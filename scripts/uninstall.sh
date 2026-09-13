@@ -2,8 +2,9 @@
 # Do-SOUL Alaya local uninstaller.
 #
 # Usage:
-#   bash scripts/uninstall.sh           # remove install dir + bin symlink, keep ~/.config/alaya
-#   bash scripts/uninstall.sh --purge   # also remove ~/.config/alaya (DURABLE MEMORY + AUDIT LOG)
+#   bash scripts/uninstall.sh              # remove install dir + bin symlink; keep ~/.config/alaya and ${ALAYA_HOME}.bak
+#   bash scripts/uninstall.sh --remove-bak # also delete the previous-install rollback directory
+#   bash scripts/uninstall.sh --purge      # also remove ~/.config/alaya (DURABLE MEMORY + AUDIT LOG)
 #
 # Environment overrides:
 #   ALAYA_HOME           default: $HOME/.local/share/do-soul-alaya
@@ -19,11 +20,13 @@ ALAYA_BIN_DIR="${ALAYA_BIN_DIR:-${HOME}/.local/bin}"
 ALAYA_CONFIG_DIR="${ALAYA_CONFIG_DIR:-${HOME}/.config/alaya}"
 ALAYA_DETACH_TARGETS="${ALAYA_DETACH_TARGETS:-codex claude-code}"
 PURGE=0
+REMOVE_BAK=0
 for arg in "$@"; do
   case "$arg" in
     --purge) PURGE=1 ;;
+    --remove-bak) REMOVE_BAK=1 ;;
     -h|--help)
-      sed -n '2,11p' "$0"
+      sed -n '2,12p' "$0"
       exit 0
       ;;
     *) printf 'unknown arg: %s\n' "$arg" >&2; exit 1 ;;
@@ -52,13 +55,19 @@ else
   info "alaya not on PATH — skipping detach (manually edit ~/.claude.json or ~/.codex/config.toml if needed)"
 fi
 
-# --- remove install dir + .bak --------------------------------------------
-for d in "$ALAYA_HOME" "${ALAYA_HOME}.bak"; do
-  if [ -d "$d" ]; then
-    rm -rf "$d"
-    ok "removed $d"
+# --- remove install dir; keep .bak as the binary rollback point -----------
+if [ -d "$ALAYA_HOME" ]; then
+  rm -rf "$ALAYA_HOME"
+  ok "removed $ALAYA_HOME"
+fi
+if [ -d "${ALAYA_HOME}.bak" ]; then
+  if [ "$REMOVE_BAK" -eq 1 ]; then
+    rm -rf "${ALAYA_HOME}.bak"
+    ok "removed ${ALAYA_HOME}.bak"
+  else
+    info "kept ${ALAYA_HOME}.bak (rollback copy). Re-run with --remove-bak to delete it."
   fi
-done
+fi
 
 # --- remove bin symlink ---------------------------------------------------
 if [ -L "${ALAYA_BIN_DIR}/alaya" ] || [ -e "${ALAYA_BIN_DIR}/alaya" ]; then

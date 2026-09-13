@@ -9,6 +9,11 @@
 A local-first memory plane for CLI coding agents (`@do-soul/alaya-*`).
 MCP and CLI only. No chat UI. No telemetry.
 
+Workspace packages are `private: true` with `workspace:*` dependencies.
+They are **not** published to npm — `npm install @do-soul/alaya-*` is
+not a supported distribution path. Install from a source checkout or
+from a GitHub Release tarball via [`scripts/install.sh`](scripts/install.sh).
+
 Current in-repo truth lives in the handbook. This README does not claim
 a completed recall landing or a published KPI.
 
@@ -58,8 +63,14 @@ curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scrip
   | ALAYA_VERSION=v0.3.11 bash
 ```
 
-`alaya update` follows the same latest-release channel unless
-`ALAYA_VERSION` is set.
+`alaya update` prints the same latest-release channel unless
+`ALAYA_VERSION` is set. Rerunning `scripts/install.sh` snapshots the
+live `alaya.db` with `VACUUM INTO` (timestamped under
+`~/.config/alaya/backups/` unless `ALAYA_CONFIG_DIR` is set) before
+swapping binaries. Restore by stopping the daemon and copying that
+backup over the live database, then `mv "$ALAYA_HOME.bak" "$ALAYA_HOME"`
+if you also need the previous binary. `scripts/uninstall.sh` keeps
+`.bak` unless `--remove-bak` is passed.
 
 ## Optional local ONNX embeddings
 
@@ -70,15 +81,20 @@ auto-installs peers, which would pull the runtimes on every default
 install. Local `local_onnx` recall is an explicit add:
 
 ```bash
-pnpm add @huggingface/transformers --filter @do-soul/alaya-core
+pnpm add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core --no-frozen-lockfile
 node scripts/fetch-local-embedding-model.mjs
 ```
+
+`--no-frozen-lockfile` is required for that `pnpm add` because it
+rewrites the workspace lockfile. After the add, `pnpm install
+--frozen-lockfile` succeeds. `pnpm-workspace.yaml` overrides
+`onnxruntime-web` away; the Node embedding path does not use it.
 
 CI and default developer installs stay on the slim path. Install the
 extra only when you want on-device embeddings.
 
-Inspector SPA is still compiled by `pnpm build` (`apps/inspector/web`).
-A prebuilt `web/dist` in a future release tarball would skip that Vite
-step; this tree does not ship a separate Inspector tarball.
+Inspector SPA is compiled by `pnpm build` (`apps/inspector/web`) unless
+`ALAYA_BUILD_INSPECTOR_WEB=0` and `apps/inspector/web/dist/index.html`
+already exists. This tree does not ship a separate Inspector tarball.
 
 License: [AGPL-3.0](LICENSE).

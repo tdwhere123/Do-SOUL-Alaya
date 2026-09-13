@@ -75,7 +75,7 @@ const PROJECT_COVERAGE = {
   },
   "@do-soul/alaya-bench-runner": {
     include: "apps/bench-runner/src/**",
-    statements: 40, lines: 40, functions: 30, branches: 20
+    statements: 60, lines: 60, functions: 50, branches: 40
   }
 };
 

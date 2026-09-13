@@ -12,7 +12,12 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(scriptDir, "..", "..");
+const rootArgIndex = process.argv.indexOf("--root");
+const repoRoot = path.resolve(
+  rootArgIndex >= 0 && process.argv[rootArgIndex + 1]
+    ? process.argv[rootArgIndex + 1]
+    : path.join(scriptDir, "..", "..")
+);
 const binPath = path.join(repoRoot, "bin", "alaya.mjs");
 const benchRunnerBinPath = path.join(repoRoot, "apps", "bench-runner", "bin", "alaya-bench-runner.mjs");
 const preflightOnly = process.argv.includes("--preflight-only");

@@ -1,13 +1,20 @@
 # Changelog
 
-All notable changes to Do-SOUL Alaya are recorded here. Per-release detail
-lives under `docs/archive/v0.3-historical/<version>/`; this file is the chronological index.
+All notable changes to Do-SOUL Alaya are recorded here. This file is
+the chronological index. Historical per-release trees under
+docs/archive were deleted on 2026-08-24 (commit 2b23da6f2).
 
 Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
 ## Unreleased — protocol 4.9.0
+
+This section is **not a release tag**. App packages remain `0.3.11`
+until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
+A GitHub release tag must match the latest published `## vX.Y.Z`
+heading (currently `## v0.3.11` below). Protocol 4.9.0 can move
+independently of the app semver.
 
 Bench adds provider-free `source-snapshot prepare` and `inspect` operations.
 Original messages enter native source records through mandatory atomic Core
@@ -67,8 +74,8 @@ The LongMemEval / LoCoMo 500q KPI gate is **PENDING a larger host** (the local
 7.6 GB WSL2 box OOMs at 500q). v0.3.11 is not a published 500q-gated tag.
 **R@5 -> 90% is not claimed as achieved** — the recall fan-in is implemented
 and code-reviewed, but the R@5 number is unmeasured locally and deferred to
-the R5 gate. See
-`docs/archive/v0.3-historical/v0.3.11/reports/v0.3.11-closeout-report.md`.
+the R5 gate. The v0.3.11 closeout report lived in the historical archive
+removed on 2026-08-24 (commit 2b23da6f2).
 
 ### Garden compute — zero-cloud by default
 
@@ -159,8 +166,8 @@ lease-pierce governance-cache hot-path hook; `#BL-055` Inspector label/filter fo
 
 ## Earlier releases
 
-Earlier release detail is recorded under `docs/archive/v0.3-historical/`, `docs/archive/v0.2/`, and
-`docs/archive/handbook-historical/runtime-status.md` (historical per-release sections). Highlights:
+Earlier release detail lived in docs/archive trees that were deleted on
+2026-08-24 (commit 2b23da6f2). Highlights:
 
 - **v0.3.9** (2026-05-17) — three-layer trust-loop closure: Garden's only legal
   claim output is `claim_status = draft`; new `soul.resolve` MCP verb; additive

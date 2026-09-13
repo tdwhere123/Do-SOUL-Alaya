@@ -221,13 +221,14 @@ These rules always win over lower-level docs and task-card convenience.
     fallback parity with MCP is enforced by tests.
 23. Attach / Profile changes write only after preview + explicit
     confirm. Silent profile mutation is forbidden.
-24. Alaya-original CLI and memory-tooling surfaces (install / attach /
-    detach / profile / secrets / operations / trust-state / doctor /
-    status / inspect / inspector-server / inspector-frontend) are
-    Alaya-original (no upstream equivalent) and any new work in these
-    areas MUST cite the relevant Surface invariant (§21-§23) and
-    `docs/handbook/architecture.md §Surface Shape` for design
-    authority.
+24. Alaya-original CLI and memory-tooling surfaces
+    (`attach` / `backup` / `detach` / `doctor` / `export` / `import` /
+    `inspect` / `install` / `mcp` / `review` /
+    `source-grounding-defers` / `status` / `temporal-cutover` /
+    `tools` / `update`) are Alaya-original (no upstream equivalent)
+    and any new work in these areas MUST cite the relevant Surface
+    invariant (§21-§23) and `docs/handbook/architecture.md` §Surface
+    Shape for design authority.
 
 25. **MCP and Protocol SemVer Contract.** Alaya publishes three
     concentric public contracts that downstream consumers (sibling
@@ -303,9 +304,9 @@ These rules always win over lower-level docs and task-card convenience.
 The v0.1-specific port invariants (vendor snapshot as source of
 truth, `trivial-copy` / `adapt-and-port` / `requires-redesign` port
 modes, no-self-rewrite rule) closed with v0.1.0 and the vendor
-snapshot was removed by Phase E vendor cleanup. See
-`docs/archive/port-protocol-historical.md` for the upstream commit pinned at
-port time. New work scopes through a PR brief or task card.
+snapshot was removed by Phase E vendor cleanup. The port-protocol
+archive was deleted on 2026-08-24 (commit 2b23da6f2). New work scopes
+through a PR brief or task card.
 
 ## Defense-against-recurrence (added 2026-05-03 in p5-system-review-r1)
 
@@ -338,17 +339,19 @@ required anti-recurrence step when a cause class recurs across independent revie
 
 ## Docs
 
-32. `docs/archive/v0.1-port-record/` is the historical v0.1 port-era task-card record
-    (v0.1.0 shipped 2026-05-05). Track ordinary engineering debt in
+32. The v0.1 port-era task-card record was removed on 2026-08-24
+    (commit 2b23da6f2). Track ordinary engineering debt in
     `docs/handbook/backlog.md` and PR descriptions. The in-repo
     authority for the recall-field contract and current live state is
     `docs/handbook/recall.md`. Gitignored local work artifacts under
     `.do-it/` (including `.do-it/plans/`) are execution tracking, not
     handbook or invariant truth.
 33. `docs/handbook/` is the maintained implementation handbook.
-34. `docs/archive/` holds retired-but-preserved discipline documents
-    (port-protocol, port-era task-card template). They are
-    archaeology, not active rules.
+34. `docs/archive/` holds retired-but-preserved documents. The
+    remaining file is `docs/archive/recall-before-retirement-2026-09-08.md`.
+    Port-protocol and port-era task-card trees were deleted on
+    2026-08-24 (commit 2b23da6f2). Archive files are archaeology, not
+    active rules.
 
 ## Governance (two-route promotion)
 

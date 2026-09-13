@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const installScript = path.join(repoRoot, "scripts/install.sh");
+const vacuumScript = path.join(repoRoot, "scripts/vacuum-into.mjs");
+
+test("install.sh rejects a tarball whose package.json version does not match the tag", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "alaya-install-version-"));
+  try {
+    const prefix = path.join(work, "do-soul-alaya-0.3.11");
+    mkdirSync(prefix);
+    writeFileSync(path.join(prefix, "package.json"), `${JSON.stringify({ name: "do-soul-alaya", version: "0.0.0" }, null, 2)}\n`);
+    const tarball = path.join(work, "do-soul-alaya-0.3.11.tar.gz");
+    const tar = spawnSync("tar", ["-czf", tarball, "do-soul-alaya-0.3.11"], { cwd: work, encoding: "utf8" });
+    assert.equal(tar.status, 0, tar.stderr);
+    const digest = createHash("sha256").update(readFileSync(tarball)).digest("hex");
+    const sums = path.join(work, "SHA256SUMS");
+    writeFileSync(sums, `${digest}  do-soul-alaya-0.3.11.tar.gz\n`);
+
+    const result = spawnSync("bash", [installScript], {
+      cwd: work,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ALAYA_VERSION: "v0.3.11",
+        ALAYA_LOCAL_TARBALL: tarball,
+        ALAYA_LOCAL_SHA256SUMS: sums,
+        ALAYA_HOME: path.join(work, "home"),
+        ALAYA_BIN_DIR: path.join(work, "bin")
+      }
+    });
+    assert.notEqual(result.status, 0);
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.match(output, /package\.json version/);
+    assert.match(output, /does not match tag/);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("vacuum-into.mjs writes a restorable snapshot", async () => {
+  const { default: Database } = await import("better-sqlite3");
+  const work = mkdtempSync(path.join(tmpdir(), "alaya-vacuum-"));
+  try {
+    const source = path.join(work, "alaya.db");
+    const dest = path.join(work, "backups", "alaya-v0.3.11-test.db");
+    const db = new Database(source);
+    db.exec("CREATE TABLE memory (id TEXT PRIMARY KEY, body TEXT); INSERT INTO memory VALUES ('1', 'hello');");
+    db.close();
+
+    const result = spawnSync(process.execPath, [vacuumScript, source, dest], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(existsSync(dest), true);
+
+    const restored = new Database(dest, { readonly: true });
+    const row = restored.prepare("SELECT body FROM memory WHERE id = '1'").get();
+    restored.close();
+    assert.equal(row.body, "hello");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});

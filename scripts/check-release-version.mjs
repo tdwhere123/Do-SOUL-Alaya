@@ -69,6 +69,16 @@ if (protocolVersion !== null) {
     );
     process.exit(1);
   }
+  const publishedHeadings = [...changelog.matchAll(/^## (v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)\b/gmu)].map(
+    (match) => match[1]
+  );
+  const latestPublished = publishedHeadings[0];
+  if (latestPublished !== tag) {
+    console.error(
+      `${changelogPath} latest published section is ${latestPublished ?? "<none>"}; tag ${tag} requires a matching ## ${tag} heading (Unreleased is not a release)`
+    );
+    process.exit(1);
+  }
 }
 
 if (mismatches.length > 0) {

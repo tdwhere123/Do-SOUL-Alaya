@@ -1,0 +1,4 @@
+{
+  "GHSA-wrjc-x8rr-h8h6": "react-router 6.x Memory Inspector SPA; the patch is a v7 breaking upgrade. Inspector is loopback-only.",
+  "GHSA-337j-9hxr-rhxg": "react-router SSR hydration constructor injection; Inspector does not use SSR. The patch is a v7 breaking upgrade."
+}

@@ -145,8 +145,8 @@ established only by the live producer-to-consumer evidence recorded in
 entered from `RecallService.recall` / worker `conditionalField.recall` /
 MCP `soul.recall`. Historical F3-only membership and full legal
 `slice_key` visibility are not the live connectedness proof.
-The pre-UGAF wording is archived at
-`docs/archive/handbook-historical/recall-routing-projections-pre-ugaf.md`.
+The pre-UGAF wording was deleted on 2026-08-24 (commit 2b23da6f2);
+live connectedness proof is `docs/handbook/recall.md`.
 
 ## Package Shape
 
@@ -209,8 +209,10 @@ surfaces are:
   diagnostics, and MCP-memory-tool fallback.
 - **Memory Inspector** (`apps/inspector`) — local-only memory-tooling
   surface, started on demand via `alaya inspect`. Listens on
-  `127.0.0.1:5174` with a per-launch random token; serves three pages
-  (Provider/Config, Memory Graph, Trust/Status). Inspector writes are
+  `127.0.0.1:5174` with a per-launch random token; serves seven primary
+  routes (`/overview`, `/governance`, `/memory-browser`, `/graph`,
+  `/system`, `/recall`, `/bench-trend`) plus legacy redirects into
+  those pages. Inspector writes are
   limited to daemon runtime parameters per invariant §21; memory
   ontology writes still go through the proposal / governance path.
   The frontend code stays domainized under `apps/inspector/web/src/`
