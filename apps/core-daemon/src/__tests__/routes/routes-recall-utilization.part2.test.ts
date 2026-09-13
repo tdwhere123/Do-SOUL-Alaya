@@ -14,6 +14,7 @@ import {
   registerRecallUtilizationRoutes,
   type RecallUtilizationRouteServices,
   type SingleUsedAnchorDeliveryReader,
+  type SingleUsedAnchorEmitInput,
   type SingleUsedAnchorTelemetryEmitter
 } from "../../routes/memory/recall/recall-utilization.js";
 
@@ -281,20 +282,37 @@ describe("recall-utilization route", () => {
       );
     }
     let queryCount = 0;
-    const anchorReader: SingleUsedAnchorDeliveryReader = {
-      findDeliveredObjectIds: vi.fn(async () => {
+    const findDeliveredObjectIds = vi.fn(
+      async (_deliveryId: string): Promise<readonly string[] | null> => {
         throw new Error("serial lookup must not run when a batch port exists");
-      }),
-      findDeliveredObjectIdsMany: vi.fn(async (deliveryIds) => {
+      }
+    );
+    const findDeliveredObjectIdsMany = vi.fn(
+      async (
+        deliveryIds: readonly string[]
+      ): Promise<ReadonlyMap<string, readonly string[] | null>> => {
         queryCount += 1;
-        return new Map(deliveryIds.map((deliveryId) => [deliveryId, [`obj-${deliveryId}`]]));
-      })
+        return new Map(
+          deliveryIds.map((deliveryId): readonly [string, readonly string[]] => [
+            deliveryId,
+            [`obj-${deliveryId}`]
+          ])
+        );
+      }
+    );
+    const emitMany = vi.fn(
+      async (_inputs: readonly SingleUsedAnchorEmitInput[]): Promise<void> => undefined
+    );
+    const anchorReader: SingleUsedAnchorDeliveryReader = {
+      findDeliveredObjectIds,
+      findDeliveredObjectIdsMany
     };
-    const emitMany = vi.fn(async () => undefined);
     const emitter: SingleUsedAnchorTelemetryEmitter = {
-      emit: vi.fn(async () => {
-        throw new Error("serial emit must not run when emitMany exists");
-      }),
+      emit: vi.fn(
+        async (_input: SingleUsedAnchorEmitInput): Promise<void> => {
+          throw new Error("serial emit must not run when emitMany exists");
+        }
+      ),
       emitMany
     };
     const app = buildApp({
@@ -306,10 +324,11 @@ describe("recall-utilization route", () => {
     const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
     expect(response.status).toBe(200);
     expect(queryCount).toBe(1);
-    expect(anchorReader.findDeliveredObjectIdsMany).toHaveBeenCalledOnce();
+    expect(findDeliveredObjectIdsMany).toHaveBeenCalledOnce();
     expect(emitMany).toHaveBeenCalledOnce();
-    expect(emitMany.mock.calls[0]?.[0]).toHaveLength(matchCount);
-    expect(anchorReader.findDeliveredObjectIds).not.toHaveBeenCalled();
+    const emittedBatch = emitMany.mock.calls.at(0)?.at(0);
+    expect(emittedBatch).toHaveLength(matchCount);
+    expect(findDeliveredObjectIds).not.toHaveBeenCalled();
     expect(emitter.emit).not.toHaveBeenCalled();
   });
 });
