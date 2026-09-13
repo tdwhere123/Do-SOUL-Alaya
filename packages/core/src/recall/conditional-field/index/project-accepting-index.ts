@@ -175,13 +175,13 @@ export function projectAcceptingIndex(input: AcceptingProjectionInput): Informat
     || continuationPolicyMismatch(input)) {
     return closedIndex(epochInput, representation, invalidatedCompleteness());
   }
-  if ((input.view.enumeration_policy ?? "canonical") === "associative") {
-    assertAssociativeMilligradeContract(input.snapshot.values, input.view);
-  }
   const admission = input.interpretation_status === undefined
     ? undefined
     : completenessForInterpretationStatus(input.interpretation_status);
   if (admission !== undefined) return closedIndex(epochInput, representation, admission);
+  if ((input.view.enumeration_policy ?? "canonical") === "associative") {
+    assertAssociativeMilligradeContract(input.snapshot.values, input.view);
+  }
   if (admitIndexBudget(input.budget) === "resource_rejected") {
     return closedIndex(epochInput, representation, resourceRejectedCompleteness());
   }

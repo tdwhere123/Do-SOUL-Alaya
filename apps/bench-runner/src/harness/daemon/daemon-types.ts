@@ -79,7 +79,7 @@ export const DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND = "local_onnx" as const;
 
 export interface BenchRecallOptions extends Pick<ConditionalFieldRecallParams,
   "budget" | "continuation" | "cancelled" | "interpretationClock" | "since" | "until" | "timeFilter"
-  | "enumeration_policy" | "result_kind_view"
+  | "enumeration_policy" | "result_kind_view" | "cap_contracts"
 > {
   readonly maxResults?: number;
   readonly conflictAwareness?: boolean;

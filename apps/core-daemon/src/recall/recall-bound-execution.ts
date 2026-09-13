@@ -15,7 +15,7 @@ export type RecallBoundSideEffectMode = "production_mcp" | "benchmark";
 
 type BoundRecallFieldOptions = Pick<ConditionalFieldRecallParams,
   "pageBudget" | "queryText" | "interpretationClock" | "since" | "until" |
-  "continuation" | "cancelled" | "budget" | "enumeration_policy" | "result_kind_view" |
+  "continuation" | "cancelled" | "budget" | "enumeration_policy" | "result_kind_view" | "cap_contracts" |
   "protocol_version" | "supported_result_kinds" | "supports_source_evidence" |
   "supports_product_updates"
 >;
@@ -95,6 +95,7 @@ export async function invokeBoundRecall<TRecallResult>(
     ...(params.cancelled === undefined ? {} : { cancelled: params.cancelled }),
     ...(params.budget === undefined ? {} : { budget: params.budget }),
     ...(params.enumeration_policy === undefined ? {} : { enumeration_policy: params.enumeration_policy }),
+    ...(params.cap_contracts === undefined ? {} : { cap_contracts: params.cap_contracts }),
     ...(params.result_kind_view === undefined ? {} : { result_kind_view: params.result_kind_view }),
     ...(params.protocol_version === undefined ? {} : { protocol_version: params.protocol_version }),
     ...(params.supported_result_kinds === undefined

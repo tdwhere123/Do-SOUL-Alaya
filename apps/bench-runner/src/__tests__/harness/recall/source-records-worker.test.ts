@@ -6,11 +6,54 @@ import { deriveAddressableSpanViews } from "@do-soul/alaya-core";
 import { SoulMemorySearchRequestSchema, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
+import { HARD_IDENTITY_CAP_CONTRACT } from "../../../../../../packages/core/src/recall/conditional-field/cap-contract.js";
 
 const NOW = "2026-09-13T00:00:00.000Z";
 const EVENT = "2026-09-12T12:00:00.000Z";
 
 describe("workspace-bound source admission through the native Recall worker", () => {
+  it("binds explicit associative cap contracts through Bench worker pagination and rejects missing or incompatible contracts", async () => {
+    const dataDirRoot = await mkdtemp(join(tmpdir(), "source-records-associative-"));
+    const daemon = await startBenchDaemon({ dataDirRoot, embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });
+    try {
+      const identities: string[] = [];
+      for (const id of ["a", "b", "c"]) {
+        const result = await daemon.importSourceRecord({ source_id: id, source_version: "fixture", content_bytes: "source text",
+          recorded_at: NOW, event_time: null, valid_from: null, valid_to: null, speaker: "user", scope_class: "project",
+          spans: deriveAddressableSpanViews("source text") });
+        identities.push(result.record.identity);
+      }
+      await daemon.checkpointFieldProjection();
+      const options = { enumeration_policy: "associative" as const, result_kind_view: "source_only" as const,
+        interpretationClock: NOW, maxResults: 1 };
+      for (const cap_contracts of [undefined, [{ ...HARD_IDENTITY_CAP_CONTRACT, domain_id: "foreign" }]]) {
+        const rejected = await daemon.recall("source text", { ...options, cap_contracts });
+        expect(rejected.results).toEqual([]);
+        expect(rejected.index?.completeness.logical_index).toBe("unavailable");
+        expect(rejected.index?.continuation).toBeNull();
+      }
+      const cap_contracts = [HARD_IDENTITY_CAP_CONTRACT];
+      let page = await daemon.recall("source text", { ...options, cap_contracts });
+      const observed: string[] = [];
+      let pages = 0;
+      while (true) {
+        pages++;
+        expect(page.execution_receipt.compile_input.view?.cap_contracts).toEqual(cap_contracts);
+        if (pages === 1) expect(page.execution_receipt.actual?.native_visits).toBeGreaterThan(0);
+        expect(page.provider_calls).toBe(0);
+        observed.push(...page.results.flatMap((row) => row.target.kind === "source_evidence" ? [row.target.root_id] : []));
+        if (page.index?.continuation == null) break;
+        expect(pages).toBeLessThan(20);
+        page = await daemon.recall("source text", { ...options, cap_contracts, continuation: page.index.continuation });
+      }
+      expect(pages).toBeGreaterThan(1);
+      expect(new Set(observed)).toEqual(new Set(identities));
+      expect(observed).toHaveLength(3);
+      expect(page.index?.completeness.logical_index).toBe("complete");
+      expect(page.index?.completeness.interpretation_coverage).toBe("open");
+    } finally { await daemon.shutdown(); await rm(dataDirRoot, { recursive: true, force: true }); }
+  }, 120000);
+
   it("keeps known false, unknown event time and true source premises distinct", async () => {
     const dataDirRoot = await mkdtemp(join(tmpdir(), "source-records-worker-"));
     const daemon = await startBenchDaemon({ dataDirRoot, embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });

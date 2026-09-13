@@ -39,6 +39,7 @@ import {
   sortIndexEntries
 } from "../../../../recall/runtime/index-continuation.js";
 import { facetObligation, identityAssociationCap, productIndexKey } from "../reference/deployment.fixture.js";
+import { capContractId } from "../../../../recall/conditional-field/cap-contract.js";
 
 const SNAPSHOT_ID = `sha256:${"c".repeat(64)}`;
 const OTHER_SNAPSHOT_ID = `sha256:${"e".repeat(64)}`;
@@ -559,7 +560,8 @@ describe("conditional-field production information index", () => {
     for (const status of ["unsupported", "malformed", "resource_rejected"] as const) {
       const index = projectAcceptingIndex(baseInput({
         snapshot: emptySnapshot(),
-        interpretation_status: status
+        interpretation_status: status,
+        view: { ...defaultView(), enumeration_policy: "associative", cap_contracts: undefined }
       }));
       expect(index.entries).toEqual([]);
       expect(index.completeness.logical_index).not.toBe("complete");
@@ -570,6 +572,20 @@ describe("conditional-field production information index", () => {
       interpretation_status: "hypotheses"
     }));
     expect(hypotheses.completeness.logical_index).not.toBe("complete");
+  });
+
+  it("continues to reject missing or mixed cap contracts for admitted associative fields", () => {
+    const contract = identityAssociationCap();
+    const view = { ...defaultView(), enumeration_policy: "associative" as const, cap_contracts: [contract] };
+    const a = { ...fieldValue("a", 1000), cap_contract_id: capContractId(contract) };
+    const b = { ...fieldValue("b", 900), cap_contract_id: capContractId(contract) };
+    expect(() => projectAcceptingIndex(baseInput({ view, snapshot: snapshotOf([a, b]), interpretation_status: "resolved" })))
+      .not.toThrow();
+    expect(() => projectAcceptingIndex(baseInput({ view: { ...view, cap_contracts: undefined },
+      snapshot: snapshotOf([a]), interpretation_status: "resolved" }))).toThrow(/shared milligrade cap/);
+    expect(() => projectAcceptingIndex(baseInput({ view, snapshot: snapshotOf([a, {
+      ...b, cap_contract_id: capContractId({ ...contract, transfer_version: "foreign" })
+    }]), interpretation_status: "resolved" }))).toThrow(/shared milligrade cap/);
   });
 
   it("keeps an interrupted open frontier from completing even when current entries are stable", () => {

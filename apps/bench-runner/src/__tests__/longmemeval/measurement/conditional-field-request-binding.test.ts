@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compileConditionalFieldQuery, interpretationIdentity } from "@do-soul/alaya-core";
 import {
-  ConditionalFieldExecutionReceiptSchema
+  ConditionalFieldExecutionReceiptSchema, executionBindingMismatch
 } from "../../../runs/measurement/conditional-field-request-binding.js";
 import {
   BENCH_RSS_SAMPLING_METHOD,
@@ -9,6 +9,7 @@ import {
   validateBenchRecallIndex
 } from "../../../harness/daemon/handle/bench-recall-response.js";
 import { InformationIndexSchema } from "@do-soul/alaya-protocol";
+import { HARD_IDENTITY_CAP_CONTRACT } from "../../../../../../packages/core/src/recall/conditional-field/cap-contract.js";
 
 const NOW = "2026-09-06T00:00:00.000Z";
 const SNAPSHOT = `sha256:${"a".repeat(64)}`;
@@ -35,6 +36,25 @@ function compileIdentityReceipt() {
 }
 
 describe("conditional field execution receipt actual-cost encoding", () => {
+  it("binds explicit cap contracts and rejects a valid receipt from a different cap request", () => {
+    const base = compileIdentityReceipt();
+    const cap_contracts = [HARD_IDENTITY_CAP_CONTRACT];
+    const view = { ...compileConditionalFieldQuery(base.compile_input).view,
+      enumeration_policy: "associative" as const, cap_contracts };
+    const compile_input = { ...base.compile_input, view };
+    const receipt = ConditionalFieldExecutionReceiptSchema.parse({ ...base, compile_input,
+      query_id: compileConditionalFieldQuery(compile_input).query_id });
+    const expected = { queryText: "needle", workspaceId: "workspace", referenceTime: NOW, requestBudget: BUDGET,
+      requestFilters: { enumeration_policy: "associative" as const, cap_contracts } };
+    expect(executionBindingMismatch(receipt, expected)).toBeNull();
+    for (const cap_contracts of [undefined, [], [{ ...HARD_IDENTITY_CAP_CONTRACT, transfer_version: "foreign" }]]) {
+      expect(executionBindingMismatch(receipt, { ...expected,
+        requestFilters: { enumeration_policy: "associative", cap_contracts } })).toBe("request_identity_mismatch");
+    }
+    expect(() => ConditionalFieldExecutionReceiptSchema.parse({ ...receipt,
+      compile_input: { ...compile_input, view: { ...view, cap_contracts: [] } } })).toThrow();
+  });
+
   it("keeps compile-identity receipts valid when actual-cost fields are absent", () => {
     const receipt = ConditionalFieldExecutionReceiptSchema.parse(compileIdentityReceipt());
     expect(receipt.native_visits).toBeUndefined();
