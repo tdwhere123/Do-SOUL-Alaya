@@ -373,7 +373,7 @@ async function writeCatalogRefillAuthority(keys: readonly string[]): Promise<{
     priceEstimate: {
       inputUsdPerMillion: 1,
       outputUsdPerMillion: 2,
-      maximumInputTokensPerAttempt: 300
+      maximumInputTokensPerAttempt: 100_000
     },
     diskFloorBytes: 0,
     inspection: {

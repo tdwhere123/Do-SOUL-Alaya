@@ -5,10 +5,19 @@ export type MaterializationDurableBoundary =
   | "commit-published-before-journal-unlink"
   | "journal-unlinked";
 
+export type MaterializationDurableFailpoint =
+  (boundary: MaterializationDurableBoundary) => void;
+
+let installedFailpoint: MaterializationDurableFailpoint | undefined;
+
+export function installMaterializationDurableFailpoint(
+  failpoint: MaterializationDurableFailpoint | undefined
+): void {
+  installedFailpoint = failpoint;
+}
+
 export function triggerMaterializationTestSigkillAfter(
   boundary: MaterializationDurableBoundary
 ): void {
-  if (process.env.NODE_ENV !== "test" ||
-      process.env.ALAYA_TEST_MATERIALIZATION_SIGKILL_AFTER !== boundary) return;
-  process.kill(process.pid, "SIGKILL");
+  installedFailpoint?.(boundary);
 }

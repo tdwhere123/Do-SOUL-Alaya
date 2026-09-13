@@ -14,6 +14,7 @@ import {
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
   buildGroundedSignalResponse,
+  groundedExtractionResult,
   providerBackedExtractionResult
 } from "./fixture.js";
 
@@ -86,7 +87,7 @@ describe("extraction-fill identity transaction", () => {
       pinnedMetaRoot,
       concurrency: 1,
       extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+        extract: async (input) => groundedExtractionResult(input)
       }),
       log: (message) => {
         if (!message.includes("2/2")) return;
@@ -146,7 +147,7 @@ async function fillSuccessfully() {
     pinnedMetaRoot,
     concurrency: 1,
     extractorFactory: () => ({
-      extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      extract: async (input) => groundedExtractionResult(input)
     }),
     log: () => undefined
   });

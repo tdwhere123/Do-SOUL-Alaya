@@ -17,12 +17,15 @@ export function smokeGatePath(workRoot: string): string {
   return join(workRoot, "smoke-gate.json");
 }
 
-export function readSmokeGate(workRoot: string): SmokeGateStatus {
+export function readSmokeGate(workRoot: string, identityDigest: string): SmokeGateStatus {
   const path = smokeGatePath(workRoot);
   if (!existsSync(path)) return "absent";
   const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<DiagnosticLoopSmokeGate>;
   if (parsed.kind !== "diagnostic_loop_smoke_gate") {
     throw new Error(`invalid smoke gate: ${path}`);
+  }
+  if (parsed.identity_digest !== identityDigest) {
+    throw new Error(`smoke gate identity_digest does not match this run: ${path}`);
   }
   return parsed.status === "failed" ? "failed" : "passed";
 }

@@ -22,6 +22,7 @@ import {
   buildGroundedSignalResponse,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
+  groundedExtractionResult,
   providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
@@ -100,7 +101,7 @@ describe("runExtractionFill", () => {
       builder: "test"
     });
     const extractorFactory = vi.fn(() => ({
-      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
+      extract: vi.fn(async (input) => groundedExtractionResult(input))
     }));
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -134,7 +135,7 @@ describe("runExtractionFill", () => {
     );
     mkdirSync(cacheFilePath(cacheRoot, key), { recursive: true });
     const liveWriter = createCachingSignalExtractor({
-      delegate: { extract: async () => providerBackedExtractionResult('{"signals":[]}') },
+      delegate: { extract: async (input) => groundedExtractionResult(input) },
       config: {
         model: "gpt-5.4-mini", modelFamily: "gpt-5.4-mini",
         providerUrl: "https://fixture-provider.invalid/v1",

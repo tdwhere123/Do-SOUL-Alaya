@@ -434,3 +434,30 @@ it("honors the derived provider wall-clock budget", async () => {
     vi.useRealTimers();
   }
 });
+
+it("refuses interactive fill when a request exceeds the receipt input-token bound", async () => {
+  const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
+    rawJson: '{"signals":[]}'
+  }));
+  await expect(runExtractionPool({
+    extractor: { extract },
+    turns: [{
+      turnContent: "User: I moved to Berlin.\nAssistant: That sounds exciting.",
+      turnMessages: [
+        { message_id: "q1-m0", role: "user", content: "I moved to Berlin." },
+        { message_id: "q1-m1", role: "assistant", content: "That sounds exciting." }
+      ]
+    }],
+    concurrency: 1,
+    requestedTurns: 1,
+    stats: newFillStats(),
+    log: () => undefined,
+    transport: {
+      retryMode: "disabled",
+      maxOutputTokens: 512,
+      outputTokenField: "max_tokens",
+      maximumInputTokensPerAttempt: 1
+    }
+  })).rejects.toThrow(/authority input-token bound/u);
+  expect(extract).not.toHaveBeenCalled();
+});

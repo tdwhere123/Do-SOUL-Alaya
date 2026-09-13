@@ -15,7 +15,11 @@ import {
 } from "../../../runs/compile-seed/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
-import { providerBackedExtractionResult } from "./fixture.js";
+import {
+  buildGroundedSignalResponse,
+  groundedExtractionResult,
+  providerBackedExtractionResult
+} from "./fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -97,12 +101,12 @@ describe("extraction-fill cache validity", () => {
 
   it("replaces a semantically invalid existing shard during live fill", async () => {
     await writeDataset();
-    await fill(() => providerBackedExtractionResult('{"signals":[]}'));
+    await fill(async (input) => groundedExtractionResult(input));
     const shardPath = firstShardPath();
     const shard = JSON.parse(readFileSync(shardPath, "utf8")) as Record<string, unknown>;
     writeFileSync(shardPath, JSON.stringify({ ...shard, raw_json: '{"signals":[42]}' }));
     const delegate = vi.fn<BenchSignalExtractor["extract"]>(
-      async () => providerBackedExtractionResult('{"signals":[]}')
+      async (input) => groundedExtractionResult(input)
     );
 
     const result = await fill(delegate);
@@ -110,9 +114,7 @@ describe("extraction-fill cache validity", () => {
     expect(result).toMatchObject({ cacheHits: 1, newlyExtracted: 1 });
     expect(delegate).toHaveBeenCalledTimes(1);
     expect(delegate.mock.calls[0]?.[0]).not.toMatchObject({ retryMode: "disabled" });
-    expect(JSON.parse(readFileSync(shardPath, "utf8"))).toMatchObject({
-      raw_json: '{"signals":[]}'
-    });
+    expect(JSON.parse(readFileSync(shardPath, "utf8")).raw_json).not.toBe('{"signals":[42]}');
   });
 
   it("does not finalize the manifest after a shard persistence failure", async () => {
@@ -136,7 +138,7 @@ describe("extraction-fill cache validity", () => {
             input.userPrompt
           );
           mkdirSync(cacheFilePath(cacheRoot, key), { recursive: true });
-          return providerBackedExtractionResult('{"signals":[]}');
+          return groundedExtractionResult(input);
         }
       }),
       log: (message) => logs.push(message)
@@ -167,10 +169,10 @@ describe("extraction-fill cache validity", () => {
       pinnedMetaRoot,
       concurrency: 1,
       extractorFactory: () => ({
-        extract: async () => {
+        extract: async (input) => {
           call += 1;
           if (call === 1) {
-            return providerBackedExtractionResult('{"signals":[]}', {
+            return providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt), {
               extractorMeta: {
                 recoveryKind: "none",
                 retryCount: 1,

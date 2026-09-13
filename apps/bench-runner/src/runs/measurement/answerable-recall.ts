@@ -3,9 +3,9 @@ import { classifyQuestionMeasurementStatus } from "./question-validity.js";
 
 export interface AnswerableRecallSummary {
   readonly scorableCount: number;
-  readonly rAt1: number;
-  readonly rAt5: number;
-  readonly rAt10: number;
+  readonly rAt1: number | null;
+  readonly rAt5: number | null;
+  readonly rAt10: number | null;
 }
 
 export function summarizeAnswerableRecall(
@@ -32,10 +32,10 @@ export function summarizeAnswerableRecall(
 
 export function answerableRecallAt5(
   diagnostics: readonly LongMemEvalQuestionDiagnostic[]
-): number {
+): number | null {
   return summarizeAnswerableRecall(diagnostics).rAt5;
 }
 
-function ratio(count: number, total: number): number {
-  return total === 0 ? 0 : count / total;
+function ratio(count: number, total: number): number | null {
+  return total === 0 ? null : count / total;
 }

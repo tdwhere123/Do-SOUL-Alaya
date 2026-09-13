@@ -143,7 +143,7 @@ async function reopenFullWindowWithFreshAuthority(): Promise<void> {
     priceEstimate: {
       inputUsdPerMillion: 0,
       outputUsdPerMillion: 0,
-      maximumInputTokensPerAttempt: 300
+      maximumInputTokensPerAttempt: 100_000
     },
     diskFloorBytes: 0,
     inspection: {

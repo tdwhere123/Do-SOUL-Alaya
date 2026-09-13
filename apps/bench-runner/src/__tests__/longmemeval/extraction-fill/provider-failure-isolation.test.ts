@@ -223,7 +223,7 @@ async function writeTargetBoundAuthority() {
     priceEstimate: {
       inputUsdPerMillion: 1,
       outputUsdPerMillion: 2,
-      maximumInputTokensPerAttempt: 300
+      maximumInputTokensPerAttempt: 100_000
     },
     diskFloorBytes: 0,
     inspection: {
@@ -257,7 +257,7 @@ async function writeUnboundAuthority(): Promise<string> {
     priceEstimate: {
       inputUsdPerMillion: 1,
       outputUsdPerMillion: 2,
-      maximumInputTokensPerAttempt: 300
+      maximumInputTokensPerAttempt: 100_000
     },
     diskFloorBytes: 0,
     inspection: {

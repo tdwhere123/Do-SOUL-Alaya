@@ -2,12 +2,11 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync
+  rmSync
 } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
+import { replaceBytesDurable } from
+  "../extraction/fill/manifest/durable-exclusive-publication.js";
 import {
   computeLongMemEvalQuestionIdDigest,
   type SeedExtractionPath
@@ -445,7 +444,10 @@ function snapshotConsumerQuestionIdDigest(
 
 export function atomicWriteJson(filePath: string, value: unknown, indentation = 2): void {
   mkdirSync(dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.${randomUUID()}.tmp`;
-  writeFileSync(tmpPath, `${JSON.stringify(value, null, indentation)}\n`, "utf8");
-  renameSync(tmpPath, filePath);
+  replaceBytesDurable({
+    destination: filePath,
+    bytes: Buffer.from(`${JSON.stringify(value, null, indentation)}\n`, "utf8"),
+    ownerIdentity: filePath,
+    temporaryDirectory: dirname(filePath)
+  });
 }

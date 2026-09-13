@@ -1,16 +1,17 @@
-import { randomUUID } from "node:crypto";
-import {
-  mkdirSync,
-  renameSync,
-  rmSync,
-  writeFileSync
-} from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   computeExtractionRawJsonSha256,
   inspectExtractionRawEnvelope,
   inspectExtractionRawJson
 } from "../../extraction/content-closure.js";
+import {
+  classifyExtractionEnvelope,
+  extractionEnvelopeCountsTowardCoverage,
+  type ExtractionEmptyClassification
+} from "../../extraction/empty-classification.js";
+import { replaceBytesDurable } from
+  "../../extraction/fill/manifest/durable-exclusive-publication.js";
 import type {
   BenchProviderResponseMetadata,
   BenchProviderUsage,
@@ -37,6 +38,7 @@ export interface CachedExtractionEntry {
   readonly cache_key: string;
   readonly raw_json: string;
   readonly extracted_at: string;
+  readonly empty_classification?: ExtractionEmptyClassification;
   readonly response_metadata?: CachedExtractionResponseMetadata;
   readonly transport_provenance?: ExtractionTransportProvenance;
 }
@@ -56,6 +58,12 @@ export type CachedExtractionInspection =
     readonly status: "invalid";
     readonly reason: string;
     readonly rawJsonSha256?: string;
+  }
+  | {
+    readonly status: "quarantined";
+    readonly reason: string;
+    readonly rawJson: string;
+    readonly rawJsonSha256: string;
   };
 
 export type CachedRawExtractionInspection =
@@ -90,7 +98,8 @@ export function inspectCachedExtraction(
   return inspectCachedContent(
     cached.entry.raw_json,
     cached.entry.response_metadata,
-    cached.entry.transport_provenance !== undefined
+    cached.entry.transport_provenance !== undefined,
+    cached.entry.empty_classification
   );
 }
 
@@ -158,34 +167,41 @@ export function writeCachedExtraction(
 ): void {
   const filePath = cacheFilePath(cacheRoot, cacheKey);
   mkdirSync(dirname(filePath), { recursive: true });
-  // invariant: same-filesystem rename exposes either the old complete shard
-  // or the new complete shard, never an OOM-interrupted partial write.
-  const tmpPath = `${filePath}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(tmpPath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
-    renameSync(tmpPath, filePath);
-  } catch (cause) {
-    try {
-      rmSync(tmpPath, { force: true });
-    } catch {
-      // Cleanup must not conceal the authoritative persistence failure.
-    }
-    throw cause;
-  }
+  replaceBytesDurable({
+    destination: filePath,
+    bytes: Buffer.from(`${JSON.stringify(entry, null, 2)}\n`, "utf8"),
+    ownerIdentity: cacheKey,
+    temporaryDirectory: dirname(filePath)
+  });
 }
 
 function inspectCachedContent(
   rawJson: string,
   responseMetadata: CachedExtractionResponseMetadata | undefined,
-  providerBacked: boolean
+  providerBacked: boolean,
+  storedClassification: ExtractionEmptyClassification | undefined
 ): CachedExtractionInspection {
   const rawJsonSha256 = computeExtractionRawJsonSha256(rawJson);
   try {
+    const envelope = inspectExtractionRawJson(rawJson);
+    const classification = storedClassification ?? classifyExtractionEnvelope({
+      rawSignalCount: envelope.rawSignalCount,
+      sourceAssertionCount: providerBacked && envelope.rawSignalCount === 0 ? 1 : 0,
+      planMembership: "in_plan"
+    });
+    if (!extractionEnvelopeCountsTowardCoverage(classification)) {
+      return {
+        status: "quarantined",
+        reason: `${classification} is not a coverage-valid extraction shard`,
+        rawJson,
+        rawJsonSha256
+      };
+    }
     const response = inspectCachedResponseMetadata(responseMetadata, providerBacked);
     return {
       status: "hit",
       rawJson,
-      ...inspectExtractionRawJson(rawJson),
+      ...envelope,
       ...response
     };
   } catch (error) {

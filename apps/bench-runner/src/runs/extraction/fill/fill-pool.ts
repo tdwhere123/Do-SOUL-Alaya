@@ -1,8 +1,13 @@
 import {
   buildOfficialApiExtractionRequests,
   GardenProviderError,
-  OfficialApiGardenProvider
+  OfficialApiGardenProvider,
+  stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
+import {
+  attemptInputByteUpperBound,
+  assertAttemptInputWithinReceiptLimit
+} from "../authority/receipt-limits.js";
 import {
   isBenchTerminalRetryClassification,
   type BenchSignalExtractor,
@@ -66,6 +71,7 @@ interface ExtractionPoolInput {
     readonly retryMode: "default" | "disabled";
     readonly maxOutputTokens: number;
     readonly outputTokenField: ExtractionOutputTokenField;
+    readonly maximumInputTokensPerAttempt?: number;
   };
   /** Leaves failed provider tasks missing so a later fill can retry them. */
   readonly tolerateProviderTaskFailures?: boolean;
@@ -201,6 +207,15 @@ function createExtractionTurnRuntime(
     turn.turnContent,
     turn.turnMessages
   );
+  const inputBound = transport?.maximumInputTokensPerAttempt;
+  if (inputBound !== undefined) {
+    for (const request of requests) {
+      assertAttemptInputWithinReceiptLimit(
+        attemptInputByteUpperBound(stringifyOfficialApiExtractionRequest(request)),
+        inputBound
+      );
+    }
+  }
   const planBudget = resolveExtractionRequestPlanBudget(
     requests,
     transport?.maxOutputTokens ?? 2_048

@@ -298,7 +298,7 @@ const FineAssessmentPrunedCandidateDiagnosticSchema = z
   .strict()
   .readonly();
 
-// Mirrors core token-economy telemetry for measure-only run aggregation.
+// Per-call view of the eval-owned sample family. Aggregates stay on eval.
 export const RecallTokenEconomySchema = z
   .object({
     delivered_context_tokens_estimate: z.number().int().nonnegative(),

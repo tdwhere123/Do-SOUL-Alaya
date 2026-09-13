@@ -24,18 +24,39 @@ const Manifest = z.object({
     limit: z.number().int().positive()
   }).strict()
 }).strict();
+export const BATCH_CAMPAIGN_STOP_REASONS = [
+  "fill_operation_failed_inspect_current_window",
+  "provider_timeout",
+  "batch_unknown_or_failed",
+  "batch_usage_unknown",
+  "incomplete_scope_without_missing_batch_work",
+  "cache_invariant",
+  "authority_invalid"
+] as const;
+export type BatchCampaignStopReason = (typeof BATCH_CAMPAIGN_STOP_REASONS)[number];
+const RETRYABLE_STOP_REASONS = new Set<BatchCampaignStopReason>([
+  "fill_operation_failed_inspect_current_window",
+  "provider_timeout",
+  "batch_unknown_or_failed"
+]);
+
 const State = z.object({
   version: z.literal(1), manifestPath: z.string(), manifestDigest: z.string(), referencesDigest: z.string(),
   window: z.number().int().nonnegative(), phase: z.enum(["prepare", "submit", "resume"]),
   nextCheckAt: z.number().int().nonnegative(), status: z.enum(["running", "stopped", "complete"]),
-  stopReason: z.string().optional()
+  stopReason: z.enum(BATCH_CAMPAIGN_STOP_REASONS).optional()
 }).strict();
 export type BatchCampaignState = z.infer<typeof State>;
+
+export function isRetryableCampaignStopReason(reason: string | undefined): boolean {
+  return reason !== undefined && RETRYABLE_STOP_REASONS.has(reason as BatchCampaignStopReason);
+}
 
 /** Scheduling only. The fill owner retains all request, admission and spend authority. */
 export async function runBatchCampaign(manifestPath: string, options: {
   readonly signal?: AbortSignal;
   readonly log?: (state: BatchCampaignState) => void;
+  readonly resetStopped?: boolean;
 } = {}): Promise<BatchCampaignState> {
   const path = resolve(manifestPath);
   const manifestText = readArtifact(path);
@@ -61,6 +82,11 @@ export async function runBatchCampaign(manifestPath: string, options: {
     assertCampaignLimits(limits, manifest.requestLimit, manifest.fill.authorityReceiptPath);
     if (state.status === "complete") {
       state.status = "running"; state.phase = "resume"; state.nextCheckAt = 0;
+      delete state.stopReason;
+    } else if (state.status === "stopped") {
+      if (options.resetStopped !== true) return structuredClone(state);
+      state.status = "running";
+      delete state.stopReason;
     }
     const save = () => {
       lease.assertOwned();
@@ -100,7 +126,7 @@ export async function runBatchCampaign(manifestPath: string, options: {
         state.status = "stopped";
         // Provider diagnostics may carry request content. Keep them in the owned
         // job artifacts; scheduler output exposes only a bounded stop category.
-        state.stopReason = "fill_operation_failed_inspect_current_window";
+        state.stopReason = classifyCampaignStopReason(cause);
       }
       save();
     }
@@ -131,6 +157,16 @@ function advanceCampaign(state: BatchCampaignState, result: ExtractionFillResult
     state.status = "stopped"; state.stopReason = "incomplete_scope_without_missing_batch_work"; return;
   }
   state.nextCheckAt = state.phase === "resume" && !settled ? Date.now() + interval : 0;
+}
+
+function classifyCampaignStopReason(cause: unknown): BatchCampaignStopReason {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  if (/cache invariant|manifest became unreadable|content closure/iu.test(message)) {
+    return "cache_invariant";
+  }
+  if (/authority/iu.test(message)) return "authority_invalid";
+  if (/timeout/iu.test(message)) return "provider_timeout";
+  return "fill_operation_failed_inspect_current_window";
 }
 
 function assertCampaignLimits(limits: GeminiBatchLimits, requestLimit: number, authorityPath: string): void {

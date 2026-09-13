@@ -43,7 +43,7 @@ export async function writeAuthorityReceipt(
     priceEstimate: {
       inputUsdPerMillion: 1,
       outputUsdPerMillion: 2,
-      maximumInputTokensPerAttempt: 300
+      maximumInputTokensPerAttempt: 100_000
     },
     diskFloorBytes: 0,
     inspection: {

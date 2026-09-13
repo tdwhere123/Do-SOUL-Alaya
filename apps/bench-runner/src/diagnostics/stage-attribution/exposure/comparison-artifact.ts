@@ -12,6 +12,7 @@ import {
 import { buildDiagnostic100QUnlock } from "./diagnostic-unlock.js";
 import { buildCachedF3ExposureSli } from "./exposure-sli.js";
 import { evaluateCanaryPolarityMatrix } from "./canary-polarity-matrix.js";
+import { RECALL_MECHANISM_SPLIT_KIND } from "../mechanism/types.js";
 
 const STAGES: readonly TreatmentExposureStage[] = ["eval_or_write_loss", "early_absent", "formation_rejected", "pre_waist", "waist_or_later", "delivered_top5"];
 
@@ -24,7 +25,7 @@ export async function readDiagnostic100QComparisonArtifact(
 }
 
 function assertComparison(value: unknown): asserts value is Diagnostic100QComparison {
-  if (isRecord(value) && value.kind === "recall_mechanism_split_v1") {
+  if (isRecord(value) && value.kind === RECALL_MECHANISM_SPLIT_KIND) {
     throw new Error(
       "recall mechanism split cannot be reinterpreted as a diagnostic 100Q comparison"
     );

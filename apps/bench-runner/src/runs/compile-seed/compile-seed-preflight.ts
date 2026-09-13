@@ -461,7 +461,7 @@ function inspectRequiredTurnFixtures(
       requestProfile
     ).status;
     if (status === "missing") missing += 1;
-    if (status === "invalid") invalid += 1;
+    if (status === "invalid" || status === "quarantined") invalid += 1;
   }
   return { missing, invalid, total: missing + invalid };
 }

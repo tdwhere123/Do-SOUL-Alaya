@@ -2,12 +2,11 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync
+  rmSync
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { replaceBytesDurable } from
+  "../extraction/fill/manifest/durable-exclusive-publication.js";
 import {
   DIAGNOSTIC_LOOP_PHASES,
   isDiagnosticLoopPhase,
@@ -33,9 +32,12 @@ export function checkpointPath(workRoot: string, phase: DiagnosticLoopPhase): st
 
 export function writeJsonAtomic(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  renameSync(temporary, path);
+  replaceBytesDurable({
+    destination: path,
+    bytes: Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8"),
+    ownerIdentity: path,
+    temporaryDirectory: dirname(path)
+  });
 }
 
 export function writeCheckpointAtomic(

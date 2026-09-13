@@ -18,6 +18,7 @@ import type {
 } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { providerBackedExtractionResult, TEST_EXTRACTION_PROVIDER_URL } from
   "../extraction/extraction-cache-test-fixture.js";
+import { groundedExtractionResult } from "./fixture.js";
 import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 
 const VARIANT = "longmemeval_oracle";
@@ -90,7 +91,7 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
     pinnedMetaRoot,
     concurrency: 1,
     extractorFactory: () => ({
-      extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      extract: async (input) => groundedExtractionResult(input)
     }),
     log: () => undefined
   });
@@ -203,7 +204,7 @@ it("does not finalize coverage when interruption follows the last response", asy
     concurrency: 1,
     signal: controller.signal,
     extractorFactory: () => ({
-      extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      extract: async (input) => groundedExtractionResult(input)
     }),
     log: (message) => {
       if (message.includes("2/2")) controller.abort(interrupted);

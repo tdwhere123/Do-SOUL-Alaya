@@ -221,6 +221,24 @@ describe("diagnostic-loop run", () => {
     await expect(resume(workRoot)).rejects.toThrow(/invalid diagnostic-loop checkpoint/iu);
   });
 
+  it("refuses to write a checkpoint whose physical calls contradict the zero-call receipt", async () => {
+    const workRoot = await tempRoot();
+    const tracked = trackingAdapters();
+    await expect(runDiagnosticLoop({
+      workRoot,
+      request: loopRequest(),
+      mode: "run",
+      adapters: {
+        ...tracked.adapters,
+        preflight: async (context) => ({
+          ...(await tracked.adapters.preflight(context)),
+          physicalCalls: 5
+        })
+      },
+      argv: []
+    })).rejects.toThrow(/physical_calls 5 contradicts no-provider-call receipt/u);
+  });
+
   it("rejects a deleted no-provider-call receipt after checkpoint resealing", async () => {
     const workRoot = await completedRun();
     const path = join(workRoot, "checkpoints", "control_recall.json");

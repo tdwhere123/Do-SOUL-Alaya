@@ -37,9 +37,7 @@ export function inspectCurrentOrReplayDerived(
     assertSemanticArtifactCompatibility(task, matching, false, replayAuthority);
     return { status: matching.admission_state, artifact: matching };
   } catch (cause) {
-    if (cause instanceof Error && /ROOT_KIND|semantic artifact root/u.test(cause.message)) {
-      return current;
-    }
+    if (isAbsentPath(cause)) return current;
     return { status: "invalid", reason: cause instanceof Error ? cause.message : String(cause) };
   }
 }
@@ -116,4 +114,9 @@ export function materializeDerivedReplayFromRaw(input: {
 
 function asError(cause: unknown): Error {
   return cause instanceof Error ? cause : new Error(String(cause));
+}
+
+function isAbsentPath(cause: unknown): boolean {
+  return typeof cause === "object" && cause !== null && "code" in cause &&
+    (cause as { readonly code?: unknown }).code === "ENOENT";
 }
