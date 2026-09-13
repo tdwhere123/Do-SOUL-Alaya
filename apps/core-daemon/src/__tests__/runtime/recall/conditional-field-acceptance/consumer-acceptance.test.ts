@@ -144,6 +144,9 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
 
   it("allows a complete logical index that still contains unknown cause", async () => {
     const slice = await openPlantedSlice();
+    // Isolate unknown causation from an independently unresolved in-window log.
+    // Recording the log today preserves the existing open relation validity.
+    stamp(slice, MEM.l, INTERPRETATION_CLOCK);
     const mcp = await recallThroughHandler(slice, {
       query: "yesterday failed deployment",
       max_results: 800,
