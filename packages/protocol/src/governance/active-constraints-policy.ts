@@ -16,14 +16,26 @@ import {
   type PathAnchorRef,
   type PathRelation
 } from "../relations/path-relation.js";
+import { z } from "zod";
 import type { SoulActiveConstraint } from "../surfaces/mcp-memory-search-types.js";
 import { ScopeClassSchema } from "../memory/object-kind.js";
+
+export const AuthorizedScopesAdmissionSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("unrestricted") }).strict(),
+  z.object({ mode: z.literal("denied") }).strict(),
+  z.object({
+    mode: z.literal("named"),
+    scopes: z.array(z.string()).min(1).readonly()
+  }).strict()
+]);
+
+export type AuthorizedScopesAdmission = z.infer<typeof AuthorizedScopesAdmissionSchema>;
 
 export interface BoundedActiveConstraintsRequest {
   readonly workspaceId: string;
   readonly asOf: string;
   readonly snapshotId?: string;
-  readonly authorizedScopes?: readonly string[];
+  readonly authorizedScopes?: AuthorizedScopesAdmission;
   readonly cap?: number | null;
   readonly nativeLimit: number;
   readonly byteLimit: number;
@@ -36,11 +48,25 @@ export interface BoundedActiveConstraintsResult {
   readonly paths: readonly Readonly<PathRelation>[];
   readonly temporal_uncertain: boolean;
   readonly work: Readonly<{ native_visits: number; bytes_read: number; retained_bytes: number }>;
-  readonly binding: Readonly<{ workspace_id: string; as_of: string; snapshot_id: string; authorized_scopes: readonly string[] }>;
+  readonly binding: Readonly<{
+    workspace_id: string;
+    as_of: string;
+    snapshot_id: string;
+    authorized_scopes: AuthorizedScopesAdmission;
+  }>;
 }
 
-export function normalizeActiveConstraintScopes(scopes: readonly string[] | undefined): readonly string[] {
-  return Object.freeze([...new Set((scopes ?? []).map((scope) => ScopeClassSchema.parse(scope)))].sort());
+export function normalizeActiveConstraintScopes(scopes: readonly string[]): readonly string[] {
+  return Object.freeze([...new Set(scopes.map((scope) => ScopeClassSchema.parse(scope)))].sort());
+}
+
+export function normalizeActiveConstraintAdmission(
+  admission: AuthorizedScopesAdmission | undefined
+): AuthorizedScopesAdmission {
+  if (admission === undefined || admission.mode === "denied") return { mode: "denied" };
+  if (admission.mode === "unrestricted") return { mode: "unrestricted" };
+  const scopes = normalizeActiveConstraintScopes(admission.scopes);
+  return scopes.length === 0 ? { mode: "denied" } : { mode: "named", scopes };
 }
 
 export const DEFAULT_ACTIVE_CONSTRAINTS_CAP = 20;

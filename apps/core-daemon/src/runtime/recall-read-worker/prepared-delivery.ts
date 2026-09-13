@@ -1,10 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { InformationIndexSchema } from "@do-soul/alaya-protocol";
+import { indexEntryCacheKey, type InformationIndex } from "@do-soul/alaya-protocol";
 import type { ConditionalFieldRecallPortResult, runConditionalFieldRecallWithReceipt } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 
 type Execution = ReturnType<typeof runConditionalFieldRecallWithReceipt>;
-type Prepared = { issue?: Execution["issue"]; receipt: Execution["execution_receipt"]; metadata: NonNullable<ConditionalFieldRecallPortResult["source_metadata"]> };
+type Prepared = {
+  issue?: Execution["issue"];
+  receipt: Execution["execution_receipt"];
+  metadata: NonNullable<ConditionalFieldRecallPortResult["source_metadata"]>;
+  index: InformationIndex;
+};
 const PREPARED = new WeakMap<RecallReadWorkerRuntime, Map<string, Prepared>>();
 
 export function prepareWorkerDelivery(
@@ -15,7 +20,7 @@ export function prepareWorkerDelivery(
   let pending = PREPARED.get(runtime);
   if (pending === undefined) { pending = new Map(); PREPARED.set(runtime, pending); }
   const id = randomUUID();
-  pending.set(id, { issue: execution.issue, receipt: execution.execution_receipt, metadata });
+  pending.set(id, { issue: execution.issue, receipt: execution.execution_receipt, metadata, index: execution.index });
   while (pending.size > 32) pending.delete(pending.keys().next().value!);
   return id;
 }
@@ -32,11 +37,23 @@ export function settleWorkerDelivery(
   const prepared = pending?.get(id);
   if (prepared === undefined) throw new Error("Recall preparation expired or discarded");
   if (prepared.issue === undefined) return prepared.receipt;
-  const index = InformationIndexSchema.parse(payload.index);
+  const issuedIds = readIssuedEntryIds(payload.issued_entry_ids);
+  const expected = prepared.index.entries.map(indexEntryCacheKey);
+  if (issuedIds.length !== expected.length
+    || issuedIds.some((entryId, offset) => entryId !== expected[offset])) {
+    throw new Error("Recall envelope changed prepared membership");
+  }
   const entries = Object.entries(payload.previews as Record<string, unknown>);
   if (entries.some(([, value]) => typeof value !== "string")) throw new TypeError("invalid Recall previews");
-  prepared.issue({ index, previews: new Map(entries as [string, string][]), metadata: prepared.metadata });
+  prepared.issue({ index: prepared.index, previews: new Map(entries as [string, string][]), metadata: prepared.metadata });
   // An acknowledgment retry must neither retain source closures nor advance a successor.
-  pending!.set(id, { metadata: {}, receipt: prepared.receipt });
+  pending!.set(id, { metadata: {}, receipt: prepared.receipt, index: prepared.index });
   return prepared.receipt;
+}
+
+function readIssuedEntryIds(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.some((entryId) => typeof entryId !== "string")) {
+    throw new TypeError("Recall issued entry ids required");
+  }
+  return value;
 }

@@ -1,9 +1,10 @@
 import {
   SoulActiveConstraintSchema,
   isPathActiveForRecall,
-  normalizeActiveConstraintScopes,
+  normalizeActiveConstraintAdmission,
   listActiveConstraintCandidateMemoryIds,
   selectActiveConstraintRecords,
+  type AuthorizedScopesAdmission,
   type BoundedActiveConstraintsRequest,
   type BoundedActiveConstraintsResult,
   type ActiveConstraintClaim,
@@ -45,16 +46,29 @@ interface ReadAllowance {
   temporalUncertain: boolean;
 }
 
-type PinnedConstraintsRequest = Readonly<BoundedActiveConstraintsRequest & { snapshotId: string }>;
+type PinnedConstraintsRequest = Readonly<BoundedActiveConstraintsRequest & {
+  snapshotId: string;
+  authorizedScopes: AuthorizedScopesAdmission;
+}>;
 
 /** Row probes precede hydration so oversized JSON never crosses the native boundary. */
 export function readBoundedActiveConstraints(
   db: StorageDatabase,
-  request: PinnedConstraintsRequest,
+  request: Readonly<BoundedActiveConstraintsRequest & { snapshotId: string }>,
   readPaths: BoundedGovernancePathReader
 ): Readonly<BoundedActiveConstraintsResult> {
-  assertRequest(request);
-  return db.connection.transaction(() => readSnapshot(db, request, readPaths))();
+  const pinned: PinnedConstraintsRequest = {
+    ...request,
+    authorizedScopes: normalizeActiveConstraintAdmission(request.authorizedScopes)
+  };
+  assertRequest(pinned);
+  if (pinned.authorizedScopes.mode === "denied") {
+    return finish(pinned, {
+      native: pinned.nativeLimit, bytes: Math.max(0, pinned.byteLimit - 1024),
+      visits: 0, bytesRead: 0, complete: true, temporalUncertain: false
+    }, [], [], 0);
+  }
+  return db.connection.transaction(() => readSnapshot(db, pinned, readPaths))();
 }
 
 function readSnapshot(
@@ -152,12 +166,12 @@ function readMemory(
   id: string,
   allowance: ReadAllowance
 ): Readonly<MemoryEntry> | null {
-  const scopes = normalizeActiveConstraintScopes(request.authorizedScopes);
-  const scopeFilter = scopes.length === 0 ? "" : `AND scope_class IN (${scopes.map(() => "?").join(",")})`;
+  const named = request.authorizedScopes.mode === "named" ? request.authorizedScopes.scopes : [];
+  const scopeFilter = named.length === 0 ? "" : `AND scope_class IN (${named.map(() => "?").join(",")})`;
   const row = db.connection.prepare(`SELECT ${MEMORY_BYTES_SQL} AS bytes FROM memory_entries
     WHERE workspace_id = ? AND object_id = ?
       ${scopeFilter} LIMIT 1`)
-    .get(request.workspaceId, id, ...scopes) as
+    .get(request.workspaceId, id, ...named) as
     { bytes: number } | undefined;
   debit(allowance, 1, row === undefined ? 0 : Buffer.byteLength(JSON.stringify(row), "utf8"));
   if (row === undefined) return null;
@@ -189,7 +203,7 @@ function finish(
     completeness: allowance.complete ? "complete" as const : "incomplete" as const,
     temporal_uncertain: allowance.temporalUncertain,
     binding: { workspace_id: request.workspaceId, as_of: request.asOf, snapshot_id: request.snapshotId,
-      authorized_scopes: normalizeActiveConstraintScopes(request.authorizedScopes) },
+      authorized_scopes: request.authorizedScopes },
     work: { native_visits: allowance.visits, bytes_read: allowance.bytesRead, retained_bytes: 0 }
   };
   if (Buffer.byteLength(JSON.stringify(base), "utf8") > request.byteLimit) {
@@ -213,7 +227,6 @@ function debit(allowance: ReadAllowance, visits: number, bytes: number): void {
 }
 
 function assertRequest(request: PinnedConstraintsRequest): void {
-  normalizeActiveConstraintScopes(request.authorizedScopes);
   if (!Number.isSafeInteger(request.nativeLimit) || request.nativeLimit < 0 || request.nativeLimit > 65536 ||
       !Number.isSafeInteger(request.byteLimit) || request.byteLimit < 1024 || request.byteLimit > 16 * 1024 * 1024 ||
       !Number.isFinite(Date.parse(request.asOf)) || request.asOf.length > 64 ||

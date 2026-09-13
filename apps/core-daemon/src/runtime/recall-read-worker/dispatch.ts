@@ -3,7 +3,11 @@ import {
   type RecallReadWorkerRequest
 } from "./protocol.js";
 import { asPayload } from "./payload-readers.js";
-import { parseWorkerOperationPayload, parseWorkerOperationResult } from "./operation-schemas.js";
+import {
+  BoundedRequestSchema,
+  parseWorkerOperationPayload,
+  parseWorkerOperationResult
+} from "./operation-schemas.js";
 import { createBoundedActiveConstraintsReader, runWorkerActiveConstraints } from "./active-constraints.js";
 import { runMemoryOperation } from "./memory-operations.js";
 import { runEvidenceOperation } from "./evidence-operations.js";
@@ -24,6 +28,15 @@ export async function runOperation(
   }
   if (runtime.closed && request.operation !== "close") {
     throw new Error("recall read worker database is closed");
+  }
+  if (request.operation === "constraints.readBounded") {
+    const parsed = BoundedRequestSchema.parse(request.payload ?? {});
+    let reader = boundedConstraintsReaders.get(runtime);
+    if (reader === undefined) {
+      reader = createBoundedActiveConstraintsReader(runtime.database);
+      boundedConstraintsReaders.set(runtime, reader);
+    }
+    return parseWorkerOperationResult(request.operation, reader(parsed));
   }
   const parsedPayload = parseWorkerOperationPayload(request.operation, request.payload);
   if (request.operation === "conditionalField.recall") {
@@ -94,14 +107,6 @@ async function dispatchParsed(
         claimFormRepo: runtime.claimFormRepo,
         pathReadPorts: runtime.recallPathReadPorts
       });
-    case "constraints.readBounded": {
-      let reader = boundedConstraintsReaders.get(runtime);
-      if (reader === undefined) {
-        reader = createBoundedActiveConstraintsReader(runtime.database);
-        boundedConstraintsReaders.set(runtime, reader);
-      }
-      return reader(payload as unknown as import("@do-soul/alaya-protocol").BoundedActiveConstraintsRequest);
-    }
     case "snapshot.beginDeferred":
       runtime.database.connection.exec("BEGIN DEFERRED");
       return null;

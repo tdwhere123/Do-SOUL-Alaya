@@ -22,7 +22,7 @@ import {
   type WorkerTierWindowResult
 } from "../../../runtime/recall-read-worker/memory-client.js";
 import { runOperation } from "../../../runtime/recall-read-worker/dispatch.js";
-import { encodeAuthorizedScopesAdmission } from "../../../runtime/recall-read-worker/operation-schemas.js";
+import { encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
 import {
   RECALL_READ_WORKER_PROTOCOL_VERSION,
   type RecallReadWorkerOperation
@@ -175,9 +175,13 @@ export function encodeWorkerRecallPayload(payload: unknown): unknown {
   if (!Object.hasOwn(record, "authorized_scopes")) {
     return payload;
   }
+  const admission = record.authorized_scopes;
+  if (admission !== null && typeof admission === "object" && !Array.isArray(admission) && "mode" in admission) {
+    return { ...record, authorized_scopes: admission };
+  }
   return {
     ...record,
-    authorized_scopes: encodeAuthorizedScopesAdmission(record.authorized_scopes as never)
+    authorized_scopes: encodeAuthorizedScopesAdmission(admission as readonly string[] | null | undefined)
   };
 }
 

@@ -14,14 +14,18 @@ export function createTierWindowChunkConsumer(): (
   value: unknown
 ) => TierWindowChunkConsumption {
   const memories: TierWindowResult["memories"][number][] = [];
+  let cursor = 0;
   return (value) => {
     const chunk = parseTierWindowChunk(value);
-    memories.push(...chunk.memories);
+    for (const memory of chunk.memories) {
+      memories[cursor] = memory;
+      cursor += 1;
+    }
     if (!chunk.done) return Object.freeze({ done: false });
     return Object.freeze({
       done: true,
       value: Object.freeze({
-        memories: Object.freeze(memories),
+        memories: Object.freeze(memories.slice(0, cursor)),
         next_cursor: chunk.next_cursor,
         truncated: chunk.truncated
       })
