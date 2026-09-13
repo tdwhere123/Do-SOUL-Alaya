@@ -144,7 +144,16 @@ describe("daemon conversation tool catalog", () => {
           }
         ]),
         callTool: vi.fn(async () => ({ content: [] })),
-        close: vi.fn(async () => undefined)
+        close: vi.fn(async () => undefined),
+        getHealth: vi.fn(() => ({
+          servers: [
+            {
+              server_name: "filesystem",
+              status: "active" as const,
+              last_error: null
+            }
+          ]
+        }))
       };
 
       const catalog = createDaemonMcpCatalogFromEnv({
@@ -201,7 +210,16 @@ describe("daemon conversation tool catalog", () => {
         getServerTools: vi.fn(() => []),
         listServerTools: vi.fn(async () => []),
         callTool: vi.fn(async () => ({ content: [] })),
-        close: vi.fn(async () => undefined)
+        close: vi.fn(async () => undefined),
+        getHealth: vi.fn(() => ({
+          servers: [
+            {
+              server_name: "filesystem",
+              status: "active" as const,
+              last_error: null
+            }
+          ]
+        }))
       };
 
       const catalog = createDaemonMcpCatalogFromEnv({
@@ -263,7 +281,16 @@ describe("daemon conversation tool catalog", () => {
           }
         ]),
         callTool: vi.fn(async () => ({ content: [] })),
-        close: vi.fn(async () => undefined)
+        close: vi.fn(async () => undefined),
+        getHealth: vi.fn(() => ({
+          servers: [
+            {
+              server_name: "filesystem",
+              status: "active" as const,
+              last_error: null
+            }
+          ]
+        }))
       };
 
       const catalog = createDaemonMcpCatalogFromEnv({
@@ -309,7 +336,8 @@ describe("daemon conversation tool catalog", () => {
         getServerTools: vi.fn(() => []),
         listServerInfos: vi.fn(() => []),
         listServerTools: vi.fn(async () => []),
-        refresh: vi.fn(async () => undefined)
+        refresh: vi.fn(async () => undefined),
+        getHealth: vi.fn(() => ({ servers: [] }))
       },
       toolSpecService
     });
@@ -338,7 +366,8 @@ describe("daemon conversation tool catalog", () => {
         getServerTools: vi.fn(() => []),
         listServerInfos: vi.fn(() => []),
         listServerTools: vi.fn(async () => []),
-        refresh: vi.fn(async () => undefined)
+        refresh: vi.fn(async () => undefined),
+        getHealth: vi.fn(() => ({ servers: [] }))
       },
       toolSpecService: {
         findById: vi.fn(async (toolId: string) => createToolSpec(toolId)),

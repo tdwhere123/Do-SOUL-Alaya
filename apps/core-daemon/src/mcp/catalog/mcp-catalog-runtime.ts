@@ -9,6 +9,8 @@ import { executeConversationToolOrThrow } from "../tool-runtime/tool-runtime.js"
 import { isBuiltinConversationToolId } from "../server/builtin-conversation-tool-specs.js";
 import {
   classifyDaemonMcpListFailure,
+  MCP_EXTERNAL_ERROR_MESSAGES,
+  type DaemonMcpListFailureCode,
   type DaemonMcpRuntimeHealth,
   type DaemonMcpRuntimeRegistry
 } from "./mcp-runtime-registry.js";
@@ -75,6 +77,7 @@ export function buildDaemonMcpCatalogState(input: {
   readonly servers: readonly Readonly<McpServerInfo>[];
   readonly toolAvailability: ReadonlyMap<string, () => boolean>;
   readonly toolExecutors: ReadonlyMap<string, DaemonMcpToolRuntimeExecutor>;
+  readonly toolServerNames: ReadonlyMap<string, string>;
 } {
   const runtimeServerInfos = input.runtimeRegistry.listServerInfos();
   const runtimeServerInfoByName = new Map(
@@ -89,6 +92,7 @@ export function buildDaemonMcpCatalogState(input: {
   const executableToolCatalog = new Map<string, readonly Readonly<ToolProviderToolSpec>[]>();
   const toolAvailability = new Map<string, () => boolean>();
   const toolExecutors = new Map<string, DaemonMcpToolRuntimeExecutor>();
+  const toolServerNames = new Map<string, string>();
 
   for (const serverName of serverNames) {
     const runtimeServerInfo = runtimeServerInfoByName.get(serverName);
@@ -114,6 +118,7 @@ export function buildDaemonMcpCatalogState(input: {
       }
 
       executableTools.push(tool.spec);
+      toolServerNames.set(tool.spec.tool_id, serverName);
       toolAvailability.set(
         tool.spec.tool_id,
         () =>
@@ -132,7 +137,8 @@ export function buildDaemonMcpCatalogState(input: {
     toolCatalog: executableToolCatalog,
     servers,
     toolAvailability,
-    toolExecutors
+    toolExecutors,
+    toolServerNames
   };
 }
 
@@ -244,10 +250,22 @@ export async function executeExternalMcpTool(input: {
   readonly toolAvailability: ReadonlyMap<string, () => boolean>;
   readonly writableRoots: readonly string[];
   readonly toolExecutors: ReadonlyMap<string, DaemonMcpToolRuntimeExecutor>;
+  readonly readLastError?: (toolId: string) => Readonly<{
+    readonly code: DaemonMcpListFailureCode;
+    readonly message: string;
+  }> | null;
 }): Promise< unknown> {
   const availabilityCheck = input.toolAvailability.get(input.toolId);
   const runtimeExecutor = input.toolExecutors.get(input.toolId);
   if (availabilityCheck?.() !== true || runtimeExecutor === undefined) {
+    const lastError = input.readLastError?.(input.toolId) ?? null;
+    if (lastError !== null) {
+      return {
+        ok: false,
+        code: lastError.code,
+        message: MCP_EXTERNAL_ERROR_MESSAGES[lastError.code]
+      };
+    }
     return {
       ok: false,
       code: "MCP_EXTERNAL_UNBOUND",
@@ -259,6 +277,17 @@ export async function executeExternalMcpTool(input: {
     rawInput: input.rawInput,
     writableRoots: input.writableRoots
   });
+}
+
+export function readCatalogToolLastError(
+  runtimeRegistry: Partial<Pick<DaemonMcpRuntimeRegistry, "getHealth">>,
+  serverName: string | undefined
+): Readonly<{ readonly code: DaemonMcpListFailureCode; readonly message: string }> | null {
+  if (serverName === undefined || typeof runtimeRegistry.getHealth !== "function") {
+    return null;
+  }
+  return runtimeRegistry.getHealth().servers.find((server) => server.server_name === serverName)
+    ?.last_error ?? null;
 }
 
 async function listBoundServerTools(

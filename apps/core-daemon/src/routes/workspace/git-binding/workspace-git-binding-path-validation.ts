@@ -26,6 +26,72 @@ export function rejectInvalidRepoPathSyntax(repoPath: string): GitBindingValidat
   return null;
 }
 
+export function isFilesystemRootPath(candidate: string): boolean {
+  const normalized = path.normalize(candidate);
+  return path.parse(normalized).root === normalized;
+}
+
+export async function validateWorkspaceRootPath(
+  rootPath: string,
+  options: {
+    readonly currentWorkingDirectory?: string;
+    readonly repoRootsEnv?: string;
+  } = {}
+): Promise<GitBindingValidationResult> {
+  if (isFilesystemRootPath(rootPath)) {
+    return {
+      ok: false,
+      code: "outside_allowed_roots",
+      detail: "root_path must not be the filesystem root."
+    };
+  }
+
+  const syntaxError = rejectInvalidRepoPathSyntax(rootPath);
+  if (syntaxError !== null && !syntaxError.ok) {
+    return {
+      ok: false,
+      code: syntaxError.code,
+      detail: syntaxError.detail.replaceAll("repo_path", "root_path")
+    };
+  }
+
+  const resolvedDirectory = await resolveRepoDirectory(rootPath);
+  if (!resolvedDirectory.ok) {
+    return {
+      ok: false,
+      code: resolvedDirectory.code,
+      detail: resolvedDirectory.detail.replaceAll("repo_path", "root_path")
+    };
+  }
+
+  if (isFilesystemRootPath(resolvedDirectory.repo_path)) {
+    return {
+      ok: false,
+      code: "outside_allowed_roots",
+      detail: "root_path must not be the filesystem root."
+    };
+  }
+
+  const allowedRoots = (await resolveAllowedRoots(options)).filter(
+    (root) => !isFilesystemRootPath(root)
+  );
+  const withinAllowedRoot = allowedRoots.some((root) =>
+    isWithinAllowedRoot(root, resolvedDirectory.repo_path)
+  );
+  if (!withinAllowedRoot) {
+    return {
+      ok: false,
+      code: "outside_allowed_roots",
+      detail: "root_path resolves outside the allowed workspace roots."
+    };
+  }
+
+  return {
+    ok: true,
+    repo_path: resolvedDirectory.repo_path
+  };
+}
+
 export async function resolveRepoDirectory(
   repoPath: string
 ): Promise<GitBindingValidationResult | { readonly ok: true; readonly repo_path: string }> {

@@ -141,7 +141,8 @@ describe("daemon conversation tool catalog", () => {
       listEnrolledToolIds: vi.fn(() => [discoveredTool.tool_id]),
       listServerTools: vi.fn(async () => [discoveredTool]),
       hasTool: vi.fn(() => true),
-      executeTool: vi.fn(async () => ({ ok: true }))
+      executeTool: vi.fn(async () => ({ ok: true })),
+      getHealth: vi.fn(() => ({ servers: [] }))
     };
     const mcpToolDiscoveryService = new McpToolDiscoveryService({
       extensionRegistry,
@@ -162,7 +163,8 @@ describe("daemon conversation tool catalog", () => {
         getServerTools: vi.fn(() => []),
         listServerInfos: vi.fn(() => []),
         listServerTools: vi.fn(async () => []),
-        refresh: vi.fn(async () => undefined)
+        refresh: vi.fn(async () => undefined),
+        getHealth: vi.fn(() => ({ servers: [] }))
       },
       toolSpecService
     });

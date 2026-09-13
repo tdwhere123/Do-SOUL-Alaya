@@ -8,6 +8,12 @@ import {
   type WorkspaceService
 } from "@do-soul/alaya-core";
 import {
+  isWorkspaceGrantDenied,
+  REQUEST_TOKEN_GRANT_CONTEXT_KEY,
+  WORKSPACE_TOKEN_DENIED_MESSAGE,
+  type RequestTokenGrant
+} from "../../../runtime/request-token-binding.js";
+import {
   parseJsonBody,
   parseListPagination,
   rejectUnexpectedRequestBody,
@@ -102,7 +108,8 @@ function registerRunCollectionRoutes(app: Hono, services: RunRouteServices): voi
 
   app.get("/runs/:id", async (context) => {
     const runId = context.req.param("id");
-    await assertRunWorkspace(services, runId);
+    const asserted = await assertRunWorkspace(context, services, runId);
+    if (asserted instanceof Response) return asserted;
     const run = await services.runService.getById(runId);
     return context.json({ success: true, data: run }, 200);
   });
@@ -111,7 +118,8 @@ function registerRunCollectionRoutes(app: Hono, services: RunRouteServices): voi
 function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
   app.get("/runs/:id/messages", async (context) => {
     const runId = context.req.param("id");
-    await assertRunWorkspace(services, runId);
+    const asserted = await assertRunWorkspace(context, services, runId);
+    if (asserted instanceof Response) return asserted;
     const pagination = parseListPagination(context);
     const [messages, totalCount] = await resolveListAndCount(
       services.conversationService.listMessages(runId, pagination),
@@ -123,7 +131,8 @@ function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
 
   app.post("/runs/:id/messages", async (context) => {
     const runId = context.req.param("id");
-    await assertRunWorkspace(services, runId);
+    const asserted = await assertRunWorkspace(context, services, runId);
+    if (asserted instanceof Response) return asserted;
     const response = await services.conversationService.sendMessage(
       runId,
       await parseJsonBody(context.req.json.bind(context.req))
@@ -134,7 +143,8 @@ function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
 
   app.post("/runs/:id/messages/stream", async (context) => {
     const runId = context.req.param("id");
-    await assertRunWorkspace(services, runId);
+    const asserted = await assertRunWorkspace(context, services, runId);
+    if (asserted instanceof Response) return asserted;
     const response = await services.conversationService.sendMessageStreaming(
       runId,
       await parseJsonBody(context.req.json.bind(context.req))
@@ -163,6 +173,8 @@ function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void
     const unexpectedBody = await rejectUnexpectedRequestBody(context);
     if (unexpectedBody !== null) return unexpectedBody;
     const runId = context.req.param("id");
+    const asserted = await assertRunWorkspace(context, services, runId);
+    if (asserted instanceof Response) return asserted;
     const result = await services.conversationService.interruptRun(runId);
 
     return context.json({ success: true, data: RunInterruptResultSchema.parse(result) }, 200);
@@ -175,7 +187,8 @@ function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void
   app.patch("/runs/:id", async (context) => {
     const runId = context.req.param("id");
     const body = parseRunRenameInput(runId, await parseJsonBody(context.req.json.bind(context.req)));
-    await assertRunWorkspace(services, runId);
+    const asserted = await assertRunWorkspace(context, services, runId);
+    if (asserted instanceof Response) return asserted;
     const run = await services.runService.rename(body);
     return context.json({ success: true, data: run }, 200);
   });
@@ -187,7 +200,8 @@ function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void
 
 async function getRunSnapshot(context: Context, services: RunRouteServices): Promise<Response> {
   const runId = context.req.param("id")!;
-  const workspaceId = await assertRunWorkspace(services, runId);
+  const workspaceId = await assertRunWorkspace(context, services, runId);
+  if (workspaceId instanceof Response) return workspaceId;
   const snapshot = await services.runHotStateService.getSnapshot(runId);
   if (snapshot === null) throw new CoreError("NOT_FOUND", "Run not found");
   try {
@@ -243,7 +257,8 @@ async function deleteRun(context: Context, services: RunRouteServices): Promise<
   const unexpectedBody = await rejectUnexpectedRequestBody(context);
   if (unexpectedBody !== null) return unexpectedBody;
   const runId = context.req.param("id")!;
-  await assertRunWorkspace(services, runId);
+  const asserted = await assertRunWorkspace(context, services, runId);
+  if (asserted instanceof Response) return asserted;
   const run = await services.runService.delete(runId);
   clearRunLocalState(services, runId);
   await services.governanceLeaseService?.release(runId).catch((error) => {
@@ -257,9 +272,17 @@ async function deleteRun(context: Context, services: RunRouteServices): Promise<
 
 // Resolve the run then confirm its workspace exists (mirror recall.ts) so an
 // unscoped /runs/:id route cannot reach a run in a missing/foreign workspace.
-async function assertRunWorkspace(services: RunRouteServices, runId: string): Promise<string> {
+async function assertRunWorkspace(
+  context: Context,
+  services: RunRouteServices,
+  runId: string
+): Promise<string | Response> {
   const run = await services.runService.getById(runId);
   await services.workspaceService.getById(run.workspace_id);
+  const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
+  if (isWorkspaceGrantDenied(grant, run.workspace_id)) {
+    return context.json({ success: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE }, 403);
+  }
   return run.workspace_id;
 }
 

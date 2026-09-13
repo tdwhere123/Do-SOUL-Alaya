@@ -278,7 +278,16 @@ describe("daemon conversation tool catalog", () => {
           }
         ]),
         callTool: vi.fn(async () => ({ content: [] })),
-        close: vi.fn(async () => undefined)
+        close: vi.fn(async () => undefined),
+        getHealth: vi.fn(() => ({
+          servers: [
+            {
+              server_name: "filesystem",
+              status: "active" as const,
+              last_error: null
+            }
+          ]
+        }))
       };
 
       const catalog = createDaemonMcpCatalogFromEnv({
@@ -350,7 +359,16 @@ describe("daemon conversation tool catalog", () => {
           throw new Error("filesystem offline");
         }),
         callTool: vi.fn(async () => ({ content: [] })),
-        close: vi.fn(async () => undefined)
+        close: vi.fn(async () => undefined),
+        getHealth: vi.fn(() => ({
+          servers: [
+            {
+              server_name: "filesystem",
+              status: "active" as const,
+              last_error: null
+            }
+          ]
+        }))
       };
 
       const catalog = createDaemonMcpCatalogFromEnv({

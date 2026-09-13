@@ -111,15 +111,22 @@ export async function inspectStorage(
 ): Promise<DoctorReport["storage"]> {
   const normalizedPath = dbPath.trim();
   if (normalizedPath.length === 0) {
-    return createStorageSnapshot(dbPath, normalizedPath, false, false);
+    return createStorageSnapshot(dbPath, normalizedPath, false, false, false);
   }
 
   const accessState = await inspectStorageAccess(normalizedPath);
-  if (!accessState.exists || !accessState.writable) {
-    return createStorageSnapshot(dbPath, normalizedPath, accessState.exists, accessState.writable);
+  if (!accessState.exists || !accessState.readable || !accessState.writable) {
+    return createStorageSnapshot(
+      dbPath,
+      normalizedPath,
+      accessState.exists,
+      accessState.readable,
+      accessState.writable,
+      accessState.error_code
+    );
   }
   if (getSchemaSummary === undefined) {
-    return createStorageSnapshot(dbPath, normalizedPath, true, true);
+    return createStorageSnapshot(dbPath, normalizedPath, true, true, true);
   }
   return await inspectStorageSchema(normalizedPath, getSchemaSummary);
 }
@@ -159,31 +166,57 @@ function createStorageSnapshot(
   originalPath: string,
   normalizedPath: string,
   existsValue: boolean,
-  writableValue: boolean
+  readableValue: boolean,
+  writableValue: boolean,
+  errorCode: string | null = null
 ): DoctorReport["storage"] {
   return {
     db_path: normalizedPath.length === 0 ? originalPath : normalizedPath,
     exists: existsValue,
+    readable: readableValue,
     writable: writableValue,
     schema_ok: null,
     schema_version_persisted: null,
-    schema_version_expected: null
+    schema_version_expected: null,
+    error_code: errorCode
   };
 }
 
 async function inspectStorageAccess(
   normalizedPath: string
-): Promise<Readonly<{ exists: boolean; writable: boolean }>> {
+): Promise<Readonly<{ exists: boolean; readable: boolean; writable: boolean; error_code: string | null }>> {
   try {
     await access(normalizedPath, fsConstants.F_OK);
-  } catch {
-    return { exists: false, writable: false };
+  } catch (error) {
+    const code = readErrnoCode(error);
+    if (code === "ENOENT") {
+      return { exists: false, readable: false, writable: false, error_code: code };
+    }
+    return {
+      exists: code === "EACCES" || code === "EPERM",
+      readable: false,
+      writable: false,
+      error_code: code
+    };
+  }
+  let readable = true;
+  let errorCode: string | null = null;
+  try {
+    await access(normalizedPath, fsConstants.R_OK);
+  } catch (error) {
+    readable = false;
+    errorCode = readErrnoCode(error);
   }
   try {
     await access(normalizedPath, fsConstants.W_OK);
-    return { exists: true, writable: true };
-  } catch {
-    return { exists: true, writable: false };
+    return { exists: true, readable, writable: true, error_code: errorCode };
+  } catch (error) {
+    return {
+      exists: true,
+      readable,
+      writable: false,
+      error_code: errorCode ?? readErrnoCode(error)
+    };
   }
 }
 
@@ -196,21 +229,35 @@ async function inspectStorageSchema(
     return {
       db_path: normalizedPath,
       exists: true,
+      readable: true,
       writable: true,
       schema_ok: summary.schemaOk,
       schema_version_persisted: summary.persistedMaxVersion,
-      schema_version_expected: summary.knownMaxVersion
+      schema_version_expected: summary.knownMaxVersion,
+      error_code: null
     };
-  } catch {
+  } catch (error) {
+    const code = readErrnoCode(error);
+    const unreadable = code === "EACCES" || code === "EPERM";
     return {
       db_path: normalizedPath,
       exists: true,
-      writable: true,
-      schema_ok: false,
+      readable: !unreadable,
+      writable: !unreadable,
+      schema_ok: unreadable ? null : false,
       schema_version_persisted: null,
-      schema_version_expected: null
+      schema_version_expected: null,
+      error_code: code
     };
   }
+}
+
+function readErrnoCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return null;
+  }
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === "string" && code.length > 0 ? code : null;
 }
 
 function writeDoctorCoreSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {
@@ -222,7 +269,12 @@ function writeDoctorCoreSummary(stream: NodeJS.WritableStream, report: DoctorRep
   );
   stream.write(`runtime ready: ${report.startup.ready ? "yes" : "no"}\n`);
   stream.write(`storage db path: ${report.storage.db_path}\n`);
+  stream.write(`storage exists: ${report.storage.exists ? "yes" : "no"}\n`);
+  stream.write(`storage readable: ${report.storage.readable ? "yes" : "no"}\n`);
   stream.write(`storage writable: ${report.storage.writable ? "yes" : "no"}\n`);
+  if (report.storage.error_code !== null) {
+    stream.write(`storage error_code: ${report.storage.error_code}\n`);
+  }
   if (report.storage.schema_ok !== null) {
     stream.write(
       `storage schema_ok: ${report.storage.schema_ok ? "yes" : "no"}` +
@@ -243,6 +295,10 @@ function writeDoctorCoreSummary(stream: NodeJS.WritableStream, report: DoctorRep
   }
   stream.write(`mcp transport: ${report.mcp.transport}\n`);
   stream.write(`garden status: ${report.garden.status}\n`);
+  stream.write(`garden schema_ok: ${report.garden.schema_ok ? "yes" : "no"}\n`);
+  if (report.garden_compute.degraded_reason) {
+    stream.write(`garden compute degraded_reason: ${report.garden_compute.degraded_reason}\n`);
+  }
   stream.write(`garden credential provenance: ${formatGardenCredentialProvenance(report.garden.credential_provenance)}\n`);
   stream.write(
     `runtime wiring: request_token=${report.runtime_wiring.request_token_source}` +

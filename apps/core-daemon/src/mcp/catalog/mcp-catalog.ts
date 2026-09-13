@@ -29,6 +29,7 @@ import {
   executeExternalMcpTool,
   freezeToolSpecs,
   hasStringLookup,
+  readCatalogToolLastError,
   readDaemonMcpCatalogHealth,
   type DaemonConversationToolRuntimeCatalog
 } from "./mcp-catalog-runtime.js";
@@ -40,7 +41,7 @@ export interface DaemonMcpCatalog {
   refresh(): Promise<void>;
   listAllowedServerNames(): readonly string[];
   listEnrolledToolIds(): readonly string[];
-  getHealth?(): DaemonMcpRuntimeHealth;
+  getHealth(): DaemonMcpRuntimeHealth;
   listServerTools(server: Readonly<McpServerInfo>): Promise<readonly Readonly<ToolProviderToolSpec>[]>;
   hasTool(toolId: string): boolean;
   executeTool(input: {
@@ -244,7 +245,8 @@ export function createDaemonMcpCatalogFromEnv(input: {
         rawInput,
         toolAvailability: state.toolAvailability,
         writableRoots,
-        toolExecutors: state.toolExecutors
+        toolExecutors: state.toolExecutors,
+        readLastError: (id) => readCatalogToolLastError(input.runtimeRegistry, state.toolServerNames.get(id))
       });
     }
   };

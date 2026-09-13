@@ -46,7 +46,8 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
       daemonMcpCatalog: {
         listAllowedServerNames: () => [],
         listEnrolledToolIds: () => ["soul.recall"],
-        refresh: async () => {}
+        refresh: async () => {},
+        getHealth: () => ({ servers: [] })
       },
       environmentStatusService: {
         getStatus: async () => ({

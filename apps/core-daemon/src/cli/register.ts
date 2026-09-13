@@ -6,7 +6,6 @@
  * `apps/core-daemon/package.json` exports entry.
  */
 import { randomUUID } from "node:crypto";
-import { once } from "node:events";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Readable, Writable } from "node:stream";
@@ -27,7 +26,11 @@ import {
   resolveAlayaConfigDir,
   resolveAlayaConfigPaths
 } from "./support/config-files.js";
-import { createDoctorCommand } from "./doctor/doctor.js";
+import {
+  assessGardenPassHealth,
+  assessMcpCatalogTransport,
+  createDoctorCommand
+} from "./doctor/doctor.js";
 import { resolveGardenComputeStatus } from "./support/garden-compute-status.js";
 import { readBuildInfo } from "../runtime/daemon/support/build-info.js";
 import { createInstallCommand } from "./install/install.js";
@@ -163,11 +166,28 @@ async function waitForInputClose(stream: NodeJS.ReadableStream): Promise<void> {
     return;
   }
 
-  await Promise.race([
-    once(stream, "end"),
-    once(stream, "close"),
-    once(stream, "error")
-  ]).then(() => undefined);
+  await new Promise<void>((resolve, reject) => {
+    const onEnd = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onClose = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = (): void => {
+      stream.off("end", onEnd);
+      stream.off("close", onClose);
+      stream.off("error", onError);
+    };
+    stream.once("end", onEnd);
+    stream.once("close", onClose);
+    stream.once("error", onError);
+  });
 }
 
 function createProfileAuditWriter(env: NodeJS.ProcessEnv): ProfileMutationAuditWriter {
@@ -209,14 +229,17 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
     getEmbeddingStatus: async (workspaceId) => await runtime.services.embeddingStatusService.getStatus(workspaceId),
     getQueryEmbeddingWarmup: () =>
       runtime.services.embeddingRecallService?.lastQueryEmbeddingWarmup() ?? null,
-    getMcpHealth: async () => ({
-      transport: "ready",
-      enrolled_tools: runtime.services.daemonMcpCatalog.listEnrolledToolIds().length
-    }),
+    getMcpHealth: async () => {
+      const health = runtime.services.daemonMcpCatalog.getHealth();
+      return {
+        transport: assessMcpCatalogTransport(health),
+        enrolled_tools: runtime.services.daemonMcpCatalog.listEnrolledToolIds().length
+      };
+    },
     getGardenHealth: async () => {
       const gardenStatus = runtime.services.gardenStatus.getStatus();
       return {
-        status: gardenStatus.last_pass_at === null ? "degraded" : "healthy",
+        status: assessGardenPassHealth(gardenStatus.last_pass_at),
         last_pass_at: gardenStatus.last_pass_at
       };
     },
@@ -233,7 +256,19 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
           tokenWorkspaces !== undefined && tokenWorkspaces.length > 0 ? tokenWorkspaces : null
       };
     },
-    getGardenCompute: async () => await resolveGardenComputeStatus(runtime),
+    getGardenCompute: async () => {
+      const status = await resolveGardenComputeStatus(runtime);
+      const config = await runtime.services.configService.getRuntimeGardenComputeConfig();
+      const degradedReason =
+        "degraded_reason" in config && typeof config.degraded_reason === "string"
+          ? config.degraded_reason
+          : null;
+      return {
+        ...status,
+        schema_ok: degradedReason === null,
+        degraded_reason: degradedReason
+      };
+    },
     getGraphHealth: async (workspaceId) =>
       await runtime.services.graphHealthService.getStatus(workspaceId),
     reconcileBootstrapPaths: async (workspaceId) =>
@@ -371,9 +406,11 @@ async function executeMcpCommand(
   }
   try {
     await waitForInputClose(ctx.stdin);
-  } finally {
+  } catch {
     await server.close();
+    return { exitCode: ALAYA_SYSEXITS.SOFTWARE };
   }
+  await server.close();
   return { exitCode: ALAYA_SYSEXITS.OK };
 }
 

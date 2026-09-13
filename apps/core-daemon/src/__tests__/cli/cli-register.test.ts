@@ -49,7 +49,8 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
       daemonMcpCatalog: {
         listAllowedServerNames: () => [],
         listEnrolledToolIds: () => ["soul.recall"],
-        refresh: async () => {}
+        refresh: async () => {},
+        getHealth: () => ({ servers: [] })
       },
       environmentStatusService: {
         getStatus: async () => ({
@@ -262,6 +263,32 @@ describe("cli registration", () => {
 
     expect(result.exitCode).toBe(0);
     expect(stdoutChunks.join("")).toBe("{\"object_id\":\"mem1\"}\n");
+  });
+
+  it("exits non-zero when MCP stdio stdin emits an error", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const startBackgroundServices = vi.fn();
+    const runtime = createRuntime({ startBackgroundServices });
+    const bridge = createAlayaCliBridge(runtime, {
+      stdin,
+      stdout,
+      stderr,
+      isTTY: false
+    });
+    registerAlayaCliCommands(bridge, runtime);
+    hoisted.runAlayaMcpStdioServer.mockImplementationOnce(async () => {
+      setImmediate(() => {
+        stdin.emit("error", Object.assign(new Error("stdin failed"), { code: "EIO" }));
+      });
+      return { close: hoisted.serverClose };
+    });
+
+    const result = await bridge.dispatch(["mcp", "stdio"]);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(hoisted.serverClose).toHaveBeenCalledTimes(1);
   });
 
   it("starts Garden background services when the attached MCP stdio transport runs", async () => {

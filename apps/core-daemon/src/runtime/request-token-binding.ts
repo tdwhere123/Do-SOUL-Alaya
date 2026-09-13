@@ -55,7 +55,7 @@ export function extractWorkspaceIdFromPath(path: string): string | null {
         return workspaceId;
       }
     } catch {
-      return encoded;
+      return null;
     }
   }
   return null;
@@ -68,6 +68,8 @@ export function isProcessSecretPatchRequest(method: string, path: string): boole
   return (PROCESS_SECRET_PATCH_PATHS as readonly string[]).includes(path);
 }
 
+export const WORKSPACE_TOKEN_DENIED_MESSAGE = "Workspace is not authorized for this token";
+
 export function workspaceScopeAllows(
   grant: RequestTokenGrant,
   workspaceId: string
@@ -76,6 +78,33 @@ export function workspaceScopeAllows(
     return true;
   }
   return grant.workspaceIds.includes(workspaceId);
+}
+
+export function isWorkspaceGrantDenied(
+  grant: RequestTokenGrant | undefined,
+  workspaceId: string
+): boolean {
+  return grant !== undefined && !workspaceScopeAllows(grant, workspaceId);
+}
+
+export function extractWorkspaceIdFromQuery(value: string | undefined): string | null {
+  const workspaceId = value?.trim();
+  if (workspaceId === undefined || workspaceId.length === 0) {
+    return null;
+  }
+  return workspaceId;
+}
+
+export function extractWorkspaceIdFromUnknown(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const workspaceId = (value as { readonly workspace_id?: unknown }).workspace_id;
+  if (typeof workspaceId !== "string") {
+    return null;
+  }
+  const trimmed = workspaceId.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 export function resolveRequestTokenGrants(
@@ -103,6 +132,7 @@ export function authorizeProtectedRequest(input: {
   readonly protection: RequestTokenProtection;
   readonly method: string;
   readonly path: string;
+  readonly workspaceIds?: readonly string[];
 }): RequestTokenAuthorization {
   const provided = input.providedToken?.trim();
   if (provided === undefined || provided.length === 0) {
@@ -118,9 +148,15 @@ export function authorizeProtectedRequest(input: {
     return { ok: false, error: "Process-level secret patch is not allowed" };
   }
 
-  const workspaceId = extractWorkspaceIdFromPath(input.path);
-  if (workspaceId !== null && !workspaceScopeAllows(grant, workspaceId)) {
-    return { ok: false, error: "Workspace is not authorized for this token" };
+  const pathWorkspaceId = extractWorkspaceIdFromPath(input.path);
+  const workspaceIds = [
+    ...(pathWorkspaceId === null ? [] : [pathWorkspaceId]),
+    ...(input.workspaceIds ?? [])
+  ];
+  for (const workspaceId of workspaceIds) {
+    if (!workspaceScopeAllows(grant, workspaceId)) {
+      return { ok: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE };
+    }
   }
 
   return { ok: true, grant };

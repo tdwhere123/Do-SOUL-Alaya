@@ -8,9 +8,15 @@ import {
   type ProjectMappingTransitionAction,
   type ProjectMappingState
 } from "@do-soul/alaya-protocol";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { CoreError, StrictConfirmationRequired } from "@do-soul/alaya-core";
 import { throwInvalidRequestBody } from "../shared/shared.js";
+import {
+  isWorkspaceGrantDenied,
+  REQUEST_TOKEN_GRANT_CONTEXT_KEY,
+  WORKSPACE_TOKEN_DENIED_MESSAGE,
+  type RequestTokenGrant
+} from "../../runtime/request-token-binding.js";
 
 export interface ProjectMappingRouteServices {
   readonly workspaceService: WorkspaceService;
@@ -30,6 +36,8 @@ function registerProjectMappingListRoute(
 ): void {
   app.get("/soul/project-mapping-anchors", async (context) => {
     const workspaceId = parseRequiredString(context.req.query("workspace_id"), "workspace_id is required");
+    const forbidden = denyUnauthorizedWorkspace(context, workspaceId);
+    if (forbidden !== null) return forbidden;
     await services.workspaceService.getById(workspaceId);
 
     const mappingState = parseOptionalProjectMappingState(context.req.query("mapping_state"));
@@ -54,6 +62,8 @@ function registerProjectMappingSuggestRoute(
 ): void {
   app.post("/soul/project-mapping-anchors", async (context) => {
     const body = await parseCreateRequest(context.req.json.bind(context.req));
+    const forbidden = denyUnauthorizedWorkspace(context, body.workspace_id);
+    if (forbidden !== null) return forbidden;
     await services.workspaceService.getById(body.workspace_id);
 
     const anchor = await services.projectMappingService.suggest(
@@ -80,6 +90,8 @@ function registerProjectMappingTransitionRoute(
 ): void {
   app.patch("/workspaces/:wsId/soul/project-mapping-anchors/:id/transition", async (context) => {
     const workspaceId = parseRequiredString(context.req.param("wsId"), "wsId is required");
+    const forbidden = denyUnauthorizedWorkspace(context, workspaceId);
+    if (forbidden !== null) return forbidden;
     await services.workspaceService.getById(workspaceId);
     const mappingId = parseRequiredString(context.req.param("id"), "id is required");
     const body = await parseTransitionRequest(context.req.json.bind(context.req));
@@ -108,6 +120,8 @@ function registerProjectMappingBatchAcceptRoute(
 ): void {
   app.post("/soul/project-mapping-anchors/batch-accept", async (context) => {
     const body = await parseBatchAcceptRequest(context.req.json.bind(context.req));
+    const forbidden = denyUnauthorizedWorkspace(context, body.workspace_id);
+    if (forbidden !== null) return forbidden;
     await services.workspaceService.getById(body.workspace_id);
 
     try {
@@ -228,6 +242,14 @@ async function parseJsonObject(
   }
 
   return body as Record<string, unknown>;
+}
+
+function denyUnauthorizedWorkspace(context: Context, workspaceId: string): Response | null {
+  const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
+  if (!isWorkspaceGrantDenied(grant, workspaceId)) {
+    return null;
+  }
+  return context.json({ success: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE }, 403);
 }
 
 function parseRequiredString(value: unknown, message: string): string {
