@@ -5,6 +5,7 @@ import {
   resolveExtractionCapability
 } from "./capability.js";
 import {
+  SEMANTIC_ARTIFACT_KIND,
   sealSemanticArtifact,
   type SemanticArtifact,
   type SemanticArtifactSourceBinding
@@ -226,7 +227,7 @@ function emptyBatchQuarantine(
     semanticKey: task.semanticKey,
     admission: sealVerifiedSemanticArtifactAdmission(sealSemanticArtifact({
       schema_version: 1,
-      kind: "assertion_semantic_artifact_v1",
+      kind: SEMANTIC_ARTIFACT_KIND,
       semantic_key: task.semanticKey,
       semantic_contract: task.semanticContract,
       capability: task.capability,
@@ -320,7 +321,7 @@ function admitParsedTask(input: {
     semanticKey: task.semanticKey,
     admission: sealVerifiedSemanticArtifactAdmission(sealSemanticArtifact({
       schema_version: 1,
-      kind: "assertion_semantic_artifact_v1",
+      kind: SEMANTIC_ARTIFACT_KIND,
       semantic_key: task.semanticKey,
       semantic_contract: task.semanticContract,
       capability: task.capability,

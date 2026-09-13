@@ -1,4 +1,5 @@
 // @ts-nocheck
+import "../../../test-support/durable-failpoints.js";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

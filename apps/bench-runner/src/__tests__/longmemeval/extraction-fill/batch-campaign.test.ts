@@ -10,7 +10,10 @@ import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } fro
 import { readExtractionCacheManifestIdentity } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { readExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
 import type { GeminiBatchLimits } from "../../../runs/extraction/fill/batch/contract.js";
-import type { BatchCampaignState } from "../../../runs/extraction/fill/batch-campaign.js";
+import {
+  isRetryableCampaignStopReason,
+  type BatchCampaignState
+} from "../../../runs/extraction/fill/batch-campaign.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { buildAuthorityQuestion, buildGroundedSignalResponse, EXTRACTION_FILL_VARIANT,
   registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
@@ -109,9 +112,9 @@ async function setup(options: { unknown?: boolean; usageMissing?: boolean; maxUs
   return { provider, manifestPath, receipt, inputFiles, limits, authorityReceiptPath };
 }
 
-function launch(manifest: string) {
+function launch(manifest: string, extraArgs: readonly string[] = []) {
   const child = spawn(process.execPath, ["--use-env-proxy", resolve("apps/bench-runner/bin/alaya-bench-runner.mjs"),
-    "extraction-fill", "--batch-campaign", manifest], { cwd: process.cwd(), env: process.env });
+    "extraction-fill", "--batch-campaign", manifest, ...extraArgs], { cwd: process.cwd(), env: process.env });
   children.add(child);
   let output = "";
   child.stdout!.on("data", (part) => { output += String(part); });
@@ -149,7 +152,9 @@ it("restarts an accepted job after SIGKILL without resubmission, fills remaining
   expect(fixture.provider.downloads).toBe(2);
 }, 45_000);
 
-it("preserves SIGTERM exit status while waiting and resumes the accepted job", async () => {
+// SIGTERM is not a process-group signal on Windows; child.kill does not map to exit 143.
+it.skipIf(process.platform === "win32")(
+  "preserves SIGTERM exit status while waiting and resumes the accepted job", async () => {
   const fixture = await setup();
   const manifest = JSON.parse(readFileSync(fixture.manifestPath, "utf8"));
   manifest.pollIntervalMs = 5_000;
@@ -169,7 +174,8 @@ it("preserves SIGTERM exit status while waiting and resumes the accepted job", a
   expect((await resumed.closed)[0], resumed.output()).toBe(0);
   expect(state().status).toBe("complete");
   expect(fixture.provider.creates).toBe(2);
-}, 45_000);
+  }, 45_000
+);
 
 it.each([{ unknown: true }, { usageMissing: true }, { foreignQuote: true }, { maxUsd: 0 }])(
   "stops durably without opening a retry window for %j", async (options) => {
@@ -198,6 +204,22 @@ it("keeps observed spend across windows and stops the next dispatch at the share
       requestProfile: fixture.receipt.observation.extraction.requestProfile } });
   expect(ledger?.attempts).toBe(1);
   expect(ledger?.telemetry.inputTokens).toBe(1_000_000);
+}, 30_000);
+
+it("keeps a stopped campaign idle until an operator reset", async () => {
+  const fixture = await setup({ maxUsd: 0 });
+  const first = launch(fixture.manifestPath);
+  expect((await first.closed)[0], first.output()).toBe(2);
+  expect(state().status).toBe("stopped");
+  expect(typeof state().stopReason).toBe("string");
+  const idle = launch(fixture.manifestPath);
+  expect((await idle.closed)[0], idle.output()).toBe(2);
+  expect(state().status).toBe("stopped");
+  expect(fixture.provider.creates).toBe(0);
+  const reset = launch(fixture.manifestPath, ["--reset-stopped"]);
+  expect((await reset.closed)[0], reset.output()).toBe(2);
+  expect(isRetryableCampaignStopReason("fill_operation_failed_inspect_current_window")).toBe(true);
+  expect(isRetryableCampaignStopReason("cache_invariant")).toBe(false);
 }, 30_000);
 
 it.each(["quarantined", "cancelled"] as const)("does not turn a %s ordinary canary into a fresh campaign retry", async (kind) => {

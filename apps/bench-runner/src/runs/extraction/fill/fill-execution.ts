@@ -149,7 +149,8 @@ export async function executeExtractionFill(
         ? "disabled"
         : "default",
       maxOutputTokens: authority.receipt.limits.max_output_tokens,
-      outputTokenField: authority.receipt.limits.output_token_field
+      outputTokenField: authority.receipt.limits.output_token_field,
+      maximumInputTokensPerAttempt: authority.receipt.price.maximum_input_tokens_per_attempt
     } }),
     ...(tolerateProviderTaskFailures ? { tolerateProviderTaskFailures: true } : {})
   });

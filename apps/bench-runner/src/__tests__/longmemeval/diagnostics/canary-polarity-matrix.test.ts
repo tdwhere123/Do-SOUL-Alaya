@@ -17,6 +17,8 @@ import { evaluateSupersededAllQuestionRateGate } from
   "./superseded-rate-gate.js";
 import { readDiagnostic100QComparisonArtifact } from
   "../../../diagnostics/stage-attribution/exposure/comparison-artifact.js";
+import { RECALL_MECHANISM_SPLIT_KIND } from
+  "../../../diagnostics/stage-attribution/mechanism/types.js";
 import { exposure } from "./phase/exposure-receipt-fixture.js";
 import {
   liveShapedCanaryReceipts,
@@ -214,6 +216,15 @@ describe("Canary polarity matrix", () => {
     }));
     await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
       /cannot be reinterpreted as current gate authority/u
+    );
+  });
+
+  it("rejects a mechanism-split kind using the shared constant", async () => {
+    const root = await mkdtemp(join(tmpdir(), "comparison-kind-"));
+    const path = join(root, "comparison.json");
+    await writeFile(path, JSON.stringify({ kind: RECALL_MECHANISM_SPLIT_KIND }));
+    await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
+      /recall mechanism split cannot be reinterpreted/u
     );
   });
 });

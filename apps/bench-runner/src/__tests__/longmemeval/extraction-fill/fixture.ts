@@ -9,8 +9,9 @@ import { afterEach, beforeEach, expect, vi } from "vitest";
 
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
-export { providerBackedExtractionResult } from
+import { providerBackedExtractionResult } from
   "../extraction/extraction-cache-test-fixture.js";
+export { providerBackedExtractionResult };
 
 export const EXTRACTION_FILL_VARIANT = "longmemeval_oracle";
 
@@ -93,6 +94,16 @@ export function buildAuthorityQuestion(
     `I completed ${fact}.`,
     `I completed ${decoy}.`
   );
+}
+
+export function groundedExtractionResult(input: { readonly userPrompt: string }) {
+  return providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt));
+}
+
+export function groundedExtractor() {
+  return {
+    extract: async (input: { readonly userPrompt: string }) => groundedExtractionResult(input)
+  };
 }
 
 export function buildGroundedSignalResponse(userPrompt: string): string {

@@ -55,9 +55,4 @@ export function assertDirectExtractionSpendRootBinding(input: {
   }
 }
 
-export function discardFreshDirectExtractionSpendAuthorization(input: {
-  readonly authorization: DirectExtractionSpendAuthorization;
-  readonly cacheRoot: string;
-}): void {
-  void input;
-}
+

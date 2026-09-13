@@ -1,7 +1,12 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
-import { createCachingSignalExtractor, importExtractionResponse, ExtractionResponseAdmissionError } from "../../compile-seed/compile-seed-cache.js";
+import {
+  createCachingSignalExtractor,
+  importExtractionResponse,
+  inspectCachedExtraction,
+  ExtractionResponseAdmissionError
+} from "../../compile-seed/compile-seed-cache.js";
 import type { ExtractionFillOptions, ExtractionFillResult } from "../extraction-fill.js";
 import { readBoundedCanonicalUtf8Artifact } from "../cache-audit/bounded-artifact-reader.js";
 import { readExtractionCacheManifestIdentity, writeExtractionCacheManifest } from "../cache/extraction-cache-manifest.js";
@@ -21,6 +26,10 @@ import { executeGeminiBatchOperation } from "./batch/executor.js";
 import { isBatchPlanAdmitted, readRootBatchRuns } from "./batch/store.js";
 import { assertExtractionFillComplete } from "./fill-completion.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
+import {
+  attemptInputByteUpperBound,
+  assertAttemptInputWithinReceiptLimit
+} from "../authority/receipt-limits.js";
 
 interface BatchFillInput {
   readonly options: ExtractionFillOptions;
@@ -61,12 +70,12 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
     ...(selected === undefined ? {} : { executionCacheKeys: selected }) });
   const plan = bindBatchPlan(input, workset, route.model, profile);
   for (const line of plan.lines) {
-    const upper = Buffer.byteLength(JSON.stringify(encodeGeminiGenerateContent(line, {
-      model: plan.model, requestProfile: plan.requestProfile, maxOutputTokens: plan.limits.maxOutputTokens
-    })), "utf8") + 256;
-    if (upper > authority.receipt.price.maximum_input_tokens_per_attempt) {
-      throw new Error("Batch request exceeds the authority input-token bound");
-    }
+    assertAttemptInputWithinReceiptLimit(
+      attemptInputByteUpperBound(JSON.stringify(encodeGeminiGenerateContent(line, {
+        model: plan.model, requestProfile: plan.requestProfile, maxOutputTokens: plan.limits.maxOutputTokens
+      }))),
+      authority.receipt.price.maximum_input_tokens_per_attempt
+    );
   }
   const http = input.options.batchHttp ?? createGeminiBatchHttp({
     apiKey: input.prepared.config.apiKey ?? "", endpoint: route.providerUrl,
@@ -198,6 +207,14 @@ async function importBatchLine(input: BatchFillInput, workset: BatchExtractionWo
       return { status: "quarantined", reason: cause.message };
     }
     throw cause;
+  }
+  const inspected = inspectCachedExtraction(
+    input.cacheRoot, result.line.key,
+    input.prepared.config.model, input.prepared.config.requestProfile
+  );
+  if (inspected.status !== "hit") {
+    authority.abandonPendingShard(result.line.key, result.provenance.attemptOrdinal);
+    return { status: "quarantined", reason: inspected.reason ?? inspected.status };
   }
   authority.commitSuccessfulShard(result.line.key);
 }

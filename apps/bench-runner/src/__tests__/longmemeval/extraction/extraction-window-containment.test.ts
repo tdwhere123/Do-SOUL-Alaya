@@ -29,6 +29,7 @@ import { inspectTurnContentKeySpace } from
   "../../../runs/extraction/turn-contents.js";
 import { buildLongMemEvalFixtureQuestion } from "../longmemeval-fixture.js";
 import { providerBackedExtractionResult } from "./extraction-cache-test-fixture.js";
+import { groundedExtractionResult } from "../extraction-fill/fixture.js";
 import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixture.js";
 
 // @anchor extraction-window-containment — I2: the cache coverage gate must
@@ -48,7 +49,7 @@ const CONFIG: CompileSeedExtractionConfig = {
 
 // Offline delegate: writes one empty signal envelope per turn, no live HTTP.
 function offlineExtractorFactory(): BenchSignalExtractor {
-  return { extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}')) };
+  return { extract: vi.fn(async (input) => groundedExtractionResult(input)) };
 }
 
 // Populate the cache with fixtures for exactly `turnContents`, through the same

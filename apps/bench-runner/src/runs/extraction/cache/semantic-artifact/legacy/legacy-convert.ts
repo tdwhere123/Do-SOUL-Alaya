@@ -7,6 +7,7 @@ import {
 import { inspectExtractionRawEnvelope } from "../../../content-closure.js";
 import type { CachedExtractionEntry } from "../../../../compile-seed/cache/cache-shard.js";
 import {
+  SEMANTIC_ARTIFACT_KIND,
   sealSemanticArtifact,
   type SemanticArtifact
 } from "../contract.js";
@@ -176,7 +177,7 @@ function convertParsedDrafts(input: {
     usedAssertions.add(assertionId);
     converted.push(sealSemanticArtifact({
       schema_version: 1,
-      kind: "assertion_semantic_artifact_v1",
+      kind: SEMANTIC_ARTIFACT_KIND,
       semantic_key: unit.semanticKey,
       semantic_contract: input.semanticContract,
       capability: LEGACY_CONVERSION_CAPABILITY,

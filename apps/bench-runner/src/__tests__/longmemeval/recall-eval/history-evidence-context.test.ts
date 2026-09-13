@@ -30,10 +30,10 @@ import {
 } from "../../cli/merge/cli-merge-evidence-fixture.js";
 import { createMergeDatasetSource } from "../../cli/merge/cli-merge-dataset-fixture.js";
 import { withEligibleMeasurementContract } from "../../cli/merge/cli-merge-validations-fixture.js";
-import {
-  createTestLongMemEvalDatasetAuthority,
-  deriveLongMemEvalReleaseEvidenceAuthority
-} from "../../../datasets/longmemeval/ingestion/fetch.js";
+import { deriveLongMemEvalReleaseEvidenceAuthority } from
+  "../../../datasets/longmemeval/ingestion/fetch.js";
+import { createTestLongMemEvalDatasetAuthority } from
+  "../ingestion/test-dataset-authority.js";
 import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/internal";
 

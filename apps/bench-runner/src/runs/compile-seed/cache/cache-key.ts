@@ -9,6 +9,13 @@ import type { LongMemEvalExtractionTurn } from
   "../../extraction/turn-contents.js";
 import type { CompileSeedExtractionConfig } from "../compile-seed-types.js";
 
+export const EXTRACTION_CACHE_KEY_GOLDEN_VECTOR = Object.freeze({
+  model: "alaya-cache-key-golden-model",
+  requestProfile: "provider-default-v1" as CompileSeedExtractionConfig["requestProfile"],
+  systemPrompt: "alaya-cache-key-golden-system-prompt",
+  extractionRequest: "{\"schema_version\":2}"
+});
+
 export function computeCacheKey(
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"],

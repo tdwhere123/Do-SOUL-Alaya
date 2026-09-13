@@ -93,7 +93,7 @@ async function runDiagnosticLoopLocked(
       skippedPhases: skipped,
       avoidedWork: avoided,
       reportPath: join(input.workRoot, "report.json"),
-      smokeGate: readSmokeGate(input.workRoot)
+      smokeGate: readSmokeGate(input.workRoot, identityDigest)
     };
   } catch (error) {
     return failRun(input, identityDigest, error);
@@ -103,7 +103,7 @@ async function runDiagnosticLoopLocked(
 async function executePhases(state: PhaseRunState): Promise<void> {
   for (const phase of phasesForMode(state.input.mode)) {
     await assertPhaseBoundary(state);
-    assertSmokeAllowsPhase(state.input, phase);
+    assertSmokeAllowsPhase(state.input, state.identityDigest, phase);
     const existing = state.checkpoints.get(phase);
     if (existing !== undefined) {
       recordSkip(state, phase, existing);
@@ -210,6 +210,11 @@ function toCheckpoint(
   if (result.noProviderCallReceipt === undefined) {
     throw new Error(`diagnostic-loop phase ${phase} omitted no-provider-call receipt`);
   }
+  if (result.physicalCalls !== result.noProviderCallReceipt.physical_calls) {
+    throw new Error(
+      `checkpoint physical_calls ${result.physicalCalls} contradicts no-provider-call receipt`
+    );
+  }
   const checkpoint: Omit<DiagnosticLoopCheckpoint, "checkpoint_digest"> = {
     schema_version: 3,
     kind: "diagnostic_loop_checkpoint",
@@ -242,11 +247,12 @@ function assertSmokeLimit(input: DiagnosticLoopRunInput): void {
 
 function assertSmokeAllowsPhase(
   input: DiagnosticLoopRunInput,
+  identityDigest: string,
   phase: DiagnosticLoopPhase
 ): void {
   if (input.mode === "report-only" || input.mode === "smoke") return;
   if (!isExpensivePhase(phase)) return;
-  if (readSmokeGate(input.workRoot) !== "failed") return;
+  if (readSmokeGate(input.workRoot, identityDigest) !== "failed") return;
   throw new DiagnosticLoopFailure({
     phase,
     classification: "infrastructure",

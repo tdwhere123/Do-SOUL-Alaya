@@ -108,7 +108,7 @@ function readLedger(lineageDigest: string) {
 async function writeValidShard(cacheKey: string): Promise<void> {
   await writeShard(cacheKey, JSON.stringify({
     model: cacheIdentity.model, request_profile: cacheIdentity.requestProfile,
-    cache_key: cacheKey, raw_json: '{"signals":[]}',
+    cache_key: cacheKey, raw_json: '{"signals":[{}]}',
     transport_provenance: {
       provider_url_sha256: `sha256:${key("a")}`, model: cacheIdentity.model
     },

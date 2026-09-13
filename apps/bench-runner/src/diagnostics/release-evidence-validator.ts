@@ -113,6 +113,9 @@ function assertRecallAggregates(
   if (payload.answerable_evaluated_count !== recall.scorableCount) {
     throw new Error("full diagnostics scorable denominator differs from verified KPI");
   }
+  if (recall.rAt1 === null || recall.rAt5 === null || recall.rAt10 === null) {
+    throw new Error("full diagnostics recall aggregates are unavailable for an empty scorable set");
+  }
   if (payload.kpi.r_at_1 !== recall.rAt1 || payload.kpi.r_at_5 !== recall.rAt5 ||
       payload.kpi.r_at_10 !== recall.rAt10) {
     throw new Error("full diagnostics recall aggregates differ from verified KPI");
@@ -191,10 +194,10 @@ function sameProviderSummary(
   });
 }
 
-function hitAt5Ratio(rows: readonly { readonly hit_at_5: boolean }[]): number {
+function hitAt5Ratio(rows: readonly { readonly hit_at_5: boolean }[]): number | null {
   return ratio(rows.filter((row) => row.hit_at_5).length, rows.length);
 }
 
-function ratio(count: number, total: number): number {
-  return total === 0 ? 0 : count / total;
+function ratio(count: number, total: number): number | null {
+  return total === 0 ? null : count / total;
 }

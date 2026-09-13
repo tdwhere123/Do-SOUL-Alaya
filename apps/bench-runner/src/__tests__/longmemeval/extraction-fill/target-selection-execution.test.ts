@@ -40,7 +40,7 @@ it("rechecks a selected root before opening an attempt ledger or reserving a pro
     priceEstimate: {
       inputUsdPerMillion: 1,
       outputUsdPerMillion: 2,
-      maximumInputTokensPerAttempt: 300
+      maximumInputTokensPerAttempt: 100_000
     },
     diskFloorBytes: 0,
     inspection: {

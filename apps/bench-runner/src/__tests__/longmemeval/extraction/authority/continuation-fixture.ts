@@ -43,7 +43,7 @@ export const model = "gpt-5.4-mini";
 export const requestProfile = "provider-default-v1" as const;
 export const firstKey = "1".repeat(64);
 export const secondKey = "2".repeat(64);
-const rawJson = '{"signals":[]}';
+const rawJson = '{"signals":[{}]}';
 const roots: string[] = [];
 
 export function cleanupContinuationRoots(): void {

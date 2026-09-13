@@ -54,7 +54,10 @@ describe("continuation sparse cache execution", () => {
     await expect(extractor.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
       userPrompt: stringifyOfficialApiExtractionRequest(requests[0]!)
-    })).resolves.toEqual({ rawJson: '{"signals":[]}' });
+    })).resolves.toEqual({
+      rawJson: '{"extraction_skip":"plan_skipped"}',
+      extractionSkip: "plan_skipped"
+    });
     expect(delegate).not.toHaveBeenCalled();
 
     await expect(extractor.extract({

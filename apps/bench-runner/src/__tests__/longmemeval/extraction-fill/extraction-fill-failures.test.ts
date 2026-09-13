@@ -33,6 +33,7 @@ import {
   buildExtractionFillQuestion as buildQuestion,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
+  groundedExtractionResult,
   providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
@@ -62,7 +63,7 @@ describe("runExtractionFill", () => {
         pinnedMetaRoot,
         concurrency: 1,
         extractorFactory: () => ({
-          extract: async () => providerBackedExtractionResult('{"signals":[]}')
+          extract: async (input) => groundedExtractionResult(input)
         }),
         log: (message) => {
           if (!message.includes("1/2")) return;
@@ -108,7 +109,7 @@ describe("runExtractionFill", () => {
     ]);
     await writeFile(join(cacheRoot, "aa"), "not-a-shard-directory", "utf8");
     const extractorFactory = vi.fn(() => ({
-      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
+      extract: vi.fn(async (input) => groundedExtractionResult(input))
     }));
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -254,7 +255,7 @@ async function writeLiveAuthorityReceipt(): Promise<string> {
     priceEstimate: {
       inputUsdPerMillion: 1,
       outputUsdPerMillion: 2,
-      maximumInputTokensPerAttempt: 300
+      maximumInputTokensPerAttempt: 100_000
     },
     diskFloorBytes: 0,
     inspection: {

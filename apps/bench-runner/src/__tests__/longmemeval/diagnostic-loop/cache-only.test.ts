@@ -79,6 +79,25 @@ describe("cache-only extraction proof", () => {
       () => undefined
     )).toThrow(/must not receive a network adapter/u);
   });
+
+  it("does not treat provider-empty-with-assertions as a cache-only hit", async () => {
+    const cacheRoot = await tempRoot();
+    const key = digest("provider-empty");
+    writeCachedExtraction(cacheRoot, key, {
+      model: "mimo-v2.5",
+      request_profile: "mimo-v2.5-nonthinking-v1",
+      cache_key: key,
+      raw_json: "{\"signals\":[]}",
+      extracted_at: "2026-08-17T00:00:00.000Z",
+      empty_classification: "provider_empty_with_assertions"
+    });
+
+    expect(() => proveCacheOnlyExtraction(loopRequest({
+      extractionCacheRoot: cacheRoot,
+      requestedKeys: [key],
+      model: "mimo-v2.5"
+    }))).toThrow(/provider_empty_with_assertions/u);
+  });
 });
 
 async function tempRoot(): Promise<string> {

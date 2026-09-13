@@ -25,10 +25,10 @@ import {
   renderLongMemEvalEvidenceManifest,
   type LongMemEvalEvidenceArtifactInput
 } from "../../../runs/provenance/evidence-manifest.js";
-import {
-  createTestLongMemEvalDatasetAuthority,
-  deriveLongMemEvalReleaseEvidenceAuthority
-} from "../../../datasets/longmemeval/ingestion/fetch.js";
+import { deriveLongMemEvalReleaseEvidenceAuthority } from
+  "../../../datasets/longmemeval/ingestion/fetch.js";
+import { createTestLongMemEvalDatasetAuthority } from
+  "../ingestion/test-dataset-authority.js";
 import { createLongMemEvalHistoryLayout } from "../../../datasets/longmemeval/history/evidence-context.js";
 import { classifyLongMemEvalDatasetCohort } from "../../../runs/selection/dataset-cohort.js";
 import {

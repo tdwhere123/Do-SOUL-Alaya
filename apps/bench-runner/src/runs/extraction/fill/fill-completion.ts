@@ -227,7 +227,9 @@ function inspectExpectedRawShards(
     const result = inspectCachedRawExtraction(
       input.cacheRoot, cacheKey, input.model, input.requestProfile
     );
-    if (result.status === "hit") {
+    // Raw closure is physical envelope identity, not coverage. Quarantined
+    // provider-empty shards remain in a complete manifest's key set.
+    if (result.status === "hit" || result.status === "quarantined") {
       valid += 1;
       entries.push({
         cacheKey,

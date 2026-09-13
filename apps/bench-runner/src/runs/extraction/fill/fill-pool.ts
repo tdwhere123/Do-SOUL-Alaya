@@ -1,8 +1,13 @@
 import {
   buildOfficialApiExtractionRequests,
   GardenProviderError,
-  OfficialApiGardenProvider
+  OfficialApiGardenProvider,
+  stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
+import {
+  attemptInputByteUpperBound,
+  assertAttemptInputWithinReceiptLimit
+} from "../authority/receipt-limits.js";
 import {
   isBenchTerminalRetryClassification,
   type BenchSignalExtractor,
@@ -23,6 +28,10 @@ import {
   resolveExtractionRequestPlanBudget
 } from "./policy/provider-request-plan-budget.js";
 import { inspectExtractionRawJson } from "../content-closure.js";
+import {
+  EMPTY_SIGNALS_ENVELOPE,
+  isPlanSkippedExtraction
+} from "../empty-classification.js";
 import type { ExtractionOutputTokenField } from "../authority/receipt-limits.js";
 
 export { EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS };
@@ -66,6 +75,7 @@ interface ExtractionPoolInput {
     readonly retryMode: "default" | "disabled";
     readonly maxOutputTokens: number;
     readonly outputTokenField: ExtractionOutputTokenField;
+    readonly maximumInputTokensPerAttempt?: number;
   };
   /** Leaves failed provider tasks missing so a later fill can retry them. */
   readonly tolerateProviderTaskFailures?: boolean;
@@ -201,6 +211,15 @@ function createExtractionTurnRuntime(
     turn.turnContent,
     turn.turnMessages
   );
+  const inputBound = transport?.maximumInputTokensPerAttempt;
+  if (inputBound !== undefined) {
+    for (const request of requests) {
+      assertAttemptInputWithinReceiptLimit(
+        attemptInputByteUpperBound(stringifyOfficialApiExtractionRequest(request)),
+        inputBound
+      );
+    }
+  }
   const planBudget = resolveExtractionRequestPlanBudget(
     requests,
     transport?.maxOutputTokens ?? 2_048
@@ -243,6 +262,11 @@ function createPlanBoundExtractor(
           ? signal
           : AbortSignal.any([signal, request.abortSignal])
       }));
+      if (isPlanSkippedExtraction(result)) {
+        // Sibling keys outside a probe/repair plan must not persist or count as
+        // empty extraction; compile still needs a parseable envelope.
+        return { rawJson: EMPTY_SIGNALS_ENVELOPE, extractionSkip: "plan_skipped" };
+      }
       state.rateLimitRetries = result.taskRateLimitRetries ??
         result.extractorMeta?.rateLimitRetries ?? 0;
       return result;

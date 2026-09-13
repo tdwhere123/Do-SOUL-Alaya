@@ -4,6 +4,12 @@ import {
   stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
+import {
+  classifyExtractionEnvelope,
+  extractionEnvelopeCountsTowardCoverage,
+  EMPTY_SIGNALS_ENVELOPE,
+  PLAN_SKIPPED_EXTRACTION_ENVELOPE
+} from "../extraction/empty-classification.js";
 import { EXTRACTION_CACHE_ROOT } from "./compile-seed-config.js";
 import { assertExtractionCacheIdentity } from "../extraction/cache/cache-identity.js";
 import { ExtractionCacheInvariantError } from "../extraction/cache/cache-invariant-error.js";
@@ -146,7 +152,7 @@ export function importExtractionResponse(input: {
     if (existing.rawJson !== result.rawJson) throw new ExtractionCacheInvariantError("import conflicts with admitted response");
     return;
   }
-  persistExtraction(options, cacheRoot, key, result, true);
+  persistExtraction(options, cacheRoot, key, result, true, extraction.request);
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
 }
@@ -165,7 +171,10 @@ async function extractWithCache(
   );
   if (options.executionCacheKeys !== undefined &&
       !options.executionCacheKeys.has(cacheKey)) {
-    return { rawJson: '{"signals":[]}' };
+    return {
+      rawJson: PLAN_SKIPPED_EXTRACTION_ENVELOPE,
+      extractionSkip: "plan_skipped" as const
+    };
   }
   if (options.stats !== undefined) {
     options.stats.extractionAttempts = (options.stats.extractionAttempts ?? 0) + 1;
@@ -177,6 +186,9 @@ async function extractWithCache(
     recordCacheHit(options, cacheKey, cached);
     options.onExtractionProgress?.();
     return cachedExtractionResult(cached);
+  }
+  if (cached.status === "quarantined") {
+    return settleQuarantinedExtraction(options, cacheKey, cached.rawJson);
   }
   if (options.allowLiveExtraction === false) {
     throw new Error(
@@ -211,9 +223,16 @@ async function persistDeterministicEmpty(
       options.onExtractionProgress?.();
       return cachedExtractionResult(recached);
     }
+    if (recached.status === "quarantined") {
+      return settleQuarantinedExtraction(options, cacheKey, recached.rawJson);
+    }
     const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
-    const result = { rawJson: '{"signals":[]}' };
-    const inspection = persistExtraction(options, cacheRoot, cacheKey, result, false);
+    const result = { rawJson: EMPTY_SIGNALS_ENVELOPE };
+    const persisted = persistExtraction(
+      options, cacheRoot, cacheKey, result, false,
+      extractCacheInputIdentity(input.userPrompt).request
+    );
+    const inspection = persisted.inspection;
     assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
     options.onDeterministicExtractionSucceeded?.(cacheKey);
     if (options.stats !== undefined) {
@@ -296,6 +315,9 @@ async function extractLiveWithLease(
     options.onExtractionProgress?.();
     return cachedExtractionResult(recached);
   }
+  if (recached.status === "quarantined") {
+    return settleQuarantinedExtraction(options, cacheKey, recached.rawJson);
+  }
   const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
   const stats = options.stats;
   markLiveExtractionStarted(stats, cacheKey);
@@ -317,9 +339,10 @@ async function extractLiveWithLease(
   });
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
-  classifyOfficialApiRequestResult(result.rawJson, extractCacheInputIdentity(input.userPrompt).request);
-  const inspection = persistExtraction(options, cacheRoot, cacheKey, result, true);
-  recordLiveExtractionSuccess(options, cacheKey, stats, inspection);
+  const request = extractCacheInputIdentity(input.userPrompt).request;
+  classifyOfficialApiRequestResult(result.rawJson, request);
+  const persisted = persistExtraction(options, cacheRoot, cacheKey, result, true, request);
+  recordLiveExtractionSuccess(options, cacheKey, stats, persisted);
   return result;
 }
 
@@ -349,9 +372,19 @@ function persistExtraction(
   cacheRoot: string,
   cacheKey: string,
   result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>,
-  providerBacked: boolean
-): ExtractionRawJsonInspection {
+  providerBacked: boolean,
+  request: OfficialApiExtractionRequest
+): {
+  readonly inspection: ExtractionRawJsonInspection;
+  readonly emptyClassification: ReturnType<typeof classifyExtractionEnvelope>;
+} {
   const inspection = inspectExtractionRawJson(result.rawJson);
+  const emptyClassification = classifyExtractionEnvelope({
+    rawSignalCount: inspection.rawSignalCount,
+    sourceAssertionCount: request.source_assertions.length,
+    planMembership: "in_plan"
+  });
+  const backed = providerBacked && emptyClassification === "completed_signals";
   try {
     writeCachedExtraction(cacheRoot, cacheKey, {
       model: options.config.model,
@@ -359,10 +392,11 @@ function persistExtraction(
       cache_key: cacheKey,
       raw_json: result.rawJson,
       extracted_at: new Date().toISOString(),
-      ...(providerBacked ? {
+      empty_classification: emptyClassification,
+      ...(backed ? {
         transport_provenance: buildExtractionTransportProvenance(options.config)
       } : {}),
-      ...persistedResponseMetadata(result.responseMetadata, result.usage, providerBacked)
+      ...persistedResponseMetadata(result.responseMetadata, result.usage, backed)
     });
   } catch (cause) {
     throw new ExtractionCacheInvariantError(
@@ -370,21 +404,46 @@ function persistExtraction(
       { cause }
     );
   }
-  return inspection;
+  return { inspection, emptyClassification };
 }
 
 function recordLiveExtractionSuccess(
   options: CachingSignalExtractorOptions,
   cacheKey: string,
   stats: CompileSeedExtractionStats | undefined,
-  inspection: ExtractionRawJsonInspection
+  persisted: {
+    readonly inspection: ExtractionRawJsonInspection;
+    readonly emptyClassification: ReturnType<typeof classifyExtractionEnvelope>;
+  }
 ): void {
   if (stats !== undefined) {
     stats.llmCalls += 1;
-    recordExtractionInspection(options, cacheKey, "live", inspection);
+    recordExtractionInspection(options, cacheKey, "live", persisted.inspection);
   }
-  options.onLiveProviderExtractionSucceeded?.(cacheKey);
+  if (extractionEnvelopeCountsTowardCoverage(persisted.emptyClassification)) {
+    options.onLiveProviderExtractionSucceeded?.(cacheKey);
+  } else {
+    // Reserved live attempts must settle even when the shard is quarantined
+    // and cannot count as a successful coverage shard.
+    options.onLiveExtractionFailed?.(cacheKey);
+  }
   options.onExtractionProgress?.();
+}
+
+function settleQuarantinedExtraction(
+  options: CachingSignalExtractorOptions,
+  cacheKey: string,
+  rawJson: string
+): Awaited<ReturnType<BenchSignalExtractor["extract"]>> {
+  options.onLiveExtractionFailed?.(cacheKey);
+  if (options.stats !== undefined) {
+    options.stats.lastCacheKey = cacheKey;
+    recordExtractionInspection(
+      options, cacheKey, "cache", inspectExtractionRawJson(rawJson)
+    );
+  }
+  options.onExtractionProgress?.();
+  return { rawJson };
 }
 
 function withAuthorityAttemptHook(

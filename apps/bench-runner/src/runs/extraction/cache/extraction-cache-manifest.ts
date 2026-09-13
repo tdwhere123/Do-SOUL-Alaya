@@ -31,6 +31,10 @@ import {
 import { readExtractionCacheManifestBytes } from
   "./io/manifest-byte-reader.js";
 import { boundedArtifactEntryExists } from "../cache-audit/bounded-artifact-reader.js";
+import {
+  computeCacheKey,
+  EXTRACTION_CACHE_KEY_GOLDEN_VECTOR
+} from "../../compile-seed/cache/cache-key.js";
 export {
   BENCH_EXTRACTION_MODEL_ENV,
   resolveBenchExtractionModel
@@ -66,12 +70,24 @@ export {
 
 export const EXTRACTION_CACHE_MANIFEST_VERSION = 3;
 export const EXTRACTION_CACHE_MANIFEST_FILENAME = "manifest.json";
-/** Documented cache-key formula. Pinned in the manifest so a future change to
- * the key derivation (which would silently invalidate every shard) is a
- * detectable mismatch rather than a silent full miss.
+/** Documented cache-key formula. The persisted identity is the digest below. */
+export const EXTRACTION_CACHE_KEY_ALGO_DOCUMENTATION =
+  "sha256(model\\0requestProfile\\0systemPrompt\\0canonicalExtractionRequest)";
+/**
+ * Pinned digest of computeCacheKey(EXTRACTION_CACHE_KEY_GOLDEN_VECTOR).
+ * Run-start recomputes the golden vector; a derivation change is a mismatch.
  */
 export const EXTRACTION_CACHE_KEY_ALGO =
-  "sha256(model\\0requestProfile\\0systemPrompt\\0canonicalExtractionRequest)";
+  "1eb13a99343ca78359552d365bb72bb9154942817843c54219a8fa722ae7548f";
+
+export function computeExtractionCacheKeyAlgoDigest(): string {
+  return computeCacheKey(
+    EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.model,
+    EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.requestProfile,
+    EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.systemPrompt,
+    EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.extractionRequest
+  );
+}
 
 export type ExtractionCacheStorage = "git-tracked" | "archive";
 /**

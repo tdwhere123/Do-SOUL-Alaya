@@ -22,6 +22,7 @@ import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
+import { groundedExtractionResult } from "../extraction-fill/fixture.js";
 import {
   EXTRACTION_CONFIG as CONFIG,
   manifestFor,
@@ -170,7 +171,7 @@ describe("single-source extraction model", () => {
       model: CONFIG.model,
       systemPrompt: "sys"
     });
-    const delegate = vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'));
+    const delegate = vi.fn(async (input) => groundedExtractionResult(input));
     const extractor = createCachingSignalExtractor({
       delegate: { extract: delegate },
       config: { ...CONFIG, requestProfile: "deepseek-v4-nonthinking-v1" },
@@ -186,7 +187,7 @@ describe("single-source extraction model", () => {
 
   it("fails closed on a cache miss when live extraction is disabled", async () => {
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
+      extract: vi.fn(async (input) => groundedExtractionResult(input))
     };
     const extractor = createCachingSignalExtractor({
       delegate,
@@ -210,7 +211,7 @@ describe("single-source extraction model", () => {
     mkdirSync(join(cacheRoot, cacheKey.slice(0, 2)), { recursive: true });
     writeFileSync(cacheFilePath(cacheRoot, cacheKey), "{torn", "utf8");
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
+      extract: vi.fn(async (input) => groundedExtractionResult(input))
     };
     const extractor = createCachingSignalExtractor({
       delegate,

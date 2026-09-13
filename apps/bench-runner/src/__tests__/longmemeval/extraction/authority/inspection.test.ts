@@ -3,6 +3,8 @@ import {
   computeExtractionAuthorityWorktreeRevision,
   inspectExtractionAuthority
 } from "../../../../runs/extraction/authority/inspection.js";
+import { EXTRACTION_CACHE_KEY_ALGO } from
+  "../../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   assertExtractionAuthorityReceipt,
   createExtractionAuthorityReceipt
@@ -86,8 +88,7 @@ describe("no-network extraction authority inspection", () => {
         authorizedUniqueCacheKeys: 4
       },
       extraction: {
-        cacheKeyAlgorithm:
-          "sha256(model\\0requestProfile\\0systemPrompt\\0canonicalExtractionRequest)",
+        cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
         manifestSha256: null,
         rawContentClosureSha256: null
       },

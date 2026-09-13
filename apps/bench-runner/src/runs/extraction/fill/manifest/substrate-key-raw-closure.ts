@@ -131,7 +131,8 @@ function inspectBoundHistoricalKeyRawClosure(
       missingKeys += 1;
       continue;
     }
-    if (inspected.status !== "hit" || expected === undefined ||
+    if ((inspected.status !== "hit" && inspected.status !== "quarantined") ||
+        expected === undefined ||
         inspected.rawJsonSha256 !== expected[0] ||
         inspected.rawSignalCount !== expected[1]) {
       invalidKeys += 1;

@@ -21,6 +21,7 @@ import {
   buildGroundedSignalResponse,
   buildAuthorityQuestion as buildExtractionFillQuestion,
   EXTRACTION_FILL_VARIANT,
+  groundedExtractionResult,
   providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
@@ -43,7 +44,7 @@ describe("strict JSON repair authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+        extract: async (input) => groundedExtractionResult(input)
       }),
       log: () => undefined
     });
@@ -91,7 +92,7 @@ describe("strict JSON repair authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+        extract: async (input) => groundedExtractionResult(input)
       }),
       log: () => undefined
     });
@@ -159,7 +160,7 @@ describe("strict JSON repair authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+        extract: async (input) => groundedExtractionResult(input)
       }),
       log: () => undefined
     });
@@ -193,7 +194,7 @@ describe("strict JSON repair authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+        extract: async (input) => groundedExtractionResult(input)
       }),
       log: () => undefined
     });
@@ -236,7 +237,7 @@ describe("strict JSON repair authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+        extract: async (input) => groundedExtractionResult(input)
       }),
       log: () => undefined
     });
@@ -275,7 +276,7 @@ describe("strict JSON repair authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+        extract: async (input) => groundedExtractionResult(input)
       }),
       log: () => undefined
     });
@@ -327,7 +328,7 @@ async function writeRepairReceipt(): Promise<string> {
     priceEstimate: {
       inputUsdPerMillion: 0,
       outputUsdPerMillion: 0,
-      maximumInputTokensPerAttempt: 1024
+      maximumInputTokensPerAttempt: 100_000
     },
     diskFloorBytes: 0,
     inspection: {

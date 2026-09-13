@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
+  EXTRACTION_CACHE_KEY_ALGO_DOCUMENTATION,
   EXTRACTION_CACHE_MANIFEST_VERSION,
+  computeExtractionCacheKeyAlgoDigest,
   computeSystemPromptSha256,
   extractionCacheManifestPath,
   readExtractionCacheManifest,
@@ -17,6 +19,10 @@ import {
   type ExtractionCacheManifestV3
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { hasCompleteExtractionFillAuthority } from "../../../runs/extraction/fill/fill-authority.js";
+import {
+  computeCacheKey,
+  EXTRACTION_CACHE_KEY_GOLDEN_VECTOR
+} from "../../../runs/compile-seed/cache/cache-key.js";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256
@@ -45,10 +51,20 @@ describe("extraction-cache-manifest", () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "extraction-manifest-"));
   });
 
-  it("declares the optional role-corpus and catalog components used by current cache keys", () => {
-    expect(EXTRACTION_CACHE_KEY_ALGO).toBe(
+  it("pins the live golden cache-key digest and demotes the formula to documentation", () => {
+    expect(EXTRACTION_CACHE_KEY_ALGO_DOCUMENTATION).toBe(
       "sha256(model\\0requestProfile\\0systemPrompt\\0canonicalExtractionRequest)"
     );
+    expect(computeExtractionCacheKeyAlgoDigest()).toBe(EXTRACTION_CACHE_KEY_ALGO);
+    expect(computeExtractionCacheKeyAlgoDigest()).toBe(
+      "1eb13a99343ca78359552d365bb72bb9154942817843c54219a8fa722ae7548f"
+    );
+    expect(computeCacheKey(
+      EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.model,
+      EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.requestProfile,
+      `${EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.systemPrompt}-mutated`,
+      EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.extractionRequest
+    )).not.toBe(EXTRACTION_CACHE_KEY_ALGO);
   });
 
   afterEach(async () => {

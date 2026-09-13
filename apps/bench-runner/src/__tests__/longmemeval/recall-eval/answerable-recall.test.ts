@@ -24,15 +24,16 @@ describe("answerable recall", () => {
     expect(answerableRecallAt5(diagnostics.slice(0, 3))).toBe(0.5);
   });
 
-  it("returns zero rates for a zero answerable denominator", () => {
+  it("returns unavailable rates for a zero answerable denominator", () => {
     const diagnostics = [diagnostic("abstention_abs", "abstention", false)];
 
     expect(summarizeAnswerableRecall(diagnostics)).toEqual({
       scorableCount: 0,
-      rAt1: 0,
-      rAt5: 0,
-      rAt10: 0
+      rAt1: null,
+      rAt5: null,
+      rAt10: null
     });
+    expect(answerableRecallAt5(diagnostics)).toBeNull();
   });
 });
 

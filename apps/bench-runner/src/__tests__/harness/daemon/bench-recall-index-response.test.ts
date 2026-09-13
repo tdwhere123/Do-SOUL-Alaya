@@ -158,10 +158,19 @@ describe("bench conditional field index response", () => {
     expect(() => encodeBenchRecallResults(fixture(), policy, budget, {
       ...expected, requestFilters: { authorized_scopes: null }
     })).toThrow(/differs from the invoked request/);
+    const associativeCaps = [{
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      normalization: IDENTITY_NORMALIZATION_ID,
+      transfer_id: HARD_IDENTITY_TRANSFER_ID,
+      transfer_version: HARD_IDENTITY_TRANSFER_VERSION
+    }];
     const associative = fixture("associative");
     expect(() => encodeBenchRecallResults(associative, policy, budget, {
-      ...expected, requestFilters: { enumeration_policy: "associative" }
+      ...expected, requestFilters: { enumeration_policy: "associative", cap_contracts: associativeCaps }
     })).not.toThrow();
+    expect(() => encodeBenchRecallResults(associative, policy, budget, {
+      ...expected, requestFilters: { enumeration_policy: "associative" }
+    })).toThrow(/differs from the invoked request/);
     expect(() => encodeBenchRecallResults(associative, policy, budget, { ...expected, requestFilters: {} }))
       .toThrow(/differs from the invoked request/);
   });

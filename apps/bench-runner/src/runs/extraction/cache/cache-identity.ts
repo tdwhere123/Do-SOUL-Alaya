@@ -2,6 +2,7 @@ import { normalizeBaseUrl } from "../../compile-seed/compile-seed-config.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
+  computeExtractionCacheKeyAlgoDigest,
   computeSystemPromptSha256,
   extractionModelFamily,
   type ExtractionCacheManifest
@@ -23,6 +24,13 @@ export function assertExtractionCacheIdentity(input: {
   assertExtractionFamily(input.config, input.manifest);
   assertExtractionRequestProfile(input.config.requestProfile, input.manifest);
   assertExtractionPrompt(input.systemPrompt, input.manifest);
+  const liveDigest = computeExtractionCacheKeyAlgoDigest();
+  if (liveDigest !== EXTRACTION_CACHE_KEY_ALGO) {
+    throw new ExtractionCacheInvariantError(
+      "[longmemeval preflight] cache-key algorithm mismatch: " +
+        `live golden digest "${liveDigest}" != pinned "${EXTRACTION_CACHE_KEY_ALGO}".`
+    );
+  }
   if (input.manifest.cache_key_algo !== EXTRACTION_CACHE_KEY_ALGO) {
     throw new ExtractionCacheInvariantError(
       "[longmemeval preflight] cache-key algorithm mismatch: " +

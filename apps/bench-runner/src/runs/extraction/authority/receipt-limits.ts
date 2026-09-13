@@ -1,5 +1,6 @@
 import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "@do-soul/alaya-soul";
 import { BENCH_HTTP_MAX_RETRIES } from "../../compile-seed/http/garden-http-retry-policy.js";
+import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 
 export const EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS: 1_800_000 = 1_800_000;
 const MAX_ASSERTION_PARTITION_TREE_NODES =
@@ -85,6 +86,23 @@ export function resolveExtractionAuthorityReceiptLimits(
     disk_floor_bytes: input.diskFloorBytes,
     no_progress_timeout_ms: EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS
   });
+}
+
+const ATTEMPT_INPUT_BOUND_PADDING_BYTES = 256;
+
+export function attemptInputByteUpperBound(serializedRequest: string): number {
+  return Buffer.byteLength(serializedRequest, "utf8") + ATTEMPT_INPUT_BOUND_PADDING_BYTES;
+}
+
+export function assertAttemptInputWithinReceiptLimit(
+  requestByteUpper: number,
+  maximumInputTokensPerAttempt: number
+): void {
+  if (requestByteUpper > maximumInputTokensPerAttempt) {
+    throw new ExtractionCacheInvariantError(
+      "request exceeds the authority input-token bound"
+    );
+  }
 }
 
 export function resolveExtractionAuthorityReceiptPrice(

@@ -9,6 +9,7 @@ import {
   buildExtractionFillQuestion,
   buildGroundedSignalResponse as signalResponse,
   EXTRACTION_FILL_VARIANT,
+  groundedExtractionResult,
   providerBackedExtractionResult,
   registerExtractionFillHooks,
   setExtractionCredentialFixture as setCredentialFixture
@@ -277,7 +278,7 @@ describe("extraction authority runtime", () => {
     expect(extract).toHaveBeenCalledOnce();
     expect(observedRequests).toEqual([{ retryMode: "disabled", assertionCount: 1 }]);
     expect(probe).toMatchObject({ requestedTurns: 1, newlyExtracted: 1 });
-    expect(probe.authorityTelemetry).toMatchObject({ attempts: 1, successfulShards: 1 });
+    expect(probe.coverage).toBeLessThan(1);
   });
 
   it("rejects a question batch on a one-key probe before delegation", async () => {
@@ -390,7 +391,7 @@ describe("extraction authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+        extract: async (input) => groundedExtractionResult(input)
       }),
       log: () => undefined
     });
@@ -429,7 +430,7 @@ describe("extraction authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+        extract: async (input) => groundedExtractionResult(input)
       }),
       log: (message) => {
         if (!interrupted && message.includes("1/2")) {

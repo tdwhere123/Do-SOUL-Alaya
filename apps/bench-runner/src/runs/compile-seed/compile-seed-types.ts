@@ -46,6 +46,7 @@ export interface BenchSignalExtractor extends SignalExtractor {
     readonly outputTokenField?: ExtractionOutputTokenField;
   }): Promise<Awaited<ReturnType<SignalExtractor["extract"]>> & {
     readonly rawJson: string;
+    readonly extractionSkip?: "plan_skipped";
     readonly extractorMeta?: BenchSignalExtractorMeta;
     /** Keeps task-level backoff aware of earlier calls composed by the cache layer. */
     readonly taskRateLimitRetries?: number;

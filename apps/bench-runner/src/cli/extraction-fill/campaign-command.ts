@@ -3,13 +3,16 @@ import { runBatchCampaign } from "../../runs/extraction/fill/batch-campaign.js";
 import { ExtractionFillInterruptedError, withExtractionFillSignalScope } from "./signal-scope.js";
 
 export async function runBatchCampaignCommand(args: readonly string[]): Promise<number> {
-  if (args.length !== 2 || args[0] !== "--batch-campaign" || !args[1]) {
+  const resetStopped = args.includes("--reset-stopped");
+  const rest = args.filter((arg) => arg !== "--reset-stopped");
+  if (rest.length !== 2 || rest[0] !== "--batch-campaign" || !rest[1]) {
     process.stderr.write("extraction-fill --batch-campaign requires exactly one manifest path\n");
     return 2;
   }
   try {
-    const result = await withExtractionFillSignalScope(process, (signal) => runBatchCampaign(args[1]!, {
-      signal, log: (state) => process.stdout.write(`${JSON.stringify(state)}\n`)
+    const result = await withExtractionFillSignalScope(process, (signal) => runBatchCampaign(rest[1]!, {
+      signal, log: (state) => process.stdout.write(`${JSON.stringify(state)}\n`),
+      ...(resetStopped ? { resetStopped: true } : {})
     }));
     return result.status === "complete" ? 0 : 2;
   } catch (cause) {
