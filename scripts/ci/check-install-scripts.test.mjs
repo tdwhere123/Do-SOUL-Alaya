@@ -11,6 +11,20 @@ import assert from "node:assert/strict";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const installScript = path.join(repoRoot, "scripts/install.sh");
 const vacuumScript = path.join(repoRoot, "scripts/vacuum-into.mjs");
+const locatorScript = path.join(repoRoot, "scripts/resolve-live-db-path.mjs");
+
+function locateLiveDb(env) {
+  const result = spawnSync(process.execPath, [locatorScript], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, ...env }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const line = result.stdout.trim();
+  const tab = line.indexOf("\t");
+  assert.notEqual(tab, -1, `locator output missing tab: ${line}`);
+  return { configDir: line.slice(0, tab), dbPath: line.slice(tab + 1) };
+}
 
 test("install.sh rejects a tarball whose package.json version does not match the tag", () => {
   const work = mkdtempSync(path.join(tmpdir(), "alaya-install-version-"));
@@ -41,6 +55,85 @@ test("install.sh rejects a tarball whose package.json version does not match the
     const output = `${result.stdout}\n${result.stderr}`;
     assert.match(output, /package\.json version/);
     assert.match(output, /does not match tag/);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("live db locator follows ALAYA_CONFIG_DIR then XDG_CONFIG_HOME then ~/.config/alaya", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "alaya-locator-"));
+  try {
+    const home = path.join(work, "home");
+    const xdg = path.join(work, "xdg");
+    const override = path.join(work, "override");
+    mkdirSync(home);
+    mkdirSync(xdg);
+    mkdirSync(override);
+
+    const fromXdg = locateLiveDb({
+      HOME: home,
+      XDG_CONFIG_HOME: xdg,
+      ALAYA_CONFIG_DIR: "",
+      DATA_DIR: ""
+    });
+    assert.equal(fromXdg.configDir, path.join(xdg, "alaya"));
+    assert.equal(fromXdg.dbPath, path.join(xdg, "alaya", "alaya.db"));
+
+    const fromOverride = locateLiveDb({
+      HOME: home,
+      XDG_CONFIG_HOME: xdg,
+      ALAYA_CONFIG_DIR: override,
+      DATA_DIR: ""
+    });
+    assert.equal(fromOverride.configDir, override);
+    assert.equal(fromOverride.dbPath, path.join(override, "alaya.db"));
+
+    const fromHome = locateLiveDb({
+      HOME: home,
+      XDG_CONFIG_HOME: "",
+      ALAYA_CONFIG_DIR: "",
+      DATA_DIR: ""
+    });
+    assert.equal(fromHome.configDir, path.join(home, ".config", "alaya"));
+    assert.equal(fromHome.dbPath, path.join(home, ".config", "alaya", "alaya.db"));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("live db locator resolves relative toml and DATA_DIR against the config dir", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "alaya-locator-rel-"));
+  try {
+    const configDir = path.join(work, "xdg", "alaya");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(path.join(configDir, "alaya.toml"), "[storage]\ndb_path = \"data/live.db\"\n");
+
+    const fromToml = locateLiveDb({
+      HOME: path.join(work, "home"),
+      XDG_CONFIG_HOME: path.join(work, "xdg"),
+      ALAYA_CONFIG_DIR: "",
+      DATA_DIR: "ignored-when-toml-present"
+    });
+    assert.equal(fromToml.configDir, configDir);
+    assert.equal(fromToml.dbPath, path.join(configDir, "data", "live.db"));
+
+    rmSync(path.join(configDir, "alaya.toml"));
+    const fromDataDir = locateLiveDb({
+      HOME: path.join(work, "home"),
+      XDG_CONFIG_HOME: path.join(work, "xdg"),
+      ALAYA_CONFIG_DIR: "",
+      DATA_DIR: "relative-data"
+    });
+    assert.equal(fromDataDir.dbPath, path.join(configDir, "relative-data", "alaya.db"));
+
+    const absoluteData = path.join(work, "abs-data");
+    const fromAbsolute = locateLiveDb({
+      HOME: path.join(work, "home"),
+      XDG_CONFIG_HOME: path.join(work, "xdg"),
+      ALAYA_CONFIG_DIR: "",
+      DATA_DIR: absoluteData
+    });
+    assert.equal(fromAbsolute.dbPath, path.join(absoluteData, "alaya.db"));
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

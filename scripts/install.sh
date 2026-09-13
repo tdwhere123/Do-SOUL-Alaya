@@ -57,33 +57,6 @@ ok()   { printf '\033[32m+\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m!\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[31mx\033[0m %s\n' "$*" >&2; exit 1; }
 
-resolve_live_db_path() {
-  local config_dir="${ALAYA_CONFIG_DIR:-${HOME}/.config/alaya}"
-  local toml="${config_dir}/alaya.toml"
-  if [ -f "$toml" ]; then
-    local from_toml
-    from_toml="$(awk '
-      /^\[storage\]/ { in_storage=1; next }
-      /^\[/ { in_storage=0 }
-      in_storage && $0 ~ /^db_path[[:space:]]*=/ {
-        sub(/^db_path[[:space:]]*=[[:space:]]*"/, "")
-        sub(/".*/, "")
-        print
-        exit
-      }
-    ' "$toml")"
-    if [ -n "$from_toml" ]; then
-      printf '%s' "$from_toml"
-      return
-    fi
-  fi
-  if [ -n "${DATA_DIR:-}" ]; then
-    printf '%s' "${DATA_DIR%/}/alaya.db"
-    return
-  fi
-  printf '%s' "${config_dir}/alaya.db"
-}
-
 bold "Do-SOUL Alaya installer"
 
 # --- path safety ----------------------------------------------------------
@@ -243,11 +216,24 @@ tar -xzf "${TMP_DIR}/${TARBALL_NAME}" -C "$STAGING_DIR" \
   --no-same-owner \
   --no-same-permissions
 
-cd "$STAGING_DIR"
-pkg_version="$(node -p "require('./package.json').version" 2>/dev/null || true)"
+pkg_version="$(node -p "require(process.argv[1]).version" "$STAGING_DIR/package.json" 2>/dev/null || true)"
 [ "$pkg_version" = "$VERSION" ] \
   || err "tarball package.json version '${pkg_version:-<missing>}' does not match tag ${VERSION_TAG}"
 ok "package.json version matches ${VERSION_TAG}"
+
+# Locate the live DB before cd. Relative toml/DATA_DIR paths must stay
+# anchored to the daemon config dir, not the staging tree.
+[ -f "$STAGING_DIR/scripts/resolve-live-db-path.mjs" ] \
+  || err "tarball missing scripts/resolve-live-db-path.mjs"
+live_locator="$(node "$STAGING_DIR/scripts/resolve-live-db-path.mjs")" \
+  || err "failed to resolve the live alaya.db path"
+LIVE_CONFIG_DIR="${live_locator%%$'\t'*}"
+LIVE_DB="${live_locator#*$'\t'}"
+LIVE_DB="${LIVE_DB%$'\n'}"
+[ -n "$LIVE_CONFIG_DIR" ] && [ -n "$LIVE_DB" ] \
+  || err "live database locator returned an empty path"
+
+cd "$STAGING_DIR"
 
 info "installing dependencies (pnpm install --frozen-lockfile)..."
 pnpm install --frozen-lockfile
@@ -263,10 +249,8 @@ ok "post-build sanity check passed"
 # Snapshot the live database before swapping binaries. Schema only moves
 # forward; a binary rollback without this copy cannot read a migrated file.
 DB_BACKUP_PATH=""
-LIVE_DB="$(resolve_live_db_path)"
 if [ -f "$LIVE_DB" ]; then
-  config_dir="${ALAYA_CONFIG_DIR:-${HOME}/.config/alaya}"
-  DB_BACKUP_PATH="${config_dir}/backups/alaya-${VERSION_TAG}-$(date -u +%Y%m%dT%H%M%SZ).db"
+  DB_BACKUP_PATH="${LIVE_CONFIG_DIR}/backups/alaya-${VERSION_TAG}-$(date -u +%Y%m%dT%H%M%SZ).db"
   info "backing up ${LIVE_DB} -> ${DB_BACKUP_PATH}"
   ( cd "$STAGING_DIR" && node ./scripts/vacuum-into.mjs "$LIVE_DB" "$DB_BACKUP_PATH" ) \
     || err "database backup failed (stop the daemon and retry). Live DB: ${LIVE_DB}"
