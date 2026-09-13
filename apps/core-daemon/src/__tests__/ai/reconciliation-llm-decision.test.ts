@@ -1,9 +1,13 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createReconciliationLlmDecisionPort, computeReconciliationRequestKeyForTest } from "../../ai/reconciliation-llm-decision.js";
+import {
+  computeReconciliationRequestKeyForTest,
+  createReconciliationLlmDecisionPort,
+  resolveReconciliationDecisionCacheRoot
+} from "../../ai/reconciliation-llm-decision.js";
 
 vi.mock("node:dns/promises", () => ({
   lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
@@ -254,6 +258,112 @@ describe("createReconciliationLlmDecisionPort", () => {
     );
     // corrupt read → cache miss → the LLM was called a second time
     expect(llmComplete).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the live LLM verdict when cacheRoot is not writable", async () => {
+    const blockedRoot = join(cacheRoot, "not-a-directory");
+    writeFileSync(blockedRoot, "not-a-directory", "utf8");
+    const llmComplete = vi.fn(async () =>
+      JSON.stringify({ kind: "noop", target_object_id: "memory-a", reason: "dup" })
+    );
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const port = createReconciliationLlmDecisionPort({
+      config: baseConfig,
+      cacheRoot: blockedRoot,
+      llmComplete
+    });
+
+    const result = await port!.decide({
+      incomingContent: "lives in Berlin",
+      candidates: [{ objectId: "memory-a", content: "The user lives in Berlin" }]
+    });
+
+    expect(result).toMatchObject({
+      kind: "noop",
+      targetObjectId: "memory-a",
+      reason: "dup"
+    });
+    expect(emitWarning).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ code: "ALAYA_RECONCILIATION_CACHE_WRITE_FAILED" })
+    );
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats an expired schema-versioned cache entry as a miss", async () => {
+    const incomingContent = "lives in Berlin since 2019";
+    const candidates = [{ objectId: "memory-a", content: "The user lives in Berlin" }];
+    const requestKey = computeReconciliationRequestKeyForTest({
+      model: baseConfig.model,
+      incomingContent,
+      candidates
+    });
+    const cacheDir = join(cacheRoot, requestKey.slice(0, 2));
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(join(cacheDir, `${requestKey}.json`), JSON.stringify({
+      schema_version: 1,
+      model: baseConfig.model,
+      request_hash: requestKey,
+      kind: "noop",
+      target_content_hash: null,
+      reason: "expired",
+      decided_at: "2020-01-01T00:00:00.000Z"
+    }), "utf8");
+    const llmComplete = vi.fn(async () =>
+      JSON.stringify({ kind: "add", reason: "fresh" })
+    );
+    const port = createReconciliationLlmDecisionPort({
+      config: baseConfig,
+      cacheRoot,
+      cacheTtlMs: 60_000,
+      now: () => Date.parse("2026-09-12T00:00:00.000Z"),
+      llmComplete
+    });
+
+    const result = await port!.decide({ incomingContent, candidates });
+
+    expect(result).toMatchObject({ kind: "add", reason: "fresh" });
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a cache entry without the current schema_version as a miss", async () => {
+    const incomingContent = "works in Munich";
+    const candidates = [{ objectId: "memory-a", content: "The user lives in Berlin" }];
+    const requestKey = computeReconciliationRequestKeyForTest({
+      model: baseConfig.model,
+      incomingContent,
+      candidates
+    });
+    const cacheDir = join(cacheRoot, requestKey.slice(0, 2));
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(join(cacheDir, `${requestKey}.json`), JSON.stringify({
+      model: baseConfig.model,
+      request_hash: requestKey,
+      kind: "noop",
+      target_content_hash: null,
+      reason: "legacy",
+      decided_at: "2026-09-12T00:00:00.000Z"
+    }), "utf8");
+    const llmComplete = vi.fn(async () =>
+      JSON.stringify({ kind: "add", reason: "reschema" })
+    );
+    const port = createReconciliationLlmDecisionPort({
+      config: baseConfig,
+      cacheRoot,
+      now: () => Date.parse("2026-09-12T00:00:00.000Z"),
+      llmComplete
+    });
+
+    const result = await port!.decide({ incomingContent, candidates });
+
+    expect(result).toMatchObject({ kind: "add", reason: "reschema" });
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves the default decision cache under DATA_DIR", () => {
+    expect(resolveReconciliationDecisionCacheRoot({ DATA_DIR: "/tmp/alaya-data" })).toBe(
+      resolve("/tmp/alaya-data", "cache", "reconciliation-decisions")
+    );
   });
 
   it("request key binds version and system prompt contract so prompt or version changes yield different keys", () => {

@@ -53,6 +53,10 @@ export type AppendFn = ReconciliationServiceDependencies["eventLog"]["append"];
 
 export type DecideFn = ReconciliationLlmDecisionPort["decide"];
 
+export const authorizedDurableRewrite = {
+  allowsDurableRewrite: async () => true
+};
+
 export function createDeps(
   neighbors: readonly MemoryEntry[],
   overrides: Partial<ReconciliationServiceDependencies> = {}

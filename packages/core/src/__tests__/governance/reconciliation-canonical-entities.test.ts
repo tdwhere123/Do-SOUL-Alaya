@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { type MemoryEntry } from "@do-soul/alaya-protocol";
 import { type SqliteMemoryEntryRepo } from "@do-soul/alaya-storage";
 import { ReconciliationService } from "../../governance/reconciliation/reconciliation-service.js";
-import { baseInput, createDeps, type DecideFn } from "./reconciliation-service.test-support.js";
+import { authorizedDurableRewrite, baseInput, createDeps, type DecideFn } from "./reconciliation-service.test-support.js";
 import {
   closeReconciliationTestDatabases,
   createReconciliationMemoryRepo,
@@ -72,12 +72,49 @@ describe("reconciliation canonical_entities survivor persistence", () => {
     expect(row.canonical_entities).toEqual(["alice", "berlin"]);
   });
 
+  it("does not rewrite a survivor when an LLM UPDATE has no rewrite authorization", async () => {
+    const repo = await createReconciliationMemoryRepo();
+    const seeded = seedEntry({
+      content: "The user works at a firm in Berlin.",
+      canonical_entities: ["old-entity"]
+    });
+    await repo.create(seeded);
+    const original = (await repo.findByIds("workspace-1", [seeded.object_id]))[0]!;
+
+    const { deps } = wireRepoDeps(repo, [seeded], { thresholds: { similarityFloor: 0.2 } });
+    deps.llmDecision.decide = vi.fn<DecideFn>(async () => ({
+      kind: "update",
+      targetObjectId: seeded.object_id,
+      reason: "refines the fact"
+    }));
+    const service = new ReconciliationService(deps);
+
+    const decision = await service.runWithDecision(
+      {
+        ...baseInput,
+        incomingContent: "The user works at a company in Berlin and likes spicy food.",
+        incomingDomainTags: ["residence"],
+        incomingProjectionFields: { canonical_entities: ["alice", "berlin"] }
+      },
+      applyUpdateVerdict
+    );
+
+    expect(decision.kind).toBe("add");
+    const row = (await repo.findByIds("workspace-1", [seeded.object_id]))[0]!;
+    expect(row.content).toBe(original.content);
+    expect(row.updated_at).toBe(original.updated_at);
+    expect(row.canonical_entities).toEqual(["old-entity"]);
+  });
+
   it("refreshes a UPDATE survivor's canonical_entities from the incoming signal", async () => {
     const repo = await createReconciliationMemoryRepo();
     const seeded = seedEntry({ canonical_entities: ["old-entity"] });
     await repo.create(seeded);
 
-    const { deps } = wireRepoDeps(repo, [seeded], { thresholds: { similarityFloor: 0.2 } });
+    const { deps } = wireRepoDeps(repo, [seeded], {
+      thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: authorizedDurableRewrite
+    });
     deps.llmDecision.decide = vi.fn<DecideFn>(async () => ({
       kind: "update",
       targetObjectId: seeded.object_id,

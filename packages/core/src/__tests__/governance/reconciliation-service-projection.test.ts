@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ReconciliationService } from "../../governance/reconciliation/reconciliation-service.js";
-import { DecideFn, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
+import { authorizedDurableRewrite, DecideFn, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
 import { requireAt, mockCallAt } from "../helpers/defined.js";
 
 describe("ReconciliationService projection metadata", () => {
@@ -12,7 +12,8 @@ describe("ReconciliationService projection metadata", () => {
       evidence_refs: ["evidence-old"]
     });
     const { deps, update } = createDeps([neighbor], {
-      thresholds: { similarityFloor: 0.2 }
+      thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: authorizedDurableRewrite
     });
     deps.llmDecision.decide = vi.fn<DecideFn>(async () => ({
       kind: "update",
@@ -73,6 +74,7 @@ describe("ReconciliationService projection metadata", () => {
       .mockResolvedValueOnce([updatedNeighbor]);
     const { deps, update } = createDeps([neighbor], {
       thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: authorizedDurableRewrite,
       memoryRepo: { findByIds }
     });
     update.mockRejectedValueOnce(new Error("event log append failed after repo update"));
@@ -107,6 +109,7 @@ describe("ReconciliationService projection metadata", () => {
       .mockResolvedValueOnce([neighbor]);
     const { deps, update } = createDeps([neighbor], {
       thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: authorizedDurableRewrite,
       memoryRepo: { findByIds }
     });
     update.mockRejectedValueOnce(new Error("repo update failed before mutation"));
@@ -147,6 +150,7 @@ describe("ReconciliationService projection metadata", () => {
       .mockResolvedValueOnce([mismatchedNeighbor]);
     const { deps, update } = createDeps([neighbor], {
       thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: authorizedDurableRewrite,
       memoryRepo: { findByIds }
     });
     update.mockRejectedValueOnce(new Error("repo update failed before intended tags landed"));
@@ -189,6 +193,7 @@ describe("ReconciliationService projection metadata", () => {
       .mockResolvedValueOnce([clearedNeighbor]);
     const { deps, update } = createDeps([neighbor], {
       thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: authorizedDurableRewrite,
       memoryRepo: { findByIds }
     });
     update.mockRejectedValueOnce(new Error("event append failed after null clear"));
@@ -226,6 +231,7 @@ describe("ReconciliationService projection metadata", () => {
       .mockRejectedValueOnce(new Error("lookup failed before update"));
     const { deps, update } = createDeps([neighbor], {
       thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: authorizedDurableRewrite,
       memoryRepo: { findByIds }
     });
     deps.llmDecision.decide = vi.fn<DecideFn>(async () => ({
@@ -257,7 +263,8 @@ describe("ReconciliationService projection metadata", () => {
       time_source: "explicit"
     });
     const { deps, update } = createDeps([neighbor], {
-      thresholds: { similarityFloor: 0.2 }
+      thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: authorizedDurableRewrite
     });
     deps.llmDecision.decide = vi.fn<DecideFn>(async () => ({
       kind: "update",
@@ -296,7 +303,8 @@ describe("ReconciliationService projection metadata", () => {
       preference_polarity: "negative"
     });
     const { deps, update } = createDeps([neighbor], {
-      thresholds: { similarityFloor: 0.2 }
+      thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: authorizedDurableRewrite
     });
     deps.llmDecision.decide = vi.fn<DecideFn>(async () => ({
       kind: "update",

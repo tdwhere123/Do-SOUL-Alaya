@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { compareCandidateContent, type ReconciliationLlmDecisionPort } from "@do-soul/alaya-core";
 import { requestGardenChatCompletionContent } from "./garden-chat-completion.js";
 import { readGardenLlmJsonCache, writeGardenLlmJsonCache } from "./garden-llm-cache.js";
@@ -18,23 +17,26 @@ import { readGardenLlmJsonCache, writeGardenLlmJsonCache } from "./garden-llm-ca
  *
  * Repeatability: every decision is cached to an on-disk fixture keyed by
  * a hash of (model + incoming fact + neighbor contents). A cached
- * decision re-runs with zero LLM calls. The cache directory lives under
- * docs/bench-history/datasets, is git-ignored, and is not source truth:
- * a fresh checkout re-populates it from a credentialled run.
+ * decision re-runs with zero LLM calls. The cache lives under
+ * DATA_DIR/cache/reconciliation-decisions, is schema-versioned, and
+ * expires after ~24h. A write failure must not block the live verdict.
  *
  * see also: packages/core/src/governance/reconciliation-service.ts
  *   (ReconciliationLlmDecisionPort consumer)
  */
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const DECISION_CACHE_SCHEMA_VERSION = 1;
+const DECISION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-// On-disk, git-ignored, model-keyed cache. A credentialled run populates
-// it; later runs reuse it with zero LLM calls. Created lazily on the
-// first credentialled decision.
-const RECONCILIATION_DECISION_CACHE_ROOT = resolve(
-  __dirname,
-  "../../../../docs/bench-history/datasets/reconciliation-decisions"
-);
+export function resolveReconciliationDecisionCacheRoot(
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const dataDir = env.DATA_DIR?.trim();
+  const root = dataDir !== undefined && dataDir.length > 0
+    ? resolve(dataDir)
+    : resolve(process.cwd(), "data");
+  return resolve(root, "cache", "reconciliation-decisions");
+}
 
 const RECONCILIATION_DECISION_REQUEST_VERSION = "v1";
 
@@ -59,6 +61,7 @@ export interface ReconciliationLlmDecisionConfig {
 }
 
 interface CachedDecision {
+  readonly schema_version: number;
   readonly model: string;
   readonly request_hash: string;
   readonly kind: "add" | "update" | "noop";
@@ -86,6 +89,8 @@ interface CachedDecision {
 export function createReconciliationLlmDecisionPort(options: {
   readonly config: ReconciliationLlmDecisionConfig;
   readonly cacheRoot?: string;
+  readonly cacheTtlMs?: number;
+  readonly now?: () => number;
   readonly llmComplete?: (
     prompt: string,
     config: ReconciliationLlmDecisionConfig
@@ -95,13 +100,23 @@ export function createReconciliationLlmDecisionPort(options: {
   if (config.apiKey === null) {
     return null;
   }
-  const cacheRoot = options.cacheRoot ?? RECONCILIATION_DECISION_CACHE_ROOT;
+  const cache: DecisionCache = {
+    root: options.cacheRoot ?? resolveReconciliationDecisionCacheRoot(),
+    ttlMs: options.cacheTtlMs ?? DECISION_CACHE_TTL_MS,
+    now: options.now ?? Date.now
+  };
   const llmComplete = options.llmComplete ?? requestDecisionFromGarden;
 
   return {
     decide: async ({ incomingContent, candidates }) =>
-      await decideWithGardenCache(config, cacheRoot, llmComplete, incomingContent, candidates)
+      await decideWithGardenCache(config, cache, llmComplete, incomingContent, candidates)
   };
+}
+
+interface DecisionCache {
+  readonly root: string;
+  readonly ttlMs: number;
+  readonly now: () => number;
 }
 
 // invariant: the cache anchors a decision target to the target
@@ -148,19 +163,19 @@ function buildDecisionPrompt(
 
 async function decideWithGardenCache(
   config: ReconciliationLlmDecisionConfig,
-  cacheRoot: string,
+  cache: DecisionCache,
   llmComplete: (prompt: string, config: ReconciliationLlmDecisionConfig) => Promise<string>,
   incomingContent: string,
   candidates: readonly { readonly objectId: string; readonly content: string }[]
 ): Promise<Awaited<ReturnType<NonNullable<ReconciliationLlmDecisionPort>["decide"]>>> {
   const requestKey = computeRequestKey(config.model, incomingContent, candidates);
-  const cached = await readCachedDecision(cacheRoot, requestKey);
+  const cached = await readCachedDecision(cache, requestKey);
   if (cached !== undefined) {
     return materializeCachedReconciliationDecision(cached, candidates);
   }
   return await requestAndCacheReconciliationDecision(
     config,
-    cacheRoot,
+    cache,
     llmComplete,
     incomingContent,
     candidates,
@@ -185,7 +200,7 @@ function materializeCachedReconciliationDecision(
 
 async function requestAndCacheReconciliationDecision(
   config: ReconciliationLlmDecisionConfig,
-  cacheRoot: string,
+  cache: DecisionCache,
   llmComplete: (prompt: string, config: ReconciliationLlmDecisionConfig) => Promise<string>,
   incomingContent: string,
   candidates: readonly { readonly objectId: string; readonly content: string }[],
@@ -203,20 +218,32 @@ async function requestAndCacheReconciliationDecision(
     targetContentHash === null
       ? undefined
       : resolveTargetByContentHash(targetContentHash, candidates);
-
-  await writeCachedDecision(cacheRoot, requestKey, {
-    model: config.model,
-    request_hash: requestKey,
-    kind: parsed.kind,
-    target_content_hash: targetContentHash,
-    reason: parsed.reason ?? "",
-    decided_at: new Date().toISOString()
-  });
-  return {
+  const verdict = {
     kind: parsed.kind,
     ...(resolvedTargetObjectId === undefined ? {} : { targetObjectId: resolvedTargetObjectId }),
     reason: parsed.reason ?? ""
-  };
+  } as const;
+
+  try {
+    await writeCachedDecision(cache.root, requestKey, {
+      schema_version: DECISION_CACHE_SCHEMA_VERSION,
+      model: config.model,
+      request_hash: requestKey,
+      kind: parsed.kind,
+      target_content_hash: targetContentHash,
+      reason: parsed.reason ?? "",
+      decided_at: new Date(cache.now()).toISOString()
+    });
+  } catch (error) {
+    process.emitWarning("[Reconciliation] decision cache write failed; returning live verdict", {
+      code: "ALAYA_RECONCILIATION_CACHE_WRITE_FAILED",
+      detail: JSON.stringify({
+        request_key: requestKey,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    });
+  }
+  return verdict;
 }
 
 export function computeReconciliationRequestKeyForTest(options: {
@@ -256,24 +283,39 @@ function computeRequestKey(
 }
 
 async function readCachedDecision(
-  cacheRoot: string,
+  cache: DecisionCache,
   requestKey: string
 ): Promise<CachedDecision | undefined> {
   return readGardenLlmJsonCache({
-    cacheRoot,
+    cacheRoot: cache.root,
     requestKey,
     warningMessage: "[Reconciliation] decision cache read failed; treating as miss",
     warningCode: "ALAYA_RECONCILIATION_CACHE_READ_FAILED",
-    parseEntry: parseCachedDecisionEntry
+    parseEntry: (parsed, key) => parseCachedDecisionEntry(parsed, key, cache.now(), cache.ttlMs)
   });
 }
 
-function parseCachedDecisionEntry(parsed: unknown, requestKey: string): CachedDecision | undefined {
+function parseCachedDecisionEntry(
+  parsed: unknown,
+  requestKey: string,
+  nowMs: number,
+  ttlMs: number
+): CachedDecision | undefined {
   if (typeof parsed !== "object" || parsed === null) {
     return undefined;
   }
   const record = parsed as Partial<CachedDecision>;
+  if (record.schema_version !== DECISION_CACHE_SCHEMA_VERSION) {
+    return undefined;
+  }
   if (record.kind !== "add" && record.kind !== "update" && record.kind !== "noop") {
+    return undefined;
+  }
+  if (typeof record.decided_at !== "string") {
+    return undefined;
+  }
+  const decidedAtMs = Date.parse(record.decided_at);
+  if (!Number.isFinite(decidedAtMs) || nowMs - decidedAtMs > ttlMs) {
     return undefined;
   }
   // Normalize the target anchor: a missing / non-string value (e.g. a
@@ -283,12 +325,13 @@ function parseCachedDecisionEntry(parsed: unknown, requestKey: string): CachedDe
   const targetContentHash =
     typeof record.target_content_hash === "string" ? record.target_content_hash : null;
   return {
+    schema_version: DECISION_CACHE_SCHEMA_VERSION,
     model: typeof record.model === "string" ? record.model : "",
     request_hash: typeof record.request_hash === "string" ? record.request_hash : requestKey,
     kind: record.kind,
     target_content_hash: targetContentHash,
     reason: typeof record.reason === "string" ? record.reason : "",
-    decided_at: typeof record.decided_at === "string" ? record.decided_at : ""
+    decided_at: record.decided_at
   };
 }
 

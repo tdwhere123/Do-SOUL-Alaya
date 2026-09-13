@@ -125,6 +125,15 @@ export interface ReconciliationLlmDecisionPort {
   }>;
 }
 
+// LLM update is a nomination only. Durable content rewrite requires an
+// independent proof effect or typed resolution, never the model verdict.
+export interface ReconciliationRewriteAuthorizationPort {
+  allowsDurableRewrite(input: {
+    readonly workspaceId: string;
+    readonly targetObjectId: string;
+  }): boolean | Promise<boolean>;
+}
+
 // invariant: the rule-only, zero-cloud decision basis. Reconciliation
 // must run out of the box without any cloud call (R0 zero-cloud stance:
 // the cloud edge-LLM stays default-off). The identity NOOP (dedup) and
@@ -168,6 +177,11 @@ export interface ReconciliationServiceDependencies {
   readonly eventLog: ReconciliationEventLogPort;
   readonly runLookup: GovernanceRunWorkspaceLookup;
   readonly llmDecision: ReconciliationLlmDecisionPort;
+  /**
+   * Optional durable-rewrite gate. Absent or false keeps existing rows
+   * unchanged; LLM `update` is demoted to an ADD candidate.
+   */
+  readonly rewriteAuthorization?: ReconciliationRewriteAuthorizationPort;
   readonly thresholds?: ReconciliationServiceThresholds;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   /**
