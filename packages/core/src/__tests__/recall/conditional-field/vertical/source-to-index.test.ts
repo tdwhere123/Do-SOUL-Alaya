@@ -17,8 +17,10 @@ import {
 } from "@do-soul/alaya-storage";
 import { fieldContractSha256 } from "../../../../shared/field-hash.js";
 import { encodedRecall, runRecall } from "../../conditional-field-oracle/bound-producer.js";
-import { mapNativeReaderPage, projectAcceptingIndex } from
+import { mapNativeReaderPage } from
   "../../../../recall/conditional-field/reference/accepting-projection.js";
+import { projectAcceptingIndex } from
+  "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { bindMaxMinField } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import {
   defaultBudget,

@@ -20,6 +20,7 @@ export const QUERY_EMBEDDING_WARMUP_BATCH_SIZE = 16;
 export const EMBEDDING_WORKSPACE_SCAN_CAP = 512;
 export const NO_STORED_VECTORS_DEGRADATION_REASON = "no_stored_vectors";
 export const EVIDENCE_DOCUMENT_MAX_OPERATOR_ID = "evidence_document_max_v1";
+export type EvidenceDocumentMaxOperatorId = typeof EVIDENCE_DOCUMENT_MAX_OPERATOR_ID;
 
 export function resolveEmbeddingWorkspaceScanCap(): number {
   const configured = getCoreConfig().embedding.workspaceScanCap;

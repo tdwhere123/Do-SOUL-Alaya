@@ -1,12 +1,31 @@
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 
 export class ObservationSubjects implements ReadonlySet<string> {
+  private mergedSnapshot?: PersistentStringMap<true>;
+  private mergedDiscoveries?: readonly Readonly<{ subject_id: string }>[];
+  private mergedView?: ObservationSubjects;
+
   public constructor(public snapshot: PersistentStringMap<true>) {}
   public get size(): number { return this.snapshot.size; }
   public get [Symbol.toStringTag](): string { return "ObservationSubjects"; }
   public has(id: string): boolean { return this.snapshot.has(id); }
   public add(id: string): void { if (!this.snapshot.has(id)) this.snapshot = this.snapshot.with(id, true); }
   public at(index: number): string | undefined { return this.snapshot.entryAt(index)?.[0]; }
+  public includingDiscoveries(discoveries: readonly Readonly<{ subject_id: string }>[]): ObservationSubjects {
+    if (discoveries.length === 0) return this;
+    if (this.mergedView !== undefined && this.mergedDiscoveries === discoveries && this.mergedSnapshot === this.snapshot) {
+      return this.mergedView;
+    }
+    let next = this.snapshot;
+    for (const row of discoveries) {
+      if (!next.has(row.subject_id)) next = next.with(row.subject_id, true);
+    }
+    const view = next === this.snapshot ? this : new ObservationSubjects(next);
+    this.mergedSnapshot = this.snapshot;
+    this.mergedDiscoveries = discoveries;
+    this.mergedView = view;
+    return view;
+  }
   public keys(): SetIterator<string> { return this.snapshot.keys(); }
   public values(): SetIterator<string> { return this.snapshot.keys(); }
   public [Symbol.iterator](): SetIterator<string> { return this.snapshot.keys(); }

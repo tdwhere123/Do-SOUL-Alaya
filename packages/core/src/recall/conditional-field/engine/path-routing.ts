@@ -1,4 +1,5 @@
 import { type AdjacencyRow, type NamedKindOverlay } from "./path-matching.js";
+import { ObservationSubjects } from "./observation-frontier.js";
 
 export type RoutingDiscovery = Readonly<{
   readonly source_id: string;
@@ -67,9 +68,19 @@ export function nextAdjacencyPair(
   pairIndex: number,
   discoveries: readonly RoutingDiscovery[] = []
 ): Readonly<{ readonly subject: string; readonly predicate: string }> | undefined {
+  const merged = adjacencySubjects(subjects, discoveries);
+  return scanAdjacencyPairs(merged, predicates, pairProgress, pairIndex, merged.size * predicates.length).pair;
+}
+
+function adjacencySubjects(
+  subjects: ReadonlySet<string>,
+  discoveries: readonly RoutingDiscovery[]
+): Readonly<{ readonly size: number; at(index: number): string | undefined }> {
+  if (subjects instanceof ObservationSubjects) return subjects.includingDiscoveries(discoveries);
+  const indexed = subjects as ReadonlySet<string> & { at?: (index: number) => string | undefined };
+  if (discoveries.length === 0 && typeof indexed.at === "function") return indexed as ObservationSubjects;
   const subjectList = [...new Set([...subjects, ...discoveries.map((row) => row.subject_id)])];
-  return scanAdjacencyPairs({ size: subjectList.length, at: (index) => subjectList[index] }, predicates, pairProgress,
-    pairIndex, subjectList.length * predicates.length).pair;
+  return { size: subjectList.length, at: (index) => subjectList[index] };
 }
 
 export function scanAdjacencyPairs(subjects: Readonly<{ size: number; at(index: number): string | undefined }>,

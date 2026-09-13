@@ -5,6 +5,7 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type { RecallFiniteFieldChannelCapture } from
   "../recall/field/finite-field-capture.js";
+import type { EvidenceDocumentMaxOperatorId } from "./constants.js";
 
 export interface EmbeddingVectorRecord {
   readonly object_id: string;
@@ -295,7 +296,7 @@ export interface EvidenceCandidateScoringWinner {
 
 export interface EvidenceCandidateScoringReceipt {
   readonly schema_version: 1;
-  readonly operator_id: "evidence_document_max_v1";
+  readonly operator_id: EvidenceDocumentMaxOperatorId;
   readonly state: "observed";
   readonly score: number;
   readonly winner: Readonly<EvidenceCandidateScoringWinner>;

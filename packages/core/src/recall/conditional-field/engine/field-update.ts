@@ -25,7 +25,13 @@ import { joinDerivation } from "./path-derivation.js";
 import { localLeafIds, traceDerivationForest } from "./derivation-provenance.js";
 import { repairSupportAfterRuleRevision } from "./dependency-equations.js";
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
-import { indexFieldRetention, mergeSeedAdditions, newTransitionAdditions } from "./field-retention-index.js";
+import {
+  indexFieldRetention,
+  indexObservationOffsets,
+  lookupIndexedObservation,
+  mergeSeedAdditions,
+  newTransitionAdditions
+} from "./field-retention-index.js";
 import { RetainedRowDraft, RetainedSequence, type RetainedRows } from "./retained-sequence.js";
 import {
   collectIdentities,
@@ -318,6 +324,10 @@ function absorbEffects(
   quota: MemoryQuota
 ): number {
   let exploration = remainingExploration;
+  const pageOffsets = indexObservationOffsets(consumption.page.observations);
+  const pageRows = {
+    at: (index: number) => consumption.page.observations[index]
+  };
   for (const effect of consumption.effects ?? []) {
     if (priorIds.has(effect.observation_id)) continue;
     if (effect.derivation !== undefined && quota.withdrawn.size > 0) {
@@ -329,7 +339,7 @@ function absorbEffects(
     absorbMeasurement(effect, measurements, quota);
     if (effect.seed !== undefined && retainPayload(effect.seed, quota)) {
       seeds.push(effect.seed);
-      if (effectSeedIsGuaranteed(effect, consumption.page.observations)) {
+      if (effectSeedIsGuaranteed(effect, pageOffsets, pageRows)) {
         guaranteedSeeds.push(effect.seed);
       }
     }
@@ -481,22 +491,14 @@ function payloadBytes(value: unknown): number {
 
 function effectSeedIsGuaranteed(
   effect: FieldObservationEffect,
-  observations: readonly TypedObservation[]
+  pageOffsets: PersistentStringMap<number>,
+  pageRows: Readonly<{ at(index: number): TypedObservation | undefined }>
 ): boolean {
   if (effect.missing_measurement === true) return false;
   if (effect.admitted_seed !== true) return false;
-  const observation = relatedObservation(effect.observation_id, observations);
+  const observation = lookupIndexedObservation(effect.observation_id, pageOffsets, pageRows);
   if (observation === undefined || !observationIsGuaranteed(observation)) return false;
   return true;
-}
-
-function relatedObservation(
-  effectObservationId: string,
-  observations: readonly TypedObservation[]
-): TypedObservation | undefined {
-  const exact = observations.find((row) => row.observation_id === effectObservationId);
-  if (exact !== undefined) return exact;
-  return observations.find((row) => effectObservationId.startsWith(`${row.observation_id}:`));
 }
 
 function interruptOpenResiduals(residuals: readonly CoverageRegion[]): readonly CoverageRegion[] {

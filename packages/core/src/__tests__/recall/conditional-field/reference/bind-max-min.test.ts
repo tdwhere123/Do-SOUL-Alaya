@@ -15,9 +15,10 @@ import {
   evaluateFacetPredicate,
   joinHyperedgeAnd,
   joinHyperedgeOr,
-  projectAcceptingIndex,
   selectFeasibleWitnesses
 } from "../../../../recall/conditional-field/reference/accepting-projection.js";
+import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
+import { facetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
 import {
   bindMaxMinField,
   productStateNodeId,
@@ -222,9 +223,10 @@ describe("conditional-field reference binder", () => {
       { obligation_id: "ob-x", domain_id: ASSOCIATION_DOMAIN_ID },
       { obligation_id: "ob-y", domain_id: ASSOCIATION_DOMAIN_ID }
     ] as const;
+    const pathId = facetPathId(productKey("c"));
     const vectors: FacetVector[] = [
-      { schema_version: 1, path_id: "p1", obligations: named, coordinates: [900, 200] },
-      { schema_version: 1, path_id: "p2", obligations: named, coordinates: [200, 900] }
+      { schema_version: 1, path_id: pathId, obligations: named, coordinates: [900, 200] },
+      { schema_version: 1, path_id: `${pathId}:split`, obligations: named, coordinates: [200, 900] }
     ];
     expect(evaluateFacetPredicate("same_path", vectors, 800)).toBe(false);
     expect(evaluateFacetPredicate("independent", vectors, 800)).toBe(true);

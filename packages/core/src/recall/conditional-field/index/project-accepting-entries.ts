@@ -1,6 +1,5 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  MILLIGRADE_BOTTOM,
   guaranteedMilligradesOf,
   productStateKeyFromIndexEntry,
   productSubjectId,
@@ -40,21 +39,10 @@ import {
   productUpdatesBetween
 } from "./product-component-diff.js";
 
-export function evaluateSamePathPredicate(
-  vectors: readonly FacetVector[],
-  threshold: number
-): boolean {
-  return vectors.some((vector) => vector.coordinates.every((value) => value > threshold));
-}
-
-export function evaluateFacetPredicate(
-  mode: FacetMode,
-  vectors: readonly FacetVector[],
-  threshold: number
-): boolean {
-  if (mode === "same_path") return evaluateSamePathPredicate(vectors, threshold);
-  return independentFacetPredicate(vectors, threshold);
-}
+export {
+  evaluateFacetPredicate,
+  evaluateSamePathPredicate
+} from "../engine/facet-predicates.js";
 
 export function acceptingEntries(
   input: AcceptingProjectionInput,
@@ -368,18 +356,4 @@ export function facetModeForValue(value: FieldValue, input: AcceptingProjectionI
     if (override !== undefined) return override;
   }
   return input.view.facet_mode;
-}
-
-function independentFacetPredicate(vectors: readonly FacetVector[], threshold: number): boolean {
-  if (vectors.length === 0) return false;
-  const width = Math.max(...vectors.map((vector) => vector.coordinates.length));
-  for (let index = 0; index < width; index += 1) {
-    let best = MILLIGRADE_BOTTOM;
-    for (const vector of vectors) {
-      const value = vector.coordinates[index] ?? MILLIGRADE_BOTTOM;
-      if (value > best) best = value;
-    }
-    if (best <= threshold) return false;
-  }
-  return true;
 }

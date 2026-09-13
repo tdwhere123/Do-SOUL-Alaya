@@ -448,6 +448,22 @@ describe("automaton, compatible join, and composed path identity", () => {
     )).toEqual({ subject: "routed", predicate: "observed_log" });
   });
 
+  it("reuses the merged adjacency subject view when subjects and discoveries are unchanged", () => {
+    const subjects = new ObservationSubjects(new PersistentStringMap<true>().with("seed", true));
+    const discoveries = [{
+      source_id: "seed",
+      subject_id: "routed",
+      predicate: "uses_service",
+      assertion_id: "route-1"
+    }];
+    const first = subjects.includingDiscoveries(discoveries);
+    const second = subjects.includingDiscoveries(discoveries);
+    expect(second).toBe(first);
+    expect(new Set(first)).toEqual(new Set(["seed", "routed"]));
+    subjects.add("later");
+    expect(subjects.includingDiscoveries(discoveries)).not.toBe(first);
+  });
+
   it("compiles empty and epsilon programs without inheriting relation start states", () => {
     const empty = compileProgramAutomaton({ schema_version: 1, kind: "empty" });
     expect(empty.start).toEqual([]);

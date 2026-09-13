@@ -7,6 +7,7 @@ import type {
   SoulActiveConstraint,
   SoulMemorySearchDegradationReason
 } from "@do-soul/alaya-protocol";
+import type { EvidenceDocumentMaxOperatorId } from "../../embedding-recall/constants.js";
 
 export type RecallSynthesisStatus =
   | Readonly<{ readonly status: "absent" }>
@@ -54,7 +55,7 @@ export interface RecallEvidenceSemanticWinnerReceipt {
 
 export interface RecallEvidenceSemanticActivationReceipt {
   readonly schema_version: 1;
-  readonly operator_id: "evidence_document_max_v1";
+  readonly operator_id: EvidenceDocumentMaxOperatorId;
   readonly state: "observed";
   readonly score: number;
   readonly winner: Readonly<RecallEvidenceSemanticWinnerReceipt>;
