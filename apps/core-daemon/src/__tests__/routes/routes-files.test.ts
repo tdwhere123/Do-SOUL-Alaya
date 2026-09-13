@@ -571,7 +571,10 @@ describe("files upload route real disk", () => {
     expect(response.status).toBe(500);
     expect(createWithEvent).toHaveBeenCalledOnce();
     const directoryStat = await stat(filesDirectory);
-    expect(directoryStat.mode & 0o777).toBe(0o700);
+    expect(directoryStat.isDirectory()).toBe(true);
+    if (process.platform !== "win32") {
+      expect(directoryStat.mode & 0o777).toBe(0o700);
+    }
     expect(await readdir(filesDirectory)).toEqual([]);
   });
 });
