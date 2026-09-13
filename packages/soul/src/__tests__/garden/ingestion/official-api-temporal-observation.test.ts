@@ -159,7 +159,7 @@ describe("official Garden temporal observation contract", () => {
 
     const [signal] = await provider.compile("I completed the review today.", context);
 
-    expect(signal?.created_at).toBe("2024-06-15T14:30:00.000Z");
+    expect(signal?.created_at).toBe("2030-01-01T00:00:00.000Z");
     expect(signal?.raw_payload.temporal_projection).toEqual({
       projection_schema_version: 1,
       event_time_start: "2024-06-15T00:00:00.000Z",

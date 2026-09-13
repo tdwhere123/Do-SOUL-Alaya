@@ -1,4 +1,5 @@
 import {
+  deepFreeze,
   EdgeProposalSchema,
   EdgeProposalTriggerSourceSchema,
   MEMORY_GRAPH_EDGE_RECALL_WEIGHTS,
@@ -6,9 +7,10 @@ import {
   type EdgeProposal
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
 import { parseNonEmptyString, parseTimestamp } from "../../shared/validators.js";
 import type { EdgeProposalCreateInput } from "../edge-proposal-types.js";
+
+export { isUniqueConstraintError } from "../../garden/garden-task-errors.js";
 
 export interface EdgeProposalRow {
   readonly proposal_id: string;
@@ -92,22 +94,6 @@ export function edgeProposalPathIdentity(edgeTypeValue: string): {
     sign,
     isPositiveRecallsFamily: sign === "positive" && POSITIVE_RECALLS_FAMILY_RELATION_KINDS.has(relationKind)
   };
-}
-
-export function isUniqueConstraintError(error: unknown): boolean {
-  let current: unknown = error;
-  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
-    const codeValue = (current as { readonly code?: unknown }).code;
-    if (typeof codeValue === "string" && codeValue.startsWith("SQLITE_CONSTRAINT")) {
-      return true;
-    }
-    const messageValue = (current as { readonly message?: unknown }).message;
-    if (typeof messageValue === "string" && messageValue.includes("UNIQUE constraint failed")) {
-      return true;
-    }
-    current = (current as { readonly cause?: unknown }).cause;
-  }
-  return false;
 }
 
 function parseEdgeTypeForIdentity(value: string): EdgeProposal["edge_type"] {

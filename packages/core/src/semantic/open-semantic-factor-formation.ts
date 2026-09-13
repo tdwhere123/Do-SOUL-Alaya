@@ -5,9 +5,12 @@ import {
   OpenSemanticFactorFormationProposalSchema,
   groundOpenSemanticFactorGraph,
   openSemanticFactorFormationCapturePreimage,
+  sourceTextDigest,
   type OpenSemanticFactorFormationCapture,
   type OpenSemanticFactorFormationCaptureBody
 } from "@do-soul/alaya-protocol";
+
+export { sourceTextDigest };
 
 export function materializeOpenSemanticFactorFormation(params: Readonly<{
   readonly source_kind: "evidence" | "query";
@@ -19,7 +22,7 @@ export function materializeOpenSemanticFactorFormation(params: Readonly<{
   if (source === null || source.trim().length === 0) {
     return createCapture("ineligible", null, null, null);
   }
-  const sourceSha256 = `sha256:${sha256(source)}`;
+  const sourceSha256 = sourceTextDigest(source, sha256);
   if (params.negative_status !== undefined) {
     return createCapture(params.negative_status, null, sourceSha256, null);
   }

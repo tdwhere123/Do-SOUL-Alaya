@@ -32,7 +32,7 @@ export * from "./relations/producers/edge-auto-producer-service.js";
 export * from "./embedding-recall/embedding-backfill-handler.js";
 export * from "./relations/edge-proposals/edge-proposal-service.js";
 export * from "./embedding-recall/embedding-recall-service.js";
-export { assertValidEmbeddingBatch } from "./embedding-recall/helpers.js";
+export { assertValidEmbeddingBatch, hashMemoryContent } from "./embedding-recall/helpers.js";
 export {
   EMBEDDING_INJECTION_SIMILARITY_FLOOR,
   EMBEDDING_MAX_INJECTED_DELIVERY

@@ -4,8 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   EMPTY_RELATION_HISTORY_DIGEST,
+  RELATION_ASSERTION_EVENT_CONTRACT_GENERATION,
+  RELATION_ASSERTION_SCHEMA_GENERATION,
+  RELATION_PATH_PROJECTION_SCHEMA_GENERATION,
   TEMPORAL_RELATION_PROJECTION_POLICY_ID,
   TEMPORAL_RELATION_PROJECTION_POLICY_SHA256,
+  canonicalJson,
   emptyBytesSha256
 } from "@do-soul/alaya-protocol";
 import BetterSqlite3 from "better-sqlite3";
@@ -18,9 +22,10 @@ export const TEMPORAL_OFFLINE_MIGRATION_VERSION = 7;
 
 export type TemporalDatabaseMode = "runtime" | "fresh-bootstrap" | "candidate";
 
-const TEMPORAL_ASSERTION_SCHEMA_GENERATION = "relation_assertion_v2";
-const TEMPORAL_ASSERTION_EVENT_CONTRACT_GENERATION = "relation_assertion_event_v2";
-const TEMPORAL_PROJECTION_SCHEMA_GENERATION = "relation_path_projection_v1";
+const TEMPORAL_ASSERTION_SCHEMA_GENERATION = RELATION_ASSERTION_SCHEMA_GENERATION;
+const TEMPORAL_ASSERTION_EVENT_CONTRACT_GENERATION =
+  RELATION_ASSERTION_EVENT_CONTRACT_GENERATION;
+const TEMPORAL_PROJECTION_SCHEMA_GENERATION = RELATION_PATH_PROJECTION_SCHEMA_GENERATION;
 const TEMPORAL_BOOTSTRAP_GENERATION = "temporal-bootstrap-empty-v1";
 const TEMPORAL_PROJECTION_POLICY_ID = TEMPORAL_RELATION_PROJECTION_POLICY_ID;
 const TEMPORAL_PROJECTION_POLICY_SHA256 = TEMPORAL_RELATION_PROJECTION_POLICY_SHA256;
@@ -92,6 +97,15 @@ function assertTemporalDatabaseReady(
          FROM temporal_schema_state
         WHERE state_id = 1`
     ).get() as Readonly<Record<string, unknown>> | undefined;
+    const generationMismatch = state === undefined
+      ? null
+      : describeTemporalGenerationMismatch(state);
+    if (generationMismatch !== null) {
+      throw new StorageError(
+        "CONFLICT",
+        `Temporal relation generation mismatch: ${generationMismatch}. Runtime startup is fail-closed until a verified candidate is selected.`
+      );
+    }
     if (state === undefined || !isVerifiedTemporalState(state) || !hasVerifiedActiveProjection(database, state)) {
       throw new StorageError(
         "CONFLICT",
@@ -396,15 +410,20 @@ function parseLegacyJson(value: string): unknown {
   }
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (typeof value === "object" && value !== null) {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
+function describeTemporalGenerationMismatch(
+  state: Readonly<Record<string, unknown>>
+): string | null {
+  const expected: ReadonlyArray<readonly [string, string]> = [
+    ["assertion_schema_generation", TEMPORAL_ASSERTION_SCHEMA_GENERATION],
+    ["assertion_event_contract_generation", TEMPORAL_ASSERTION_EVENT_CONTRACT_GENERATION],
+    ["projection_schema_generation", TEMPORAL_PROJECTION_SCHEMA_GENERATION]
+  ];
+  const mismatches = expected.flatMap(([field, value]) =>
+    state[field] === value
+      ? []
+      : [`${field} actual=${JSON.stringify(state[field])} expected=${JSON.stringify(value)}`]
+  );
+  return mismatches.length === 0 ? null : mismatches.join("; ");
 }
 
 function sha256(value: string): string {

@@ -49,7 +49,7 @@ export interface OpenAIEmbeddingClientOptions {
   // Injectable RNG for jitter (test determinism). Defaults to Math.random.
   readonly random?: () => number;
   // Diagnostics sink for retry activity. When unset, retries emit a structured
-  // console.warn so flakiness is never fully silent.
+  // process warning so flakiness is never fully silent.
   readonly onRetry?: (event: EmbeddingRetryEvent) => void;
 }
 
@@ -204,13 +204,7 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     }
 
     return Object.freeze(
-      data.map((entry, index) => {
-        if (!Array.isArray(entry.embedding) || entry.embedding.length === 0) {
-          throw new Error(`Embedding response ${index} did not include a valid vector.`);
-        }
-
-        return new Float32Array(entry.embedding);
-      })
+      data.map((entry, index) => parseEmbeddingVector(entry.embedding, index))
     );
   }
 
@@ -347,11 +341,27 @@ async function sleepEmbeddingRetry(delayMs: number): Promise<void> {
   });
 }
 
+function parseEmbeddingVector(embedding: unknown, index: number): Float32Array {
+  if (!Array.isArray(embedding) || embedding.length === 0) {
+    throw new Error(`Embedding response ${index} did not include a valid vector.`);
+  }
+  const values = new Float32Array(embedding.length);
+  for (let offset = 0; offset < embedding.length; offset += 1) {
+    const value = embedding[offset];
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new Error(`Embedding response ${index} contained a non-finite element.`);
+    }
+    values[offset] = value;
+  }
+  return values;
+}
+
 function defaultEmbeddingRetrySink(event: EmbeddingRetryEvent): void {
-  console.warn(
+  process.emitWarning(
     `Embedding request retry for host ${event.host} attempt ${event.attempt}/${event.maxAttempts} ` +
       `reason=${event.reason}${event.status === undefined ? "" : ` status=${event.status}`} ` +
-      `backoff=${event.delayMs}ms`
+      `backoff=${event.delayMs}ms`,
+    { code: "ALAYA_EMBEDDING_REQUEST_RETRY" }
   );
 }
 

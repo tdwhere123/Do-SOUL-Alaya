@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rm, stat, unlink, writeFile, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveStoredFilePath } from "@do-soul/alaya-core";
@@ -17,8 +18,22 @@ import {
 } from "@do-soul/alaya-protocol";
 import { registerFileRoutes } from "../../routes/workspace/files/files.js";
 
+const fsActual = vi.hoisted(() => {
+  type FsPromises = typeof import("node:fs/promises");
+  return {
+    chmod: null as FsPromises["chmod"] | null,
+    mkdir: null as FsPromises["mkdir"] | null,
+    writeFile: null as FsPromises["writeFile"] | null,
+    unlink: null as FsPromises["unlink"] | null
+  };
+});
+
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
+  fsActual.chmod = actual.chmod;
+  fsActual.mkdir = actual.mkdir;
+  fsActual.writeFile = actual.writeFile;
+  fsActual.unlink = actual.unlink;
   return {
     ...actual,
     readFile: vi.fn(),
@@ -497,5 +512,69 @@ describe("files download route", () => {
       success: false,
       error: "File access denied"
     });
+  });
+});
+
+describe("files upload route real disk", () => {
+  let filesDirectory: string;
+
+  beforeEach(async () => {
+    filesDirectory = await mkdtemp(path.join(tmpdir(), "alaya-files-upload-"));
+    mockedMkdir.mockImplementation(fsActual.mkdir!);
+    mockedChmod.mockImplementation(fsActual.chmod!);
+    mockedWriteFile.mockImplementation(fsActual.writeFile!);
+    mockedUnlink.mockImplementation(fsActual.unlink!);
+  });
+
+  afterEach(async () => {
+    mockedMkdir.mockReset();
+    mockedChmod.mockReset();
+    mockedWriteFile.mockReset();
+    mockedUnlink.mockReset();
+    await rm(filesDirectory, { recursive: true, force: true });
+  });
+
+  it("creates a 0o700 directory and deletes the file when persistence fails", async () => {
+    const createWithEvent = vi.fn(async () => {
+      throw new Error("database write failed");
+    });
+    const app = new Hono();
+    app.onError((error, context) => context.json({ success: false, error: error.message }, 500));
+    registerFileRoutes(app, {
+      workspaceService: {
+        getById: vi.fn(async (workspaceId: string) => ({ workspace_id: workspaceId }))
+      },
+      runService: {
+        getById: vi.fn(async (runId: string) => ({ run_id: runId, workspace_id: "ws-1" }))
+      },
+      fileRepo: {
+        findById: vi.fn(),
+        createWithEvent
+      } as never,
+      eventLogRepo: {
+        append: createAuditEventLogAppend()
+      },
+      runtimeNotifier: {
+        notifyEntry: vi.fn()
+      },
+      filesDirectory
+    });
+
+    const response = await app.request("/files", {
+      method: "POST",
+      body: uploadFormData({
+        file: new File(["hello"], "notes.txt", { type: "text/plain" }),
+        workspace_id: "ws-1"
+      })
+    });
+
+    expect(response.status).toBe(500);
+    expect(createWithEvent).toHaveBeenCalledOnce();
+    const directoryStat = await stat(filesDirectory);
+    expect(directoryStat.isDirectory()).toBe(true);
+    if (process.platform !== "win32") {
+      expect(directoryStat.mode & 0o777).toBe(0o700);
+    }
+    expect(await readdir(filesDirectory)).toEqual([]);
   });
 });

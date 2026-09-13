@@ -1,6 +1,8 @@
 // invariant: a per-key in-process async mutex. This is defense-in-depth
 // for one process only; storage-level CAS or lease ports carry durable
 // multi-process correctness for read-decide-write paths.
+// Soul cannot import core, so packages/soul keeps a sibling copy.
+// Delete that copy when a protocol (or other jointly reachable) owner exists.
 // see also: packages/core/src/governance/reconciliation/reconciliation-service.ts
 
 export class KeyedMutex {

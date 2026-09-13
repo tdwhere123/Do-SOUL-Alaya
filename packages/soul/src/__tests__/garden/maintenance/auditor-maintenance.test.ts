@@ -143,6 +143,36 @@ describe("Auditor", () => {  it("assesses cold start and generates draft candida
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
+  it("fails closed on crystallization mutation when eventLogRepo is missing", async () => {
+    const { auditor, bootstrappingPort } = createAuditor({
+      omitEventLogRepo: true,
+      patterns: [{ pattern_key: "pattern-a", frequency: 4 }]
+    });
+
+    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.CRYSTALLIZATION_SCAN }));
+
+    expect(result.success).toBe(false);
+    expect(result.error_message).toMatch(/eventLogRepo/);
+    expect(bootstrappingPort.createSynthesisCandidate).not.toHaveBeenCalled();
+  });
+
+  it("does not create a crystallization candidate when EventLog append fails", async () => {
+    const { auditor, bootstrappingPort } = createAuditor({
+      patterns: [{ pattern_key: "pattern-b", frequency: 5 }],
+      eventLogRepo: {
+        append: vi.fn(),
+        appendManyWithMutation: vi.fn(async () => {
+          throw new Error("event log crashed");
+        }) as NonNullable<AuditorDependencies["eventLogRepo"]>["appendManyWithMutation"]
+      }
+    });
+
+    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.CRYSTALLIZATION_SCAN }));
+
+    expect(result.success).toBe(false);
+    expect(bootstrappingPort.createSynthesisCandidate).not.toHaveBeenCalled();
+  });
+
 
   it("reports completion with success = true across all supported task kinds", async () => {
     const { auditor, scheduler } = createAuditor({

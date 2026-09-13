@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  isEnvFlagDisabled,
   parseDefaultOnFlag,
+  parseEnvBoolean,
   parseEnvOptionalNumber,
   parseEnvPositiveInt,
   parseRecallRuntimeConfigFromEnv,
@@ -8,6 +10,10 @@ import {
   readRecallUnitFloat,
   resetCoreConfigForTests
 } from "../../../runtime/config/index.js";
+import { parseEnvPositiveInt as parseGatewayPositiveInt } from
+  "../../../../../engine-gateway/src/mcp/env-value.js";
+import { isEnvFlagDisabled as isStorageEnvFlagDisabled } from
+  "../../../../../storage/src/sqlite/env-bool.js";
 
 describe("parseSourceRefRobust", () => {
   it.each([
@@ -79,5 +85,52 @@ describe("parseEnvPositiveInt", () => {
     expect(parseEnvPositiveInt(undefined, "ALAYA_MCP_TOOL_TIMEOUT_MS")).toBeUndefined();
     expect(() => parseEnvPositiveInt("60000ms", "ALAYA_MCP_TOOL_TIMEOUT_MS"))
       .toThrow(/ALAYA_MCP_TOOL_TIMEOUT_MS must be a positive integer/);
+  });
+});
+
+describe("env-value primitives stay consistent across former modules", () => {
+  it.each(["1", "true", "TRUE", " 1 "] as const)("boolean synonyms parse %j", (raw) => {
+    expect(parseEnvBoolean(raw, "FLAG")).toBe(true);
+  });
+
+  it.each(["0", "false", "FALSE", " 0 "] as const)("boolean off-synonyms parse %j", (raw) => {
+    expect(parseEnvBoolean(raw, "FLAG")).toBe(false);
+  });
+
+  it("rejects illegal boolean tokens", () => {
+    expect(() => parseEnvBoolean("maybe", "FLAG")).toThrow(/FLAG must be true, false, 1, or 0/);
+  });
+
+  it.each(["0", "false", "off", "no", "disabled"] as const)(
+    "disable tokens match across core and storage for %s",
+    (raw) => {
+      expect(isEnvFlagDisabled(raw, "FLAG")).toBe(true);
+      expect(isStorageEnvFlagDisabled(raw, "FLAG")).toBe(true);
+      expect(parseDefaultOnFlag(raw, "FLAG")).toBe(false);
+    }
+  );
+
+  it.each(["1", "true", "on", "yes", "enabled"] as const)(
+    "enable tokens match across core and storage for %s",
+    (raw) => {
+      expect(isEnvFlagDisabled(raw, "FLAG")).toBe(false);
+      expect(isStorageEnvFlagDisabled(raw, "FLAG")).toBe(false);
+      expect(parseDefaultOnFlag(raw, "FLAG")).toBe(true);
+    }
+  );
+
+  it("rejects illegal flag tokens in both core and storage", () => {
+    expect(() => isEnvFlagDisabled("maybe", "FLAG")).toThrow(/FLAG must be on, off, true, false, 1, or 0/);
+    expect(() => isStorageEnvFlagDisabled("maybe", "FLAG"))
+      .toThrow(/FLAG must be on, off, true, false, 1, or 0/);
+  });
+
+  it("parses the same positive integers in core and engine-gateway", () => {
+    expect(parseEnvPositiveInt("30", "KEY")).toBe(30);
+    expect(parseGatewayPositiveInt("30", "KEY")).toBe(30);
+    expect(parseEnvPositiveInt(undefined, "KEY")).toBeUndefined();
+    expect(parseGatewayPositiveInt(undefined, "KEY")).toBeUndefined();
+    expect(() => parseEnvPositiveInt("30ms", "KEY")).toThrow(/KEY must be a positive integer/);
+    expect(() => parseGatewayPositiveInt("30ms", "KEY")).toThrow(/KEY must be a positive integer/);
   });
 });

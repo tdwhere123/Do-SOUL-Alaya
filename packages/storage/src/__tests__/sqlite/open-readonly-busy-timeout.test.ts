@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it } from "vitest";
+import { StorageError } from "../../shared/errors.js";
 import { initDatabase } from "../../sqlite/db.js";
 import {
   READ_ONLY_BUSY_TIMEOUT_MS,
@@ -82,6 +83,31 @@ describe("openReadOnlyDatabase busy timeout", () => {
     })).toThrow(/SQLITE_BUSY/);
     expect(attempts).toBe(5);
     expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
+  it("retries a wrapped database-is-locked cause", () => {
+    let attempts = 0;
+    expect(withSqliteBusyRetry(() => {
+      attempts += 1;
+      if (attempts < 3) {
+        throw new StorageError(
+          "MIGRATION_FAILED",
+          "Failed to apply migration 001-init.sql",
+          Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY", errcode: 5 })
+        );
+      }
+      return "ready";
+    })).toBe("ready");
+    expect(attempts).toBe(3);
+  });
+
+  it("does not retry a generic resource-busy message", () => {
+    let attempts = 0;
+    expect(() => withSqliteBusyRetry(() => {
+      attempts += 1;
+      throw new Error("EBUSY: resource busy");
+    })).toThrow(/resource busy/);
+    expect(attempts).toBe(1);
   });
 });
 

@@ -328,10 +328,7 @@ describe("GardenScheduler", () => {  it("dispatches a tier-0 task for janitor an
     await expect(
       scheduler.dispatchNextMatchingTaskKind(GardenRole.JANITOR, [GardenTaskKind.TTL_CLEANUP])
     ).resolves.toMatchObject({ task_id: "task-valid-routing" });
-    expect(repo.findById(invalid.task_id)).toMatchObject({
-      status: "failed",
-      last_error_text: expect.stringContaining("does not match required tier")
-    });
+    expect(repo.findById(invalid.task_id)).toBeNull();
     expect(eventLog.append).toHaveBeenCalledWith(
       expect.objectContaining({
         event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,

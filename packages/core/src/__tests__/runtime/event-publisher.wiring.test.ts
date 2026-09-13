@@ -8,6 +8,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   EventPublisher,
+  EVENT_PUBLISHER_ADAPTER_FALLBACK_CODE,
   bindEventPublisher,
   type EventPublisherEventLogRepoPort,
   type EventPublisherInput
@@ -407,6 +408,63 @@ describe("EventPublisher wiring (fake EventLog repo)", () => {
 
   it("bindEventPublisher throws when neither publisher nor EventLog repo is provided", () => {
     expect(() => bindEventPublisher({ purpose: "TestService" })).toThrow(/requires an event publisher/);
+  });
+
+  it("emits an adapter-fallback diagnostic when notifier or hot state is omitted", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const entry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: WorkerStateChangedPayloadSchema.parse({
+        workerId: "worker-1",
+        state: "active",
+        previousState: "init"
+      })
+    });
+    bindEventPublisher({
+      eventLogRepo: createSingleEntryRepo(entry, []),
+      purpose: "TestService"
+    });
+    expect(emitWarning).toHaveBeenCalledWith(
+      expect.stringContaining("inert notifier/hot-state"),
+      expect.objectContaining({ code: EVENT_PUBLISHER_ADAPTER_FALLBACK_CODE })
+    );
+    emitWarning.mockRestore();
+  });
+
+  it("wakes an injected notifier when the adapter is given a subscriber", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const notifyEntry = vi.fn(async () => undefined);
+    const entry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: WorkerStateChangedPayloadSchema.parse({
+        workerId: "worker-1",
+        state: "active",
+        previousState: "init"
+      })
+    });
+    const publisher = bindEventPublisher({
+      eventLogRepo: createSingleEntryRepo(entry, []),
+      runtimeNotifier: { notify: vi.fn(), notifyEntry },
+      runHotStateService: { apply: vi.fn() },
+      purpose: "TestService"
+    });
+    await publisher.publish(toEventInput(entry));
+    expect(notifyEntry).toHaveBeenCalledWith(entry);
+    expect(emitWarning).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ code: EVENT_PUBLISHER_ADAPTER_FALLBACK_CODE })
+    );
+    emitWarning.mockRestore();
   });
 
   it("bindEventPublisher keeps class-instance EventLog `this` across append", async () => {

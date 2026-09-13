@@ -1,4 +1,5 @@
 import {
+  deepFreeze,
   GovernanceDriftLeaseSchema,
   SurfaceDriftOperationTypeSchema,
   type GovernanceDriftLease,
@@ -6,7 +7,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { isUniqueConstraintError } from "../garden/garden-task-errors.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 
 interface DriftLeaseRow {
@@ -18,8 +19,6 @@ interface DriftLeaseRow {
   readonly expires_at: string;
   readonly granted_at: string;
 }
-
-const SQLITE_CONSTRAINT_UNIQUE = "SQLITE_CONSTRAINT_UNIQUE";
 
 export interface DriftLeaseRepo {
   create(lease: Readonly<GovernanceDriftLease>): Readonly<GovernanceDriftLease>;
@@ -224,6 +223,3 @@ function parseSurfaceDriftOperationType(value: string): SurfaceDriftOperationTyp
   }
 }
 
-function isUniqueConstraintError(error: unknown): boolean {
-  return (error as { code?: unknown })?.code === SQLITE_CONSTRAINT_UNIQUE;
-}

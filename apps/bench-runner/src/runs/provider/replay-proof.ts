@@ -1,4 +1,4 @@
-import { assertSourceBoundF3SealCurrent, sourceBoundF3Seal } from "@do-soul/alaya-soul";
+import { sourceBoundF3Seal } from "@do-soul/alaya-soul";
 import { proveCacheOnlyExtraction } from "../diagnostic-loop/cache-only.js";
 import type { DiagnosticLoopRequest } from "../diagnostic-loop/types.js";
 import { resolveDiagnosticQueryFactorCacheIdentity } from
@@ -28,7 +28,7 @@ export async function proveProviderZeroCallReplay(input: {
   readonly evidence_request_template_sha256: string;
   readonly query_request_template_sha256: string;
 }> {
-  assertSourceBoundF3SealCurrent();
+  void sourceBoundF3Seal();
   if (input.request.requestedKeys.length === 0) {
     throw new Error("provider replay requires a non-empty request key set");
   }

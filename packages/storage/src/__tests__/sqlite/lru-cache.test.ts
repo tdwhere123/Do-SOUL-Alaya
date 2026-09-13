@@ -57,6 +57,23 @@ describe("LruCache", () => {
     expect(cache.size).toBe(2);
   });
 
+  it("setWithEvictionNotice reports the evicted recency victim", () => {
+    const cache = new LruCache<string, string>(2);
+    const evicted: Array<readonly [string, string]> = [];
+    cache.set("a", "1");
+    cache.set("b", "2");
+    cache.get("a");
+    cache.setWithEvictionNotice("c", "3", (key, value) => {
+      evicted.push([key, value]);
+    });
+
+    expect(evicted).toEqual([["b", "2"]]);
+    expect(cache.get("a")).toBe("1");
+    expect(cache.get("c")).toBe("3");
+    expect(cache.get("b")).toBeUndefined();
+    expect(cache.size).toBe(2);
+  });
+
   it("set does not deleteOldest a sole blocked entry", () => {
     const cache = new LruCache<string, string>(1);
     cache.set("blocked", "1");

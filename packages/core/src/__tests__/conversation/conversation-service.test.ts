@@ -194,7 +194,8 @@ describe("ConversationService", () => {
       expect.objectContaining({
         workspace_id: "workspace-1",
         run_id: "run-1",
-        surface_id: "surface://cli/main"
+        surface_id: "surface://cli/main",
+        source_observed_at: "2026-04-29T00:00:00.000Z"
       })
     );
     expect(signalReceiver.receiveSignal).toHaveBeenCalledWith({
@@ -202,7 +203,7 @@ describe("ConversationService", () => {
       source_observation: {
         authority: "trusted_host_event",
         source_event_id: "event-2",
-        observed_at: expect.any(String)
+        observed_at: "2026-04-29T00:00:00.000Z"
       }
     });
     expect(sessionOverridePromotion.evaluateActiveForRun).toHaveBeenCalledWith({
@@ -263,8 +264,69 @@ describe("ConversationService", () => {
       source_observation: {
         authority: "trusted_host_event",
         source_event_id: "event-1",
-        observed_at: expect.not.stringContaining("2020-01-01")
+        observed_at: "2026-04-29T00:00:00.000Z"
       }
+    }));
+  });
+
+  it("binds evidence occurred_at to the user message time instead of provider completion", async () => {
+    const sourceTime = "2026-04-01T10:00:00.000Z";
+    const signalReceiver = {
+      receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
+        signal,
+        triage_result: "deferred" as const,
+        materialization: null
+      }))
+    };
+    const { service } = createService({
+      signalReceiver,
+      gardenComputeProvider: {
+        provider_kind: "official_api",
+        compile: vi.fn(async () => [createSignal()])
+      }
+    });
+
+    await service.orchestrateMemoryTurn({
+      runId: "run-1",
+      userMessage: createMessage("msg-user", "user", "remember this at T", sourceTime),
+      assistantMessage: createMessage("msg-assistant", "assistant", "noted")
+    });
+    await flushBackgroundTasks();
+
+    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith(expect.objectContaining({
+      source_observation: {
+        authority: "trusted_host_event",
+        source_event_id: "event-1",
+        observed_at: sourceTime
+      }
+    }));
+  });
+
+  it("leaves source observation unknown when the user message has no source time", async () => {
+    const signalReceiver = {
+      receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
+        signal,
+        triage_result: "deferred" as const,
+        materialization: null
+      }))
+    };
+    const { service } = createService({
+      signalReceiver,
+      gardenComputeProvider: {
+        provider_kind: "official_api",
+        compile: vi.fn(async () => [createSignal()])
+      }
+    });
+
+    await service.orchestrateMemoryTurn({
+      runId: "run-1",
+      userMessage: createMessage("msg-user", "user", "no source time", null),
+      assistantMessage: createMessage("msg-assistant", "assistant", "noted")
+    });
+    await flushBackgroundTasks();
+
+    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith(expect.objectContaining({
+      source_observation: null
     }));
   });
 

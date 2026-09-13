@@ -7,31 +7,7 @@ import {
   prepareWorkspaceStatements,
   type WorkspaceStatements
 } from "./statements/workspace-statements.js";
-
-// Walk the underlying better-sqlite3 error and any wrapped causes to detect
-// a UNIQUE-constraint collision on a specific qualified column. Driver
-// errors typically set `code` to "SQLITE_CONSTRAINT_UNIQUE" and include
-// the constraint string in the message; the cause walk handles later
-// error-wrapping by upstream layers.
-function isUniqueConstraintError(error: unknown, qualifiedColumn: string): boolean {
-  let current: unknown = error;
-  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
-    const codeValue = (current as { readonly code?: unknown }).code;
-    const messageValue = (current as { readonly message?: unknown }).message;
-    const isUniqueCode =
-      typeof codeValue === "string" && codeValue.startsWith("SQLITE_CONSTRAINT");
-    const matchesColumn =
-      typeof messageValue === "string" && messageValue.includes(qualifiedColumn);
-    if (isUniqueCode && matchesColumn) {
-      return true;
-    }
-    if (matchesColumn && typeof messageValue === "string" && messageValue.includes("UNIQUE")) {
-      return true;
-    }
-    current = (current as { readonly cause?: unknown }).cause;
-  }
-  return false;
-}
+import { isUniqueConstraintError } from "../garden/garden-task-errors.js";
 
 export type WorkspaceCreateInput = Omit<Workspace, "created_at" | "archived_at" | "repo_path"> & {
   readonly repo_path?: Workspace["repo_path"];

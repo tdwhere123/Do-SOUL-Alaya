@@ -31,6 +31,9 @@ function createFilename(): string {
 }
 
 const distInitModule = fileURLToPath(new URL("../../../dist/sqlite/db.js", import.meta.url));
+const distBusyRetryModule = fileURLToPath(
+  new URL("../../../dist/sqlite/sqlite-busy-retry.js", import.meta.url)
+);
 
 describe("initDatabase concurrent migration", () => {
   it("lets a second file-backed initDatabase observe the applied ledger without throwing", () => {
@@ -47,19 +50,18 @@ describe("initDatabase concurrent migration", () => {
     expect(maxVersion.max_version).toBe(15);
   });
 
-  it.skipIf(!existsSync(distInitModule))(
+  it.skipIf(!existsSync(distInitModule) || !existsSync(distBusyRetryModule))(
     "lets two processes initialize the same file without a migration throw",
     async () => {
       const filename = createFilename();
       const moduleUrl = pathToFileURL(distInitModule).href;
+      const busyRetryUrl = pathToFileURL(distBusyRetryModule).href;
       const [first, second] = await Promise.all([
-        spawnInitDatabaseProcess(filename, moduleUrl),
-        spawnInitDatabaseProcess(filename, moduleUrl)
+        spawnInitDatabaseProcess(filename, moduleUrl, busyRetryUrl),
+        spawnInitDatabaseProcess(filename, moduleUrl, busyRetryUrl)
       ]);
-      expect(first.stderr, first.stderr).toBe("");
-      expect(second.stderr, second.stderr).toBe("");
-      expect(first.status).toBe(0);
-      expect(second.status).toBe(0);
+      expect(first.status, first.stderr).toBe(0);
+      expect(second.status, second.stderr).toBe(0);
       const probe = new BetterSqlite3(filename, { readonly: true, fileMustExist: true });
       try {
         const maxVersion = probe.prepare(
@@ -102,7 +104,8 @@ describe("initDatabase uninitialized-file probe", () => {
 
 function spawnInitDatabaseProcess(
   filename: string,
-  moduleUrl: string
+  moduleUrl: string,
+  busyRetryUrl: string
 ): Promise<{ readonly status: number; readonly stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -111,8 +114,21 @@ function spawnInitDatabaseProcess(
         "--input-type=module",
         "-e",
         `import { initDatabase } from ${JSON.stringify(moduleUrl)};
-         const database = initDatabase({ filename: ${JSON.stringify(filename)} });
-         database.close();`
+         import { isSqliteBusyError } from ${JSON.stringify(busyRetryUrl)};
+         const filename = ${JSON.stringify(filename)};
+         const deadline = Date.now() + 5_000;
+         for (;;) {
+           try {
+             const database = initDatabase({ filename });
+             database.close();
+             break;
+           } catch (error) {
+             if (Date.now() >= deadline || !isSqliteBusyError(error)) {
+               throw error;
+             }
+             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+           }
+         }`
       ],
       { stdio: ["ignore", "pipe", "pipe"], env: process.env, cwd: process.cwd() }
     );

@@ -154,7 +154,7 @@ describe("evidence fact-frame formation", () => {
     expect(result.searchProjections).toEqual([]);
   });
 
-  it("records a normalizer invocation failure as rejected", () => {
+  it("records a normalizer invocation failure as producer unavailability", () => {
     const result = materializeEvidenceFactFrameFormation({
       sourceAssertion: assertion,
       sourceHash: "sha256:source",
@@ -165,9 +165,10 @@ describe("evidence fact-frame formation", () => {
     });
 
     expect(result.capture).toMatchObject({
-      status: "rejected",
+      status: "unavailable",
       producer_operator_id: "throwing_normalizer_v1"
     });
+    expect(result.capture.status).not.toBe("rejected");
     expect(result.searchProjections).toEqual([]);
   });
 

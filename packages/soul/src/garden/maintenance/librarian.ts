@@ -15,8 +15,8 @@ import {
 import type { GraphEdgeCreationPort } from "../materialization/materialization-router.js";
 import {
   PATH_PLASTICITY_TASK_DEFAULTS,
-  resolvePathPlasticitySinceIso,
-  resolvePathPlasticityUntilIso,
+  parsePathPlasticityRevisionCursor,
+  resolvePathPlasticitySinceRevision,
   runPathPlasticityWithinBudget,
   type PathPlasticityComputePort,
   type PathPlasticityPendingPort
@@ -351,13 +351,20 @@ export class Librarian {
         return result;
       }
 
-      const sinceIso = resolvePathPlasticitySinceIso(task.target_object_refs, completedAt);
-      const untilIso = resolvePathPlasticityUntilIso(task.target_object_refs, completedAt);
+      const untilRevision = parsePathPlasticityRevisionCursor(task.target_object_refs[1]);
+      if (untilRevision === undefined) {
+        const result = this.createSuccessResult(task, completedAt, [], [
+          "path_plasticity_update: skipped because EventLog revision cursor is missing"
+        ]);
+        await this.scheduler.reportCompletion(result);
+        return result;
+      }
+      const sinceRevision = resolvePathPlasticitySinceRevision(task.target_object_refs, 0);
       const computed = await runPathPlasticityWithinBudget(
         (abortSignal, onMutationBoundaryEntered) => pathPlasticityPort.computeAndApplyPlasticity({
           workspaceId: task.workspace_id,
-          sinceIso,
-          untilIso,
+          sinceRevision,
+          untilRevision,
           abortSignal,
           onMutationBoundaryEntered
         }),
@@ -366,12 +373,12 @@ export class Librarian {
       );
       await pathPlasticityPort.markProcessed?.({
         workspaceId: task.workspace_id,
-        processedThroughIso: untilIso,
+        processedThroughRevision: untilRevision,
         processedAuditEventId: null
       });
 
       const result = this.createSuccessResult(task, completedAt, computed.affectedPathIds, [
-        `path_plasticity_update: reinforced=${computed.reinforced} weakened=${computed.weakened} retired=${computed.retired} since=${sinceIso} until=${untilIso} budget_ms=${this.pathPlasticityBudgetMs}`
+        `path_plasticity_update: reinforced=${computed.reinforced} weakened=${computed.weakened} retired=${computed.retired} since_revision=${sinceRevision} until_revision=${untilRevision} budget_ms=${this.pathPlasticityBudgetMs}`
       ]);
       await this.scheduler.reportCompletion(result);
       return result;

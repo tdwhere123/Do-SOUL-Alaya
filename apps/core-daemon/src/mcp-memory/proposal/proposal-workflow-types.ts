@@ -7,14 +7,18 @@ import type {
   SoulPendingProposalSummary,
   SynthesisCapsule
 } from "@do-soul/alaya-protocol";
+import { McpToolError } from "../tool/mcp-tool-error.js";
 
 export interface McpMemoryProposalWorkflowEventLogRepo {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
 }
 
-export class SourceDeliveryAnchorValidationError extends Error {
-  public readonly code = "VALIDATION";
+export class SourceDeliveryAnchorValidationError extends McpToolError {
+  public constructor(message: string) {
+    super("VALIDATION", message);
+    this.name = "SourceDeliveryAnchorValidationError";
+  }
 }
 
 export type ProposalResolutionEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;

@@ -2,6 +2,7 @@
 // sections sharing a key so two cannot interleave. Garden runs
 // fire-and-forget in one process, so a process-local lock suffices.
 // Local to soul because invariant §6 forbids Garden importing packages/core.
+// Delete this copy when a protocol (or other jointly reachable) owner exists.
 export class KeyedMutex {
   private readonly tails = new Map<string, Promise<void>>();
 

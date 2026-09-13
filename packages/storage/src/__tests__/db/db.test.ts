@@ -196,6 +196,7 @@ describe("StorageDatabase reopen cache handling", () => {
     }
   }, 30_000);
 
+  // Windows: 32 file-backed inits each apply the full migration set.
   it("does not close caller-owned database handles when cache pressure evicts their entries", () => {
     const closedContext = createTempDatabasePath();
     directories.push(closedContext.directory);
@@ -217,7 +218,7 @@ describe("StorageDatabase reopen cache handling", () => {
     expect(closedDatabase.isClosed()).toBe(false);
     expect(oldestCachedDatabase.isClosed()).toBe(false);
     expect(oldestCachedDatabase.connection.prepare("SELECT 1 AS value").get()).toEqual({ value: 1 });
-  }, 20_000);
+  }, process.platform === "win32" ? 60_000 : 20_000);
 });
 
 describe("initDatabase forward-version guard", () => {

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   BOUNDED_EVIDENCE_ARRAY_MAX,
@@ -17,6 +16,11 @@ export {
   TEMPORAL_RELATION_PROJECTION_PROFILES,
   type TemporalRelationProjectionProfile
 } from "./relation-projection-policy.js";
+export {
+  RELATION_ASSERTION_EVENT_CONTRACT_GENERATION,
+  RELATION_ASSERTION_SCHEMA_GENERATION,
+  RELATION_PATH_PROJECTION_SCHEMA_GENERATION
+} from "./relation-generation.js";
 
 const relationAssertionResolutionValues = [
   "contradicted",
@@ -95,16 +99,34 @@ export const RelationAssertionEvidenceReceiptSchema = z
 
 const Sha256DigestSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 
+// SHA-256 of empty bytes / "[]". Literals keep this leaf free of node:crypto.
+const EMPTY_BYTES_SHA256 =
+  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+const EMPTY_JSON_ARRAY_SHA256 =
+  "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945";
+
 export function emptyBytesSha256(): string {
-  return createHash("sha256").update(Buffer.alloc(0)).digest("hex");
+  return EMPTY_BYTES_SHA256;
 }
 
 export function emptyJsonArraySha256(): string {
-  return createHash("sha256").update("[]", "utf8").digest("hex");
+  return EMPTY_JSON_ARRAY_SHA256;
+}
+
+export function sourceTextDigest(source: string, sha256: (value: string) => string): string;
+export function sourceTextDigest(
+  source: string | null,
+  sha256: (value: string) => string
+): string | null;
+export function sourceTextDigest(
+  source: string | null,
+  sha256: (value: string) => string
+): string | null {
+  return source === null ? null : `sha256:${sha256(source)}`;
 }
 
 // On-disk temporal bootstrap identity is SHA-256 of empty bytes, not a structured empty hash.
-export const EMPTY_RELATION_HISTORY_DIGEST = emptyBytesSha256();
+export const EMPTY_RELATION_HISTORY_DIGEST = EMPTY_BYTES_SHA256;
 
 export const RelationFormationSourceKind = {
   EVENT_LOG_ENTRY: "event_log_entry",

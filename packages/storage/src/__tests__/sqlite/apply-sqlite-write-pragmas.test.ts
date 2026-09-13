@@ -23,6 +23,16 @@ describe("applySqliteWritePragmas", () => {
     return new Database(join(root, "probe.db"));
   }
 
+  it("sets busy_timeout before journal_mode so a peer IMMEDIATE lock can wait", () => {
+    const calls: string[] = [];
+    applySqliteWritePragmas(
+      { pragma(source: string) { calls.push(source); } },
+      { busyTimeoutMs: 5_000 }
+    );
+    expect(calls[0]).toBe("busy_timeout = 5000");
+    expect(calls).toContain("journal_mode = WAL");
+  });
+
   it("does not set cache_size or temp_store on the shared write path", () => {
     const db = openProbe();
     applySqliteWritePragmas(db, { busyTimeoutMs: 5_000 });

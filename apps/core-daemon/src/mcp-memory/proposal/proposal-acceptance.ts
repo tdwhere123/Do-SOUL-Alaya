@@ -11,6 +11,7 @@ import {
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import type { McpMemoryToolCallContext } from "../tool/tool-handler.js";
+import { createWorkflowError } from "../tool/mcp-tool-error.js";
 import type { McpMemoryProposalWorkflowDependencies } from "./proposal-workflow.js";
 import {
   prepareAcceptedPrivacyErase,
@@ -490,8 +491,6 @@ function parseSynthesisCapsuleForAccept(value: unknown): SynthesisCapsule {
 function createAcceptanceError(
   code: "NOT_FOUND" | "VALIDATION" | "NEEDS_CONTEXT",
   message: string
-): Error & { readonly code: string } {
-  const error = new Error(message) as Error & { code: string };
-  error.code = code;
-  return error;
+): Error {
+  return createWorkflowError(code, message);
 }

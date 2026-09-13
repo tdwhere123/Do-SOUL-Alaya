@@ -3,6 +3,7 @@ import {
   GardenTaskKind,
   GardenTier,
   MemoryGovernanceEventType,
+  SoulMemoryStateChangedPayloadSchema,
   SoulMemoryTierChangedPayloadSchema,
   type AuditorEventLogPort,
   type EventLogEntry,
@@ -208,6 +209,11 @@ export class Janitor {
     const objectIds = expiredObjects.slice(0, JANITOR_CONSTANTS.BATCH_SIZE).map((entry) => entry.object_id);
 
     if (objectIds.length > 0) {
+      const expiredBatch = expiredObjects.slice(0, JANITOR_CONSTANTS.BATCH_SIZE);
+      await this.publishEventLogsMutation(
+        this.buildTtlCleanupEvents(task, expiredBatch, completedAt),
+        () => undefined as never
+      );
       await this.cleanupPort.removeExpiredObjects(task.workspace_id, objectIds);
     }
 
@@ -253,6 +259,33 @@ export class Janitor {
       this.buildHotIndexDemotionEvents(task, objectIds, this.now()),
       () => this.tieringPort.demoteToWarm(task.workspace_id, objectIds)
     );
+  }
+
+  private buildTtlCleanupEvents(
+    task: GardenTaskDescriptor,
+    expiredObjects: readonly ExpiredControlPlaneObject[],
+    occurredAt: string
+  ): readonly EventLogDraft[] {
+    return expiredObjects.map((expired) => ({
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
+      entity_type: expired.object_kind,
+      entity_id: expired.object_id,
+      workspace_id: task.workspace_id,
+      run_id: task.run_id,
+      caused_by: this.role,
+      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
+        object_id: expired.object_id,
+        object_kind: expired.object_kind,
+        workspace_id: task.workspace_id,
+        run_id: task.run_id,
+        from_state: "active",
+        to_state: "expired",
+        reason_code: "ttl_cleanup",
+        caused_by: "system",
+        evidence_refs: null,
+        occurred_at: occurredAt
+      })
+    }));
   }
 
   private buildHotIndexDemotionEvents(

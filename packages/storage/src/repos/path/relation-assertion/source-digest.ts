@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { EventLogEntry } from "@do-soul/alaya-protocol";
+import { canonicalJson, type EventLogEntry } from "@do-soul/alaya-protocol";
 
 export type RelationFormationEventSource = Pick<
   EventLogEntry,
@@ -19,7 +19,7 @@ export function digestRelationFormationEventSource(
   event: Readonly<RelationFormationEventSource>
 ): string {
   return createHash("sha256")
-    .update(canonicalStringify({
+    .update(canonicalJson({
       event_id: event.event_id,
       event_type: event.event_type,
       entity_type: event.entity_type,
@@ -32,18 +32,4 @@ export function digestRelationFormationEventSource(
       created_at: event.created_at
     }), "utf8")
     .digest("hex");
-}
-
-function canonicalStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalStringify).join(",")}]`;
-  }
-  if (typeof value === "object" && value !== null) {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, nested]) => `${key}:${canonicalStringify(nested)}`)
-      .join(",")}}`;
-  }
-  const scalar = JSON.stringify(value);
-  return scalar === undefined ? "undefined" : scalar;
 }

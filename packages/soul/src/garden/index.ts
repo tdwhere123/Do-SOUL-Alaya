@@ -235,7 +235,9 @@ export {
 } from "./materialization/path-graph-snapshotter.js";
 export {
   PATH_PLASTICITY_TASK_DEFAULTS,
-  resolvePathPlasticitySinceIso,
+  parsePathPlasticityRevisionCursor,
+  resolvePathPlasticitySinceRevision,
+  resolvePathPlasticityUntilRevision,
   type PathPlasticityComputePort,
   type PathPlasticityComputeResult
 } from "./materialization/path-plasticity-task.js";
@@ -279,22 +281,13 @@ export {
 } from "./ingestion/schema-grounding.js";
 export { LocalHeuristics } from "./triage/local-heuristics.js";
 export {
-  SessionOverrideRemediation,
-  type PromotionOutcome,
-  type SessionOverrideRemediationClaimPort,
-  type SessionOverrideRemediationDependencies,
-  type SessionOverrideRemediationEventLogPort,
-  type SessionOverrideRemediationMemoryPort,
-  type SessionOverrideRemediationTargetObjectResolverPort,
-  type SessionOverrideRemediationWarnPort
-} from "./maintenance/session-override-remediation.js";
-export {
   evaluateBacklogPressure,
   type BacklogPressureThresholds,
   type BacklogPressureTransition
 } from "./scheduling/backlog-telemetry.js";
 export {
   GardenScheduler,
+  MAX_PENDING_BACKLOG_WARNING_TRANSITIONS,
   type GardenBacklogWarningTransitionSignal,
   type GardenSchedulerConfig,
   type GardenSchedulerEventLogPort

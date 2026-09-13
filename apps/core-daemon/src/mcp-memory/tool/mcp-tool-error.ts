@@ -5,13 +5,22 @@ export type McpToolWorkflowErrorCode = Extract<
   "NOT_FOUND" | "VALIDATION" | "NEEDS_CONTEXT" | "UNAVAILABLE"
 >;
 
+const MCP_TOOL_ERROR_BRAND = Symbol.for("do-soul.alaya.McpToolError");
+
 export class McpToolError extends Error {
   public readonly code: McpMemoryToolErrorCode;
+  public readonly [MCP_TOOL_ERROR_BRAND] = true as const;
 
   public constructor(code: McpMemoryToolErrorCode, message: string) {
     super(message);
     this.name = "McpToolError";
     this.code = code;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+
+  // Brand is Symbol.for, so instanceof still holds across src/dist copies.
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return typeof value === "object" && value !== null && MCP_TOOL_ERROR_BRAND in value;
   }
 }
 

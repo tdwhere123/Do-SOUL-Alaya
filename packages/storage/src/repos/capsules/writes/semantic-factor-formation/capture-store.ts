@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  sourceTextDigest,
   verifyOpenSemanticFactorFormationCapture,
   verifyEvidenceOsfSemanticCompleteness,
   type EvidenceCapsule,
@@ -7,6 +8,8 @@ import {
   type OpenSemanticFactorFormationCapture,
   type EvidenceOsfSemanticCompletenessReceipt
 } from "@do-soul/alaya-protocol";
+
+export { sourceTextDigest };
 
 export type EvidenceSemanticFactorFormationInsertArgs = readonly [
   evidenceObjectId: string,
@@ -33,7 +36,7 @@ export function prepareSemanticFactorFormationInsert(
     throw new Error("evidence semantic factor formation must contain an evidence graph");
   }
   if (verified.source_sha256 !== null &&
-      verified.source_sha256 !== sourceDigest(capsule.excerpt)) {
+      verified.source_sha256 !== sourceTextDigest(capsule.excerpt, sha256)) {
     throw new Error("semantic factor formation source does not match its evidence capsule");
   }
   const certified = completeness === undefined ? null : completeness;
@@ -57,10 +60,6 @@ export function prepareSemanticFactorFormationInsert(
     verified.capture_digest,
     certified === null ? null : JSON.stringify(certified)
   ];
-}
-
-function sourceDigest(source: string | null): string | null {
-  return source === null ? null : `sha256:${sha256(source)}`;
 }
 
 function sha256(value: string): string {

@@ -181,13 +181,6 @@
     "docs/bench-history"
   ],
   "existing_artifact_reference_exceptions": {
-    "apps/core-daemon/src/ai/reconciliation-llm-decision.ts": {
-      "max_occurrences_by_fragment": {
-        ".do-it/bench-runs": 0,
-        "docs/bench-history": 1
-      },
-      "reason": "Named post-lock authority decision: production/provider cache currently lives under docs/bench-history."
-    },
     "apps/inspector/src/runtime/app.ts": {
       "max_occurrences_by_fragment": {
         ".do-it/bench-runs": 0,
@@ -1145,8 +1138,8 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 2413,
-      "expected_sha256": "8b0e0d3f22d09a8da5b0aa4490c3dea4d5f91bc65bb8e0239259c0170bf6e72a"
+      "expected_count": 2418,
+      "expected_sha256": "8ede27cfeae0f78e6628c1634da4d81e083472db418932304250e5e0ae6ca267"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
@@ -1157,8 +1150,8 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 908,
-      "expected_sha256": "59dcfb60e687b0f1a2bb4ea22f18cc86f7b8df6a4b272f1b9fdb14c209374e40"
+      "expected_count": 913,
+      "expected_sha256": "17b30c9d1e3384193631a9b5563e180c3fb77f0949eee7a5c486b271d3e346da"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",
@@ -1187,8 +1180,8 @@
     {
       "specifier": "@do-soul/alaya-soul",
       "path": "packages/soul/src/index.ts",
-      "expected_count": 245,
-      "expected_sha256": "02511099650b41c08d47a578c6f0cd6b31b673438bf126a8452f08b987344aef"
+      "expected_count": 240,
+      "expected_sha256": "7dda30bfe11215b379792bec1d261ce26fddb5501f9c69773965392ac130b72b"
     },
     {
       "specifier": "@do-soul/alaya-storage",

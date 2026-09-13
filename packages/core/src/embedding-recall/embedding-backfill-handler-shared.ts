@@ -1,7 +1,9 @@
-import { createHash } from "node:crypto";
 import { AlayaError, StorageTier, type MemoryEntry } from "@do-soul/alaya-protocol";
+import { hashMemoryContent } from "./helpers.js";
 import type { HqProvider } from "./embed-text-resolver.js";
 import type { EmbeddingProviderPort, EmbeddingVectorRecord } from "./embedding-recall-service.js";
+
+export { hashMemoryContent };
 
 export interface EmbeddingBackfillMemoryRepoPort {
   findByWorkspaceId(
@@ -185,10 +187,6 @@ export function buildEmbeddingBackfillBatches(
   }
 
   return Object.freeze(batches.map((batch) => Object.freeze([...batch])));
-}
-
-export function hashMemoryContent(content: string): string {
-  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
 export const EMBEDDING_CONTENT_HASH_STALE_REASON = "embedding_content_hash_stale";

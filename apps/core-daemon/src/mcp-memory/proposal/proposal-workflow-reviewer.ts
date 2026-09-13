@@ -58,5 +58,15 @@ export function normalizeResolutionError(error: unknown): unknown {
   if (error instanceof Error && "code" in error && error.code === "VALIDATION_FAILED") {
     return createWorkflowError("VALIDATION", error.message);
   }
+  if (
+    error instanceof Error &&
+    "code" in error &&
+    (error.code === "VALIDATION" ||
+      error.code === "NOT_FOUND" ||
+      error.code === "NEEDS_CONTEXT" ||
+      error.code === "UNAVAILABLE")
+  ) {
+    return createWorkflowError(error.code, error.message);
+  }
   return error;
 }

@@ -1,3 +1,9 @@
+import {
+  DEFAULT_SQLITE_BUSY_RETRY_LIMIT,
+  DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS,
+  withSqliteBusyRetry
+} from "./sqlite-busy-retry.js";
+
 export interface SqliteWritePragmaConnection {
   pragma(source: string): unknown;
 }
@@ -18,15 +24,21 @@ export function applySqliteWritePragmas(
   connection: SqliteWritePragmaConnection,
   options: ApplySqliteWritePragmasOptions
 ): void {
-  connection.pragma("foreign_keys = ON");
-  // WAL keeps readers independent; timeout bounds lock waits for writers.
-  connection.pragma("journal_mode = WAL");
-  connection.pragma(`busy_timeout = ${options.busyTimeoutMs}`);
-  connection.pragma("synchronous = NORMAL");
-  if (options.analysisLimit !== undefined) {
-    // Bounded planner sampling avoids multi-second full scans on large databases.
-    connection.pragma(`analysis_limit = ${options.analysisLimit}`);
-  }
+  withSqliteBusyRetry(() => {
+    // Timeout before journal_mode: WAL conversion can SQLITE_BUSY and ignore a later timeout.
+    connection.pragma(`busy_timeout = ${options.busyTimeoutMs}`);
+    connection.pragma("foreign_keys = ON");
+    connection.pragma("journal_mode = WAL");
+    connection.pragma("synchronous = NORMAL");
+    if (options.analysisLimit !== undefined) {
+      // Bounded planner sampling avoids multi-second full scans on large databases.
+      connection.pragma(`analysis_limit = ${options.analysisLimit}`);
+    }
+  }, {
+    retryLimit: DEFAULT_SQLITE_BUSY_RETRY_LIMIT,
+    budgetMs: options.busyTimeoutMs,
+    sleepMs: DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS
+  });
 }
 
 export function isSqliteWriteQueueSessionPragmas(

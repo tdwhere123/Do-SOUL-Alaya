@@ -6,12 +6,6 @@
  */
 
 export const PATH_PLASTICITY_TASK_DEFAULTS = {
-  /**
-   * Default lookback window when the task descriptor does not embed an
-   * explicit `since` timestamp. Conservative (24h) — wider windows can be
-   * configured by the daemon when wiring the descriptor.
-   */
-  DEFAULT_LOOKBACK_MS: 24 * 60 * 60 * 1000,
   MAX_EXECUTION_MS: 30_000
 } as const;
 
@@ -36,8 +30,8 @@ export interface PathPlasticityComputeResult {
 export interface PathPlasticityComputePort {
   computeAndApplyPlasticity(params: {
     readonly workspaceId: string;
-    readonly sinceIso: string;
-    readonly untilIso?: string;
+    readonly sinceRevision: number;
+    readonly untilRevision: number;
     readonly abortSignal?: AbortSignal;
     /**
      * Residual hook from the retired write path. Attribution-only compute
@@ -47,7 +41,7 @@ export interface PathPlasticityComputePort {
   }): Promise<PathPlasticityComputeResult>;
   markProcessed?(params: {
     readonly workspaceId: string;
-    readonly processedThroughIso: string;
+    readonly processedThroughRevision: number;
     readonly processedAuditEventId?: string | null;
   }): Promise<void> | void;
 }
@@ -67,38 +61,36 @@ export function createAttributionOnlyPathPlasticityPort(options?: {
   };
 }
 
-/**
- * Computes the lower watermark for a plasticity task. If the daemon embeds an
- * ISO timestamp in `target_object_refs[0]` the task uses that; otherwise the
- * task falls back to `now - DEFAULT_LOOKBACK_MS`.
- */
-export function resolvePathPlasticitySinceIso(
-  targetObjectRefs: readonly string[],
-  nowIso: string
-): string {
-  const candidate = targetObjectRefs[0];
-  if (candidate !== undefined && Number.isFinite(Date.parse(candidate))) {
-    return candidate;
-  }
-  return new Date(
-    Date.parse(nowIso) - PATH_PLASTICITY_TASK_DEFAULTS.DEFAULT_LOOKBACK_MS
-  ).toISOString();
+const REVISION_CURSOR = /^\d+$/u;
+
+export function parsePathPlasticityRevisionCursor(
+  value: string | undefined
+): number | undefined {
+  if (value === undefined || !REVISION_CURSOR.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 /**
- * Computes the inclusive upper watermark for a plasticity task. Daemon wiring
- * passes the enqueue-time upper bound in `target_object_refs[1]`; the Librarian
- * marks it processed only after compute succeeds.
+ * Lower exclusive EventLog revision cursor. Integer refs only — wall-clock
+ * ISO strings are not a monotonic watermark and must not be substituted.
  */
-export function resolvePathPlasticityUntilIso(
+export function resolvePathPlasticitySinceRevision(
   targetObjectRefs: readonly string[],
-  nowIso: string
-): string {
-  const candidate = targetObjectRefs[1];
-  if (candidate !== undefined && Number.isFinite(Date.parse(candidate))) {
-    return candidate;
-  }
-  return nowIso;
+  fallbackRevision = 0
+): number {
+  return parsePathPlasticityRevisionCursor(targetObjectRefs[0]) ?? fallbackRevision;
+}
+
+/**
+ * Inclusive upper EventLog revision cursor captured before compute starts.
+ * Missing integer refs do not fall back to "now".
+ */
+export function resolvePathPlasticityUntilRevision(
+  targetObjectRefs: readonly string[],
+  fallbackRevision: number
+): number {
+  return parsePathPlasticityRevisionCursor(targetObjectRefs[1]) ?? fallbackRevision;
 }
 
 export async function runPathPlasticityWithinBudget<T>(

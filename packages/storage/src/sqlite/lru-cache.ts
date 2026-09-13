@@ -34,6 +34,28 @@ export class LruCache<K, V> {
     this.entries.set(key, value);
   }
 
+  public setWithEvictionNotice(key: K, value: V, onEvict: (evictedKey: K, evictedValue: V) => void): void {
+    if (this.entries.has(key)) {
+      this.entries.delete(key);
+    } else if (this.entries.size >= this.maxEntries) {
+      const oldestKey = this.oldestKey();
+      if (oldestKey !== undefined) {
+        const evictedValue = this.entries.get(oldestKey);
+        this.entries.delete(oldestKey);
+        if (evictedValue !== undefined) {
+          onEvict(oldestKey, evictedValue);
+        }
+      }
+    }
+    this.entries.set(key, value);
+  }
+
+  public forEach(callback: (value: V, key: K) => void): void {
+    for (const [key, value] of this.entries) {
+      callback(value, key);
+    }
+  }
+
   public delete(key: K): boolean {
     return this.entries.delete(key);
   }
