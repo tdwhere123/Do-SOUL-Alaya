@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   AuthorizedScopesAdmissionSchema,
-  normalizeActiveConstraintAdmission
+  normalizeActiveConstraintAdmission,
+  type AuthorizedScopesAdmission
 } from "@do-soul/alaya-protocol";
+
+const unrestricted: AuthorizedScopesAdmission = { mode: "unrestricted" };
+const denied: AuthorizedScopesAdmission = { mode: "denied" };
+const named: AuthorizedScopesAdmission = { mode: "named", scopes: ["project"] };
 
 const cases: ReadonlyArray<{
   readonly name: string;
@@ -23,6 +28,12 @@ const cases: ReadonlyArray<{
 ];
 
 describe("AuthorizedScopesAdmissionSchema", () => {
+  it("keeps named denied and unrestricted as distinct assignable modes", () => {
+    expect(AuthorizedScopesAdmissionSchema.parse(unrestricted).mode).toBe("unrestricted");
+    expect(AuthorizedScopesAdmissionSchema.parse(denied).mode).toBe("denied");
+    expect(AuthorizedScopesAdmissionSchema.parse(named)).toEqual(named);
+  });
+
   it.each(cases)("$name", ({ value, ok, mode }) => {
     const parsed = AuthorizedScopesAdmissionSchema.safeParse(value);
     expect(parsed.success).toBe(ok);

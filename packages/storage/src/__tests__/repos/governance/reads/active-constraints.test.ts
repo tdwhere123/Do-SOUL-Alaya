@@ -11,6 +11,8 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
+  type AuthorizedScopesAdmission,
+  type BoundedActiveConstraintsRequest,
   type MemoryEntry,
   type ClaimForm,
   type PathRelation
@@ -27,9 +29,9 @@ import { SqliteWorkspaceRepo } from "../../../../repos/runtime/workspace-repo.js
 
 const databases = new Set<StorageDatabase>();
 
-const boundedRequest = {
+const boundedRequest: BoundedActiveConstraintsRequest & { snapshotId: string } = {
   workspaceId: "workspace-1", asOf: "2026-05-19T00:00:00.000Z", snapshotId: "snapshot-1",
-  authorizedScopes: { mode: "unrestricted" as const },
+  authorizedScopes: { mode: "unrestricted" },
   cap: 20, nativeLimit: 128, byteLimit: 65536
 };
 
@@ -115,7 +117,7 @@ describe("bounded active constraints snapshot", () => {
       object_id: globalId, scope_class: ScopeClass.GLOBAL_CORE, content: "global core constraint"
     }));
     claimFormRepo.create(createActiveClaim({ source_object_refs: [globalId] }));
-    const seen = (admission: import("@do-soul/alaya-protocol").AuthorizedScopesAdmission | undefined) =>
+    const seen = (admission: AuthorizedScopesAdmission | undefined) =>
       readBounded(database, { authorizedScopes: admission }).constraints.map((row) => row.object_id);
     expect(seen({ mode: "unrestricted" })).toEqual([globalId]);
     expect(seen({ mode: "denied" })).toEqual([]);
@@ -134,9 +136,7 @@ describe("bounded active constraints snapshot", () => {
 
 function readBounded(
   database: StorageDatabase,
-  overrides: Partial<typeof boundedRequest> & {
-    authorizedScopes?: import("@do-soul/alaya-protocol").AuthorizedScopesAdmission;
-  } = {}
+  overrides: Partial<BoundedActiveConstraintsRequest & { snapshotId: string }> = {}
 ) {
   const paths = new SqliteGovernancePathReader(database);
   paths.prepareIndex();

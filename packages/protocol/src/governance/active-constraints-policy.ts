@@ -20,7 +20,12 @@ import { z } from "zod";
 import type { SoulActiveConstraint } from "../surfaces/mcp-memory-search-types.js";
 import { ScopeClassSchema } from "../memory/object-kind.js";
 
-export const AuthorizedScopesAdmissionSchema = z.discriminatedUnion("mode", [
+export type AuthorizedScopesAdmission =
+  | { readonly mode: "unrestricted" }
+  | { readonly mode: "denied" }
+  | { readonly mode: "named"; readonly scopes: readonly string[] };
+
+export const AuthorizedScopesAdmissionSchema: z.ZodType<AuthorizedScopesAdmission> = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("unrestricted") }).strict(),
   z.object({ mode: z.literal("denied") }).strict(),
   z.object({
@@ -28,8 +33,6 @@ export const AuthorizedScopesAdmissionSchema = z.discriminatedUnion("mode", [
     scopes: z.array(z.string()).min(1).readonly()
   }).strict()
 ]);
-
-export type AuthorizedScopesAdmission = z.infer<typeof AuthorizedScopesAdmissionSchema>;
 
 export interface BoundedActiveConstraintsRequest {
   readonly workspaceId: string;
