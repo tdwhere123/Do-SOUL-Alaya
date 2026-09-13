@@ -6,8 +6,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 // Remaining production console.*/stderr.write sites owned by other workstreams.
-// Shrink this list; do not add new entries. Guard wiring into package.json /
-// CI workflows is owned by the ci-docs-install stream.
+// Shrink this list; do not add new entries.
 const ALLOWED_RELATIVE_PATHS = new Set([
   "packages/storage/src/sqlite/db.ts",
   "packages/eval/src/history/history.ts",

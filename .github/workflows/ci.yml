@@ -81,6 +81,10 @@ jobs:
         if: ${{ matrix.run_hygiene }}
         run: pnpm run hygiene:unused
 
+      - name: Guard production console
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run hygiene:no-console
+
       - name: Guard test as-any
         if: ${{ matrix.run_hygiene }}
         run: |
