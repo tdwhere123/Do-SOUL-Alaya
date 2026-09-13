@@ -1,5 +1,7 @@
 export class LruCache<K, V> {
-  // Daemon-local copy: middleware must not import @do-soul/alaya-storage for LRU.
+  // Daemon-local copy: importing @do-soul/alaya-storage's package root loads
+  // better-sqlite3. A storage subpath export would let this re-export the
+  // storage owner; until that exists in storage/package.json, keep this Map LRU.
   private readonly entries = new Map<K, V>();
 
   public constructor(private readonly maxEntries: number) {}

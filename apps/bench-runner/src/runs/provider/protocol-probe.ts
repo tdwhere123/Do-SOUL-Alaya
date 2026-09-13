@@ -1,6 +1,6 @@
 import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
 import { executeProviderChatCompletion } from "@do-soul/alaya-engine-gateway";
-import { assertSourceBoundF3SealCurrent } from "@do-soul/alaya-soul";
+import { sourceBoundF3Seal } from "@do-soul/alaya-soul";
 import type { ExtractionRequestProfile } from "../extraction/request-profile.js";
 import { requireProviderBinding, resolveVendorModel } from "./catalog.js";
 import { createGeminiHttpExtractor } from "../compile-seed/http/gemini-http.js";
@@ -27,7 +27,7 @@ export interface ProviderProtocolProbeReceipt {
 export async function probeProviderProtocol(
   input: ProviderProtocolProbeInput
 ): Promise<ProviderProtocolProbeReceipt> {
-  assertSourceBoundF3SealCurrent();
+  void sourceBoundF3Seal();
   if (input.apiKey.trim().length === 0) {
     throw new Error("provider protocol probe refuses an empty API key");
   }

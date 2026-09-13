@@ -9,6 +9,7 @@ import {
   type SoulReportContextUsageRequest
 } from "@do-soul/alaya-protocol";
 import type { RecallUsageHandlerDependencies } from "../recall/recall-usage-handlers.js";
+import { McpToolError } from "../tool/mcp-tool-error.js";
 
 type SupportedUsageObjectKind = RecallCandidate["object_kind"];
 
@@ -18,20 +19,16 @@ type ReportedUsedObject = Readonly<{
   readonly target?: RecallTargetRef;
 }>;
 
-export class ContextUsageValidationError extends Error {
-  public readonly code = "VALIDATION" as const;
-
+export class ContextUsageValidationError extends McpToolError {
   public constructor(message: string) {
-    super(message);
+    super("VALIDATION", message);
     this.name = "ContextUsageValidationError";
   }
 }
 
-export class ContextUsageNotFoundError extends Error {
-  public readonly code = "NOT_FOUND" as const;
-
+export class ContextUsageNotFoundError extends McpToolError {
   public constructor(message: string) {
-    super(message);
+    super("NOT_FOUND", message);
     this.name = "ContextUsageNotFoundError";
   }
 }

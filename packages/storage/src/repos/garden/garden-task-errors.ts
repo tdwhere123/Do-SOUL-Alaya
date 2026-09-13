@@ -12,19 +12,21 @@ export class GardenTaskPendingFailureCasMiss extends Error {
   }
 }
 
-export function isUniqueConstraintError(error: unknown, qualifiedColumn: string): boolean {
+// Storage unique-constraint owner. SQLITE_CONSTRAINT / errno 19 also cover
+// CHECK / NOT NULL / FOREIGN KEY, so only SQLITE_CONSTRAINT_UNIQUE (or the
+// UNIQUE constraint failed message) counts. qualifiedColumn narrows to one index.
+export function isUniqueConstraintError(error: unknown, qualifiedColumn?: string): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
     const codeValue = (current as { readonly code?: unknown }).code;
     const messageValue = (current as { readonly message?: unknown }).message;
-    const isUniqueCode =
-      typeof codeValue === "string" && codeValue.startsWith("SQLITE_CONSTRAINT");
+    const uniqueCode = codeValue === "SQLITE_CONSTRAINT_UNIQUE";
+    const uniqueMessage =
+      typeof messageValue === "string" && messageValue.includes("UNIQUE constraint failed");
     const matchesColumn =
-      typeof messageValue === "string" && messageValue.includes(qualifiedColumn);
-    if (isUniqueCode && matchesColumn) {
-      return true;
-    }
-    if (matchesColumn && typeof messageValue === "string" && messageValue.includes("UNIQUE")) {
+      qualifiedColumn === undefined ||
+      (typeof messageValue === "string" && messageValue.includes(qualifiedColumn));
+    if ((uniqueCode || uniqueMessage) && matchesColumn) {
       return true;
     }
     current = (current as { readonly cause?: unknown }).cause;

@@ -76,6 +76,7 @@ function proposeWithNormalizer(
   readonly proposal: Readonly<EvidenceFactFrameFormationProposal> | undefined;
   readonly expectedProducer: string | null;
   readonly emptyStatus: "unavailable" | "rejected";
+  readonly cause?: unknown;
 }> {
   if (configured === null || configured === undefined) {
     return Object.freeze({
@@ -98,11 +99,12 @@ function proposeWithNormalizer(
       expectedProducer: producer,
       emptyStatus: "unavailable"
     });
-  } catch {
+  } catch (error) {
     return Object.freeze({
       proposal: undefined,
       expectedProducer: producer,
-      emptyStatus: "rejected"
+      emptyStatus: "unavailable",
+      cause: error
     });
   }
 }

@@ -13,6 +13,7 @@ import {
 import {
   registerRecallUtilizationRoutes,
   type RecallUtilizationRouteServices,
+  type SingleUsedAnchorDeliveryReader,
   type SingleUsedAnchorTelemetryEmitter
 } from "../../routes/memory/recall/recall-utilization.js";
 
@@ -257,5 +258,58 @@ describe("recall-utilization route", () => {
     expect(body.data.cohorts[0]?.delivery_total).toBe(1);
     expect(body.data.window.since).toBe("2026-05-01T00:00:00.000Z");
     expect(body.data.window.until).toBe("2026-05-31T23:59:59.000Z");
+  });
+
+  it("looks up 1000 single-used anchors with one batch query", async () => {
+    const matchCount = 1000;
+    const rows: EventLogEntry[] = [];
+    for (let index = 0; index < matchCount; index += 1) {
+      const deliveryId = `d_${index}`;
+      rows.push(
+        makeRow({
+          type: RecallContextEventType.SOUL_RECALL_DELIVERED,
+          entityId: deliveryId,
+          runId: "run-1",
+          payload: deliveredPayload({ deliveryId, runId: "run-1", pointerCount: 1 })
+        }),
+        makeRow({
+          type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+          entityId: deliveryId,
+          runId: "run-1",
+          payload: usagePayload({ deliveryId, runId: "run-1", usageState: "used" })
+        })
+      );
+    }
+    let queryCount = 0;
+    const anchorReader: SingleUsedAnchorDeliveryReader = {
+      findDeliveredObjectIds: vi.fn(async () => {
+        throw new Error("serial lookup must not run when a batch port exists");
+      }),
+      findDeliveredObjectIdsMany: vi.fn(async (deliveryIds) => {
+        queryCount += 1;
+        return new Map(deliveryIds.map((deliveryId) => [deliveryId, [`obj-${deliveryId}`]]));
+      })
+    };
+    const emitMany = vi.fn(async () => undefined);
+    const emitter: SingleUsedAnchorTelemetryEmitter = {
+      emit: vi.fn(async () => {
+        throw new Error("serial emit must not run when emitMany exists");
+      }),
+      emitMany
+    };
+    const app = buildApp({
+      workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
+      eventLogRepo: fakeEventLogRepo(rows),
+      singleUsedAnchorEmitter: emitter,
+      deliveryAnchorReader: anchorReader
+    });
+    const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
+    expect(response.status).toBe(200);
+    expect(queryCount).toBe(1);
+    expect(anchorReader.findDeliveredObjectIdsMany).toHaveBeenCalledOnce();
+    expect(emitMany).toHaveBeenCalledOnce();
+    expect(emitMany.mock.calls[0]?.[0]).toHaveLength(matchCount);
+    expect(anchorReader.findDeliveredObjectIds).not.toHaveBeenCalled();
+    expect(emitter.emit).not.toHaveBeenCalled();
   });
 });

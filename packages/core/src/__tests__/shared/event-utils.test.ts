@@ -18,13 +18,14 @@ describe("isUniqueConstraintError", () => {
     expect(isUniqueConstraintError(error)).toBe(true);
   });
 
-  it("returns true when the driver exposes SQLite constraint errno", () => {
+  it("returns false for SQLITE_CONSTRAINT errno that is not UNIQUE", () => {
     const error = new Error("wrapped", {
-      cause: Object.assign(new Error("driver text changed"), {
+      cause: Object.assign(new Error("CHECK constraint failed: memories"), {
+        code: "SQLITE_CONSTRAINT_CHECK",
         errno: 19
       })
     });
-    expect(isUniqueConstraintError(error)).toBe(true);
+    expect(isUniqueConstraintError(error)).toBe(false);
   });
 
   it("returns false for an unrelated cause message", () => {

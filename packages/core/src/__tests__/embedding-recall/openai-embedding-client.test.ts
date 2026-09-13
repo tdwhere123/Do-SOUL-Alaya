@@ -171,6 +171,26 @@ describe("OpenAIEmbeddingClient", () => {
     ]);
   });
 
+  it("rejects non-numeric embedding elements instead of producing NaN", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          data: [{ index: 0, embedding: [0.1, "bad", 0.3] }]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    ) as unknown as typeof fetch;
+    const client = new OpenAIEmbeddingClient({
+      apiKey: "sk-test-secret",
+      baseUrl: "https://embedding.example.test/v1",
+      fetchImpl,
+      maxAttempts: 1
+    });
+
+    await expect(client.embedTexts(["smoke"], { timeoutMs: 1000 }))
+      .rejects.toThrow(/non-finite element/);
+  });
+
   // invariant: embedTexts MUST settle (reject) when the transport never
   // resolves AND the abort signal is ignored (the undici half-open stall). Only
   // the wall-clock backstop guarantees this; without it the guard race below

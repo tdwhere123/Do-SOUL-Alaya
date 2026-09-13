@@ -20,20 +20,26 @@ export interface RecallUtilizationRouteServices {
   readonly deliveryAnchorReader?: SingleUsedAnchorDeliveryReader;
 }
 
+export interface SingleUsedAnchorEmitInput {
+  readonly workspaceId: string;
+  readonly runId: string | null;
+  readonly agentTarget: string;
+  readonly sessionId: string;
+  readonly deliveryId: string;
+  readonly occurredAt: string;
+  readonly usedAnchorObjectId: string | null;
+}
+
 export interface SingleUsedAnchorDeliveryReader {
   findDeliveredObjectIds(deliveryId: string): Promise<readonly string[] | null>;
+  findDeliveredObjectIdsMany?(
+    deliveryIds: readonly string[]
+  ): Promise<ReadonlyMap<string, readonly string[] | null>>;
 }
 
 export interface SingleUsedAnchorTelemetryEmitter {
-  emit(input: {
-    readonly workspaceId: string;
-    readonly runId: string | null;
-    readonly agentTarget: string;
-    readonly sessionId: string;
-    readonly deliveryId: string;
-    readonly occurredAt: string;
-    readonly usedAnchorObjectId: string | null;
-  }): Promise<void>;
+  emit(input: SingleUsedAnchorEmitInput): Promise<void>;
+  emitMany?(inputs: readonly SingleUsedAnchorEmitInput[]): Promise<void>;
 }
 
 export interface RecallUtilizationCohortRow {
@@ -223,31 +229,78 @@ async function emitSingleUsedAnchorTelemetry(input: {
       entry.report !== undefined
     );
 
-  for (const { delivery, report } of matches) {
-    let usedAnchorObjectId: string | null = null;
-    if (input.anchorReader !== undefined) {
-      try {
-        const ids = await input.anchorReader.findDeliveredObjectIds(delivery.delivery_id);
-        if (ids !== null && ids.length === 1) {
-          usedAnchorObjectId = ids[0] ?? null;
-        }
-      } catch (error) {
-        process.emitWarning(
-          `recall utilization anchor lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-          { type: "AlayaRecallUtilizationWarning", code: "ALAYA_RECALL_UTILIZATION_ANCHOR_LOOKUP_FAILED" }
-        );
-      }
+  const deliveryIds = matches.map(({ delivery }) => delivery.delivery_id);
+  const anchorsByDelivery = await readDeliveredObjectIdsMany(input.anchorReader, deliveryIds);
+  const emits: SingleUsedAnchorEmitInput[] = matches.map(({ delivery, report }) => {
+    const ids = anchorsByDelivery.get(delivery.delivery_id);
+    return {
+      workspaceId: input.workspaceId,
+      runId: report.run_id,
+      agentTarget: report.agent_target,
+      sessionId: report.session_id,
+      deliveryId: delivery.delivery_id,
+      occurredAt: report.occurred_at,
+      usedAnchorObjectId: ids !== undefined && ids !== null && ids.length === 1 ? ids[0] ?? null : null
+    };
+  });
+  await emitUsedAnchorTelemetry(input.emitter, emits);
+}
+
+async function readDeliveredObjectIdsMany(
+  reader: SingleUsedAnchorDeliveryReader | undefined,
+  deliveryIds: readonly string[]
+): Promise<ReadonlyMap<string, readonly string[] | null>> {
+  if (reader === undefined || deliveryIds.length === 0) {
+    return new Map();
+  }
+  try {
+    if (reader.findDeliveredObjectIdsMany !== undefined) {
+      return await reader.findDeliveredObjectIdsMany(deliveryIds);
     }
+    const entries = await Promise.all(
+      deliveryIds.map(async (deliveryId) => {
+        try {
+          return [deliveryId, await reader.findDeliveredObjectIds(deliveryId)] as const;
+        } catch (error) {
+          process.emitWarning(
+            `recall utilization anchor lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+            { type: "AlayaRecallUtilizationWarning", code: "ALAYA_RECALL_UTILIZATION_ANCHOR_LOOKUP_FAILED" }
+          );
+          return [deliveryId, null] as const;
+        }
+      })
+    );
+    return new Map(entries);
+  } catch (error) {
+    process.emitWarning(
+      `recall utilization anchor lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+      { type: "AlayaRecallUtilizationWarning", code: "ALAYA_RECALL_UTILIZATION_ANCHOR_LOOKUP_FAILED" }
+    );
+    return new Map();
+  }
+}
+
+async function emitUsedAnchorTelemetry(
+  emitter: SingleUsedAnchorTelemetryEmitter,
+  emits: readonly SingleUsedAnchorEmitInput[]
+): Promise<void> {
+  if (emits.length === 0) {
+    return;
+  }
+  if (emitter.emitMany !== undefined) {
     try {
-      await input.emitter.emit({
-        workspaceId: input.workspaceId,
-        runId: report.run_id,
-        agentTarget: report.agent_target,
-        sessionId: report.session_id,
-        deliveryId: delivery.delivery_id,
-        occurredAt: report.occurred_at,
-        usedAnchorObjectId
-      });
+      await emitter.emitMany(emits);
+    } catch (error) {
+      process.emitWarning(
+        `recall utilization telemetry emit failed: ${error instanceof Error ? error.message : String(error)}`,
+        { type: "AlayaRecallUtilizationWarning", code: "ALAYA_RECALL_UTILIZATION_TELEMETRY_EMIT_FAILED" }
+      );
+    }
+    return;
+  }
+  for (const emit of emits) {
+    try {
+      await emitter.emit(emit);
     } catch (error) {
       process.emitWarning(
         `recall utilization telemetry emit failed: ${error instanceof Error ? error.message : String(error)}`,

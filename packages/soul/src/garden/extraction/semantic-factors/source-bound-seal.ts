@@ -76,9 +76,13 @@ export function sourceBoundF3Seal(): SourceBoundF3Seal {
   };
 }
 
-/** Runtime identity is hash(material). Drift locks live in tests, not production hex. */
-export function assertSourceBoundF3SealCurrent(): void {
-  void sourceBoundF3Seal();
+export function sourceBoundF3SealStatus(): SourceBoundF3Seal {
+  return sourceBoundF3Seal();
+}
+
+/** Kept for callers outside this workstream; prefer sourceBoundF3Seal(). */
+export function assertSourceBoundF3SealCurrent(): SourceBoundF3Seal {
+  return sourceBoundF3SealStatus();
 }
 
 export function sha256Utf8(value: string): string {

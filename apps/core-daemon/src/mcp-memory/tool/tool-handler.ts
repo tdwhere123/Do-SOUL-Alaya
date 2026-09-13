@@ -30,7 +30,12 @@ export type {
 export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencies): McpMemoryToolHandler {
   const now = deps.now ?? (() => new Date().toISOString());
   const generateId = deps.generateId ?? randomUUID;
-  const warn = deps.warn ?? ((message: string, meta: Record<string, unknown>) => console.warn(message, meta));
+  const warn = deps.warn ?? ((message: string, meta: Record<string, unknown>) => {
+    process.emitWarning(message, {
+      code: "ALAYA_MCP_MEMORY_TOOL_WARNING",
+      detail: JSON.stringify(meta)
+    });
+  });
   const gardenTasks = createGardenTaskHandlers({ deps, now, warn, generateId });
   const recall = createRecallHandler({ deps, now, warn, generateId });
   const reportContextUsage = createReportContextUsageHandler({

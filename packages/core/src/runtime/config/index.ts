@@ -12,6 +12,7 @@ export {
   resolveCoreConfigEnvironmentKeys
 } from "./core-config-environment.js";
 export {
+  isEnvFlagDisabled,
   parseDefaultOnFlag,
   parseEnvBoolean,
   parseEnvOptionalNonNegativeSafeInt,

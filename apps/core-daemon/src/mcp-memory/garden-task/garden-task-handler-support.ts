@@ -11,6 +11,7 @@ import {
 import type { GardenTaskRow } from "@do-soul/alaya-storage";
 import { stableStringify } from "@do-soul/alaya-core";
 import { buildGardenTaskSignalId } from "../../garden/support/task-signal-id.js";
+import { McpToolError } from "../tool/mcp-tool-error.js";
 
 export type WarnPort = (message: string, meta: Record<string, unknown>) => void;
 export type GardenCompletionCandidateSignal = NonNullable<
@@ -21,16 +22,25 @@ type CandidateSignalGraphRefInput = {
   readonly raw_payload: Readonly<Record<string, unknown>>;
 } & Partial<Record<CandidateSignalGraphRefKey, readonly string[]>>;
 
-export class GardenTaskValidationError extends Error {
-  public readonly code = "VALIDATION" as const;
+export class GardenTaskValidationError extends McpToolError {
+  public constructor(message: string) {
+    super("VALIDATION", message);
+    this.name = "GardenTaskValidationError";
+  }
 }
 
-export class GardenTaskUnavailableError extends Error {
-  public readonly code = "UNAVAILABLE" as const;
+export class GardenTaskUnavailableError extends McpToolError {
+  public constructor(message: string) {
+    super("UNAVAILABLE", message);
+    this.name = "GardenTaskUnavailableError";
+  }
 }
 
-export class GardenTaskNotFoundError extends Error {
-  public readonly code = "NOT_FOUND" as const;
+export class GardenTaskNotFoundError extends McpToolError {
+  public constructor(message: string) {
+    super("NOT_FOUND", message);
+    this.name = "GardenTaskNotFoundError";
+  }
 }
 
 export function buildGardenCompletionEnvelopeJson(

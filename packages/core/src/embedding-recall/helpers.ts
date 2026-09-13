@@ -86,6 +86,8 @@ export async function waitForPreparedQuery(settled: Promise<unknown>, timeoutMs:
   }
 }
 
+// Content-hash owner for embedding freshness. Storage's mapper copy remains
+// until that file can import this helper (storage cannot import core).
 export function hashMemoryContent(content: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }

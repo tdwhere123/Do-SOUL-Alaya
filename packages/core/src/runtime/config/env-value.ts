@@ -1,8 +1,8 @@
 const ENV_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/u;
 const ENV_POSITIVE_INT = /^[1-9][0-9]*$/u;
 const ENV_NON_NEGATIVE_SAFE_INT = /^[0-9]+$/u;
-const DEFAULT_ON_OFF = /^(?:0|false|off|no|disabled)$/u;
-const DEFAULT_ON_ON = /^(?:1|true|on|yes|enabled)$/u;
+const ENV_FLAG_OFF = new Set(["0", "false", "off", "no", "disabled"]);
+const ENV_FLAG_ON = new Set(["1", "true", "on", "yes", "enabled"]);
 
 export function parseEnvBoolean(raw: string | undefined, key: string): boolean {
   if (raw === undefined) return false;
@@ -66,7 +66,17 @@ export function parseDefaultOnFlag(raw: string | undefined, key: string): boolea
   if (raw === undefined) return true;
   const normalized = raw.trim().toLowerCase();
   if (normalized.length === 0) return true;
-  if (DEFAULT_ON_OFF.test(normalized)) return false;
-  if (DEFAULT_ON_ON.test(normalized)) return true;
+  if (ENV_FLAG_OFF.has(normalized)) return false;
+  if (ENV_FLAG_ON.has(normalized)) return true;
+  throw new Error(`${key} must be on, off, true, false, 1, or 0`);
+}
+
+/** True when the raw env value is an explicit disable token. Unset/empty is not disabled. */
+export function isEnvFlagDisabled(raw: string | undefined, key = "env flag"): boolean {
+  if (raw === undefined) return false;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized.length === 0) return false;
+  if (ENV_FLAG_OFF.has(normalized)) return true;
+  if (ENV_FLAG_ON.has(normalized)) return false;
   throw new Error(`${key} must be on, off, true, false, 1, or 0`);
 }

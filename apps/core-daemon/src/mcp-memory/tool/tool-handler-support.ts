@@ -98,16 +98,6 @@ export function classifyError(error: unknown): "VALIDATION" | "UNAVAILABLE" | "N
   if (error instanceof McpToolError) {
     return classifyMcpToolErrorCode(error.code);
   }
-  if (
-    error instanceof Error &&
-    "code" in error &&
-    (error.code === "VALIDATION" ||
-      error.code === "UNAVAILABLE" ||
-      error.code === "NOT_FOUND" ||
-      error.code === "NEEDS_CONTEXT")
-  ) {
-    return error.code;
-  }
   if (error instanceof Error && error.name === "ZodError") {
     return "VALIDATION";
   }
