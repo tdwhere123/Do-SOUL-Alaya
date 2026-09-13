@@ -436,6 +436,12 @@ function settleQuarantinedExtraction(
   rawJson: string
 ): Awaited<ReturnType<BenchSignalExtractor["extract"]>> {
   options.onLiveExtractionFailed?.(cacheKey);
+  if (options.stats !== undefined) {
+    options.stats.lastCacheKey = cacheKey;
+    recordExtractionInspection(
+      options, cacheKey, "cache", inspectExtractionRawJson(rawJson)
+    );
+  }
   options.onExtractionProgress?.();
   return { rawJson };
 }

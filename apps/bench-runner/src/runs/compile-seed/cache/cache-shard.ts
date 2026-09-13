@@ -81,6 +81,7 @@ export type CachedRawExtractionInspection =
       readonly reason: string;
       readonly rawJson: string;
       readonly rawJsonSha256: string;
+      readonly rawSignalCount: number;
     };
 
 export interface CachedExtractionInspectionObserver {
@@ -134,7 +135,8 @@ export function inspectCachedRawExtraction(
         status: "quarantined",
         reason: `${classification} is not a coverage-valid extraction shard`,
         rawJson: cached.entry.raw_json,
-        rawJsonSha256
+        rawJsonSha256,
+        rawSignalCount: envelope.rawSignalCount
       };
     }
     return {
