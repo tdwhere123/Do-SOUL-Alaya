@@ -13,8 +13,10 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
   if ((state.observed_relations?.length ?? 0) === 0 && (state.interpretation.view.claim_demands?.length ?? 0) === 0) {
     return applyEvidenceEffect(state, { support: [], work_status: "complete" });
   }
+  const solverComplete = state.binding.kind === "bound" && state.binding.solver_complete;
   const references = [state.query_id, state.snapshot_id, input.as_of,
-    state.observed_relations, state.transitions, state.transition_derivations, state.derivations, state.ordered_identities];
+    state.observed_relations, state.transitions, state.transition_derivations, state.derivations, state.ordered_identities,
+    state.seeds, solverComplete];
   const same = state.support_dependency_revision !== undefined
     && references.every((reference, index) => reference === state.support_dependency_references?.[index]);
   if (same && state.support_work_status === "complete") return state;
@@ -69,7 +71,9 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
     progress[key] = { cursor: prepared.progress, complete: prepared.complete };
     if (prepared.complete) offset += 1;
   }
-  const complete = offset === values.size;
+  // An unfinished solve can still activate identities already skipped by this scan.
+  // Keep its progress, then reassess those products when the solve closes.
+  const complete = offset === values.size && solverComplete;
   const next = applyEvidenceEffect({ ...state, support: [], remaining_exploration: remaining, remaining_memory_bytes: memory },
     { support: [...support.values()], claims, work_status: complete ? "complete" : "open" });
   return { ...next, claim_propositions: propositionChanged ? propositions : state.claim_propositions, support_progress: progress,
