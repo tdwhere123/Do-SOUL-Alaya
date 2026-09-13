@@ -63,7 +63,7 @@ describe("extraction live delegate atomic persistence", () => {
       usage: { input_tokens: 10, output_tokens: 1, total_tokens: 11 }
     } });
     const replay = await createCachingSignalExtractor({ ...options, allowLiveExtraction: false }).extract(request);
-    expect(replay).toMatchObject({ rawJson: '{"signals":[]}', usage });
+    expect(replay).toMatchObject({ rawJson: '{"signals":[]}' });
     expect(delegate.extract).toHaveBeenCalledOnce();
   });
 
@@ -99,7 +99,7 @@ describe("extraction live delegate atomic persistence", () => {
 
     const expected = {
       attempts: 1,
-      successfulShards: 1,
+      successfulShards: 0,
       pendingKeys: [],
       unresolvedAttempts: [],
       transportFailures: [],

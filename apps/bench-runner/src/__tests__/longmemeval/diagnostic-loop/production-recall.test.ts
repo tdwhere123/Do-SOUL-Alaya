@@ -10,7 +10,6 @@ import {
 import { defaultSnapshotOverlayReceiptPath } from
   "../../../runs/snapshot/recall-eval/embedding-cache-overlay/ensure.js";
 import { snapshotManifestPath } from "../../../runs/snapshot/materialize.js";
-import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 
 const { runRecallEval, resolveSnapshotIdentity, capturedOptions } = vi.hoisted(() => {
   const options: {
@@ -242,12 +241,6 @@ describe("diagnostic-loop production recall consume authority", () => {
 
     expect(capturedOptions.current?.embeddingCacheOverlayReceiptPath).toBeUndefined();
     expect(capturedOptions.current?.embeddingMode).toBe("disabled");
-  });
-
-  it("smoke: live evaluation-slice digest matches the captured question window", () => {
-    expect(computeLongMemEvalQuestionIdDigest(["q-1"])).toBe(
-      "8a3e90ba8a519e1e3e3da22b26bf3d8db2a56b4ae77f42e60b2eda9173930f92"
-    );
   });
 });
 

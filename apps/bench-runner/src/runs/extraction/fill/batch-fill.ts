@@ -213,6 +213,7 @@ async function importBatchLine(input: BatchFillInput, workset: BatchExtractionWo
     input.prepared.config.model, input.prepared.config.requestProfile
   );
   if (inspected.status !== "hit") {
+    authority.abandonPendingShard(result.line.key, result.provenance.attemptOrdinal);
     return { status: "quarantined", reason: inspected.reason ?? inspected.status };
   }
   authority.commitSuccessfulShard(result.line.key);

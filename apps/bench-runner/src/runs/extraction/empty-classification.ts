@@ -9,7 +9,8 @@ export type ExtractionEmptyClassification =
   (typeof EXTRACTION_EMPTY_CLASSIFICATIONS)[number];
 
 export const EMPTY_SIGNALS_ENVELOPE = '{"signals":[]}' as const;
-export const PLAN_SKIPPED_EXTRACTION_ENVELOPE = EMPTY_SIGNALS_ENVELOPE;
+export const PLAN_SKIPPED_EXTRACTION_ENVELOPE =
+  '{"extraction_skip":"plan_skipped"}' as const;
 
 export function classifyExtractionEnvelope(input: {
   readonly rawSignalCount: number;

@@ -433,7 +433,7 @@ async function writeValidShard(cacheKey: string): Promise<void> {
     model: cacheIdentity.model,
     request_profile: cacheIdentity.requestProfile,
     cache_key: cacheKey,
-    raw_json: '{"signals":[]}',
+    raw_json: '{"signals":[{}]}',
     transport_provenance: {
       provider_url_sha256: `sha256:${key("a")}`,
       model: cacheIdentity.model

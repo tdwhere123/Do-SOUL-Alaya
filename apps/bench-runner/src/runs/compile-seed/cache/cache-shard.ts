@@ -75,7 +75,13 @@ export type CachedRawExtractionInspection =
       readonly transportProvenance?: ExtractionTransportProvenance;
     }
   | { readonly status: "missing"; readonly reason?: undefined }
-  | { readonly status: "invalid"; readonly reason: string; readonly rawJsonSha256?: string };
+  | { readonly status: "invalid"; readonly reason: string; readonly rawJsonSha256?: string }
+  | {
+      readonly status: "quarantined";
+      readonly reason: string;
+      readonly rawJson: string;
+      readonly rawJsonSha256: string;
+    };
 
 export interface CachedExtractionInspectionObserver {
   readonly onPhysicalRead?: () => void;
@@ -117,13 +123,27 @@ export function inspectCachedRawExtraction(
       cached.entry.response_metadata,
       cached.entry.transport_provenance !== undefined
     );
+    const envelope = inspectExtractionRawEnvelope(cached.entry.raw_json);
+    const classification = resolveStoredEmptyClassification(
+      envelope.rawSignalCount,
+      cached.entry.transport_provenance !== undefined,
+      cached.entry.empty_classification
+    );
+    if (!extractionEnvelopeCountsTowardCoverage(classification)) {
+      return {
+        status: "quarantined",
+        reason: `${classification} is not a coverage-valid extraction shard`,
+        rawJson: cached.entry.raw_json,
+        rawJsonSha256
+      };
+    }
     return {
       status: "hit",
       rawJson: cached.entry.raw_json,
       ...(cached.entry.transport_provenance === undefined ? {} : {
         transportProvenance: cached.entry.transport_provenance
       }),
-      ...inspectExtractionRawEnvelope(cached.entry.raw_json)
+      ...envelope
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -184,11 +204,11 @@ function inspectCachedContent(
   const rawJsonSha256 = computeExtractionRawJsonSha256(rawJson);
   try {
     const envelope = inspectExtractionRawJson(rawJson);
-    const classification = storedClassification ?? classifyExtractionEnvelope({
-      rawSignalCount: envelope.rawSignalCount,
-      sourceAssertionCount: providerBacked && envelope.rawSignalCount === 0 ? 1 : 0,
-      planMembership: "in_plan"
-    });
+    const classification = resolveStoredEmptyClassification(
+      envelope.rawSignalCount,
+      providerBacked,
+      storedClassification
+    );
     if (!extractionEnvelopeCountsTowardCoverage(classification)) {
       return {
         status: "quarantined",
@@ -208,6 +228,18 @@ function inspectCachedContent(
     const reason = error instanceof Error ? error.message : String(error);
     return { status: "invalid", reason: `invalid cached extraction: ${reason}`, rawJsonSha256 };
   }
+}
+
+function resolveStoredEmptyClassification(
+  rawSignalCount: number,
+  providerBacked: boolean,
+  storedClassification: ExtractionEmptyClassification | undefined
+): ExtractionEmptyClassification {
+  return storedClassification ?? classifyExtractionEnvelope({
+    rawSignalCount,
+    sourceAssertionCount: providerBacked && rawSignalCount === 0 ? 1 : 0,
+    planMembership: "in_plan"
+  });
 }
 
 function inspectCachedIdentity(

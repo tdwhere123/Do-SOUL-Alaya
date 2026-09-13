@@ -338,21 +338,23 @@ export function deriveLongMemEvalReleaseEvidenceAuthority(
   });
 }
 
-export const LONGMEMEVAL_DATASET_TEST_AUTHORITY_KIND =
-  "longmemeval-dataset-test-authority" as const;
+const boundTestAuthorityTokens = new WeakSet<object>();
 
-export interface LongMemEvalDatasetTestAuthorityToken {
-  readonly kind: typeof LONGMEMEVAL_DATASET_TEST_AUTHORITY_KIND;
+export function bindLongMemEvalDatasetTestAuthorityToken(token: object): void {
+  if (token === null || typeof token !== "object") {
+    throw new Error("test-only LongMemEval authority seam is unavailable");
+  }
+  boundTestAuthorityTokens.add(token);
 }
 
-export function createTestLongMemEvalDatasetAuthority(
-  token: LongMemEvalDatasetTestAuthorityToken,
+export function mintLongMemEvalDatasetAuthorityFromTestToken(
+  token: object,
   input: {
     readonly datasetSha256: string;
     readonly assignments: readonly LongMemEvalSelectionAssignment[];
   }
 ): VerifiedLongMemEvalDatasetAuthority {
-  if (token.kind !== LONGMEMEVAL_DATASET_TEST_AUTHORITY_KIND) {
+  if (!boundTestAuthorityTokens.has(token)) {
     throw new Error("test-only LongMemEval authority seam is unavailable");
   }
   return mintVerifiedDatasetAuthority(input.datasetSha256, input.assignments);

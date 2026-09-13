@@ -191,6 +191,7 @@ it("admits a completed empty selection alongside grounded signals without anothe
   expect(Object.values(result.batchState!.jobs[0]!.outcomes).map((outcome) => outcome.status).sort())
     .toEqual(["admitted", "quarantined"]);
   expect(result.authorityTelemetry).toMatchObject({ attempts: 2, successfulShards: 1,
+    pendingKeys: [],
     telemetry: { inputTokens: 20, outputTokens: 40, totalTokens: 60 } });
   expect(provider.downloads).toBe(1);
   await expect(run("import")).rejects.toThrow(/cannot authorize invalid or orphan shards/u);

@@ -1,22 +1,18 @@
 import {
-  createTestLongMemEvalDatasetAuthority as mintWithToken,
-  LONGMEMEVAL_DATASET_TEST_AUTHORITY_KIND,
-  type LongMemEvalDatasetTestAuthorityToken,
+  bindLongMemEvalDatasetTestAuthorityToken,
+  mintLongMemEvalDatasetAuthorityFromTestToken,
   type VerifiedLongMemEvalDatasetAuthority
 } from "../../../datasets/longmemeval/ingestion/fetch.js";
 import type { LongMemEvalSelectionAssignment } from "@do-soul/alaya-eval";
 
-const TOKEN: LongMemEvalDatasetTestAuthorityToken = Object.freeze({
-  kind: LONGMEMEVAL_DATASET_TEST_AUTHORITY_KIND
+const TOKEN = Object.freeze({
+  brand: Symbol("longmemeval-dataset-test-authority")
 });
+bindLongMemEvalDatasetTestAuthorityToken(TOKEN);
 
 export function createTestLongMemEvalDatasetAuthority(input: {
   readonly datasetSha256: string;
   readonly assignments: readonly LongMemEvalSelectionAssignment[];
 }): VerifiedLongMemEvalDatasetAuthority {
-  return mintWithToken(TOKEN, input);
-}
-
-export function longMemEvalDatasetTestAuthorityToken(): LongMemEvalDatasetTestAuthorityToken {
-  return TOKEN;
+  return mintLongMemEvalDatasetAuthorityFromTestToken(TOKEN, input);
 }

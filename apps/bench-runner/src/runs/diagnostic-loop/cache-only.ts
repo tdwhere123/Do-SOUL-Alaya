@@ -30,7 +30,9 @@ export function proveCacheOnlyExtraction(
       request.extractionCacheRoot, key, request.model, profile
     );
     if (inspected.status === "missing") missing.push(key);
-    if (inspected.status === "invalid") invalid.push(`${key}: ${inspected.reason}`);
+    if (inspected.status === "invalid" || inspected.status === "quarantined") {
+      invalid.push(`${key}: ${inspected.reason}`);
+    }
   }
   if (network !== undefined) {
     throw new DiagnosticLoopFailure({

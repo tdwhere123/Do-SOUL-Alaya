@@ -188,8 +188,7 @@ async function extractWithCache(
     return cachedExtractionResult(cached);
   }
   if (cached.status === "quarantined") {
-    options.onExtractionProgress?.();
-    return { rawJson: cached.rawJson };
+    return settleQuarantinedExtraction(options, cacheKey, cached.rawJson);
   }
   if (options.allowLiveExtraction === false) {
     throw new Error(
@@ -225,8 +224,7 @@ async function persistDeterministicEmpty(
       return cachedExtractionResult(recached);
     }
     if (recached.status === "quarantined") {
-      options.onExtractionProgress?.();
-      return { rawJson: recached.rawJson };
+      return settleQuarantinedExtraction(options, cacheKey, recached.rawJson);
     }
     const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
     const result = { rawJson: EMPTY_SIGNALS_ENVELOPE };
@@ -318,8 +316,7 @@ async function extractLiveWithLease(
     return cachedExtractionResult(recached);
   }
   if (recached.status === "quarantined") {
-    options.onExtractionProgress?.();
-    return { rawJson: recached.rawJson };
+    return settleQuarantinedExtraction(options, cacheKey, recached.rawJson);
   }
   const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
   const stats = options.stats;
@@ -425,8 +422,22 @@ function recordLiveExtractionSuccess(
   }
   if (extractionEnvelopeCountsTowardCoverage(persisted.emptyClassification)) {
     options.onLiveProviderExtractionSucceeded?.(cacheKey);
+  } else {
+    // Reserved live attempts must settle even when the shard is quarantined
+    // and cannot count as a successful coverage shard.
+    options.onLiveExtractionFailed?.(cacheKey);
   }
   options.onExtractionProgress?.();
+}
+
+function settleQuarantinedExtraction(
+  options: CachingSignalExtractorOptions,
+  cacheKey: string,
+  rawJson: string
+): Awaited<ReturnType<BenchSignalExtractor["extract"]>> {
+  options.onLiveExtractionFailed?.(cacheKey);
+  options.onExtractionProgress?.();
+  return { rawJson };
 }
 
 function withAuthorityAttemptHook(

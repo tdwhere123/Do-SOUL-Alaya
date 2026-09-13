@@ -2,9 +2,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import {
-  createTestLongMemEvalDatasetAuthority as mintWithToken
-} from "../../../datasets/longmemeval/ingestion/fetch.js";
+import * as datasetFetch from "../../../datasets/longmemeval/ingestion/fetch.js";
 import { createTestLongMemEvalDatasetAuthority } from
   "../ingestion/test-dataset-authority.js";
 
@@ -31,8 +29,10 @@ describe("production crash-injection absence", () => {
   });
 
   it("refuses a forged test dataset authority token", () => {
-    expect(() => mintWithToken(
-      { kind: "forged" } as never,
+    expect("createTestLongMemEvalDatasetAuthority" in datasetFetch).toBe(false);
+    expect("LONGMEMEVAL_DATASET_TEST_AUTHORITY_KIND" in datasetFetch).toBe(false);
+    expect(() => datasetFetch.mintLongMemEvalDatasetAuthorityFromTestToken(
+      { kind: "longmemeval-dataset-test-authority" },
       { datasetSha256: "aa".repeat(32), assignments: [] }
     )).toThrow(/test-only LongMemEval authority seam is unavailable/u);
     expect(createTestLongMemEvalDatasetAuthority({

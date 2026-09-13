@@ -5,24 +5,35 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildOfficialApiExtractionRequests,
   OFFICIAL_API_SYSTEM_PROMPT,
-  stringifyOfficialApiExtractionRequest
+  stringifyOfficialApiExtractionRequest,
+  transportPackIdentity
 } from "@do-soul/alaya-soul";
 import {
   createCachingSignalExtractor,
   inspectCachedExtraction
 } from "../../../runs/compile-seed/compile-seed-cache.js";
+import { inspectCachedRawExtraction } from
+  "../../../runs/compile-seed/cache/cache-shard.js";
 import { inspectExtractionFillCompletion } from
   "../../../runs/extraction/fill/fill-completion.js";
 import {
-  classifyExtractionEnvelope
+  classifyExtractionEnvelope,
+  EMPTY_SIGNALS_ENVELOPE,
+  isPlanSkippedExtraction,
+  PLAN_SKIPPED_EXTRACTION_ENVELOPE
 } from "../../../runs/extraction/empty-classification.js";
-import { SEMANTIC_ARTIFACT_KIND } from
-  "../../../runs/extraction/cache/semantic-artifact/contract.js";
+import { admitProviderRaw, semanticPackRequestSha256 } from
+  "../../../runs/extraction/cache/semantic-artifact/admit.js";
+import { currentSemanticReplayAuthority } from
+  "../../../runs/extraction/cache/semantic-artifact/replay-authority.js";
+import { openExtractionAttemptLedger } from
+  "../../../runs/extraction/authority/attempt-ledger.js";
 import { newFillStats } from "../../../runs/extraction/fill/fill-stats.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
+import { semanticTask } from "./semantic-artifact-fixture.js";
 
 const roots: string[] = [];
 
@@ -88,7 +99,86 @@ describe("extraction empty envelope classification", () => {
     });
     expect(completion.coverage).toBeLessThan(1);
     expect(completion.validTurns).toBe(0);
-    expect(SEMANTIC_ARTIFACT_KIND).toBe("assertion_semantic_artifact_v1");
+    expect(inspectCachedRawExtraction(
+      cacheRoot, cacheKey, "test-model", "provider-default-v1"
+    ).status).toBe("quarantined");
+    const task = semanticTask("I moved to Berlin.");
+    const semanticRoot = await mkdtemp(join(tmpdir(), "empty-semantic-"));
+    roots.push(semanticRoot);
+    const packIdentity = transportPackIdentity("token_aware", [task.semanticKey]);
+    const [admission] = admitProviderRaw({
+      root: semanticRoot,
+      rawJson: EMPTY_SIGNALS_ENVELOPE,
+      tasks: [task],
+      replayAuthority: currentSemanticReplayAuthority(),
+      rawBinding: {
+        packIdentity,
+        requestSha256: semanticPackRequestSha256({
+          packIdentity,
+          sourceCorpusIdentity: task.binding.sourceCorpusIdentity,
+          sourceAuthority: task.sourceAuthority,
+          members: [{
+            semanticKey: task.semanticKey,
+            assertionId: task.assertionId,
+            text: task.text
+          }]
+        }),
+        sourceCorpusIdentity: task.binding.sourceCorpusIdentity,
+        policyKind: "token_aware",
+        memberSemanticKeys: [task.semanticKey]
+      }
+    });
+    expect(admission?.kind).toBe("quarantined");
+    expect(admission && "admission" in admission ? admission.admission.state : undefined)
+      .toBe("quarantined");
+  });
+
+  it("abandons a reserved live provider-empty shard without committing success", async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), "empty-pending-"));
+    roots.push(cacheRoot);
+    writeExtractionCacheTestManifest({
+      cacheRoot, model: "test-model", systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const request = buildOfficialApiExtractionRequests(
+      "I moved to Berlin.",
+      [{ message_id: "m0", role: "user", content: "I moved to Berlin." }]
+    )[0]!;
+    const ledger = openExtractionAttemptLedger({
+      cacheRoot,
+      lineageDigest: "a".repeat(64),
+      cacheIdentity: { model: "test-model", requestProfile: "provider-default-v1" },
+      startingMissing: 1,
+      maximumAttempts: 2,
+      successfulShardCeiling: 1
+    });
+    const extractor = createCachingSignalExtractor({
+      delegate: {
+        extract: async (input) => {
+          await input.onTransportAttempt?.(input.abortSignal);
+          return { rawJson: EMPTY_SIGNALS_ENVELOPE };
+        }
+      },
+      config: {
+        model: "test-model",
+        modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
+      cacheRoot,
+      onTransportAttempt: ledger.reserveAttempt,
+      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+      onLiveExtractionFailed: ledger.abandonPendingShard,
+      onLiveExtractionOutcome: ledger.recordTransportOutcome
+    });
+    await extractor.extract({
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      userPrompt: stringifyOfficialApiExtractionRequest(request)
+    });
+    expect(ledger.snapshot()).toMatchObject({
+      attempts: 1,
+      successfulShards: 0,
+      pendingKeys: []
+    });
   });
 
   it("marks out-of-allowlist keys as plan-skipped without counting cache hits", async () => {
@@ -119,6 +209,10 @@ describe("extraction empty envelope classification", () => {
       userPrompt: stringifyOfficialApiExtractionRequest(request)
     });
     expect(result.extractionSkip).toBe("plan_skipped");
+    expect(isPlanSkippedExtraction(result)).toBe(true);
+    expect(result.rawJson).toBe(PLAN_SKIPPED_EXTRACTION_ENVELOPE);
+    expect(result.rawJson).not.toBe(EMPTY_SIGNALS_ENVELOPE);
+    expect(JSON.parse(result.rawJson)).toEqual({ extraction_skip: "plan_skipped" });
     expect(stats.cacheHits).toBe(0);
   });
 });
