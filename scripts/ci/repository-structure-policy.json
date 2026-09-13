@@ -181,13 +181,6 @@
     "docs/bench-history"
   ],
   "existing_artifact_reference_exceptions": {
-    "apps/core-daemon/src/ai/reconciliation-llm-decision.ts": {
-      "max_occurrences_by_fragment": {
-        ".do-it/bench-runs": 0,
-        "docs/bench-history": 1
-      },
-      "reason": "Named post-lock authority decision: production/provider cache currently lives under docs/bench-history."
-    },
     "apps/inspector/src/runtime/app.ts": {
       "max_occurrences_by_fragment": {
         ".do-it/bench-runs": 0,
@@ -1157,8 +1150,8 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 909,
-      "expected_sha256": "672a136e31d9ee0349666d6f7c88d3596a074a76eac57563284bda3bb93764f2"
+      "expected_count": 913,
+      "expected_sha256": "17b30c9d1e3384193631a9b5563e180c3fb77f0949eee7a5c486b271d3e346da"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",

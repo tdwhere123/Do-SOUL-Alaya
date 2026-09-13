@@ -76,7 +76,7 @@ export function sourceBoundF3Seal(): SourceBoundF3Seal {
   };
 }
 
-export function sourceBoundF3SealStatus(): SourceBoundF3Seal {
+function sourceBoundF3SealStatus(): SourceBoundF3Seal {
   return sourceBoundF3Seal();
 }
 
