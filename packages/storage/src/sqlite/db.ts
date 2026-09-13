@@ -26,6 +26,8 @@ import { openSqliteConnection } from "./open-sqlite-connection.js";
 import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 import { registerRetainedSourceChunkDigest } from "./retained-source-chunk-digest.js";
 import { migrateRetainedSourceChunks } from "./retained-source-migration.js";
+import { migrateEmbeddingVectorValidity } from "./embedding-vector-validity-migration.js";
+import { parseRows, type RowParser } from "../repos/shared/parse-row.js";
 
 export { TEMPORAL_OFFLINE_MIGRATION_VERSION, type TemporalDatabaseMode } from "./temporal-cutover-gate.js";
 
@@ -42,6 +44,8 @@ export interface InitDatabaseOptions {
 const MAX_DATABASE_CACHE_ENTRIES = 32;
 const DEFAULT_BUSY_TIMEOUT_MS = 5_000;
 const MAX_SQLITE_BUSY_TIMEOUT_MS = 2_147_483_647;
+const MEMORY_ENTRY_ENUM_CHECK_MIGRATION_VERSION = 14;
+const EMBEDDING_VECTOR_VALIDITY_MIGRATION_VERSION = 15;
 
 const databaseCache = new LruCache<string, StorageDatabase>(MAX_DATABASE_CACHE_ENTRIES);
 
@@ -198,8 +202,18 @@ export function readSchemaMigrationLedger(
 
 export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase {
   const filename = options.filename ?? ":memory:";
-  const temporalMode = resolveTemporalDatabaseMode(filename, options.temporalMode);
   const busyTimeoutMs = normalizeBusyTimeoutMs(options.busyTimeoutMs);
+  let temporalMode = resolveTemporalDatabaseMode(filename, options.temporalMode);
+  // A peer still creating this file looks like "exists" to existsSync, but it
+  // is not a legacy source. Empty/unledgers stay on the fresh-bootstrap path.
+  if (
+    options.temporalMode === undefined &&
+    filename !== ":memory:" &&
+    temporalMode === "runtime" &&
+    isUninitializedDatabaseFile(filename)
+  ) {
+    temporalMode = "fresh-bootstrap";
+  }
 
   if (filename !== ":memory:") {
     const cached = databaseCache.get(filename);
@@ -295,25 +309,31 @@ function openDatabase(filename: string): SqliteConnection {
 function runMigrations(database: SqliteConnection, temporalMode: TemporalDatabaseMode): void {
   const migrationsDirectory = resolveMigrationsDirectory();
   const migrationFiles = listMigrationFiles(migrationsDirectory);
-  ensureSchemaVersionTable(database);
+  assertContiguousMigrationFileVersions(migrationFiles);
   const knownMaxVersion = computeKnownMaxVersion(migrationFiles);
   assertSchemaVersionNotAhead(database, knownMaxVersion);
-  const statements = prepareMigrationStatements(database);
 
+  const beforeRebuild: string[] = [];
+  const rebuild: string[] = [];
+  const afterRebuild: string[] = [];
   for (const fileName of migrationFiles) {
     const version = parseMigrationVersion(fileName);
     if (version === TEMPORAL_OFFLINE_MIGRATION_VERSION && temporalMode === "runtime") {
       continue;
     }
-    // Bind-key uniqueness requires the temporal generation table from offline v7.
-    if (
-      version === TEMPORAL_VERIFIED_BIND_KEY_MIGRATION_VERSION &&
-      statements.isAppliedStatement.get(TEMPORAL_OFFLINE_MIGRATION_VERSION) === undefined
-    ) {
-      continue;
+    if (version < MEMORY_ENTRY_ENUM_CHECK_MIGRATION_VERSION) {
+      beforeRebuild.push(fileName);
+    } else if (version === MEMORY_ENTRY_ENUM_CHECK_MIGRATION_VERSION) {
+      rebuild.push(fileName);
+    } else {
+      afterRebuild.push(fileName);
     }
-    applyMigrationIfPending(database, migrationsDirectory, statements, fileName, temporalMode);
   }
+
+  // Keep 1..13 atomic so a concurrent opener never observes a pre-temporal ledger.
+  applyMigrationBatch(database, migrationsDirectory, beforeRebuild, temporalMode, false);
+  applyMigrationBatch(database, migrationsDirectory, rebuild, temporalMode, true);
+  applyMigrationBatch(database, migrationsDirectory, afterRebuild, temporalMode, false);
 }
 
 function ensureSchemaVersionTable(database: SqliteConnection): void {
@@ -381,6 +401,45 @@ function prepareMigrationStatements(database: SqliteConnection): MigrationStatem
   };
 }
 
+function applyMigrationBatch(
+  database: SqliteConnection,
+  migrationsDirectory: string,
+  fileNames: readonly string[],
+  temporalMode: TemporalDatabaseMode,
+  rebuildsMemoryEntries: boolean
+): void {
+  if (fileNames.length === 0) {
+    return;
+  }
+  if (rebuildsMemoryEntries) {
+    // PRAGMA foreign_keys is a no-op inside a transaction; DROP/rename of
+    // memory_entries needs incoming FKs disabled for the official rebuild.
+    // Do not fail-closed on pre-existing FK violations: this batch only
+    // adds enum CHECKs. Illegal enum rows still fail the rebuilt CHECK.
+    database.pragma("foreign_keys = OFF");
+  }
+  try {
+    database.transaction(() => {
+      ensureSchemaVersionTable(database);
+      const statements = prepareMigrationStatements(database);
+      for (const fileName of fileNames) {
+        applyMigrationIfPending(database, migrationsDirectory, statements, fileName, temporalMode);
+      }
+    }).immediate();
+  } catch (error) {
+    if (error instanceof StorageError) throw error;
+    throw new StorageError(
+      "MIGRATION_FAILED",
+      `Failed to apply migration ${fileNames[0]}`,
+      error
+    );
+  } finally {
+    if (rebuildsMemoryEntries) {
+      database.pragma("foreign_keys = ON");
+    }
+  }
+}
+
 function applyMigrationIfPending(
   database: SqliteConnection,
   migrationsDirectory: string,
@@ -389,18 +448,52 @@ function applyMigrationIfPending(
   temporalMode: TemporalDatabaseMode
 ): void {
   const version = parseMigrationVersion(fileName);
+  if (
+    version === TEMPORAL_VERIFIED_BIND_KEY_MIGRATION_VERSION &&
+    statements.isAppliedStatement.get(TEMPORAL_OFFLINE_MIGRATION_VERSION) === undefined
+  ) {
+    return;
+  }
   if (statements.isAppliedStatement.get(version) !== undefined) {
     return;
   }
   const migrationSql = fs.readFileSync(path.join(migrationsDirectory, fileName), "utf8");
   try {
-    database.transaction(() => {
-      database.exec(migrationSql);
-      runDataMigrationIfPresent(database, version, temporalMode);
-      statements.markAppliedStatement.run(version, new Date().toISOString());
-    })();
+    database.exec(migrationSql);
+    runDataMigrationIfPresent(database, version, temporalMode);
+    statements.markAppliedStatement.run(version, new Date().toISOString());
   } catch (error) {
+    if (error instanceof StorageError) throw error;
     throw new StorageError("MIGRATION_FAILED", `Failed to apply migration ${fileName}`, error);
+  }
+}
+
+function isUninitializedDatabaseFile(filename: string): boolean {
+  if (!fs.existsSync(filename)) {
+    return true;
+  }
+  let database: SqliteConnection | undefined;
+  try {
+    database = openSqliteConnection(filename, { readonly: true, fileMustExist: true });
+    const table = database.prepare(
+      "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'"
+    ).get() as { readonly count: number };
+    if (table.count === 0) {
+      return true;
+    }
+    const ledger = database.prepare("SELECT COUNT(*) AS count FROM schema_version").get() as {
+      readonly count: number;
+    };
+    return ledger.count === 0;
+  } catch (error) {
+    if (isSqliteNoSuchTableError(error)) {
+      return true;
+    }
+    // Open/query failure is not proof the ledger is empty. Keep runtime so
+    // assertRuntimeTemporalDatabaseReady fail-closes instead of applying v7.
+    return false;
+  } finally {
+    database?.close();
   }
 }
 
@@ -416,7 +509,8 @@ const DATA_MIGRATIONS: Readonly<Partial<Record<
   [TEMPORAL_VERIFIED_BIND_KEY_MIGRATION_VERSION]: (database) => {
     migrateVerifiedProjectionBindKey(database);
   },
-  13: migrateRetainedSourceChunks
+  13: migrateRetainedSourceChunks,
+  [EMBEDDING_VECTOR_VALIDITY_MIGRATION_VERSION]: migrateEmbeddingVectorValidity
 };
 
 function runDataMigrationIfPresent(
@@ -442,6 +536,41 @@ function parseMigrationVersion(fileName: string): number {
     throw new StorageError("MIGRATION_FAILED", `Invalid migration filename: ${fileName}`);
   }
   return Number(versionMatch[1]);
+}
+
+function assertContiguousMigrationFileVersions(fileNames: readonly string[]): void {
+  const versions = fileNames.map(parseMigrationVersion);
+  if (versions.length === 0) {
+    throw new StorageError("MIGRATION_FAILED", "No SQLite migration files found.");
+  }
+  const unique = [...new Set(versions)].sort((left, right) => left - right);
+  if (unique.length !== versions.length) {
+    throw new StorageError("MIGRATION_FAILED", "Duplicate SQLite migration versions.");
+  }
+  if (unique[0] !== 1) {
+    throw new StorageError("MIGRATION_FAILED", "SQLite migration versions must start at 1.");
+  }
+  for (let index = 1; index < unique.length; index += 1) {
+    const expected = unique[index - 1]! + 1;
+    if (unique[index] !== expected) {
+      throw new StorageError(
+        "MIGRATION_FAILED",
+        `SQLite migration versions are not contiguous: missing ${expected}.`
+      );
+    }
+  }
+}
+
+export function selectRows<T>(
+  database: SqliteConnection,
+  sql: string,
+  args: readonly unknown[] | Record<string, unknown>,
+  parser: RowParser<T>,
+  label: string
+): readonly T[] {
+  const statement = database.prepare(sql);
+  const values = Array.isArray(args) ? statement.all(...args) : statement.all(args);
+  return parseRows(values, parser, label);
 }
 
 /**

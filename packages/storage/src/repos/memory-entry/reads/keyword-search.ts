@@ -1,9 +1,6 @@
 import type { MemoryEntrySemanticTieRow } from "../semantic-tie-order.js";
 import type { MemoryEntryKeywordSearchResult } from "../types.js";
-import {
-  isCjkSegmentationCandidate,
-  segmentCjkRun
-} from "../../shared/cjk-segmentation.js";
+import { tokenizeFtsQuery as tokenizeFtsQueryFromRouting } from "../../shared/fts-lane-routing.js";
 
 export interface ExactKeywordCandidateRow extends MemoryEntrySemanticTieRow {
   readonly object_id: string;
@@ -238,8 +235,6 @@ export function buildGroupedOrdinalScores<T>(
   return Object.freeze(scores);
 }
 
-const MAX_FTS_QUERY_TOKENS = 32;
-
 // invariant: FTS5 has more reserved metacharacters than the original
 // denylist (":, ", *) covered — at minimum `(`, `)`, `+`, `-`, `^`, plus
 // the column-filter `:` and NEAR/0 word forms. Rather than chase the FTS5
@@ -254,29 +249,11 @@ function sanitizeFtsToken(token: string): string {
 }
 
 export function tokenizeFtsQuery(queryText: string): readonly string[] {
-  const surfaceTokens = queryText
-    .trim()
-    .split(/\s+/u)
-    .map((token) => sanitizeFtsToken(token))
-    .filter((token) => token.length > 0);
-  const expanded: string[] = [];
-  for (const token of surfaceTokens) {
-    expanded.push(token);
-    // anchor: jieba word-level pieces are appended after the surface
-    // token so the trigram lane still sees the long form (substring
-    // match) AND any FTS5 lane that handles short tokens sees the word
-    // boundaries. see also: shared/cjk-segmentation.ts.
-    if (isCjkSegmentationCandidate(token)) {
-      for (const piece of segmentCjkRun(token)) {
-        const trimmed = sanitizeFtsToken(piece);
-        if (trimmed.length > 0 && trimmed !== token) {
-          expanded.push(trimmed);
-        }
-      }
-    }
-  }
-  const deduped = Array.from(new Set(expanded));
-  return Object.freeze(deduped.slice(0, MAX_FTS_QUERY_TOKENS));
+  return Object.freeze(
+    tokenizeFtsQueryFromRouting(queryText)
+      .map(sanitizeFtsToken)
+      .filter((token) => token.length > 0)
+  );
 }
 
 export function countQueryCodepoints(value: string): number {

@@ -3,6 +3,8 @@ CREATE TABLE evidence_semantic_factor_formations (
   evidence_object_id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
   schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+  -- Literal must match OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID
+  -- (packages/protocol/src/relations/open-semantic-factor-graph.ts).
   operator_id TEXT NOT NULL CHECK (
     operator_id = 'open_semantic_factor_formation_v1'
   ),

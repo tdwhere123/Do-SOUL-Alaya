@@ -4,8 +4,10 @@ import {
   buildFtsMatchExpression,
   buildWorkspaceFtsScopeMatch,
   buildWorkspaceScopedFtsMatch,
-  queryFtsLaneRows
+  queryFtsLaneRows,
+  tokenizeFtsQuery as tokenizeLaneQuery
 } from "../../../repos/shared/fts-lane-routing.js";
+import { tokenizeFtsQuery as tokenizeKeywordQuery } from "../../../repos/memory-entry/reads/keyword-search.js";
 
 describe("buildFtsMatchExpression", () => {
   it("ORs quoted tokens and escapes embedded quotes", () => {
@@ -71,5 +73,18 @@ describe("queryFtsLaneRows", () => {
       { object_id: "first", raw_rank: -10 },
       { object_id: "second", raw_rank: -5 }
     ]);
+  });
+});
+
+describe("FTS token sets across keyword and lane routing", () => {
+  it("emits the same tokens for CJK, punctuation, and long-token queries", () => {
+    const queries = [
+      "hello, world!",
+      "我喜欢咖啡",
+      "supercalifragilisticexpialidocious punctuation:token"
+    ];
+    for (const query of queries) {
+      expect(tokenizeKeywordQuery(query)).toEqual(tokenizeLaneQuery(query));
+    }
   });
 });

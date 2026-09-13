@@ -117,6 +117,41 @@ describe("SqliteMemoryRecallReader lexical cursor", () => {
     expect([...first.ids, ...second.ids]).toEqual(ids);
     expect(new Set([...first.ids, ...second.ids]).size).toBe(ids.length);
   });
+
+  it("resumes lexical paging from a non-numeric object id", async () => {
+    const { database, repo } = await createRepo();
+    const ids = await plantNeedles(repo, 4);
+    const reader = new SqliteMemoryRecallReader(database);
+    const first = reader.lexical("workspace-1", "needle", 2, 2);
+    expect(first.ids).toEqual(ids.slice(0, 2));
+    const afterObjectId = first.ids.at(-1) ?? null;
+    expect(afterObjectId).not.toMatch(/^[0-9]+$/u);
+    const second = reader.lexical("workspace-1", "needle", 2, 2, afterObjectId);
+    expect(second.ids).toEqual(ids.slice(2));
+    expect([...first.ids, ...second.ids]).toEqual(ids);
+  });
+
+  it("does not prepare lexical SQL once per page", async () => {
+    const { database, repo } = await createRepo();
+    await plantNeedles(repo, 8);
+    const reader = new SqliteMemoryRecallReader(database);
+    const originalPrepare = database.connection.prepare.bind(database.connection);
+    let prepareCount = 0;
+    database.connection.prepare = ((sql: string, ...args: unknown[]) => {
+      prepareCount += 1;
+      return originalPrepare(sql, ...(args as []));
+    }) as typeof database.connection.prepare;
+    const first = reader.lexical("workspace-1", "needle", 2, 2);
+    const afterFirst = prepareCount;
+    let after = first.committedThrough ?? null;
+    for (let step = 0; step < 3; step += 1) {
+      const page = reader.lexical("workspace-1", "needle", 2, 2, after);
+      after = page.committedThrough ?? after;
+      if (!page.truncated) break;
+    }
+    expect(afterFirst).toBeGreaterThan(0);
+    expect(prepareCount).toBe(afterFirst);
+  });
 });
 
 async function plantNeedles(

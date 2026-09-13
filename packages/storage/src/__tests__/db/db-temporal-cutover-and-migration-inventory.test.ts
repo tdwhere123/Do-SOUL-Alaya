@@ -60,7 +60,7 @@ describe("temporal cutover startup gate", () => {
         readonly status: string;
       };
 
-      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(13);
+      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(15);
       expect(state).toEqual({
         active_projection_generation: "temporal-bootstrap-empty-v1",
         projection_count: 0,
@@ -153,7 +153,8 @@ describe("SQLite migration inventory guardrail", () => {
 const INTENTIONAL_MIGRATION_GAPS = new Set<number>([]);
 const INTENTIONAL_NOOP_MIGRATIONS = new Set([
   "007-temporal-bootstrap.sql",
-  "008-temporal-verified-bind-key.sql"
+  "008-temporal-verified-bind-key.sql",
+  "015-embedding-vector-validity.sql"
 ]);
 
 function readMigrationInventory(): {

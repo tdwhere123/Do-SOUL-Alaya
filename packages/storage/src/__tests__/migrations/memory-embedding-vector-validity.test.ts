@@ -1,5 +1,6 @@
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
+import { initDatabase } from "../../sqlite/db.js";
 import { migrateEmbeddingVectorValidity } from "../../sqlite/embedding-vector-validity-migration.js";
 
 const databases = new Set<BetterSqlite3.Database>();
@@ -45,6 +46,18 @@ describe("memory embedding vector validity", () => {
       { object_id: "valid", vector_valid: 1 },
       { object_id: "zero", vector_valid: 0 }
     ]);
+  });
+
+  it("is wired into initDatabase as migration version 15", () => {
+    const database = initDatabase({ filename: ":memory:" });
+    try {
+      const applied = database.connection.prepare(
+        "SELECT 1 AS present FROM schema_version WHERE version = 15 LIMIT 1"
+      ).get() as { readonly present: number } | undefined;
+      expect(applied?.present).toBe(1);
+    } finally {
+      database.close();
+    }
   });
 });
 

@@ -1,0 +1,3 @@
+-- Historical memory_embeddings.vector_valid backfill is applied by the
+-- version 15 data hook so the scan stays inside the migration transaction.
+-- INTENTIONAL_NOOP_MIGRATION

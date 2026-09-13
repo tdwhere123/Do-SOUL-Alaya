@@ -36,7 +36,7 @@ describe("retained source representation migration", () => {
     // Upgrade-and-reopen is the contract; close-time optimize is not.
     old.close({ optimize: false });
     const migrated = initDatabase({ filename });
-    expect(migrated.connection.prepare("SELECT MAX(version) AS version FROM schema_version").get()).toEqual({ version: 13 });
+    expect(migrated.connection.prepare("SELECT MAX(version) AS version FROM schema_version").get()).toEqual({ version: 15 });
     expect(migrated.connection.prepare("SELECT COUNT(*) AS count FROM retained_source_chunks").get()).toEqual({ count: 2 });
     migrated.close({ optimize: false });
     const readonly = new StorageDatabase(filename, new BetterSqlite3(filename, { readonly: true }));

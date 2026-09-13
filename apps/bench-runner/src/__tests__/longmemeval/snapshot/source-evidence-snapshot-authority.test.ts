@@ -283,7 +283,7 @@ describe("source evidence snapshot authority", () => {
           source_kind, formation_kind, domain_tags, content, evidence_refs, run_id,
           workspace_id, surface_id
         ) VALUES (?, 'memory_entry', 1, 'active', ?, ?, 'fixture',
-                  'episode', 'project', 'user', 'atomic', '[]',
+                  'episode', 'project', 'user', 'explicit', '[]',
                   'same id memory', ?, ?, ?, ?)
       `).run(
         fixture.evidenceId,
