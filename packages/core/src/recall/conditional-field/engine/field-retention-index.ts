@@ -4,6 +4,7 @@ import { productStateNodeId } from "../reference/bind-max-min.js";
 import { ruleIdentity, transitionKey } from "./path-composition.js";
 import type { FieldEngineState } from "./field-engine.js";
 import { RetainedSequence, type RetainedRows } from "./retained-sequence.js";
+import { selectSeedActivation } from "./path-composition-seed.js";
 
 export type FieldRetentionIndex = Readonly<{
   rows: Pick<FieldEngineState, "observations" | "measurements" | "seeds" | "guaranteed_seeds" | "transitions"
@@ -57,19 +58,24 @@ function seedOffsets(seeds: RetainedRows<SeedActivation>): PersistentStringMap<n
 }
 
 export function mergeSeedAdditions(prior: RetainedRows<SeedActivation>, incoming: readonly SeedActivation[],
-  offsets: PersistentStringMap<number>): Readonly<{ rows: RetainedRows<SeedActivation>; additions: readonly SeedActivation[]; offsets: PersistentStringMap<number> }> {
-  if (incoming.length === 0) return { rows: prior, additions: [], offsets };
+  offsets: PersistentStringMap<number>): Readonly<{ rows: RetainedRows<SeedActivation>; additions: readonly SeedActivation[];
+    offsets: PersistentStringMap<number>; reset: boolean }> {
+  if (incoming.length === 0) return { rows: prior, additions: [], offsets, reset: false };
   let rows = RetainedSequence.from(prior);
   const additions: SeedActivation[] = [];
+  let reset = false;
   for (const seed of incoming) {
     const key = productStateNodeId(seed.state);
     const offset = offsets.get(key);
-    if (offset !== undefined && rows.at(offset)!.milligrades >= seed.milligrades) continue;
+    const previous = offset === undefined ? undefined : rows.at(offset)!;
+    if (selectSeedActivation(previous, seed) === previous) continue;
+    // The incremental graph only adds maxima; a new activation contract must rebind both bounds.
+    if (previous !== undefined && previous.cap_contract_id !== seed.cap_contract_id) reset = true;
     if (offset === undefined) { offsets = offsets.with(key, rows.length); rows = rows.append(seed); }
     else rows = rows.replace(offset, seed);
     additions.push(seed);
   }
-  return { rows, additions, offsets };
+  return { rows, additions, offsets, reset };
 }
 
 export function newTransitionAdditions(incoming: readonly Transition[], index: FieldRetentionIndex): Readonly<{

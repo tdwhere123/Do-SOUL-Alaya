@@ -189,7 +189,7 @@ export function absorbObservations(
       observations: quota.observationOffsets, measurements: quota.measurementIds, derivations: quota.derivationRows,
       facets: quota.facetIds, discoveries: quota.discoveryIds, seeds: seedDelta.offsets, guaranteedSeeds: guaranteedDelta.offsets,
       transitions: transitionDelta.keys, ruleRevisions: transitionDelta.revisions },
-    binding_delta: { reset: transitionDelta.reset,
+    binding_delta: { reset: transitionDelta.reset || seedDelta.reset || guaranteedDelta.reset,
       possible: { seeds: seedDelta.additions, transitions: transitionDelta.additions },
       guaranteed: { seeds: guaranteedDelta.additions, transitions: transitionDelta.additions.filter((row) => row.applicable) } },
     proven_binding: binding,
