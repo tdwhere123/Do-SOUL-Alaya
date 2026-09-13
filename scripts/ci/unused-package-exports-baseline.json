@@ -360,6 +360,7 @@
     "type:packages/eval/src/contracts/kpi-auxiliary-schema.ts:EmbeddingSupplementRuntimeProvenance",
     "type:packages/eval/src/contracts/kpi-auxiliary-schema.ts:QaMetrics",
     "type:packages/eval/src/contracts/kpi-auxiliary-schema.ts:RecallEvalAttribution",
+    "type:packages/eval/src/contracts/kpi-auxiliary-schema.ts:RecallTokenEconomySample",
     "type:packages/eval/src/contracts/kpi-schema.ts:QaMetrics",
     "type:packages/eval/src/contracts/kpi-schema.ts:RecallEvalAttribution",
     "type:packages/eval/src/contracts/kpi-schema.ts:SeedFuelInventory",
