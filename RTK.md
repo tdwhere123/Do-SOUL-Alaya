@@ -12,7 +12,7 @@ Examples:
 rtk git status
 rtk pnpm test
 rtk pnpm exec vitest run --config vitest.config.mjs
-rtk node dist/cli/index.js doctor
+rtk pnpm exec alaya doctor
 ```
 
 ## Meta Commands

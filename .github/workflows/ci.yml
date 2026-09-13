@@ -20,6 +20,7 @@ jobs:
   quality:
     name: Quality (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -44,9 +45,6 @@ jobs:
             run_smoke: true
     steps:
       - uses: actions/checkout@v7
-
-      - name: Fetch shadow-off neutrality pin
-        run: git fetch --depth 1 origin f29002ba9480b267106e38128a91eec1ebe5917d
 
       - uses: pnpm/action-setup@v6
         with:
@@ -85,13 +83,31 @@ jobs:
 
       - name: Guard test as-any
         if: ${{ matrix.run_hygiene }}
-        run: pnpm run ci:test-as-any
+        run: |
+          pnpm run ci:test-as-any -- --self-test
+          pnpm run ci:test-as-any
 
-      - name: Dependency audit high severity
+      - name: Guard env docs
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run ci:env-docs
+
+      - name: Guard doc links
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run ci:doc-links
+
+      - name: Guard unused package exports
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run hygiene:unused-exports
+
+      - name: Installer script checks
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run ci:install-scripts
+
+      - name: Dependency audit moderate severity
         if: ${{ matrix.run_hygiene }}
         run: |
           for attempt in 1 2 3; do
-            pnpm run ci:audit-high && exit 0
+            pnpm run ci:audit && exit 0
             sleep 20
           done
           exit 1
@@ -119,6 +135,7 @@ jobs:
   content-contracts:
     name: Bench content contracts
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -132,6 +149,7 @@ jobs:
   install-smoke:
     name: CLI install surface smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: quality
     steps:
       - uses: actions/checkout@v7

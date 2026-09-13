@@ -20,5 +20,7 @@
 | An issue opened, deferred, or closed | `backlog.md` |
 | A stable term | `glossary.md` |
 
-Keep each file under ~15 KB. Code locations for recall are cited in
-`recall.md`; otherwise use `rg` or CodeGraph.
+Prefer concise files. `architecture.md`, `recall.md`, and
+`invariants.md` currently exceed 15 KB because they are the long-form
+contracts. Code locations for recall are cited in `recall.md`;
+otherwise use `rg` or CodeGraph.

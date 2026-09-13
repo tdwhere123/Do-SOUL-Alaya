@@ -12,7 +12,8 @@ Control (per-turn).
 
 **Memory Object** — Faceted stable semantic unit forming the ontology.
 Includes `EvidenceCapsule`, `MemoryEntry`, `SynthesisCapsule`,
-`ClaimForm`. Defined in `packages/protocol/src/soul/`.
+`ClaimForm`. Defined in `packages/protocol/src/memory/` and
+`packages/protocol/src/evidence/`.
 
 **EvidenceCapsule** — First-class evidence object. Contains semantic /
 event / physical anchors plus a health state. Evidence is required
@@ -48,8 +49,8 @@ this as the orchestration entry point for a chat turn (Memory +
 Recall + Evidence + Green + Governance + OutputShaping). Alaya
 retains only the candidate→recall→govern→durable memory orchestration;
 chat-specific orchestration (worker-dispatch / runtime-adapter /
-tool-substrate) was dropped during the v0.1 port. See historical
-card `docs/archive/v0.1-port-record/phase-3-briefs/README.md` row P3-conversation.
+tool-substrate) was dropped during the v0.1 port. The port-era
+phase-3 brief was deleted on 2026-08-24 (commit 2b23da6f2).
 
 **RecallQuery** — Per-turn request to RecallService describing what
 the consuming agent needs (subject, scope, dimensions, budgets,
@@ -280,7 +281,5 @@ I/O boundaries rather than inside SQLite repo APIs.
 
 The `Port` / `trivial-copy` / `adapt-and-port` / `requires-redesign`
 / `Vendor Snapshot` terminology was load-bearing only during the v0.1
-port wave. Definitions are preserved at
-`docs/archive/port-protocol-historical.md` for reading port-era task
-cards under `docs/archive/v0.1-port-record/phase-*-briefs/`. Forward (post-v0.1.0) work
-does not use these terms.
+port wave. Those archive trees were deleted on 2026-08-24
+(commit 2b23da6f2). Forward (post-v0.1.0) work does not use these terms.

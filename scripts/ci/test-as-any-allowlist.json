@@ -1,0 +1,30 @@
+{
+  "apps/bench-runner/src/__tests__/longmemeval/query-semantic-factor-cache.test.ts": {
+    "max": 5,
+    "reason": "JSON shard fixtures still use Record<string, any>; replace with the production shard type"
+  },
+  "apps/core-daemon/src/__tests__/mcp/tool-runtime-bootstrap.part2.test.ts": {
+    "max": 1,
+    "reason": "namespace import cast of @do-soul/alaya-core; replace with the production module type"
+  },
+  "apps/core-daemon/src/__tests__/mcp/tool-runtime-bootstrap.part3.test.ts": {
+    "max": 4,
+    "reason": "namespace import casts of @do-soul/alaya-core; replace with the production module type"
+  },
+  "apps/core-daemon/src/__tests__/mcp/tool-runtime-file-write-unresolvable-root.test.ts": {
+    "max": 1,
+    "reason": "open() mock still typed as Promise<any>; replace with fs.promises.open's return type"
+  },
+  "apps/core-daemon/src/__tests__/mcp/tool-runtime-wiring-core-mocks.ts": {
+    "max": 1,
+    "reason": "hoisted mock record; replace with production core ports"
+  },
+  "apps/core-daemon/src/__tests__/mcp/tool-runtime-wiring-storage-mocks.ts": {
+    "max": 1,
+    "reason": "hoisted mock record; replace with production storage ports"
+  },
+  "packages/core/src/__tests__/runtime/runs/engine-binding-service.test.ts": {
+    "max": 4,
+    "reason": "Map<string, any> stand-in for EngineBindingRecord; replace with the protocol type"
+  }
+}

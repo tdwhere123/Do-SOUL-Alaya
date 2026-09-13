@@ -30,16 +30,18 @@
 #   2. resolves the requested release tag and validates strict semver shape
 #   3. downloads the release tarball + SHA256SUMS over HTTPS-pinned curl
 #   4. verifies sha256 (anchored match) + rejects unsafe paths inside tarball
-#   5. extracts to a STAGING dir and runs pnpm install + pnpm build there
-#   6. on success, atomically swaps STAGING -> $ALAYA_HOME (old install -> .bak)
-#   7. symlinks $ALAYA_HOME/bin/alaya.mjs into $ALAYA_BIN_DIR/alaya
+#   5. extracts to a STAGING dir, asserts package.json.version matches the tag,
+#      then runs pnpm install + pnpm build there
+#   6. VACUUM INTO a timestamped copy of the live alaya.db (if present)
+#   7. on success, atomically swaps STAGING -> $ALAYA_HOME (old install -> .bak)
+#   8. symlinks $ALAYA_HOME/bin/alaya.mjs into $ALAYA_BIN_DIR/alaya
 #
 # Local ONNX embeddings are an optional extra (~640MiB). Default pnpm install
 # does not pull @huggingface/transformers. After install:
-#   pnpm add @huggingface/transformers --filter @do-soul/alaya-core
+#   pnpm add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core --no-frozen-lockfile
 #   node scripts/fetch-local-embedding-model.mjs
-# Inspector SPA is still compiled by `pnpm build` (apps/inspector/web); this
-# installer does not ship a separate prebuilt Inspector tarball.
+# Inspector SPA is compiled by `pnpm build` unless ALAYA_BUILD_INSPECTOR_WEB=0
+# and apps/inspector/web/dist/index.html already exists.
 set -euo pipefail
 
 REPO="${ALAYA_REPO:-tdwhere123/Do-SOUL-Alaya}"
@@ -214,7 +216,25 @@ tar -xzf "${TMP_DIR}/${TARBALL_NAME}" -C "$STAGING_DIR" \
   --no-same-owner \
   --no-same-permissions
 
+pkg_version="$(node -p "require(process.argv[1]).version" "$STAGING_DIR/package.json" 2>/dev/null || true)"
+[ "$pkg_version" = "$VERSION" ] \
+  || err "tarball package.json version '${pkg_version:-<missing>}' does not match tag ${VERSION_TAG}"
+ok "package.json version matches ${VERSION_TAG}"
+
+# Locate the live DB before cd. Relative toml/DATA_DIR paths must stay
+# anchored to the daemon config dir, not the staging tree.
+[ -f "$STAGING_DIR/scripts/resolve-live-db-path.mjs" ] \
+  || err "tarball missing scripts/resolve-live-db-path.mjs"
+live_locator="$(node "$STAGING_DIR/scripts/resolve-live-db-path.mjs")" \
+  || err "failed to resolve the live alaya.db path"
+LIVE_CONFIG_DIR="${live_locator%%$'\t'*}"
+LIVE_DB="${live_locator#*$'\t'}"
+LIVE_DB="${LIVE_DB%$'\n'}"
+[ -n "$LIVE_CONFIG_DIR" ] && [ -n "$LIVE_DB" ] \
+  || err "live database locator returned an empty path"
+
 cd "$STAGING_DIR"
+
 info "installing dependencies (pnpm install --frozen-lockfile)..."
 pnpm install --frozen-lockfile
 info "building (pnpm build)..."
@@ -225,6 +245,17 @@ if ! node ./bin/alaya.mjs --help >/dev/null 2>&1; then
   err "post-build sanity check failed: \`node ./bin/alaya.mjs --help\` did not exit 0"
 fi
 ok "post-build sanity check passed"
+
+# Snapshot the live database before swapping binaries. Schema only moves
+# forward; a binary rollback without this copy cannot read a migrated file.
+DB_BACKUP_PATH=""
+if [ -f "$LIVE_DB" ]; then
+  DB_BACKUP_PATH="${LIVE_CONFIG_DIR}/backups/alaya-${VERSION_TAG}-$(date -u +%Y%m%dT%H%M%SZ).db"
+  info "backing up ${LIVE_DB} -> ${DB_BACKUP_PATH}"
+  ( cd "$STAGING_DIR" && node ./scripts/vacuum-into.mjs "$LIVE_DB" "$DB_BACKUP_PATH" ) \
+    || err "database backup failed (stop the daemon and retry). Live DB: ${LIVE_DB}"
+  ok "database backup: ${DB_BACKUP_PATH}"
+fi
 
 # Atomic swap.
 if [ -d "$ALAYA_HOME" ]; then
@@ -260,13 +291,21 @@ bold "Installed Do-SOUL Alaya ${VERSION_TAG}."
 info ""
 info "This install came from GitHub Releases, not git HEAD."
 info "Local ONNX embeddings are optional; default install skips @huggingface/transformers."
-info "To enable local_onnx after this install:"
-info "  pnpm add @huggingface/transformers --filter @do-soul/alaya-core"
+info "To enable local_onnx after this install (rewrites the install lockfile):"
+info "  pnpm add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core --no-frozen-lockfile"
 info "  node ${ALAYA_HOME}/scripts/fetch-local-embedding-model.mjs"
+if [ -n "$DB_BACKUP_PATH" ]; then
+  info ""
+  info "Database backup (VACUUM INTO): ${DB_BACKUP_PATH}"
+  info "Schema only migrates forward. Restore before rolling the binary back:"
+  info "  1. stop the daemon"
+  info "  2. cp '${DB_BACKUP_PATH}' '${LIVE_DB}'"
+  info "Binary rollback: mv '${ALAYA_HOME}.bak' '${ALAYA_HOME}'"
+fi
 info ""
 info "Next steps:"
 info "  alaya doctor          # verify runtime"
 info "  alaya install         # attach to your CLI agent (codex / claude code / ...)"
 info "  alaya inspect --open  # open the Memory Inspector UI"
 info ""
-info "Uninstall: bash ${ALAYA_HOME}/scripts/uninstall.sh   (add --purge to remove ~/.config/alaya)"
+info "Uninstall: bash ${ALAYA_HOME}/scripts/uninstall.sh   (add --purge to remove ~/.config/alaya; .bak is kept unless --remove-bak)"
