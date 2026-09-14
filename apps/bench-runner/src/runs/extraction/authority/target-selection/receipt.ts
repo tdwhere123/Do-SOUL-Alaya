@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -75,6 +76,7 @@ export interface ExtractionTargetFinalIdentity {
   readonly model: string;
   readonly model_family: string;
   readonly request_profile: string;
+  readonly source_packing?: ExtractionSourcePacking;
   readonly provider_url: string;
   readonly system_prompt_sha256: string;
   readonly cache_key_algorithm: string;

@@ -1,5 +1,5 @@
 export interface AuthorizeExtractionArgs {
-  readonly action: "probe" | "fill";
+  readonly action: "probe" | "fill" | "sample";
   readonly outputPath: string;
   readonly outputTokenCap: number;
   readonly outputTokenField: ExtractionOutputTokenField;
@@ -8,6 +8,7 @@ export interface AuthorizeExtractionArgs {
   readonly maximumInputTokens: number;
   readonly diskFloorBytes: number;
   readonly probeKey?: string;
+  readonly sampleKeysPath?: string;
   readonly targetSelectionPath?: string;
   readonly predecessorAuthorityPath?: string;
   readonly repairInvalidShards: boolean;
@@ -17,6 +18,7 @@ export function parseAuthorizeExtractionArgs(
   args: ReadonlyArray<string>
 ): AuthorizeExtractionArgs {
   assertFlagAtMostOnce(args, "--extraction-predecessor-authority");
+  assertFlagAtMostOnce(args, "--extraction-sample-keys");
   const parsed = readAuthorizeExtractionArgs(args);
   assertAuthorizeExtractionArgs(parsed);
   return parsed;
@@ -28,7 +30,7 @@ function assertFlagAtMostOnce(args: ReadonlyArray<string>, flag: string): void {
 }
 
 function readAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExtractionArgs {
-  const action = requiredEnum(args, "--extraction-action", ["probe", "fill"] as const);
+  const action = requiredEnum(args, "--extraction-action", ["probe", "fill", "sample"] as const);
   const outputTokenField = requiredEnum(
     args, "--extraction-output-token-field", EXTRACTION_OUTPUT_TOKEN_FIELDS
   );
@@ -46,6 +48,7 @@ function readAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExtr
     maximumInputTokens: requiredNonNegativeInt(args, "--extraction-max-input-tokens"),
     diskFloorBytes: requiredNonNegativeInt(args, "--extraction-disk-floor-bytes"),
     probeKey: optionalString(args, "--extraction-probe-key"),
+    sampleKeysPath: optionalRequiredString(args, "--extraction-sample-keys"),
     targetSelectionPath: optionalRequiredString(args, "--extraction-target-selection"),
     predecessorAuthorityPath: optionalRequiredString(
       args, "--extraction-predecessor-authority"
@@ -55,10 +58,16 @@ function readAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExtr
 }
 
 function assertAuthorizeExtractionArgs(parsed: AuthorizeExtractionArgs): void {
+  if ((parsed.action === "sample") !== (parsed.sampleKeysPath !== undefined)) {
+    throw new Error("--extraction-sample-keys is required only for --extraction-action=sample");
+  }
+  if (parsed.action === "sample" && parsed.targetSelectionPath === undefined) {
+    throw new Error("sample authority requires an existing target selection receipt");
+  }
   if (parsed.action === "probe" && parsed.probeKey === undefined) {
     throw new Error("--extraction-probe-key is required when --extraction-action=probe");
   }
-  if (parsed.action === "fill" && parsed.probeKey !== undefined) {
+  if (parsed.action !== "probe" && parsed.probeKey !== undefined) {
     throw new Error("--extraction-probe-key is only valid when --extraction-action=probe");
   }
   if (parsed.predecessorAuthorityPath !== undefined &&

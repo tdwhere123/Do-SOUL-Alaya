@@ -13,7 +13,7 @@ import {
   writeSnapshotSidecar,
   type LongMemEvalSnapshotQuestion,
   type LongMemEvalSnapshotSidecarFile,
-  type SnapshotExtractionProvenanceV3
+  type ProfiledSnapshotExtractionProvenance
 } from "./materialize.js";
 import { readSchemaMigrationVersion } from "./snapshot-seed-identity.js";
 import { deriveSnapshotAttribution } from "./attribution.js";
@@ -63,7 +63,7 @@ export interface WriteRecallEvalSnapshotInput {
 
 interface SnapshotArtifactWritePreparation {
   readonly captured: ReturnType<typeof captureSnapshotExtractionAuthority>;
-  readonly extraction: SnapshotExtractionProvenanceV3;
+  readonly extraction: ProfiledSnapshotExtractionProvenance;
   readonly sidecar: LongMemEvalSnapshotSidecarFile;
   readonly questionDigest: string;
   readonly datasetSha: string;
@@ -183,7 +183,7 @@ function buildSidecar(input: WriteRecallEvalSnapshotInput): LongMemEvalSnapshotS
 function buildManifest(context: {
   readonly input: WriteRecallEvalSnapshotInput;
   readonly schemaMigrationVersion: number;
-  readonly extraction: SnapshotExtractionProvenanceV3;
+  readonly extraction: ProfiledSnapshotExtractionProvenance;
   readonly integrity: Awaited<ReturnType<typeof buildSnapshotArtifactIntegrity>>;
   readonly datasetSha: string;
   readonly questionDigest: string;
@@ -229,7 +229,7 @@ function buildManifest(context: {
 function readPersistedAuthority(
   filePath: string,
   expectedBytes: Buffer,
-  extraction: SnapshotExtractionProvenanceV3
+  extraction: ProfiledSnapshotExtractionProvenance
 ) {
   const bytes = readRegularFileNoFollow(
     filePath,
@@ -245,7 +245,7 @@ function readPersistedAuthority(
 
 function resolveSnapshotDatasetSha(
   input: WriteRecallEvalSnapshotInput,
-  extraction: SnapshotExtractionProvenanceV3,
+  extraction: ProfiledSnapshotExtractionProvenance,
   questionDigest: string
 ): string {
   if (!/^[a-f0-9]{64}$/u.test(input.datasetSha256)) {

@@ -79,7 +79,7 @@ function selectedRequestKeys(
   allowlist: ReadonlySet<string> | undefined
 ): ReadonlySet<string> {
   const available = new Set(turns.flatMap((turn) => computeExtractionTurnCacheKeys(
-    prepared.config.model, prepared.config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn
+    prepared.config.model, prepared.config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn, prepared.config.sourcePacking
   )));
   if (allowlist === undefined) return available;
   for (const key of allowlist) {
@@ -107,7 +107,7 @@ function collectBatchRequests(
       turn.turnContent, turn.turnMessages, prepared.datasetRevision
     );
     const byAssertion = new Map(workset.units.map((unit) => [unit.assertionId, unit]));
-    for (const request of buildOfficialApiExtractionRequests(turn.turnContent, turn.turnMessages)) {
+    for (const request of buildOfficialApiExtractionRequests(turn.turnContent, turn.turnMessages, prepared.config.sourcePacking)) {
       const userPrompt = stringifyOfficialApiExtractionRequest(request);
       const key = computeCacheKey(prepared.config.model, prepared.config.requestProfile,
         OFFICIAL_API_SYSTEM_PROMPT, userPrompt);

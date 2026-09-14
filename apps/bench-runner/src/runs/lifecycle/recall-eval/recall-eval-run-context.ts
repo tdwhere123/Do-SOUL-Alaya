@@ -61,8 +61,6 @@ import {
   loadedQuerySemanticFactorCacheFromBound,
   type LoadedQuerySemanticFactorCache
 } from "../../query-factors/query-semantic-factor-cache.js";
-import { EXTRACTION_CACHE_MANIFEST_VERSION } from
-  "../../extraction/cache/extraction-cache-manifest.js";
 import { isCurrentExtractionRequestProfile } from
   "../../extraction/request-profile.js";
 import { buildExpectedEmbeddingCacheOverlayBinding } from
@@ -281,10 +279,12 @@ export async function bindRecallEvalQuerySemanticFactorCache(
     throw new Error("recall-eval query cache current bind requires snapshot extraction authority");
   }
   if (provenance == null ||
-      provenance.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION) {
+      (provenance.schema_version !== 3 && provenance.schema_version !== 4)) {
     throw new Error("recall-eval query cache current bind requires current snapshot extraction provenance");
   }
-  if (authority.request_profile !== provenance.request_profile ||
+  if (authority.source_manifest_schema_version !== provenance.schema_version ||
+      authority.source_packing !== provenance.source_packing ||
+      authority.request_profile !== provenance.request_profile ||
       authority.extraction_model !== provenance.extraction_model) {
     throw new Error("recall-eval query cache current bind has mismatched extraction identity");
   }

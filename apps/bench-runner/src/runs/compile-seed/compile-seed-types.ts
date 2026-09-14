@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import type { ExtractionOutputTokenField } from "../extraction/authority/receipt-limits.js";
 import type {
@@ -170,6 +171,7 @@ export interface BenchSignalExtractorMeta {
 }
 
 export interface CompileSeedExtractionConfig {
+  readonly sourcePacking?: ExtractionSourcePacking;
   /** OpenAI-compatible chat-completions base URL (…/v1). */
   readonly providerUrl: string;
   /** Exact chat model id sent to the provider and used by the raw cache key. */
@@ -214,6 +216,7 @@ export interface ExtractionCachePreflightProof {
 
 export interface CompileSeedRunnerOptions {
   readonly config?: CompileSeedExtractionConfig;
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly cacheRoot?: string;
   readonly extractorFactory?: (
     config: CompileSeedExtractionConfig

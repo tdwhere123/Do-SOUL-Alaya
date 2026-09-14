@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { resolveOfficialApiSystemPrompt } from "@do-soul/alaya-soul";
-import { EXTRACTION_CACHE_KEY_ALGO, EXTRACTION_CACHE_MANIFEST_VERSION } from
+import { EXTRACTION_CACHE_KEY_ALGO } from
   "../../extraction/cache/extraction-cache-manifest.js";
 import type { SnapshotExtractionAuthority } from "../extraction-authority.js";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
@@ -78,7 +78,7 @@ function requireCompleteExtraction(
   readonly extraction: CompleteExtraction;
   readonly systemPrompt: string;
 }> {
-  if (value?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION ||
+  if ((value?.schema_version !== 3 && value?.schema_version !== 4) ||
       value.fill_status !== "complete" || value.content_closure_sha256 === undefined ||
       value.expected_turns === undefined || value.expected_key_set_sha256 === undefined ||
       value.request_profile === undefined ||

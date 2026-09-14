@@ -369,23 +369,34 @@ function extractTimeConcerns(
 
     pattern.lastIndex = 0;
     const candidates = resolveSourceTemporalCandidates(sentence, anchorIso ?? undefined);
+    for (const candidate of candidates) {
+      const matchedText = sentence.slice(candidate.start, candidate.end).trim();
+      matches.push({
+        matched_text: matchedText,
+        window_digest: normalizeWindowDigest(matchedText),
+        excerpt: sentence,
+        temporal_projection: candidate.role === "event" ? candidate.projection : null
+      });
+    }
     for (const match of sentence.matchAll(pattern)) {
+      // A bound range is one source candidate, not two independently projected
+      // endpoints. Raw hits remain only for genuinely unresolved source terms.
+      if (candidates.some((candidate) => candidate.start < match.index + match[0].length &&
+          match.index < candidate.end)) continue;
       const matchedText = normalizeMatchedText(match[0]);
       if (matchedText.length === 0) {
         continue;
       }
-      const temporal_projection = candidates.find((candidate) => candidate.role === "event" &&
-        candidate.start >= match.index && candidate.end <= match.index + match[0].length)?.projection ?? null;
       // Relative phrases without a source observation must not invent wall-clock windows.
       // Absolute calendar hits may still emit with a null projection (e.g. impossible dates).
-      if (temporal_projection === null && isRelativeTimeConcern(matchedText)) {
+      if (isRelativeTimeConcern(matchedText)) {
         continue;
       }
       matches.push({
         matched_text: matchedText,
         window_digest: normalizeWindowDigest(matchedText),
         excerpt: sentence,
-        temporal_projection
+        temporal_projection: null
       });
     }
   }

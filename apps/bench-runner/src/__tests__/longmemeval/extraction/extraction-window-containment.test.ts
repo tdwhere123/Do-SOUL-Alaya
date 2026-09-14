@@ -83,6 +83,7 @@ async function fillTurns(
   // manifest-present containment path, not the no-manifest first-build path.
   writeExtractionCacheManifest(cacheRoot, {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    source_packing: "reference-eight",
     extraction_model: CONFIG.model,
     model_family: CONFIG.model,
     request_profile: CONFIG.requestProfile,

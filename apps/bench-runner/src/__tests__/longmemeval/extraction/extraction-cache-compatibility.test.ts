@@ -15,6 +15,18 @@ afterEach(() => {
 });
 
 describe("extraction cache compatibility", () => {
+  it("treats legacy packing as eight and requires rebuilding a different generation policy", () => {
+    const source = identity();
+    const input = { sourceRoot: "/cache/canonical", source, replay: completeReplay() };
+    const eight = decideExtractionCacheCompatibility({ ...input,
+      final: { ...source, raw: { ...source.raw, sourcePacking: "reference-eight" } } });
+    expect(eight.raw).toMatchObject({ action: "reuse", reasons: [] });
+    expect(eight.raw.source).not.toHaveProperty("sourcePacking");
+    const singleton = decideExtractionCacheCompatibility({ ...input,
+      final: { ...source, raw: { ...source.raw, sourcePacking: "singleton" } } });
+    expect(singleton.raw).toMatchObject({ action: "rebuild", reasons: ["source_packing_mismatch"] });
+  });
+
   it("reuses raw observations and projections with complete replay and exact identity", () => {
     const result = decideExtractionCacheCompatibility({
       sourceRoot: "/cache/canonical",

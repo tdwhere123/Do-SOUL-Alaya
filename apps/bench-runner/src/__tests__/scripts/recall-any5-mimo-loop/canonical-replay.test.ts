@@ -52,8 +52,9 @@ describe("canonical cache-only replay process", () => {
     await removeTempDirectory(root);
   });
 
-  it("derives the full selected-window request and reaches real zero-call preflight", async () => {
-    const prepared = await prepareCanonicalProcessFixture(root);
+  it.each(["reference-eight", "singleton"] as const)("derives the full %s window request and reaches real zero-call preflight", async (sourcePacking) => {
+    const prepared = await prepareCanonicalProcessFixture(root, sourcePacking);
+    expect(prepared.fixture.keys).toHaveLength(sourcePacking === "singleton" ? 3 : 2);
     expectManifestMatchesFixture(prepared.manifest, prepared.fixture);
     const result = await runReplayConsumer(prepared.requestPath, prepared.denyNetwork);
     const receipt = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -137,9 +138,9 @@ interface CanonicalReplayFixture {
 }
 
 async function prepareCanonicalProcessFixture(
-  root: string
+  root: string, sourcePacking = "reference-eight"
 ): Promise<PreparedCanonicalProcessFixture> {
-  const fixture = await writeCanonicalReplayFixture(root);
+  const fixture = await writeCanonicalReplayFixture(root, sourcePacking);
   const requestPath = path.join(root, "canonical-request.json");
   const denyNetwork = path.join(root, "deny-network.cjs");
   await writeDenyNetwork(denyNetwork);
@@ -237,7 +238,7 @@ function sealManifest(body: ReplayManifestBody): ReplayManifest {
   };
 }
 
-async function writeCanonicalReplayFixture(root: string): Promise<CanonicalReplayFixture> {
+async function writeCanonicalReplayFixture(root: string, sourcePacking: string): Promise<CanonicalReplayFixture> {
   const dataDir = path.join(root, "data");
   const pinnedMetaRoot = path.join(root, "meta");
   const cacheRoot = path.join(root, "cache");
@@ -246,23 +247,26 @@ async function writeCanonicalReplayFixture(root: string): Promise<CanonicalRepla
     mkdir(pinnedMetaRoot, { recursive: true }),
     mkdir(cacheRoot, { recursive: true })
   ]);
+  const question = buildLongMemEvalFixtureQuestion("q001", "session-q001");
+  question.haystack_sessions[0][0].content = "I use TypeScript. I enjoy coffee.";
   await writeLongMemEvalFixtureDataset({
     variant: "longmemeval_s",
     dataDir,
     pinnedMetaRoot,
-    questions: [buildLongMemEvalFixtureQuestion("q001", "session-q001")]
+    questions: [question]
   });
   const window = await prepareExtractionFillWindow({
-    variant: "longmemeval_s", limit: 1, offset: 0, dataDir, pinnedMetaRoot
+    variant: "longmemeval_s", limit: 1, offset: 0, dataDir, pinnedMetaRoot, sourcePacking
   }, undefined);
   const keys = [...new Set(requiredExtractionCacheKeys({
+    sourcePacking,
     model: MODEL,
     requestProfile: PROFILE,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
     requiredTurnContents: window.distinctTurns,
     requiredExtractionTurns: window.distinctExtractionTurns
   }))].sort();
-  const authority = writeSealedCache(cacheRoot, window.datasetRevision, keys);
+  const authority = writeSealedCache(cacheRoot, window.datasetRevision, keys, sourcePacking);
   return {
     cacheRoot, dataDir, pinnedMetaRoot, datasetRevision: window.datasetRevision, keys,
     ...authority
@@ -272,7 +276,7 @@ async function writeCanonicalReplayFixture(root: string): Promise<CanonicalRepla
 function writeSealedCache(
   cacheRoot: string,
   datasetRevision: string,
-  keys: readonly string[]
+  keys: readonly string[], sourcePacking: string
 ): { readonly manifestSha256: string; readonly contentClosureSha256: string } {
   const rawJson = '{"signals":[]}';
   const inspected = inspectExtractionRawJson(rawJson);
@@ -287,7 +291,7 @@ function writeSealedCache(
     cacheKey, model: MODEL, requestProfile: PROFILE, ...inspected
   }));
   const contentClosureSha256 = computeExtractionContentClosureSha256(entries);
-  writeExtractionCacheManifest(cacheRoot, manifestFor({
+  const manifest = manifestFor({
     extraction_model: MODEL, model_family: MODEL, request_profile: PROFILE,
     provider_url: PROVIDER, dataset_revision: datasetRevision,
     requested_turns: keys.length, cached_turns: keys.length, coverage: 1,
@@ -298,7 +302,10 @@ function writeSealedCache(
     content_closure_index: Object.fromEntries(keys.map((key) => [key, [
       inspected.rawJsonSha256, inspected.rawSignalCount, inspected.parsedDraftCount
     ]]))
-  }));
+  });
+  writeExtractionCacheManifest(cacheRoot, sourcePacking === "reference-eight" ? manifest : {
+    ...manifest, schema_version: 4, source_packing: sourcePacking
+  });
   const identity = readExtractionCacheManifestIdentity(cacheRoot)!;
   return { manifestSha256: identity.manifestSha256, contentClosureSha256 };
 }

@@ -102,7 +102,7 @@ function readCurrentExtractionAuthority(
     authorityBytes,
     authorityPath
   );
-  if (manifest.extraction_provenance?.schema_version !== 3) {
+  if ((manifest.extraction_provenance?.schema_version !== 3 && manifest.extraction_provenance?.schema_version !== 4)) {
     throw new Error("current snapshot extraction provenance is incomplete");
   }
   assertSnapshotExtractionAuthorityBinding(

@@ -1,3 +1,4 @@
+import { assertSampleExecutionOptions, assertSampleInspection } from "../../authority/sample-scope.js";
 import type { ExtractionFillOptions } from "../../extraction-fill.js";
 import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error.js";
 import { readExtractionCacheManifestIdentity } from
@@ -46,6 +47,7 @@ export async function loadExtractionAuthority(
 ): Promise<ReceiptBoundExtractionAuthority> {
   const receipt = readExtractionAuthorityReceipt(options.authorityReceiptPath!);
   assertDirectExtractionMetadataScope(options, receipt);
+  assertSampleExecutionOptions(receipt, options);
   const targetSelection = loadReceiptTargetSelection(options, receipt);
   const continuation = loadSameRootExtractionContinuation({
     predecessorAuthorityReceiptPath: options.predecessorAuthorityReceiptPath,
@@ -128,7 +130,7 @@ async function inspectReceiptAuthority(
 ) {
   const ledgerState = inspectContinuationLedgerState({ cacheRoot, receipt, continuation });
   const currentManifest = readExtractionCacheManifestIdentity(cacheRoot);
-  const settledManifestSha256 = currentManifest?.manifest.schema_version === 3 &&
+  const settledManifestSha256 = (currentManifest?.manifest.schema_version === 3 || currentManifest?.manifest.schema_version === 4) &&
     currentManifest.manifest.fill_status !== undefined
     ? currentManifest.manifestSha256
     : undefined;
@@ -165,6 +167,7 @@ function extractionInspectionInput(input: {
     (receipt.continuation !== undefined || receipt.catalog_refill !== undefined);
   return {
     variant: options.variant,
+    sourcePacking: options.sourcePacking,
     ...(options.limit === undefined ? {} : { limit: options.limit }),
     ...(options.offset === undefined ? {} : { offset: options.offset }),
     ...(receipt.repair_scope === undefined || options.questionBatchLimit === undefined ? {} : {
@@ -196,7 +199,7 @@ function catalogRefillResumeRecoveryCandidate(input: {
   const current = input.currentManifest;
   if (scope === undefined || input.ledger === undefined ||
       input.persistedResumeManifestSha256 !== undefined ||
-      current?.manifest.schema_version !== 3 || current.manifest.fill_status !== "in_progress" ||
+      (current?.manifest.schema_version !== 3 && current?.manifest.schema_version !== 4) || current.manifest.fill_status !== "in_progress" ||
       current.manifestSha256 === scope.initial_manifest_sha256) return undefined;
   return current.manifestSha256;
 }
@@ -217,6 +220,9 @@ function assertAuthorityInspection(
   assertCatalogInspection({ receipt, inspection, cacheRoot, successorLedger,
     postPinManifestSha256, resumeManifestSha256, settledManifestSha256 });
   assertRepairInspection(receipt, inspection);
+  if (receipt.sample_scope !== undefined) {
+    assertSampleInspection(receipt.sample_scope, inspection, successorLedger?.successfulKeys);
+  }
   writeLease?.assertOwned();
   if (receipt.direct_spend !== undefined) {
     assertDirectExtractionSpendRootBinding({

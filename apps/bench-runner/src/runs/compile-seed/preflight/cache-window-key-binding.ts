@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import type { ExtractionCacheManifest } from
   "../../extraction/cache/extraction-cache-manifest.js";
 import { computeExtractionKeySetSha256 } from
@@ -13,6 +14,7 @@ import {
 export interface RequiredExtractionCacheKeysInput {
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly systemPrompt: string;
   readonly requiredTurnContents: readonly string[];
   readonly requiredExtractionTurns?: readonly LongMemEvalExtractionTurn[];
@@ -64,15 +66,15 @@ export function requiredExtractionCacheKeys(
   if (input.requiredExtractionTurns !== undefined) {
     return input.requiredExtractionTurns.flatMap((turn) =>
       computeExtractionTurnCacheKeys(
-        input.model, input.requestProfile, input.systemPrompt, turn
+        input.model, input.requestProfile, input.systemPrompt, turn, input.sourcePacking
       ));
   }
   return input.requiredTurnContents.flatMap((turnContent) =>
     computeSourceTurnCacheKeys(
-      input.model, input.requestProfile, input.systemPrompt, { turnContent }
+      input.model, input.requestProfile, input.systemPrompt, { turnContent }, input.sourcePacking
     ));
 }
 
 function v3ClosureIndex(manifest: ExtractionCacheManifest) {
-  return manifest.schema_version === 3 ? manifest.content_closure_index : undefined;
+  return (manifest.schema_version === 3 || manifest.schema_version === 4) ? manifest.content_closure_index : undefined;
 }

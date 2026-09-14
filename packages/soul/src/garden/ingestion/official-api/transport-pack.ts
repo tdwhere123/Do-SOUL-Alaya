@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ReferenceTransportBatchSizeSchema, type ReferenceTransportBatchSize } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "./extraction-request.js";
 
 export const TRANSPORT_PACK_CONTRACT_VERSION = 1;
@@ -11,7 +12,7 @@ export interface PackableAssertion {
 
 export type TransportPackPolicy =
   | { readonly kind: "reference_batch_8" }
-  | { readonly kind: "reference_batch"; readonly assertionsPerPack: 8 | 16 | 24 | 32 }
+  | { readonly kind: "reference_batch"; readonly assertionsPerPack: ReferenceTransportBatchSize }
   | {
       readonly kind: "token_aware";
       readonly maxAssertions: number;
@@ -208,6 +209,10 @@ function freezePlan(
 }
 
 function assertTransportPackPolicy(policy: TransportPackPolicy): void {
+  if (policy.kind === "reference_batch") {
+    ReferenceTransportBatchSizeSchema.parse(policy.assertionsPerPack);
+    return;
+  }
   if (policy.kind !== "token_aware") return;
   for (const [label, value] of Object.entries({
     maxAssertions: policy.maxAssertions,

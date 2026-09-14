@@ -61,6 +61,7 @@ describe("LongMemEval-S effective extraction root", () => {
       expect(context.opts.extractionCacheRoot).toBe(fixture.extractionCacheRoot);
       expect(provenance.extraction_cache).toMatchObject({
         schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+        source_packing: "reference-eight",
         dataset_revision: fixture.datasetSha256,
         request_profile: "provider-default-v1"
       });
@@ -128,6 +129,7 @@ async function provenanceFor(
 function writeCurrentCacheManifest(cacheRoot: string, datasetSha256: string): void {
   writeExtractionCacheManifest(cacheRoot, {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    source_packing: "reference-eight",
     extraction_model: "test-extraction-model",
     model_family: "test-extraction-model",
     request_profile: "provider-default-v1",

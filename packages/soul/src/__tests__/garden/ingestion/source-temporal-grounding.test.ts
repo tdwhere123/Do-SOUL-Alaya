@@ -4,6 +4,7 @@ import { parseOfficialApiTemporalProjection } from "../../../garden/extraction/t
 import { resolveTemporalProjection } from "../../../garden/extraction/time-concern-projection.js";
 import { OfficialApiGardenProvider } from "../../../garden/ingestion/compute-provider.js";
 import { LocalHeuristics } from "../../../garden/triage/local-heuristics.js";
+import { buildMemoryInput } from "../../../garden/materialization/materialization-router/inputs.js";
 import { createContext, createOpenSemanticExtractor } from "./compute-provider-fixtures.js";
 
 const year = {
@@ -101,6 +102,77 @@ describe("source calendar windows and temporal roles", () => {
   it("does not borrow an undated neighboring clause's validity role", () => {
     expect(inspectObservedTemporalProjection("This policy was announced in 2016 and is effective indefinitely.", undefined, undefined).projection)
       .toEqual(year);
+  });
+
+  it.each([
+    "I launched an effective product in 2016.",
+    "I launched the product in 2016 with an effective team."
+  ])("does not turn a descriptive adjective into validity: %s", (source) => {
+    expect(inspectObservedTemporalProjection(source, undefined, undefined).projection).toEqual(year);
+  });
+
+  it("rejects omitted or wrong closed validity ends and preserves the independently derived complete range", () => {
+    const source = "I have a permit valid from 2016 to 2017.";
+    const open = { projection_schema_version: 1 as const, valid_from: year.event_time_start,
+      time_precision: "year" as const, time_source: "explicit" as const };
+    const complete = { ...open, valid_to: "2017-12-31T23:59:59.999Z", time_precision: "range" as const };
+    for (const nomination of [open, { ...open, valid_to: year.event_time_end }]) {
+      const parsed = parseOfficialApiTemporalProjection(nomination)!;
+      expect(inspectObservedTemporalProjection(source, parsed, undefined)).toEqual({
+        projection: complete, audit: { status: "rejected", reason: "valid_time_role_not_source_grounded" }
+      });
+    }
+    expect(inspectObservedTemporalProjection(source, complete, undefined)).toEqual({
+      projection: complete, audit: { status: "formed", reason: "valid_time_source_verified" }
+    });
+    expect(inspectObservedTemporalProjection("I have a permit valid from 2016.", open, undefined)).toEqual({
+      projection: open, audit: { status: "formed", reason: "valid_time_source_verified" }
+    });
+  });
+
+  it.each([
+    "I worked from 2016 until 2017.",
+    "I worked from January 1, 2016 until January 3, 2016 (exclusive).",
+    "I worked from January 1, 2016 to January 3, 2016 (exclusive).",
+    "I worked from January 1, 2016 through January 3, 2016, not including January 3."
+  ])("abstains when an endpoint is unresolved or explicitly excluded: %s", (source) => {
+    expect(inspectObservedTemporalProjection(source, undefined, undefined).projection).toBeUndefined();
+    const nomination = { ...year, time_precision: "range" as const,
+      event_time_start: "2016-01-01T00:00:00.000Z", event_time_end: "2016-01-03T23:59:59.999Z" };
+    expect(inspectObservedTemporalProjection(source, nomination, undefined)).toMatchObject({
+      audit: { status: "rejected" }
+    });
+    expect(inspectObservedTemporalProjection(source, nomination, undefined).projection).toBeUndefined();
+  });
+
+  it.each(["to", "through"])("keeps the supported closed %s endpoint inclusive", (connector) => {
+    expect(inspectObservedTemporalProjection(`I worked from January 1, 2016 ${connector} January 3, 2016.`, undefined, undefined).projection)
+      .toMatchObject({ event_time_start: year.event_time_start, event_time_end: "2016-01-03T23:59:59.999Z", time_precision: "range" });
+  });
+
+  it("uses one complete local range candidate while preserving role-ineligible and unresolved terms", async () => {
+    const context = { ...createContext(), turn_messages: [], allow_legacy_single_user_source: true };
+    for (const [source, count, projected] of [
+      ["I worked from 2016 to 2017.", 1, true],
+      ["I worked in 2016.", 1, true],
+      ["I have a permit valid from 2016 to 2017.", 1, false],
+      ["I worked in 2016 or 2017.", 1, false]
+    ] as const) {
+      const signals = (await new LocalHeuristics().compile(source, context))
+        .filter((signal) => signal.raw_payload.time_concern !== undefined);
+      expect(signals).toHaveLength(count);
+      for (const signal of signals) {
+        expect(signal.raw_payload.temporal_projection !== undefined).toBe(projected);
+        const memoryInput = buildMemoryInput(signal, ["source-evidence"]);
+        expect(memoryInput.event_time_start ?? null).toBe(projected ? year.event_time_start : null);
+        if (source === "I worked from 2016 to 2017.") {
+          expect(signal.raw_payload.temporal_projection).toMatchObject({
+            event_time_start: year.event_time_start, event_time_end: "2017-12-31T23:59:59.999Z"
+          });
+          expect(memoryInput.event_time_end).toBe("2017-12-31T23:59:59.999Z");
+        }
+      }
+    }
   });
 
   it("anchors relative years to the supplied fixed offset across the UTC year boundary", () => {

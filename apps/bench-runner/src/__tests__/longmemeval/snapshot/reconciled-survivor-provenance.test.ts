@@ -468,7 +468,7 @@ function extractionFixture() {
     parsedDraftCount: 1
   };
   const manifest: ExtractionCacheManifestV3 = {
-    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    schema_version: 3,
     extraction_model: MODEL,
     model_family: MODEL,
     request_profile: PROFILE,

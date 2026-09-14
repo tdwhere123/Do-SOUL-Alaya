@@ -1,3 +1,4 @@
+import { ExtractionSourcePackingSchema } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { LongMemEvalSelectionContractIdentitySchema } from
@@ -122,6 +123,7 @@ const SourceSnapshotSchema = z.object({
 }).strict().readonly();
 
 export const LongMemEvalExpansionSourceCacheWireSchema = z.object({
+  source_packing: ExtractionSourcePackingSchema.optional(),
   manifest_sha256: Sha256Schema,
   extraction_model: z.string().min(1),
   model_family: z.string().min(1),
@@ -140,6 +142,7 @@ export const LongMemEvalExpansionSourceCacheWireSchema = z.object({
 }).strict().readonly();
 
 const TargetCacheBaseSchema = z.object({
+  source_packing: ExtractionSourcePackingSchema.optional(),
   extraction_model: z.string().min(1),
   model_family: z.string().min(1),
   request_profile: ExtractionRequestProfileSchema,
@@ -181,7 +184,8 @@ export const LongMemEvalExpansionLineageWireSchema =
   }).strict().readonly().superRefine(assertPromotionProgression);
 
 const ExtractionSummaryBaseSchema = z.object({
-  schema_version: z.literal(3),
+  schema_version: z.union([z.literal(3), z.literal(4)]),
+  source_packing: ExtractionSourcePackingSchema.optional(),
   manifest_sha256: Sha256Schema,
   extraction_model: z.string().min(1),
   model_family: z.string().min(1),
@@ -213,18 +217,27 @@ export const LongMemEvalExtractionSummarySchema =
   ExtractionSummaryBaseSchema.extend({
     supplemental_source_receipt:
       LongMemEvalSupplementalSourceProvenanceBindingWireSchema.optional()
-  }).passthrough().readonly();
+  }).passthrough().superRefine(assertSummaryPacking).readonly();
 
 export const LongMemEvalFullExtractionCacheSchema =
   ExtractionSummaryBaseSchema.extend({
     supplemental_source_receipt:
       LongMemEvalSupplementalSourceProvenanceBindingWireSchema.optional(),
     content_closure_index: LongMemEvalContentClosureIndexSchema
-  }).passthrough().readonly();
+  }).passthrough().superRefine(assertSummaryPacking).readonly();
+
+function assertSummaryPacking(
+  value: { schema_version: number; source_packing?: unknown }, ctx: z.RefinementCtx
+): void {
+  if ((value.schema_version === 4) !== (value.source_packing !== undefined)) {
+    ctx.addIssue({ code: "custom", message: "manifest v4 requires source_packing; v3 omits it" });
+  }
+}
 
 export const LongMemEvalExtractionAuthoritySchema = z.object({
   schema_version: z.literal(1),
-  source_manifest_schema_version: z.literal(3),
+  source_manifest_schema_version: z.union([z.literal(3), z.literal(4)]),
+  source_packing: ExtractionSourcePackingSchema.optional(),
   source_manifest_sha256: Sha256Schema,
   extraction_model: z.string().min(1),
   model_family: z.string().min(1),
@@ -246,7 +259,9 @@ export const LongMemEvalExtractionAuthoritySchema = z.object({
   supplemental_source_binding_sha256: Sha256Schema.optional(),
   expansion_source_anchor_sha256: Sha256Schema.optional(),
   expansion_lineage_sha256: Sha256Schema.optional()
-}).strict().readonly();
+}).strict().superRefine((value, ctx) => assertSummaryPacking({
+  schema_version: value.source_manifest_schema_version, source_packing: value.source_packing
+}, ctx)).readonly();
 
 const ArtifactDescriptorBaseSchema = z.object({
   path: z.string().min(1),

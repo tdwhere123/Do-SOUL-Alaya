@@ -1,3 +1,4 @@
+import { DEFAULT_EXTRACTION_SOURCE_PACKING, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   readExtractionCacheManifest,
   type ExtractionCacheManifest
@@ -148,6 +149,7 @@ function preflightRequiredTurnWindow(
     cacheRoot: input.cacheRoot,
     model: input.config.model,
     requestProfile: input.config.requestProfile,
+    sourcePacking: input.config.sourcePacking,
     systemPrompt: input.systemPrompt,
     requiredTurnContents,
     requiredExtractionTurns: input.requiredExtractionTurns,
@@ -160,6 +162,7 @@ function preflightRequiredTurnWindow(
     cacheRoot: input.cacheRoot,
     model: input.config.model,
     requestProfile: input.config.requestProfile,
+    sourcePacking: input.config.sourcePacking,
     systemPrompt: input.systemPrompt,
     requiredTurnContents,
     requiredExtractionTurns: input.requiredExtractionTurns,
@@ -192,6 +195,7 @@ function assertScopedWindowBinding(input: {
   readonly cacheRoot: string;
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly systemPrompt: string;
   readonly requiredTurnContents: readonly string[];
   readonly requiredExtractionTurns?: readonly LongMemEvalExtractionTurn[];
@@ -221,6 +225,7 @@ function assertExactWindowBinding(
     cacheRoot: input.cacheRoot,
     model: input.model,
     requestProfile: input.requestProfile,
+    sourcePacking: input.sourcePacking,
     systemPrompt: input.systemPrompt,
     ...(input.requiredExtractionTurns === undefined
       ? { turnContents: input.requiredTurnContents }
@@ -251,7 +256,7 @@ function throwExactKeySetMismatch(): never {
 function assertFinalizedContentClosure(
   input: Parameters<typeof assertScopedWindowBinding>[0]
 ): ExtractionCacheContentInspection {
-  const inspect = input.manifest.schema_version === 3 &&
+  const inspect = (input.manifest.schema_version === 3 || input.manifest.schema_version === 4) &&
       input.manifest.content_closure_index !== undefined
     ? inspectExtractionCacheRawContentClosure
     : inspectExtractionCacheContentClosure;
@@ -280,7 +285,7 @@ function matchesFinalizedContentClosure(
   inspected: ReturnType<typeof inspectExtractionCacheContentClosure>
 ): boolean {
   const manifest = input.manifest;
-  if (manifest.schema_version !== 3 || manifest.content_closure_index === undefined) {
+  if ((manifest.schema_version !== 3 && manifest.schema_version !== 4) || manifest.content_closure_index === undefined) {
     return inspected.contentClosureSha256 === manifest.content_closure_sha256;
   }
   const expectedRawClosure = computeExtractionRawContentClosureSha256(
@@ -317,7 +322,7 @@ function assertScopedSubsetBinding(
     input.requestProfile,
     input.systemPrompt,
     input.requiredTurnContents,
-    input.requiredExtractionTurns
+    input.requiredExtractionTurns, input.sourcePacking
   );
   if (unavailable.total === 0) return true;
   throw new Error(
@@ -362,6 +367,7 @@ function assertWindowContainment(input: {
   readonly cacheRoot: string;
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly systemPrompt: string;
   readonly requiredTurnContents: readonly string[];
   readonly requiredExtractionTurns?: readonly LongMemEvalExtractionTurn[];
@@ -374,7 +380,7 @@ function assertWindowContainment(input: {
     input.requestProfile,
     input.systemPrompt,
     input.requiredTurnContents,
-    input.requiredExtractionTurns
+    input.requiredExtractionTurns, input.sourcePacking
   );
   if (
     unavailable.total > 0 &&
@@ -442,12 +448,13 @@ function inspectRequiredTurnFixtures(
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
   turnContents: readonly string[],
-  extractionTurns?: readonly LongMemEvalExtractionTurn[]
+  extractionTurns?: readonly LongMemEvalExtractionTurn[],
+  sourcePacking?: ExtractionSourcePacking
 ): { readonly missing: number; readonly invalid: number; readonly total: number } {
   let missing = 0;
   let invalid = 0;
   const keys = requiredExtractionCacheKeys({
-    model, requestProfile, systemPrompt,
+    model, requestProfile, systemPrompt, sourcePacking,
     requiredTurnContents: turnContents,
     ...(extractionTurns === undefined ? {} : {
       requiredExtractionTurns: extractionTurns

@@ -1,3 +1,4 @@
+import { ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   mkdirSync,
   renameSync,
@@ -68,7 +69,7 @@ export {
  *   OFFICIAL_API_SYSTEM_PROMPT (the prompt whose sha256 is pinned here)
  */
 
-export const EXTRACTION_CACHE_MANIFEST_VERSION = 3;
+export const EXTRACTION_CACHE_MANIFEST_VERSION = 4;
 export const EXTRACTION_CACHE_MANIFEST_FILENAME = "manifest.json";
 /** Documented cache-key formula. The persisted identity is the digest below. */
 export const EXTRACTION_CACHE_KEY_ALGO_DOCUMENTATION =
@@ -144,16 +145,24 @@ export interface ExtractionCacheManifestV2 extends ExtractionCacheManifestBase {
 }
 
 export interface ExtractionCacheManifestV3 extends ExtractionCacheManifestBase {
-  readonly schema_version: typeof EXTRACTION_CACHE_MANIFEST_VERSION;
+  readonly schema_version: 3;
   /** Comparison-only canonical family. It never participates in the raw cache key. */
   readonly model_family: string;
   readonly request_profile: ExtractionRequestProfile;
 }
 
+export interface ExtractionCacheManifestV4 extends Omit<ExtractionCacheManifestV3, "schema_version"> {
+  readonly schema_version: 4;
+  readonly source_packing: ExtractionSourcePacking;
+}
+
+export type ProfiledExtractionCacheManifest = ExtractionCacheManifestV3 | ExtractionCacheManifestV4;
+
 export type ExtractionCacheManifest =
   | ExtractionCacheManifestV1
   | ExtractionCacheManifestV2
-  | ExtractionCacheManifestV3;
+  | ExtractionCacheManifestV3
+  | ExtractionCacheManifestV4;
 
 export interface ExtractionCacheManifestIdentity {
   readonly manifest: ExtractionCacheManifest;
@@ -274,10 +283,10 @@ function validateManifest(
 function requireSchemaVersion(
   record: Readonly<Record<string, unknown>>,
   filePath: string
-): 1 | 2 | typeof EXTRACTION_CACHE_MANIFEST_VERSION {
+): 1 | 2 | 3 | typeof EXTRACTION_CACHE_MANIFEST_VERSION {
   if (!Object.hasOwn(record, "schema_version")) return 1;
   const version = record.schema_version;
-  if (version === 1 || version === 2 || version === EXTRACTION_CACHE_MANIFEST_VERSION) {
+  if (version === 1 || version === 2 || version === 3 || version === EXTRACTION_CACHE_MANIFEST_VERSION) {
     return version;
   }
   if (typeof version !== "number" || !Number.isInteger(version)) {
@@ -292,10 +301,13 @@ function requireSchemaVersion(
 
 function readVersionedManifest(
   record: Readonly<Record<string, unknown>>,
-  schemaVersion: 1 | 2 | typeof EXTRACTION_CACHE_MANIFEST_VERSION,
+  schemaVersion: 1 | 2 | 3 | typeof EXTRACTION_CACHE_MANIFEST_VERSION,
   common: ExtractionCacheManifestBase,
   filePath: string
 ): ExtractionCacheManifest {
+  if (schemaVersion !== 4 && Object.hasOwn(record, "source_packing")) {
+    throw new Error("legacy extraction manifests must not declare source_packing");
+  }
   const hasFamily = Object.hasOwn(record, "model_family");
   const hasProfile = Object.hasOwn(record, "request_profile");
   const expansion = parseExpansionManifestArtifacts({
@@ -319,7 +331,7 @@ function readVersionedManifest(
     assertLegacyClosureIndexAbsent(common, schemaVersion, filePath);
     return { ...common, schema_version: 2, model_family: modelFamily };
   }
-  return readCurrentManifest(record, common, modelFamily, expansion, filePath);
+  return readCurrentManifest(record, schemaVersion, common, modelFamily, expansion, filePath);
 }
 
 function readV1Manifest(
@@ -340,11 +352,12 @@ function readV1Manifest(
 
 function readCurrentManifest(
   record: Readonly<Record<string, unknown>>,
+  schemaVersion: 3 | 4,
   common: ExtractionCacheManifestBase,
   modelFamily: string,
   expansion: ReturnType<typeof parseExpansionManifestArtifacts>,
   filePath: string
-): ExtractionCacheManifestV3 {
+): ExtractionCacheManifestV3 | ExtractionCacheManifestV4 {
   const requestProfile = requireRequestProfile(record.request_profile, filePath);
   assertContentClosureIndex(common, requestProfile, filePath);
   const supplementalSource = parseSupplementalSourceBinding(
@@ -353,7 +366,10 @@ function readCurrentManifest(
   );
   return {
     ...common,
-    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    ...(schemaVersion === 3 ? { schema_version: 3 as const } : {
+      schema_version: 4 as const,
+      source_packing: ExtractionSourcePackingSchema.parse(record.source_packing)
+    }),
     model_family: modelFamily,
     request_profile: requestProfile,
     ...expansion,

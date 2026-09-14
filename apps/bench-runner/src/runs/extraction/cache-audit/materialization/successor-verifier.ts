@@ -8,7 +8,7 @@ import {
 } from "../../content-closure.js";
 import {
   extractionCacheManifestPath, readExtractionCacheManifestIdentity,
-  type ExtractionCacheManifestV3
+  type ProfiledExtractionCacheManifest
 } from "../../cache/extraction-cache-manifest.js";
 import {
   supplementalSourceManifestBinding
@@ -95,7 +95,7 @@ export function verifyCommittedMaterializationSuccessor(input: {
 function assertOriginState(
   targetRoot: string,
   commit: ExtractionCacheMaterializationCommit,
-  manifest: ExtractionCacheManifestV3
+  manifest: ProfiledExtractionCacheManifest
 ): void {
   if (!isDeepStrictEqual(manifest, commit.initial_target_manifest)) {
     throw new Error("committed origin manifest differs from its immutable witness");
@@ -105,7 +105,7 @@ function assertOriginState(
 
 function assertCompletionManifest(
   witness: ReturnType<typeof readCompletionWitness>,
-  manifest: ExtractionCacheManifestV3,
+  manifest: ProfiledExtractionCacheManifest,
   manifestSha256: string
 ): void {
   if (witness.successor_manifest_sha256 !== manifestSha256 ||
@@ -134,7 +134,7 @@ function assertOriginShards(
 }
 
 function readSuccessorManifest(targetRoot: string): {
-  readonly manifest: ExtractionCacheManifestV3;
+  readonly manifest: ProfiledExtractionCacheManifest;
   readonly manifestSha256: string;
 } {
   const path = extractionCacheManifestPath(targetRoot);
@@ -144,26 +144,28 @@ function readSuccessorManifest(targetRoot: string): {
     throw new Error("materialized successor manifest is unsafe");
   }
   const identity = readExtractionCacheManifestIdentity(targetRoot);
-  if (identity?.manifest.schema_version !== 3) {
-    throw new Error("materialized successor requires a V3 manifest");
+  if ((identity?.manifest.schema_version !== 3 && identity?.manifest.schema_version !== 4)) {
+    throw new Error("materialized successor requires a V3 or V4 manifest");
   }
   return { manifest: identity.manifest, manifestSha256: identity.manifestSha256 };
 }
 
 function assertSuccessorManifest(
   commit: ExtractionCacheMaterializationCommit,
-  manifest: ExtractionCacheManifestV3,
+  manifest: ProfiledExtractionCacheManifest,
   manifestSha256: string
 ): void {
   const initial = commit.initial_target_manifest;
-  const fixedFields: readonly (keyof ExtractionCacheManifestV3)[] = [
+  const fixedFields: readonly (keyof ProfiledExtractionCacheManifest)[] = [
     "schema_version", "extraction_model", "model_family", "request_profile",
     "provider_url", "system_prompt_sha256", "cache_key_algo", "dataset",
     "dataset_revision", "requested_turns", "window_offset", "window_limit",
     "expected_turns", "expected_key_set_sha256", "storage", "archive_url",
     "archive_sha256"
   ];
-  if (!fixedFields.every((field) => isDeepStrictEqual(manifest[field], initial[field])) ||
+  if ((manifest.schema_version === 4 ? manifest.source_packing : undefined) !==
+      (initial.schema_version === 4 ? initial.source_packing : undefined) ||
+      !fixedFields.every((field) => isDeepStrictEqual(manifest[field], initial[field])) ||
       manifestSha256 === commit.target_manifest_sha256 || manifest.fill_status !== "complete" ||
       manifest.cached_turns !== commit.expected_turns || manifest.coverage !== 1 ||
       manifest.builder !== "extraction-fill" ||
@@ -229,7 +231,7 @@ function contentEntries(
 }
 
 function assertManifestClosure(
-  manifest: ExtractionCacheManifestV3,
+  manifest: ProfiledExtractionCacheManifest,
   entries: ReturnType<typeof contentEntries>
 ): void {
   if (manifest.content_closure_sha256 !== computeExtractionContentClosureSha256(entries) ||
@@ -340,7 +342,7 @@ function assertSettledLedger(
 
 function assertSupplementalProvenance(
   commit: ExtractionCacheMaterializationCommit,
-  manifest: ExtractionCacheManifestV3,
+  manifest: ProfiledExtractionCacheManifest,
   witness: ReturnType<typeof readCompletionWitness>,
   shards: readonly RemainingShardProvenance[]
 ): void {
@@ -376,7 +378,7 @@ function assertSupplementalProvenance(
 
 function assertDirectTransportProvenance(
   commit: ExtractionCacheMaterializationCommit,
-  manifest: ExtractionCacheManifestV3,
+  manifest: ProfiledExtractionCacheManifest,
   witness: ReturnType<typeof readCompletionWitness>,
   shards: readonly RemainingShardProvenance[]
 ): void {

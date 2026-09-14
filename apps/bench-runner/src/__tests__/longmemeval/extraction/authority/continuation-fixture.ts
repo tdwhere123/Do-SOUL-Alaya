@@ -443,6 +443,7 @@ function temporaryCacheRoot(): string {
 function writeManifest(cacheRoot: string): void {
   writeExtractionCacheManifest(cacheRoot, {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    source_packing: "reference-eight",
     extraction_model: model,
     model_family: model,
     request_profile: requestProfile,

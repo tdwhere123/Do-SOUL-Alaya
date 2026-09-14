@@ -56,7 +56,7 @@ export function makeShardProvenance(
     },
     extraction_cache: {
       manifest_sha256: "c".repeat(64),
-      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+      schema_version: 3,
       extraction_model: "fixture-model",
       model_family: "fixture-model-family",
       request_profile: "provider-default-v1",

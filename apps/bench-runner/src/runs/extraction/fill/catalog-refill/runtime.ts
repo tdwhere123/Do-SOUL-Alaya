@@ -8,7 +8,7 @@ import { writeCatalogRefillCompletionWitness } from
   "../../authority/catalog-refill/completion-witness.js";
 import {
   readExtractionCacheManifestIdentity, type ExtractionCacheManifest,
-  type ExtractionCacheManifestV3
+  type ProfiledExtractionCacheManifest
 } from "../../cache/extraction-cache-manifest.js";
 import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error.js";
 import type { ExecutionExtractionAuthority } from "../fill-execution.js";
@@ -92,7 +92,7 @@ export function reconcileSettledCatalogRefillCompletion(
 ): ExtractionFillResult | undefined {
   if (authority?.receipt.catalog_refill === undefined) return undefined;
   const identity = readExtractionCacheManifestIdentity(cacheRoot);
-  if (identity?.manifest.schema_version !== 3 ||
+  if ((identity?.manifest.schema_version !== 3 && identity?.manifest.schema_version !== 4) ||
       identity.manifest.fill_status !== "complete") return undefined;
   const ledger = authority.snapshot();
   if (ledger === undefined) {
@@ -117,7 +117,7 @@ export function reconcileSettledCatalogRefillCompletion(
   });
 }
 
-function requireCompleteManifestCounts(manifest: ExtractionCacheManifestV3): {
+function requireCompleteManifestCounts(manifest: ProfiledExtractionCacheManifest): {
   readonly requestedTurns: number;
   readonly cachedTurns: number;
   readonly coverage: number;
@@ -141,7 +141,7 @@ function finalizeSettledCatalogRefill(
   ledger: ExtractionAttemptLedgerSnapshot,
   supplementalSourceReceipt: SupplementalSourceReceipt | undefined
 ): void {
-  if (identity.manifest.schema_version !== 3) {
+  if ((identity.manifest.schema_version !== 3 && identity.manifest.schema_version !== 4)) {
     throw new ExtractionCacheInvariantError("catalog refill requires a V3 final manifest");
   }
   writeCatalogRefillCompletionWitness({

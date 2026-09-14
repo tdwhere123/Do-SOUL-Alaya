@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   parseExtractionCacheManifestContents,
-  type ExtractionCacheManifestV3
+  type ProfiledExtractionCacheManifest
 } from "../../cache/extraction-cache-manifest.js";
 import type { ExtractionTargetSelectionReceipt } from
   "../../authority/target-selection/receipt.js";
@@ -54,7 +54,7 @@ export interface MaterializationBinding {
   readonly remaining_keys: readonly string[];
   readonly materialized_content_sha256: string;
   readonly initial_target_manifest_sha256: string;
-  readonly initial_target_manifest: ExtractionCacheManifestV3;
+  readonly initial_target_manifest: ProfiledExtractionCacheManifest;
   readonly max_shard_bytes: number;
   readonly shards: readonly MaterializationShardDescriptor[];
 }
@@ -280,7 +280,7 @@ function assertWitnesses(value: MaterializationBinding): void {
   );
   const manifest = value.initial_target_manifest;
   const selection = value.target_selection;
-  if (parsed.schema_version !== 3 || !isDeepStrictEqual(parsed, manifest) ||
+  if ((parsed.schema_version !== 3 && parsed.schema_version !== 4) || !isDeepStrictEqual(parsed, manifest) ||
       digest(serializeMaterializedTargetFillManifest(manifest)) !==
         value.initial_target_manifest_sha256 ||
       selection.receipt_digest !== value.target_selection_receipt_digest ||

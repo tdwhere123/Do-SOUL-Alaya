@@ -114,6 +114,7 @@ async function createQuestionAuthority(manifestPath: string) {
 function writeFixtureExtractionManifest(extractionCacheRoot: string): void {
   writeExtractionCacheManifest(extractionCacheRoot, {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    source_packing: "reference-eight",
     extraction_model: "cached-model",
     model_family: "cached-family",
     request_profile: "deepseek-v4-nonthinking-v1",

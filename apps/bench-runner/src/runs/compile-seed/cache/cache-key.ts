@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import {
   buildOfficialApiExtractionRequests,
@@ -40,10 +41,11 @@ export function computeExtractionTurnCacheKey(
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
-  turn: LongMemEvalExtractionTurn
+  turn: LongMemEvalExtractionTurn,
+  sourcePacking?: ExtractionSourcePacking
 ): string {
   return requireSingleCacheKey(computeExtractionTurnCacheKeys(
-    model, requestProfile, systemPrompt, turn
+    model, requestProfile, systemPrompt, turn, sourcePacking
   ));
 }
 
@@ -51,9 +53,10 @@ export function computeExtractionTurnCacheKeys(
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
-  turn: LongMemEvalExtractionTurn
+  turn: LongMemEvalExtractionTurn,
+  sourcePacking?: ExtractionSourcePacking
 ): readonly string[] {
-  return computeSourceTurnCacheKeys(model, requestProfile, systemPrompt, turn);
+  return computeSourceTurnCacheKeys(model, requestProfile, systemPrompt, turn, sourcePacking);
 }
 
 export function computeSourceTurnCacheKey(
@@ -61,10 +64,11 @@ export function computeSourceTurnCacheKey(
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
   input: Pick<LongMemEvalExtractionTurn, "turnContent"> &
-    Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>
+    Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>,
+  sourcePacking?: ExtractionSourcePacking
 ): string {
   return requireSingleCacheKey(computeSourceTurnCacheKeys(
-    model, requestProfile, systemPrompt, input
+    model, requestProfile, systemPrompt, input, sourcePacking
   ));
 }
 
@@ -73,11 +77,12 @@ export function computeSourceTurnCacheKeys(
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
   input: Pick<LongMemEvalExtractionTurn, "turnContent"> &
-    Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>
+    Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>,
+  sourcePacking?: ExtractionSourcePacking
 ): readonly string[] {
   return Object.freeze(buildOfficialApiExtractionRequests(
     input.turnContent,
-    input.turnMessages ?? []
+    input.turnMessages ?? [], sourcePacking
   ).map((request) => computeCacheKey(
     model,
     requestProfile,

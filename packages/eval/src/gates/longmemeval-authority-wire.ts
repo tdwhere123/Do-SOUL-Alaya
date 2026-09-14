@@ -1,3 +1,4 @@
+import { DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { canonicalJson } from "./canonical-json.js";
@@ -61,6 +62,9 @@ export function assertLongMemEvalExtractionAuthorityBinding(input: {
   const mismatches: string[] = fields.filter(
     (field) => authority[field] !== compact[field]
   );
+  if (authority.source_manifest_schema_version !== compact.schema_version) {
+    mismatches.push("source_manifest_schema_version");
+  }
   if (authority.source_manifest_sha256 !== compact.manifest_sha256) {
     mismatches.push("source_manifest_sha256");
   }
@@ -297,7 +301,7 @@ function assertExpansionCompactTarget(
     lineage.target_cache;
   const compactTarget = targetCacheFromSummary(compact);
   const extension = lineage.supplemental_source_receipt_extension;
-  if (canonicalJson(lineageTarget) !== canonicalJson(compactTarget) ||
+  if (canonicalJson({ ...lineageTarget, source_packing: lineageTarget.source_packing ?? DEFAULT_EXTRACTION_SOURCE_PACKING }) !== canonicalJson(compactTarget) ||
       lineageClosure !== compact.content_closure_sha256 ||
       (extension !== undefined && canonicalJson(extension.target_binding) !==
         canonicalJson(compact.supplemental_source_receipt))) {
@@ -346,6 +350,7 @@ function assertSupplementalExtensionClosure(
 
 function targetCacheFromSummary(compact: LongMemEvalExtractionSummary) {
   return {
+    source_packing: compact.source_packing ?? DEFAULT_EXTRACTION_SOURCE_PACKING,
     extraction_model: compact.extraction_model,
     model_family: compact.model_family,
     request_profile: compact.request_profile,
@@ -383,7 +388,7 @@ function promotionIdentityFromExpansion(value: z.infer<
 
 function authoritySummaryFields() {
   return [
-    "extraction_model", "model_family", "request_profile", "system_prompt_sha256",
+    "extraction_model", "model_family", "request_profile", "source_packing", "system_prompt_sha256",
     "cache_key_algo", "dataset", "dataset_revision", "requested_turns",
     "cached_turns", "coverage", "fill_status", "window_offset", "window_limit",
     "expected_turns", "expected_key_set_sha256", "content_closure_sha256"

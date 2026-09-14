@@ -30,6 +30,7 @@ export function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     pinnedMetaRoot: state.pinnedMetaRoot,
     questionManifest: state.questionManifest,
     extractionCacheRoot: state.extractionCacheRoot,
+    extractionSourcePacking: state.extractionSourcePacking,
     extractionAuthority: state.extractionAuthority,
     extractionTargetSelection: state.extractionTargetSelection,
     extractionPredecessorAuthority: state.extractionPredecessorAuthority,

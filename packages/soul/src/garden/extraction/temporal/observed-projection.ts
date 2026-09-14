@@ -64,7 +64,7 @@ export function inspectObservedTemporalProjection(
       (eventSource === undefined && validSource === undefined)) {
     return temporalInspection(sourceProjection, "rejected", "temporal_projection_not_source_grounded");
   }
-  return temporalInspection(verifiedProjection(extracted, eventSource?.projection, validSource?.projection), "formed",
+  return temporalInspection(verifiedProjection(eventSource?.projection, validSource), "formed",
     eventSource !== undefined && validSource !== undefined ? "dual_time_source_verified"
       : validSource !== undefined ? "valid_time_source_verified" : "event_time_source_verified");
 }
@@ -87,7 +87,9 @@ function verifiesEventProjection(extracted: OfficialApiTemporalProjectionDraft, 
 
 function verifiesValidProjection(extracted: OfficialApiTemporalProjectionDraft, source: SourceTemporalCandidate): boolean {
   return source.role === "validity" && extracted.valid_from === source.projection.event_time_start &&
-    (extracted.valid_to === undefined || (source.bounded && verifiesSourceEnd(extracted.valid_to, source.projection.event_time_end)));
+    (source.bounded
+      ? extracted.valid_to !== undefined && verifiesSourceEnd(extracted.valid_to, source.projection.event_time_end)
+      : extracted.valid_to === undefined);
 }
 
 function verifiesSourceEnd(nominated: string, sourceEnd: string): boolean {
@@ -98,17 +100,16 @@ function verifiesSourceEnd(nominated: string, sourceEnd: string): boolean {
 }
 
 function verifiedProjection(
-  extracted: OfficialApiTemporalProjectionDraft,
   eventSource: OfficialApiTemporalProjectionDraft | undefined,
-  validSource: OfficialApiTemporalProjectionDraft | undefined
+  validSource: SourceTemporalCandidate | undefined
 ): OfficialApiTemporalProjectionDraft {
-  const semanticSource = eventSource ?? validSource!;
+  const semanticSource = eventSource ?? validSource!.projection;
   return Object.freeze({
     projection_schema_version: 1,
     ...(eventSource === undefined ? {} : { event_time_start: eventSource.event_time_start, event_time_end: eventSource.event_time_end }),
     ...(validSource === undefined ? {} : {
-      valid_from: validSource.event_time_start,
-      ...(extracted.valid_to === undefined ? {} : { valid_to: validSource.event_time_end })
+      valid_from: validSource.projection.event_time_start,
+      ...(validSource.bounded ? { valid_to: validSource.projection.event_time_end } : {})
     }),
     time_precision: semanticSource.time_precision,
     time_source: semanticSource.time_source

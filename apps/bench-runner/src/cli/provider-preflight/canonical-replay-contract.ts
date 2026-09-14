@@ -1,3 +1,5 @@
+import { readExtractionCacheManifest } from "../../runs/extraction/cache/extraction-cache-manifest.js";
+import { DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
@@ -45,7 +47,12 @@ export async function rebuildCanonicalReplayKeys(input: {
   if (input.request.limit === undefined || input.request.offset === undefined) {
     throw new Error("canonical replay request requires limit and offset");
   }
+  const manifest = input.request.extractionCacheRoot === undefined ? undefined
+    : readExtractionCacheManifest(input.request.extractionCacheRoot);
+  const sourcePacking = manifest?.schema_version === 4
+    ? manifest.source_packing : DEFAULT_EXTRACTION_SOURCE_PACKING;
   const window = await prepareExtractionFillWindow({
+    sourcePacking,
     variant: input.request.variant,
     limit: input.request.limit,
     offset: input.request.offset,
@@ -60,6 +67,7 @@ export async function rebuildCanonicalReplayKeys(input: {
     throw new Error("canonical replay request profile is unsupported");
   }
   return Object.freeze([...new Set(requiredExtractionCacheKeys({
+    sourcePacking,
     model: input.request.model,
     requestProfile: input.request.requestProfile,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,

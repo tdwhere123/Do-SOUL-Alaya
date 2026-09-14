@@ -40,7 +40,7 @@ export function finishPreparedExtractionFill(
   const settledCatalog = scope !== undefined && telemetry !== undefined &&
     telemetry.pendingKeys.length === 0 && telemetry.unresolvedAttempts.length === 0 &&
     sameStrings(successful, scope.keys);
-  const supplemental = settledCatalog && prepared.existingManifest?.schema_version === 3
+  const supplemental = settledCatalog && (prepared.existingManifest?.schema_version === 3 || prepared.existingManifest?.schema_version === 4)
     ? prepareCatalogRefillSupplementalReceipt({
       authority, cacheRoot, ledger: telemetry,
       manifest: prepared.existingManifest, createdAt: builtAt

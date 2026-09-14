@@ -1,3 +1,4 @@
+import { DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
 import { normalizeBaseUrl } from "../../compile-seed/compile-seed-config.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import {
@@ -14,12 +15,17 @@ const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
 export function assertExtractionCacheIdentity(input: {
   readonly config: Pick<
     CompileSeedExtractionConfig,
-    "model" | "modelFamily" | "providerUrl" | "requestProfile"
+    "model" | "modelFamily" | "providerUrl" | "requestProfile" | "sourcePacking"
   >;
   readonly systemPrompt: string;
   readonly manifest: ExtractionCacheManifest;
   readonly validateProvider: boolean;
 }): void {
+  const packing = input.manifest.schema_version === 4
+    ? input.manifest.source_packing : DEFAULT_EXTRACTION_SOURCE_PACKING;
+  if ((input.config.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING) !== packing) {
+    throw new ExtractionCacheInvariantError("extraction source packing differs from the cache generation");
+  }
   assertExtractionModel(input.config.model, input.manifest);
   assertExtractionFamily(input.config, input.manifest);
   assertExtractionRequestProfile(input.config.requestProfile, input.manifest);
@@ -46,8 +52,8 @@ function assertExtractionRequestProfile(
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   manifest: ExtractionCacheManifest
 ): void {
-  if (manifest.schema_version === 3 && manifest.request_profile === requestProfile) return;
-  const cached = manifest.schema_version === 3 ? manifest.request_profile : "legacy-implicit";
+  if ((manifest.schema_version === 3 || manifest.schema_version === 4) && manifest.request_profile === requestProfile) return;
+  const cached = (manifest.schema_version === 3 || manifest.schema_version === 4) ? manifest.request_profile : "legacy-implicit";
   throw new ExtractionCacheInvariantError(
     "[longmemeval preflight] extraction request profile mismatch: resolved profile " +
       `"${requestProfile}" != cached profile "${cached}" ` +

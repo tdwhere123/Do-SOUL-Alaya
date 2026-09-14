@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import process from "node:process";
 import { executeExtractionBatchFill } from "./fill/batch-fill.js";
 import { existsSync, realpathSync } from "node:fs";
@@ -77,6 +78,7 @@ export {
   EXTRACTION_FILL_MAX_CONCURRENCY
 } from "./fill/policy/fill-concurrency.js";
 export interface ExtractionFillOptions {
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly batch?: {
     readonly window?: string;
     readonly requestLimit?: number;
@@ -297,7 +299,7 @@ async function prepareLockedExtractionFill(input: {
   const currentManifest = readExtractionCacheManifestIdentity(input.cacheRoot)?.manifest;
   assertCatalogRefillTransportReadiness(
     input.executionAuthority, input.cacheRoot,
-    currentManifest?.schema_version === 3 ? currentManifest : undefined
+    (currentManifest?.schema_version === 3 || currentManifest?.schema_version === 4) ? currentManifest : undefined
   );
   return input.authority === undefined
     ? prepareExtractionFill(input.options, input.cacheRoot, input.concurrency, input.log, input.expansion)

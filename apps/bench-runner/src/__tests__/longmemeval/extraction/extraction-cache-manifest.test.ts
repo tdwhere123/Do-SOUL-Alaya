@@ -19,6 +19,8 @@ import {
   type ExtractionCacheManifestV3
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { hasCompleteExtractionFillAuthority } from "../../../runs/extraction/fill/fill-authority.js";
+import { resolveCompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-config.js";
+import { createCompileSeedRunnerContext } from "../../../runs/compile-seed/compile-seed-runner-context.js";
 import { assertExtractionCacheIdentity } from "../../../runs/extraction/cache/cache-identity.js";
 import {
   computeCacheKey,
@@ -50,6 +52,41 @@ describe("extraction-cache-manifest", () => {
 
   beforeEach(async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "extraction-manifest-"));
+  });
+
+  it("preserves legacy manifest bytes before defaulting packing and requires explicit packing in v4", () => {
+    const legacy = scopedManifest();
+    writeExtractionCacheManifest(cacheRoot, legacy);
+    const path = extractionCacheManifestPath(cacheRoot);
+    const bytes = readFileSync(path);
+    const legacyIdentity = readExtractionCacheManifestIdentity(cacheRoot)!;
+    expect(legacyIdentity.manifestSha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+    expect(legacyIdentity.manifest).not.toHaveProperty("source_packing");
+    expect(resolveCompileSeedExtractionConfig({}, legacyIdentity.manifest).sourcePacking).toBe("reference-eight");
+    expect(readFileSync(path)).toEqual(bytes);
+    for (const invalid of [{ ...legacy, source_packing: "singleton" },
+      { ...legacy, source_packing: "reference-eight" }, { ...legacy, schema_version: 4 },
+      { ...legacy, schema_version: 4, source_packing: "unknown" }]) {
+      writeFileSync(path, JSON.stringify(invalid));
+      expect(() => readExtractionCacheManifest(cacheRoot)).toThrow();
+    }
+    const current: ExtractionCacheManifest = { ...legacy, schema_version: EXTRACTION_CACHE_MANIFEST_VERSION, source_packing: "singleton" as const };
+    writeExtractionCacheManifest(cacheRoot, current);
+    expect(readExtractionCacheManifest(cacheRoot)).toEqual(current);
+    expect(resolveCompileSeedExtractionConfig({}, current).sourcePacking).toBe("singleton");
+    expect(() => resolveCompileSeedExtractionConfig({}, current, "reference-eight")).toThrow(/packing/u);
+    expect(() => resolveCompileSeedExtractionConfig({ ALAYA_BENCH_EXTRACTION_SOURCE_PACKING: "reference-eight" }, current))
+      .toThrow(/packing/u);
+    expect(() => resolveCompileSeedExtractionConfig({ ALAYA_BENCH_EXTRACTION_SOURCE_PACKING: "reference-eight" }, current, "singleton"))
+      .toThrow(/overrides disagree/u);
+    const config = { providerUrl: current.provider_url, model: current.extraction_model,
+      requestProfile: "provider-default-v1" as const, apiKey: null };
+    const options = { cacheRoot, config, skipPreflight: true, diagnosticDir: null };
+    expect(createCompileSeedRunnerContext(options).config.sourcePacking).toBe("singleton");
+    expect(() => createCompileSeedRunnerContext({ ...options, sourcePacking: "reference-eight" }))
+      .toThrow(/packing/u);
+    expect(() => createCompileSeedRunnerContext({ ...options, sourcePacking: "singleton",
+      config: { ...config, sourcePacking: "reference-eight" } })).toThrow(/packing/u);
   });
 
   it("pins the live golden cache-key digest and demotes the formula to documentation", () => {
@@ -105,7 +142,7 @@ describe("extraction-cache-manifest", () => {
   it("round-trips a v3 manifest with an explicit closed request profile", () => {
     const manifest: ExtractionCacheManifest = {
       ...BASE_MANIFEST,
-      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+      schema_version: 3,
       extraction_model: "deepseek-v4-flash-free",
       model_family: "deepseek-v4-flash",
       cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
@@ -118,7 +155,7 @@ describe("extraction-cache-manifest", () => {
   it("parses and preserves a v3 supplemental source binding", () => {
     const manifest: ExtractionCacheManifest = {
       ...BASE_MANIFEST,
-      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+      schema_version: 3,
       extraction_model: "deepseek-v4-flash-free",
       model_family: "deepseek-v4-flash",
       cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
@@ -320,7 +357,7 @@ describe("extraction-cache-manifest", () => {
       extractionCacheManifestPath(cacheRoot),
       JSON.stringify({
         ...BASE_MANIFEST,
-        schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+        schema_version: 3,
         model_family: "fixture-family"
       }),
       "utf8"
@@ -337,7 +374,7 @@ describe("extraction-cache-manifest", () => {
         extractionCacheManifestPath(cacheRoot),
         JSON.stringify({
           ...BASE_MANIFEST,
-          schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+          schema_version: 3,
           model_family: "fixture-family",
           request_profile: requestProfile
         }),
@@ -487,7 +524,7 @@ function scopedManifest(
 ): ExtractionCacheManifestV3 {
   return {
     ...BASE_MANIFEST,
-    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    schema_version: 3,
     model_family: BASE_MANIFEST.extraction_model,
     request_profile: "provider-default-v1",
     cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,

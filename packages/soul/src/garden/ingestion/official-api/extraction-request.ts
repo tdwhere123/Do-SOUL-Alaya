@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { ConversationMessage } from "@do-soul/alaya-protocol";
+import {
+  DEFAULT_EXTRACTION_SOURCE_PACKING, extractionSourcePackingSize,
+  type ExtractionSourcePacking, type ConversationMessage
+} from "@do-soul/alaya-protocol";
 import {
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
@@ -50,9 +53,10 @@ export type OfficialApiExtractionRequest = z.infer<typeof OfficialApiExtractionR
 
 export function buildOfficialApiExtractionRequest(
   turnContent: string,
-  messages: readonly Pick<ConversationMessage, "role" | "content">[]
+  messages: readonly Pick<ConversationMessage, "role" | "content">[],
+  sourcePacking: ExtractionSourcePacking = DEFAULT_EXTRACTION_SOURCE_PACKING
 ): OfficialApiExtractionRequest {
-  const requests = buildOfficialApiExtractionRequests(turnContent, messages);
+  const requests = buildOfficialApiExtractionRequests(turnContent, messages, sourcePacking);
   if (requests.length !== 1) {
     throw new TypeError("official API extraction requires a batched request plan");
   }
@@ -61,7 +65,8 @@ export function buildOfficialApiExtractionRequest(
 
 export function buildOfficialApiExtractionRequests(
   turnContent: string,
-  messages: readonly Pick<ConversationMessage, "role" | "content">[]
+  messages: readonly Pick<ConversationMessage, "role" | "content">[],
+  sourcePacking: ExtractionSourcePacking = DEFAULT_EXTRACTION_SOURCE_PACKING
 ): readonly OfficialApiExtractionRequest[] {
   const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
   const assertions = buildOfficialApiSourceAssertions(sourceCorpus);
@@ -80,7 +85,7 @@ export function buildOfficialApiExtractionRequests(
         text: assertion.text
       };
     }),
-    { kind: "reference_batch_8" }
+    { kind: "reference_batch", assertionsPerPack: extractionSourcePackingSize(sourcePacking) }
   );
   const packs = plan.packs.filter((pack) => pack.assertion_ids.length > 0);
   if (packs.length === 0) {

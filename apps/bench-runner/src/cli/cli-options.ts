@@ -1,3 +1,4 @@
+import { ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import path from "node:path";
 import process from "node:process";
 import type {
@@ -47,6 +48,7 @@ export interface ParsedFlags {
   readonly pinnedMetaRoot?: string;
   readonly questionManifest?: string;
   readonly extractionCacheRoot?: string;
+  readonly extractionSourcePacking?: ExtractionSourcePacking;
   /** Digest-bound extraction authority receipt required for live cache fills. */
   readonly extractionAuthority?: string;
   /** Immutable target-root selection receipt linked from a normal authority receipt. */
@@ -94,6 +96,7 @@ export interface ParsedFlagsState {
   pinnedMetaRoot?: string;
   questionManifest?: string;
   extractionCacheRoot?: string;
+  extractionSourcePacking?: ExtractionSourcePacking;
   extractionAuthority?: string;
   extractionTargetSelection?: string;
   extractionPredecessorAuthority?: string;
@@ -325,6 +328,13 @@ function consumeSnapshotCachePathFlags(
   }
   if (matchFlagToken(token, "--pinned-meta-root")) {
     state.pinnedMetaRoot = readFlagValue(args, index, token, "--pinned-meta-root");
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--extraction-source-packing")) {
+    if (state.extractionSourcePacking !== undefined) throw new Error("source packing may be supplied only once");
+    state.extractionSourcePacking = ExtractionSourcePackingSchema.parse(
+      readFlagValue(args, index, token, "--extraction-source-packing")
+    );
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--extraction-cache-root")) {

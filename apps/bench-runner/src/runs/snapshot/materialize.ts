@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   existsSync,
   mkdirSync,
@@ -19,7 +20,6 @@ import type { LongMemEvalSourceRound } from "../provenance/source-rounds.js";
 import type { LongMemEvalSnapshotRunProvenance } from
   "./run-provenance.js";
 import {
-  EXTRACTION_CACHE_MANIFEST_VERSION,
   type ExtractionRequestProfile
 } from "../extraction/cache/extraction-cache-manifest.js";
 import type { SnapshotArtifactIntegrity } from "./integrity.js";
@@ -246,7 +246,8 @@ export interface SnapshotExtractionProvenanceV2
 
 export interface SnapshotExtractionProvenanceV3
   extends SnapshotExtractionProvenanceBase, ExtractionFillSummaryContract {
-  readonly schema_version: typeof EXTRACTION_CACHE_MANIFEST_VERSION;
+  readonly schema_version: 3;
+  readonly source_packing?: never;
   readonly model_family: string;
   readonly request_profile: ExtractionRequestProfile;
   readonly expansion_source_anchor?: LongMemEvalExpansionSourceAnchor;
@@ -254,10 +255,20 @@ export interface SnapshotExtractionProvenanceV3
   readonly supplemental_source_receipt?: SupplementalSourceProvenanceBinding;
 }
 
+export interface SnapshotExtractionProvenanceV4
+  extends Omit<SnapshotExtractionProvenanceV3, "schema_version" | "source_packing"> {
+  readonly schema_version: 4;
+  readonly source_packing: ExtractionSourcePacking;
+}
+
+export type ProfiledSnapshotExtractionProvenance =
+  | SnapshotExtractionProvenanceV3
+  | SnapshotExtractionProvenanceV4;
+
 export type SnapshotExtractionProvenance =
   | SnapshotExtractionProvenanceV1
   | SnapshotExtractionProvenanceV2
-  | SnapshotExtractionProvenanceV3;
+  | ProfiledSnapshotExtractionProvenance;
 
 export function snapshotManifestPath(snapshotDbPath: string): string {
   return `${snapshotDbPath}.manifest.json`;

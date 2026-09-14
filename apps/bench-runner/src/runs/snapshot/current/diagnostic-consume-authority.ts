@@ -1,6 +1,6 @@
 import type {
   LongMemEvalSnapshotManifest,
-  SnapshotExtractionProvenanceV3
+  ProfiledSnapshotExtractionProvenance
 } from "../materialize.js";
 import {
   assertDiagnosticSnapshotWriteAuthority,
@@ -9,7 +9,7 @@ import {
 
 export function assertDiagnosticManifestConsumeAuthority(
   manifest: LongMemEvalSnapshotManifest
-): SnapshotExtractionProvenanceV3 {
+): ProfiledSnapshotExtractionProvenance {
   const extraction = manifest.extraction_provenance;
   if (manifest.artifact_integrity === undefined) {
     throw new Error("diagnostic snapshot consumer requires artifact integrity");
@@ -20,9 +20,9 @@ export function assertDiagnosticManifestConsumeAuthority(
       "diagnostic snapshot consumer requires dataset and question identity"
     );
   }
-  if (extraction?.schema_version !== 3) {
+  if ((extraction?.schema_version !== 3 && extraction?.schema_version !== 4)) {
     throw new Error(
-      "diagnostic snapshot consumer requires v3 extraction provenance"
+      "diagnostic snapshot consumer requires v3 or v4 extraction provenance"
     );
   }
   if (manifest.run_provenance === undefined) {
@@ -41,7 +41,7 @@ export function assertDiagnosticManifestConsumeAuthority(
 }
 
 export function assertDiagnosticSnapshotConsumeAuthority(input: {
-  readonly extraction: SnapshotExtractionProvenanceV3;
+  readonly extraction: ProfiledSnapshotExtractionProvenance;
   readonly seedExtractionPath: LongMemEvalSnapshotManifest["seed_extraction_path"];
   readonly runProvenance: DiagnosticSnapshotProvenance;
   readonly datasetSha256: string;

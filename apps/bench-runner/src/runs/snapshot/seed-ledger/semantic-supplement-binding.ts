@@ -15,7 +15,7 @@ import {
 import type {
   LongMemEvalSnapshotExtractionShard,
   LongMemEvalSnapshotSeedRound,
-  SnapshotExtractionProvenanceV3
+  ProfiledSnapshotExtractionProvenance
 } from "../materialize.js";
 
 interface ObservedSemanticSupplementEntry {
@@ -87,7 +87,7 @@ export function assertSemanticSupplementRound(input: {
 }
 
 export function assertSemanticSupplementClosure(
-  extraction: SnapshotExtractionProvenanceV3,
+  extraction: ProfiledSnapshotExtractionProvenance,
   entries: Readonly<SemanticSupplementEntries>,
   binding: SourceAssertionSupplementBinding | undefined
 ): void {

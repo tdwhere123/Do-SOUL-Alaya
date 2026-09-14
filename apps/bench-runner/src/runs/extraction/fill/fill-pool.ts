@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   buildOfficialApiExtractionRequests,
   GardenProviderError,
@@ -63,6 +64,7 @@ export class ExtractionFillTaskError extends Error {
 }
 
 interface ExtractionPoolInput {
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly extractor: BenchSignalExtractor;
   readonly turns: readonly LongMemEvalExtractionTurn[];
   readonly concurrency: number;
@@ -121,7 +123,7 @@ async function runExtractionTask(
   await adaptive.acquire(scope.signal);
   let outcome: AdaptiveConcurrencyReleaseOutcome = "neutral";
   try {
-    outcome = await extractTurn(input.extractor, turn, scope.signal, input.transport) > 0
+    outcome = await extractTurn(input.extractor, turn, scope.signal, input.transport, input.sourcePacking) > 0
       ? "rate_limit"
       : "success";
   } catch (cause) {
@@ -189,9 +191,10 @@ async function extractTurn(
   extractor: BenchSignalExtractor,
   turn: LongMemEvalExtractionTurn,
   signal: AbortSignal,
-  transport: ExtractionPoolInput["transport"]
+  transport: ExtractionPoolInput["transport"],
+  sourcePacking?: ExtractionSourcePacking
 ): Promise<number> {
-  const runtime = createExtractionTurnRuntime(extractor, turn, signal, transport);
+  const runtime = createExtractionTurnRuntime(extractor, turn, signal, transport, sourcePacking);
   try {
     await compileExtractionTurn(runtime.provider, turn);
   } finally {
@@ -204,12 +207,13 @@ function createExtractionTurnRuntime(
   extractor: BenchSignalExtractor,
   turn: LongMemEvalExtractionTurn,
   signal: AbortSignal,
-  transport: ExtractionPoolInput["transport"]
+  transport: ExtractionPoolInput["transport"],
+  sourcePacking?: ExtractionSourcePacking
 ) {
   const timeBudget = resolveExtractionFillProviderTimeBudget(transport?.maxOutputTokens);
   const requests = buildOfficialApiExtractionRequests(
     turn.turnContent,
-    turn.turnMessages
+    turn.turnMessages, sourcePacking
   );
   const inputBound = transport?.maximumInputTokensPerAttempt;
   if (inputBound !== undefined) {
@@ -230,6 +234,7 @@ function createExtractionTurnRuntime(
   const state = { rateLimitRetries: 0 };
   return {
     provider: new OfficialApiGardenProvider({
+      sourcePacking,
       apiKey: "extraction-fill-injected",
       requestTimeoutMs: timeBudget.requestTimeoutMs,
       wallClockBudgetMs: planBudget.wallClockBudgetMs,

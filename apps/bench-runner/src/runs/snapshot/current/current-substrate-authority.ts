@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -26,7 +27,7 @@ import {
   snapshotQuestionIdDigest,
   type LongMemEvalSnapshotManifest,
   type LongMemEvalSnapshotSidecarFile,
-  type SnapshotExtractionProvenanceV3
+  type ProfiledSnapshotExtractionProvenance
 } from "../materialize.js";
 import { deriveSnapshotAttribution } from "../attribution.js";
 import { verifySnapshotArtifactIntegrity } from "../integrity.js";
@@ -95,7 +96,8 @@ export function assertCurrentPostFillCacheAuthority(input: {
   readonly requiredExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly requiredQuestionWindow: ExtractionFillQuestionWindow;
   readonly env: Readonly<Record<string, string | undefined>>;
-}): SnapshotExtractionProvenanceV3 {
+  readonly sourcePacking?: ExtractionSourcePacking;
+}): ProfiledSnapshotExtractionProvenance {
   return inspectCurrentPostFillCacheAuthority(input).provenance;
 }
 
@@ -119,12 +121,12 @@ export function assertCurrentPostFillCacheAuthorityProof(
   }
   assertCacheOnlyEnvironment(input.env);
   const identity = readExtractionCacheManifestIdentity(cacheRoot);
-  if (identity === undefined || identity.manifest.schema_version !== 3 ||
+  if (identity === undefined || (identity.manifest.schema_version !== 3 && identity.manifest.schema_version !== 4) ||
       !hasCompleteExtractionFillAuthority(identity.manifest) ||
       identity.manifest.dataset_revision !== input.datasetSha256) {
     throw new Error("post-fill extraction manifest changed after cache preflight");
   }
-  const config = resolveCompileSeedExtractionConfig({ ...input.env }, identity.manifest);
+  const config = resolveCompileSeedExtractionConfig({ ...input.env }, identity.manifest, input.sourcePacking);
   assertExtractionCachePreflightProofReuse(input.proof, {
     cacheRoot,
     manifestIdentity: identity,
@@ -153,20 +155,20 @@ function inspectCurrentPostFillCacheAuthority(
   input: Parameters<typeof assertCurrentPostFillCacheAuthority>[0]
 ) {
   const identity = readExtractionCacheManifestIdentity(input.cacheRoot);
-  if (identity === undefined || identity.manifest.schema_version !== 3) {
-    throw new Error("post-fill benchmark requires a complete v3 extraction manifest");
+  if (identity === undefined || (identity.manifest.schema_version !== 3 && identity.manifest.schema_version !== 4)) {
+    throw new Error("post-fill benchmark requires a complete v3 or v4 extraction manifest");
   }
   if (identity.manifest.dataset_revision !== input.datasetSha256) {
     throw new Error("post-fill extraction manifest dataset identity mismatch");
   }
   const complete = hasCompleteExtractionFillAuthority(identity.manifest);
   if (!complete && identity.manifest.fill_status !== undefined) {
-    throw new Error("post-fill benchmark requires a complete v3 extraction manifest");
+    throw new Error("post-fill benchmark requires a complete v3 or v4 extraction manifest");
   }
   if (complete) assertCacheOnlyEnvironment(input.env);
   const config = resolveCompileSeedExtractionConfig(
     { ...input.env },
-    identity.manifest
+    identity.manifest, input.sourcePacking
   );
   if (!complete) assertIncompletePostFillCache(input, identity.manifest, config);
   const proof = createExtractionCachePreflightProof({
@@ -206,7 +208,7 @@ function assertIncompletePostFillCache(
     requiredQuestionWindow: input.requiredQuestionWindow,
     requireManifest: true
   });
-  throw new Error("post-fill benchmark requires a complete v3 extraction manifest");
+  throw new Error("post-fill benchmark requires a complete v3 or v4 extraction manifest");
 }
 
 export type { SnapshotConsumeAuthority, SnapshotWriteAuthority };
@@ -215,7 +217,7 @@ export function assertCurrentSnapshotWriteAuthority(input: {
   readonly dbPath: string;
   readonly sidecar: LongMemEvalSnapshotSidecarFile;
   readonly canonicalQuestions: readonly LongMemEvalQuestion[];
-  readonly extraction: SnapshotExtractionProvenanceV3;
+  readonly extraction: ProfiledSnapshotExtractionProvenance;
   readonly extractionAuthority: SnapshotExtractionAuthority;
   readonly seedExtractionPath: SeedExtractionPath;
   readonly runProvenance: LongMemEvalRunProvenance;
@@ -319,7 +321,7 @@ export async function verifyCurrentRecallSnapshotAuthority(input: {
 
 function assertPromotionSnapshotWriteAuthority(input: {
   readonly sidecar: LongMemEvalSnapshotSidecarFile;
-  readonly extraction: SnapshotExtractionProvenanceV3;
+  readonly extraction: ProfiledSnapshotExtractionProvenance;
   readonly seedExtractionPath: SeedExtractionPath;
   readonly runProvenance: LongMemEvalRunProvenance;
   readonly datasetSha256: string;
@@ -385,14 +387,14 @@ async function loadCurrentSnapshotDataset(
 
 function assertCurrentManifestAuthority(
   manifest: LongMemEvalSnapshotManifest
-): SnapshotExtractionProvenanceV3 {
+): ProfiledSnapshotExtractionProvenance {
   const extraction = manifest.extraction_provenance;
   const selection = manifest.run_provenance?.selection;
   if (manifest.attribution?.status !== "attributed" ||
       manifest.attribution.gate_eligible !== true ||
       manifest.artifact_integrity === undefined ||
       manifest.dataset_sha256 === undefined || manifest.question_id_digest === undefined ||
-      extraction?.schema_version !== 3 ||
+      (extraction?.schema_version !== 3 && extraction?.schema_version !== 4) ||
       !hasCompleteExtractionFillSummary(extraction) ||
       !isCacheOnlySeedExtractionPath(manifest.seed_extraction_path) ||
       manifest.run_provenance === undefined ||
@@ -433,7 +435,7 @@ function assertSnapshotSubstrate(input: {
   readonly dbPath: string;
   readonly sidecar: LongMemEvalSnapshotSidecarFile;
   readonly questions: readonly LongMemEvalQuestion[];
-  readonly extraction: SnapshotExtractionProvenanceV3;
+  readonly extraction: ProfiledSnapshotExtractionProvenance;
   readonly extractionAuthority: SnapshotExtractionAuthority;
   readonly seedExtractionPath: SeedExtractionPath | undefined;
   readonly questionWindow: { readonly offset: number; readonly limit: number };
@@ -460,7 +462,7 @@ function assertRunAuthorityBinding(
   authority: SnapshotExtractionAuthority
 ): void {
   const cache = provenance.extraction_cache;
-  if (cache?.schema_version !== 3) {
+  if ((cache?.schema_version !== 3 && cache?.schema_version !== 4)) {
     throw new Error("snapshot writer requires current run extraction provenance");
   }
   assertSnapshotExtractionAuthorityBinding(authority, cache);
@@ -468,10 +470,10 @@ function assertRunAuthorityBinding(
 
 function extractionProvenance(
   identity: NonNullable<ReturnType<typeof readExtractionCacheManifestIdentity>>
-): SnapshotExtractionProvenanceV3 {
+): ProfiledSnapshotExtractionProvenance {
   const manifest = identity.manifest;
-  if (manifest.schema_version !== 3) {
-    throw new Error("snapshot extraction provenance requires schema v3");
+  if ((manifest.schema_version !== 3 && manifest.schema_version !== 4)) {
+    throw new Error("snapshot extraction provenance requires schema v3 or v4");
   }
   return buildSnapshotExtractionSummary(manifest, identity.manifestSha256);
 }

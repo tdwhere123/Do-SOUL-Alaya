@@ -143,7 +143,7 @@ export function buildSemanticSubstrateManifestAuthority(input: {
   };
 }): SemanticSubstrateManifestAuthority {
   const manifest = input.manifest;
-  if (manifest.schema_version !== 3 || manifest.model_family === undefined ||
+  if ((manifest.schema_version !== 3 && manifest.schema_version !== 4) || manifest.model_family === undefined ||
       manifest.request_profile === undefined || manifest.expected_turns === undefined ||
       manifest.expected_key_set_sha256 === undefined ||
       manifest.content_closure_sha256 === undefined ||

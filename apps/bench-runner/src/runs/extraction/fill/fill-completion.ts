@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
@@ -47,12 +48,14 @@ interface ShardInspectionInput {
   readonly cacheRoot: string;
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
+  readonly sourcePacking?: ExtractionSourcePacking;
 }
 
 export function inspectExtractionFillCompletion(input: {
   readonly cacheRoot: string;
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly systemPrompt: string;
   readonly turnContents?: readonly string[];
   readonly extractionTurns?: readonly LongMemEvalExtractionTurn[];
@@ -86,12 +89,12 @@ export function inspectExtractionFillCompletion(input: {
 function expectedCacheKeys(input: Parameters<typeof inspectExtractionFillCompletion>[0]): Set<string> {
   if (input.extractionTurns !== undefined) {
     return new Set(input.extractionTurns.flatMap((turn) => computeExtractionTurnCacheKeys(
-      input.model, input.requestProfile, input.systemPrompt, turn
+      input.model, input.requestProfile, input.systemPrompt, turn, input.sourcePacking
     )));
   }
   return new Set((input.turnContents ?? []).flatMap((turnContent) =>
     computeSourceTurnCacheKeys(
-      input.model, input.requestProfile, input.systemPrompt, { turnContent }
+      input.model, input.requestProfile, input.systemPrompt, { turnContent }, input.sourcePacking
     )
   ));
 }
@@ -100,6 +103,7 @@ export function inspectExtractionCacheContentClosure(input: {
   readonly cacheRoot: string;
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
+  readonly sourcePacking?: ExtractionSourcePacking;
 }): ExtractionCacheContentInspection {
   const inventory = inspectShardInventory(input.cacheRoot);
   const counts = inspectExpectedShards(input, inventory.keys);
@@ -122,6 +126,7 @@ export function inspectExtractionCacheContentClosureExcluding(input: {
   readonly cacheRoot: string;
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly excludeCacheKeys: readonly string[];
 }): ExtractionCacheContentInspection {
   const inventory = inspectShardInventory(input.cacheRoot);

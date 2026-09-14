@@ -101,7 +101,7 @@ function assertRoundIdentity(
     {
       turnContent: content,
       turnMessages
-    }
+    }, extraction.source_packing
   );
   const shards = readRoundExtractionShards(actual);
   const semantic = readRoundSemanticSupplementShards(actual);
@@ -110,7 +110,7 @@ function assertRoundIdentity(
     semanticEntries,
     semanticBinding,
     cacheKeys,
-    requests: buildOfficialApiExtractionRequests(content, turnMessages)
+    requests: buildOfficialApiExtractionRequests(content, turnMessages, extraction.source_packing)
   });
   const rawSignalCount = sumExtractionShardCount(shards, semantic, "rawSignalCount");
   const draftCount = sumExtractionShardCount(shards, semantic, "draftCount");

@@ -41,12 +41,13 @@ export function resolveSourceTemporalCandidates(
   const range = sourceRangeMatch(source, matches);
   const candidates = (range === undefined ? matches : [range]).map((candidate) => {
     const bounded = candidate === range;
-    const window = sourceRoleWindow(source, candidate, matches);
+    const before = sourceRolePrefix(source, candidate, matches);
     const role = (hasDependentDateNeighbor(source, candidate, [...matches, ...unresolved]) ||
+      hasUnresolvedEndpointExclusion(source, candidate) ||
       /^\s*[,，]?\s*(?:or\b|或)/iu.test(source.slice(candidate.end)) ||
       /^(?:\s+(?:or|and|to|through|until)\s+(?:the\s+year\s+)?\d|\s*(?:或|和|至|到)\s*\d)/iu.test(source.slice(candidate.end)))
       ? "unknown"
-      : sourceTemporalRole(window, source.slice(Math.max(0, candidate.start - 40), candidate.start),
+      : sourceTemporalRole(before,
         source.slice(candidate.end, candidate.end + 8), bounded);
     return Object.freeze({ ...candidate, role, bounded });
   });
@@ -57,7 +58,7 @@ function sourceRangeMatch(source: string, matches: readonly TemporalMatch[]): Te
   if (matches.length !== 2) return undefined;
   const [left, right] = matches;
   const connector = source.slice(left!.end, right!.start);
-  if (!/^\s*(?:to|through|until|[-–—]|至|到)\s*$/iu.test(connector)) return undefined;
+  if (!/^\s*(?:to|through|[-–—]|至|到)\s*$/iu.test(connector)) return undefined;
   const start = left!.projection.event_time_start;
   const end = right!.projection.event_time_end;
   if (Date.parse(start) > Date.parse(end)) return undefined;
@@ -81,48 +82,41 @@ function hasDependentDateNeighbor(source: string, candidate: TemporalMatch, matc
   });
 }
 
-function sourceTemporalRole(window: string, before: string, after: string, bounded: boolean): SourceTemporalCandidate["role"] {
+function sourceTemporalRole(before: string, after: string, bounded: boolean): SourceTemporalCandidate["role"] {
   // These name an inequality, not occurrence within the mentioned calendar
   // window. A validity cue cannot override an unresolved inequality either.
   if (/\b(?:before|after|by)\s+(?:the\s+year\s+)?$/iu.test(before) || /^(?:之前|之后|以前|以后|前|后)/u.test(after)) return "unknown";
   if (!bounded && /\b(?:until|through)\s*$|(?:截至|直到)$/iu.test(before)) return "unknown";
-  if (hasValidityCue(window, bounded)) return "validity";
+  if (hasValidityConstruction(before)) return "validity";
   if (!bounded && /\b(?:from|to)\s+(?:the\s+year\s+)?$|(?:自|从|到|至)$/iu.test(before)) return "unknown";
   return "event";
 }
 
-function hasValidityCue(source: string, bounded: boolean): boolean {
-  if (/\b(?:since|effective(?:\s+from|\s+on)?|valid\s+(?:from|since)|as\s+of|in\s+effect\s+since)\b/iu.test(source) ||
-      /(?:生效|有效|适用).{0,48}(?:自|从|起)/u.test(source)) return true;
-  return bounded && (
-    /\b(?:effective|valid|in\s+effect|appl(?:y|ies))\b[\s\S]{0,96}\b(?:to|through|until)\b/iu.test(source) ||
-    /(?:有效期|生效|适用).{0,96}(?:至|到|截至)/u.test(source)
-  );
+function hasValidityConstruction(before: string): boolean {
+  // The construction must govern this date directly; a role word elsewhere
+  // in the clause (for example an adjective) cannot supply temporal validity.
+  return /\b(?:(?:effective|valid|in\s+effect|appl(?:y|ies))(?:\s+(?:from|since|on))?|since|as\s+of)\s+(?:the\s+year\s+)?$/iu.test(before) ||
+    /(?:有效期|生效|有效|适用)\s*(?:自|从|起)?\s*$/u.test(before);
 }
 
-function sourceRoleWindow(source: string, candidate: TemporalMatch, matches: readonly TemporalMatch[]): string {
+function hasUnresolvedEndpointExclusion(source: string, candidate: TemporalMatch): boolean {
+  return /\b(?:exclusive|excluding|not\s+including)\b/iu.test(source.slice(candidate.start, candidate.end)) ||
+    /^\s*[,;:]?\s*\(?\s*(?:exclusive\b|excluding\b|not\s+including\b)/iu.test(source.slice(candidate.end));
+}
+
+function sourceRolePrefix(source: string, candidate: TemporalMatch, matches: readonly TemporalMatch[]): string {
   const previous = [...matches].filter((match) => match.end <= candidate.start)
     .sort((left, right) => right.end - left.end)[0];
-  const next = matches.filter((match) => match.start >= candidate.end)
-    .sort((left, right) => left.start - right.start)[0];
   // Role cues cannot cross the clause separating neighboring dates. With no
   // neighbor, retain the local clause so bounds on a date are not discarded.
   const earliest = Math.max(0, candidate.start - 96);
-  const latest = Math.min(source.length, candidate.end + 96);
   const start = clauseStartAfter(source, previous?.end ?? earliest, candidate.start,
     previous === undefined ? earliest : candidate.start);
-  const end = clauseEndBefore(source, candidate.end, next?.start ?? latest,
-    next === undefined ? latest : candidate.end);
-  return source.slice(start, end);
+  return source.slice(start, candidate.start);
 }
 
 function clauseStartAfter(source: string, start: number, end: number, noBoundary: number): number {
   const separators = [...source.slice(start, end).matchAll(ROLE_CLAUSE_SEPARATOR)];
   const separator = separators[separators.length - 1];
   return separator === undefined ? noBoundary : start + separator.index + separator[0].length;
-}
-
-function clauseEndBefore(source: string, start: number, end: number, noBoundary: number): number {
-  const separator = source.slice(start, end).matchAll(ROLE_CLAUSE_SEPARATOR).next().value;
-  return separator === undefined ? noBoundary : start + separator.index;
 }

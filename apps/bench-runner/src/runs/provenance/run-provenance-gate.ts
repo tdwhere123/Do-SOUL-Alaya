@@ -1,7 +1,4 @@
 import {
-  EXTRACTION_CACHE_MANIFEST_VERSION
-} from "../extraction/cache/extraction-cache-manifest.js";
-import {
   containsExtractionFillQuestionWindow,
   hasCompleteExtractionFillAuthority,
   hasCompleteExtractionFillSummary
@@ -20,7 +17,7 @@ export function isLongMemEvalRunProvenanceGateEligible(
   if (!isLegacyGateSchema(provenance)) return false;
   const cache = provenance.extraction_cache;
   return cache !== null &&
-    cache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&
+    (cache.schema_version === 3 || cache.schema_version === 4) &&
     hasCompleteExtractionFillAuthority(cache) &&
     isLongMemEvalRunProvenanceSummaryGateEligible(provenance);
 }
@@ -38,7 +35,7 @@ export function isLongMemEvalRunProvenanceSummaryGateEligible(
     provenance.code.gate_sha256 !== null &&
     provenance.code.worktree_state_sha256 !== null &&
     provenance.code.executed_dist !== null && cache !== null &&
-    cache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&
+    (cache.schema_version === 3 || cache.schema_version === 4) &&
     hasCompleteExtractionFillSummary(cache) &&
     containsExtractionFillQuestionWindow(cache, provenance.execution.offset, provenance.execution.evaluated_count) &&
     hasCurrentDatasetBinding(provenance) &&

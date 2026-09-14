@@ -11,11 +11,17 @@ export const CURRENT_RECEIPT_VERSION = 5;
 
 export function hasExpectedExtractionAuthorityReceiptLimits(input: {
   readonly schemaVersion: 2 | 3 | 4 | 5;
-  readonly action: "probe" | "fill";
+  readonly action: "probe" | "fill" | "sample";
+  readonly sampleCount?: number;
   readonly startingMissing: number;
   readonly maximumAttempts: number;
   readonly successfulShardCeiling: number;
 }): boolean {
+  if (input.action === "sample") {
+    return input.schemaVersion === CURRENT_RECEIPT_VERSION && input.sampleCount !== undefined &&
+      input.sampleCount > 0 && input.startingMissing >= input.sampleCount &&
+      input.maximumAttempts === input.sampleCount && input.successfulShardCeiling === input.sampleCount;
+  }
   const expectedSuccesses = input.action === "probe" ? 1 : input.startingMissing;
   if (input.successfulShardCeiling !== expectedSuccesses) return false;
   if (input.schemaVersion === CURRENT_RECEIPT_VERSION) {

@@ -1,3 +1,4 @@
+import { ExtractionSourcePackingSchema } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import type {
   ExtractionTargetFinalIdentity,
@@ -64,7 +65,8 @@ function isFinalIdentity(value: unknown): value is ExtractionTargetFinalIdentity
   return isRecord(value) && typeof value.revision === "string" &&
     typeof value.dataset_variant === "string" && isSha256(value.dataset_revision_sha256) &&
     typeof value.model === "string" && typeof value.model_family === "string" &&
-    typeof value.request_profile === "string" && typeof value.provider_url === "string" &&
+    typeof value.request_profile === "string" &&
+    (value.source_packing === undefined || ExtractionSourcePackingSchema.safeParse(value.source_packing).success) && typeof value.provider_url === "string" &&
     isSha256(value.system_prompt_sha256) && typeof value.cache_key_algorithm === "string";
 }
 

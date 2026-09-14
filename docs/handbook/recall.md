@@ -141,6 +141,22 @@ normalizer version 4. Historical locator version 2 receipts and prompt bytes
 remain readable as historical data; current source qualification and extraction
 do not reinterpret their catalog ids. New requests, prompt identities and
 derived cache commitments bind the current catalog contract.
+Extraction generations select `reference-eight` or `singleton` source packing
+through the shared request owner. Manifest v4 requires `source_packing`;
+historical v3 remains reference-eight and retains its original signed shape.
+Bench `--extraction-source-packing` (or `ALAYA_BENCH_EXTRACTION_SOURCE_PACKING`)
+must agree with an existing manifest. Omission restores that generation's
+policy. The full catalog, assertion ids and total batch count precede selection;
+physical packing does not change the semantic request template.
+
+An extraction authority v5 `sample` action binds a distinct, nonempty, missing
+native request set from the complete first-100 inventory. Its limits preserve
+the full starting-missing denominator and derive attempts and successes from
+the selected count. Only one exact Batch job is permitted, with durable
+submission intent before reservation. Unknown submission and prior submitted
+jobs block redispatch; sync, repair and continuation cannot reuse this scope.
+Sample settlement remains partial and cannot promote the cache or snapshot.
+
 Historical capture and certificate bytes remain intact, while current qualified
 OSF and fact-key reads reject incomplete source obligations, including the
 pre-capture Signal fallback. Raw field factor rows participate in immutable
@@ -430,10 +446,15 @@ official, replay, or local heuristic event projection. Absolute years 1000–999
 require a temporal preposition and a closed numeral, or an explicit Chinese
 calendar-year context; bare identifiers, amounts, quantities, partial dates,
 alternative years, and unresolved before/after bounds do not establish an event
-window. Closed `from ... to ...` ranges retain both endpoints; explicit validity
-or `since` yields validity, never an event copy. Missing source clocks leave
-relative dates unresolved; live and replay preserve a supplied fixed offset for
-civil-time resolution. Absolute calendar years use UTC and need no clock.
+window. Supported closed `to` and `through` ranges retain both endpoints as one
+candidate, including in local heuristics. Unresolved `until` or explicitly excluded
+endpoints remain unavailable. Validity requires a construction directly governing
+the date; a descriptive adjective elsewhere cannot supply that role. A nomination
+that omits a source-established closed validity end remains rejected in the audit,
+even when the independent source owner can preserve the complete range. Missing
+source clocks leave relative dates unresolved; live and replay preserve a supplied
+fixed offset for every civil-time consumer, including time-concern proposals.
+Absolute calendar years use UTC and need no clock.
 Generation response-schema JSON participates in raw cache identity; current
 parser, grounding and formation identities separate newly derived artifacts
 from historical raw or previously qualified generations.

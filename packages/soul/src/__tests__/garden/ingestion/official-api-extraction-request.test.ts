@@ -14,6 +14,24 @@ import {
 import { planTurnTransportPacks } from "../../../garden/ingestion/official-api/transport-pack.js";
 
 describe("official API extraction request", () => {
+  it("keeps default request bytes and semantic template stable while singleton retains the full catalog", () => {
+    const source = Array.from({ length: 18 }, (_, i) => `I recorded durable detail number ${i + 1}.`).join(" ");
+    const defaultRequests = buildOfficialApiExtractionRequests(source, []);
+    const explicit = buildOfficialApiExtractionRequests(source, [], "reference-eight");
+    expect(explicit.map(stringifyOfficialApiExtractionRequest))
+      .toEqual(defaultRequests.map(stringifyOfficialApiExtractionRequest));
+    expect(defaultRequests.map((request) => request.source_assertions.length)).toEqual([8, 8, 2]);
+    const before = officialApiExtractionRequestTemplatePreimage();
+    const singleton = buildOfficialApiExtractionRequests(source, [], "singleton");
+    expect(singleton).toHaveLength(18);
+    expect(singleton.flatMap((request) => request.source_assertions))
+      .toEqual(defaultRequests.flatMap((request) => request.source_assertions));
+    expect(singleton.map((request) => [request.batch_index, request.batch_count]))
+      .toEqual(Array.from({ length: 18 }, (_, i) => [i, 18]));
+    expect(singleton.every((request) => request.source_corpus_identity === defaultRequests[0]!.source_corpus_identity)).toBe(true);
+    expect(officialApiExtractionRequestTemplatePreimage()).toBe(before);
+  });
+
   it("carries only canonical User assertions", () => {
     const request = buildOfficialApiExtractionRequest(
       "I moved to Berlin.",

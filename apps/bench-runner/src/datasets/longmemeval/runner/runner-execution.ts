@@ -366,9 +366,10 @@ function buildQaOptions(
 function assertSnapshotProducerExecutionPolicy(context: LongMemEvalRunContext): void {
   assertSnapshotProducerStaticPolicy(context, process.env);
   const proof = requireSnapshotPreflightProof(context);
-  const requiredTurns = inspectTurnContentKeySpace(context.window);
+  const requiredTurns = inspectTurnContentKeySpace(context.window, context.opts.extractionSourcePacking);
   assertCurrentPostFillCacheAuthorityProof({
     proof,
+    sourcePacking: context.opts.extractionSourcePacking,
     cacheRoot: context.extractionCacheRoot,
     datasetSha256: context.datasetSha256,
     requiredTurnContents: requiredTurns.distinctTurnContents,

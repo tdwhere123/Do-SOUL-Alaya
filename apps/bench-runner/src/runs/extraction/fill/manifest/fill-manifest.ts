@@ -1,3 +1,4 @@
+import { DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -42,7 +43,10 @@ export function buildFillManifest(input: {
   const completion = input.completion;
   const contentClosure = requireContentClosure(input.status, completion);
   return {
-    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    ...(input.existingManifest?.schema_version === 3
+      ? { schema_version: 3 as const }
+      : { schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+          source_packing: input.config.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING }),
     extraction_model: input.config.model,
     model_family: input.config.modelFamily ?? input.config.model,
     request_profile: input.config.requestProfile,
@@ -85,13 +89,13 @@ function resolveSupplementalBinding(
 }
 
 export function buildMaterializedTargetFillManifest(input: {
-  readonly sourceManifest: Extract<ExtractionCacheManifest, { readonly schema_version: 3 }>;
+  readonly sourceManifest: Extract<ExtractionCacheManifest, { readonly schema_version: 3 | 4 }>;
   readonly targetSelection: ExtractionTargetSelectionReceipt;
   readonly expectedTurns: number;
   readonly cachedTurns: number;
   readonly expectedKeySetSha256: string;
   readonly builtAt: string;
-}): Extract<ExtractionCacheManifest, { readonly schema_version: 3 }> {
+}): Extract<ExtractionCacheManifest, { readonly schema_version: 3 | 4 }> {
   const source = input.sourceManifest;
   const target = input.targetSelection.final_identity;
   return {
@@ -99,6 +103,7 @@ export function buildMaterializedTargetFillManifest(input: {
     extraction_model: source.extraction_model,
     model_family: source.model_family,
     request_profile: source.request_profile,
+    source_packing: source.schema_version === 4 ? source.source_packing : DEFAULT_EXTRACTION_SOURCE_PACKING,
     provider_url: source.provider_url,
     system_prompt_sha256: source.system_prompt_sha256,
     cache_key_algo: source.cache_key_algo,
@@ -125,7 +130,7 @@ export function buildMaterializedTargetFillManifest(input: {
 
 export function writeNewMaterializedTargetFillManifest(
   cacheRoot: string,
-  manifest: Extract<ExtractionCacheManifest, { readonly schema_version: 3 }>,
+  manifest: Extract<ExtractionCacheManifest, { readonly schema_version: 3 | 4 }>,
   operationId: string,
   temporaryDirectory: string = dirname(cacheRoot)
 ): string {
@@ -139,7 +144,7 @@ export function writeNewMaterializedTargetFillManifest(
 }
 
 export function serializeMaterializedTargetFillManifest(
-  manifest: Extract<ExtractionCacheManifest, { readonly schema_version: 3 }>
+  manifest: Extract<ExtractionCacheManifest, { readonly schema_version: 3 | 4 }>
 ): Buffer {
   return Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 }

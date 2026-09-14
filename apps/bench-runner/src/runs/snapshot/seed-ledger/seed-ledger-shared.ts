@@ -6,7 +6,7 @@ import type { ExtractionFillQuestionWindow } from
   "../../extraction/fill/manifest/fill-manifest-contract.js";
 import type {
   LongMemEvalSnapshotSeedRound,
-  SnapshotExtractionProvenanceV3
+  ProfiledSnapshotExtractionProvenance
 } from "../materialize.js";
 
 export interface SnapshotSeedLedgerClosureAuthority {
@@ -23,8 +23,8 @@ export interface LedgerTotals {
   materializationDrop: number;
 }
 
-export type CompleteExtraction = SnapshotExtractionProvenanceV3 & Required<Pick<
-  SnapshotExtractionProvenanceV3,
+export type CompleteExtraction = ProfiledSnapshotExtractionProvenance & Required<Pick<
+  ProfiledSnapshotExtractionProvenance,
   "expected_turns" | "expected_key_set_sha256" | "content_closure_sha256"
 >>;
 

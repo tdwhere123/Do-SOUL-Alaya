@@ -1,3 +1,4 @@
+import { DEFAULT_EXTRACTION_SOURCE_PACKING, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { isDeepStrictEqual } from "node:util";
 import { resolve } from "node:path";
 import {
@@ -28,6 +29,7 @@ interface PreflightProofBinding {
   readonly providerUrl: string;
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly systemPromptSha256: string;
   readonly requiredKeySetSha256: string;
   readonly requiredKeyCount: number;
@@ -99,6 +101,7 @@ function captureExtractionCachePreflightProof(
     providerUrl: input.config.providerUrl,
     model: input.config.model,
     requestProfile: input.config.requestProfile,
+    sourcePacking: input.config.sourcePacking,
     systemPromptSha256: computeSystemPromptSha256(input.systemPrompt),
     requiredKeySetSha256: computeExtractionKeySetSha256(requiredKeys),
     requiredKeyCount: new Set(requiredKeys).size,
@@ -130,6 +133,8 @@ function assertExtractionCachePreflightProofCurrent(
       binding.providerUrl !== input.config.providerUrl ||
       binding.model !== input.config.model ||
       binding.requestProfile !== input.config.requestProfile ||
+      (binding.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING) !==
+        (input.config.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING) ||
       binding.systemPromptSha256 !== computeSystemPromptSha256(input.systemPrompt) ||
       input.config.apiKey !== null) {
     throw new Error("extraction cache preflight proof identity mismatch");
@@ -160,6 +165,7 @@ function computeRequiredKeys(input: ProofScopeInput): readonly string[] {
   return requiredExtractionCacheKeys({
     model: input.config.model,
     requestProfile: input.config.requestProfile,
+    sourcePacking: input.config.sourcePacking,
     systemPrompt: input.systemPrompt,
     requiredTurnContents: input.requiredTurnContents,
     ...(input.requiredExtractionTurns === undefined ? {} : {

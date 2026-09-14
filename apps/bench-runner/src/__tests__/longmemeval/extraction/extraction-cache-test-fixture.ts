@@ -50,6 +50,7 @@ export function writeExtractionCacheTestManifest(input: {
 }): void {
   writeExtractionCacheManifest(input.cacheRoot, {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    source_packing: "reference-eight",
     extraction_model: input.model,
     model_family: input.modelFamily ?? input.model,
     request_profile: input.requestProfile ?? "provider-default-v1",

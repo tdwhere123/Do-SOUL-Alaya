@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
-  parseExtractionCacheManifestContents, type ExtractionCacheManifestV3
+  parseExtractionCacheManifestContents, type ProfiledExtractionCacheManifest
 } from "../../cache/extraction-cache-manifest.js";
 import type { ExtractionAttemptLedgerSnapshot } from "../attempt-ledger.js";
 import {
@@ -42,7 +42,7 @@ export interface CatalogRefillCompletionWitness {
     readonly transport_provenance?: ExtractionTransportProvenance;
   }>[];
   readonly successor_manifest_sha256: string;
-  readonly successor_manifest: ExtractionCacheManifestV3;
+  readonly successor_manifest: ProfiledExtractionCacheManifest;
   readonly successor_content_closure_sha256: string;
   readonly supplemental_source_receipt?: SupplementalSourceReceipt;
   readonly witness_digest: string;
@@ -60,7 +60,7 @@ export function writeCatalogRefillCompletionWitness(input: {
   readonly cacheRoot: string;
   readonly receipt: ExtractionAuthorityReceipt;
   readonly ledger: ExtractionAttemptLedgerSnapshot;
-  readonly manifest: ExtractionCacheManifestV3;
+  readonly manifest: ProfiledExtractionCacheManifest;
   readonly manifestSha256: string;
   readonly supplementalSourceReceipt?: SupplementalSourceReceipt;
 }): CatalogRefillCompletionWitness {
@@ -207,7 +207,7 @@ function assertWitnessManifest(
     JSON.stringify(witness.successor_manifest), "catalog refill completion manifest"
   );
   if (scope === undefined || !sameStrings(successfulKeys, scope.keys) ||
-      manifest.schema_version !== 3 || !isDeepStrictEqual(manifest, witness.successor_manifest) ||
+      (manifest.schema_version !== 3 && manifest.schema_version !== 4) || !isDeepStrictEqual(manifest, witness.successor_manifest) ||
       digestBytes(serializeMaterializedTargetFillManifest(manifest)) !==
         witness.successor_manifest_sha256 ||
       manifest.content_closure_sha256 !== witness.successor_content_closure_sha256 ||
@@ -274,7 +274,7 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
 }
 
 function hasMatchingSupplementalBinding(
-  manifest: ExtractionCacheManifestV3,
+  manifest: ProfiledExtractionCacheManifest,
   receipt: SupplementalSourceReceipt | undefined
 ): boolean {
   const binding = receipt === undefined ? undefined : supplementalSourceManifestBinding(receipt);
