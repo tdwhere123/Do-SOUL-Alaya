@@ -1,4 +1,4 @@
-import { computeOfficialApiSourceCorpusIdentity } from "./extraction-request.js";
+import { buildOfficialApiExtractionRequest, computeOfficialApiSourceCorpusIdentity } from "./extraction-request.js";
 import { buildOfficialApiSourceCorpus, OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION } from "../../triage/grounding/source-locator.js";
 
 function exampleSourceCorpusIdentity(source: string): string {
@@ -245,6 +245,87 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
                 ]
               }
             ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "input": buildOfficialApiExtractionRequest(
+      "The exhibit opened in 2019 with the aim of helping visitors learn ceramics.", []
+    ),
+    "output": {
+      "signals": [
+        {
+          "object_kind": "episode",
+          "confidence": 1,
+          "matched_text": "The exhibit opened in 2019 with the aim of helping visitors learn ceramics.",
+          "source_locator": {
+            "contract_version": OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+            "kind": "assertion_catalog",
+            "assertion_id": 1
+          },
+          "canonical_entities": ["exhibit", "ceramics"],
+          "semantic_factor_graph": {
+            "schema_version": 2,
+            "source_kind": "evidence",
+            "factors": [
+              {
+                "factor_id": "exhibit",
+                "surface": "The exhibit",
+                "semantic_identity": "the exhibit"
+              },
+              {
+                "factor_id": "open",
+                "surface": "opened",
+                "semantic_identity": "open"
+              },
+              {
+                "factor_id": "year",
+                "surface": "2019",
+                "semantic_identity": "2019"
+              },
+              {
+                "factor_id": "aim",
+                "surface": "with the aim of helping visitors learn ceramics",
+                "semantic_identity": "with the aim of helping visitors learn ceramics"
+              }
+            ],
+            "variables": [],
+            "result_variable_ids": [],
+            "propositions": [
+              {
+                "proposition_id": "opening",
+                "predicate_factor_id": "open",
+                "arguments": [
+                  {
+                    "position": 0,
+                    "binding_identity": "theme",
+                    "reference_kind": "factor",
+                    "reference_id": "exhibit"
+                  },
+                  {
+                    "position": 1,
+                    "binding_identity": "time",
+                    "reference_kind": "factor",
+                    "reference_id": "year"
+                  },
+                  {
+                    "position": 2,
+                    "binding_identity": "accompanying_aim",
+                    "reference_kind": "factor",
+                    "reference_id": "aim"
+                  }
+                ]
+              }
+            ]
+          },
+          "temporal_projection": {
+            "projection_schema_version": 1,
+            "time_precision": "year",
+            "time_source": "explicit",
+            "event_time_start": "2019-01-01T00:00:00.000Z",
+            "event_time_end": "2019-12-31T23:59:59.999Z"
           }
         }
       ]
