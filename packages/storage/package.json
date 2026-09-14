@@ -38,7 +38,7 @@
       "import": "./dist/index.js"
     },
     "./lru-cache": {
-      "types": "./dist/sqlite/lru-cache.d.ts",
+      "types": "./src/sqlite/lru-cache.ts",
       "import": "./dist/sqlite/lru-cache.js"
     }
   }
