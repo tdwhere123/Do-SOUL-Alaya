@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import type { CachedExtractionEntry } from "../../../../compile-seed/cache/cache-shard.js";
+import { inspectCachedExtractionContent, type CachedExtractionEntry } from
+  "../../../../compile-seed/cache/cache-shard.js";
 import {
   inspectCachedResponseMetadata,
   type CachedExtractionResponseMetadata
 } from "../../../../compile-seed/cache/cached-response-metadata.js";
-import { inspectExtractionRawJson } from "../../../content-closure.js";
 import {
   readExtractionCacheManifestIdentity
 } from "../../extraction-cache-manifest.js";
@@ -76,7 +76,8 @@ export function readVerifiedLegacyExtractionEntry(input: {
     label: `legacy extraction shard ${input.cacheKey}`
   });
   const entry = parseEntry(serialized, input.cacheKey);
-  const raw = inspectExtractionRawJson(entry.raw_json);
+  const raw = inspectCachedExtractionContent(entry);
+  if (raw.status !== "hit") throw new Error(`legacy shard is not completed: ${raw.reason}`);
   if (raw.rawJsonSha256 !== authority.rawJsonSha256 ||
       raw.rawSignalCount !== authority.rawSignalCount ||
       raw.parsedDraftCount !== authority.parsedDraftCount) {
@@ -170,6 +171,8 @@ export function parseCapturedLegacyExtractionEntry(
     cache_key: entry.cache_key,
     raw_json: entry.raw_json,
     extracted_at: entry.extracted_at,
+    ...(entry.empty_classification === undefined ? {} : { empty_classification: entry.empty_classification }),
+    ...(entry.request_completion === undefined ? {} : { request_completion: entry.request_completion }),
     response_metadata: capture.completionMetadata,
     transport_provenance: capture.transport
   });

@@ -2,13 +2,8 @@ import { lstatSync } from "node:fs";
 import { cacheFilePath } from "../../../compile-seed/compile-seed-cache.js";
 import type { CompileSeedExtractionConfig } from
   "../../../compile-seed/compile-seed-types.js";
-import {
-  inspectCachedResponseMetadata, type CachedExtractionResponseMetadata
-} from
-  "../../../compile-seed/cache/cached-response-metadata.js";
-import {
-  computeExtractionRawJsonSha256, inspectExtractionRawJson
-} from "../../content-closure.js";
+import { inspectCachedExtractionContent, type CachedExtractionEntry } from
+  "../../../compile-seed/cache/cache-shard.js";
 import { isExtractionTransportProvenance } from "../../transport-route.js";
 import {
   inspectExtractionCacheInventory,
@@ -120,18 +115,12 @@ function inspectShardBytes(
   }
   const identityError = cachedIdentityError(parsed, cacheKey, model, requestProfile);
   if (identityError !== undefined) return invalid(cacheKey, identityError);
-  const rawJson = parsed.raw_json as string;
-  const rawJsonSha256 = computeExtractionRawJsonSha256(rawJson);
-  try {
-    inspectCachedResponseMetadata(
-      parsed.response_metadata as CachedExtractionResponseMetadata | undefined,
-      parsed.transport_provenance !== undefined
-    );
-    const content = inspectExtractionRawJson(rawJson);
-    return Object.freeze({ cacheKey, status: "hit", ...content });
-  } catch (cause) {
-    return invalid(cacheKey, `invalid cached extraction: ${errorMessage(cause)}`, rawJsonSha256);
-  }
+  const content = inspectCachedExtractionContent(parsed as unknown as CachedExtractionEntry);
+  return content.status === "hit" ? Object.freeze({ cacheKey, status: content.status,
+    rawJsonSha256: content.rawJsonSha256, rawSignalCount: content.rawSignalCount,
+    parsedDraftCount: content.parsedDraftCount }) :
+    invalid(cacheKey, content.reason ?? "cached extraction is unavailable",
+      content.status === "missing" ? undefined : content.rawJsonSha256);
 }
 
 function cachedIdentityError(

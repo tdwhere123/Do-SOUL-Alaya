@@ -7,6 +7,8 @@ import {
 import {
   classifyExtractionEnvelope,
   extractionEnvelopeCountsTowardCoverage,
+  EXTRACTION_REQUEST_COMPLETION_VERSION,
+  type ExtractionRequestCompletion,
   EMPTY_SIGNALS_ENVELOPE,
   PLAN_SKIPPED_EXTRACTION_ENVELOPE
 } from "../extraction/empty-classification.js";
@@ -140,8 +142,9 @@ export function importExtractionResponse(input: {
   const key = computeCacheKey(input.config.model, input.config.requestProfile,
     input.systemPrompt, extraction.canonical);
   if (key !== input.expectedCacheKey) throw new ExtractionCacheInvariantError("import request identity mismatch");
+  let completion: ExtractionRequestCompletion;
   try {
-    classifyOfficialApiRequestResult(result.rawJson, extraction.request, input.sourceCorpus);
+    completion = classifyOfficialApiRequestResult(result.rawJson, extraction.request, input.sourceCorpus).status;
   } catch (cause) {
     throw new ExtractionResponseAdmissionError("provider response failed request-bound admission", { cause });
   }
@@ -152,7 +155,7 @@ export function importExtractionResponse(input: {
     if (existing.rawJson !== result.rawJson) throw new ExtractionCacheInvariantError("import conflicts with admitted response");
     return;
   }
-  persistExtraction(options, cacheRoot, key, result, true, extraction.request);
+  persistExtraction(options, cacheRoot, key, result, true, extraction.request, completion);
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
 }
@@ -188,7 +191,7 @@ async function extractWithCache(
     return cachedExtractionResult(cached);
   }
   if (cached.status === "quarantined") {
-    return settleQuarantinedExtraction(options, cacheKey, cached.rawJson);
+    return refuseQuarantinedExtraction(cacheKey, cached.reason);
   }
   if (options.allowLiveExtraction === false) {
     throw new Error(
@@ -224,7 +227,7 @@ async function persistDeterministicEmpty(
       return cachedExtractionResult(recached);
     }
     if (recached.status === "quarantined") {
-      return settleQuarantinedExtraction(options, cacheKey, recached.rawJson);
+      return refuseQuarantinedExtraction(cacheKey, recached.reason);
     }
     const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
     const result = { rawJson: EMPTY_SIGNALS_ENVELOPE };
@@ -316,7 +319,7 @@ async function extractLiveWithLease(
     return cachedExtractionResult(recached);
   }
   if (recached.status === "quarantined") {
-    return settleQuarantinedExtraction(options, cacheKey, recached.rawJson);
+    return refuseQuarantinedExtraction(cacheKey, recached.reason);
   }
   const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
   const stats = options.stats;
@@ -340,8 +343,8 @@ async function extractLiveWithLease(
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
   const request = extractCacheInputIdentity(input.userPrompt).request;
-  classifyOfficialApiRequestResult(result.rawJson, request);
-  const persisted = persistExtraction(options, cacheRoot, cacheKey, result, true, request);
+  const completion = classifyOfficialApiRequestResult(result.rawJson, request).status;
+  const persisted = persistExtraction(options, cacheRoot, cacheKey, result, true, request, completion);
   recordLiveExtractionSuccess(options, cacheKey, stats, persisted);
   return result;
 }
@@ -373,14 +376,16 @@ function persistExtraction(
   cacheKey: string,
   result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>,
   providerBacked: boolean,
-  request: OfficialApiExtractionRequest
+  request: OfficialApiExtractionRequest,
+  requestCompletion?: ExtractionRequestCompletion
 ): {
   readonly inspection: ExtractionRawJsonInspection;
   readonly emptyClassification: ReturnType<typeof classifyExtractionEnvelope>;
 } {
   const classificationContext = {
     sourceAssertionCount: request.source_assertions.length,
-    planMembership: "in_plan" as const
+    planMembership: "in_plan" as const,
+    requestCompletion
   };
   const inspection = inspectExtractionRawJson(result.rawJson, classificationContext);
   const emptyClassification = inspection.emptyClassification ??
@@ -388,7 +393,9 @@ function persistExtraction(
       rawSignalCount: inspection.rawSignalCount,
       ...classificationContext
     });
-  const backed = providerBacked && emptyClassification === "completed_signals";
+  if (providerBacked && requestCompletion === undefined) {
+    throw new ExtractionCacheInvariantError("provider result lacks shared request completion");
+  }
   try {
     writeCachedExtraction(cacheRoot, cacheKey, {
       model: options.config.model,
@@ -397,10 +404,11 @@ function persistExtraction(
       raw_json: result.rawJson,
       extracted_at: new Date().toISOString(),
       empty_classification: emptyClassification,
-      ...(backed ? {
-        transport_provenance: buildExtractionTransportProvenance(options.config)
+      ...(providerBacked ? {
+        transport_provenance: buildExtractionTransportProvenance(options.config),
+        request_completion: { version: EXTRACTION_REQUEST_COMPLETION_VERSION, status: requestCompletion! }
       } : {}),
-      ...persistedResponseMetadata(result.responseMetadata, result.usage, backed)
+      ...persistedResponseMetadata(result.responseMetadata, result.usage, providerBacked)
     });
   } catch (cause) {
     throw new ExtractionCacheInvariantError(
@@ -434,20 +442,11 @@ function recordLiveExtractionSuccess(
   options.onExtractionProgress?.();
 }
 
-function settleQuarantinedExtraction(
-  options: CachingSignalExtractorOptions,
+function refuseQuarantinedExtraction(
   cacheKey: string,
-  rawJson: string
-): Awaited<ReturnType<BenchSignalExtractor["extract"]>> {
-  options.onLiveExtractionFailed?.(cacheKey);
-  if (options.stats !== undefined) {
-    options.stats.lastCacheKey = cacheKey;
-    recordExtractionInspection(
-      options, cacheKey, "cache", inspectExtractionRawJson(rawJson)
-    );
-  }
-  options.onExtractionProgress?.();
-  return { rawJson };
+  reason: string
+): never {
+  throw new ExtractionCacheInvariantError(`extraction cache shard ${cacheKey} is quarantined: ${reason}`);
 }
 
 function withAuthorityAttemptHook(

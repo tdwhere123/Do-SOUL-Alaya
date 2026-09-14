@@ -3,12 +3,15 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { groundOpenSemanticFactorGraph } from "@do-soul/alaya-protocol";
 import { buildOfficialApiExtractionRequests, parseOfficialApiExtractionRequest } from
   "../../../garden/ingestion/official-api/extraction-request.js";
 import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 import { classifyOfficialApiRequestResult } from "../../../garden/ingestion/official-api/request-result.js";
 import { groundOfficialApiDraft } from "../../../garden/ingestion/official-api/source-grounding.js";
+import { auditOfficialApiSignalFormation } from "../../../garden/ingestion/official-api/formation-audit.js";
+import { officialApiExtractionResponseSchema } from "../../../garden/ingestion/official-api/response-schema.js";
 import {
   OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,
   OFFICIAL_API_SIGNAL_CONTRACT_VERSION,
@@ -17,16 +20,21 @@ import {
 } from "../../../garden/ingestion/compute-provider.js";
 
 describe("official API system prompt", () => {
+  const examples = [...OFFICIAL_API_SYSTEM_PROMPT.matchAll(/<example>(.*?)<\/example>/gu)]
+    .map((match) => JSON.parse(match[1]!) as { input: unknown; output: unknown });
+
   it("embeds complete fictional examples accepted by the shared request parser and source grounding", () => {
-    const examples = [...OFFICIAL_API_SYSTEM_PROMPT.matchAll(/<example>(.*?)<\/example>/gu)]
-      .map((match) => JSON.parse(match[1]!) as { input: unknown; output: unknown });
-    expect(examples).toHaveLength(2);
+    expect(examples).toHaveLength(3);
     const sources = ["In 2020, I opened a workshop and promised to lend tools.",
-      "I can borrow tools in the workshop only on Saturdays."];
+      "I can borrow tools in the workshop only on Saturdays.",
+      "The exhibit opened in 2019 with the aim of helping visitors learn ceramics."];
     examples.forEach((example, index) => {
       const source = sources[index]!;
       const request = parseOfficialApiExtractionRequest(example.input);
       expect(request).toEqual(buildOfficialApiExtractionRequests(source, [])[0]);
+      const schema = officialApiExtractionResponseSchema(JSON.stringify(request));
+      expect(z.fromJSONSchema(schema as Parameters<typeof z.fromJSONSchema>[0])
+        .safeParse(example.output).success).toBe(true);
       const corpus = buildOfficialApiSourceCorpus(source, []);
       const classified = classifyOfficialApiRequestResult(JSON.stringify(example.output), request, corpus);
       expect(classified.status).toBe("completed_signals");
@@ -46,7 +54,7 @@ describe("official API system prompt", () => {
         expect(grounded.draft.temporal_projection).toMatchObject({ time_source: "explicit", time_precision: "year",
           event_time_start: "2020-01-01T00:00:00.000Z", event_time_end: "2020-12-31T23:59:59.999Z" });
         expect(graph!.propositions.map((proposition) => proposition.arguments.at(-1)?.reference_id)).toEqual(["year", "year"]);
-      } else {
+      } else if (index === 1) {
         expect(graph!.factors.map((factor) => factor.surface).sort()).toEqual([
           "I", "can", "borrow", "tools", "in the workshop", "only on Saturdays"
         ].sort());
@@ -55,6 +63,64 @@ describe("official API system prompt", () => {
         expect(grounded.draft.temporal_projection).toBeUndefined();
       }
     });
+  });
+
+  it("retains an accompanying aim without inventing an intention actor or accomplished learning", () => {
+    const source = "The exhibit opened in 2019 with the aim of helping visitors learn ceramics.";
+    const example = examples[2]!;
+    const request = parseOfficialApiExtractionRequest(example.input);
+    const classified = classifyOfficialApiRequestResult(JSON.stringify(example.output), request,
+      buildOfficialApiSourceCorpus(source, []));
+    const draft = classified.drafts[0]!;
+    expect(draft.object_kind).toBe("episode");
+    expect(draft.matched_text).toBe(source);
+    expect(draft.source_locator).toEqual({ contract_version: 3, kind: "assertion_catalog", assertion_id: 1 });
+    const graph = groundOpenSemanticFactorGraph(draft.semantic_factor_graph, source)!;
+    expect(graph).not.toBeNull();
+    expect(graph.factors.map(({ surface, semantic_identity }) => [surface, semantic_identity])).toEqual([
+      ["The exhibit", "the exhibit"], ["opened", "open"], ["2019", "2019"],
+      ["with the aim of helping visitors learn ceramics", "with the aim of helping visitors learn ceramics"]
+    ]);
+    expect(graph.factors.map((factor) => factor.source_span)).toEqual([[0, 11], [12, 18], [22, 26], [27, 74]]);
+    expect(graph.variables).toEqual([]);
+    expect(graph.result_variable_ids).toEqual([]);
+    expect(graph.propositions).toHaveLength(1);
+    const opening = graph.propositions[0]!;
+    expect(graph.factors.find((factor) => factor.factor_id === opening.predicate_factor_id)?.surface).toBe("opened");
+    expect(opening.arguments.map((argument) => [argument.position, argument.binding_identity,
+      argument.reference_kind, graph.factors.find((factor) => factor.factor_id === argument.reference_id)?.surface])).toEqual([
+      [0, "theme", "factor", "The exhibit"], [1, "time", "factor", "2019"],
+      [2, "accompanying_aim", "factor", "with the aim of helping visitors learn ceramics"]
+    ]);
+    const year = { projection_schema_version: 1, time_precision: "year", time_source: "explicit",
+      event_time_start: "2019-01-01T00:00:00.000Z", event_time_end: "2019-12-31T23:59:59.999Z" };
+    expect(draft.temporal_projection).toEqual(year);
+    const formed = auditOfficialApiSignalFormation({ raw_json: JSON.stringify(example.output),
+      turn_content: source, turn_messages: [{ message_id: "exhibit-source", role: "user", content: source }],
+      workspace_id: "example-workspace", run_id: "example-run", surface_id: null,
+      created_at: "2024-06-01T10:00:00.000Z", source_observed_at: "2024-05-01T10:00:00.000Z",
+      require_semantic_factor_graph: true, signal_id_for: () => "exhibit-opening" });
+    expect(formed.mode).toBe("strict");
+    expect(formed.entries).toHaveLength(1);
+    expect(formed.entries[0]).toMatchObject({ disposition: "admitted", reason: "formed",
+      temporal_projection_audit: { status: "formed", reason: "event_time_source_verified" } });
+    expect(formed.entries[0]!.signal?.raw_payload.temporal_projection).toEqual(year);
+    const formedGraph = groundOpenSemanticFactorGraph(
+      formed.entries[0]!.signal?.raw_payload.semantic_factor_graph, source);
+    expect(formedGraph).toEqual(graph);
+  });
+
+  it("adds only the accompanying-aim example to the archived primary and repair prompts", () => {
+    const primary = resolveOfficialApiSystemPrompt(
+      "f18b2d40f913326786018e38f23b12a26e87c0867e7bdbedd6f329a6e31a7d20");
+    const repair = resolveOfficialApiSystemPrompt(
+      "eb2c3e15aee70b3ec7441a8e5d8173a478826fa9c8b2998a7e36cb55b33e0619");
+    const added = ` <example>${JSON.stringify(examples[2])}</example>`;
+    expect(OFFICIAL_API_SYSTEM_PROMPT.split(added)).toHaveLength(2);
+    expect(OFFICIAL_API_SYSTEM_PROMPT.replace(added, "")).toBe(primary);
+    expect(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT.replace(added, "")).toBe(repair);
+    expect(sha256(primary!)).toBe("f18b2d40f913326786018e38f23b12a26e87c0867e7bdbedd6f329a6e31a7d20");
+    expect(sha256(repair!)).toBe("eb2c3e15aee70b3ec7441a8e5d8173a478826fa9c8b2998a7e36cb55b33e0619");
   });
 
   it("requires quote-first evidence before distillation", () => {
@@ -196,7 +262,7 @@ describe("official API system prompt", () => {
     const g8Sha256 =
       "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
     const currentSha256Expected =
-      "f18b2d40f913326786018e38f23b12a26e87c0867e7bdbedd6f329a6e31a7d20";
+      "6b262e173dfc580d8751046e2d48cd773c91a26f203394dcff05906d6abed5dc";
     const previousCatalogPrompt = resolveOfficialApiSystemPrompt(
       "1775799d80bebde5797ded3a5fdddf209c96839489cde4a947518822110a76fd"
     );

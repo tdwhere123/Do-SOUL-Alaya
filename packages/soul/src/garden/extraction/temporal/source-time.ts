@@ -84,30 +84,46 @@ function sourceTemporalInventory(source: string, anchor: string | undefined): {
   const arguments_ = sourceTemporalArguments(source);
   const matches: TemporalMatch[] = [];
   const unresolved: TemporalSpan[] = [];
-  for (const match of source.matchAll(timeConcernPattern())) {
+  const discovered = [...source.matchAll(timeConcernPattern())].map((match) => {
     const span = temporalLexicalExtent(source, match.index, match.index + match[0].length);
     const projection = resolveTemporalProjection(match[0], anchor ?? null);
+    // Year discovery includes its preposition; role/range binding needs the
+    // actual date span, just as month/day discovery does.
+    const yearOffset = projection?.time_precision === "year" && projection.time_source === "explicit"
+      ? match[0].search(/[1-9]\d{3}/u) : 0;
+    return { span, lexeme: { start: match.index, end: match.index + match[0].length },
+      candidate: projection === null ? undefined : {
+        start: match.index + Math.max(0, yearOffset), end: match.index + match[0].length, projection } };
+  });
+  // Compact closed ranges are whole calendar units. Let the existing range
+  // owner establish their two endpoints before treating the dash as attachment.
+  const range = sourceRangeMatch(source, discovered.flatMap((row) => row.candidate ?? []));
+  const completeRange = range !== undefined && discovered.every(({ span, lexeme, candidate }) =>
+    candidate !== undefined && ((span.start === lexeme.start && span.end === lexeme.end) ||
+      (span.start === range.start && span.end === range.end)));
+  for (const { span, lexeme, candidate } of discovered) {
     // Preserve rejected branches before interpreting their dependencies. A
     // matched calendar prefix is not evidence for the complete attached token.
-    if (projection === null || (projection.time_source === "explicit" &&
-        (span.start !== match.index || span.end !== match.index + match[0].length))) {
+    const complete = span.start === lexeme.start && span.end === lexeme.end;
+    // Endpoint eligibility is atomic: a range used as evidence cannot then lose
+    // one rejected endpoint and publish its survivor as a standalone date.
+    if (candidate === undefined || (range !== undefined ? !completeRange : !complete)) {
       unresolved.push(span);
       continue;
     }
-    // Year discovery includes its preposition; role/range binding needs the
-    // actual date span, just as month/day discovery does.
-    const yearOffset = projection.time_precision === "year" && projection.time_source === "explicit"
-      ? match[0].search(/[1-9]\d{3}/u) : 0;
-    matches.push({ start: match.index + Math.max(0, yearOffset), end: match.index + match[0].length, projection });
+    matches.push(candidate);
   }
   return { arguments_, matches, unresolved };
 }
 
 function temporalLexicalExtent(source: string, start: number, end: number): TemporalSpan {
-  // ASCII date punctuation and identifier characters can extend a discovered
-  // prefix. Preserve that lexical unit; whitespace/clause punctuation ends it.
-  while (start > 0 && /[a-z\d_/-]/iu.test(source[start - 1]!)) start -= 1;
-  while (end < source.length && /[a-z\d_/-]/iu.test(source[end]!)) end += 1;
+  // An attached identifier, compound or possessive belongs to a larger unit,
+  // not a standalone calendar adjunct. Outer quotation alone is not attachment.
+  while (start > 0 && /[a-z\d_/\-‐‑–—]/iu.test(source[start - 1]!)) start -= 1;
+  while (end < source.length && /[a-z\d_/\-‐‑–—]/iu.test(source[end]!)) end += 1;
+  const modifier = /^(?:['’]s|的)/iu.exec(source.slice(end));
+  if (modifier !== null) end += modifier[0].length;
+  while (end < source.length && /[a-z\d_/\-‐‑–—]/iu.test(source[end]!)) end += 1;
   return { start, end };
 }
 

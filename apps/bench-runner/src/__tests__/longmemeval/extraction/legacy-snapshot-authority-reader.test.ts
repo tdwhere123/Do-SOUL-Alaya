@@ -61,6 +61,7 @@ async function fixture(options: Readonly<{
   omitResponseMetadata?: boolean;
   omitTransport?: boolean;
   omitCompletionWitness?: boolean;
+  witnessedEmpty?: boolean;
   rawJson?: string;
 }> = {}) {
   const cacheRoot = await mkdtemp(join(tmpdir(), "legacy-authority-cache-"));
@@ -96,6 +97,8 @@ async function fixture(options: Readonly<{
     cache_key: cacheKey,
     raw_json: rawJson,
     extracted_at: "2026-08-23T10:07:08.564Z",
+    ...(options.witnessedEmpty ? { empty_classification: "completed_empty" as const,
+      request_completion: { version: 1 as const, status: "completed_empty" as const } } : {}),
     ...(options.omitTransport === true ? {} : {
       transport_provenance: {
         provider_url_sha256: `sha256:${options.transportProviderUrlSha256 ?? createHash("sha256")
@@ -259,10 +262,18 @@ describe("legacy conversion snapshot authority reader", () => {
     expect(() => readFromAuthority(stillComplete)).toThrow(/completion metadata changed after snapshot seal/iu);
   });
 
-  it("keeps empty signals without exhaustive proof unresolved", async () => {
+  it("refuses legacy empty signals before conversion without current request completion", async () => {
     const empty = await fixture({ rawJson: "{\"signals\":[]}" });
+    expect(() => readFromAuthority(empty)).toThrow(/unclassified_empty/iu);
+  });
+
+  it("keeps witnessed request abstention without assertion-level proof unresolved", async () => {
+    const empty = await fixture({ rawJson: "{\"signals\":[]}", witnessedEmpty: true });
+    const handle = readFromAuthority(empty);
+    expect(parseCapturedLegacyExtractionEntry(handle)).toMatchObject({ empty_classification: "completed_empty",
+      request_completion: { version: 1, status: "completed_empty" } });
     const report = convertLegacyExtractionShard({
-      sealedEntry: readFromAuthority(empty),
+      sealedEntry: handle,
       request: empty.request,
       sourceUnits: [empty.unit],
       semanticContract: empty.unit.semanticIdentity.contractId,
