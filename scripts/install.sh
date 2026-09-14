@@ -40,9 +40,8 @@
 # does not pull @huggingface/transformers. After install:
 #   pnpm add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core --no-frozen-lockfile
 #   node scripts/fetch-local-embedding-model.mjs
-# Inspector SPA is compiled only when ALAYA_BUILD_INSPECTOR_WEB=1 during
-# `pnpm build`, or when a release tarball already vendors web/dist/index.html.
-# ALAYA_BUILD_INSPECTOR_WEB=0 skips the SPA toolchain even when dist exists.
+# Inspector SPA is compiled by `pnpm build` unless ALAYA_BUILD_INSPECTOR_WEB=0
+# and apps/inspector/web/dist/index.html already exists.
 set -euo pipefail
 
 REPO="${ALAYA_REPO:-tdwhere123/Do-SOUL-Alaya}"
