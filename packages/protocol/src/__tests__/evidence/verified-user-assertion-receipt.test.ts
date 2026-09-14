@@ -52,6 +52,17 @@ function receiptV2(input: VerifiedUserAssertionReceiptV2Input = V2_INPUT): strin
 }
 
 describe("verified user assertion receipt compatibility", () => {
+  it("retains historical catalog bytes while binding new receipts to the current catalog version", () => {
+    const current: VerifiedUserAssertionReceiptV2Input = { ...V2_INPUT,
+      source_locator: { ...V2_INPUT.source_locator, contract_version: 3 } };
+    expect(parseVerifiedUserAssertionCatalogLocator(V2_INPUT.source_locator)).toEqual(V2_INPUT.source_locator);
+    expect(parseVerifiedUserAssertionCatalogLocator(current.source_locator)).toEqual(current.source_locator);
+    expect(receiptV2(current)).not.toBe(receiptV2(V2_INPUT));
+    expect(verifyVerifiedUserAssertionSourceHash(receiptV2(V2_INPUT), V2_INPUT, sha256)).toBe(true);
+    expect(verifyVerifiedUserAssertionSourceHash(receiptV2(current), current, sha256)).toBe(true);
+    expect(verifyVerifiedUserAssertionSourceHash(receiptV2(V2_INPUT), current, sha256)).toBe(false);
+  });
+
   it("preserves the v1 prefix, preimage, formatter, and digest reader", () => {
     const digest = "a".repeat(64);
 

@@ -151,7 +151,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
 
     expect(JSON.parse(vi.mocked(extractor.extract).mock.calls[0]![0].userPrompt)).toEqual({
       schema_version: 2,
-      source_locator_contract_version: 2,
+      source_locator_contract_version: 3,
       batch_contract_version: 1,
       source_corpus_identity: expect.stringMatching(/^[a-f0-9]{64}$/u),
       batch_index: 0,
@@ -260,7 +260,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
         confidence: 0.8,
         matched_text: "The build is green.",
         source_locator: {
-          contract_version: 2,
+          contract_version: 3,
           kind: "assertion_catalog",
           assertion_id: 1
         }
@@ -296,7 +296,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
           confidence: 0.8,
           matched_text: "The build is green.",
           source_locator: {
-            contract_version: 2,
+            contract_version: 3,
             kind: "assertion_catalog",
             assertion_id: 1
           },

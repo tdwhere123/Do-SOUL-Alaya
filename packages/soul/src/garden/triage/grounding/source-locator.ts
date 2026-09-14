@@ -10,6 +10,7 @@ import {
   type SourceAssertionResolution
 } from "./source-assertion.js";
 import { parseDirectPreferenceRelation } from "./preference-relation.js";
+import { sourceAssertionPreservesDependentScope } from "./source-assertion/scope.js";
 import {
   collectSourceRoleMarkers,
   sourceRoleMarkerPrefixLength,
@@ -116,6 +117,7 @@ export function resolveOfficialApiSourceLocator(
   locator: OfficialApiSourceLocator,
   maxChars = SOURCE_ASSERTION_MAX_CHARS
 ): SourceAssertionResolution {
+  if (parseOfficialApiSourceLocator(locator) === null) return rejectedLocator();
   return resolveAssertionCatalogLocator(sourceText, locator.assertion_id, maxChars);
 }
 
@@ -197,7 +199,8 @@ function resolveCatalogVerbatimQuote(
   if (resolution.status === "grounded" || resolution.reason !== "source_assertion_not_self_contained") {
     return resolution;
   }
-  if (!isRecoverableVerbatimUserQuote(quote, maxChars)) return resolution;
+  if (!sourceAssertionPreservesDependentScope(sourceText, offset, offset + quote.length) ||
+      !isRecoverableVerbatimUserQuote(quote, maxChars)) return resolution;
   return { status: "grounded", assertion: stripSourceRoleMarker(quote) };
 }
 

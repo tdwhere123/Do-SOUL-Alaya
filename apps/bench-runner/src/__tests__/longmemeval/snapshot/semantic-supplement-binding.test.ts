@@ -89,7 +89,7 @@ describe("snapshot semantic supplement binding", () => {
 function request() {
   return parseOfficialApiExtractionRequest({
     schema_version: 2,
-    source_locator_contract_version: 2,
+    source_locator_contract_version: 3,
     batch_contract_version: 1,
     source_corpus_identity: CORPUS_SHA,
     batch_index: 0,

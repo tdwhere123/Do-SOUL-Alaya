@@ -184,7 +184,7 @@ function rawResult(text: string, assertionId: number) {
       confidence: 0.9,
       matched_text: text.replace(/^(?:User|Assistant): /u, ""),
       source_locator: {
-        contract_version: 2,
+        contract_version: 3,
         kind: "assertion_catalog",
         assertion_id: assertionId
       }
@@ -320,7 +320,7 @@ describe("offline semantic replay execution identity", () => {
         confidence: 0.9,
         matched_text: task.text.replace(/^(?:User|Assistant): /u, ""),
         source_locator: {
-          contract_version: 2,
+          contract_version: 3,
           kind: "assertion_catalog",
           assertion_id: task.assertionId
         }

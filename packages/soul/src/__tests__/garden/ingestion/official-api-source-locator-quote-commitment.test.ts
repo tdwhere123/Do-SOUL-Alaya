@@ -7,7 +7,7 @@ import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 const SOURCE = "I moved to Berlin last year. I moved to Berlin today.";
 const MESSAGES = [{ message_id: "u1", role: "user" as const, content: SOURCE }];
 const LOCATOR = {
-  contract_version: 2 as const,
+  contract_version: 3 as const,
   kind: "assertion_catalog" as const,
   assertion_id: 1
 };

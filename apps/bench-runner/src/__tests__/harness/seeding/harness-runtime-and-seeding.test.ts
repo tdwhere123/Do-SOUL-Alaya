@@ -284,7 +284,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "spend three days in Kyoto",
                   distilled_fact: "The user plans three days in Kyoto.",
                   source_locator: {
-                    contract_version: 2,
+                    contract_version: 3,
                     kind: "assertion_catalog",
                     assertion_id: 2
                   }
@@ -296,7 +296,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "I prefer low-impact morning workouts",
                   distilled_fact: "The user prefers low-impact morning workouts.",
                   source_locator: {
-                    contract_version: 2,
+                    contract_version: 3,
                     kind: "assertion_catalog",
                     assertion_id: 3
                   }
@@ -395,7 +395,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "spend three days in Kyoto",
                   distilled_fact: "The user plans three days in Kyoto.",
                   source_locator: {
-                    contract_version: 2,
+                    contract_version: 3,
                     kind: "assertion_catalog",
                     assertion_id: 2
                   }
@@ -407,7 +407,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "I prefer low-impact morning workouts",
                   distilled_fact: "The user prefers low-impact morning workouts.",
                   source_locator: {
-                    contract_version: 2,
+                    contract_version: 3,
                     kind: "assertion_catalog",
                     assertion_id: 3
                   }

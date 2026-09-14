@@ -66,7 +66,7 @@ describe("official API assertion catalog locator", () => {
     const [signal] = await provider.compile(source, contextForUser(source));
 
     expect(signal?.raw_payload.source_locator).toMatchObject({
-      contract_version: 2,
+      contract_version: 3,
       kind: "assertion_catalog"
     });
     expect(signal?.raw_payload.distilled_fact).toBe(
@@ -385,7 +385,7 @@ function signalJson(): Record<string, unknown> {
 
 function assertionLocator(assertionId: number) {
   return {
-    contract_version: 2 as const,
+    contract_version: 3 as const,
     kind: "assertion_catalog" as const,
     assertion_id: assertionId
   };

@@ -151,7 +151,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
             matched_text: "I moved to Berlin.",
             distilled_fact: "I moved to Berlin.",
             source_locator: {
-              contract_version: 2,
+              contract_version: 3,
               kind: "assertion_catalog",
               assertion_id: 1
             }
@@ -182,7 +182,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(seeded[0]?.distilledFact).toBe("I moved to Berlin.");
     expect(seeded[0]?.productionRawPayload).toMatchObject({
       source_locator: {
-        contract_version: 2,
+        contract_version: 3,
         kind: "assertion_catalog",
         assertion_id: 1
       },

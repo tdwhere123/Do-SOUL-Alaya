@@ -48,7 +48,7 @@ describe("formation eligibility live producer to consumer path", () => {
       extractor: { extract: async () => ({ rawJson: JSON.stringify({ signals: [{
         signal_kind: "potential_claim", object_kind: "review_scope", confidence: 0.9,
         matched_text: ASSERTION, evidence_refs: [], source_memory_refs: [],
-        source_locator: { contract_version: 2, kind: "assertion_catalog", assertion_id: 1 },
+        source_locator: { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 },
         semantic_factor_graph: binaryUseEvidenceSemanticGraph()
       }] }) }) },
       generateSignalId: () => "signal-provider-formed"

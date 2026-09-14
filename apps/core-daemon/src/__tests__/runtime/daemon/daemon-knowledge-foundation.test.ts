@@ -144,7 +144,7 @@ function openSignal(assertion: string, assertionId: number) {
     confidence: 0.9,
     matched_text: assertion,
     source_locator: {
-      contract_version: 2,
+      contract_version: 3,
       kind: "assertion_catalog",
       assertion_id: assertionId
     },

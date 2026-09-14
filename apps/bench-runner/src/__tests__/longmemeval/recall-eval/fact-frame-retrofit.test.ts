@@ -217,7 +217,7 @@ function bindVerifiedAssertionOwner(
       source_corpus: row.gist
   };
   const sourceLocator = {
-    contract_version: 2 as const,
+    contract_version: 3 as const,
     kind: "assertion_catalog" as const,
     assertion_id: 1
   };

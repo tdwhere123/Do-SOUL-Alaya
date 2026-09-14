@@ -8,6 +8,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_OBJECT_KINDS } from "./object-kind-contract.js";
 import { OFFICIAL_API_GROUNDED_EXAMPLES } from "./source-examples.js";
+import { OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION } from "../../triage/grounding/source-locator.js";
 
 export const OFFICIAL_API_SIGNAL_CONTRACT_VERSION = 1;
 
@@ -38,7 +39,7 @@ const DURABLE_PROJECTION_PROMPT_PARTS = Object.freeze([
 
 const GROUNDED_SIGNAL_PROMPT_PARTS = Object.freeze([
   'Do not include "signal_kind"; the runtime derives it deterministically from the bounded object_kind.',
-  'Use "source_locator":{"contract_version":2,"kind":"assertion_catalog","assertion_id":N} for every signal.',
+  `Use "source_locator":{"contract_version":${OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION},"kind":"assertion_catalog","assertion_id":N} for every signal.`,
   "Return only assertion_id from the provided source_assertions catalog for evidence selection; never invent or rewrite a catalog assertion.",
   "The server-derived source_assertions catalog contains only User assertions the runtime can ground without unresolved references; no other conversation content is available or authoritative.",
   "For each signal, work quote-first, then distill.",

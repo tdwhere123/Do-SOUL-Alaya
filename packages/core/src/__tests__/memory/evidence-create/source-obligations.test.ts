@@ -67,6 +67,45 @@ it.each(["With the badge", "Without the badge", "Before the surgery", "After the
       capture: historicalCapture(enterFrame) })).toThrow();
   });
 
+it.each([
+  "only if I have a badge", "if I have a badge", "unless I lose my badge",
+  "unless authorized", "provided that I have a badge", "as long as I have a badge",
+  "and use the equipment only if I have a badge", ", but only if I have a badge",
+  "and the user leaves only if I have a badge", "only on Sundays"
+])("refuses trailing dependent scope through automatic, explicit and historical frames: %s", (tail) => {
+  const source = `I can enter the lab ${tail}.`;
+  expect(normalizer.propose(source)).toBeUndefined();
+  const opaque: AssociativeFactFrame = { ...enterFrame, slots: [...enterFrame.slots.slice(0, -1),
+    { role: "value", text: `the lab ${tail}` }] };
+  const qualified: AssociativeFactFrame = { ...enterFrame, slots: [...enterFrame.slots,
+    { role: "qualifier", text: tail }] };
+  for (const frame of [enterFrame, opaque, qualified]) {
+    expect(materialize(source, frame)).toMatchObject({ capture: { status: "rejected" }, searchProjections: [] });
+    const capture = historicalCapture(frame, "rule_based_evidence_fact_frame_normalizer_v3");
+    expect(() => replayEvidenceFactFrameFormationCapture({ sourceAssertion: source, sourceHash, capture })).toThrow();
+    const semanticFormation = materializeOpenSemanticFactorFormation({ source_kind: "evidence", source_text: source,
+      proposal: { schema_version: 1, producer_operator_id: "garden_source_bound_open_semantic_factor_v3",
+        source_text: source, graph: { schema_version: 2, source_kind: "evidence", variables: [], result_variable_ids: [],
+          factors: [{ factor_id: "enter", surface: "enter", semantic_identity: "enter" },
+            { factor_id: "lab", surface: "the lab", semantic_identity: "the lab" }],
+          propositions: [{ proposition_id: "p", predicate_factor_id: "enter", arguments: [
+            { position: 0, binding_identity: "object", reference_kind: "factor", reference_id: "lab" }
+          ] }] } } });
+    expect(semanticFormation.status).toBe("formed");
+    expect(certifyEvidenceSemanticCompleteness({ sourceText: source, factFrame: capture, semanticFormation }))
+      .toMatchObject({ receipt: { status: "rejected", reason_code: "invalid_fact_frame_obligation" },
+        semanticFormation: { status: "rejected", graph: null } });
+  }
+});
+
+it.each(['"Only If"', "'Only If'", "“Only If”", "‘Only If’"])(
+  "preserves a quoted value containing scope vocabulary: %s", (title) => {
+    const source = `I read ${title} and coffee recipes.`;
+    const proposal = normalizer.propose(source)!;
+    expect(proposal).toBeDefined();
+    expect(materialize(source, proposal.fact_frame).capture.status).toBe("formed");
+  });
+
 it.each(["do not", "don't", "don’t", "never", "currently", "usually"])(
   "rejects an explicit or historical frame omitting the recognized predicate qualifier %s", (qualifier) => {
     const source = `I ${qualifier} like tea.`;

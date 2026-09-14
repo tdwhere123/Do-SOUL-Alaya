@@ -158,7 +158,7 @@ describe("compile-seed raw payload projection", () => {
               confidence: 0.9,
               matched_text: source,
               source_locator: {
-                contract_version: 2,
+                contract_version: 3,
                 kind: "assertion_catalog",
                 assertion_id: 1
               },
@@ -229,7 +229,7 @@ describe("compile-seed raw payload projection", () => {
       }
     });
     expect(signal?.raw_payload.source_locator).toEqual({
-      contract_version: 2,
+      contract_version: 3,
       kind: "assertion_catalog",
       assertion_id: 1
     });

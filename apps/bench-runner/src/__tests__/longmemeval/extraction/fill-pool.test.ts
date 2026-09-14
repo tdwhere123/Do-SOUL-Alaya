@@ -55,7 +55,7 @@ it("uses the compact production extraction request", async () => {
     readonly source_assertions?: readonly { readonly text: string }[];
   };
   expect(request.schema_version).toBe(2);
-  expect(request.source_locator_contract_version).toBe(2);
+  expect(request.source_locator_contract_version).toBe(3);
   expect(request.source_assertions).toEqual([
     { assertion_id: 1, text: "User: I moved to Berlin." }
   ]);

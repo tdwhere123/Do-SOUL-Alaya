@@ -193,7 +193,7 @@ function createGroundedGardenSignal(
       verified_user_assertion_source_hash:
         expectedSourceHash(assertion, sourceCorpus, assertionId),
       source_locator: {
-        contract_version: 2,
+        contract_version: 3,
         kind: "assertion_catalog",
         assertion_id: assertionId
       },
@@ -219,7 +219,7 @@ function expectedSourceHash(
     .update(buildVerifiedUserAssertionReceiptV2Preimage({
       signal_id: "signal-1",
       source_locator: {
-        contract_version: 2,
+        contract_version: 3,
         kind: "assertion_catalog",
         assertion_id: assertionId
       },

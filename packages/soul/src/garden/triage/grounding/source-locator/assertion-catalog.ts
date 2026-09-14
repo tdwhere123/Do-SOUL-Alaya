@@ -1,3 +1,4 @@
+import { VERIFIED_USER_ASSERTION_CATALOG_CONTRACT_VERSION } from "@do-soul/alaya-protocol";
 import {
   PREFERENCE_SOURCE_ASSERTION_MAX_CHARS,
   resolveAtomicSourceAssertion,
@@ -12,6 +13,7 @@ import {
   type AssertionSpan
 } from "../source-assertion/clause-spans.js";
 import { atomicAssertionSpans } from "../source-assertion/atomic-spans.js";
+import { boundedIndirectQuestionPrefix } from "../source-assertion/scope.js";
 import {
   collectSourceRoleMarkers,
   stripSourceRoleMarker,
@@ -19,7 +21,7 @@ import {
   type SourceRoleMarker
 } from "../source-role/marker.js";
 
-export const OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION = 2;
+export const OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION = VERIFIED_USER_ASSERTION_CATALOG_CONTRACT_VERSION;
 export const MAX_SOURCE_ASSERTIONS = 64;
 
 export interface OfficialApiSourceAssertion {
@@ -38,17 +40,6 @@ export function isDirectQuestionSourceText(text: string): boolean {
   const content = stripSourceRoleMarker(text);
   if (!/[?？]$/u.test(content)) return false;
   return boundedIndirectQuestionPrefix(content) === null;
-}
-
-function boundedIndirectQuestionPrefix(content: string): string | null {
-  const kinship = "sister|brother|mother|father|aunt|uncle|cousin|niece|nephew|daughter|son|wife|husband|partner|friend";
-  const person = "\\p{Lu}[\\p{L}'’-]*";
-  const place = "(?:the\\s+)?\\p{Lu}[\\p{L}\\p{N}'’.-]*(?:\\s+\\p{Lu}[\\p{L}\\p{N}'’.-]*){0,3}";
-  const pattern = new RegExp(
-    `^((?:I['’]m|I am)\\s+thinking\\s+of\\s+visiting\\s+(?:my|our)\\s+(?:${kinship})\\s+${person}\\s+in\\s+${place}(?:\\s+soon)?),\\s+and\\s+I\\s+was\\s+wondering\\s+(?:if|whether)\\b[^?,;:—–]*\\?$`,
-    "u"
-  );
-  return pattern.exec(content)?.[1]?.trim() ?? null;
 }
 
 export function indexSourceAssertions(sourceText: string): readonly IndexedSourceAssertion[] {

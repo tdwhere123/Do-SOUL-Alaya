@@ -131,7 +131,7 @@ describe("evidence fact-frame formation", () => {
     expect(normalized.capture).toMatchObject({ status: "unavailable", producer_operator_id: null });
     expect(injected.capture).toMatchObject({
       status: "formed",
-      producer_operator_id: "rule_based_evidence_fact_frame_normalizer_v3"
+      producer_operator_id: "rule_based_evidence_fact_frame_normalizer_v4"
     });
     expect(upstream.capture.producer_operator_id)
       .toBe("structured_formation_parser_v1");

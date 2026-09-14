@@ -355,7 +355,7 @@ async function persistLazyProvenanceReceipt(receiptRoot: string, cacheRoot: stri
           confidence: 0.9,
           matched_text: boundTask.text.replace(/^(?:User|Assistant): /u, ""),
           source_locator: {
-            contract_version: 2,
+            contract_version: 3,
             kind: "assertion_catalog",
             assertion_id: boundTask.assertionId
           }

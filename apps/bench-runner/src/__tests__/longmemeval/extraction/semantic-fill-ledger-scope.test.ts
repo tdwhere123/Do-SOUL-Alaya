@@ -56,7 +56,7 @@ function rawForText(text: string, assertionId = 1): string {
     object_kind: "fact",
     confidence: 0.9,
     matched_text: text,
-    source_locator: { contract_version: 2, kind: "assertion_catalog", assertion_id: assertionId }
+    source_locator: { contract_version: 3, kind: "assertion_catalog", assertion_id: assertionId }
   }] });
 }
 
@@ -66,7 +66,7 @@ function signalFor(task: ReturnType<typeof semanticTask>) {
     confidence: 0.9,
     matched_text: task.text.replace(/^(?:User|Assistant): /u, ""),
     source_locator: {
-      contract_version: 2,
+      contract_version: 3,
       kind: "assertion_catalog",
       assertion_id: task.assertionId
     }

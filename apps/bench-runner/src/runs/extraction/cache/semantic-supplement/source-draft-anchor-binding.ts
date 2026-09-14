@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   computeOfficialApiSourceCorpusIdentity,
+  OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
   parseOfficialApiSignals,
   resolveOfficialApiSourceLocatorQuote,
   type OfficialApiExtractionRequest,
@@ -159,7 +160,7 @@ function encodeBinding(
   }
   const resolution = resolveOfficialApiSourceLocatorQuote(
     sourceCorpus,
-    { contract_version: 2, kind: "assertion_catalog", assertion_id: currentAssertionId },
+    { contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION, kind: "assertion_catalog", assertion_id: currentAssertionId },
     draft.matched_text
   );
   if (resolution.status === "rejected") {
@@ -190,7 +191,7 @@ function assertAnchorBinding(
   }
   const resolution = resolveOfficialApiSourceLocatorQuote(
     sourceCorpus,
-    { contract_version: 2, kind: "assertion_catalog",
+    { contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION, kind: "assertion_catalog",
       assertion_id: binding.current_anchor_assertion_id },
     draft.matched_text
   );
@@ -231,7 +232,7 @@ function reanchorDraft(
   return Object.freeze({
     ...draft,
     source_locator: Object.freeze({
-      contract_version: 2 as const,
+      contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
       kind: "assertion_catalog" as const,
       assertion_id: assertionId
     })

@@ -200,7 +200,7 @@ function signal(assertionId: number, matchedText: string) {
     matched_text: matchedText,
     distilled_fact: matchedText,
     source_locator: {
-      contract_version: 2,
+      contract_version: 3,
       kind: "assertion_catalog",
       assertion_id: assertionId
     },

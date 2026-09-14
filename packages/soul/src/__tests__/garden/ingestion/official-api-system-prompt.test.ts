@@ -89,7 +89,7 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Do not invent facts");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"source_locator"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      'Use "source_locator":{"contract_version":2,"kind":"assertion_catalog","assertion_id":N} for every signal.'
+      'Use "source_locator":{"contract_version":3,"kind":"assertion_catalog","assertion_id":N} for every signal.'
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('Prefer "source_locator"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
@@ -196,7 +196,10 @@ describe("official API system prompt", () => {
     const g8Sha256 =
       "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
     const currentSha256Expected =
-      "1775799d80bebde5797ded3a5fdddf209c96839489cde4a947518822110a76fd";
+      "b283f340eb28a44edf7dd28ade0a113c8a50e4f42a8deaa2c183f7c0692d15e1";
+    const previousCatalogPrompt = resolveOfficialApiSystemPrompt(
+      "1775799d80bebde5797ded3a5fdddf209c96839489cde4a947518822110a76fd"
+    );
     const previousSha256 =
       "bf255feebdf99106871e33241f7bba3260e3f02874f0eefe36db803cc95d7705";
     const previous = resolveOfficialApiSystemPrompt(previousSha256);
@@ -207,6 +210,8 @@ describe("official API system prompt", () => {
     const g8 = resolveOfficialApiSystemPrompt(g8Sha256);
 
     expect(currentSha256).toBe(currentSha256Expected);
+    expect(previousCatalogPrompt).toBeDefined();
+    expect(sha256(previousCatalogPrompt!)).toBe("1775799d80bebde5797ded3a5fdddf209c96839489cde4a947518822110a76fd");
     expect(resolveOfficialApiSystemPrompt(currentSha256)).toBe(OFFICIAL_API_SYSTEM_PROMPT);
     expect(previous).toBeDefined();
     expect(sha256(previous!)).toBe(previousSha256);

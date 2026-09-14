@@ -2,6 +2,7 @@ import { trimmedSpan, type AssertionSpan } from "./clause-spans.js";
 import { isLocallyClosedAtomicAssertion } from "./reference-closure.js";
 import { hasAssertionPreservingRelativeClauseSuffix } from "./relative-clause.js";
 import { sourceRoleMarkerPrefixLength } from "../source-role/marker.js";
+import { sourceAssertionPreservesDependentScope } from "./scope.js";
 
 const DISCOURSE_PREFIX = /^(?:(?:also)\s*,?\s*)?(?:by the way|anyway|actually|well|speaking of)\s*[,：:—–-]?\s*/iu;
 const RELATIVE_CLAUSE = /,\s*(?:which|who)\b/iu;
@@ -79,7 +80,8 @@ function appendAtomicAssertion(
   end: number
 ): void {
   const span = trimmedSpan(sourceText, start, end);
-  if (span.start === span.end || !isLocallyClosedAtomicAssertion(sourceText.slice(span.start, span.end))) {
+  if (span.start === span.end || !sourceAssertionPreservesDependentScope(sourceText, span.start, span.end) ||
+      !isLocallyClosedAtomicAssertion(sourceText.slice(span.start, span.end))) {
     return;
   }
   output.push(span);

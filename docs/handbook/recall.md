@@ -105,6 +105,20 @@ the same legal membership. Source records and retained capsule text have
 bounded discovery and UTF-8 payload readers through the ordinary worker route.
 Record-only roots remain deliverable after optional memory formation fails.
 
+Optional fact-frame formation rejects unquoted trailing dependent scope such as
+`if`, `unless`, and `only`; an opaque value containing the condition does not
+establish its meaning. Explicit proposals, automatic normalization, historical
+frame replay and Core certification share this boundary. Source assertion
+fragments must retain a scope-bearing sentence unless a supported bounded
+grammar demonstrates their independence. Source text still persists when the
+optional frame, OSF certificate or F3 incidence cannot form.
+
+Current extraction uses assertion-catalog locator version 3 and fact-frame
+normalizer version 4. Historical locator version 2 receipts and prompt bytes
+remain readable as historical data; current source qualification and extraction
+do not reinterpret their catalog ids. New requests, prompt identities and
+derived cache commitments bind the current catalog contract.
+
 Mandatory original-source imports use Core `createAuditedSourceAdmission`,
 which composes existing source identity/span validation inside the formation
 store transaction and then appends the receipt-first source audit. A failed
