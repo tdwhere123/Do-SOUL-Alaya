@@ -471,9 +471,11 @@ Local heuristics qualify the complete source before using shared sentence spans
 for excerpts; presentation boundaries cannot recreate a rejected time window.
 Relative terms obey the same complete lexical-unit check as explicit dates.
 Attached ASCII/curly apostrophe `s` suffixes, ASCII identifier characters,
-ASCII hyphen/Unicode hyphen/nonbreaking-hyphen compounds and the Chinese marker
-`的` remain unresolved rather than establishing an event window. En/em dashes
-retain their existing calendar-range meaning. This bounded delimiter check
+ASCII hyphen/Unicode hyphen/nonbreaking-hyphen/en-dash/em-dash compounds and the
+Chinese marker `的` remain unresolved rather than establishing an event window.
+The existing range owner qualifies complete calendar units atomically, including
+mixed relative/absolute endpoints: a rejected endpoint cannot leave one day
+as the range's surviving interpretation. This bounded delimiter check
 does not recognize every possible lexical attachment. It checks
 modifier eligibility, not general rhetoric or part-of-speech semantics. Existing
 standalone calendar adjuncts remain supported; an independent `yesterday` does

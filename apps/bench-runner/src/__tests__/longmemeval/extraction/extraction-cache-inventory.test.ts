@@ -10,10 +10,14 @@ import {
 } from "../../../runs/extraction/cache-audit/inventory.js";
 import { inspectBoundedMaterializationInventory } from
   "../../../runs/extraction/cache-audit/materialization/preflight-inventory.js";
+import type { CachedExtractionEntry } from "../../../runs/compile-seed/cache/cache-shard.js";
+import { TEST_CACHED_PROVIDER_COMPLETION_METADATA } from "./extraction-cache-test-fixture.js";
 
 const roots: string[] = [];
 const model = "gpt-5.4-mini";
 const requestProfile = "provider-default-v1" as const;
+const legacyNonempty = JSON.stringify({ signals: [{ object_kind: "fact", confidence: 0.9,
+  matched_text: "I live in Paris." }] });
 
 afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
@@ -100,7 +104,7 @@ describe("extraction cache inventory", () => {
     const root = cacheRoot();
     const truncated = "d".repeat(64);
     const legacy = "e".repeat(64);
-    writeShard(root, truncated, JSON.stringify({ signals: [] }), {
+    writeShard(root, truncated, legacyNonempty, {
       finish_reason: "length",
       max_output_tokens: 2048
     });
@@ -126,7 +130,7 @@ describe("extraction cache inventory", () => {
   it("materialization rejects provider-backed legacy completion metadata", () => {
     const root = cacheRoot();
     const key = "f".repeat(64);
-    writeShard(root, key, JSON.stringify({ signals: [] }), {
+    writeShard(root, key, legacyNonempty, {
       finish_reason: "stop"
     }, true);
     const audited: ExtractionCacheInventory = {
@@ -150,6 +154,26 @@ describe("extraction cache inventory", () => {
     });
     expect(inspected.descriptors).toEqual([]);
   });
+
+  it.each(["deterministic_empty", "completed_empty", "legacy_nonempty"] as const)(
+    "preserves the exact audited inventory shape for a qualified %s shard", (kind) => {
+      const root = cacheRoot();
+      const key = "a".repeat(64);
+      const provider = kind === "completed_empty";
+      writeShard(root, key, kind === "legacy_nonempty" ? legacyNonempty : '{"signals":[]}',
+        provider ? TEST_CACHED_PROVIDER_COMPLETION_METADATA : undefined, provider,
+        kind === "legacy_nonempty" ? {} : { empty_classification: kind,
+          ...(provider ? { request_completion: { version: 1, status: "completed_empty" } } : {}) });
+      const audited = inspectExtractionCacheInventory({ cacheRoot: root, cacheKeys: [key], model, requestProfile });
+      const bounded = inspectBoundedMaterializationInventory({ sourceRoot: root, audited,
+        model, requestProfile, maxShardBytes: 32_768 });
+      expect(audited.counts.hit).toBe(1);
+      expect(bounded.inventory).toEqual(audited);
+      expect(bounded.descriptors).toHaveLength(1);
+      expect(Object.keys(bounded.inventory.shards[0]!).sort()).toEqual([
+        "cacheKey", "parsedDraftCount", "rawJsonSha256", "rawSignalCount", "status"
+      ]);
+    });
 
   it("rejects a symlinked cache root rather than following it", () => {
     const root = cacheRoot();
@@ -193,9 +217,10 @@ function cacheRoot(): string {
 function writeShard(
   root: string,
   cacheKey: string,
-  rawJson = JSON.stringify({ signals: [] }),
+  rawJson = legacyNonempty,
   responseMetadata?: unknown,
-  providerBacked = false
+  providerBacked = false,
+  completion: Pick<CachedExtractionEntry, "empty_classification" | "request_completion"> = {}
 ): void {
   const path = cacheFilePath(root, cacheKey);
   mkdirSync(join(path, ".."), { recursive: true });
@@ -204,6 +229,7 @@ function writeShard(
     model,
     request_profile: requestProfile,
     raw_json: rawJson,
+    ...completion,
     ...(responseMetadata === undefined ? {} : { response_metadata: responseMetadata }),
     ...(providerBacked ? {
       transport_provenance: {

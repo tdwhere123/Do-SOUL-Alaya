@@ -116,7 +116,9 @@ function inspectShardBytes(
   const identityError = cachedIdentityError(parsed, cacheKey, model, requestProfile);
   if (identityError !== undefined) return invalid(cacheKey, identityError);
   const content = inspectCachedExtractionContent(parsed as unknown as CachedExtractionEntry);
-  return content.status === "hit" ? Object.freeze({ cacheKey, ...content }) :
+  return content.status === "hit" ? Object.freeze({ cacheKey, status: content.status,
+    rawJsonSha256: content.rawJsonSha256, rawSignalCount: content.rawSignalCount,
+    parsedDraftCount: content.parsedDraftCount }) :
     invalid(cacheKey, content.reason ?? "cached extraction is unavailable",
       content.status === "missing" ? undefined : content.rawJsonSha256);
 }

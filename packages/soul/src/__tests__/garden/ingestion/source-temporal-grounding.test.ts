@@ -26,6 +26,8 @@ describe("relative calendar modifier qualification", () => {
     "In today’s world, doing what you love shouldn’t mean worrying about components and buying expensive gear.",
     "I shipped today's build.", "I shipped yesterday’s build.", "I use today-based labels.",
     "I use today‑based labels.", "I use today_label.", "I shipped today’sWorld.", "I shipped today's_build.",
+    "The today–based label is obsolete.", "The today—based label is obsolete.",
+    "We worked yesterday-today’s shifts.", "We worked yesterday-today–based schedules.",
     "我喜欢今天的版本。", "我喜欢上周的版本。"
   ])("does not project an attached date modifier: %s", async (source) => {
     expect(resolveSourceTemporalCandidates(source, anchor)).toEqual([]);
@@ -64,6 +66,20 @@ describe("relative calendar modifier qualification", () => {
         event_time_start: text.startsWith("yesterday") ? "2023-05-28T00:00:00.000Z" : "2023-05-01T00:00:00.000Z",
         event_time_end: text.startsWith("yesterday") ? today.event_time_end : "2023-05-03T23:59:59.999Z" });
     });
+
+  it.each([
+    ["today-2023-05-30", "2023-05-29", "2023-05-30"],
+    ["2023-05-28-today", "2023-05-28", "2023-05-29"],
+    ["today–2023-05-30", "2023-05-29", "2023-05-30"],
+    ["2023-05-28—today", "2023-05-28", "2023-05-29"],
+    ["2023-05-01-2023-05-03", "2023-05-01", "2023-05-03"]
+  ])("qualifies complete calendar endpoints together: %s", (text, start, end) => {
+    const candidates = resolveSourceTemporalCandidates(`We worked ${text}.`, anchor);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ bounded: true, role: "event", projection: {
+      event_time_start: `${start}T00:00:00.000Z`, event_time_end: `${end}T23:59:59.999Z`, time_precision: "range" } });
+    expect(inspectObservedTemporalProjection(`We worked ${text}.`, today, anchor).audit.status).toBe("rejected");
+  });
 });
 
 describe("temporal evidence inventory", () => {
@@ -191,6 +207,7 @@ describe("temporal evidence inventory", () => {
     expect(local).toHaveLength(1);
     expect(local[0]!.raw_payload.temporal_projection).toEqual({ ...year, projection_schema_version: "1" });
   });
+
 });
 
 describe("source calendar windows and temporal roles", () => {

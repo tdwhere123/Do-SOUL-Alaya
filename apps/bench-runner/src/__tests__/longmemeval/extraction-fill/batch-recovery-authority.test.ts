@@ -187,14 +187,15 @@ it("admits a completed empty selection alongside grounded signals without anothe
   provider.results = ["empty", "valid"];
   await run("prepare"); await run("submit");
   const result = await run("resume");
-  expect(result.coverage).toBeLessThan(1);
+  expect(result.coverage).toBe(1);
   expect(Object.values(result.batchState!.jobs[0]!.outcomes).map((outcome) => outcome.status).sort())
-    .toEqual(["admitted", "quarantined"]);
-  expect(result.authorityTelemetry).toMatchObject({ attempts: 2, successfulShards: 1,
+    .toEqual(["admitted", "admitted"]);
+  expect(result.authorityTelemetry).toMatchObject({ attempts: 2, successfulShards: 2,
     pendingKeys: [],
     telemetry: { inputTokens: 20, outputTokens: 40, totalTokens: 60 } });
   expect(provider.downloads).toBe(1);
-  await expect(run("import")).rejects.toThrow(/cannot authorize invalid or orphan shards/u);
+  const reopened = await run("import");
+  expect(reopened.authorityTelemetry).toMatchObject({ attempts: 2, successfulShards: 2 });
   expect(provider.downloads).toBe(1);
 });
 

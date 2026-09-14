@@ -98,13 +98,16 @@ function sourceTemporalInventory(source: string, anchor: string | undefined): {
   // Compact closed ranges are whole calendar units. Let the existing range
   // owner establish their two endpoints before treating the dash as attachment.
   const range = sourceRangeMatch(source, discovered.flatMap((row) => row.candidate ?? []));
+  const completeRange = range !== undefined && discovered.every(({ span, lexeme, candidate }) =>
+    candidate !== undefined && ((span.start === lexeme.start && span.end === lexeme.end) ||
+      (span.start === range.start && span.end === range.end)));
   for (const { span, lexeme, candidate } of discovered) {
     // Preserve rejected branches before interpreting their dependencies. A
     // matched calendar prefix is not evidence for the complete attached token.
     const complete = span.start === lexeme.start && span.end === lexeme.end;
-    const completeRange = candidate?.projection.time_source === "relative_resolved" &&
-      range !== undefined && span.start === range.start && span.end === range.end;
-    if (candidate === undefined || (!complete && !completeRange)) {
+    // Endpoint eligibility is atomic: a range used as evidence cannot then lose
+    // one rejected endpoint and publish its survivor as a standalone date.
+    if (candidate === undefined || (range !== undefined ? !completeRange : !complete)) {
       unresolved.push(span);
       continue;
     }
@@ -116,10 +119,11 @@ function sourceTemporalInventory(source: string, anchor: string | undefined): {
 function temporalLexicalExtent(source: string, start: number, end: number): TemporalSpan {
   // An attached identifier, compound or possessive belongs to a larger unit,
   // not a standalone calendar adjunct. Outer quotation alone is not attachment.
-  while (start > 0 && /[a-z\d_/\-‐‑]/iu.test(source[start - 1]!)) start -= 1;
+  while (start > 0 && /[a-z\d_/\-‐‑–—]/iu.test(source[start - 1]!)) start -= 1;
+  while (end < source.length && /[a-z\d_/\-‐‑–—]/iu.test(source[end]!)) end += 1;
   const modifier = /^(?:['’]s|的)/iu.exec(source.slice(end));
   if (modifier !== null) end += modifier[0].length;
-  while (end < source.length && /[a-z\d_/\-‐‑]/iu.test(source[end]!)) end += 1;
+  while (end < source.length && /[a-z\d_/\-‐‑–—]/iu.test(source[end]!)) end += 1;
   return { start, end };
 }
 
