@@ -1,5 +1,5 @@
 import { isCjkSegmentationCandidate, segmentCjkRun } from
-  "../cjk-segmentation.js";
+  "@do-soul/alaya-protocol";
 
 export { factFrameWordPiecesCoverRun } from "./word-piece-coverage.js";
 

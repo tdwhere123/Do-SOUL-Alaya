@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { AlayaCliBridge, AlayaCliBridgeOptions, AlayaCliResult } from "../bridge.js";
 import type { AlayaDaemonRuntime } from "../../runtime/daemon/lifecycle/daemon-runtime-types.js";
 import { writeCliFailure } from "../errors/error-reporting.js";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDirectory, "..", "..", "..", "..", "..");
@@ -102,7 +103,7 @@ export async function runAlayaCli(
   argv: readonly string[] = process.argv.slice(2),
   options: RunAlayaCliOptions = {}
 ): Promise<number> {
-  const env = options.env ?? process.env;
+  const env = options.env ?? processEnvLookup();
   const cwd = options.cwd ?? process.cwd();
   const stdin = options.stdin ?? process.stdin;
   const stdout = options.stdout ?? process.stdout;

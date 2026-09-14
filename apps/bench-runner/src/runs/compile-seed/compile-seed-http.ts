@@ -341,6 +341,7 @@ function buildGardenHttpRequest(
     abortSignal: input.abortSignal,
     fetchImpl: deps.fetch,
     timeoutMs: resolveAttemptIdleTimeoutMs(input),
+    env: process.env,
     ...(input.maxOutputTokens === undefined ? {} : {
       maxOutputTokens: input.maxOutputTokens,
       outputTokenField: input.outputTokenField

@@ -3,6 +3,7 @@ import { checkLinuxKeychainAvailable, readLinuxKeychainSecret, writeLinuxKeychai
 import { checkMacosKeychainAvailable, readMacosKeychainSecret, writeMacosKeychainSecret } from "./macos.js";
 import { checkWindowsKeychainAvailable, readWindowsKeychainSecret, writeWindowsKeychainSecret } from "./windows.js";
 import { KEYCHAIN_SUBPROCESS_TIMEOUT_MS } from "./constants.js";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
 const KEYCHAIN_CHILD_ENV_ALLOWLIST = [
   "PATH",
@@ -173,7 +174,7 @@ export function defaultKeychainSubprocessRunner(
   };
 }
 
-function createKeychainChildProcessEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+function createKeychainChildProcessEnv(source: NodeJS.ProcessEnv = processEnvLookup()): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const variableName of KEYCHAIN_CHILD_ENV_ALLOWLIST) {
     const value = source[variableName];

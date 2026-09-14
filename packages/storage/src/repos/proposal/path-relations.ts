@@ -5,7 +5,7 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import {
   readNonEmptyStringField,
   readRecord,

@@ -3,6 +3,7 @@ import {
   ProviderChatCompletionError,
   type ProviderTransportFailureKind
 } from "@do-soul/alaya-engine-gateway";
+import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
 
 export interface GardenChatCompletionConfig {
   readonly providerUrl: string;
@@ -38,7 +39,8 @@ async function requestGardenChatCompletionContentOnce(
     userPrompt: input.userPrompt,
     timeoutMs: input.timeoutMs,
     mode: "json",
-    jsonObject: true
+    jsonObject: true,
+    env: processEnvLookup()
   }, {
     maxRetries: RETRY_DELAYS_MS.length,
     retryDelaysMs: RETRY_DELAYS_MS,

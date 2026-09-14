@@ -18,7 +18,7 @@ import {
   selectFeasibleWitnesses
 } from "../../../../recall/conditional-field/reference/accepting-projection.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
-import { facetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { facetPathId } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
 import {
   bindMaxMinField,
   productStateNodeId,

@@ -5,7 +5,8 @@ import {
   BoundedRequestSchema,
   parseConditionalFieldRecallPayload,
   parseWorkerOperationPayload,
-  parseWorkerOperationResult
+  parseWorkerOperationResult,
+  type WorkerOperationPayload
 } from "../../../runtime/recall-read-worker/operation-schemas.js";
 import { RECALL_READ_WORKER_OPERATIONS } from "../../../runtime/recall-read-worker/protocol.js";
 
@@ -37,10 +38,11 @@ function recallPayload(authorized_scopes: unknown) {
 
 describe("recall read worker operation schemas", () => {
   it("parses each worker op payload with Zod and keeps JSON null from flipping denied to unrestricted", () => {
-    expect(parseWorkerOperationPayload("memory.findByIds", {
+    const payload = parseWorkerOperationPayload("memory.findByIds", {
       workspaceId: "workspace-1",
       objectIds: ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001"]
-    })).toMatchObject({ workspaceId: "workspace-1" });
+    }) satisfies WorkerOperationPayload<"memory.findByIds">;
+    expect(payload).toMatchObject({ workspaceId: "workspace-1" });
     expect(() => parseWorkerOperationPayload("memory.findByIds", { workspaceId: 1 })).toThrow();
     const omitted = JSON.parse(JSON.stringify({
       ...recallPayload(undefined),

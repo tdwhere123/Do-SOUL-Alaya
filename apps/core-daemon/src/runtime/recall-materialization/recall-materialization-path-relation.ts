@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { processEnvLookup } from "../config/daemon-config-environment.js";
 import {
   ControlPlaneObjectKind,
   MemoryGovernanceEventType,
@@ -103,7 +104,7 @@ export function createPathRelationRuntime(input: PathRelationRuntimeInput): Read
 }
 
 function readPositiveNumberEnv(name: string): number | undefined {
-  const raw = process.env[name];
+  const raw = processEnvLookup()[name];
   if (raw === undefined || raw === "") {
     return undefined;
   }

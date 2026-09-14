@@ -11,7 +11,7 @@ Examples:
 ```bash
 rtk git status
 rtk pnpm test
-rtk pnpm exec vitest run --config vitest.config.mjs
+rtk pnpm exec vitest run --project @do-soul/alaya-core-daemon
 rtk pnpm exec alaya doctor
 ```
 

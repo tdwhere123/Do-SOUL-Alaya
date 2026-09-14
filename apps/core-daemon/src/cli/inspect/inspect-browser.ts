@@ -2,6 +2,7 @@ import { spawn as spawnChildProcess } from "node:child_process";
 import { platform, release } from "node:os";
 import type { BrowserOpenerSpawn } from "./inspect-types.js";
 import { describeInspectError } from "./inspect-errors.js";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
 export async function defaultOpenUrl(url: string): Promise<void> {
   await openUrlWithSpawn(url, {
@@ -52,7 +53,7 @@ export function openCommandCandidates(
   const os = options.os ?? platform();
   if (os === "darwin") return [["open", [url]]];
   if (os === "win32") return [["cmd", ["/c", "start", "", quoteWindowsStartUrl(url)]]];
-  if (os === "linux" && isWslEnvironment(options.env ?? process.env, options.osRelease ?? release())) {
+  if (os === "linux" && isWslEnvironment(options.env ?? processEnvLookup(), options.osRelease ?? release())) {
     return [
       ["wslview", [url]],
       ["cmd.exe", ["/c", "start", "", quoteWindowsStartUrl(url)]],

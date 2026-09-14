@@ -413,8 +413,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     const afterCreatedAt = options.afterCreatedAt ?? "";
     const afterObjectId = options.afterObjectId ?? "";
     try {
-      const rows = parseRows(
-        this.statements.pageCapsuleOnlyRootsStatement.all(
+      const rows = parseRows(this.statements.pageCapsuleOnlyRootsStatement.all(
           workspaceId,
           afterCreatedAt,
           afterCreatedAt,

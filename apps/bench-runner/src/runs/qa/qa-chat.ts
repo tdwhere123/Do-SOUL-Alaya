@@ -108,7 +108,8 @@ export function createGardenChatFn(config: QaChatConfig): QaChatFn {
         systemPrompt: system,
         userPrompt: user,
         mode: "json",
-        jsonObject: false
+        jsonObject: false,
+        env: process.env
       }, {
         maxRetries: QA_MAX_ATTEMPTS - 1,
         retryDelaysMs: Array.from(

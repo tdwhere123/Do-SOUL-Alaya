@@ -110,6 +110,52 @@ describe("Janitor", () => {
     expect(cleanupPort.removeExpiredObjects).not.toHaveBeenCalled();
   });
 
+  it("deletes expired objects inside the EventLog mutate callback", async () => {
+    const order: string[] = [];
+    const removeExpiredObjects = vi.fn(() => {
+      order.push("remove");
+    });
+    const eventLogRepo: AuditorEventLogPort = {
+      append: vi.fn(),
+      appendManyWithMutation: vi.fn(
+        async <T>(
+          entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+          mutate: (rows: readonly EventLogEntry[]) => T
+        ): Promise<T> => {
+          order.push("append");
+          return mutate(
+            entries.map((entry, idx) => ({
+              ...entry,
+              event_id: `evt-${idx}`,
+              created_at: "2026-03-27T00:00:00.000Z",
+              revision: idx
+            }))
+          );
+        }
+      ) as AuditorEventLogPort["appendManyWithMutation"]
+    };
+    const janitor = new Janitor({
+      cleanupPort: {
+        findExpiredObjects: vi.fn(async () => [
+          { object_kind: "gap_record", object_id: "gap-1", expires_at: "2026-03-20T00:00:00.000Z" }
+        ]),
+        removeExpiredObjects
+      },
+      tieringPort: {
+        findHotDemotionCandidates: vi.fn(async () => []),
+        demoteToWarm: vi.fn()
+      },
+      scheduler: { reportCompletion: vi.fn(async () => undefined) },
+      eventLogRepo,
+      now: () => "2026-03-27T00:00:00.000Z"
+    });
+
+    await janitor.run(createTask({ task_kind: GardenTaskKind.TTL_CLEANUP }));
+
+    expect(order).toEqual(["append", "remove"]);
+    expect(removeExpiredObjects).toHaveBeenCalledWith("workspace-1", ["gap-1"]);
+  });
+
   it("runs hot index demotion with threshold criteria and demotes candidate ids", async () => {
     const { tieringPort, scheduler, janitor } = createJanitor({
       hotCandidates: [
@@ -163,7 +209,7 @@ describe("Janitor", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => [{ object_kind: "handoff_record", object_id: "handoff-1", expires_at: "2026-03-20T00:00:00.000Z" }]),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
@@ -227,7 +273,7 @@ describe("Janitor", () => {
     };
     const cleanupPort = {
       findExpiredObjects: vi.fn(async () => []),
-      removeExpiredObjects: vi.fn(async () => undefined)
+      removeExpiredObjects: vi.fn(() => undefined)
     };
     const scheduler = { reportCompletion: vi.fn(async () => undefined) };
     const janitor = new Janitor({
@@ -419,7 +465,7 @@ function createJanitor(options: {
     findExpiredObjects:
       options.findExpiredObjects ??
       vi.fn(async () => options.expiredObjects ?? []),
-    removeExpiredObjects: vi.fn(async () => undefined)
+    removeExpiredObjects: vi.fn(() => undefined)
   };
   const tieringPort = {
     findHotDemotionCandidates: vi.fn(async () => options.hotCandidates ?? []),

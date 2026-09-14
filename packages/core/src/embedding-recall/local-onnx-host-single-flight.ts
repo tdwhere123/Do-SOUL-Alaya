@@ -34,19 +34,19 @@ interface HostLockTarget {
 }
 
 export function localOnnxHostSingleFlightEnabled(
-  env: { readonly ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT?: string } = process.env
+  env: { readonly ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT?: string } = {}
 ): boolean {
   const raw = env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
 }
 
 export function resolveLocalOnnxHostLockPath(
-  env: HostLockEnvironment = process.env
+  env: HostLockEnvironment = {}
 ): string {
   return resolveHostLockTarget(env).lockPath;
 }
 
-function resolveHostLockTarget(env: HostLockEnvironment = process.env): HostLockTarget {
+function resolveHostLockTarget(env: HostLockEnvironment = {}): HostLockTarget {
   const override = env.ALAYA_LOCAL_ONNX_LOCK_PATH?.trim();
   if (override && override.length > 0) {
     return { lockPath: override };
@@ -75,6 +75,9 @@ export async function withLocalOnnxHostSingleFlight<T>(
   operation: () => Promise<T>,
   options: {
     readonly enabled?: boolean;
+    readonly env?: HostLockEnvironment & {
+      readonly ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT?: string;
+    };
     readonly lockPath?: string;
     readonly timeoutMs?: number;
     readonly retryMs?: number;
@@ -83,13 +86,14 @@ export async function withLocalOnnxHostSingleFlight<T>(
     readonly signal?: AbortSignal;
   } = {}
 ): Promise<T> {
-  const enabled = options.enabled ?? localOnnxHostSingleFlightEnabled();
+  const env = options.env ?? {};
+  const enabled = options.enabled ?? localOnnxHostSingleFlightEnabled(env);
   if (!enabled) {
     throwIfAborted(options.signal);
     return operation();
   }
   const target = options.lockPath === undefined
-    ? resolveHostLockTarget()
+    ? resolveHostLockTarget(env)
     : { lockPath: options.lockPath };
   return runWithSqliteHostLock(operation, {
     lockPath: target.lockPath,

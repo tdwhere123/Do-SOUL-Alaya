@@ -88,9 +88,9 @@ function hasOwnProperty(record: Readonly<Record<string, unknown>>, key: string):
   return Object.prototype.hasOwnProperty.call(record, key);
 }
 
-export class RecallHitTierPromotionCasMiss extends Error {
+export class RecallHitTierPromotionCasMiss extends McpToolError {
   public constructor() {
-    super("Recall-hit tier promotion CAS predicate did not match.");
+    super("UNAVAILABLE", "Recall-hit tier promotion CAS predicate did not match.");
     this.name = "RecallHitTierPromotionCasMiss";
   }
 }

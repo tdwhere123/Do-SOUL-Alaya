@@ -1,4 +1,5 @@
 import type { RecallTokenEconomy } from "@do-soul/alaya-eval";
+import { RECALL_TOKEN_ECONOMY_SAMPLE_SCHEMA_VERSION } from "@do-soul/alaya-protocol";
 import type { BenchRecallTokenEconomy } from "../../harness/recall/recall-diagnostics-schema.js";
 
 function readNonNegativeInt(
@@ -95,8 +96,7 @@ export function extractRecallTokenEconomy(
  *   packages/eval/src/contracts/kpi-schema.ts (RecallTokenEconomy KPI block)
  */
 
-const RECALL_TOKEN_ECONOMY_SCHEMA_VERSION =
-  "bench-recall-token-economy.v1" as const;
+const RECALL_TOKEN_ECONOMY_SCHEMA_VERSION = RECALL_TOKEN_ECONOMY_SAMPLE_SCHEMA_VERSION;
 
 const EMPTY_STAT = Object.freeze({
   mean: 0,

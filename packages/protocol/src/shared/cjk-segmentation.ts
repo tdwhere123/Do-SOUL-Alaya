@@ -1,6 +1,5 @@
-import { readErrorMessage } from "@do-soul/alaya-protocol";
-import { CJK_INTERROGATIVE_FALLBACK_ATOMS } from
-  "./fact-frame-grammar/cjk-interrogative-forms.js";
+import { readErrorMessage } from "./read-error-message.js";
+import { CJK_INTERROGATIVE_FALLBACK_ATOMS } from "./cjk-interrogative-fallback-atoms.js";
 
 /**
  * CJK-aware lazy word segmenter backed by @node-rs/jieba.
@@ -14,13 +13,9 @@ import { CJK_INTERROGATIVE_FALLBACK_ATOMS } from
  * Fail-soft contract: if the @node-rs/jieba native binding cannot load on
  * this host (missing platform binary, jieba ESM import error, dict read
  * error, …) the segmenter emits a structured process warning and splits
- * only the interrogative atoms owned by cjk-interrogative-forms so
+ * only the interrogative atoms owned by cjk-interrogative-fallback-atoms so
  * WH-final/medial queries still tokenize. Other CJK runs stay a single
- * surface piece.
- * Recall paths therefore never throw on a missing jieba.
- *
- * Storage cannot import core, so packages/storage keeps a sibling copy.
- * Delete that copy when a protocol (or other jointly reachable) owner exists.
+ * surface piece. Recall paths therefore never throw on a missing jieba.
  *
  * Lifecycle: the jieba instance + dict are loaded exactly once on the
  * first successful `segmentCjkRun` call, then cached for the process. A
@@ -32,10 +27,10 @@ type CjkSegmenter = { cut(input: string): readonly string[] };
 type CjkSegmenterLoader = () => Promise<CjkSegmenter | null>;
 export type CjkSegmentationStatus = "uninitialized" | "loading" | "ready" | "unavailable";
 
-export const CJK_SEGMENTATION_FALLBACK_WARNING_CODE = "ALAYA_CORE_CJK_SEGMENTATION_FALLBACK";
+export const CJK_SEGMENTATION_FALLBACK_WARNING_CODE = "ALAYA_CJK_SEGMENTATION_FALLBACK";
 const CJK_SEGMENTATION_FALLBACK_WARNING_MESSAGE =
   "[CjkSegmentation] @node-rs/jieba unavailable; using surface-token fallback";
-const CJK_SEGMENTATION_COLD_FALLBACK_WARNING_CODE = "ALAYA_CORE_CJK_SEGMENTATION_COLD_FALLBACK";
+const CJK_SEGMENTATION_COLD_FALLBACK_WARNING_CODE = "ALAYA_CJK_SEGMENTATION_COLD_FALLBACK";
 const CJK_SEGMENTATION_COLD_FALLBACK_WARNING_MESSAGE =
   "[CjkSegmentation] @node-rs/jieba not ready; using surface-token fallback for this call";
 
@@ -49,8 +44,7 @@ let emittedColdFallbackWarning = false;
 
 // Han + Hiragana + Katakana are the scripts jieba actually segments at
 // word level; Hangul / Arabic / other scripts fall back to per-codepoint
-// splits inside jieba, so routing them through here would be a no-op
-// (or worse, fragment whole words). see also: splitLexicalTokens caller.
+// splits inside jieba, so routing them through here would fragment words.
 const CJK_WORD_SEGMENTER_SCRIPTS =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
 
@@ -63,11 +57,6 @@ async function loadJieba(): Promise<CjkSegmenter | null> {
     if (loadJiebaOverrideForTests !== null) {
       return await loadJiebaOverrideForTests();
     }
-    // Dynamic import keeps the native binding off the import graph for
-    // hosts that never see CJK input. The dict subpath uses a CommonJS
-    // wrapper that synchronously reads dict.txt; if either resolution
-    // fails (missing platform binary, missing dict file, ESM/CJS interop
-    // error), we treat segmentation as unavailable.
     const jieba = await import("@node-rs/jieba");
     const dictMod = await import("@node-rs/jieba/dict.js");
     const instance = jieba.Jieba.withDict(dictMod.dict);
@@ -84,7 +73,7 @@ function emitCjkSegmentationFallbackWarning(error: unknown): void {
   process.emitWarning(CJK_SEGMENTATION_FALLBACK_WARNING_MESSAGE, {
     code: CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
     detail: JSON.stringify({
-      layer: "core",
+      layer: "protocol",
       error: readErrorMessage(error, "Unknown jieba load failure")
     })
   });
@@ -98,7 +87,7 @@ function emitCjkSegmentationColdFallbackWarning(): void {
   process.emitWarning(CJK_SEGMENTATION_COLD_FALLBACK_WARNING_MESSAGE, {
     code: CJK_SEGMENTATION_COLD_FALLBACK_WARNING_CODE,
     detail: JSON.stringify({
-      layer: "core",
+      layer: "protocol",
       state: jiebaState.kind
     })
   });
@@ -126,12 +115,7 @@ async function ensureSegmenter(): Promise<CjkSegmenter | null> {
   return promise;
 }
 
-/**
- * Eagerly probe jieba availability. Optional warm-up that recall paths can
- * call once at service wire time so the first user query does not pay the
- * native binding import cost. Returns true when jieba is ready, false when
- * the host has no usable jieba (fail-soft path is in effect).
- */
+/** Optional warm-up so the first user query does not pay the native import cost. */
 export async function warmCjkSegmentation(): Promise<boolean> {
   const segmenter = await ensureSegmenter();
   return segmenter !== null;
@@ -157,9 +141,6 @@ export function segmentCjkRun(text: string): readonly string[] {
       .filter((piece) => piece.length > 0);
     return pieces.length === 0 ? [text] : pieces;
   }
-  // Jieba not yet loaded (or unavailable). Kick off the lazy load so a
-  // subsequent call can use the segmenter, but fall back to the original
-  // run so callers never block the synchronous tokenization path.
   if (jiebaState.kind === "uninitialized") {
     void ensureSegmenter();
   }
@@ -202,11 +183,7 @@ function nextLexemeIndex(text: string, start: number): number {
   return next;
 }
 
-/**
- * Reset the cached jieba state. Intended for tests that need to exercise
- * both the loaded-segmenter path and the fail-soft fallback path within
- * one process. Not exported from the package barrel — internal-only.
- */
+/** Internal-only: reset cached jieba state between test scenarios. */
 export function __resetCjkSegmentationStateForTests(): void {
   jiebaState = { kind: "uninitialized" };
   loadJiebaOverrideForTests = null;

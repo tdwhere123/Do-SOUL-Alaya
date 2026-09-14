@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import {
   SOURCE_ENRICHMENT_CONTRACT,
+  canonicalizeSemanticExtractionProfile,
+  semanticExtractionProfilesEqual,
   type SemanticExtractionProfile
 } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION } from "./formation-audit.js";
@@ -9,34 +11,11 @@ import { capabilityIdentity, OFFICIAL_API_SIGNALS_CAPABILITY, resolveExtractionC
 import { officialApiExtractionRequestTemplatePreimage } from "./extraction-request.js";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "./system-prompt.js";
 
-export { SOURCE_ENRICHMENT_CONTRACT };
-
-export function canonicalizeSemanticExtractionProfile(
-  profile: SemanticExtractionProfile
-): SemanticExtractionProfile {
-  const canonical: SemanticExtractionProfile = {
-    capability: profile.capability,
-    model: profile.model,
-    requestProfile: profile.requestProfile,
-    promptRevision: profile.promptRevision,
-    outputSchema: profile.outputSchema
-  };
-  if (Object.values(canonical).some((value) => typeof value !== "string" || value.trim().length === 0)) {
-    throw new Error("incomplete semantic extraction profile");
-  }
-  return canonical;
-}
-
-export function semanticExtractionProfilesEqual(
-  left: SemanticExtractionProfile,
-  right: SemanticExtractionProfile
-): boolean {
-  const a = canonicalizeSemanticExtractionProfile(left);
-  const b = canonicalizeSemanticExtractionProfile(right);
-  return a.capability === b.capability && a.model === b.model &&
-    a.requestProfile === b.requestProfile && a.promptRevision === b.promptRevision &&
-    a.outputSchema === b.outputSchema;
-}
+export {
+  SOURCE_ENRICHMENT_CONTRACT,
+  canonicalizeSemanticExtractionProfile,
+  semanticExtractionProfilesEqual
+};
 
 export function computeSemanticArtifactKey(
   semanticKey: string,
@@ -73,5 +52,3 @@ export function defaultSourceEnrichmentProfile(input: {
     outputSchema: "official-api-signals-v1"
   });
 }
-
-

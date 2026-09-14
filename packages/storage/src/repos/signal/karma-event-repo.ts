@@ -1,7 +1,15 @@
 import { parseKarmaEvent as parseProtocolKarmaEvent, type KarmaEvent } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import { selectRows } from "../shared/select-rows.js";
+import {
+  parseRows,
+  readFiniteNumberField,
+  readNonEmptyStringField,
+  readRecord,
+  type RowParser
+} from "../shared/parse-row.js";
 import {
   DEFAULT_REPO_LIST_PAGE_LIMIT,
   parseNonEmptyString,
@@ -54,6 +62,32 @@ interface KarmaEventSumRow {
   readonly total: number;
 }
 
+const KarmaEventRowParser: RowParser<KarmaEventRow> = {
+  parse(value: unknown): KarmaEventRow {
+    const record = readRecord(value, "karma event row");
+    const runId = record.run_id;
+    return {
+      event_id: readNonEmptyStringField(record, "event_id"),
+      kind: readNonEmptyStringField(record, "kind"),
+      object_id: readNonEmptyStringField(record, "object_id"),
+      amount: readFiniteNumberField(record, "amount"),
+      created_at: readNonEmptyStringField(record, "created_at"),
+      workspace_id: readNonEmptyStringField(record, "workspace_id"),
+      run_id: runId === null || runId === undefined ? null : readNonEmptyStringField(record, "run_id")
+    };
+  }
+};
+
+const KarmaEventSumRowParser: RowParser<KarmaEventSumRow> = {
+  parse(value: unknown): KarmaEventSumRow {
+    const record = readRecord(value, "karma event sum row");
+    return {
+      object_id: readNonEmptyStringField(record, "object_id"),
+      total: readFiniteNumberField(record, "total")
+    };
+  }
+};
+
 const DEFAULT_KARMA_EVENT_PAGE = Object.freeze({
   limit: DEFAULT_REPO_LIST_PAGE_LIMIT,
   offset: 0
@@ -61,7 +95,6 @@ const DEFAULT_KARMA_EVENT_PAGE = Object.freeze({
 
 export class SqliteKarmaEventRepo implements KarmaEventRepo {
   private readonly createStatement;
-  private readonly findByObjectIdStatement;
   private readonly findByObjectIdPagedStatement;
   private readonly findByWorkspaceIdStatement;
   private readonly findByWorkspaceIdPagedStatement;
@@ -80,19 +113,6 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
-    this.findByObjectIdStatement = db.connection.prepare(`
-      SELECT
-        event_id,
-        kind,
-        object_id,
-        amount,
-        created_at,
-        workspace_id,
-        run_id
-      FROM karma_events
-      WHERE object_id = ?
-      ORDER BY created_at ASC, event_id ASC
-    `);
     this.findByObjectIdPagedStatement = db.connection.prepare(`
       SELECT
         event_id,
@@ -194,7 +214,14 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
     const parsedObjectId = parseNonEmptyString(objectId, "object id");
 
     try {
-      const rows = this.findByObjectIdStatement.all(parsedObjectId) as KarmaEventRow[];
+      const rows = selectRows(
+        this.db.connection,
+        `SELECT event_id, kind, object_id, amount, created_at, workspace_id, run_id
+         FROM karma_events WHERE object_id = ? ORDER BY created_at ASC, event_id ASC`,
+        [parsedObjectId],
+        KarmaEventRowParser,
+        "karma event row"
+      );
       return rows.map((row) => parseKarmaEventRow(row));
     } catch (error) {
       throw new StorageError(
@@ -213,11 +240,11 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
     const parsedPage = parseKarmaEventPage(page);
 
     try {
-      const rows = this.findByObjectIdPagedStatement.all(
+      const rows = parseRows(this.findByObjectIdPagedStatement.all(
         parsedObjectId,
         parsedPage.limit,
         parsedPage.offset
-      ) as KarmaEventRow[];
+      ), KarmaEventRowParser, "karma event row");
       return rows.map((row) => parseKarmaEventRow(row));
     } catch (error) {
       throw new StorageError(
@@ -236,7 +263,7 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findByWorkspaceIdStatement.all(parsedWorkspaceId) as KarmaEventRow[];
+      const rows = parseRows(this.findByWorkspaceIdStatement.all(parsedWorkspaceId), KarmaEventRowParser, "karma event row");
       return rows.map((row) => parseKarmaEventRow(row));
     } catch (error) {
       throw new StorageError(
@@ -255,11 +282,11 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
     const parsedPage = parseKarmaEventPage(page);
 
     try {
-      const rows = this.findByWorkspaceIdPagedStatement.all(
+      const rows = parseRows(this.findByWorkspaceIdPagedStatement.all(
         parsedWorkspaceId,
         parsedPage.limit,
         parsedPage.offset
-      ) as KarmaEventRow[];
+      ), KarmaEventRowParser, "karma event row");
       return rows.map((row) => parseKarmaEventRow(row));
     } catch (error) {
       throw new StorageError(
@@ -321,7 +348,10 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
     `);
 
     try {
-      const rows = statement.all(...parsedObjectIds) as KarmaEventSumRow[];
+      const rows = parseRows(statement.all(...parsedObjectIds),
+        KarmaEventSumRowParser,
+        "karma event sum row"
+      );
       const totals: Record<string, number> = {};
 
       for (const objectId of parsedObjectIds) {

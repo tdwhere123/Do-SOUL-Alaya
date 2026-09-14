@@ -66,6 +66,30 @@ export function createRecallUtilizationRuntime(input: CreateRecallMaterializatio
       async findDeliveredObjectIds(deliveryId: string): Promise<readonly string[] | null> {
         const delivery = await input.trustStateRecorder.findDeliveryById(deliveryId);
         return delivery === null ? null : delivery.delivered_object_ids;
+      },
+      async findDeliveredObjectIdsMany(
+        deliveryIds: readonly string[]
+      ): Promise<ReadonlyMap<string, readonly string[] | null>> {
+        if (input.trustStateRecorder.findDeliveriesByIds !== undefined) {
+          const deliveries = await input.trustStateRecorder.findDeliveriesByIds(deliveryIds);
+          const result = new Map<string, readonly string[] | null>();
+          for (const deliveryId of deliveryIds) {
+            const delivery = deliveries.get(deliveryId);
+            result.set(
+              deliveryId,
+              delivery === undefined || delivery === null ? null : delivery.delivered_object_ids
+            );
+          }
+          return result;
+        }
+        const entries = await Promise.all(deliveryIds.map(async (deliveryId) => {
+          const delivery = await input.trustStateRecorder.findDeliveryById(deliveryId);
+          return [
+            deliveryId,
+            delivery === null ? null : delivery.delivered_object_ids
+          ] as const;
+        }));
+        return new Map(entries);
       }
     }
   };

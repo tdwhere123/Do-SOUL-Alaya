@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { CoreError } from "@do-soul/alaya-core";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
+  diagnosticWarn,
   DEFAULT_ENVIRONMENT_CONFIG,
   DEFAULT_SOUL_CONFIG,
   DEFAULT_STRATEGY_CONFIG,
@@ -95,9 +97,9 @@ export function createConfigService(dependencies: {
     platform = process.platform,
     generateTempId = () => randomUUID(),
     generateAuditId = () => randomUUID(),
-    envProvider = () => process.env,
+    envProvider = () => processEnvLookup(),
     warn = (message) => {
-      process.stderr.write(`${message}\n`);
+      diagnosticWarn(message);
     }
   } = dependencies;
 

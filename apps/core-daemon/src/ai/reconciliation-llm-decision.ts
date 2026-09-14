@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { compareCandidateContent, type ReconciliationLlmDecisionPort } from "@do-soul/alaya-core";
 import { requestGardenChatCompletionContent } from "./garden-chat-completion.js";
 import { readGardenLlmJsonCache, writeGardenLlmJsonCache } from "./garden-llm-cache.js";
+import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
 
 /**
  * @anchor reconciliation-llm-decision
@@ -29,7 +30,7 @@ const DECISION_CACHE_SCHEMA_VERSION = 1;
 const DECISION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export function resolveReconciliationDecisionCacheRoot(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = processEnvLookup()
 ): string {
   const dataDir = env.DATA_DIR?.trim();
   const root = dataDir !== undefined && dataDir.length > 0

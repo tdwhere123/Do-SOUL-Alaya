@@ -1,16 +1,18 @@
 import { serializePathAnchorRef, type PathAnchorRef, type PathRelation } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import { findByAnchorsSql, findByBackingObjectIdsSql } from "../statements/path-relation-sql.js";
 import type { PathRelationStatements } from "../statements/path-relation-statements.js";
 import type { PathRelationListResult, PathRelationPageOptions } from "../path-relation-types.js";
+import { parseRows } from "../../shared/parse-row.js";
 import {
   DEFAULT_PATH_RELATION_PAGE,
   PATH_RELATION_ACTIVE_LIST_HARD_CAP,
   parsePathAnchorRef,
   parsePathRelationPage,
+  PathRelationRowParser,
   type PathRelationRow
 } from "../mappers/path-relation-rows.js";
 
@@ -56,7 +58,7 @@ export async function findAllPathRelationsByWorkspace(
   const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
   try {
-    const rows = ctx.statements.findByWorkspaceStatement.all(parsedWorkspaceId) as PathRelationRow[];
+    const rows = parseRows(ctx.statements.findByWorkspaceStatement.all(parsedWorkspaceId), PathRelationRowParser, "path relation row");
     return ctx.parseRows(rows);
   } catch (error) {
     if (error instanceof StorageError) {
@@ -80,11 +82,11 @@ export async function findPathRelationsByWorkspacePage(
   const parsedPage = parsePathRelationPage(page);
 
   try {
-    const rows = ctx.statements.findByWorkspacePagedStatement.all(
+    const rows = parseRows(ctx.statements.findByWorkspacePagedStatement.all(
       parsedWorkspaceId,
       parsedPage.limit,
       parsedPage.offset
-    ) as PathRelationRow[];
+    ), PathRelationRowParser, "path relation row");
     return ctx.parseRows(rows);
   } catch (error) {
     if (error instanceof StorageError) {
@@ -109,8 +111,8 @@ export async function findPathRelationsByAnchor(
   const anchorKey = serializePathAnchorRef(parsedAnchor);
 
   try {
-    const sourceRows = ctx.statements.findBySourceAnchorStatement.all(parsedWorkspaceId, anchorKey) as PathRelationRow[];
-    const targetRows = ctx.statements.findByTargetAnchorStatement.all(parsedWorkspaceId, anchorKey) as PathRelationRow[];
+    const sourceRows = parseRows(ctx.statements.findBySourceAnchorStatement.all(parsedWorkspaceId, anchorKey), PathRelationRowParser, "path relation row");
+    const targetRows = parseRows(ctx.statements.findByTargetAnchorStatement.all(parsedWorkspaceId, anchorKey), PathRelationRowParser, "path relation row");
     return ctx.parseRows([...sourceRows, ...targetRows], { dedupe: true });
   } catch (error) {
     if (error instanceof StorageError) {
@@ -131,7 +133,7 @@ export async function findPathRelationsByTargetAnchor(
   const anchorKey = serializePathAnchorRef(parsedAnchor);
 
   try {
-    const rows = ctx.statements.findByTargetAnchorStatement.all(parsedWorkspaceId, anchorKey) as PathRelationRow[];
+    const rows = parseRows(ctx.statements.findByTargetAnchorStatement.all(parsedWorkspaceId, anchorKey), PathRelationRowParser, "path relation row");
     return ctx.parseRows(rows);
   } catch (error) {
     if (error instanceof StorageError) {
@@ -157,11 +159,10 @@ export async function findPathRelationsByAnchors(
   const statement = ctx.db.connection.prepare(findByAnchorsSql(anchorKeys.length));
 
   try {
-    const rows = statement.all(
-      parsedWorkspaceId,
-      ...anchorKeys,
-      ...anchorKeys
-    ) as PathRelationRow[];
+    const rows = parseRows(statement.all(parsedWorkspaceId, ...anchorKeys, ...anchorKeys),
+      PathRelationRowParser,
+      "path relation row"
+    );
     return ctx.parseRows(rows, { dedupe: true });
   } catch (error) {
     if (error instanceof StorageError) {
@@ -181,12 +182,12 @@ export async function findPathRelationsByBackingObjectId(
   const parsedObjectId = parseNonEmptyString(objectId, "object id");
 
   try {
-    const rows = ctx.statements.findByBackingObjectIdStatement.all(
+    const rows = parseRows(ctx.statements.findByBackingObjectIdStatement.all(
       parsedWorkspaceId,
       parsedObjectId,
       parsedWorkspaceId,
       parsedObjectId
-    ) as PathRelationRow[];
+    ), PathRelationRowParser, "path relation row");
     return ctx.parseRows(rows, { dedupe: true });
   } catch (error) {
     if (error instanceof StorageError) {
@@ -221,12 +222,13 @@ export async function findPathRelationsByBackingObjectIds(
     for (let offset = 0; offset < parsedObjectIds.length; offset += BACKING_OBJECT_ID_BATCH_SIZE) {
       const batch = parsedObjectIds.slice(offset, offset + BACKING_OBJECT_ID_BATCH_SIZE);
       const statement = ctx.db.connection.prepare(findByBackingObjectIdsSql(batch.length));
-      rows.push(...statement.all(
-        parsedWorkspaceId,
-        ...batch,
-        parsedWorkspaceId,
-        ...batch
-      ) as PathRelationRow[]);
+      rows.push(
+        ...parseRows(
+          statement.all(parsedWorkspaceId, ...batch, parsedWorkspaceId, ...batch),
+          PathRelationRowParser,
+          "path relation row"
+        )
+      );
     }
     return ctx.parseRows(rows, { dedupe: true });
   } catch (error) {
@@ -257,11 +259,11 @@ export async function findAllActivePathRelations(
   const cap = parseActiveListHardCap(hardCap);
 
   try {
-    const rows = ctx.statements.findActivePagedStatement.all(
+    const rows = parseRows(ctx.statements.findActivePagedStatement.all(
       parsedWorkspaceId,
       cap + 1,
       0
-    ) as PathRelationRow[];
+    ), PathRelationRowParser, "path relation row");
     return capPathRelationList(ctx.parseRows(rows), cap);
   } catch (error) {
     if (error instanceof StorageError) {
@@ -303,11 +305,11 @@ export async function findActivePathRelationPage(
   const parsedPage = parsePathRelationPage(page);
 
   try {
-    const rows = ctx.statements.findActivePagedStatement.all(
+    const rows = parseRows(ctx.statements.findActivePagedStatement.all(
       parsedWorkspaceId,
       parsedPage.limit,
       parsedPage.offset
-    ) as PathRelationRow[];
+    ), PathRelationRowParser, "path relation row");
     return ctx.parseRows(rows);
   } catch (error) {
     if (error instanceof StorageError) {
@@ -339,10 +341,10 @@ export async function findAllDormantPathRelations(
   const parsedOlderThanIso = parseNonEmptyString(olderThanIso, "older-than timestamp");
 
   try {
-    const rows = ctx.statements.findDormantStatement.all(
+    const rows = parseRows(ctx.statements.findDormantStatement.all(
       parsedWorkspaceId,
       parsedOlderThanIso
-    ) as PathRelationRow[];
+    ), PathRelationRowParser, "path relation row");
     return ctx.parseRows(rows);
   } catch (error) {
     if (error instanceof StorageError) {
@@ -368,12 +370,12 @@ export async function findDormantPathRelationPage(
   const parsedPage = parsePathRelationPage(page);
 
   try {
-    const rows = ctx.statements.findDormantPagedStatement.all(
+    const rows = parseRows(ctx.statements.findDormantPagedStatement.all(
       parsedWorkspaceId,
       parsedOlderThanIso,
       parsedPage.limit,
       parsedPage.offset
-    ) as PathRelationRow[];
+    ), PathRelationRowParser, "path relation row");
     return ctx.parseRows(rows);
   } catch (error) {
     if (error instanceof StorageError) {

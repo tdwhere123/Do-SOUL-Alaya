@@ -1,4 +1,5 @@
 import {
+  diagnosticWarn,
   type EventLogEntry,
   type RunHotState,
   type RunSnapshot,
@@ -485,5 +486,5 @@ function logRunRouteWarning(
 }
 
 function defaultRunRouteWarning(message: string, meta: Record<string, unknown>): void {
-  console.warn(message, meta);
+  diagnosticWarn(message, meta);
 }

@@ -64,8 +64,8 @@ async function postChatCompletion(
   request: ProviderChatCompletionRequest,
   signal: AbortSignal
 ): Promise<Response> {
-  const url = providerChatCompletionsUrl(request.providerUrl);
-  await assertAllowedProviderChatUrlResolved(url);
+  const url = providerChatCompletionsUrl(request.providerUrl, request.env);
+  await assertAllowedProviderChatUrlResolved(url, request.env);
   const fetchImpl = request.fetchImpl ?? fetch;
   // RequestInit must not carry the caller abortSignal; timeout abort would then
   // be indistinguishable from an operator abort.

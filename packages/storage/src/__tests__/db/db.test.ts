@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { bindDiagnosticLogger } from "@do-soul/alaya-protocol";
 import {
   closeCachedDatabase,
   getCurrentSchemaSummary,
@@ -29,19 +30,19 @@ function cleanupTempDirectory(directory: string): void {
 
 describe("getCurrentSchemaSummary schema version read", () => {
   let context: TempContext;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     context = createTempDatabasePath();
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
 
   afterEach(() => {
-    warnSpy.mockRestore();
+    bindDiagnosticLogger({ warn: () => undefined, error: () => undefined });
     cleanupTempDirectory(context.directory);
   });
 
   it("warns and falls back to null when schema_version cannot be read", () => {
+    const diagnosticWarn = vi.fn();
+    bindDiagnosticLogger({ warn: diagnosticWarn, error: vi.fn() });
     const database = initDatabase({ filename: context.filename });
     try {
       database.connection.exec("DROP TABLE schema_version");
@@ -50,7 +51,7 @@ describe("getCurrentSchemaSummary schema version read", () => {
       const migrationFiles = readMigrationInventory().files;
       const knownMaxVersion = migrationFiles.at(-1)?.version ?? 0;
 
-      expect(warnSpy).toHaveBeenCalledWith(
+      expect(diagnosticWarn).toHaveBeenCalledWith(
         "sqlite/db: failed to read schema_version max; treating as unknown",
         expect.anything()
       );

@@ -8,6 +8,16 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import {
+  parseRows,
+  readFiniteNumberField,
+  readJsonColumn,
+  readNullableStringField,
+  readNonEmptyStringField,
+  readRecord,
+  type RowParser
+} from "../shared/parse-row.js";
+import { parseJsonColumn } from "../shared/parse-json-column.js";
 import { DEFAULT_REPO_LIST_PAGE_LIMIT, parsePageLimit, parsePageOffset } from "../shared/validators.js";
 
 export interface SignalRepo {
@@ -213,8 +223,11 @@ export class SqliteSignalRepo implements SignalRepo {
   ): Promise<readonly CandidateMemorySignal[]> {
     const parsedPage = parseSignalPage(page ?? DEFAULT_SIGNAL_PAGE);
     try {
-      const rows = this.listByRunPagedStatement.all(runId, parsedPage.limit, parsedPage.offset) as SignalRow[];
-      return rows.map((row) => parseSignalRow(row));
+      return parseRows(
+        this.listByRunPagedStatement.all(runId, parsedPage.limit, parsedPage.offset),
+        SignalRowParser,
+        "signal row"
+      );
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list signals for run ${runId}.`, error);
     }
@@ -222,8 +235,7 @@ export class SqliteSignalRepo implements SignalRepo {
 
   public async listByRunAll(runId: string): Promise<readonly CandidateMemorySignal[]> {
     try {
-      const rows = this.listByRunStatement.all(runId) as SignalRow[];
-      return rows.map((row) => parseSignalRow(row));
+      return parseRows(this.listByRunStatement.all(runId), SignalRowParser, "signal row");
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list all signals for run ${runId}.`, error);
     }
@@ -355,33 +367,42 @@ function parseSignal(signal: CandidateMemorySignal): CandidateMemorySignal {
   }
 }
 
-function parseSignalRow(row: SignalRow): CandidateMemorySignal {
+const SignalRowParser: RowParser<CandidateMemorySignal> = {
+  parse: parseSignalRow
+};
+
+function parseSignalRow(value: unknown): CandidateMemorySignal {
+  const row = readRecord(value, "signal row");
+  const sourceDeliveryIdsJson = readNullableStringField(row, "source_delivery_ids_json");
+  const sourceObservationJson = readNullableStringField(row, "source_observation_json");
   try {
     return CandidateMemorySignalSchema.parse({
-      signal_id: row.signal_id,
-      workspace_id: row.workspace_id,
-      run_id: row.run_id,
-      surface_id: row.surface_id,
-      source: row.source,
-      signal_kind: row.signal_kind,
-      signal_state: row.signal_state,
-      object_kind: row.object_kind,
-      scope_hint: row.scope_hint,
-      domain_tags: JSON.parse(row.domain_tags_json),
-      confidence: row.confidence,
-      evidence_refs: JSON.parse(row.evidence_refs_json),
-      source_memory_refs: JSON.parse(row.source_memory_refs_json),
-      supersedes_refs: JSON.parse(row.supersedes_refs_json),
-      exception_to_refs: JSON.parse(row.exception_to_refs_json),
-      contradicts_refs: JSON.parse(row.contradicts_refs_json),
-      incompatible_with_refs: JSON.parse(row.incompatible_with_refs_json),
-      raw_payload: JSON.parse(row.raw_payload_json),
-      ...(row.source_delivery_ids_json === null
+      signal_id: readNonEmptyStringField(row, "signal_id"),
+      workspace_id: readNonEmptyStringField(row, "workspace_id"),
+      run_id: readNonEmptyStringField(row, "run_id"),
+      surface_id: readNullableStringField(row, "surface_id"),
+      source: readNonEmptyStringField(row, "source"),
+      signal_kind: readNonEmptyStringField(row, "signal_kind"),
+      signal_state: readNonEmptyStringField(row, "signal_state"),
+      object_kind: readNonEmptyStringField(row, "object_kind"),
+      scope_hint: readNullableStringField(row, "scope_hint"),
+      domain_tags: readJsonColumn(row, "domain_tags_json"),
+      confidence: readFiniteNumberField(row, "confidence"),
+      evidence_refs: readJsonColumn(row, "evidence_refs_json"),
+      source_memory_refs: readJsonColumn(row, "source_memory_refs_json"),
+      supersedes_refs: readJsonColumn(row, "supersedes_refs_json"),
+      exception_to_refs: readJsonColumn(row, "exception_to_refs_json"),
+      contradicts_refs: readJsonColumn(row, "contradicts_refs_json"),
+      incompatible_with_refs: readJsonColumn(row, "incompatible_with_refs_json"),
+      raw_payload: readJsonColumn(row, "raw_payload_json"),
+      ...(sourceDeliveryIdsJson === null
         ? {}
-        : { source_delivery_ids: JSON.parse(row.source_delivery_ids_json) }),
+        : { source_delivery_ids: parseJsonColumn(sourceDeliveryIdsJson, "source_delivery_ids_json") }),
       source_observation:
-        row.source_observation_json === null ? null : JSON.parse(row.source_observation_json),
-      created_at: row.created_at
+        sourceObservationJson === null
+          ? null
+          : parseJsonColumn(sourceObservationJson, "source_observation_json"),
+      created_at: readNonEmptyStringField(row, "created_at")
     });
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate signal row.", error);

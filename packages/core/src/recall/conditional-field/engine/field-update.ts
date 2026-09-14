@@ -33,15 +33,9 @@ import {
   newTransitionAdditions
 } from "./field-retention-index.js";
 import { RetainedRowDraft, RetainedSequence, type RetainedRows } from "./retained-sequence.js";
-import {
-  collectIdentities,
-  mergeTransitions,
-  observationIsGuaranteed,
-  productStateFromObservation,
-  seedFromObservation,
-  transitionKey,
-  tryCompleteHyperedge
-} from "./path-composition.js";
+import { collectIdentities, observationIsGuaranteed, productStateFromObservation, seedFromObservation } from "./path-composition-seed.js";
+import { mergeTransitions, transitionKey } from "./path-composition.js";
+import { tryCompleteHyperedge } from "./path-hyperedge.js";
 import type { RoutingDiscovery } from "./path-routing.js";
 import type {
   BindableState,

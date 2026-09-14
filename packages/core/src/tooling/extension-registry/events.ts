@@ -8,7 +8,7 @@ import {
   type ToolProvider
 } from "@do-soul/alaya-protocol";
 import { SYSTEM_ACTOR } from "../../shared/actors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { readNow } from "../../shared/time.js";
 
 export interface DescriptorEventInput {

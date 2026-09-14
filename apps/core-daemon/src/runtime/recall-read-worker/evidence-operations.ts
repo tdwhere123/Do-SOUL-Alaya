@@ -1,58 +1,60 @@
 import type { RecallReadWorkerRequest } from "./protocol.js";
+import type { WorkerOperationPayload, WorkerOperationPayloadMap } from "./operation-schemas.js";
 import { readEvidenceSearchMatches } from "./evidence-search-matches.js";
 import { runEvidenceFieldOperation } from "./field-operations.js";
-import {
-  readNumber,
-  readString,
-  readStringArray
-} from "./payload-readers.js";
-import { readKeywordSearchBatchQueries } from "./worker-readers.js";
+import { runOrderedKeywordSearchBatch } from "./worker-readers.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
+
+type EvidenceOperation = Extract<RecallReadWorkerRequest["operation"], `evidence.${string}`>;
 
 export async function runEvidenceOperation(
   runtime: RecallReadWorkerRuntime,
-  operation: Extract<RecallReadWorkerRequest["operation"], `evidence.${string}`>,
-  payload: Record<string, unknown>
+  operation: EvidenceOperation,
+  payload: WorkerOperationPayloadMap[EvidenceOperation]
 ) {
   const { evidenceCapsuleRepo } = runtime;
   if (operation === "evidence.searchByKeyword") {
+    const keywordPayload = payload as WorkerOperationPayload<"evidence.searchByKeyword">;
     return await evidenceCapsuleRepo.searchByKeyword(
-      readString(payload.workspaceId, "workspaceId"),
-      readString(payload.queryText, "queryText"),
-      readNumber(payload.limit, "limit")
+      keywordPayload.workspaceId,
+      keywordPayload.queryText,
+      keywordPayload.limit
     );
   }
   if (operation === "evidence.searchByKeywordField") {
-    return await runEvidenceFieldOperation(evidenceCapsuleRepo, payload);
-  }
-  if (operation === "evidence.searchManyByKeywordField") {
-    return await evidenceCapsuleRepo.searchManyByKeywordField(
-      readString(payload.workspaceId, "workspaceId"),
-      readKeywordSearchBatchQueries(payload.queries)
+    return await runEvidenceFieldOperation(
+      evidenceCapsuleRepo,
+      payload as WorkerOperationPayload<"evidence.searchByKeywordField">
     );
   }
-
-  const workspaceId = readString(payload.workspaceId, "workspaceId");
+  if (operation === "evidence.searchManyByKeywordField") {
+    const batchPayload = payload as WorkerOperationPayload<"evidence.searchManyByKeywordField">;
+    return await evidenceCapsuleRepo.searchManyByKeywordField(
+      batchPayload.workspaceId,
+      batchPayload.queries
+    );
+  }
   if (operation === "evidence.findSourceAnchorsByIds") {
+    const anchorPayload = payload as WorkerOperationPayload<"evidence.findSourceAnchorsByIds">;
     return await evidenceCapsuleRepo.findSourceAnchorsByIds(
-      workspaceId,
-      readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
+      anchorPayload.workspaceId,
+      anchorPayload.evidenceObjectIds
     );
   }
   if (operation === "evidence.findRecallQualifiedByIds") {
+    const qualifiedPayload = payload as WorkerOperationPayload<"evidence.findRecallQualifiedByIds">;
     return await evidenceCapsuleRepo.findRecallQualifiedByIds(
-      workspaceId,
-      readEvidenceSearchMatches(payload.matches)
+      qualifiedPayload.workspaceId,
+      readEvidenceSearchMatches(qualifiedPayload.matches)
     );
   }
   if (operation === "evidence.findRecallQualifiedFactKeysByIds") {
+    const factKeyPayload = payload as WorkerOperationPayload<"evidence.findRecallQualifiedFactKeysByIds">;
     return await evidenceCapsuleRepo.findRecallQualifiedFactKeysByIds(
-      workspaceId,
-      readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
+      factKeyPayload.workspaceId,
+      factKeyPayload.evidenceObjectIds
     );
   }
-  return await evidenceCapsuleRepo.findByIds(
-    workspaceId,
-    readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
-  );
+  const idsPayload = payload as WorkerOperationPayload<"evidence.findByIds">;
+  return await evidenceCapsuleRepo.findByIds(idsPayload.workspaceId, idsPayload.evidenceObjectIds);
 }

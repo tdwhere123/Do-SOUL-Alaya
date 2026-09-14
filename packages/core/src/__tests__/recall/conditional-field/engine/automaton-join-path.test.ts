@@ -13,16 +13,10 @@ import { observeField } from "../../../../recall/runtime/conditional-field-obser
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
 import { SNAPSHOT_ID, defaultBudget, defaultView, facetObligation } from "../reference/deployment.fixture.js";
-import {
-  adjacencyKindsFor,
-  alternativeMax,
-  composedFacetPathId,
-  facetModeAccepts,
-  mergeDiscoveries,
-  nextAdjacencyPair,
-  pairKey,
-  routingOverlayKinds
-} from "../../../../recall/conditional-field/engine/path-composition.js";
+import { adjacencyKindsFor } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { composedFacetPathId, facetModeAccepts } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
+import { alternativeMax } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
+import { mergeDiscoveries, nextAdjacencyPair, pairKey, routingOverlayKinds } from "../../../../recall/conditional-field/engine/path-routing.js";
 import {
   ACCEPTING_PROGRAM_STATE,
   compileProgramAutomaton

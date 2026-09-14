@@ -25,11 +25,9 @@ import {
 import { bindEngineState } from "../../../../recall/conditional-field/engine/field-update.js";
 import { capContractId, HARD_IDENTITY_CAP_CONTRACT } from "../../../../recall/conditional-field/cap-contract.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
-import {
-  samePathAccepts,
-  serialMin,
-  tryCompleteHyperedge
-} from "../../../../recall/conditional-field/engine/path-composition.js";
+import { samePathAccepts } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
+import { serialMin } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
+import { tryCompleteHyperedge } from "../../../../recall/conditional-field/engine/path-hyperedge.js";
 import { observeField, seedEffects } from "../../../../recall/runtime/conditional-field-observe.js";
 import { type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
 import {

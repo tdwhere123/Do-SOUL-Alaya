@@ -140,19 +140,12 @@ describe("LocalOnnxEmbeddingClient", () => {
   });
 
   it("threads bounded ONNX session options from the environment into the pipeline loader", async () => {
-    const originalThreads = process.env.ALAYA_LOCAL_ONNX_THREADS;
-    process.env.ALAYA_LOCAL_ONNX_THREADS = "2";
     const loader = vi.fn(async () => stubExtractor([[dimRow(1)]]).extractor);
-    try {
-      const client = new LocalOnnxEmbeddingClient({ pipelineLoader: loader });
-      await client.embedTexts(["a"], { timeoutMs: 5_000 });
-    } finally {
-      if (originalThreads === undefined) {
-        delete process.env.ALAYA_LOCAL_ONNX_THREADS;
-      } else {
-        process.env.ALAYA_LOCAL_ONNX_THREADS = originalThreads;
-      }
-    }
+    const client = new LocalOnnxEmbeddingClient({
+      pipelineLoader: loader,
+      env: { ALAYA_LOCAL_ONNX_THREADS: "2" }
+    });
+    await client.embedTexts(["a"], { timeoutMs: 5_000 });
 
     expect(loader).toHaveBeenCalledWith(
       expect.any(String),
@@ -174,36 +167,24 @@ describe("LocalOnnxEmbeddingClient", () => {
   });
 
   it("defaults the model cache outside the repository under XDG cache", async () => {
-    const originalXdg = process.env.XDG_CACHE_HOME;
-    const originalHome = process.env.HOME;
-    process.env.XDG_CACHE_HOME = "/tmp/alaya-xdg-cache";
-    process.env.HOME = "/tmp/ignored-home";
-    try {
-      let observedCacheDir: string | null = null;
-      const client = new LocalOnnxEmbeddingClient({
-        pipelineLoader: async (_modelId, cacheDir) => {
-          observedCacheDir = cacheDir;
-          return stubExtractor([[dimRow(1)]]).extractor;
-        }
-      });
-
-      await client.embedTexts(["cache probe"], { timeoutMs: 5_000 });
-
-      const expectedCacheDir = path.join("/tmp/alaya-xdg-cache", "do-soul-alaya", "models");
-      expect(defaultLocalOnnxCacheDir()).toBe(expectedCacheDir);
-      expect(observedCacheDir).toBe(expectedCacheDir);
-    } finally {
-      if (originalXdg === undefined) {
-        delete process.env.XDG_CACHE_HOME;
-      } else {
-        process.env.XDG_CACHE_HOME = originalXdg;
+    const env = {
+      XDG_CACHE_HOME: "/tmp/alaya-xdg-cache",
+      HOME: "/tmp/ignored-home"
+    };
+    let observedCacheDir: string | null = null;
+    const client = new LocalOnnxEmbeddingClient({
+      env,
+      pipelineLoader: async (_modelId, cacheDir) => {
+        observedCacheDir = cacheDir;
+        return stubExtractor([[dimRow(1)]]).extractor;
       }
-      if (originalHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = originalHome;
-      }
-    }
+    });
+
+    await client.embedTexts(["cache probe"], { timeoutMs: 5_000 });
+
+    const expectedCacheDir = path.join("/tmp/alaya-xdg-cache", "do-soul-alaya", "models");
+    expect(defaultLocalOnnxCacheDir(env)).toBe(expectedCacheDir);
+    expect(observedCacheDir).toBe(expectedCacheDir);
   });
 
   it("returns an empty result without loading the model for empty input", async () => {
@@ -244,15 +225,15 @@ describe("LocalOnnxEmbeddingClient", () => {
 
   it.skipIf(process.platform !== "linux")("retains the host inference lock until a timed-out extractor actually settles", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "alaya-embedding-timeout-"));
-    const previousEnabled = process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT;
-    const previousLockPath = process.env.ALAYA_LOCAL_ONNX_LOCK_PATH;
-    process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT = "1";
-    process.env.ALAYA_LOCAL_ONNX_LOCK_PATH = path.join(root, "inference.lock");
+    const env = {
+      ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT: "1",
+      ALAYA_LOCAL_ONNX_LOCK_PATH: path.join(root, "inference.lock")
+    };
     const releases: Array<(value: Awaited<ReturnType<LocalOnnxFeatureExtractor>>) => void> = [];
     const extractor = vi.fn<LocalOnnxFeatureExtractor>(() =>
       new Promise((resolve) => releases.push(resolve))
     );
-    const client = new LocalOnnxEmbeddingClient({ pipelineLoader: async () => extractor });
+    const client = new LocalOnnxEmbeddingClient({ pipelineLoader: async () => extractor, env });
     const output = { dims: [1, LOCAL_ONNX_EMBEDDING_DIMENSIONS], tolist: () => [dimRow(9)] };
     let second: Promise<readonly Float32Array[]> | null = null;
 
@@ -281,8 +262,6 @@ describe("LocalOnnxEmbeddingClient", () => {
         for (const release of releases.splice(0)) release(output);
         await second.catch(() => undefined);
       }
-      restoreEnv("ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT", previousEnabled);
-      restoreEnv("ALAYA_LOCAL_ONNX_LOCK_PATH", previousLockPath);
       rmSync(root, { recursive: true, force: true });
     }
   }, 30_000);
@@ -290,6 +269,10 @@ describe("LocalOnnxEmbeddingClient", () => {
   it("uses the entry deadline while waiting for the host lock and never starts orphan work", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "alaya-embedding-wait-"));
     const lockPath = path.join(root, "inference.lock");
+    const env = {
+      ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT: "1",
+      ALAYA_LOCAL_ONNX_LOCK_PATH: lockPath
+    };
     let releaseHolder: () => void = () => undefined;
     let markAcquired: () => void = () => undefined;
     const acquired = new Promise<void>((resolve) => { markAcquired = resolve; });
@@ -299,11 +282,7 @@ describe("LocalOnnxEmbeddingClient", () => {
     }, { enabled: true, lockPath });
     await acquired;
     const extractor = vi.fn(stubExtractor([[dimRow(1)]]).extractor);
-    const client = new LocalOnnxEmbeddingClient({ pipelineLoader: async () => extractor });
-    const previousEnabled = process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT;
-    const previousLockPath = process.env.ALAYA_LOCAL_ONNX_LOCK_PATH;
-    process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT = "1";
-    process.env.ALAYA_LOCAL_ONNX_LOCK_PATH = lockPath;
+    const client = new LocalOnnxEmbeddingClient({ pipelineLoader: async () => extractor, env });
     const releaseTimer = setTimeout(releaseHolder, 60);
     try {
       await expect(client.embedTexts(["waiting"], { timeoutMs: 15 })).rejects.toThrow(/timed out/);
@@ -314,18 +293,16 @@ describe("LocalOnnxEmbeddingClient", () => {
       clearTimeout(releaseTimer);
       releaseHolder();
       await holder;
-      restoreEnv("ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT", previousEnabled);
-      restoreEnv("ALAYA_LOCAL_ONNX_LOCK_PATH", previousLockPath);
       rmSync(root, { recursive: true, force: true });
     }
   });
 
   it("uses the entry deadline for model load and skips inference after cancellation", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "alaya-embedding-load-"));
-    const priorEnabled = process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT;
-    const priorPath = process.env.ALAYA_LOCAL_ONNX_LOCK_PATH;
-    process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT = "1";
-    process.env.ALAYA_LOCAL_ONNX_LOCK_PATH = path.join(root, "inference.lock");
+    const env = {
+      ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT: "1",
+      ALAYA_LOCAL_ONNX_LOCK_PATH: path.join(root, "inference.lock")
+    };
     let finishLoad: (extractor: LocalOnnxFeatureExtractor) => void = () => undefined;
     let markLoadStarted: () => void = () => undefined;
     const loadStarted = new Promise<void>((resolve) => {
@@ -333,6 +310,7 @@ describe("LocalOnnxEmbeddingClient", () => {
     });
     const extractor = vi.fn(stubExtractor([[dimRow(2)]]).extractor);
     const client = new LocalOnnxEmbeddingClient({
+      env,
       pipelineLoader: () => {
         markLoadStarted();
         return new Promise((resolve) => {
@@ -341,7 +319,7 @@ describe("LocalOnnxEmbeddingClient", () => {
       }
     });
     const secondLoader = vi.fn(async () => stubExtractor([[dimRow(3)]]).extractor);
-    const second = new LocalOnnxEmbeddingClient({ pipelineLoader: secondLoader });
+    const second = new LocalOnnxEmbeddingClient({ pipelineLoader: secondLoader, env });
     let waiting: Promise<readonly Float32Array[]> | null = null;
     try {
       // Windows SQLite lock acquire often exceeds a 15ms entry deadline, so
@@ -363,8 +341,6 @@ describe("LocalOnnxEmbeddingClient", () => {
     } finally {
       finishLoad(extractor);
       await waiting?.catch(() => undefined);
-      restoreEnv("ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT", priorEnabled);
-      restoreEnv("ALAYA_LOCAL_ONNX_LOCK_PATH", priorPath);
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -409,14 +385,6 @@ describe("LocalOnnxEmbeddingClient", () => {
     expect(loader).toHaveBeenCalledTimes(2);
   });
 });
-
-function restoreEnv(name: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[name];
-    return;
-  }
-  process.env[name] = value;
-}
 
 // Real-model smoke check. Runs only when the model weights have been
 // pre-fetched into the worktree cache; otherwise skipped so CI without the

@@ -6,9 +6,10 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 import { prepareOrphanRadarStatements, type SqliteStatement } from "./statements/orphan-radar-statements.js";
+import { parseRows } from "../shared/parse-row.js";
 
 export interface OrphanRadarRepo {
   create(record: Readonly<OrphanRadar>): Readonly<OrphanRadar>;
@@ -135,7 +136,7 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
     const parsedNow = parseTimestamp(now);
 
     try {
-      const rows = this.findActiveByWorkspaceIdStatement.all(parsedWorkspaceId, parsedNow) as OrphanRadarRow[];
+      const rows = parseRows(this.findActiveByWorkspaceIdStatement.all(parsedWorkspaceId, parsedNow), { parse: (value: unknown) => value as OrphanRadarRow }, "orphan radar row");
 
       return Object.freeze(rows.map((row) => parseRow(row)));
     } catch (error) {
@@ -152,7 +153,7 @@ export class SqliteOrphanRadarRepo implements OrphanRadarRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findByTargetMemoryStatement.all(parsedMemoryId, parsedWorkspaceId) as OrphanRadarRow[];
+      const rows = parseRows(this.findByTargetMemoryStatement.all(parsedMemoryId, parsedWorkspaceId), { parse: (value: unknown) => value as OrphanRadarRow }, "orphan radar row");
 
       return Object.freeze(rows.map((row) => parseRow(row)));
     } catch (error) {

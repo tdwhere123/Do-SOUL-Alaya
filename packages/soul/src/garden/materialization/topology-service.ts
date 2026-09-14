@@ -10,7 +10,7 @@ import {
   type TopologyTrend,
   type TopologyTrendDirection
 } from "@do-soul/alaya-protocol";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 
 const TOPOLOGY_HISTORY_LIMIT = 5;
 

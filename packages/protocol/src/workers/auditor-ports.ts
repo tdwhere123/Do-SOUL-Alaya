@@ -160,7 +160,10 @@ export interface AuditorBootstrappingPort {
   assessColdStart(workspaceId: string): Promise<ColdStartAssessment>;
   generateDraftCandidates(workspaceId: string): Promise<readonly DraftCandidate[]>;
   findHighFrequencyPatterns(workspaceId: string, minFrequency: number): Promise<readonly HighFrequencyPattern[]>;
-  createSynthesisCandidate(workspaceId: string, patternKey: string): Promise<{ readonly candidate_id: string }>;
+  // invariant: Synthesis candidate INSERT joins EventPublisher
+  // appendManyWithMutation's sync mutate so the proposal row and
+  // SOUL_PROPOSAL_CREATED EventLog commit together.
+  createSynthesisCandidate(workspaceId: string, patternKey: string): { readonly candidate_id: string };
   hasPendingSynthesisCandidate(workspaceId: string, patternKey: string): Promise<boolean>;
 }
 

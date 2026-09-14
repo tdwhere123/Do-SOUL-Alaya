@@ -58,8 +58,7 @@ export function loadRecallQualifiedFactKeysByIds(
   try {
     const matches: EvidenceSearchMatch[] = [];
     for (let offset = 0; offset < ids.length; offset += 500) {
-      const rows = parseRows(
-        statements.findFactKeyProjectionIdentitiesByIdsStatement.all(
+      const rows = parseRows(statements.findFactKeyProjectionIdentitiesByIdsStatement.all(
           workspaceId,
           JSON.stringify(ids.slice(offset, offset + 500))
         ),

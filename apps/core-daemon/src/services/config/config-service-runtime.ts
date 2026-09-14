@@ -331,12 +331,14 @@ function parseGardenComputeConfigWithLegacyFallback(
   warn(
     `${source}: rejected by schema (${issues}); Garden compute is degraded until the config is repaired.`
   );
+  // Do not rewrite to local_heuristics — that would look like an intentional
+  // healthy provider choice. Keep official_api disabled with an explicit reason.
   return Object.freeze({
     ...RuntimeGardenComputeConfigSchema.parse({
       config_version: CURRENT_CONFIG_VERSION,
       secret_ref: null,
       enabled: false,
-      provider_kind: "local_heuristics",
+      provider_kind: "official_api",
       model_id: null,
       provider_url: null
     }),

@@ -4,7 +4,14 @@ import {
   type GardenRoleValue
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import {
+  readIntegerField,
+  readNonEmptyStringField,
+  readNullableStringField,
+  readRecord,
+  type RowParser
+} from "../../shared/parse-row.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../../shared/validators.js";
 import type { GardenTaskBacklogCount, GardenTaskRow, GardenTaskStatus } from "../garden-task-types.js";
 
@@ -40,6 +47,38 @@ export function computeStaleClaimCutoff(now: string, staleAfterMs: number): stri
   }
   return new Date(nowMs - staleAfterMs).toISOString();
 }
+
+export const GardenTaskDbRowParser: RowParser<GardenTaskDbRow> = {
+  parse(value: unknown): GardenTaskDbRow {
+    const record = readRecord(value, "garden task row");
+    return {
+      id: readNonEmptyStringField(record, "id"),
+      workspace_id: readNonEmptyStringField(record, "workspace_id"),
+      role: readNonEmptyStringField(record, "role"),
+      kind: readNonEmptyStringField(record, "kind"),
+      payload_json: readNonEmptyStringField(record, "payload_json"),
+      status: readNonEmptyStringField(record, "status"),
+      claimed_by: readNullableStringField(record, "claimed_by"),
+      claimed_at: readNullableStringField(record, "claimed_at"),
+      created_at: readNonEmptyStringField(record, "created_at"),
+      completed_at: readNullableStringField(record, "completed_at"),
+      attempt_count: readIntegerField(record, "attempt_count"),
+      last_error_text: readNullableStringField(record, "last_error_text"),
+      completion_envelope_json: readNullableStringField(record, "completion_envelope_json")
+    };
+  }
+};
+
+export const GardenTaskBacklogCountDbRowParser: RowParser<GardenTaskBacklogCountDbRow> = {
+  parse(value: unknown): GardenTaskBacklogCountDbRow {
+    const record = readRecord(value, "garden task backlog count row");
+    return {
+      role: readNonEmptyStringField(record, "role"),
+      status: readNonEmptyStringField(record, "status"),
+      count: readIntegerField(record, "count")
+    };
+  }
+};
 
 export function parseGardenTaskRow(row: GardenTaskDbRow): GardenTaskRow {
   let payload: unknown;

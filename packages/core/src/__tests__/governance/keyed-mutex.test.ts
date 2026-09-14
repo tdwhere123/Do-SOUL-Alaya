@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KeyedMutex } from "../../governance/keyed-mutex.js";
-
-// invariant: covers the per-key in-process async mutex — strict
-// serialization per key, concurrency across distinct keys, lock release
-// on throw, and the no-leak cleanup (the map entry is deleted once the
-// last waiter for a key drains).
-// see also: packages/core/src/governance/keyed-mutex.ts
+import { KeyedMutex } from "@do-soul/alaya-protocol";
 
 describe("KeyedMutex", () => {
   it("serializes tasks for the same key in arrival order", async () => {
@@ -41,8 +35,6 @@ describe("KeyedMutex", () => {
       release = resolve;
     });
 
-    // Each task parks on a shared gate so all three are observed active
-    // before any releases, independent of scheduler timing.
     const task = async () => {
       active += 1;
       maxActive = Math.max(maxActive, active);

@@ -1,4 +1,6 @@
-import { readErrorMessage, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import {
+  diagnosticWarn, readErrorMessage, type CandidateMemorySignal
+} from "@do-soul/alaya-protocol";
 import type {
   MaterializationCreatedObject,
   MaterializationContext,
@@ -372,7 +374,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     // A reconciliation backend failure must never drop the fact: fall back to
     // the unchanged blind-append path. A partial applyVerdict can orphan at
     // most one evidence capsule, but it cannot lose the fact.
-    console.warn("materialization-router: reconciliation failed", {
+    diagnosticWarn("materialization-router: reconciliation failed", {
       signalId: signal.signal_id,
       error: error instanceof Error ? error.message : String(error)
     });

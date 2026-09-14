@@ -1,8 +1,9 @@
 import { GreenStatusSchema, type GreenStatus } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
 
 export interface GreenStatusRepo {
   findByObjectId(objectId: string): Promise<Readonly<GreenStatus> | null>;
@@ -177,7 +178,7 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findByWorkspaceIdStatement.all(parsedWorkspaceId) as GreenStatusRow[];
+      const rows = parseRows(this.findByWorkspaceIdStatement.all(parsedWorkspaceId), { parse: (value: unknown) => value as GreenStatusRow }, "green status row");
       return rows.map((row) => parseGreenStatusRow(row));
     } catch (error) {
       if (error instanceof StorageError) {
@@ -246,7 +247,7 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = statement.all(parsedWorkspaceId) as GreenStatusRow[];
+      const rows = parseRows(statement.all(parsedWorkspaceId), { parse: (value: unknown) => value as GreenStatusRow }, "green status row");
       return rows.map((row) => parseGreenStatusRow(row));
     } catch (error) {
       if (error instanceof StorageError) {

@@ -14,6 +14,11 @@ if (tag === undefined || !/^v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/u.test(tag)) {
   process.exit(1);
 }
 
+if (/^unreleased$/iu.test(tag.slice(1))) {
+  console.error("Unreleased is not a release tag; publish a ## vX.Y.Z section first");
+  process.exit(1);
+}
+
 // App packages share the release tag semver; @do-soul/alaya-protocol tracks its
 // own contract semver because MCP schema breaks are independent of app releases.
 const PROTOCOL_PACKAGE = "@do-soul/alaya-protocol";

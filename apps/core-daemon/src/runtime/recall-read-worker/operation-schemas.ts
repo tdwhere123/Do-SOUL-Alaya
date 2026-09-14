@@ -194,6 +194,13 @@ const PAYLOAD_SCHEMAS = {
   "constraints.readBounded": BoundedRequestSchema
 } satisfies Record<RecallReadWorkerOperation, z.ZodTypeAny>;
 
+export type WorkerOperationPayloadMap = {
+  [K in RecallReadWorkerOperation]: z.infer<(typeof PAYLOAD_SCHEMAS)[K]>;
+};
+
+export type WorkerOperationPayload<O extends RecallReadWorkerOperation> =
+  WorkerOperationPayloadMap[O];
+
 const KeywordHitSchema = z.object({
   object_id: z.string(),
   normalized_rank: z.number(),
@@ -292,11 +299,11 @@ const RESULT_SCHEMAS = {
   "constraints.readBounded": BoundedActiveConstraintsResultSchema
 } satisfies Record<RecallReadWorkerOperation, z.ZodTypeAny>;
 
-export function parseWorkerOperationPayload(
-  operation: RecallReadWorkerOperation,
+export function parseWorkerOperationPayload<O extends RecallReadWorkerOperation>(
+  operation: O,
   payload: unknown
-): unknown {
-  return PAYLOAD_SCHEMAS[operation].parse(payload ?? {});
+): WorkerOperationPayload<O> {
+  return PAYLOAD_SCHEMAS[operation].parse(payload ?? {}) as WorkerOperationPayload<O>;
 }
 
 export function parseWorkerOperationResult(

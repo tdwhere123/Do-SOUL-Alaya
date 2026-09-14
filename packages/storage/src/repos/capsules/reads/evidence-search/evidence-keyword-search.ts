@@ -152,13 +152,11 @@ function queryOwnerAndProjectionRows(
   }
   const match = buildWorkspaceScopedFtsMatch(workspaceId, tokens);
   return Object.freeze({
-    owners: Object.freeze(parseRows(
-      ownerStatement.all(workspaceId, match, limit),
+    owners: Object.freeze(parseRows(ownerStatement.all(workspaceId, match, limit),
       FtsLaneRankRowParser,
       "evidence fts owner row"
     )),
-    projections: Object.freeze(parseRows(
-      projectionStatement.all(workspaceId, match, limit),
+    projections: Object.freeze(parseRows(projectionStatement.all(workspaceId, match, limit),
       ProjectionRankRowParser,
       "evidence fts projection row"
     ))

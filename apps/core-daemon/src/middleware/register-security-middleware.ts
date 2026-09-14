@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
 import {
   createFixedWindowRateLimitMiddleware,
   resolveProtectedRateLimitKey
@@ -43,7 +44,7 @@ export function registerRateLimitMiddleware(
   );
 }
 
-function isRemoteDaemonBind(env: NodeJS.ProcessEnv = process.env): boolean {
+function isRemoteDaemonBind(env: NodeJS.ProcessEnv = processEnvLookup()): boolean {
   const host = (env.DAEMON_HOST ?? "127.0.0.1").trim();
   if (host.length === 0 || host === "localhost" || host === "::1" || host === "[::1]") {
     return false;

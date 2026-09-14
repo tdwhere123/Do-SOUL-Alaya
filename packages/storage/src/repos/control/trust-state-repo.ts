@@ -10,12 +10,16 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import { parseRows } from "../shared/parse-row.js";
 
 export interface TrustStateRepo {
   createDelivery(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord>;
   createUsage(record: UsageProofRecord): Readonly<UsageProofRecord>;
   findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
+  findDeliveriesByIds(
+    deliveryIds: readonly string[]
+  ): Promise<ReadonlyMap<string, Readonly<ContextDeliveryRecord> | null>>;
   listDeliveriesByAgentTarget(agentTarget: string): Promise<readonly Readonly<ContextDeliveryRecord>[]>;
   listUsageByDeliveryIds(deliveryIds: readonly string[]): Promise<readonly Readonly<UsageProofRecord>[]>;
 }
@@ -159,10 +163,50 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
     }
   }
 
+  public async findDeliveriesByIds(
+    deliveryIds: readonly string[]
+  ): Promise<ReadonlyMap<string, Readonly<ContextDeliveryRecord> | null>> {
+    const result = new Map<string, Readonly<ContextDeliveryRecord> | null>();
+    if (deliveryIds.length === 0) {
+      return result;
+    }
+    const parsedDeliveryIds = deliveryIds.map((deliveryId) => NonEmptyStringSchema.parse(deliveryId));
+    for (const deliveryId of parsedDeliveryIds) {
+      result.set(deliveryId, null);
+    }
+    const placeholders = parsedDeliveryIds.map(() => "?").join(", ");
+    try {
+      const rows = parseRows(
+        this.db.connection
+          .prepare(`
+          SELECT
+            delivery_id,
+            agent_target,
+            workspace_id,
+            run_id,
+            delivered_object_ids_json,
+            delivered_at,
+            audit_event_id
+          FROM trust_context_delivery
+          WHERE delivery_id IN (${placeholders})
+        `)
+          .all(...parsedDeliveryIds),
+        { parse: (value: unknown) => value as DeliveryRow },
+        "delivery row"
+      );
+      for (const row of rows) {
+        result.set(row.delivery_id, parseDeliveryRow(row));
+      }
+      return result;
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to load trust deliveries by ids.", error);
+    }
+  }
+
   public async listDeliveriesByAgentTarget(agentTarget: string): Promise<readonly Readonly<ContextDeliveryRecord>[]> {
     const parsedAgentTarget = NonEmptyStringSchema.parse(agentTarget);
     try {
-      const rows = this.listDeliveriesByAgentTargetStatement.all(parsedAgentTarget) as DeliveryRow[];
+      const rows = parseRows(this.listDeliveriesByAgentTargetStatement.all(parsedAgentTarget), { parse: (value: unknown) => value as DeliveryRow }, "delivery row");
       return rows.map((row) => parseDeliveryRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list trust deliveries for ${parsedAgentTarget}.`, error);
@@ -176,8 +220,8 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
     const parsedDeliveryIds = deliveryIds.map((deliveryId) => NonEmptyStringSchema.parse(deliveryId));
     const placeholders = parsedDeliveryIds.map(() => "?").join(", ");
     try {
-      const rows = this.db.connection
-        .prepare(`
+      const rows = parseRows(this.db.connection
+          .prepare(`
           SELECT
             delivery_id,
             usage_state,
@@ -191,7 +235,10 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
           WHERE delivery_id IN (${placeholders})
           ORDER BY reported_at ASC, delivery_id ASC
         `)
-        .all(...parsedDeliveryIds) as UsageRow[];
+          .all(...parsedDeliveryIds),
+        { parse: (value: unknown) => value as UsageRow },
+        "usage row"
+      );
       return rows.map((row) => parseUsageRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to list trust usage proofs.", error);

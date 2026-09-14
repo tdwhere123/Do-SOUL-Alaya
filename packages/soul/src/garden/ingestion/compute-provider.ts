@@ -1,4 +1,5 @@
 import {
+  diagnosticWarn,
   AlayaError,
   CandidateMemorySignalSchema,
   GardenProviderKind as GardenProviderKinds,
@@ -358,7 +359,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         sourceGrounding: grounding.audit
       }));
     } catch (error) {
-      console.warn("garden/compute-provider: dropped one official-API signal", {
+      diagnosticWarn("garden/compute-provider: dropped one official-API signal", {
         runId: context.run_id,
         signalKind: draft.signal_kind,
         matchedTextChars: draft.matched_text.length,
@@ -507,7 +508,7 @@ function groundDraftForContext(
     ? groundOfficialApiDraft(draft, groundingSourceText, sourceCorpus)
     : rejectOfficialApiDraftGrounding(draft, trustRejection);
   if (grounding.status === "rejected") {
-    console.warn("garden/compute-provider: rejected ungrounded official-API signal", {
+    diagnosticWarn("garden/compute-provider: rejected ungrounded official-API signal", {
       runId: context.run_id,
       reasons: grounding.audit.reasons
     });

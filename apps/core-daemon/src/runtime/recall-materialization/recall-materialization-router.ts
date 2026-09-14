@@ -1,4 +1,5 @@
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import { processEnvLookup } from "../config/daemon-config-environment.js";
 import {
   ClaimService,
   ConflictDetectionService,
@@ -105,7 +106,7 @@ function createMaterializationMemoryService(
 }
 
 export function isRetainUnroutedFactsEnabled(
-  raw: string | undefined = process.env.ALAYA_RETAIN_UNROUTED_FACTS
+  raw: string | undefined = processEnvLookup().ALAYA_RETAIN_UNROUTED_FACTS
 ): boolean {
   const normalized = raw?.trim().toLowerCase();
   return normalized === "1" || normalized === "true";
@@ -115,13 +116,13 @@ function readMaterializationRouterOptions() {
   return {
     retainUnroutedHighConfidenceFacts: isRetainUnroutedFactsEnabled(),
     fullTurnEvidenceExcerpt:
-      process.env.ALAYA_EVIDENCE_FULL_TURN !== "0" &&
-      process.env.ALAYA_EVIDENCE_FULL_TURN !== "false",
+      processEnvLookup().ALAYA_EVIDENCE_FULL_TURN !== "0" &&
+      processEnvLookup().ALAYA_EVIDENCE_FULL_TURN !== "false",
     materializationConfidenceFloor: readMaterializationConfidenceFloor()
   };
 }
 
 function readMaterializationConfidenceFloor(): number | undefined {
-  const raw = Number(process.env.ALAYA_MATERIALIZATION_CONF_FLOOR);
+  const raw = Number(processEnvLookup().ALAYA_MATERIALIZATION_CONF_FLOOR);
   return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : undefined;
 }

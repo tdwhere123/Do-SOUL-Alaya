@@ -72,15 +72,9 @@ async function bootStartedDaemonRuntime(): Promise<AlayaDaemonRuntime> {
 }
 
 async function expectBootstrapDoesNotWaitForCjkWarmups(): Promise<void> {
-  const coreGate = createDeferred<boolean>();
-  const storageGate = createDeferred<boolean>();
   const configGate = createDeferred<ReadonlyMap<string, string>>();
-  const coreCallsBefore = hoisted.coreWarmCjkSegmentation.mock.calls.length;
-  const storageCallsBefore = hoisted.storageWarmCjkSegmentation.mock.calls.length;
   const configCallsBefore = hoisted.loadConfigEnv.mock.calls.length;
 
-  hoisted.coreWarmCjkSegmentation.mockImplementationOnce(async () => coreGate.promise);
-  hoisted.storageWarmCjkSegmentation.mockImplementationOnce(async () => storageGate.promise);
   hoisted.loadConfigEnv.mockImplementationOnce(
     async () => configGate.promise as unknown as Map<string, string>
   );
@@ -93,11 +87,6 @@ async function expectBootstrapDoesNotWaitForCjkWarmups(): Promise<void> {
 
   try {
     await waitUntil(
-      () =>
-        hoisted.coreWarmCjkSegmentation.mock.calls.length === coreCallsBefore + 1 &&
-        hoisted.storageWarmCjkSegmentation.mock.calls.length === storageCallsBefore + 1
-    );
-    await waitUntil(
       () => hoisted.loadConfigEnv.mock.calls.length === configCallsBefore + 1
     );
     expect(completed).toBe(false);
@@ -106,8 +95,6 @@ async function expectBootstrapDoesNotWaitForCjkWarmups(): Promise<void> {
     await runtimePromise;
     expect(completed).toBe(true);
   } finally {
-    coreGate.resolve(false);
-    storageGate.resolve(false);
     configGate.resolve(new Map());
     await runtimePromise.catch(() => undefined);
   }

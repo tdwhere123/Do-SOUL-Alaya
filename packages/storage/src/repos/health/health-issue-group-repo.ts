@@ -7,7 +7,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import { parseRows } from "../shared/parse-row.js";
 
 // invariant: HealthIssueGroupRepo is the projection store for the
 // Inspector health inbox. Writers upsert by (workspace_id,
@@ -168,15 +169,18 @@ export class SqliteHealthIssueGroupRepo implements HealthIssueGroupRepo {
     }
     const limit = options.limit ?? 200;
     try {
-      const rows = this.db.connection
-        .prepare(
-          `SELECT ${SELECT_COLUMNS}
+      const rows = parseRows(this.db.connection
+          .prepare(
+            `SELECT ${SELECT_COLUMNS}
            FROM health_issue_groups
            WHERE ${where.join(" AND ")}
            ORDER BY last_seen_at DESC, group_id ASC
            LIMIT ?`
-        )
-        .all(...params, limit) as HealthIssueGroupRow[];
+          )
+          .all(...params, limit),
+        { parse: (value: unknown) => value as HealthIssueGroupRow },
+        "health issue group row"
+      );
       return Object.freeze(rows.map(parseRow));
     } catch (error) {
       throw new StorageError(

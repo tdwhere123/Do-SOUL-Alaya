@@ -3,6 +3,7 @@ import { snapshotIdFromPin } from "@do-soul/alaya-core";
 import { findActiveConstraints, readBoundedActiveConstraints, SqliteGovernancePathReader,
   SqliteIndexedRecallProjection, type StorageDatabase } from "@do-soul/alaya-storage";
 import type { RecallPathReadPorts } from "../recall/recall-path-readers.js";
+import type { WorkerOperationPayload } from "./operation-schemas.js";
 
 export function createBoundedActiveConstraintsReader(database: StorageDatabase) {
   const paths = new SqliteGovernancePathReader(database);
@@ -28,7 +29,7 @@ export function createBoundedActiveConstraintsReader(database: StorageDatabase) 
 }
 
 export async function runWorkerActiveConstraints(input: Readonly<{
-  readonly payload: Record<string, unknown>;
+  readonly payload: WorkerOperationPayload<"constraints.findActive">;
   readonly memoryRepo: Parameters<typeof findActiveConstraints>[0]["memoryRepo"];
   readonly claimFormRepo: Parameters<typeof findActiveConstraints>[0]["claimFormRepo"];
   readonly pathReadPorts: RecallPathReadPorts;
@@ -36,22 +37,21 @@ export async function runWorkerActiveConstraints(input: Readonly<{
   readonly constraints: readonly unknown[];
   readonly total_count: number;
 }>> {
-  const workspaceId = readString(input.payload.workspaceId, "workspaceId");
-  const asOf = readOptionalString(input.payload.asOf, "asOf");
+  const { payload } = input;
   const result = await findActiveConstraints({
-    workspaceId,
+    workspaceId: payload.workspaceId,
     memoryRepo: input.memoryRepo,
     claimFormRepo: input.claimFormRepo,
     pathRelationRepo: {
       findActiveAll: async () => ({
         relations: await input.pathReadPorts.findActiveByWorkspace(
-          workspaceId,
-          asOf === undefined ? {} : { asOf }
+          payload.workspaceId,
+          payload.asOf === undefined ? {} : { asOf: payload.asOf }
         ),
         truncated: false
       })
     },
-    cap: readNullableNumber(input.payload.cap, "cap")
+    cap: payload.cap
   });
   return Object.freeze({
     constraints: Object.freeze(result.constraints.map(toActiveConstraint)),
@@ -72,21 +72,4 @@ function toActiveConstraint(record: Awaited<ReturnType<typeof findActiveConstrai
       source_channels: record.source_channels
     }
   });
-}
-
-function readString(value: unknown, name: string): string {
-  if (typeof value !== "string") throw new Error(`worker payload ${name} must be a string`);
-  return value;
-}
-
-function readOptionalString(value: unknown, name: string): string | undefined {
-  return value === undefined ? undefined : readString(value, name);
-}
-
-function readNullableNumber(value: unknown, name: string): number | null | undefined {
-  if (value === undefined || value === null) return value;
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`worker payload ${name} must be a finite number`);
-  }
-  return value;
 }

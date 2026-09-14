@@ -1,8 +1,9 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../../shared/errors.js";
-import { parseMemoryEntryRow, parseStorageTier, type MemoryEntryRow } from "../../mappers/row-mapper.js";
+import { parseStorageTier, MemoryEntryRowParser } from "../../mappers/row-mapper.js";
 import type { RecallActivationTopKQuery } from "../../types.js";
 import type { RecallActivationTopKStatements } from "../../statements/recall/activation-top-k-statements.js";
+import { parseRows } from "../../../shared/parse-row.js";
 
 export const MAX_RECALL_ACTIVATION_TOP_K = 102_400;
 
@@ -15,15 +16,15 @@ export function findRecallActivationTopK(
   const minActivation = parseOptionalMinActivation(query.min_activation_score);
   const excludeJson = JSON.stringify(parseExcludeObjectIds(query.exclude_object_ids));
   try {
-    const rows = statements.findRecallActivationTopKStatement.all(
+    const rows = parseRows(statements.findRecallActivationTopKStatement.all(
       query.workspaceId,
       tier,
       minActivation,
       minActivation,
       excludeJson,
       limit
-    ) as MemoryEntryRow[];
-    return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
+    ), MemoryEntryRowParser, "memory entry row");
+    return Object.freeze(rows);
   } catch (error) {
     if (error instanceof StorageError) throw error;
     throw new StorageError(

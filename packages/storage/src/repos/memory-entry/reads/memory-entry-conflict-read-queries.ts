@@ -6,13 +6,13 @@ import {
 import { StorageError } from "../../../shared/errors.js";
 import {
   parseMemoryDimension,
-  parseMemoryEntryRow,
   parseScopeClass,
-  type MemoryEntryRow
+  MemoryEntryRowParser
 } from "../mappers/row-mapper.js";
 import type { MemoryEntryStatements } from "../statements/sqlite-memory-entry-statements.js";
 import { DEFAULT_MEMORY_ENTRY_PAGE, parseMemoryEntryPage } from "./memory-entry-read-page.js";
 import type { MemoryEntryListPageOptions } from "../types.js";
+import { parseRows } from "../../shared/parse-row.js";
 
 export class MemoryEntryConflictReadQueries {
   public constructor(private readonly statements: () => MemoryEntryStatements) {}
@@ -23,12 +23,15 @@ export class MemoryEntryConflictReadQueries {
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     const parsedPage = parseMemoryEntryPage(page ?? DEFAULT_MEMORY_ENTRY_PAGE);
     try {
-      const rows = this.statements().findByWorkspaceHotConflictPagedStatement.all(
-        workspaceId,
-        parsedPage.limit,
-        parsedPage.offset
-      ) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      const rows = parseRows(this.statements().findByWorkspaceHotConflictPagedStatement.all(
+          workspaceId,
+          parsedPage.limit,
+          parsedPage.offset
+        ),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
+      return rows;
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -61,13 +64,16 @@ export class MemoryEntryConflictReadQueries {
     const parsedDimension = parseMemoryDimension(dimension);
     const parsedPage = parseMemoryEntryPage(page ?? DEFAULT_MEMORY_ENTRY_PAGE);
     try {
-      const rows = this.statements().findByDimensionHotConflictPagedStatement.all(
-        workspaceId,
-        parsedDimension,
-        parsedPage.limit,
-        parsedPage.offset
-      ) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      const rows = parseRows(this.statements().findByDimensionHotConflictPagedStatement.all(
+          workspaceId,
+          parsedDimension,
+          parsedPage.limit,
+          parsedPage.offset
+        ),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
+      return rows;
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -105,13 +111,16 @@ export class MemoryEntryConflictReadQueries {
     const parsedScopeClass = parseScopeClass(scopeClass);
     const parsedPage = parseMemoryEntryPage(page ?? DEFAULT_MEMORY_ENTRY_PAGE);
     try {
-      const rows = this.statements().findByScopeClassHotConflictPagedStatement.all(
-        workspaceId,
-        parsedScopeClass,
-        parsedPage.limit,
-        parsedPage.offset
-      ) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      const rows = parseRows(this.statements().findByScopeClassHotConflictPagedStatement.all(
+          workspaceId,
+          parsedScopeClass,
+          parsedPage.limit,
+          parsedPage.offset
+        ),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
+      return rows;
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -151,14 +160,17 @@ export class MemoryEntryConflictReadQueries {
     const parsedDimension = parseMemoryDimension(dimension);
     const parsedPage = parseMemoryEntryPage(page ?? DEFAULT_MEMORY_ENTRY_PAGE);
     try {
-      const rows = this.statements().findByScopeClassAndDimensionHotConflictPagedStatement.all(
-        workspaceId,
-        parsedScopeClass,
-        parsedDimension,
-        parsedPage.limit,
-        parsedPage.offset
-      ) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      const rows = parseRows(this.statements().findByScopeClassAndDimensionHotConflictPagedStatement.all(
+          workspaceId,
+          parsedScopeClass,
+          parsedDimension,
+          parsedPage.limit,
+          parsedPage.offset
+        ),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
+      return rows;
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",

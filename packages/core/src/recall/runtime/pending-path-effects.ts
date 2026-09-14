@@ -1,6 +1,6 @@
 import { productSubjectId, type ObserverPage } from "@do-soul/alaya-protocol";
 import { applyObserverPage, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
-import { createAdjacencyEffectCursor } from "../conditional-field/engine/path-composition.js";
+import { createAdjacencyEffectCursor } from "../conditional-field/engine/path-composition-adjacency.js";
 
 export function resumePathEffects(state: FieldEngineState): FieldEngineState {
   while (state.pending_path_effects !== undefined) {

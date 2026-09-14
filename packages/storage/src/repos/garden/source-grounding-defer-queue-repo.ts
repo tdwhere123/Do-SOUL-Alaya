@@ -9,6 +9,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { parseRows } from "../shared/parse-row.js";
 
 export {
   SOURCE_GROUNDING_DEFER_QUEUE_CAP,
@@ -192,7 +193,7 @@ export class SqliteSourceGroundingDeferQueueRepo implements SourceGroundingDefer
     limit = Number.MAX_SAFE_INTEGER
   ): readonly SourceGroundingDeferEntry[] {
     try {
-      const rows = this.listStatement.all(workspaceId, Math.max(0, limit)) as QueueRow[];
+      const rows = parseRows(this.listStatement.all(workspaceId, Math.max(0, limit)), { parse: (value: unknown) => value as QueueRow }, "queue row");
       return rows.map(mapRow);
     } catch (error) {
       throw new StorageError(
@@ -206,7 +207,7 @@ export class SqliteSourceGroundingDeferQueueRepo implements SourceGroundingDefer
   public stats(workspaceId: string): SourceGroundingDeferStats {
     try {
       const queueStats = this.readQueueStats(workspaceId);
-      const reasons = this.listReasonsStatement.all(workspaceId) as ReasonCountRow[];
+      const reasons = parseRows(this.listReasonsStatement.all(workspaceId), { parse: (value: unknown) => value as ReasonCountRow }, "reason count row");
       return buildStats(queueStats, this.cap, reasons);
     } catch (error) {
       throw new StorageError(
@@ -227,7 +228,7 @@ export class SqliteSourceGroundingDeferQueueRepo implements SourceGroundingDefer
                COALESCE(SUM(capacity_blocked), 0) AS capacity_blocked
         FROM source_grounding_defer_queue
       `).get() as QueueStatsRow | undefined;
-      const reasons = this.aggregateReasonsStatement.all() as ReasonCountRow[];
+      const reasons = parseRows(this.aggregateReasonsStatement.all(), { parse: (value: unknown) => value as ReasonCountRow }, "reason count row");
       return buildStats(row ?? emptyQueueStats(), this.cap, reasons, "aggregate");
     } catch (error) {
       throw new StorageError(

@@ -23,6 +23,24 @@
  * - `config` — configuration schemas.
  * - `shared` — primitives shared across the above.
  */
+export type { EnvLookup } from "./config/env-lookup.js";
+export {
+  isEnvFlagDisabled,
+  parseDefaultOnFlag,
+  parseEnvBoolean,
+  parseEnvOptionalNonNegativeSafeInt,
+  parseEnvOptionalNumber,
+  parseEnvPositiveInt,
+  parseSourceRefRobust
+} from "./config/env-value.js";
+export type { DiagnosticLogger, LoggerCorrelationIds, LoggerPort } from "./runtime/logger-port.js";
+export {
+  bindDiagnosticLogger,
+  bindLoggerCorrelation,
+  diagnosticError,
+  diagnosticWarn,
+  withLoggerCorrelation
+} from "./runtime/logger-port.js";
 export * from "./workspace/workspace.js";
 export * from "./workspace/workspace-files.js";
 export * from "./runtime/run.js";
@@ -181,6 +199,13 @@ export * from "./workers/auditor-ports.js";
 export * from "./shared/read-error-message.js";
 export { AlayaError, type AlayaErrorOptions } from "./shared/alaya-error.js";
 export { deepFreeze } from "./shared/deep-freeze.js";
+export { isUniqueConstraintError } from "./shared/sqlite-unique-constraint.js";
+export { hashMemoryContent } from "./shared/memory-content-hash.js";
+export {
+  RECALL_TOKEN_ECONOMY_SAMPLE_SCHEMA_VERSION,
+  RecallTokenEconomySampleSchema,
+  type RecallTokenEconomySample
+} from "./recall/recall-token-economy.js";
 export {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_JSON_OBJECT_MAX_CHARS,
@@ -201,3 +226,22 @@ export {
 } from "./shared/standard-response.js";
 export { ManifestationBudgetConfigRouteDataSchema } from "./recall/manifestation-budget.js";
 export * from "./garden/semantic-artifact.js";
+export {
+  canonicalizeSemanticExtractionProfile,
+  semanticExtractionProfilesEqual,
+  semanticExtractionProfilePreimage
+} from "./garden/semantic-extraction-profile.js";
+export { KeyedMutex } from "./shared/keyed-mutex.js";
+export {
+  CJK_INTERROGATIVE_FALLBACK_ATOMS
+} from "./shared/cjk-interrogative-fallback-atoms.js";
+export {
+  CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
+  __resetCjkSegmentationStateForTests,
+  __setCjkSegmentationLoaderForTests,
+  isCjkSegmentationCandidate,
+  readCjkSegmentationStatus,
+  segmentCjkRun,
+  warmCjkSegmentation
+} from "./shared/cjk-segmentation.js";
+export type { CjkSegmentationStatus } from "./shared/cjk-segmentation.js";

@@ -5,7 +5,7 @@ import {
   assertLegacyPathRelationWriteAllowed
 } from "../../sqlite/temporal-projection-selection.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString } from "../shared/validators.js";
 import {
   findActivePathRelationPage,

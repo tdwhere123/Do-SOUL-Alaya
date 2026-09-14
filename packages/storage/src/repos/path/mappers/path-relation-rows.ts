@@ -6,8 +6,13 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseJsonColumnWithSchema } from "../../shared/parse-json-column.js";
+import {
+  readNonEmptyStringField,
+  readRecord,
+  type RowParser
+} from "../../shared/parse-row.js";
 import {
   DEFAULT_REPO_LIST_PAGE_LIMIT,
   parsePageLimit,
@@ -69,6 +74,24 @@ export function parseParsedRowCacheMax(value: number): number {
 
   return value;
 }
+
+export const PathRelationRowParser: RowParser<PathRelationRow> = {
+  parse(value: unknown): PathRelationRow {
+    const record = readRecord(value, "path relation row");
+    return {
+      path_id: readNonEmptyStringField(record, "path_id"),
+      workspace_id: readNonEmptyStringField(record, "workspace_id"),
+      anchors_json: readNonEmptyStringField(record, "anchors_json"),
+      constitution_json: readNonEmptyStringField(record, "constitution_json"),
+      effect_vector_json: readNonEmptyStringField(record, "effect_vector_json"),
+      plasticity_state_json: readNonEmptyStringField(record, "plasticity_state_json"),
+      lifecycle_json: readNonEmptyStringField(record, "lifecycle_json"),
+      legitimacy_json: readNonEmptyStringField(record, "legitimacy_json"),
+      created_at: readNonEmptyStringField(record, "created_at"),
+      updated_at: readNonEmptyStringField(record, "updated_at")
+    };
+  }
+};
 
 export function parsePathRelationRow(row: PathRelationRow): Readonly<PathRelation> {
   return parsePathRelation({

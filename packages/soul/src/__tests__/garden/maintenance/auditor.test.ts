@@ -368,7 +368,7 @@ function createAuditor(options: {
     ),
     generateDraftCandidates: vi.fn(async () => options.draftCandidates ?? []),
     findHighFrequencyPatterns: vi.fn(async () => options.patterns ?? []),
-    createSynthesisCandidate: vi.fn(async (_workspaceId: string, patternKey: string) => ({
+    createSynthesisCandidate: vi.fn( (_workspaceId: string, patternKey: string) => ({
       candidate_id: `candidate:${patternKey}`
     })),
     hasPendingSynthesisCandidate: vi.fn(async (_workspaceId: string, patternKey: string) =>

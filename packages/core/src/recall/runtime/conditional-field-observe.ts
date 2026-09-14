@@ -21,12 +21,9 @@ import {
   createConditionalField,
   type FieldEngineState
 } from "../conditional-field/engine/field-engine.js";
-import {
-  adjacencyKindsFor,
-  hasOpenPairs,
-  routingOverlayKinds,
-  seedProgramStates
-} from "../conditional-field/engine/path-composition.js";
+import { adjacencyKindsFor } from "../conditional-field/engine/path-composition-adjacency.js";
+import { seedProgramStates } from "../conditional-field/engine/path-composition-seed.js";
+import { hasOpenPairs, routingOverlayKinds } from "../conditional-field/engine/path-routing.js";
 import { collectRelations } from "../conditional-field/query/compile-query.js";
 import { ObservedSourceFacts } from "./observed-source-facts.js";
 import {

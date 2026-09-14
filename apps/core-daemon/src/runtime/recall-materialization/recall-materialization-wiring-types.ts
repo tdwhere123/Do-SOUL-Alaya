@@ -73,6 +73,9 @@ export type CreateRecallMaterializationWiringInput = {
   readonly taskSurfaceBuilder: TaskSurfaceBuilder;
   readonly trustStateRecorder: {
     findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
+    findDeliveriesByIds?(
+      deliveryIds: readonly string[]
+    ): Promise<ReadonlyMap<string, Readonly<ContextDeliveryRecord> | null>>;
   };
   readonly edgeProposalService: EdgeProposalService;
   readonly dynamicsService: DynamicsService;

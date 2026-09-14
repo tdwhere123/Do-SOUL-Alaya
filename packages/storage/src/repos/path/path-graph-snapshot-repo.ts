@@ -1,8 +1,9 @@
 import { PathGraphSnapshotSchema, type PathGraphSnapshot } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
 
 type PathGraphSnapshotMetrics = Omit<PathGraphSnapshot, "snapshot_id" | "workspace_id" | "snapshot_at">;
 
@@ -145,7 +146,7 @@ export class SqlitePathGraphSnapshotRepo implements PathGraphSnapshotRepo {
     }
 
     try {
-      const rows = this.findHistoryStatement.all(parsedWorkspaceId, parsedLimit) as PathGraphSnapshotRow[];
+      const rows = parseRows(this.findHistoryStatement.all(parsedWorkspaceId, parsedLimit), { parse: (value: unknown) => value as PathGraphSnapshotRow }, "path graph snapshot row");
       return deepFreeze(rows.map((row) => parsePathGraphSnapshotRow(row)));
     } catch (error) {
       if (error instanceof StorageError) {

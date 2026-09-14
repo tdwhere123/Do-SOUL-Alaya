@@ -1,3 +1,4 @@
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   type ConversationToolCatalog,
   type ToolProvider,
@@ -188,7 +189,7 @@ export function createDaemonMcpCatalogFromEnv(input: {
   readonly warn?: WarnLogger;
 }): DaemonMcpCatalog {
   const warn = input.warn ?? defaultWarn;
-  const env = input.env ?? process.env;
+  const env = input.env ?? processEnvLookup();
   const rawToolCatalog = readDaemonMcpCatalogEnvironment(env, warn).rawToolCatalog;
   const isServerAllowed = (serverName: string): boolean =>
     parseAllowedMcpServerNames(env.ALAYA_ALLOWED_MCP_SERVERS).includes(serverName);

@@ -1,13 +1,16 @@
 import type { Proposal } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString, parseTimestamp } from "../../shared/validators.js";
 import { parseMemoryProposalOperation, parseProposalId, parseProposalReviewerAssignment, parseProposalReviewerAssignmentRow, parseProposalRow, parseProposedChanges, parseSourceDeliveryIds, parseWorkspaceId } from "../mappers/mappers.js";
 import { parseProposedPathRelation } from "../path-relations.js";
 import type { PendingProposalSummaryRow, ProposalReviewerAssignmentRow, ProposalRow } from "../mappers/rows.js";
 import type { ProposalStatements } from "../statements/sqlite-proposal-statements.js";
 import { SQLITE_VARIABLE_CHUNK_SIZE, type FindPendingSummariesOptions, type PendingProposalSummary, type ProposalListPageOptions, type ProposalReviewerAssignment, type ProposalReviewerAssignmentInput, type ScopedProposal } from "../types.js";
+import { parseRows } from "../../shared/parse-row.js";
+import { ProposalRowParser } from "../mappers/mappers.js";
+import { PendingProposalSummaryRowParser } from "../mappers/mappers.js";
 
 interface PendingSummariesQuery {
   readonly sql: string;
@@ -65,9 +68,9 @@ export class ProposalReadQueries {
     try {
       const rows =
         page === undefined
-          ? (this.statements.findByWorkspaceIdStatement.all(parsedWorkspaceId) as ProposalRow[])
-          : (this.statements.findByWorkspaceIdPagedStatement.all(parsedWorkspaceId, page.limit, page.offset) as ProposalRow[]);
-      return rows.map((row) => parseProposalRow(row));
+          ? (parseRows(this.statements.findByWorkspaceIdStatement.all(parsedWorkspaceId), ProposalRowParser, "proposal row"))
+          : (parseRows(this.statements.findByWorkspaceIdPagedStatement.all(parsedWorkspaceId, page.limit, page.offset), ProposalRowParser, "proposal row"));
+      return rows;
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -103,9 +106,9 @@ export class ProposalReadQueries {
     try {
       const rows =
         page === undefined
-          ? (this.statements.findPendingStatement.all(parsedWorkspaceId) as ProposalRow[])
-          : (this.statements.findPendingPagedStatement.all(parsedWorkspaceId, page.limit, page.offset) as ProposalRow[]);
-      return rows.map((row) => parseProposalRow(row));
+          ? (parseRows(this.statements.findPendingStatement.all(parsedWorkspaceId), ProposalRowParser, "proposal row"))
+          : (parseRows(this.statements.findPendingPagedStatement.all(parsedWorkspaceId, page.limit, page.offset), ProposalRowParser, "proposal row"));
+      return rows;
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -184,7 +187,10 @@ export class ProposalReadQueries {
     const query = buildPendingSummariesQuery(parsedWorkspaceId, referenceTime, options);
 
     try {
-      const rows = this.activeConnection().prepare(query.sql).all(...query.params) as PendingProposalSummaryRow[];
+      const rows = parseRows(this.activeConnection().prepare(query.sql).all(...query.params),
+        PendingProposalSummaryRowParser,
+        "pending proposal summary row"
+      );
       return rows.map((row) => parsePendingProposalSummary(row));
     } catch (error) {
       throw new StorageError(

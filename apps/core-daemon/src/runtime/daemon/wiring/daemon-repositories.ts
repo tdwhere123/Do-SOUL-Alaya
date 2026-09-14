@@ -1,3 +1,4 @@
+import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
   SqliteBootstrappingRecordRepo,
   SqliteClaimFormRepo,
@@ -129,9 +130,9 @@ function createDaemonMemoryRepos(input: {
     memoryEntryRepo,
     globalMemoryRepo: createOptionalGlobalMemoryRepo(input.database),
     globalMemoryRecallCacheRepo: createOptionalGlobalMemoryRecallCacheRepo(input.database),
-    orphanDetectionEnabled: process.env.ORPHAN_DETECTION_ENABLED !== "false",
+    orphanDetectionEnabled: processEnvLookup().ORPHAN_DETECTION_ENABLED !== "false",
     orphanRadarRepo:
-      process.env.ORPHAN_DETECTION_ENABLED !== "false"
+      processEnvLookup().ORPHAN_DETECTION_ENABLED !== "false"
         ? new SqliteOrphanRadarRepo(input.database)
         : null,
     pathRelationRepo: new SqlitePathRelationRepo(input.database),

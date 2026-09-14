@@ -2,6 +2,7 @@ import type { AlayaDaemonRuntime } from "./daemon-runtime-types.js";
 import { SqliteSourceRootRecallReader } from "@do-soul/alaya-storage";
 import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
 import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
+import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
   createSourceAdmissionPort,
   createAuditedSourceAdmission,
@@ -150,7 +151,7 @@ function createDaemonAppEnvironmentInput(input: FinalizeDaemonRuntimeWiringInput
     principalCodingEngineAvailable: input.principalCodingAvailability.available,
     repoRoot: input.repoRoot,
     filesDirectory: input.filesDirectory,
-    env: process.env,
+    env: processEnvLookup(),
     listServerHardConstraints: input.listServerHardConstraints,
     warn: input.warnLogger.warn,
     probeDatabase: () => {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  diagnosticWarn,
   type GardenTaskDescriptor,
   type GardenTaskKindValue,
   type GardenTierValue
@@ -106,7 +107,7 @@ function systemNowIso(): string {
 }
 
 function defaultGardenRuntimeWarn(message: string, meta: Record<string, unknown>): void {
-  console.warn(message, meta);
+  diagnosticWarn(message, meta);
 }
 
 function createGardenSchedulerRuntime(

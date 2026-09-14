@@ -1,25 +1,17 @@
 import {
-  CJK_SEGMENTATION_FALLBACK_WARNING_CODE as CORE_CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
-  readCjkSegmentationStatus as readCoreCjkSegmentationStatus
-} from "@do-soul/alaya-core";
-import {
-  readCjkSegmentationStatus as readStorageCjkSegmentationStatus,
-  STORAGE_CJK_SEGMENTATION_FALLBACK_WARNING_CODE
-} from "@do-soul/alaya-storage";
+  CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
+  readCjkSegmentationStatus
+} from "@do-soul/alaya-protocol";
 
 export function collectCjkSegmentationProvenance(): {
-  core_status: ReturnType<typeof readCoreCjkSegmentationStatus>;
-  storage_status: ReturnType<typeof readStorageCjkSegmentationStatus>;
+  core_status: ReturnType<typeof readCjkSegmentationStatus>;
+  storage_status: ReturnType<typeof readCjkSegmentationStatus>;
   warnings: string[];
 } {
-  const core_status = readCoreCjkSegmentationStatus();
-  const storage_status = readStorageCjkSegmentationStatus();
+  const status = readCjkSegmentationStatus();
   return {
-    core_status,
-    storage_status,
-    warnings: [
-      ...(core_status === "unavailable" ? [CORE_CJK_SEGMENTATION_FALLBACK_WARNING_CODE] : []),
-      ...(storage_status === "unavailable" ? [STORAGE_CJK_SEGMENTATION_FALLBACK_WARNING_CODE] : [])
-    ]
+    core_status: status,
+    storage_status: status,
+    warnings: status === "unavailable" ? [CJK_SEGMENTATION_FALLBACK_WARNING_CODE] : []
   };
 }

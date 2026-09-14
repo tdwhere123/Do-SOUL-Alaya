@@ -7,7 +7,7 @@ import {
 
 export function readApiKey(
   binding: EngineBinding,
-  getEnv: (key: string) => string | undefined = (key) => process.env[key]
+  getEnv: (key: string) => string | undefined
 ): string | undefined {
   if ("api_key" in binding && typeof binding.api_key === "string" && binding.api_key.length > 0) {
     return binding.api_key;

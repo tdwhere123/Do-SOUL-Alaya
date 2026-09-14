@@ -1,7 +1,7 @@
 import { BootstrappingRecordSchema, type BootstrappingRecord } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 
 interface BootstrappingRecordRow {

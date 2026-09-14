@@ -76,15 +76,6 @@ export function sourceBoundF3Seal(): SourceBoundF3Seal {
   };
 }
 
-function sourceBoundF3SealStatus(): SourceBoundF3Seal {
-  return sourceBoundF3Seal();
-}
-
-/** Kept for callers outside this workstream; prefer sourceBoundF3Seal(). */
-export function assertSourceBoundF3SealCurrent(): SourceBoundF3Seal {
-  return sourceBoundF3SealStatus();
-}
-
 export function sha256Utf8(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }

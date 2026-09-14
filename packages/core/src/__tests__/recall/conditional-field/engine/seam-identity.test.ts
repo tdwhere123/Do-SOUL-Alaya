@@ -8,10 +8,8 @@ import {
   type QueryProgram,
   type RelationValidity
 } from "@do-soul/alaya-protocol";
-import {
-  adjacencyEffectsForRows,
-  seedProgramStates
-} from "../../../../recall/conditional-field/engine/path-composition.js";
+import { adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { RELATION_ROUTING } from "../../../../recall/runtime/conditional-field-observe.js";
 import { defaultView, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 

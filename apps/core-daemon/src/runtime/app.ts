@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
+import { processEnvLookup } from "./config/daemon-config-environment.js";
 import {
   applyRemoteBindTokenRotation,
   authorizeProtectedRequest,
@@ -162,7 +163,7 @@ export function createApp(
   const protectionConfig =
     services.requestProtection === undefined
       ? undefined
-      : applyRemoteBindTokenRotation(services.requestProtection, process.env);
+      : applyRemoteBindTokenRotation(services.requestProtection, processEnvLookup());
   const requestProtection = resolveRequestProtectionSettings(protectionConfig);
   const bodyLimits = createRequestBodyLimits();
 
@@ -244,7 +245,7 @@ function resolveRequestProtectionSettings(
   return {
     allowedOrigin:
       requestProtection?.allowedOrigin ??
-      process.env.ALLOWED_ORIGIN ??
+      processEnvLookup().ALLOWED_ORIGIN ??
       DEFAULT_DAEMON_ALLOWED_ORIGIN,
     allowDesktopOriginlessRequests:
       requestProtection?.allowDesktopOriginlessRequests ?? true

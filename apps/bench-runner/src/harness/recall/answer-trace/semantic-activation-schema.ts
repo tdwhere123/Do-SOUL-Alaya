@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EVIDENCE_DOCUMENT_MAX_OPERATOR_ID } from "@do-soul/alaya-core";
 import {
   factSlotsHaveRequiredRoles,
   RecallFactKeyProjectionFormSchema,
@@ -82,7 +83,7 @@ const EvidenceSemanticObservationSchema = z.object({
 
 export const EvidenceSemanticActivationReceiptSchema = z.object({
   schema_version: z.literal(1),
-  operator_id: z.literal("evidence_document_max_v1"),
+  operator_id: z.literal(EVIDENCE_DOCUMENT_MAX_OPERATOR_ID),
   state: z.literal("observed"),
   score: z.number().min(0).max(1),
   winner: EvidenceSemanticObservationSchema,

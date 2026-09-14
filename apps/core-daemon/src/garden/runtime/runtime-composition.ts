@@ -163,7 +163,7 @@ export function createGardenRuntimeJanitor(
   const cleanupPort: JanitorControlPlaneCleanupPort = {
     findExpiredObjects: async (workspaceId: string, nowIso: string) =>
       input.handoffGapRepo.findExpiredObjectsByWorkspace(workspaceId, nowIso),
-    removeExpiredObjects: async (_workspaceId: string, objectIds: readonly string[]) => {
+    removeExpiredObjects: (_workspaceId: string, objectIds: readonly string[]) => {
       for (const id of objectIds) {
         input.handoffGapRepo.deleteById(id);
       }

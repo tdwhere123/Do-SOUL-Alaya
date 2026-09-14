@@ -6,7 +6,7 @@ import {
   type FieldSnapshot,
   type FieldValue
 } from "@do-soul/alaya-protocol";
-import { composedFacetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { composedFacetPathId } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
 import {
   continueAcceptingIndex,
   projectAcceptingIndex

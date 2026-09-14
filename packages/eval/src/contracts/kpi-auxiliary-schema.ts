@@ -1,4 +1,14 @@
 import { z } from "zod";
+import {
+  RECALL_TOKEN_ECONOMY_SAMPLE_SCHEMA_VERSION,
+  RecallTokenEconomySampleSchema,
+  type RecallTokenEconomySample
+} from "@do-soul/alaya-protocol";
+
+export {
+  RecallTokenEconomySampleSchema,
+  type RecallTokenEconomySample
+};
 
 const RatioSchema = z.number().min(0).max(1);
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -134,22 +144,9 @@ const PerCallStatSchema = z
   })
   .strict();
 
-export const RecallTokenEconomySampleSchema = z
-  .object({
-    delivered_context_tokens_estimate: z.number().int().nonnegative(),
-    coarse_pool_size: z.number().int().nonnegative(),
-    fine_evaluated: z.number().int().nonnegative(),
-    fine_pruned_count: z.number().int().nonnegative(),
-    fine_priority_overflow_count: z.number().int().nonnegative().default(0),
-    fusion_families_with_hits: z.number().int().nonnegative(),
-    embedding_inference_calls: z.number().int().nonnegative()
-  })
-  .strict();
-export type RecallTokenEconomySample = z.infer<typeof RecallTokenEconomySampleSchema>;
-
 export const RecallTokenEconomySchema = z
   .object({
-    schema_version: z.literal("bench-recall-token-economy.v1"),
+    schema_version: z.literal(RECALL_TOKEN_ECONOMY_SAMPLE_SCHEMA_VERSION),
     // Number of per-recall samples (one per recall call observed across
     // all questions in the run). Zero when no recall produced diagnostics
     // (e.g. shard with no questions); a run with this at zero will skip

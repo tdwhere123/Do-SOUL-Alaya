@@ -89,10 +89,6 @@ export type {
   RequestActualCost
 } from "./runtime/conditional-field-execution-receipt.js";
 export { compileConditionalFieldQuery, interpretationIdentity } from "./conditional-field/query/compile-query.js";
-export {
-  attributeUsageReports,
-  type UsageReportAttribution
-} from "../relations/path-plasticity/causal-usage-projection.js";
 export type {
   KeywordSearchBatchQuery,
   KeywordSearchLaneScope,
@@ -102,6 +98,8 @@ export type {
   KeywordSearchLaneReceipt,
   KeywordSearchResult,
   RecallMemoryListPageOptions,
+  RecallTierWindowCursor,
+  RecallTierWindowResult,
   RecallCandidate,
   RecallCandidateDropReason,
   RecallResult,

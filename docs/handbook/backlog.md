@@ -165,7 +165,7 @@ the listed zero-coverage files no longer at 0%.
 `packages/storage/src/repos/runtime/`); `EventLogBackedCache` still has
 no TTL/max (`packages/core/src/governance/cache/event-log-backed-cache.ts`,
 also `#BL-068`); FTS token policy lives in
-`packages/protocol/src/soul/fts-search-policy.ts` (review, not deletion);
+`packages/protocol/src/recall/fts-search-policy.ts` (review, not deletion);
 Garden raw-signal salvage exists
 (`packages/soul/src/garden/official-api/raw-signal-envelope.ts:59`).
 Hardcoded tuning constants and remaining silent-catch/void-promise

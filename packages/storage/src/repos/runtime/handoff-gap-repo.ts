@@ -1,11 +1,14 @@
 import { GapRecordSchema, HandoffRecordSchema, type GapRecord, type HandoffRecord } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import { parseRows } from "../shared/parse-row.js";
 import {
+  ExpiredObjectRowParser,
+  GapRecordRowParser,
+  HandoffRecordRowParser,
   parseGapRow,
   parseHandoffRow,
-  type ExpiredObjectRow,
   type GapRecordRow,
   type HandoffRecordRow
 } from "./mappers/handoff-gap-rows.js";
@@ -155,29 +158,35 @@ export class SqliteHandoffGapRepo {
 
   public listAll(): ReadonlyArray<Readonly<HandoffRecord | GapRecord>> {
     try {
-      const handoffRows = this.database.connection
-        .prepare(
-          `SELECT
+      const handoffRows = parseRows(this.database.connection
+          .prepare(
+            `SELECT
             runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
             retention_policy, handoff_kind, source_run_id, target_run_id, surface_id,
             ttl_ms, recurrence_runs, recurrence_surfaces, governance_impact,
             unresolved_age_ms, upgrade_candidate
           FROM handoff_records
           ORDER BY runtime_id ASC`
-        )
-        .all() as HandoffRecordRow[];
+          )
+          .all(),
+        HandoffRecordRowParser,
+        "handoff record row"
+      );
 
-      const gapRows = this.database.connection
-        .prepare(
-          `SELECT
+      const gapRows = parseRows(this.database.connection
+          .prepare(
+            `SELECT
             runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
             retention_policy, gap_kind, detected_in_run_id, surface_id, description,
             ttl_ms, recurrence_runs, recurrence_surfaces, governance_impact,
             unresolved_age_ms, upgrade_candidate
           FROM gap_records
           ORDER BY runtime_id ASC`
-        )
-        .all() as GapRecordRow[];
+          )
+          .all(),
+        GapRecordRowParser,
+        "gap record row"
+      );
 
       const results: Array<Readonly<HandoffRecord | GapRecord>> = [
         ...handoffRows.map((row) => parseHandoffRow(row)),
@@ -192,9 +201,9 @@ export class SqliteHandoffGapRepo {
 
   public findByRunId(runId: string): ReadonlyArray<Readonly<HandoffRecord | GapRecord>> {
     try {
-      const handoffRows = this.database.connection
-        .prepare(
-          `SELECT
+      const handoffRows = parseRows(this.database.connection
+          .prepare(
+            `SELECT
             runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
             retention_policy, handoff_kind, source_run_id, target_run_id, surface_id,
             ttl_ms, recurrence_runs, recurrence_surfaces, governance_impact,
@@ -202,12 +211,15 @@ export class SqliteHandoffGapRepo {
           FROM handoff_records
           WHERE source_run_id = ?
           ORDER BY runtime_id ASC`
-        )
-        .all(runId) as HandoffRecordRow[];
+          )
+          .all(runId),
+        HandoffRecordRowParser,
+        "handoff record row"
+      );
 
-      const gapRows = this.database.connection
-        .prepare(
-          `SELECT
+      const gapRows = parseRows(this.database.connection
+          .prepare(
+            `SELECT
             runtime_id, object_kind, task_surface_ref, expires_at, derived_from,
             retention_policy, gap_kind, detected_in_run_id, surface_id, description,
             ttl_ms, recurrence_runs, recurrence_surfaces, governance_impact,
@@ -215,8 +227,11 @@ export class SqliteHandoffGapRepo {
           FROM gap_records
           WHERE detected_in_run_id = ?
           ORDER BY runtime_id ASC`
-        )
-        .all(runId) as GapRecordRow[];
+          )
+          .all(runId),
+        GapRecordRowParser,
+        "gap record row"
+      );
 
       const results: Array<Readonly<HandoffRecord | GapRecord>> = [
         ...handoffRows.map((row) => parseHandoffRow(row)),
@@ -283,9 +298,9 @@ export class SqliteHandoffGapRepo {
     nowIso: string
   ): ReadonlyArray<{ object_kind: string; object_id: string; expires_at: string }> {
     try {
-      const rows = this.database.connection
-        .prepare(
-          `SELECT runtime_id AS object_id, object_kind, expires_at
+      const rows = parseRows(this.database.connection
+          .prepare(
+            `SELECT runtime_id AS object_id, object_kind, expires_at
           FROM handoff_records
           WHERE expires_at IS NOT NULL AND expires_at <= ?
           UNION
@@ -293,8 +308,11 @@ export class SqliteHandoffGapRepo {
           FROM gap_records
           WHERE expires_at IS NOT NULL AND expires_at <= ?
           ORDER BY expires_at ASC`
-        )
-        .all(nowIso, nowIso) as ExpiredObjectRow[];
+          )
+          .all(nowIso, nowIso),
+        ExpiredObjectRowParser,
+        "expired object row"
+      );
 
       return Object.freeze(rows.map((row) => Object.freeze({ ...row })));
     } catch (error) {
@@ -311,9 +329,9 @@ export class SqliteHandoffGapRepo {
     nowIso: string
   ): ReadonlyArray<{ object_kind: string; object_id: string; expires_at: string }> {
     try {
-      const rows = this.database.connection
-        .prepare(
-          `SELECT h.runtime_id AS object_id, h.object_kind, h.expires_at
+      const rows = parseRows(this.database.connection
+          .prepare(
+            `SELECT h.runtime_id AS object_id, h.object_kind, h.expires_at
           FROM handoff_records h
           INNER JOIN runs r ON h.source_run_id = r.run_id
           WHERE h.expires_at IS NOT NULL AND h.expires_at <= ? AND r.workspace_id = ?
@@ -323,8 +341,11 @@ export class SqliteHandoffGapRepo {
           INNER JOIN runs r ON g.detected_in_run_id = r.run_id
           WHERE g.expires_at IS NOT NULL AND g.expires_at <= ? AND r.workspace_id = ?
           ORDER BY expires_at ASC`
-        )
-        .all(nowIso, workspaceId, nowIso, workspaceId) as ExpiredObjectRow[];
+          )
+          .all(nowIso, workspaceId, nowIso, workspaceId),
+        ExpiredObjectRowParser,
+        "expired object row"
+      );
 
       return Object.freeze(rows.map((row) => Object.freeze({ ...row })));
     } catch (error) {

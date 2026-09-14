@@ -1,3 +1,4 @@
+import { processEnvLookup } from "../config/daemon-config-environment.js";
 import {
   bindEventPublisher,
   ConflictDetectionService,
@@ -252,14 +253,14 @@ export const edgeReconciliationTestInternals = {
 };
 
 function readEnabledEnv(name: string, defaultValue: boolean): boolean {
-  return resolveProductFormationEnabled(process.env[name], defaultValue);
+  return resolveProductFormationEnabled(processEnvLookup()[name], defaultValue);
 }
 
 function createEdgeClassifyRuntime(
   wiring: Pick<EdgeRuntimeWiring, "warn">,
   sharedGardenComputeConfig: Awaited<ReturnType<EdgeRuntimeWiring["rawConfigService"]["getRuntimeGardenComputeConfig"]>>
 ) {
-  const edgeClassifyWiring = resolveEdgeClassifyWiring(process.env, sharedGardenComputeConfig);
+  const edgeClassifyWiring = resolveEdgeClassifyWiring(processEnvLookup(), sharedGardenComputeConfig);
   const edgeClassifyQueueRepoHolder: {
     current:
       | {

@@ -5,7 +5,7 @@ import {
 import {
   isCjkSegmentationCandidate,
   segmentCjkRun
-} from "./cjk-segmentation.js";
+} from "@do-soul/alaya-protocol";
 import { parseRows } from "./parse-row.js";
 import { FtsLaneRankRowParser } from "./sqlite-row-schemas.js";
 
@@ -67,8 +67,7 @@ export function queryFtsLaneRows(
   limit: number
 ): readonly FtsLaneRankRow[] {
   const matchExpression = buildWorkspaceScopedFtsMatch(workspaceId, laneTokens);
-  return Object.freeze(parseRows(
-    statement.all(workspaceId, matchExpression, limit),
+  return Object.freeze(parseRows(statement.all(workspaceId, matchExpression, limit),
     FtsLaneRankRowParser,
     "fts lane rank row"
   ));

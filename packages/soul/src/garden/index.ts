@@ -120,7 +120,6 @@ export {
   SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256,
   SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
   SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256,
-  assertSourceBoundF3SealCurrent,
   sourceBoundF3Seal
 } from "./extraction/semantic-factors/source-bound-seal.js";
 export {

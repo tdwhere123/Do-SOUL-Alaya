@@ -323,7 +323,7 @@ function formGroundedDraft(
       providerKind: GardenProviderKind.OFFICIAL_API,
       signalId: input.signal_id_for(index),
       createdAt,
-      sourceObservedAt: sourceObservedAt ?? createdAt,
+      ...(sourceObservedAt === undefined ? {} : { sourceObservedAt }),
       sourceGrounding
     }));
     return {

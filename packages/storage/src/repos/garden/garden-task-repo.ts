@@ -22,10 +22,12 @@ import {
   roleRank,
   stringifyPayload,
   resolveDuplicateGardenEnqueue,
-  type GardenTaskBacklogCountDbRow,
   type GardenTaskDbRow
 } from "./mappers/garden-task-rows.js";
 import type { GardenTaskBacklogCount, GardenTaskClaimResult, GardenTaskCompletionResult, GardenTaskEnqueueInput, GardenTaskEventInput, GardenTaskEventPublisherPort, GardenTaskExpiryInput, GardenTaskKindBacklogCount, GardenTaskReclaimInput, GardenTaskRepoPort, GardenTaskRow } from "./garden-task-types.js";
+import { parseRows } from "../shared/parse-row.js";
+import { GardenTaskDbRowParser } from "./mappers/garden-task-rows.js";
+import { GardenTaskBacklogCountDbRowParser } from "./mappers/garden-task-rows.js";
 
 export type * from "./garden-task-types.js";
 
@@ -117,12 +119,12 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     try {
       const rows =
         workspace_id === undefined
-          ? (this.peekPendingStatement.all(parsedRoleRank, parsedLimit) as GardenTaskDbRow[])
-          : (this.peekPendingByWorkspaceStatement.all(
+          ? (parseRows(this.peekPendingStatement.all(parsedRoleRank, parsedLimit), GardenTaskDbRowParser, "garden task row"))
+          : (parseRows(this.peekPendingByWorkspaceStatement.all(
               parsedRoleRank,
               parseNonEmptyString(workspace_id, "garden_task.workspace_id"),
               parsedLimit
-            ) as GardenTaskDbRow[]);
+            ), GardenTaskDbRowParser, "garden task row"));
       return rows.map((row) => parseGardenTaskRow(row));
     } catch (error) {
       if (error instanceof StorageError) {
@@ -305,7 +307,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     const cutoff = computeStaleClaimCutoff(now, staleAfterMs);
 
     try {
-      const rows = this.peekAbandonedClaimsStatement.all(cutoff) as GardenTaskDbRow[];
+      const rows = parseRows(this.peekAbandonedClaimsStatement.all(cutoff), GardenTaskDbRowParser, "garden task row");
       return rows.map((row) => parseGardenTaskRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to read abandoned Garden task claims.", error);
@@ -368,7 +370,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       );
     }
     try {
-      const rows = this.peekExpiredUnclaimedStatement.all(parsedKind, cutoff, limit) as GardenTaskDbRow[];
+      const rows = parseRows(this.peekExpiredUnclaimedStatement.all(parsedKind, cutoff, limit), GardenTaskDbRowParser, "garden task row");
       return rows.map((row) => parseGardenTaskRow(row));
     } catch (error) {
       throw new StorageError(
@@ -417,10 +419,10 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         ? null
         : parseNonEmptyString(workspace_id, "garden_task.workspace_id");
     try {
-      const rows = this.countByRoleStatusStatement.all(
+      const rows = parseRows(this.countByRoleStatusStatement.all(
         workspaceId,
         workspaceId
-      ) as GardenTaskBacklogCountDbRow[];
+      ), GardenTaskBacklogCountDbRowParser, "garden task backlog count row");
       return rows.map((row) => parseBacklogCountRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to count Garden task backlog.", error);

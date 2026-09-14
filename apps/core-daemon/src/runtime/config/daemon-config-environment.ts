@@ -1,4 +1,5 @@
 import { resolveCoreConfigEnvironmentKeys } from "@do-soul/alaya-core";
+import type { EnvLookup } from "@do-soul/alaya-protocol";
 
 export const DAEMON_ONLY_CONFIG_ENV_KEYS = Object.freeze({
   recall: Object.freeze({
@@ -83,6 +84,45 @@ export function listRegisteredDaemonEnvKeys(): readonly string[] {
   return Object.freeze([...REGISTERED_DAEMON_ENV_KEYS].sort());
 }
 
+const WATCHED_ENV_PREFIXES = ["ALAYA_", "OFFICIAL_"] as const;
+
+export function listUnregisteredPrefixedDaemonEnvKeys(
+  env: EnvLookup = processEnvLookup()
+): readonly string[] {
+  const unknown: string[] = [];
+  for (const key of Object.keys(env)) {
+    if (!WATCHED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      continue;
+    }
+    if (env[key] === undefined) {
+      continue;
+    }
+    if (!REGISTERED_DAEMON_ENV_KEYS.has(key)) {
+      unknown.push(key);
+    }
+  }
+  return Object.freeze(unknown.sort());
+}
+
+export function warnUnregisteredPrefixedDaemonEnvKeys(
+  env: EnvLookup = processEnvLookup(),
+  emitWarning: typeof process.emitWarning = process.emitWarning.bind(process)
+): readonly string[] {
+  const unknown = listUnregisteredPrefixedDaemonEnvKeys(env);
+  if (unknown.length === 0) {
+    return unknown;
+  }
+  emitWarning(
+    `Unregistered ALAYA_*/OFFICIAL_* environment keys are set and will be ignored: ${unknown.join(", ")}`,
+    {
+      type: "AlayaUnregisteredEnvWarning",
+      code: "ALAYA_UNREGISTERED_ENV_KEYS",
+      detail: JSON.stringify({ keys: unknown })
+    }
+  );
+  return unknown;
+}
+
 export function assertRegisteredDaemonEnvKey(key: string): void {
   if (!REGISTERED_DAEMON_ENV_KEYS.has(key)) {
     throw new Error(`unregistered daemon env key: ${key}`);
@@ -91,8 +131,13 @@ export function assertRegisteredDaemonEnvKey(key: string): void {
 
 export function readDaemonProcessEnv(
   key: string,
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: EnvLookup = processEnvLookup()
 ): string | undefined {
   assertRegisteredDaemonEnvKey(key);
   return env[key];
+}
+
+/** Single process-env bind for daemon code; prefer EnvLookup injection. */
+export function processEnvLookup(): EnvLookup {
+  return process.env;
 }

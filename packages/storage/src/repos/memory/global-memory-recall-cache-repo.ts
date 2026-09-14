@@ -1,6 +1,7 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import { parseRows } from "../shared/parse-row.js";
 import {
   DEFAULT_REPO_LIST_PAGE_LIMIT,
   parseNonEmptyString,
@@ -224,17 +225,17 @@ export class SqliteGlobalMemoryRecallCacheRepo implements GlobalMemoryRecallCach
     try {
       const rows =
         parsedClassification === undefined
-          ? (this.listByWorkspacePagedStatement.all(
+          ? (parseRows(this.listByWorkspacePagedStatement.all(
               parsedWorkspaceId,
               parsedPage.limit,
               parsedPage.offset
-            ) as GlobalMemoryRecallCacheRow[])
-          : (this.listByWorkspaceAndClassificationPagedStatement.all(
+            ), { parse: (value: unknown) => value as GlobalMemoryRecallCacheRow }, "global memory recall cache row"))
+          : (parseRows(this.listByWorkspaceAndClassificationPagedStatement.all(
               parsedWorkspaceId,
               parsedClassification,
               parsedPage.limit,
               parsedPage.offset
-            ) as GlobalMemoryRecallCacheRow[]);
+            ), { parse: (value: unknown) => value as GlobalMemoryRecallCacheRow }, "global memory recall cache row"));
 
       return rows.map((row) => parseGlobalMemoryRecallCacheRow(row));
     } catch (error) {
@@ -261,11 +262,11 @@ export class SqliteGlobalMemoryRecallCacheRepo implements GlobalMemoryRecallCach
     try {
       const rows =
         parsedClassification === undefined
-          ? (this.listByWorkspaceStatement.all(parsedWorkspaceId) as GlobalMemoryRecallCacheRow[])
-          : (this.listByWorkspaceAndClassificationStatement.all(
+          ? (parseRows(this.listByWorkspaceStatement.all(parsedWorkspaceId), { parse: (value: unknown) => value as GlobalMemoryRecallCacheRow }, "global memory recall cache row"))
+          : (parseRows(this.listByWorkspaceAndClassificationStatement.all(
               parsedWorkspaceId,
               parsedClassification
-            ) as GlobalMemoryRecallCacheRow[]);
+            ), { parse: (value: unknown) => value as GlobalMemoryRecallCacheRow }, "global memory recall cache row"));
 
       return rows.map((row) => parseGlobalMemoryRecallCacheRow(row));
     } catch (error) {
@@ -321,7 +322,7 @@ export class SqliteGlobalMemoryRecallCacheRepo implements GlobalMemoryRecallCach
           AND global_object_id IN (${placeholders})
         ORDER BY global_object_id ASC
       `);
-      const rows = statement.all(workspaceId, ...uniqueIds) as GlobalMemoryRecallCacheRow[];
+      const rows = parseRows(statement.all(workspaceId, ...uniqueIds), { parse: (value: unknown) => value as GlobalMemoryRecallCacheRow }, "global memory recall cache row");
       return Object.freeze(rows.map((row) => parseGlobalMemoryRecallCacheRow(row)));
     } catch (error) {
       if (error instanceof StorageError) {

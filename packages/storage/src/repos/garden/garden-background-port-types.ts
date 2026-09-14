@@ -138,7 +138,8 @@ export interface GardenAuditorBootstrappingPort {
   assessColdStart(workspaceId: string): Promise<ColdStartAssessment>;
   generateDraftCandidates(workspaceId: string): Promise<readonly DraftCandidate[]>;
   findHighFrequencyPatterns(workspaceId: string, minFrequency: number): Promise<readonly HighFrequencyPattern[]>;
-  createSynthesisCandidate(workspaceId: string, patternKey: string): Promise<{ readonly candidate_id: string }>;
+  // Sync so crystallization create can join EventLog appendManyWithMutation mutate.
+  createSynthesisCandidate(workspaceId: string, patternKey: string): { readonly candidate_id: string };
   hasPendingSynthesisCandidate(workspaceId: string, patternKey: string): Promise<boolean>;
 }
 

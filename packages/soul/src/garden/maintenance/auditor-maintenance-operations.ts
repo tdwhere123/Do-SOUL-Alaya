@@ -271,7 +271,7 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
         continue;
       }
 
-      await this.appendEventLogAndMutate(
+      const candidate = await this.appendEventLogAndMutate(
         {
           event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
           entity_type: "proposal",
@@ -286,11 +286,11 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
             run_id: task.run_id
           })
         },
-        () => undefined
-      );
-      const candidate = await this.dependencies.bootstrappingPort.createSynthesisCandidate(
-        task.workspace_id,
-        pattern.pattern_key
+        () =>
+          this.dependencies.bootstrappingPort.createSynthesisCandidate(
+            task.workspace_id,
+            pattern.pattern_key
+          )
       );
       created = [...created, candidate.candidate_id];
     }

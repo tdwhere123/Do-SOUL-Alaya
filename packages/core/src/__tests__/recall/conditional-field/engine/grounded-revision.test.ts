@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { productSubjectId, type QueryProgram, type QueryInterpretation, type Transition } from "@do-soul/alaya-protocol";
 import { createConditionalField, applyObserverPage, withdrawDerivationLeaves, type FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
-import { adjacencyEffectsForRows, seedProgramStates, composedFacetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { composedFacetPathId } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
+import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { leafDerivation, joinDerivation, reviseDerivations, derivationForest, evaluateDerivation } from "../../../../recall/conditional-field/engine/path-derivation.js";
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import {

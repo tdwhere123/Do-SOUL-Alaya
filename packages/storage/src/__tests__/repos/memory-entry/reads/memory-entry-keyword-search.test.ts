@@ -13,7 +13,7 @@ import {
   __setCjkSegmentationLoaderForTests,
   segmentCjkRun,
   warmCjkSegmentation
-} from "../../../../repos/shared/cjk-segmentation.js";
+} from "@do-soul/alaya-protocol";
 
 describe("buildObjectIdFilterSql", () => {
   it("builds parameterized filters for allowlisted object id columns", () => {
@@ -252,7 +252,7 @@ describe("tokenizeFtsQuery CJK segmentation fail-soft", () => {
     expect(emitWarning).toHaveBeenCalledWith(
       "[CjkSegmentation] @node-rs/jieba not ready; using surface-token fallback for this call",
       expect.objectContaining({
-        code: "ALAYA_STORAGE_CJK_SEGMENTATION_COLD_FALLBACK"
+        code: "ALAYA_CJK_SEGMENTATION_COLD_FALLBACK"
       })
     );
 
@@ -274,9 +274,9 @@ describe("tokenizeFtsQuery CJK segmentation fail-soft", () => {
     expect(emitWarning).toHaveBeenCalledWith(
       "[CjkSegmentation] @node-rs/jieba unavailable; using surface-token fallback",
       expect.objectContaining({
-        code: "ALAYA_STORAGE_CJK_SEGMENTATION_FALLBACK",
+        code: "ALAYA_CJK_SEGMENTATION_FALLBACK",
         detail: JSON.stringify({
-          layer: "storage",
+          layer: "protocol",
           error: "mock jieba load failure"
         })
       })

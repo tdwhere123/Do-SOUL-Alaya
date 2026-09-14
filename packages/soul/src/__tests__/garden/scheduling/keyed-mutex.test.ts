@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KeyedMutex } from "../../../garden/scheduling/keyed-mutex.js";
+import { KeyedMutex } from "@do-soul/alaya-protocol";
 
 function defer<T>(): { readonly promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -25,7 +25,6 @@ describe("KeyedMutex", () => {
       order.push("b:end");
     });
 
-    // The second same-key task must not begin until the first releases.
     await Promise.resolve();
     expect(order).toEqual(["a:start"]);
 
@@ -49,7 +48,6 @@ describe("KeyedMutex", () => {
       order.push("b:end");
     });
 
-    // b holds a different key, so it completes while a is still blocked.
     await b;
     expect(order).toEqual(["a:start", "b:start", "b:end"]);
 
@@ -80,15 +78,15 @@ describe("KeyedMutex", () => {
     const mutex = new KeyedMutex();
 
     await mutex.runExclusive("same", async () => "first");
-    expect(mutex.size).toBe(0);
+    expect(mutex.trackedKeyCount).toBe(0);
 
     await Promise.all([
       mutex.runExclusive("alpha", async () => "a"),
       mutex.runExclusive("beta", async () => "b")
     ]);
-    expect(mutex.size).toBe(0);
+    expect(mutex.trackedKeyCount).toBe(0);
 
     await mutex.runExclusive("same", async () => "again");
-    expect(mutex.size).toBe(0);
+    expect(mutex.trackedKeyCount).toBe(0);
   });
 });

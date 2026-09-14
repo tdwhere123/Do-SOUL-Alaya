@@ -1,4 +1,5 @@
 import {
+  diagnosticWarn,
   CandidateMemorySignalSchema,
   SignalEventType,
   SignalState,
@@ -89,7 +90,7 @@ export class SignalService {
   private readonly warn: SignalServiceWarnPort;
 
   public constructor(private readonly dependencies: SignalServiceDependencies) {
-    this.warn = dependencies.warn ?? ((message, meta) => console.warn(message, meta));
+    this.warn = dependencies.warn ?? ((message, meta) => diagnosticWarn(message, meta));
     const hasQueue = dependencies.sourceGroundingDeferQueue !== undefined;
     const hasTransitions = dependencies.sourceGroundingDeferTransitions !== undefined;
     if (hasQueue !== hasTransitions) {

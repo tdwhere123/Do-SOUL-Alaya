@@ -46,7 +46,7 @@ function checkDocPaths() {
       const raw = match[1];
       const relative = raw
         .split(/[\s#§]/u)[0]
-        ?.replace(/:\d+(?:-\d+)?$/u, "")
+        ?.replace(/:(?:\d+(?:-\d+)?)(?:,\d+(?:-\d+)?)*$/u, "")
         .replace(/[.,;:]+$/u, "") ?? "";
       if (relative.includes("*") || relative.includes("<") || relative.endsWith("/")) continue;
       const key = `${path.relative(repoRoot, file)}:${relative}`;
@@ -135,12 +135,30 @@ function visit(dir, onFile) {
     return;
   }
   for (const entry of entries) {
-    if (entry.name === "node_modules" || entry.name === "dist" || entry.name === ".git") continue;
+    if (
+      entry.name === "node_modules" ||
+      entry.name === "dist" ||
+      entry.name === ".git" ||
+      entry.name === ".pnpm-store" ||
+      entry.name === ".do-it"
+    ) {
+      continue;
+    }
     const child = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       visit(child, onFile);
       continue;
     }
-    if (entry.isFile() || statSync(child).isFile()) onFile(child);
+    if (entry.isSymbolicLink()) {
+      let stats;
+      try {
+        stats = statSync(child);
+      } catch {
+        continue;
+      }
+      if (stats.isFile()) onFile(child);
+      continue;
+    }
+    if (entry.isFile()) onFile(child);
   }
 }

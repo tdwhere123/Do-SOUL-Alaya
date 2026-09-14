@@ -1,8 +1,9 @@
 import { StorageTier, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../../shared/errors.js";
-import { parseMemoryEntryRow, parseStorageTier, type MemoryEntryRow } from "../../mappers/row-mapper.js";
+import { MemoryEntryRowParser, parseStorageTier } from "../../mappers/row-mapper.js";
 import type { RecallTierWindowQuery, RecallTierWindowResult } from "../../types.js";
 import type { RecallTierWindowStatements } from "../../statements/recall/recall-tier-window-statements.js";
+import { parseRows } from "../../../shared/parse-row.js";
 
 const MAX_RECALL_TIER_WINDOW_LIMIT = 102_400;
 
@@ -15,9 +16,11 @@ export function findRecallTierWindow(
   const cursor = parseRecallTierWindowCursor(query.cursor);
   try {
     const params = recallTierWindowParams(query.workspaceId, tier, cursor, limit + 1);
-    const rows = (tier === StorageTier.HOT
-      ? statements.findRecallHotWindowStatement.all(...params.hot)
-      : statements.findRecallTierWindowStatement.all(...params.tier)) as MemoryEntryRow[];
+    const rawRows =
+      tier === StorageTier.HOT
+        ? statements.findRecallHotWindowStatement.all(...params.hot)
+        : statements.findRecallTierWindowStatement.all(...params.tier);
+    const rows = parseRows(rawRows, MemoryEntryRowParser, "memory entry row");
     return buildRecallTierWindowResult(rows, limit);
   } catch (error) {
     if (error instanceof StorageError) throw error;
@@ -30,11 +33,11 @@ export function findRecallTierWindow(
 }
 
 function buildRecallTierWindowResult(
-  rows: readonly MemoryEntryRow[],
+  rows: readonly Readonly<MemoryEntry>[],
   limit: number
 ): Readonly<RecallTierWindowResult> {
   const truncated = rows.length > limit;
-  const memories = rows.slice(0, limit).map((row) => parseMemoryEntryRow(row));
+  const memories = rows.slice(0, limit);
   const last = truncated ? memories.at(-1) : undefined;
   return Object.freeze({
     memories: Object.freeze(memories),

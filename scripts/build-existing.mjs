@@ -77,15 +77,19 @@ if (existsSync(daemonDistDir)) {
 }
 
 // Inspector SPA frontend lives in apps/inspector/web — separate Vite build.
-// Skip when a prebuilt bundle is already present and the operator opted out
-// (CLI/MCP-only installs, or a tarball that vendors web/dist).
+// Default install/build skips the SPA toolchain unless ALAYA_BUILD_INSPECTOR_WEB=1
+// or a release tarball already vendors apps/inspector/web/dist/index.html.
 const inspectorWebDir = "apps/inspector/web";
 const inspectorWebIndex = join(inspectorWebDir, "dist", "index.html");
-const skipInspectorWeb =
-  process.env.ALAYA_BUILD_INSPECTOR_WEB === "0" && existsSync(inspectorWebIndex);
-if (skipInspectorWeb) {
-  console.log("skipping inspector web build (ALAYA_BUILD_INSPECTOR_WEB=0 and dist/index.html present)");
-} else if (existsSync(join(inspectorWebDir, "package.json"))) {
+const hasPrebuiltInspectorWeb = existsSync(inspectorWebIndex);
+const buildInspectorWeb = process.env.ALAYA_BUILD_INSPECTOR_WEB === "1";
+if (process.env.ALAYA_BUILD_INSPECTOR_WEB === "0") {
+  if (hasPrebuiltInspectorWeb) {
+    console.log("skipping inspector web build (ALAYA_BUILD_INSPECTOR_WEB=0; using prebuilt dist/index.html)");
+  } else {
+    console.log("skipping inspector web build (ALAYA_BUILD_INSPECTOR_WEB=0; no prebuilt dist/index.html)");
+  }
+} else if (buildInspectorWeb && existsSync(join(inspectorWebDir, "package.json"))) {
   const inspectorWebBuild = spawnSync(
     "pnpm",
     ["--dir", inspectorWebDir, "build"],
@@ -94,6 +98,10 @@ if (skipInspectorWeb) {
   if (inspectorWebBuild.status !== 0) {
     process.exit(inspectorWebBuild.status ?? 1);
   }
+} else if (hasPrebuiltInspectorWeb) {
+  console.log("using prebuilt inspector web dist (set ALAYA_BUILD_INSPECTOR_WEB=1 to rebuild)");
+} else if (existsSync(join(inspectorWebDir, "package.json"))) {
+  console.log("skipping inspector web build (set ALAYA_BUILD_INSPECTOR_WEB=1 to compile the SPA)");
 }
 
 process.exit(0);

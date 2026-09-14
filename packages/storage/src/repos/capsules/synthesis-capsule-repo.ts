@@ -8,7 +8,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
 import { toFieldSearchStorageError } from "../shared/field-search-errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import {
   queryFtsLaneRows,
   splitFtsLanes,
@@ -19,6 +19,7 @@ import {
   prepareSynthesisCapsuleStatements,
   type SynthesisCapsuleStatements
 } from "./statements/synthesis-capsule-statements.js";
+import { parseRows } from "../shared/parse-row.js";
 import {
   buildSynthesisFieldRefinementLevels,
   buildSynthesisFieldView,
@@ -254,10 +255,13 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
       const rows: SynthesisCapsuleRow[] = [];
       for (let offset = 0; offset < parsedObjectIds.length; offset += 500) {
         const chunk = parsedObjectIds.slice(offset, offset + 500);
-        rows.push(...this.statements.findByIdsStatement.all(
-          parsedWorkspaceId,
-          JSON.stringify(chunk)
-        ) as SynthesisCapsuleRow[]);
+        rows.push(
+          ...parseRows(
+            this.statements.findByIdsStatement.all(parsedWorkspaceId, JSON.stringify(chunk)),
+            { parse: (value: unknown) => value as SynthesisCapsuleRow },
+            "synthesis capsule row"
+          )
+        );
       }
       rows.sort((left, right) =>
         left.created_at.localeCompare(right.created_at) || left.object_id.localeCompare(right.object_id)
@@ -270,7 +274,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
 
   public async findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<SynthesisCapsule>[]> {
     try {
-      const rows = this.statements.findByWorkspaceIdStatement.all(workspaceId) as SynthesisCapsuleRow[];
+      const rows = parseRows(this.statements.findByWorkspaceIdStatement.all(workspaceId), { parse: (value: unknown) => value as SynthesisCapsuleRow }, "synthesis capsule row");
       return rows.map((row) => parseSynthesisCapsuleRow(row));
     } catch (error) {
       throw new StorageError(
@@ -283,7 +287,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
 
   public async findByTopicKey(workspaceId: string, topicKey: string): Promise<readonly Readonly<SynthesisCapsule>[]> {
     try {
-      const rows = this.statements.findByTopicKeyStatement.all(workspaceId, topicKey) as SynthesisCapsuleRow[];
+      const rows = parseRows(this.statements.findByTopicKeyStatement.all(workspaceId, topicKey), { parse: (value: unknown) => value as SynthesisCapsuleRow }, "synthesis capsule row");
       return rows.map((row) => parseSynthesisCapsuleRow(row));
     } catch (error) {
       throw new StorageError(

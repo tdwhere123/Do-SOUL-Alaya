@@ -1,4 +1,5 @@
 import { assertAllowedProviderChatUrl } from "./provider-url-guard.js";
+import type { EnvLookup } from "@do-soul/alaya-protocol";
 import type {
   ProviderChatCompletionRequest,
   ProviderRequestProfile
@@ -24,9 +25,12 @@ export function normalizeProviderBaseUrl(endpoint: string): string {
     : withoutSlash;
 }
 
-export function providerChatCompletionsUrl(providerUrl: string): string {
+export function providerChatCompletionsUrl(
+  providerUrl: string,
+  env: EnvLookup = {}
+): string {
   const url = `${normalizeProviderBaseUrl(providerUrl)}/chat/completions`;
-  assertAllowedProviderChatUrl(url);
+  assertAllowedProviderChatUrl(url, env);
   return url;
 }
 

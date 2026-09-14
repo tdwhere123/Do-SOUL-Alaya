@@ -4,6 +4,7 @@ import type {
   EnrichPendingFailedAttemptResult
 } from "../enrich-pending-repo.js";
 import type { EnrichPendingStatements } from "../statements/enrich-pending-statements.js";
+import { parseRows } from "../../shared/parse-row.js";
 
 interface ClaimRow {
   readonly workspace_id: string;
@@ -33,11 +34,11 @@ export function createClaimBatchTransaction(
       claimedAt: string,
       maxAttempts: number
     ): readonly EnrichPendingClaim[] => {
-      const candidates = statements.selectClaimableStatement.all(
+      const candidates = parseRows(statements.selectClaimableStatement.all(
         workspaceId,
         maxAttempts,
         limit
-      ) as ClaimRow[];
+      ), { parse: (value: unknown) => value as ClaimRow }, "claim row");
       const claimed: EnrichPendingClaim[] = [];
       for (const row of candidates) {
         const result = statements.claimStatement.run(claimedAt, row.workspace_id, row.memory_id);

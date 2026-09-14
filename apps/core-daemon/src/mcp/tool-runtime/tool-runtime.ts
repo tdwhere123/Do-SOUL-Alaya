@@ -1,4 +1,5 @@
 import { CoreError } from "@do-soul/alaya-core";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   ExecShellToolInputSchema,
   ExecShellToolResultSchema,
@@ -13,6 +14,7 @@ import {
   type ConversationRuntimeContext,
   type ToolUseBlock,
 } from "@do-soul/alaya-protocol";
+import { createWarnLogger } from "../../runtime/daemon/lifecycle/daemon-runtime-helpers.js";
 import { constantTimeTokenEqual } from "../../shared/constant-time-token.js";
 import {
   builtinConversationToolRequiresConfirmation,
@@ -163,7 +165,7 @@ function authorizeConfirmedBuiltinTool(
   toolUse: ToolUseBlock,
   configuredToken: string | undefined
 ): { readonly ok: true; readonly input: Record<string, unknown> } | StructuredToolErrorResult {
-  const token = normalizeConfirmationToken(configuredToken ?? process.env.ALAYA_MCP_TOOL_CONFIRMATION_TOKEN);
+  const token = normalizeConfirmationToken(configuredToken ?? processEnvLookup().ALAYA_MCP_TOOL_CONFIRMATION_TOKEN);
   if (token === null) {
     return {
       ok: false,
@@ -481,5 +483,5 @@ async function executeExternalConversationTool(input: {
   });
 }
 function defaultWarn(message: string, meta: Record<string, unknown>): void {
-  console.warn(message, meta);
+  createWarnLogger().warn(message, meta);
 }

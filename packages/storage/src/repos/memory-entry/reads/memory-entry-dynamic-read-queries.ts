@@ -4,9 +4,9 @@ import type { DynamicPreparedStatementCache } from "../../../sqlite/dynamic-prep
 import { parseNonEmptyString } from "../../shared/validators.js";
 import {
   MEMORY_ENTRY_SELECT_COLUMNS,
-  parseMemoryEntryRow,
-  type MemoryEntryRow
+  MemoryEntryRowParser
 } from "../mappers/row-mapper.js";
+import { parseRows, readNonEmptyStringField, readRecord, type RowParser } from "../../shared/parse-row.js";
 import {
   FIND_BY_EVIDENCE_REFS_INPUT_CAP,
   FIND_BY_EVIDENCE_REFS_ROW_LIMIT,
@@ -41,8 +41,11 @@ export class MemoryEntryDynamicReadQueries {
     `);
 
     try {
-      const rows = statement.all(parsedWorkspaceId, JSON.stringify(parsedObjectIds)) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parseRows(
+        statement.all(parsedWorkspaceId, JSON.stringify(parsedObjectIds)),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to load memory entries by ids.", error);
     }
@@ -73,8 +76,13 @@ export class MemoryEntryDynamicReadQueries {
     `);
 
     try {
-      const rows = statement.all(JSON.stringify(uniqueTags), workspaceId) as MemoryEntryRow[];
-      return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
+      return Object.freeze(
+        parseRows(
+          statement.all(JSON.stringify(uniqueTags), workspaceId),
+          MemoryEntryRowParser,
+          "memory entry row"
+        )
+      );
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -96,7 +104,7 @@ export class MemoryEntryDynamicReadQueries {
     try {
       const rows = queryEvidenceRefRows(this.statementCache, parsedWorkspaceId, cappedIds);
       reportEvidenceRefRowCap(parsedWorkspaceId, cappedIds.length, rows.length, this.diagnostics);
-      return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
+      return Object.freeze(rows);
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -133,23 +141,29 @@ export class MemoryEntryDynamicReadQueries {
   }
 }
 
-interface BoundEvidenceRefRow {
-  readonly evidence_ref: string;
-}
+const BoundEvidenceRefRowParser: RowParser<{ readonly evidence_ref: string }> = {
+  parse(value: unknown): { readonly evidence_ref: string } {
+    const record = readRecord(value, "bound evidence ref row");
+    return { evidence_ref: readNonEmptyStringField(record, "evidence_ref") };
+  }
+};
 
 function queryBoundEvidenceRefs(
   statementCache: DynamicPreparedStatementCache,
   workspaceId: string,
   evidenceObjectIds: readonly string[]
 ): readonly string[] {
-  const rows = statementCache.prepare(`
+  const rows = parseRows(statementCache.prepare(`
     SELECT DISTINCT evidence_ref
     FROM memory_entry_evidence_refs
     WHERE workspace_id = ?
       AND evidence_ref IN (SELECT value FROM json_each(?))
     ORDER BY evidence_ref ASC
-  `).all(workspaceId, JSON.stringify(evidenceObjectIds)) as BoundEvidenceRefRow[];
-  return rows.map((row) => parseNonEmptyString(row.evidence_ref, "evidence_ref"));
+  `).all(workspaceId, JSON.stringify(evidenceObjectIds)),
+    BoundEvidenceRefRowParser,
+    "bound evidence ref row"
+  );
+  return rows.map((row) => row.evidence_ref);
 }
 
 function capEvidenceRefLookupIds(
@@ -172,10 +186,11 @@ function queryEvidenceRefRows(
   statementCache: DynamicPreparedStatementCache,
   workspaceId: string,
   evidenceObjectIds: readonly string[]
-): readonly MemoryEntryRow[] {
-  return statementCache
-    .prepare(
-      `SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+): readonly Readonly<MemoryEntry>[] {
+  return parseRows(
+    statementCache
+      .prepare(
+        `SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
        FROM memory_entries
        WHERE workspace_id = ?
          AND COALESCE(retention_state, '') != 'tombstoned'
@@ -188,8 +203,11 @@ function queryEvidenceRefRows(
          )
        ORDER BY object_id ASC
        LIMIT ${FIND_BY_EVIDENCE_REFS_ROW_LIMIT}`
-    )
-    .all(workspaceId, workspaceId, JSON.stringify(evidenceObjectIds)) as MemoryEntryRow[];
+      )
+      .all(workspaceId, workspaceId, JSON.stringify(evidenceObjectIds)),
+    MemoryEntryRowParser,
+    "memory entry row"
+  );
 }
 
 function reportEvidenceRefRowCap(

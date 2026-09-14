@@ -2,16 +2,28 @@ import { createHash } from "node:crypto";
 import { parseOfficialApiSignals } from "@do-soul/alaya-soul";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
+import {
+  classifyExtractionEnvelope,
+  extractionEnvelopeCountsTowardCoverage,
+  type ExtractionEmptyClassification
+} from "./empty-classification.js";
 
 export interface ExtractionRawJsonInspection {
   readonly rawJsonSha256: string;
   readonly rawSignalCount: number;
   readonly parsedDraftCount: number;
+  readonly emptyClassification?: ExtractionEmptyClassification;
 }
 
 export type ExtractionRawEnvelopeInspection = Readonly<{
   readonly rawJsonSha256: string;
   readonly rawSignalCount: number;
+  readonly emptyClassification?: ExtractionEmptyClassification;
+}>;
+
+export type ExtractionEnvelopeClassificationContext = Readonly<{
+  readonly sourceAssertionCount: number;
+  readonly planMembership: "in_plan" | "skipped";
 }>;
 
 export interface ExtractionContentClosureEntry extends ExtractionRawJsonInspection {
@@ -41,15 +53,17 @@ export function computeExtractionRawJsonSha256(rawJson: string): string {
 }
 
 export function inspectExtractionRawJson(
-  rawJson: string
+  rawJson: string,
+  classificationContext?: ExtractionEnvelopeClassificationContext
 ): ExtractionRawJsonInspection {
-  const envelope = inspectExtractionRawEnvelope(rawJson);
+  const envelope = inspectExtractionRawEnvelope(rawJson, classificationContext);
   const parsedDraftCount = parseOfficialApiSignals(rawJson).length;
   return { ...envelope, parsedDraftCount };
 }
 
 export function inspectExtractionRawEnvelope(
-  rawJson: string
+  rawJson: string,
+  classificationContext?: ExtractionEnvelopeClassificationContext
 ): ExtractionRawEnvelopeInspection {
   let parsed: unknown;
   try {
@@ -58,11 +72,67 @@ export function inspectExtractionRawEnvelope(
     throw new Error("extraction raw_json is not strict JSON", { cause });
   }
   const rawSignalCount = countRawEnvelopeSignals(parsed);
-  if (rawSignalCount === null) throw new Error("signals array missing");
+  if (rawSignalCount === null) {
+    if (isPlanSkippedRawEnvelope(parsed)) {
+      return classifiedEnvelope(rawJson, 0, {
+        sourceAssertionCount: classificationContext?.sourceAssertionCount ?? 0,
+        planMembership: "skipped"
+      });
+    }
+    throw new Error("signals array missing");
+  }
+  if (classificationContext !== undefined) {
+    return classifiedEnvelope(rawJson, rawSignalCount, classificationContext);
+  }
+  // Empty envelopes without assertion context stay unclassified so callers
+  // cannot treat them as coverage-valid success by rawSignalCount alone.
   return {
     rawJsonSha256: computeExtractionRawJsonSha256(rawJson),
     rawSignalCount
   };
+}
+
+function classifiedEnvelope(
+  rawJson: string,
+  rawSignalCount: number,
+  classificationContext: ExtractionEnvelopeClassificationContext
+): ExtractionRawEnvelopeInspection {
+  return {
+    rawJsonSha256: computeExtractionRawJsonSha256(rawJson),
+    rawSignalCount,
+    emptyClassification: classifyExtractionEnvelope({
+      rawSignalCount,
+      sourceAssertionCount: classificationContext.sourceAssertionCount,
+      planMembership: classificationContext.planMembership
+    })
+  };
+}
+
+/** Reject envelopes that must not count as coverage-valid success. */
+export function assertCoverageValidExtractionEnvelope(
+  inspection: Pick<ExtractionRawEnvelopeInspection, "emptyClassification" | "rawSignalCount">,
+  classificationContext?: ExtractionEnvelopeClassificationContext
+): ExtractionEmptyClassification {
+  const emptyClassification = inspection.emptyClassification ?? (
+    classificationContext === undefined
+      ? undefined
+      : classifyExtractionEnvelope({
+        rawSignalCount: inspection.rawSignalCount,
+        sourceAssertionCount: classificationContext.sourceAssertionCount,
+        planMembership: classificationContext.planMembership
+      })
+  );
+  if (emptyClassification === undefined) {
+    throw new Error(
+      "empty extraction envelope lacks classification; assertion context is required"
+    );
+  }
+  if (!extractionEnvelopeCountsTowardCoverage(emptyClassification)) {
+    throw new Error(
+      `${emptyClassification} is not a coverage-valid extraction envelope`
+    );
+  }
+  return emptyClassification;
 }
 
 export function computeExtractionKeySetSha256(keys: Iterable<string>): string {
@@ -146,4 +216,10 @@ function countRawEnvelopeSignals(parsed: unknown): number | null {
   if (typeof parsed !== "object" || parsed === null) return null;
   const signals = (parsed as { readonly signals?: unknown }).signals;
   return Array.isArray(signals) ? signals.length : null;
+}
+
+function isPlanSkippedRawEnvelope(parsed: unknown): boolean {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  return (parsed as { readonly extraction_skip?: unknown }).extraction_skip ===
+    "plan_skipped";
 }

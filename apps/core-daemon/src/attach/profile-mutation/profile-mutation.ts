@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   ALAYA_OPERATOR_INSTRUCTIONS,
   ALAYA_SLASH_ALIAS,
@@ -156,7 +157,7 @@ export async function detectAttachedProfileInstructionsDrift(
   target: ProfileTarget,
   options: ProfileMutationBuildOptions = {}
 ): Promise<ProfileInstructionsDriftReport> {
-  const env = options.env ?? process.env;
+  const env = options.env ?? processEnvLookup();
   const fs = options.fs ?? createNodeProfileMutationFs();
   const paths = await resolveProfilePaths(target, { env, fs });
   const content = await fs.readText(paths.mcpConfigPath);
@@ -198,7 +199,7 @@ export async function buildAttachProfileMutationPlan(
   target: ProfileTarget,
   options: ProfileMutationBuildOptions = {}
 ): Promise<ProfileMutationPlan> {
-  const env = options.env ?? process.env;
+  const env = options.env ?? processEnvLookup();
   const fs = options.fs ?? createNodeProfileMutationFs();
   const paths = await resolveProfilePaths(target, { env, fs });
   const mcpBefore = await fs.readText(paths.mcpConfigPath);
@@ -239,7 +240,7 @@ export async function buildDetachProfileMutationPlan(
   target: ProfileTarget,
   options: ProfileMutationBuildOptions = {}
 ): Promise<ProfileMutationPlan> {
-  const env = options.env ?? process.env;
+  const env = options.env ?? processEnvLookup();
   const fs = options.fs ?? createNodeProfileMutationFs();
   const paths = await resolveProfilePaths(target, { env, fs });
   const mcpBefore = await fs.readText(paths.mcpConfigPath);
@@ -280,7 +281,7 @@ export async function resolveProfilePaths(
   target: ProfileTarget,
   options: ResolveProfilePathsOptions = {}
 ): Promise<ProfilePaths> {
-  const env = options.env ?? process.env;
+  const env = options.env ?? processEnvLookup();
   const fs = options.fs ?? createNodeProfileMutationFs();
   const home = requireHome(env);
 

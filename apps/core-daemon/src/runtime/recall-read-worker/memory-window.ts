@@ -1,5 +1,7 @@
-import { StorageTierSchema, type StorageTier } from "@do-soul/alaya-protocol";
+import type { StorageTier } from "@do-soul/alaya-protocol";
 import type { SqliteMemoryEntryRepo } from "@do-soul/alaya-storage";
+import type { WorkerOperationPayload } from "./operation-schemas.js";
+import { MAX_WORKER_PAGE_LIMIT } from "./worker-readers.js";
 
 const MEMORY_ENTRY_PAGE_LIMIT = 500;
 
@@ -9,6 +11,14 @@ export async function findMemoryEntriesByWorkspaceId(
   tier: StorageTier | undefined,
   page: { readonly limit: number; readonly offset: number } | undefined
 ) {
+  if (page !== undefined) {
+    if (!Number.isInteger(page.limit) || page.limit < 0 || page.limit > MAX_WORKER_PAGE_LIMIT) {
+      throw new Error(`page.limit must be an integer between 0 and ${MAX_WORKER_PAGE_LIMIT}`);
+    }
+    if (!Number.isInteger(page.offset) || page.offset < 0) {
+      throw new Error("page.offset must be a non-negative integer");
+    }
+  }
   if (page === undefined || page.limit <= MEMORY_ENTRY_PAGE_LIMIT) {
     return await memoryEntryRepo.findByWorkspaceId(workspaceId, tier, page);
   }
@@ -30,43 +40,13 @@ export async function findMemoryEntriesByWorkspaceId(
   return rows;
 }
 
-export function readRecallTierWindowQuery(payload: Record<string, unknown>) {
-  const cursor = payload.cursor === undefined
-    ? undefined
-    : readRecallTierWindowCursor(payload.cursor);
+export function readRecallTierWindowQuery(
+  payload: WorkerOperationPayload<"memory.findRecallTierWindow">
+) {
   return {
-    workspaceId: readString(payload.workspaceId, "workspaceId"),
-    tier: StorageTierSchema.parse(payload.tier),
-    limit: readNumber(payload.limit, "limit"),
-    ...(cursor === undefined ? {} : { cursor })
+    workspaceId: payload.workspaceId,
+    tier: payload.tier,
+    limit: payload.limit,
+    ...(payload.cursor === undefined ? {} : { cursor: payload.cursor })
   };
-}
-
-function readRecallTierWindowCursor(value: unknown) {
-  const cursor = asPayload(value);
-  return {
-    created_at: readString(cursor.created_at, "cursor.created_at"),
-    object_id: readString(cursor.object_id, "cursor.object_id")
-  };
-}
-
-function asPayload(value: unknown): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("worker payload must be an object");
-  }
-  return value as Record<string, unknown>;
-}
-
-function readString(value: unknown, name: string): string {
-  if (typeof value !== "string") {
-    throw new Error(`worker payload ${name} must be a string`);
-  }
-  return value;
-}
-
-function readNumber(value: unknown, name: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`worker payload ${name} must be a finite number`);
-  }
-  return value;
 }

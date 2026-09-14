@@ -16,7 +16,7 @@ import {
 import { CoreError } from "../../shared/errors.js";
 import type { EventPublisher } from "../../runtime/event-publisher.js";
 import { SYSTEM_ACTOR } from "../../shared/actors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { readNow } from "../../shared/time.js";
 
 export interface ConstitutionalFragmentStorePort {

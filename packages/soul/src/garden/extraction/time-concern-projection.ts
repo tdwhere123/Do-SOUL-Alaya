@@ -26,14 +26,20 @@ export function timeConcernPattern(): RegExp {
   return new RegExp(TIME_CONCERN_PATTERN.source, TIME_CONCERN_PATTERN.flags);
 }
 
-export function resolveTemporalProjection(matchedText: string, anchorIso: string): TemporalProjection | null {
-  const anchor = new Date(anchorIso);
-  if (Number.isNaN(anchor.getTime())) {
-    return null;
-  }
-  const offsetMinutes = parseFixedOffsetMinutes(anchorIso) ?? 0;
+export function resolveTemporalProjection(
+  matchedText: string,
+  anchorIso: string | null
+): TemporalProjection | null {
   const term = parseRelativeTemporalTerm(normalizeRelativeArticle(matchedText));
   if (term !== null) {
+    if (anchorIso === null) {
+      return null;
+    }
+    const anchor = new Date(anchorIso);
+    if (Number.isNaN(anchor.getTime())) {
+      return null;
+    }
+    const offsetMinutes = parseFixedOffsetMinutes(anchorIso) ?? 0;
     return projectionFromWindow(
       resolveRelativeTemporalWindow(term, anchor.getTime(), offsetMinutes),
       "relative_resolved"
@@ -44,6 +50,11 @@ export function resolveTemporalProjection(matchedText: string, anchorIso: string
   if (month !== null) return month;
   const explicit = parseEnglishCalendarDate(matchedText) ?? parseStrictCalendarDateToUtcDay(normalized);
   return explicit === null ? null : explicitDayProjection(explicit);
+}
+
+/** Relative phrases need a source observation; absolute matches may still emit without a projection. */
+export function isRelativeTimeConcern(matchedText: string): boolean {
+  return parseRelativeTemporalTerm(normalizeRelativeArticle(matchedText)) !== null;
 }
 
 function parseFixedOffsetMinutes(value: string): number | null {

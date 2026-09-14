@@ -1,3 +1,4 @@
+import { processEnvLookup } from "../config/daemon-config-environment.js";
 import {
   ComputeProviderPriority,
   HealthEventKind,
@@ -146,7 +147,7 @@ function formatGardenSecretRefError(error: ResolveSecretError): string {
 }
 
 function readConflictDetectionLlmApiKey(): string | undefined {
-  const secretRef = process.env.ALAYA_CONFLICT_LLM_SECRET_REF?.trim();
+  const secretRef = processEnvLookup().ALAYA_CONFLICT_LLM_SECRET_REF?.trim();
   if (secretRef !== undefined && secretRef.length > 0) {
     const resolved = resolveSecretRef(secretRef);
     if ("kind" in resolved) {
@@ -155,7 +156,7 @@ function readConflictDetectionLlmApiKey(): string | undefined {
     const value = resolved.value.trim();
     return value.length > 0 ? value : undefined;
   }
-  const raw = process.env.ALAYA_CONFLICT_LLM_API_KEY?.trim();
+  const raw = processEnvLookup().ALAYA_CONFLICT_LLM_API_KEY?.trim();
   return raw !== undefined && raw.length > 0 ? raw : undefined;
 }
 
@@ -167,7 +168,7 @@ type ConflictDetectionLlmConfig = Readonly<{
 }>;
 
 function readConflictDetectionLlmConfig(): ConflictDetectionLlmConfig | null {
-  const baseUrl = process.env.ALAYA_CONFLICT_LLM_PROVIDER_URL?.trim();
+  const baseUrl = processEnvLookup().ALAYA_CONFLICT_LLM_PROVIDER_URL?.trim();
   const apiKey = readConflictDetectionLlmApiKey();
   if (
     baseUrl === undefined ||
@@ -179,11 +180,11 @@ function readConflictDetectionLlmConfig(): ConflictDetectionLlmConfig | null {
   }
   // Conflict LLM is optional. Missing model is the same skip as missing
   // URL/key — do not invent a vendor default.
-  const model = process.env.ALAYA_CONFLICT_LLM_MODEL?.trim();
+  const model = processEnvLookup().ALAYA_CONFLICT_LLM_MODEL?.trim();
   if (model === undefined || model.length === 0) {
     return null;
   }
-  const parsedTimeout = Number.parseInt(process.env.ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "", 10);
+  const parsedTimeout = Number.parseInt(processEnvLookup().ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "", 10);
   return {
     baseUrl,
     apiKey,
@@ -213,7 +214,8 @@ async function classifyConflictPair(
       mode: "json",
       jsonObject: false,
       maxOutputTokens: 8,
-      outputTokenField: "max_tokens"
+      outputTokenField: "max_tokens",
+      env: processEnvLookup()
     }, {
       maxRetries: 0,
       retryDelaysMs: []

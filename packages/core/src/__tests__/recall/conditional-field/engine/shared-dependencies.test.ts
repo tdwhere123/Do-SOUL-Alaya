@@ -26,11 +26,8 @@ import {
   seedDerivationIdentity,
   withdrawDerivation
 } from "../../../../recall/conditional-field/engine/path-derivation.js";
-import {
-  composedFacetPathId,
-  samePathAccepts,
-  transitionKey
-} from "../../../../recall/conditional-field/engine/path-composition.js";
+import { composedFacetPathId, samePathAccepts } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
+import { transitionKey } from "../../../../recall/conditional-field/engine/path-composition.js";
 import { recoverExplanationForest } from "../../../../recall/conditional-field/index/explanation.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";

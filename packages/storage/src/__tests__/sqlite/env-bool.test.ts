@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isEnvFlagDisabled } from "../../sqlite/env-bool.js";
+import { isEnvFlagDisabled } from "@do-soul/alaya-protocol";
 
 describe("isEnvFlagDisabled", () => {
   it.each([

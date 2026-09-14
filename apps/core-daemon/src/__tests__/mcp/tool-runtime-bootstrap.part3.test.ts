@@ -53,15 +53,9 @@ async function bootStartedDaemonRuntime(): Promise<AlayaDaemonRuntime> {
 }
 
 async function expectBootstrapDoesNotWaitForCjkWarmups(): Promise<void> {
-  const coreGate = createDeferred<boolean>();
-  const storageGate = createDeferred<boolean>();
   const configGate = createDeferred<ReadonlyMap<string, string>>();
-  const coreCallsBefore = hoisted.coreWarmCjkSegmentation.mock.calls.length;
-  const storageCallsBefore = hoisted.storageWarmCjkSegmentation.mock.calls.length;
   const configCallsBefore = hoisted.loadConfigEnv.mock.calls.length;
 
-  hoisted.coreWarmCjkSegmentation.mockImplementationOnce(async () => coreGate.promise);
-  hoisted.storageWarmCjkSegmentation.mockImplementationOnce(async () => storageGate.promise);
   hoisted.loadConfigEnv.mockImplementationOnce(
     async () => configGate.promise as unknown as Map<string, string>
   );
@@ -74,11 +68,6 @@ async function expectBootstrapDoesNotWaitForCjkWarmups(): Promise<void> {
 
   try {
     await waitUntil(
-      () =>
-        hoisted.coreWarmCjkSegmentation.mock.calls.length === coreCallsBefore + 1 &&
-        hoisted.storageWarmCjkSegmentation.mock.calls.length === storageCallsBefore + 1
-    );
-    await waitUntil(
       () => hoisted.loadConfigEnv.mock.calls.length === configCallsBefore + 1
     );
     expect(completed).toBe(false);
@@ -87,8 +76,6 @@ async function expectBootstrapDoesNotWaitForCjkWarmups(): Promise<void> {
     await runtimePromise;
     expect(completed).toBe(true);
   } finally {
-    coreGate.resolve(false);
-    storageGate.resolve(false);
     configGate.resolve(new Map());
     await runtimePromise.catch(() => undefined);
   }
@@ -187,10 +174,10 @@ describe("daemon tool runtime bootstrap", () => {
 
   it("warns when CJK segmentation warmups resolve unavailable", async () => {
     const { startCjkSegmentationWarmup } = await import("../../index.js");
+    const protocol = await import("@do-soul/alaya-protocol");
+    const warmSpy = vi.spyOn(protocol, "warmCjkSegmentation").mockResolvedValueOnce(false);
     const warn = vi.fn();
 
-    hoisted.coreWarmCjkSegmentation.mockResolvedValueOnce(false);
-    hoisted.storageWarmCjkSegmentation.mockResolvedValueOnce(false);
     startCjkSegmentationWarmup({ warn });
 
     await waitUntil(() => warn.mock.calls.length === 1);
@@ -198,10 +185,10 @@ describe("daemon tool runtime bootstrap", () => {
       expect.stringContaining("CJK segmentation warmup unavailable"),
       expect.objectContaining({
         code: "ALAYA_CJK_SEGMENTATION_WARMUP_FAILED",
-        core_ready: false,
-        storage_ready: false
+        ready: false
       })
     );
+    warmSpy.mockRestore();
   });
 
   it("constructs ingest reconciliation by default with the rule-only zero-cloud decision port", async () => {

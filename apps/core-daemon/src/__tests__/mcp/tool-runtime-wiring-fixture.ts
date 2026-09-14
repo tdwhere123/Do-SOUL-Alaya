@@ -41,10 +41,6 @@ export function resetToolRuntimeWiringState(): void {
   hoisted.conversationToolExecutorDeps = null;
   hoisted.conversationServiceDeps = null;
   hoisted.officialGardenProviderDeps = null;
-  hoisted.coreWarmCjkSegmentation.mockReset();
-  hoisted.coreWarmCjkSegmentation.mockImplementation(async () => false);
-  hoisted.storageWarmCjkSegmentation.mockReset();
-  hoisted.storageWarmCjkSegmentation.mockImplementation(async () => false);
   hoisted.loadConfigEnv.mockReset();
   if (hoisted.loadConfigEnvDefault !== null) {
     hoisted.loadConfigEnv.mockImplementation(

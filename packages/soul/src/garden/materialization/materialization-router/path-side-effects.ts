@@ -1,4 +1,6 @@
-import { readErrorMessage, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import {
+  diagnosticWarn, readErrorMessage, type CandidateMemorySignal
+} from "@do-soul/alaya-protocol";
 import type {
   MaterializationCreatedObject,
   MaterializationContext,
@@ -35,7 +37,7 @@ export class MaterializationRouterPathSideEffects {
     try {
       return await this.createTimeConcernPathRelationProposal(targetObjectId, evidenceId, signal, context);
     } catch (err) {
-      console.warn("materialization-router: time_concern proposal failed", {
+      diagnosticWarn("materialization-router: time_concern proposal failed", {
         targetObjectId,
         signalId: signal.signal_id,
         error: err instanceof Error ? err.message : String(err)
@@ -253,7 +255,7 @@ export class MaterializationRouterPathSideEffects {
       if (!retryAvailable || !hasMaterializableSignalMemoryRefs(signal)) {
         throw error;
       }
-      console.warn("materialization-router: signal-ref path candidate deferred to enrich_pending retry", {
+      diagnosticWarn("materialization-router: signal-ref path candidate deferred to enrich_pending retry", {
         sourceMemoryId: newObjectId,
         targetMemoryIds: collectMaterializableSignalMemoryRefs(signal),
         signalId: signal.signal_id,

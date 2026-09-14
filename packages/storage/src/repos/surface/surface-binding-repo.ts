@@ -6,7 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseOptionalRow, parseRow, parseRows } from "../shared/parse-row.js";
 import {
   SurfaceBindingRowParser,
@@ -125,8 +125,7 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = parseRows(
-        this.findByObjectIdStatement.all(parsedObjectId, parsedWorkspaceId),
+      const rows = parseRows(this.findByObjectIdStatement.all(parsedObjectId, parsedWorkspaceId),
         SurfaceBindingRowParser,
         "surface binding row"
       );
@@ -163,8 +162,7 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = parseRows(
-        this.findBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
+      const rows = parseRows(this.findBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
         SurfaceBindingRowParser,
         "surface binding row"
       );
@@ -182,8 +180,7 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = parseRows(
-        this.findDetachableBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
+      const rows = parseRows(this.findDetachableBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
         SurfaceBindingRowParser,
         "surface binding row"
       );
@@ -197,8 +194,7 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = parseRows(
-        this.findByWorkspaceStatement.all(parsedWorkspaceId),
+      const rows = parseRows(this.findByWorkspaceStatement.all(parsedWorkspaceId),
         SurfaceBindingRowParser,
         "surface binding row"
       );
@@ -254,8 +250,7 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedUpdatedAt = parseTimestamp(updatedAt);
 
     try {
-      const rows = parseRows(
-        this.findDetachableBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
+      const rows = parseRows(this.findDetachableBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
         SurfaceBindingRowParser,
         "surface binding row"
       );
@@ -268,8 +263,7 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
 
       this.cascadeDetachStatement.run(parsedUpdatedAt, parsedSurfaceId, parsedWorkspaceId);
 
-      const updatedRows = parseRows(
-        this.findDetachedBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
+      const updatedRows = parseRows(this.findDetachedBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
         SurfaceBindingRowParser,
         "surface binding row"
       );

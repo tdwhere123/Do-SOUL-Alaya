@@ -113,16 +113,48 @@ describe("Auditor", () => {  it("assesses cold start and generates draft candida
   });
 
 
-  it("creates synthesis candidates for crystallization patterns without pending proposals", async () => {
+  it("creates synthesis candidates inside the EventLog mutate callback", async () => {
+    const order: string[] = [];
+    const eventLogRepo = createPassthroughEventLogPort();
+    const originalAppend = eventLogRepo.appendManyWithMutation;
+    eventLogRepo.appendManyWithMutation = vi.fn(
+      async <T>(
+        entries: readonly object[],
+        mutate: (rows: readonly object[]) => T
+      ): Promise<T> => {
+        order.push("append");
+        return await originalAppend(entries as never, (rows) => {
+          order.push("mutate-enter");
+          const value = mutate(rows);
+          order.push("mutate-exit");
+          return value;
+        });
+      }
+    ) as typeof originalAppend;
     const { auditor, bootstrappingPort, scheduler } = createAuditor({
       patterns: [
         { pattern_key: "pattern-a", frequency: 4 },
         { pattern_key: "pattern-b", frequency: 6 }
-      ]
+      ],
+      eventLogRepo
+    });
+    bootstrappingPort.createSynthesisCandidate = vi.fn((_workspaceId: string, patternKey: string) => {
+      order.push(`create:${patternKey}`);
+      return { candidate_id: `candidate:${patternKey}` };
     });
 
     const result = await auditor.run(createTask({ task_kind: GardenTaskKind.CRYSTALLIZATION_SCAN }));
 
+    expect(order).toEqual([
+      "append",
+      "mutate-enter",
+      "create:pattern-a",
+      "mutate-exit",
+      "append",
+      "mutate-enter",
+      "create:pattern-b",
+      "mutate-exit"
+    ]);
     expect(bootstrappingPort.createSynthesisCandidate).toHaveBeenNthCalledWith(
       1,
       "workspace-1",
@@ -331,7 +363,7 @@ function createAuditor(options: {
     ),
     generateDraftCandidates: vi.fn(async () => options.draftCandidates ?? []),
     findHighFrequencyPatterns: vi.fn(async () => options.patterns ?? []),
-    createSynthesisCandidate: vi.fn(async (_workspaceId: string, patternKey: string) => ({
+    createSynthesisCandidate: vi.fn( (_workspaceId: string, patternKey: string) => ({
       candidate_id: `candidate:${patternKey}`
     })),
     hasPendingSynthesisCandidate: vi.fn(async (_workspaceId: string, patternKey: string) =>

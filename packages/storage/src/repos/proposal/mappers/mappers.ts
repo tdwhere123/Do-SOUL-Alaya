@@ -9,10 +9,18 @@ import {
   type ProposalResolutionState
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import {
+  readNonEmptyStringField,
+  readNullableStringField,
+  readRecord,
+  readStringField,
+  readSqliteBooleanIntField,
+  type RowParser
+} from "../../shared/parse-row.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../../shared/validators.js";
 import type { ProposalReviewerAssignment, ProposalReviewerAssignmentInput } from "../types.js";
-import type { ProposalReviewerAssignmentRow, ProposalRow } from "./rows.js";
+import type { PendingProposalSummaryRow, ProposalReviewerAssignmentRow, ProposalRow } from "./rows.js";
 
 export function parseProposal(value: Proposal): Readonly<Proposal> {
   try {
@@ -21,6 +29,56 @@ export function parseProposal(value: Proposal): Readonly<Proposal> {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate proposal.", error);
   }
 }
+
+function readProposalRow(value: unknown): ProposalRow {
+  const record = readRecord(value, "proposal row");
+  return {
+    runtime_id: readNonEmptyStringField(record, "runtime_id"),
+    object_kind: readNonEmptyStringField(record, "object_kind"),
+    proposal_id: readNonEmptyStringField(record, "proposal_id"),
+    task_surface_ref: readNullableStringField(record, "task_surface_ref"),
+    derived_from: readNullableStringField(record, "derived_from"),
+    retention_policy: readNonEmptyStringField(record, "retention_policy"),
+    dossier_ref: readNullableStringField(record, "dossier_ref"),
+    recommended_option_id: readNullableStringField(record, "recommended_option_id"),
+    proposal_options: readNonEmptyStringField(record, "proposal_options"),
+    resolution_state: readNonEmptyStringField(record, "resolution_state"),
+    expires_at: readNullableStringField(record, "expires_at"),
+    last_updated_at: readNonEmptyStringField(record, "last_updated_at"),
+    workspace_id: readNonEmptyStringField(record, "workspace_id"),
+    run_id: readNullableStringField(record, "run_id"),
+    reviewer_identity: readNullableStringField(record, "reviewer_identity"),
+    proposal_operation: readNullableStringField(record, "proposal_operation"),
+    target_object_kind: readNonEmptyStringField(record, "target_object_kind"),
+    proposed_change_summary: readStringField(record, "proposed_change_summary"),
+    proposed_changes: readNullableStringField(record, "proposed_changes"),
+    proposed_path_relation: readNullableStringField(record, "proposed_path_relation"),
+    created_at: readNullableStringField(record, "created_at"),
+    target_baseline_updated_at: readNullableStringField(record, "target_baseline_updated_at"),
+    source_delivery_ids: readNullableStringField(record, "source_delivery_ids")
+  };
+}
+
+export const ProposalRowParser: RowParser<Readonly<Proposal>> = {
+  parse(value: unknown): Readonly<Proposal> {
+    return parseProposalRow(readProposalRow(value));
+  }
+};
+
+function readPendingProposalSummaryRow(value: unknown): PendingProposalSummaryRow {
+  const record = readRecord(value, "pending proposal summary row");
+  return {
+    ...readProposalRow(record),
+    assigned_reviewer_identity: readNullableStringField(record, "assigned_reviewer_identity"),
+    assigned_at: readNullableStringField(record, "assigned_at"),
+    deadline_at: readNullableStringField(record, "deadline_at"),
+    is_overdue: readSqliteBooleanIntField(record, "is_overdue") as 0 | 1
+  };
+}
+
+export const PendingProposalSummaryRowParser: RowParser<PendingProposalSummaryRow> = {
+  parse: readPendingProposalSummaryRow
+};
 
 export function parseProposalRow(row: ProposalRow): Readonly<Proposal> {
   let proposalOptions: unknown;

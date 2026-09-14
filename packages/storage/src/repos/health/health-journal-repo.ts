@@ -7,8 +7,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
 
 export interface HealthJournalCreateInput {
   readonly entry_id?: string;
@@ -113,8 +114,8 @@ export class SqliteHealthJournalRepo implements HealthJournalRepo {
     try {
       const rows =
         parsedKind === undefined
-          ? (this.findByWorkspaceStatement.all(parsedWorkspaceId, parsedLimit) as HealthJournalRow[])
-          : (this.findByWorkspaceAndKindStatement.all(parsedWorkspaceId, parsedKind, parsedLimit) as HealthJournalRow[]);
+          ? (parseRows(this.findByWorkspaceStatement.all(parsedWorkspaceId, parsedLimit), { parse: (value: unknown) => value as HealthJournalRow }, "health journal row"))
+          : (parseRows(this.findByWorkspaceAndKindStatement.all(parsedWorkspaceId, parsedKind, parsedLimit), { parse: (value: unknown) => value as HealthJournalRow }, "health journal row"));
 
       return rows.map((row) => parseRow(row));
     } catch (error) {

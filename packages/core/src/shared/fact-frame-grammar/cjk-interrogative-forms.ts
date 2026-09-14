@@ -17,14 +17,6 @@ export const CJK_INTERROGATIVE_RESULT_FORMS = Object.freeze([
   ...CJK_LOCATION_RESULT_FORMS
 ]);
 
-export const CJK_INTERROGATIVE_FALLBACK_ATOMS: readonly string[] = Object.freeze(
-  [
-    ...CJK_INTERROGATIVE_RESULT_FORMS,
-    ...CJK_COPULAR_PREDICATE_FORMS,
-    CJK_LOCATIVE_LINKER_FORM
-  ].slice().sort((left, right) => right.length - left.length || left.localeCompare(right))
-);
-
 function cjkWhSurfaces(surfaces: readonly string[]): readonly string[] {
   return Object.freeze(surfaces.filter((surface) => /\p{Script=Han}/u.test(surface)));
 }

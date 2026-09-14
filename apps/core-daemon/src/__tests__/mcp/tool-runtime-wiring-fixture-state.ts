@@ -381,9 +381,6 @@ const hoisted = vi.hoisted(() => {
     };
   });
   const serverClose = vi.fn();
-  const coreWarmCjkSegmentation = vi.fn(async () => false);
-  const storageWarmCjkSegmentation = vi.fn(async () => false);
-
   return {
     conversationToolSpecs,
     resetToolSpecMap,
@@ -451,8 +448,6 @@ const hoisted = vi.hoisted(() => {
     officialGardenProviderCtor,
     officialGardenProviderDeps: null as null | Record<string, unknown>,
     officialGardenProviderInstance,
-    coreWarmCjkSegmentation,
-    storageWarmCjkSegmentation,
     loadConfigEnv: vi.fn(async () => new Map<string, string>()),
     loadConfigEnvDefault: null as
       | null

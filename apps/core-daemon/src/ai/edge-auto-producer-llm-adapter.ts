@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
+import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
 import type {
   EdgeAutoProducerLlmDecision,
   EdgeAutoProducerLlmPort
@@ -76,7 +77,7 @@ export interface PairInput {
 }
 
 export function resolveEdgeAutoProducerDecisionCacheRoot(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = processEnvLookup()
 ): string {
   const dataDir = env.DATA_DIR?.trim();
   const root = dataDir !== undefined && dataDir.length > 0

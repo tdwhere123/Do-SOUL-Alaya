@@ -1,3 +1,4 @@
+import type { EnvLookup } from "@do-soul/alaya-protocol";
 import { parseCoreConfigFromEnv, type CoreConfig } from "./core-config.js";
 
 let installedCoreConfig: CoreConfig | null = null;
@@ -21,7 +22,7 @@ export function resetCoreConfigForTests(): void {
 }
 
 export function installCoreConfigFromProcessEnv(
-  env: Readonly<Record<string, string | undefined>> = process.env,
+  env: EnvLookup,
   configEnv?: ReadonlyMap<string, string>
 ): CoreConfig {
   const merged: Record<string, string | undefined> = { ...env };

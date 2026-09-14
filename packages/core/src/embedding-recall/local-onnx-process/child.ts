@@ -83,6 +83,7 @@ function childClient(request: LocalOnnxEmbeddingIpcRequest): LocalOnnxEmbeddingC
   // in_process: this process already is the ORT isolate; do not fork again.
   client = new LocalOnnxEmbeddingClient({
     execution: "in_process",
+    env: process.env,
     modelId: request.modelId,
     cacheDir: request.cacheDir,
     schemaVersion: request.schemaVersion

@@ -38,7 +38,8 @@ export interface ExpiredControlPlaneObject {
 
 export interface JanitorControlPlaneCleanupPort {
   findExpiredObjects(workspaceId: string, nowIso: string): Promise<readonly ExpiredControlPlaneObject[]>;
-  removeExpiredObjects(workspaceId: string, objectIds: readonly string[]): Promise<void>;
+  // Sync so TTL delete can join EventLog appendManyWithMutation mutate.
+  removeExpiredObjects(workspaceId: string, objectIds: readonly string[]): void;
 }
 
 export interface HotDemotionCandidate {
@@ -212,9 +213,8 @@ export class Janitor {
       const expiredBatch = expiredObjects.slice(0, JANITOR_CONSTANTS.BATCH_SIZE);
       await this.publishEventLogsMutation(
         this.buildTtlCleanupEvents(task, expiredBatch, completedAt),
-        () => undefined as never
+        () => this.cleanupPort.removeExpiredObjects(task.workspace_id, objectIds)
       );
-      await this.cleanupPort.removeExpiredObjects(task.workspace_id, objectIds);
     }
 
     const result = this.createSuccessResult(task, completedAt, objectIds, [

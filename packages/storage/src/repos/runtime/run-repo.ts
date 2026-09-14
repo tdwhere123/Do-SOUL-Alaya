@@ -3,6 +3,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { cascadeDeleteRun } from "../path/writes/cascade-delete.js";
 import { prepareRunStatements, type SqliteStatement } from "./statements/run-statements.js";
+import { parseRows, readRecord, type RowParser } from "../shared/parse-row.js";
 
 export type RunCreateInput = Omit<Run, "created_at" | "last_active_at">;
 
@@ -102,11 +103,13 @@ export class SqliteRunRepo implements RunRepo {
     page?: RunListPageOptions
   ): Promise<readonly Run[]> {
     try {
-      const rows =
+      return parseRows(
         page === undefined
-          ? (this.listByWorkspaceStatement.all(workspaceId) as RunRow[])
-          : (this.listByWorkspacePagedStatement.all(workspaceId, page.limit, page.offset) as RunRow[]);
-      return rows.map((row) => parseRun(row));
+          ? this.listByWorkspaceStatement.all(workspaceId)
+          : this.listByWorkspacePagedStatement.all(workspaceId, page.limit, page.offset),
+        RunRowParser,
+        "run row"
+      );
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list runs for workspace ${workspaceId}.`, error);
     }
@@ -179,7 +182,14 @@ export class SqliteRunRepo implements RunRepo {
   }
 }
 
-function parseRun(row: RunRow): Run {
+const RunRowParser: RowParser<Run> = {
+  parse(value: unknown): Run {
+    return parseRun(value);
+  }
+};
+
+function parseRun(value: unknown): Run {
+  const row = readRecord(value, "run row");
   try {
     return RunSchema.parse(row);
   } catch (error) {

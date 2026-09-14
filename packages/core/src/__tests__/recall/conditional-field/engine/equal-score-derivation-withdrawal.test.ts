@@ -12,10 +12,8 @@ import {
   createConditionalField,
   withdrawDerivationLeaves
 } from "../../../../recall/conditional-field/engine/field-engine.js";
-import {
-  adjacencyEffectsForRows,
-  seedProgramStates
-} from "../../../../recall/conditional-field/engine/path-composition.js";
+import { adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import {
   derivationForest,
   evaluateDerivation,

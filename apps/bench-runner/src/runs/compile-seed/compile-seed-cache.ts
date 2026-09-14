@@ -378,12 +378,16 @@ function persistExtraction(
   readonly inspection: ExtractionRawJsonInspection;
   readonly emptyClassification: ReturnType<typeof classifyExtractionEnvelope>;
 } {
-  const inspection = inspectExtractionRawJson(result.rawJson);
-  const emptyClassification = classifyExtractionEnvelope({
-    rawSignalCount: inspection.rawSignalCount,
+  const classificationContext = {
     sourceAssertionCount: request.source_assertions.length,
-    planMembership: "in_plan"
-  });
+    planMembership: "in_plan" as const
+  };
+  const inspection = inspectExtractionRawJson(result.rawJson, classificationContext);
+  const emptyClassification = inspection.emptyClassification ??
+    classifyExtractionEnvelope({
+      rawSignalCount: inspection.rawSignalCount,
+      ...classificationContext
+    });
   const backed = providerBacked && emptyClassification === "completed_signals";
   try {
     writeCachedExtraction(cacheRoot, cacheKey, {

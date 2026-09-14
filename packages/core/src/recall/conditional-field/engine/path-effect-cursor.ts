@@ -1,12 +1,13 @@
-import type { CompiledAdjacencyEffect } from "./path-composition.js";
+import type { AdjacencyEffectsInput, CompiledAdjacencyEffect } from "./path-composition-adjacency.js";
 import type { ObserverPage } from "@do-soul/alaya-protocol";
 import { BindingContextResourceError, type BindingContextStore } from "./binding-environment.js";
+import type { AdjacencyRow } from "./path-matching.js";
 
 export type PathComputationStep = Readonly<{ kind: "work"; retained_bytes?: number; retention?: "effect_payload" }>
   | Readonly<{ kind: "effect"; effect: CompiledAdjacencyEffect }>;
 export type PathComputation<Result> = Generator<PathComputationStep, Result, void>;
 export type PendingPathEffects = Readonly<{ cursor?: PathEffectCursor; offset: number; retained_bytes: number; completed_work?: number; page: ObserverPage;
-  input: Readonly<{ rows: Iterable<import("./path-matching.js").AdjacencyRow>; options: import("./path-composition.js").AdjacencyEffectsInput }> }>;
+  input: Readonly<{ rows: Iterable<AdjacencyRow>; options: AdjacencyEffectsInput }> }>;
 const EFFECT_LOG_SLOT_BYTES = 64;
 
 /** Prepared effects remain replayable until the field commits their offset. */

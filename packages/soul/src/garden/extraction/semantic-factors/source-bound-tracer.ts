@@ -3,7 +3,7 @@ import {
   type OpenSemanticFactorGraphProposal
 } from "@do-soul/alaya-protocol";
 import {
-  assertSourceBoundF3SealCurrent,
+  sourceBoundF3Seal,
   SOURCE_BOUND_F3_FORBIDDEN_WRITES,
   type SourceBoundF3Capability
 } from "./source-bound-seal.js";
@@ -24,7 +24,7 @@ export function traceSourceBoundF3Proposal(input: {
   readonly proposal: OpenSemanticFactorGraphProposal | null;
   readonly rawProposal?: unknown;
 }): SourceBoundF3Trace {
-  assertSourceBoundF3SealCurrent();
+  void sourceBoundF3Seal();
   const forbidden = forbiddenWrites(input.rawProposal ?? input.proposal);
   if (forbidden.length > 0) {
     return finished(input.capability, [], forbidden, 0, false);

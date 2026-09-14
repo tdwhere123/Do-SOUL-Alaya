@@ -1,3 +1,4 @@
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   createMcpMemoryProposalWorkflow,
   SourceDeliveryAnchorValidationError,
@@ -177,7 +178,7 @@ function buildDaemonMcpMemoryProposalWorkflow(
 
 export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandlerInput) {
   const reviewerIdentityBinding =
-    input.reviewerIdentityBinding ?? createReviewerIdentityBindingFromEnv(process.env);
+    input.reviewerIdentityBinding ?? createReviewerIdentityBindingFromEnv(processEnvLookup());
   const soulResolveHandler = buildSoulResolveHandler(input);
   return createMcpMemoryToolHandler({
     zeroDayToolAccess: input.zeroDayToolAccess,

@@ -62,6 +62,16 @@ export class GardenComputeProviderResolver implements GardenComputeProvider {
 
   public async getProvider(): Promise<GardenComputeProvider> {
     const config = await this.deps.configReader.getRuntimeGardenComputeConfig();
+    const degradedReason =
+      "degraded_reason" in config && typeof (config as { degraded_reason?: unknown }).degraded_reason === "string"
+        ? (config as { degraded_reason: string }).degraded_reason
+        : null;
+    if (degradedReason !== null) {
+      throw new GardenProviderError(
+        `Official garden provider is degraded (${degradedReason}).`,
+        "auth"
+      );
+    }
     const cacheKey = buildCacheKey({
       providerKind: config.provider_kind,
       enabled: config.enabled,

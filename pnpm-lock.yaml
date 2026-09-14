@@ -331,9 +331,6 @@ importers:
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@node-rs/jieba':
-        specifier: 2.0.3
-        version: 2.0.3
     devDependencies:
       '@do-soul/alaya-soul':
         specifier: workspace:*
@@ -350,18 +347,20 @@ importers:
 
   packages/eval:
     dependencies:
-      zod:
-        specifier: 4.6.2
-        version: 4.6.2
-    devDependencies:
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../protocol
+      zod:
+        specifier: 4.6.2
+        version: 4.6.2
 
   packages/graph-algorithms: {}
 
   packages/protocol:
     dependencies:
+      '@node-rs/jieba':
+        specifier: 2.0.3
+        version: 2.0.3
       zod:
         specifier: 4.6.2
         version: 4.6.2
@@ -383,9 +382,6 @@ importers:
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@node-rs/jieba':
-        specifier: 2.0.3
-        version: 2.0.3
       better-sqlite3:
         specifier: 13.0.3
         version: 13.0.3

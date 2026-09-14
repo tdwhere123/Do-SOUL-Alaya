@@ -1,4 +1,5 @@
 import { createServer } from "node:net";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   DEFAULT_DAEMON_HOST,
   DEFAULT_DAEMON_PORT,
@@ -129,7 +130,7 @@ export async function defaultGetWorkspaceById(
 
 const LOOPBACK_DAEMON_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 
-export function assertInspectDaemonUrl(url: string, env: NodeJS.ProcessEnv = process.env): void {
+export function assertInspectDaemonUrl(url: string, env: NodeJS.ProcessEnv = processEnvLookup()): void {
   let parsed: URL;
   try {
     parsed = new URL(url);

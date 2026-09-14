@@ -1,6 +1,7 @@
 import { PathRelationSchema, type PathRelation } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../../sqlite/db.js";
 import { StorageError } from "../../../../shared/errors.js";
+import { parseRows } from "../../../shared/parse-row.js";
 import {
   parseRelationAssertionJson,
   wrapRelationAssertionStorageError
@@ -165,7 +166,7 @@ export async function findActiveProjectionByWorkspace(
 ): Promise<readonly Readonly<PathRelation>[]> {
   assertRelationProjectionCurrent(db);
   try {
-    const rows = db.connection.prepare(`
+    const rows = parseRows(db.connection.prepare(`
       SELECT projection_json
       FROM relation_path_projections
       WHERE generation = (
@@ -174,7 +175,7 @@ export async function findActiveProjectionByWorkspace(
         WHERE state_id = 1 AND status = 'ready' AND projection_refresh_required = 0
       ) AND workspace_id = ?
       ORDER BY path_id ASC
-    `).all(workspaceId) as ProjectionRow[];
+    `).all(workspaceId), { parse: (value: unknown) => value as ProjectionRow }, "projection row");
     return Object.freeze(rows.map(parseProjectionRow));
   } catch (error) {
     throw wrapRelationAssertionStorageError("read active relation projections", error);
@@ -212,12 +213,12 @@ export async function findProjectionByWorkspaceAtAsOf(
   try {
     const generation = findVerifiedGenerationAtAsOf(db, asOf);
     if (generation === null) return null;
-    const rows = db.connection.prepare(`
+    const rows = parseRows(db.connection.prepare(`
       SELECT projection_json
       FROM relation_path_projections
       WHERE generation = ? AND workspace_id = ?
       ORDER BY path_id ASC
-    `).all(generation, workspaceId) as ProjectionRow[];
+    `).all(generation, workspaceId), { parse: (value: unknown) => value as ProjectionRow }, "projection row");
     return Object.freeze(rows.map(parseProjectionRow));
   } catch (error) {
     if (error instanceof StorageError) throw error;

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { RecallReadWorkerOperation, RecallReadWorkerResponse } from "./protocol.js";
 import { parseNodeTimerDelayMs } from "../timing/node-timer-delay.js";
+import { processEnvLookup } from "../config/daemon-config-environment.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_WORKER_COUNT = 2;
@@ -9,7 +10,7 @@ const MAX_WORKER_COUNT = 4;
 const REQUEST_TIMEOUT_ENV = "ALAYA_RECALL_READ_WORKER_REQUEST_TIMEOUT_MS";
 
 export function normalizeRequestTimeoutMs(value: number | undefined): number {
-  const configuredEnv = process.env[REQUEST_TIMEOUT_ENV]?.trim();
+  const configuredEnv = processEnvLookup()[REQUEST_TIMEOUT_ENV]?.trim();
   if (value === undefined && (configuredEnv === undefined || configuredEnv.length === 0)) {
     return DEFAULT_REQUEST_TIMEOUT_MS;
   }

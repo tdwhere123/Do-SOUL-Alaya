@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { bindDiagnosticLogger } from "@do-soul/alaya-protocol";
 import { MaterializationRouter } from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import {
@@ -292,7 +293,8 @@ describe("MaterializationRouter ingest reconciliation", () => {
       })
     };
     const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const warnSpy = vi.fn();
+    bindDiagnosticLogger({ warn: warnSpy, error: vi.fn() });
     const router = new MaterializationRouter({
       ...deps,
       pathRelationProposalPort,
@@ -332,7 +334,7 @@ describe("MaterializationRouter ingest reconciliation", () => {
         })
       );
     } finally {
-      warnSpy.mockRestore();
+      bindDiagnosticLogger({ warn: () => undefined, error: () => undefined });
     }
   });
 

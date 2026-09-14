@@ -7,7 +7,8 @@ import {
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import { parseRows, readJsonColumn, readNonEmptyStringField, readPositiveIntField, readRecord, type RowParser } from "../shared/parse-row.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 
 export interface ClaimFormRepo {
@@ -150,11 +151,11 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     }
 
     try {
-      const rows = this.statements.findByIdsStatement.all(
-        parsedWorkspaceId,
-        JSON.stringify(parsedObjectIds)
-      ) as ClaimFormRow[];
-      return rows.map((row) => parseClaimFormRow(row));
+      return parseRows(
+        this.statements.findByIdsStatement.all(parsedWorkspaceId, JSON.stringify(parsedObjectIds)),
+        ClaimFormRowParser,
+        "claim form row"
+      );
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to load claim forms by ids.", error);
     }
@@ -162,8 +163,11 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
 
   public async findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]> {
     try {
-      const rows = this.statements.findByWorkspaceIdStatement.all(workspaceId) as ClaimFormRow[];
-      return rows.map((row) => parseClaimFormRow(row));
+      return parseRows(
+        this.statements.findByWorkspaceIdStatement.all(workspaceId),
+        ClaimFormRowParser,
+        "claim form row"
+      );
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list claim forms for workspace ${workspaceId}.`, error);
     }
@@ -173,8 +177,11 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     const parsedStatus = parseClaimLifecycleState(status);
 
     try {
-      const rows = this.statements.findByStatusStatement.all(workspaceId, parsedStatus) as ClaimFormRow[];
-      return rows.map((row) => parseClaimFormRow(row));
+      return parseRows(
+        this.statements.findByStatusStatement.all(workspaceId, parsedStatus),
+        ClaimFormRowParser,
+        "claim form row"
+      );
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -186,8 +193,11 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
 
   public async findByCanonicalKey(workspaceId: string, canonicalKey: string): Promise<readonly Readonly<ClaimForm>[]> {
     try {
-      const rows = this.statements.findByCanonicalKeyStatement.all(workspaceId, canonicalKey) as ClaimFormRow[];
-      return rows.map((row) => parseClaimFormRow(row));
+      return parseRows(
+        this.statements.findByCanonicalKeyStatement.all(workspaceId, canonicalKey),
+        ClaimFormRowParser,
+        "claim form row"
+      );
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -434,28 +444,33 @@ function parseClaimForm(value: ClaimForm): Readonly<ClaimForm> {
   }
 }
 
-function parseClaimFormRow(row: ClaimFormRow): Readonly<ClaimForm> {
+const ClaimFormRowParser: RowParser<Readonly<ClaimForm>> = {
+  parse: parseClaimFormRow
+};
+
+function parseClaimFormRow(value: unknown): Readonly<ClaimForm> {
+  const row = readRecord(value, "claim form row");
   try {
     return deepFreeze(
       ClaimFormSchema.parse({
-        object_id: row.object_id,
-        object_kind: row.object_kind,
-        schema_version: row.schema_version,
-        lifecycle_state: row.lifecycle_state,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        created_by: row.created_by,
-        governance_subject: JSON.parse(row.governance_subject),
-        claim_kind: row.claim_kind,
-        scope_class: row.scope_class,
-        enforcement_level: row.enforcement_level,
-        origin_tier: row.origin_tier,
-        precedence_basis: row.precedence_basis,
-        proposition_digest: row.proposition_digest,
-        evidence_refs: JSON.parse(row.evidence_refs),
-        source_object_refs: JSON.parse(row.source_object_refs),
-        workspace_id: row.workspace_id,
-        claim_status: row.claim_status
+        object_id: readNonEmptyStringField(row, "object_id"),
+        object_kind: readNonEmptyStringField(row, "object_kind"),
+        schema_version: readPositiveIntField(row, "schema_version"),
+        lifecycle_state: readNonEmptyStringField(row, "lifecycle_state"),
+        created_at: readNonEmptyStringField(row, "created_at"),
+        updated_at: readNonEmptyStringField(row, "updated_at"),
+        created_by: readNonEmptyStringField(row, "created_by"),
+        governance_subject: readJsonColumn(row, "governance_subject"),
+        claim_kind: readNonEmptyStringField(row, "claim_kind"),
+        scope_class: readNonEmptyStringField(row, "scope_class"),
+        enforcement_level: readNonEmptyStringField(row, "enforcement_level"),
+        origin_tier: readNonEmptyStringField(row, "origin_tier"),
+        precedence_basis: readNonEmptyStringField(row, "precedence_basis"),
+        proposition_digest: readNonEmptyStringField(row, "proposition_digest"),
+        evidence_refs: readJsonColumn(row, "evidence_refs"),
+        source_object_refs: readJsonColumn(row, "source_object_refs"),
+        workspace_id: readNonEmptyStringField(row, "workspace_id"),
+        claim_status: readNonEmptyStringField(row, "claim_status")
       })
     );
   } catch (error) {

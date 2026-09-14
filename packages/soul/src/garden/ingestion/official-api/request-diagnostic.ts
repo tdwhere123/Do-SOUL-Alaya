@@ -1,7 +1,9 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { readErrorMessage, type GardenProviderKind } from "@do-soul/alaya-protocol";
+import {
+  diagnosticWarn, readErrorMessage, type GardenProviderKind
+} from "@do-soul/alaya-protocol";
 import {
   extractHeadersFromCauseChain,
   extractRecoveryKindFromInputs,
@@ -43,7 +45,7 @@ export function dumpOfficialApiRequestDiagnostic(input: OfficialApiRequestDiagno
     const timestamp = input.now();
     writeDiagnostic(input.diagnosticDir, timestamp, buildDiagnosticEnvelope(input, timestamp));
   } catch (error) {
-    console.warn("garden/compute-provider: diagnostic dump failed", {
+    diagnosticWarn("garden/compute-provider: diagnostic dump failed", {
       error: readErrorMessage(error, "unknown error")
     });
   }

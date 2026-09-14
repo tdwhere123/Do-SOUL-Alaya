@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { bindDiagnosticLogger } from "@do-soul/alaya-protocol";
 import { createTimeConcernWindowDigest } from "@do-soul/alaya-protocol";
 import {
   GardenProviderError,
@@ -18,6 +19,14 @@ function createContext() {
     turn_messages: [],
     allow_legacy_single_user_source: true
   };
+}
+
+function withDiagnosticWarn(run: (warn: ReturnType<typeof vi.fn>) => Promise<void>): Promise<void> {
+  const warn = vi.fn();
+  bindDiagnosticLogger({ warn, error: vi.fn() });
+  return run(warn).finally(() => {
+    bindDiagnosticLogger({ warn: () => undefined, error: () => undefined });
+  });
 }
 
 describe("OfficialApiGardenProvider", () => {  it("materializes candidate signals from a successful official API response", async () => {
@@ -96,6 +105,46 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
     expect(signal).toBeDefined();
     expect(signal?.created_at).toBe(compileTime);
     expect(signal?.created_at).not.toBe(sourceTime);
+  });
+
+  it("does not invent the compile clock as source observation time when source time is missing", async () => {
+    const compileTime = "2026-04-01T12:00:00.000Z";
+    const extractor = createOpenSemanticExtractor(JSON.stringify({
+      signals: [
+        {
+          signal_kind: "potential_preference",
+          object_kind: "user_preference",
+          confidence: 0.9,
+          matched_text: "Call me Ash",
+          distilled_fact: "Call me Ash.",
+          reason: "naming_preference",
+          temporal_projection: {
+            event_time_start: "2026-04-01T00:00:00.000Z",
+            event_time_end: "2026-04-02T00:00:00.000Z",
+            time_precision: "day",
+            time_source: "session_timestamp",
+            projection_schema_version: 1
+          }
+        }
+      ]
+    }));
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor,
+      now: () => compileTime,
+      generateSignalId: () => "signal-missing-source-time"
+    });
+
+    const [signal] = await provider.compile("Call me Ash.", createContext());
+    expect(signal).toBeDefined();
+    expect(signal?.created_at).toBe(compileTime);
+    expect(signal?.raw_payload).toEqual(expect.objectContaining({
+      time_concern_projection_audit: {
+        status: "unavailable",
+        reason: "event_time_unavailable"
+      }
+    }));
+    expect(JSON.stringify(signal)).not.toContain(`"observed_at":"${compileTime}"`);
   });
 
 
@@ -194,7 +243,10 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
       generateSignalId: () => "signal-temporal"
     });
 
-    const signals = await provider.compile("The deployment happened on 2026-03-19.", createContext());
+    const signals = await provider.compile("The deployment happened on 2026-03-19.", {
+      ...createContext(),
+      source_observed_at: "2026-04-23T09:00:00.000Z"
+    });
 
     expect(signals[0]!.raw_payload).toMatchObject({
       temporal_projection: {
@@ -371,8 +423,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
 
   it("drops one schema-rejected signal but keeps the rest of the turn", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
+    await withDiagnosticWarn(async (warn) => {
       const extractor = createOpenSemanticExtractor(JSON.stringify({
         signals: [
           {
@@ -413,15 +464,12 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
           runId: "run-1", signalKind: "potential_claim"
         })
       );
-    } finally {
-      warn.mockRestore();
-    }
+    });
   });
 
 
   it("keeps the turn's good signals when one entry's model JSON is malformed", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
+    await withDiagnosticWarn(async () => {
       // Five signals, one malformed: a non-canonical confidence. A throwing
       // parse would abort the whole turn (GardenProviderError out of
       // compile()); per-entry resilience must drop the one bad fact and keep
@@ -483,9 +531,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
       expect(signals.map((s) => s.object_kind)).toEqual(
         ["open_semantic_observation", "decision", "fact", "open_semantic_observation"]
       );
-    } finally {
-      warn.mockRestore();
-    }
+    });
   });
 
 
@@ -508,8 +554,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
 
   it("drops an oversized raw_payload signal while the turn's other signals survive", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
+    await withDiagnosticWarn(async (warn) => {
       // A long matched_text overflows the 16 KB BoundedJsonObject cap on
       // raw_payload: schema-grounding triplicates it (matched_text +
       // field_candidates value + evidence), and buildTurnExcerpt adds an
@@ -551,9 +596,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
         "garden/compute-provider: dropped one official-API signal",
         expect.objectContaining({ matchedTextChars: 4_000 })
       );
-    } finally {
-      warn.mockRestore();
-    }
+    });
   });
 
 });

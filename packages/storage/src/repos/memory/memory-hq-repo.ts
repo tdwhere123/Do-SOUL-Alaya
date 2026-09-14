@@ -5,6 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { parseRows } from "../shared/parse-row.js";
 
 export interface MemoryHqRecord {
   readonly object_id: string;
@@ -118,8 +119,8 @@ export class SqliteMemoryHqRepo implements MemoryHqRepo {
         const chunk = unique.slice(offset, offset + HQ_LOOKUP_CHUNK);
         if (chunk.length === 0) continue;
         const placeholders = chunk.map(() => "?").join(", ");
-        const rows = this.db.connection.prepare(`${OBSERVATION_SELECT_SQL}
-          WHERE current.object_id IN (${placeholders})`).all(...chunk) as ObservationRow[];
+        const rows = parseRows(this.db.connection.prepare(`${OBSERVATION_SELECT_SQL}
+          WHERE current.object_id IN (${placeholders})`).all(...chunk), { parse: (value: unknown) => value as ObservationRow }, "observation row");
         for (const row of rows) result.set(row.object_id, parseObservationRow(row));
       }
       return result;

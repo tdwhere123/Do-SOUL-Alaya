@@ -10,10 +10,10 @@ import {
   readRecallUnitFloat,
   resetCoreConfigForTests
 } from "../../../runtime/config/index.js";
-import { parseEnvPositiveInt as parseGatewayPositiveInt } from
-  "../../../../../engine-gateway/src/mcp/env-value.js";
-import { isEnvFlagDisabled as isStorageEnvFlagDisabled } from
-  "../../../../../storage/src/sqlite/env-bool.js";
+import {
+  isEnvFlagDisabled as isStorageEnvFlagDisabled,
+  parseEnvPositiveInt as parseGatewayPositiveInt
+} from "@do-soul/alaya-protocol";
 
 describe("parseSourceRefRobust", () => {
   it.each([

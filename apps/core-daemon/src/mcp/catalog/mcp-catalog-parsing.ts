@@ -1,7 +1,11 @@
 import {
   ToolProviderToolSpecSchema,
+  type EnvLookup,
   type ToolProviderToolSpec
 } from "@do-soul/alaya-protocol";
+
+export type { EnvLookup };
+import { createWarnLogger } from "../../runtime/daemon/lifecycle/daemon-runtime-helpers.js";
 import { z } from "zod";
 import { isBuiltinConversationToolId, type BuiltinConversationToolId } from "../server/builtin-conversation-tool-specs.js";
 import type { DaemonMcpServerRuntimeConfig } from "./mcp-runtime-registry.js";
@@ -58,7 +62,6 @@ export type DaemonMcpCatalogToolEntry = Readonly<{
 }>;
 
 export type WarnLogger = (message: string, meta: Record<string, unknown>) => void;
-export type EnvLookup = Readonly<Record<string, string | undefined>>;
 export type DaemonMcpCatalogEnvironmentSnapshot = Readonly<{
   readonly allowedServerNames: readonly string[];
   readonly rawToolCatalog: ReadonlyMap<string, readonly DaemonMcpCatalogToolEntry[]>;
@@ -117,8 +120,11 @@ export function readDaemonMcpCatalogEnvironment(
   });
 }
 
+let sharedCatalogWarnLogger: WarnLogger | null = null;
+
 export function defaultWarn(message: string, meta: Record<string, unknown>): void {
-  console.warn(message, meta);
+  sharedCatalogWarnLogger ??= createWarnLogger().warn.bind(createWarnLogger());
+  sharedCatalogWarnLogger(message, meta);
 }
 
 function parseDaemonMcpServerRuntimeConfig(

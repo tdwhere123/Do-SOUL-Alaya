@@ -1,7 +1,8 @@
 ﻿import { SlotSchema, type Slot } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import { parseRows, readJsonColumn, readNonEmptyStringField, readNullableStringField, readPositiveIntField, readRecord, type RowParser } from "../shared/parse-row.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../shared/validators.js";
 
 export interface SlotRepo {
@@ -189,8 +190,11 @@ export class SqliteSlotRepo implements SlotRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findByWorkspaceStatement.all(parsedWorkspaceId) as SlotRow[];
-      return rows.map((row) => parseSlotRow(row));
+      return parseRows(
+        this.findByWorkspaceStatement.all(parsedWorkspaceId),
+        SlotRowParser,
+        "slot row"
+      );
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list slots for workspace ${parsedWorkspaceId}.`, error);
     }
@@ -259,24 +263,29 @@ function parseSlot(value: Slot): Readonly<Slot> {
   }
 }
 
-function parseSlotRow(row: SlotRow): Readonly<Slot> {
+const SlotRowParser: RowParser<Readonly<Slot>> = {
+  parse: parseSlotRow
+};
+
+function parseSlotRow(value: unknown): Readonly<Slot> {
+  const row = readRecord(value, "slot row");
   try {
     return deepFreeze(
       SlotSchema.parse({
-        object_id: row.object_id,
-        object_kind: row.object_kind,
-        schema_version: row.schema_version,
-        lifecycle_state: row.lifecycle_state,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        created_by: row.created_by,
-        governance_subject: JSON.parse(row.governance_subject),
-        claim_kind: row.claim_kind,
-        scope_class: row.scope_class,
-        winner_claim_id: row.winner_claim_id,
-        incumbent_since: row.incumbent_since,
-        flip_conditions: JSON.parse(row.flip_conditions),
-        workspace_id: row.workspace_id
+        object_id: readNonEmptyStringField(row, "object_id"),
+        object_kind: readNonEmptyStringField(row, "object_kind"),
+        schema_version: readPositiveIntField(row, "schema_version"),
+        lifecycle_state: readNonEmptyStringField(row, "lifecycle_state"),
+        created_at: readNonEmptyStringField(row, "created_at"),
+        updated_at: readNonEmptyStringField(row, "updated_at"),
+        created_by: readNonEmptyStringField(row, "created_by"),
+        governance_subject: readJsonColumn(row, "governance_subject"),
+        claim_kind: readNonEmptyStringField(row, "claim_kind"),
+        scope_class: readNonEmptyStringField(row, "scope_class"),
+        winner_claim_id: readNullableStringField(row, "winner_claim_id"),
+        incumbent_since: readNullableStringField(row, "incumbent_since"),
+        flip_conditions: readJsonColumn(row, "flip_conditions"),
+        workspace_id: readNonEmptyStringField(row, "workspace_id")
       })
     );
   } catch (error) {

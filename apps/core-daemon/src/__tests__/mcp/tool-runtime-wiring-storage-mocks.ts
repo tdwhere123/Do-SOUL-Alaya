@@ -28,11 +28,6 @@ export async function buildToolRuntimeWiringStorageMocks(params: {
     ...actual,
     initDatabase: vi.fn(() => hoisted.database),
     createGardenBackgroundDataPorts: vi.fn(() => gardenBackgroundDataPorts),
-    // anchor: storage owns an independent jieba module-state instance;
-    // the daemon AWAITS this warm at startup so the runtime-wiring
-    // surface must expose a fast no-op fallback (mirrors the core mock
-    // below). see also: packages/storage/src/repos/shared/cjk-segmentation.ts.
-    warmCjkSegmentation: hoisted.storageWarmCjkSegmentation,
     SqliteMemoryEmbeddingRepo: undefined,
     SqliteWorkspaceRepo: vi.fn().mockImplementation(function SqliteWorkspaceRepo() {
       return {

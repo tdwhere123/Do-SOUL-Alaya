@@ -5,7 +5,8 @@ import {
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../../shared/errors.js";
-import { parseEventLogEntryRow, type CountRow, type EventLogRow } from "../mappers/event-log-rows.js";
+import { parseRows } from "../../../shared/parse-row.js";
+import { EventLogEntryRowParser, type CountRow } from "../mappers/event-log-rows.js";
 import type {
   EventLogGovernancePredicateStatements,
   EventLogRunQueryStatements
@@ -101,13 +102,13 @@ export function executeQueryGovernanceLeaseEventsByRun(
   statements: Pick<EventLogRunQueryStatements, "queryGovernanceLeaseEventsByRunStatement">,
   runId: string
 ): readonly EventLogEntry[] {
-  const rows = statements.queryGovernanceLeaseEventsByRunStatement.all(
+  const rows = parseRows(statements.queryGovernanceLeaseEventsByRunStatement.all(
     runId,
     GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
     GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
     GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED
-  ) as EventLogRow[];
-  return rows.map((row) => parseEventLogEntryRow(row));
+  ), EventLogEntryRowParser, "event log row");
+  return rows;
 }
 
 export function executeQueryNarrativeDigestPayloadsByRun(

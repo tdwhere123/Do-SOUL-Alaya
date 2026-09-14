@@ -39,16 +39,10 @@ import {
   scheduleFairWork,
   type FairWorkRegion
 } from "../reference/schedule-fair-work.js";
-import {
-  collectIdentities,
-  mergeSeeds,
-  mergeTransitions,
-  facetBelongsToOutput,
-  retainSamePathVectors,
-  transitionKey,
-  type HyperedgeCompletion,
-  type HyperedgePremise
-} from "./path-composition.js";
+import { type HyperedgeCompletion, type HyperedgePremise } from "./path-composition-adjacency.js";
+import { facetBelongsToOutput, retainSamePathVectors } from "./path-composition-facet.js";
+import { collectIdentities, mergeSeeds } from "./path-composition-seed.js";
+import { mergeTransitions, transitionKey } from "./path-composition.js";
 import type { RoutingDiscovery } from "./path-routing.js";
 import { derivationForest, evaluateDerivation, reviseDerivations } from "./path-derivation.js";
 import type { BoundSourceFacts } from "./binding-environment.js";

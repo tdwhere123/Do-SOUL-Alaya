@@ -11,7 +11,7 @@
  * see also: packages/core/src/recall/recall-service.ts collectEntityDerivedSeeds
  */
 
-export type EntityCandidateKind =
+type EntityCandidateKind =
   | "quoted"
   | "proper_noun"
   | "code_ref"

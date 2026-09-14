@@ -1,6 +1,6 @@
 import { ToolSpecSchema, type ToolSpec } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface ToolSpecServiceRepoPort {

@@ -12,8 +12,7 @@ import {
   CLAUSE_BOUNDARIES,
   WH_WORDS
 } from "./fact-frame-grammar/clause-boundaries.js";
-import { isCjkSegmentationCandidate, warmCjkSegmentation } from
-  "./cjk-segmentation.js";
+import { isCjkSegmentationCandidate, warmCjkSegmentation } from "@do-soul/alaya-protocol";
 import { parseCjkInterrogativeFactFrame } from
   "./fact-frame-grammar/cjk-interrogative.js";
 import {

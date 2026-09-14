@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   readFile as fsReadFile,
   realpath
@@ -228,7 +229,7 @@ function truncateExecOutput(output: string): string {
 function createExecChildProcessEnv(): NodeJS.ProcessEnv {
   const childEnv: NodeJS.ProcessEnv = {};
   for (const variableName of EXEC_CHILD_ENV_ALLOWLIST) {
-    const value = process.env[variableName];
+    const value = processEnvLookup()[variableName];
     if (typeof value === "string" && value.length > 0) {
       childEnv[variableName] = value;
     }

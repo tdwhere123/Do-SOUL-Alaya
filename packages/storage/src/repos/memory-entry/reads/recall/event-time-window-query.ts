@@ -5,12 +5,12 @@ import {
 import { StorageError } from "../../../../shared/errors.js";
 import { parsePageLimit } from "../../../shared/validators.js";
 import {
-  parseMemoryEntryRow,
   parseStorageTier,
-  type MemoryEntryRow
+  MemoryEntryRowParser
 } from "../../mappers/row-mapper.js";
 import type { RecallEventTimeWindowQuery } from "../../types.js";
 import type { RecallEventTimeWindowStatements } from "../../statements/recall/event-time-window-statements.js";
+import { parseRows } from "../../../shared/parse-row.js";
 
 export function findByEventTimeWindow(
   statements: RecallEventTimeWindowStatements,
@@ -18,14 +18,14 @@ export function findByEventTimeWindow(
 ): readonly Readonly<MemoryEntry>[] {
   const window = parseEventTimeWindow(query);
   try {
-    const rows = statements.findByEventTimeWindowStatement.all(
+    const rows = parseRows(statements.findByEventTimeWindowStatement.all(
       query.workspaceId,
       parseStorageTier(query.tier),
       window.endTime,
       window.startTime,
       window.limit
-    ) as MemoryEntryRow[];
-    return rows.map((row) => parseMemoryEntryRow(row));
+    ), MemoryEntryRowParser, "memory entry row");
+    return rows;
   } catch (error) {
     if (error instanceof StorageError) throw error;
     throw new StorageError(

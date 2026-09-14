@@ -3,7 +3,7 @@ import {
   openReadOnlyDatabase
 } from "@do-soul/alaya-storage";
 import { parseDaemonMcpServerRuntimeConfigs } from "../../mcp/catalog/mcp-catalog-parsing.js";
-import { listRegisteredDaemonEnvKeys } from "../../runtime/config/daemon-config-environment.js";
+import { listRegisteredDaemonEnvKeys, processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import { isRetainUnroutedFactsEnabled } from "../../runtime/recall-materialization/recall-materialization-router.js";
 
 export type DoctorMcpConfigStatus = "unset" | "valid" | "invalid";
@@ -78,7 +78,7 @@ export function writeDoctorAuditSummary(
 }
 
 function readMcpServerConfigStatus(): DoctorMcpConfigStatus {
-  const raw = process.env.ALAYA_MCP_SERVER_CONFIG_JSON;
+  const raw = processEnvLookup().ALAYA_MCP_SERVER_CONFIG_JSON;
   if (raw === undefined || raw.trim().length === 0) {
     return "unset";
   }
@@ -113,7 +113,7 @@ function readTemporalProjectionStatus(dbPath: string): DoctorAuditSnapshot["temp
 }
 
 function isConflictLlmRawKeyOnly(): boolean {
-  const rawKey = process.env.ALAYA_CONFLICT_LLM_API_KEY?.trim();
-  const secretRef = process.env.ALAYA_CONFLICT_LLM_SECRET_REF?.trim();
+  const rawKey = processEnvLookup().ALAYA_CONFLICT_LLM_API_KEY?.trim();
+  const secretRef = processEnvLookup().ALAYA_CONFLICT_LLM_SECRET_REF?.trim();
   return Boolean(rawKey) && !secretRef;
 }

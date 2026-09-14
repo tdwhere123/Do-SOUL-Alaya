@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isUniqueConstraintError } from "../../../repos/garden/garden-task-errors.js";
+import { isUniqueConstraintError } from "@do-soul/alaya-protocol";
+import { isUniqueConstraintError as storageReexport } from "../../../repos/garden/garden-task-errors.js";
 
 function sqliteError(input: {
   readonly code?: string;
@@ -80,5 +81,10 @@ describe("isUniqueConstraintError", () => {
     }
   ])("$name", ({ error, column, expected }) => {
     expect(isUniqueConstraintError(error, column)).toBe(expected);
+    expect(storageReexport(error, column)).toBe(expected);
+  });
+
+  it("is the protocol owner re-exported by storage", () => {
+    expect(storageReexport).toBe(isUniqueConstraintError);
   });
 });

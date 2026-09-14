@@ -26,7 +26,9 @@
 // the transport phases where the abort cannot terminate the stall.
 // see also: packages/core/src/embedding-recall/transport-backstop.ts raceAgainstTransportBackstop
 
-import { AlayaError } from "@do-soul/alaya-protocol";
+import {
+  diagnosticWarn, AlayaError
+} from "@do-soul/alaya-protocol";
 
 const WALL_CLOCK_TICK_MS = 5_000;
 
@@ -156,7 +158,7 @@ export async function withWallClockTimeout<T>(
       if (!raceSettled || state.controller.signal.aborted) {
         return;
       }
-      console.warn(
+      diagnosticWarn(
         "garden/wall-clock-timeout: inner promise rejected after outer settlement",
         { error }
       );

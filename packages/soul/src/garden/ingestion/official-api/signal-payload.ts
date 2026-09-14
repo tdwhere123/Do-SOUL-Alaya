@@ -31,7 +31,7 @@ export function buildOfficialCandidateSignal(input: {
   readonly providerKind: GardenProviderKind;
   readonly signalId: string;
   readonly createdAt: string;
-  readonly sourceObservedAt: string;
+  readonly sourceObservedAt?: string;
   readonly sourceGrounding: OfficialApiSourceGroundingAudit;
 }): Record<string, unknown> {
   const { draft } = input;

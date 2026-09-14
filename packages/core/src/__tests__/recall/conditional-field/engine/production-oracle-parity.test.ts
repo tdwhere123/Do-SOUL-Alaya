@@ -3,7 +3,8 @@ import { evaluateBooleanHypergraph, type BooleanHyperedge } from "@do-soul/alaya
 import { productSubjectId, type ObserverPage, type QueryInterpretation, type QueryProgram, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
 import { applyObserverPage, createConditionalField, withdrawDerivationLeaves, type FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { bindEngineState } from "../../../../recall/conditional-field/engine/field-update.js";
-import { adjacencyEffectsForRows, seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { encodeBindingContext, parseBindingContext } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";

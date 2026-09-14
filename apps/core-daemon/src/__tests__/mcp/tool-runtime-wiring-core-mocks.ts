@@ -146,10 +146,6 @@ export function buildToolRuntimeWiringCoreMocks(params: {
     scheduleAuditedAsyncSideEffect: vi.fn((work: Promise<unknown> | null | undefined) => {
       void work?.catch(() => undefined);
     }),
-    // anchor: jieba warm-up call site lives in apps/core-daemon/src/index.ts
-    // createAlayaDaemonRuntime. The mock must expose a no-op so the
-    // fire-and-forget call does not blow up the runtime-wiring test surface.
-    warmCjkSegmentation: hoisted.coreWarmCjkSegmentation,
     CrossCuttingPermissionService: makeClass(),
     ClaudeRuntimeAdapter: makeClass(),
     DynamicsService: makeClass(),

@@ -5,6 +5,7 @@ import {
   installDefaultSqliteWriteQueue,
   type SqliteWriteQueuePort
 } from "@do-soul/alaya-storage";
+import { processEnvLookup } from "../config/daemon-config-environment.js";
 
 let installedWriteQueue: SqliteWriteQueuePort | null = null;
 
@@ -13,7 +14,7 @@ export async function openDaemonDatabase(filename: string) {
   // so payload writes can leave the event loop. Opt out: ALAYA_SQLITE_WRITE_QUEUE=0.
   // Close any prior install first — the port is process-global and workers outlive DB handles.
   await closeDaemonSqliteWriteQueue();
-  installedWriteQueue = await installDefaultSqliteWriteQueue();
+  installedWriteQueue = await installDefaultSqliteWriteQueue(processEnvLookup());
   const database = initDatabase({ filename });
   assertTemporalProjectionReady(database);
   // Without stats, SQLite can pick a low-selectivity index on a growing alaya.db.

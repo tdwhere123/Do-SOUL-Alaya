@@ -1,8 +1,9 @@
 import { ToolExecutionRecordSchema, type ToolExecutionRecord } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { toSqliteBoolean } from "../shared/sqlite-utils.js";
+import { parseRows } from "../shared/parse-row.js";
 
 export interface ToolExecutionRecordRepo {
   insert(record: ToolExecutionRecord): Promise<Readonly<ToolExecutionRecord>>;
@@ -169,7 +170,7 @@ export class SqliteToolExecutionRecordRepo implements ToolExecutionRecordRepo {
         requestedBy === "principal"
           ? this.listByPrincipalRunIdStatement
           : this.listByWorkerRunIdStatement;
-      const rows = statement.all(runId) as ToolExecutionRecordRow[];
+      const rows = parseRows(statement.all(runId), { parse: (value: unknown) => value as ToolExecutionRecordRow }, "tool execution record row");
       return rows.map((row) => parseToolExecutionRecordRow(row));
     } catch (error) {
       if (error instanceof StorageError) {

@@ -1,4 +1,3 @@
-import { StorageTierSchema } from "@do-soul/alaya-protocol";
 import type {
   KeywordSearchLaneScope,
   RecallServiceEvidenceSearchPort,
@@ -6,14 +5,12 @@ import type {
   RecallServiceSynthesisSearchPort
 } from "@do-soul/alaya-core";
 import type { RecallReadWorkerOperation } from "./protocol.js";
-import {
-  asPayload,
-  readNumber,
-  readOptionalKeywordFieldCapture,
-  readPositiveIntegerArray,
-  readString,
-  readStringArray
-} from "./payload-readers.js";
+import type { WorkerOperationPayload, WorkerOperationPayloadMap } from "./operation-schemas.js";
+
+type FieldMemoryOperation = Extract<
+  RecallReadWorkerOperation,
+  "memory.searchByKeywordField" | "memory.searchByAnchorField"
+>;
 
 type FieldMemoryRepo = Pick<
   RecallServiceMemoryRepoPort,
@@ -22,81 +19,73 @@ type FieldMemoryRepo = Pick<
 
 export async function runMemoryFieldOperation(
   repo: FieldMemoryRepo,
-  operation: Extract<RecallReadWorkerOperation, `memory.${string}`>,
-  payload: Record<string, unknown>
+  operation: FieldMemoryOperation,
+  payload: WorkerOperationPayloadMap[FieldMemoryOperation]
 ): Promise<unknown> {
-  const workspaceId = readString(payload.workspaceId, "workspaceId");
-  const limit = readNumber(payload.limit, "limit");
   if (operation === "memory.searchByKeywordField") {
+    const keywordPayload = payload as WorkerOperationPayload<"memory.searchByKeywordField">;
     if (repo.searchByKeywordField === undefined) {
       throw new Error("memory keyword field is unavailable");
     }
     return await repo.searchByKeywordField(
-      workspaceId,
-      readString(payload.queryText, "queryText"),
-      limit,
-      readKeywordLaneScope(payload.scope),
-      readRefinementDepths(payload.refinementDepths),
-      readOptionalKeywordFieldCapture(payload.capture)
+      keywordPayload.workspaceId,
+      keywordPayload.queryText,
+      keywordPayload.limit,
+      readKeywordLaneScope(keywordPayload.scope),
+      keywordPayload.refinementDepths,
+      keywordPayload.capture
     );
   }
-  if (operation !== "memory.searchByAnchorField" || repo.searchByAnchorField === undefined) {
+  const anchorPayload = payload as WorkerOperationPayload<"memory.searchByAnchorField">;
+  if (repo.searchByAnchorField === undefined) {
     throw new Error("memory anchor field is unavailable");
   }
   return await repo.searchByAnchorField(
-    workspaceId,
-    readStringArray(payload.anchorTokens, "anchorTokens"),
-    readStringArray(payload.optionalTokens, "optionalTokens"),
-    limit,
-    readKeywordLaneScope(payload.scope),
-    readRefinementDepths(payload.refinementDepths)
+    anchorPayload.workspaceId,
+    anchorPayload.anchorTokens,
+    anchorPayload.optionalTokens,
+    anchorPayload.limit,
+    readKeywordLaneScope(anchorPayload.scope),
+    anchorPayload.refinementDepths
   );
 }
 
 export async function runEvidenceFieldOperation(
   repo: Pick<RecallServiceEvidenceSearchPort, "searchByKeywordField">,
-  payload: Record<string, unknown>
+  payload: WorkerOperationPayload<"evidence.searchByKeywordField">
 ): Promise<unknown> {
   if (repo.searchByKeywordField === undefined) {
     throw new Error("evidence keyword field is unavailable");
   }
   return await repo.searchByKeywordField(
-    readString(payload.workspaceId, "workspaceId"),
-    readString(payload.queryText, "queryText"),
-    readNumber(payload.limit, "limit"),
-    readRefinementDepths(payload.refinementDepths)
+    payload.workspaceId,
+    payload.queryText,
+    payload.limit,
+    payload.refinementDepths
   );
 }
 
 export async function runSynthesisFieldOperation(
   repo: Pick<RecallServiceSynthesisSearchPort, "searchByKeywordField">,
-  payload: Record<string, unknown>
+  payload: WorkerOperationPayload<"synthesis.searchByKeywordField">
 ): Promise<unknown> {
   if (repo.searchByKeywordField === undefined) {
     throw new Error("synthesis keyword field is unavailable");
   }
   return await repo.searchByKeywordField(
-    readString(payload.workspaceId, "workspaceId"),
-    readString(payload.queryText, "queryText"),
-    readNumber(payload.limit, "limit"),
-    readRefinementDepths(payload.refinementDepths)
+    payload.workspaceId,
+    payload.queryText,
+    payload.limit,
+    payload.refinementDepths
   );
 }
 
-function readKeywordLaneScope(value: unknown): Readonly<KeywordSearchLaneScope> {
-  if (value === undefined) return Object.freeze({});
-  const scope = asPayload(value);
+function readKeywordLaneScope(
+  scope: WorkerOperationPayload<"memory.searchByKeywordField">["scope"]
+): Readonly<KeywordSearchLaneScope> | undefined {
+  if (scope === undefined) return undefined;
   return Object.freeze({
-    ...(scope.objectIds === undefined
-      ? {}
-      : { objectIds: readStringArray(scope.objectIds, "scope.objectIds") }),
-    ...(scope.tier === undefined
-      ? {}
-      : { tier: StorageTierSchema.parse(scope.tier) })
+    ...(scope.objectIds === undefined ? {} : { objectIds: scope.objectIds }),
+    ...(scope.tier === undefined ? {} : { tier: scope.tier })
   });
-}
-
-function readRefinementDepths(value: unknown): readonly number[] {
-  if (value === undefined) return Object.freeze([]);
-  return readPositiveIntegerArray(value, "refinementDepths");
 }

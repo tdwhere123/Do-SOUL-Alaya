@@ -1,7 +1,7 @@
 import { MemoryDimension, ScopeClass, type MemoryDimension as MemoryDimensionType, type ScopeClass as ScopeClassType } from "@do-soul/alaya-protocol";
 import { extractTemporalTerms } from "@do-soul/alaya-graph-algorithms";
 import { recallEnvRaw } from "../../runtime/config/recall-env-access.js";
-import { isCjkSegmentationCandidate, segmentCjkRun } from "../../shared/cjk-segmentation.js";
+import { isCjkSegmentationCandidate, segmentCjkRun } from "@do-soul/alaya-protocol";
 
 export type RecallQuerySubjectHint = "self_reference";
 
@@ -202,7 +202,7 @@ export function admitLexicalExpandedSurface(value: string): string | null {
 
 /**
  * Deterministic lowercased terms (shared split regex, length>2-or-CJK keep rule); keeps stop words. Reused by the feature-rerank tokenizer so query and candidate tokenize identically.
- * invariant: a CJK-bearing surface token yields its surface chunk first then deduped jieba word-pieces — keeps trigram substring coverage while exposing word boundaries. see also: shared/cjk-segmentation.ts.
+ * invariant: a CJK-bearing surface token yields its surface chunk first then deduped jieba word-pieces — keeps trigram substring coverage while exposing word boundaries.
  */
 export function splitLexicalTokens(value: string): readonly string[] {
   const surfaceTokens = lexicalSurfacePieces(value).filter(isLexicalKeepLength);

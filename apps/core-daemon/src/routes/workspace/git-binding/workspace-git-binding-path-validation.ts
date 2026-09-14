@@ -1,6 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { GitBindingValidationResult } from "./workspace-git-binding-types.js";
+import { processEnvLookup } from "../../../runtime/config/daemon-config-environment.js";
 import {
   logGitBindingFsWarning,
   mapFsErrorToValidationResult
@@ -144,7 +145,7 @@ export async function resolveAllowedRoots(options: {
   readonly repoRootsEnv?: string;
 }): Promise<readonly string[]> {
   const currentWorkingDirectory = options.currentWorkingDirectory ?? process.cwd();
-  const configuredRoots = (options.repoRootsEnv ?? process.env.ALAYA_REPO_ROOTS ?? "")
+  const configuredRoots = (options.repoRootsEnv ?? processEnvLookup().ALAYA_REPO_ROOTS ?? "")
     .split(path.delimiter)
     .map((value) => value.trim())
     .filter((value) => value.length > 0);

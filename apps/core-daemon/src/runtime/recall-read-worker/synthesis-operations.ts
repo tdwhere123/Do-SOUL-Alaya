@@ -1,38 +1,37 @@
 import type { RecallReadWorkerRequest } from "./protocol.js";
+import type { WorkerOperationPayload, WorkerOperationPayloadMap } from "./operation-schemas.js";
 import { runSynthesisFieldOperation } from "./field-operations.js";
-import {
-  readNumber,
-  readString,
-  readStringArray
-} from "./payload-readers.js";
-import { readKeywordSearchBatchQueries } from "./worker-readers.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
+
+type SynthesisOperation = Extract<RecallReadWorkerRequest["operation"], `synthesis.${string}`>;
 
 export async function runSynthesisOperation(
   runtime: RecallReadWorkerRuntime,
-  operation: Extract<RecallReadWorkerRequest["operation"], `synthesis.${string}`>,
-  payload: Record<string, unknown>
+  operation: SynthesisOperation,
+  payload: WorkerOperationPayloadMap[SynthesisOperation]
 ) {
   const { synthesisCapsuleRepo } = runtime;
   if (operation === "synthesis.searchByKeyword") {
+    const keywordPayload = payload as WorkerOperationPayload<"synthesis.searchByKeyword">;
     return await synthesisCapsuleRepo.searchByKeyword(
-      readString(payload.workspaceId, "workspaceId"),
-      readString(payload.queryText, "queryText"),
-      readNumber(payload.limit, "limit")
+      keywordPayload.workspaceId,
+      keywordPayload.queryText,
+      keywordPayload.limit
     );
   }
   if (operation === "synthesis.searchByKeywordField") {
-    return await runSynthesisFieldOperation(synthesisCapsuleRepo, payload);
-  }
-  if (operation === "synthesis.searchManyByKeywordField") {
-    return await synthesisCapsuleRepo.searchManyByKeywordField(
-      readString(payload.workspaceId, "workspaceId"),
-      readKeywordSearchBatchQueries(payload.queries)
+    return await runSynthesisFieldOperation(
+      synthesisCapsuleRepo,
+      payload as WorkerOperationPayload<"synthesis.searchByKeywordField">
     );
   }
-
-  return await synthesisCapsuleRepo.findByIds(
-    readString(payload.workspaceId, "workspaceId"),
-    readStringArray(payload.objectIds, "objectIds")
-  );
+  if (operation === "synthesis.searchManyByKeywordField") {
+    const batchPayload = payload as WorkerOperationPayload<"synthesis.searchManyByKeywordField">;
+    return await synthesisCapsuleRepo.searchManyByKeywordField(
+      batchPayload.workspaceId,
+      batchPayload.queries
+    );
+  }
+  const idsPayload = payload as WorkerOperationPayload<"synthesis.findByIds">;
+  return await synthesisCapsuleRepo.findByIds(idsPayload.workspaceId, idsPayload.objectIds);
 }

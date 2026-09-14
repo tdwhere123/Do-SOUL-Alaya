@@ -14,6 +14,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
+import { parseRows } from "../repos/shared/parse-row.js";
+import { PathRelationRowParser } from "../repos/path/mappers/path-relation-rows.js";
 import { openSqliteConnection } from "./open-sqlite-connection.js";
 
 type SqliteConnection = InstanceType<typeof BetterSqlite3>;
@@ -332,19 +334,6 @@ function hasCanonicalSelectionState(state: Readonly<Record<string, unknown>>): b
     typeof state.selected_at === "string" && state.selected_at.length > 0;
 }
 
-type LegacyPathRow = Readonly<{
-  readonly path_id: string;
-  readonly workspace_id: string;
-  readonly anchors_json: string;
-  readonly constitution_json: string;
-  readonly effect_vector_json: string;
-  readonly plasticity_state_json: string;
-  readonly lifecycle_json: string;
-  readonly legitimacy_json: string;
-  readonly created_at: string;
-  readonly updated_at: string;
-}>;
-
 export interface LegacyPathRelationQuarantine {
   readonly workspaceId: string;
   readonly sourceIdentity: string;
@@ -365,8 +354,9 @@ export function listLegacyPathRelationQuarantines(
             plasticity_state_json, lifecycle_json, legitimacy_json, created_at, updated_at
        FROM path_relations
       ORDER BY workspace_id ASC, path_id ASC`
-  ).all() as LegacyPathRow[];
-  return Object.freeze(rows.map((row) => {
+  ).all();
+  const validatedRows = parseRows(rows, PathRelationRowParser, "legacy path relation row");
+  return Object.freeze(validatedRows.map((row) => {
     const sourceJson = canonicalJson({
       path_id: row.path_id,
       workspace_id: row.workspace_id,

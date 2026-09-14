@@ -50,7 +50,8 @@ export {
   type TemporalProjectionSelectionState
 } from "./sqlite/index.js";
 export {
-  readSchemaMigrationLedger
+  readSchemaMigrationLedger,
+  selectRows
 } from "./sqlite/db.js";
 export {
   SqliteWorkspaceRepo,
@@ -391,20 +392,6 @@ export {
   type TrustStateRepo
 } from "./repos/control/index.js";
 export { SqliteHandoffGapRepo } from "./repos/runtime/index.js";
-// invariant: storage owns an independent jieba module-state instance (Package
-// Dependency Direction forbids importing core's copy). Daemon and bench-runner
-// MUST warm both core's and storage's segmenters at startup so the FTS query
-// path never hits the loading-state fallback on the user-visible hot path.
-// see also: packages/core/src/shared/cjk-segmentation.ts, apps/core-daemon/src/index.ts.
-export {
-  warmCjkSegmentation,
-  segmentCjkRun,
-  isCjkSegmentationCandidate,
-  readCjkSegmentationStatus,
-  CJK_SEGMENTATION_FALLBACK_WARNING_CODE as STORAGE_CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
-  __resetCjkSegmentationStateForTests as __resetStorageCjkSegmentationStateForTests
-} from "./repos/shared/cjk-segmentation.js";
-export type { CjkSegmentationStatus } from "./repos/shared/cjk-segmentation.js";
 export {
   createGardenBackgroundDataPorts,
   type GardenBackgroundDataPorts,
@@ -437,3 +424,13 @@ export { SqliteRelationRecallReader, type RecallAssertionObservation, RELATION_R
 
 export { SqliteMemoryRecallReader } from "./repos/memory-entry/reads/bounded-recall-reader.js";
 export { readBoundedActiveConstraints, type BoundedGovernancePathReader } from "./repos/governance/reads/bounded-active-constraints.js";
+
+export {
+  CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
+  readCjkSegmentationStatus,
+  isCjkSegmentationCandidate,
+  segmentCjkRun,
+  warmCjkSegmentation
+} from "@do-soul/alaya-protocol";
+export type { CjkSegmentationStatus } from "@do-soul/alaya-protocol";
+

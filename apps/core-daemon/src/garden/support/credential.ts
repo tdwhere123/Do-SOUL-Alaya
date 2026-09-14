@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { secretRefScheme } from "@do-soul/alaya-protocol";
 import { resolveSecretRef, type ResolveSecretError, type ResolvedSecret } from "../../secrets/index.js";
 import { readPlatformKeychainSecret } from "../../secrets/keychain/index.js";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
 export type GardenCredentialProvenance = Readonly<{
   readonly kind: "env" | "file" | "keychain" | "embedding-fallback" | "none";
@@ -37,7 +38,7 @@ export function resolveGardenOpenAiCredential(input: {
   readonly apiKey: string | null;
   readonly provenance: GardenCredentialProvenance;
 }> {
-  const env = input.env ?? process.env;
+  const env = input.env ?? processEnvLookup();
   const dedicatedRef = readFirstConfigValue(env, input.configEnv, [
     ALAYA_GARDEN_OPENAI_SECRET_REF_ENV,
     ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV

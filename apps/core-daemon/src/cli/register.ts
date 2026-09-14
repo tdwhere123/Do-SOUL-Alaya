@@ -15,6 +15,7 @@ import type { AlayaDaemonRuntime } from "../index.js";
 import { stripReviewerCredentialsFromAgentMcpEnv } from "../attach/attached-agent-mcp-child-env.js";
 import { createAttachClaudeCommandSpec, createAttachCodexCommandSpec, createDetachCommandSpec } from "./attach/index.js";
 import { runAlayaMcpStdioServer } from "../mcp/server/mcp-server.js";
+import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
 import {
   ALAYA_SYSEXITS,
   type AlayaCliArgsSchema,
@@ -70,11 +71,11 @@ interface AttachArgs {
 
 function createAttachCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<AttachArgs> {
   const codex = createAttachCodexCommandSpec({
-    auditWriter: createProfileAuditWriter(process.env),
+    auditWriter: createProfileAuditWriter(processEnvLookup()),
     trustStateRecorder: runtime.services.trustStateRecorder
   });
   const claude = createAttachClaudeCommandSpec({
-    auditWriter: createProfileAuditWriter(process.env),
+    auditWriter: createProfileAuditWriter(processEnvLookup()),
     trustStateRecorder: runtime.services.trustStateRecorder
   });
 
@@ -246,12 +247,12 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
     getGardenCredentialProvenance: async () =>
       await runtime.services.configService.getGardenCredentialProvenance(),
     getRuntimeWiring: () => {
-      const daemonSocket = process.env.ALAYA_DAEMON_SOCKET?.trim();
-      const tokenWorkspaces = process.env.ALAYA_REQUEST_TOKEN_WORKSPACES?.trim();
+      const daemonSocket = processEnvLookup().ALAYA_DAEMON_SOCKET?.trim();
+      const tokenWorkspaces = processEnvLookup().ALAYA_REQUEST_TOKEN_WORKSPACES?.trim();
       return {
         request_token_source: runtime.requestProtection.tokenSource ?? "ephemeral",
         daemon_socket: daemonSocket !== undefined && daemonSocket.length > 0 ? daemonSocket : null,
-        wildcard_bind_opt_in: process.env.ALAYA_ALLOW_WILDCARD_BIND === "1",
+        wildcard_bind_opt_in: processEnvLookup().ALAYA_ALLOW_WILDCARD_BIND === "1",
         request_token_workspaces:
           tokenWorkspaces !== undefined && tokenWorkspaces.length > 0 ? tokenWorkspaces : null
       };
@@ -295,7 +296,7 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
 function registerAttachCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRuntime): void {
   bridge.registerSubcommand(createAttachCommand(runtime));
   bridge.registerSubcommand(createDetachCommandSpec({
-    auditWriter: createProfileAuditWriter(process.env)
+    auditWriter: createProfileAuditWriter(processEnvLookup())
   }));
 }
 

@@ -11,6 +11,7 @@ import {
   SignalExtractorError,
   type SignalExtractor
 } from "@do-soul/alaya-soul";
+import { processEnvLookup } from "../config/daemon-config-environment.js";
 
 type VendorModelAlias = Readonly<{
   readonly id: string;
@@ -56,6 +57,7 @@ export function createOfficialGardenExtractor(input: Readonly<{
         abortSignal: options?.signal,
         mode: "json",
         jsonObject: true,
+        env: processEnvLookup(),
         ...(profile === undefined ? {} : { profile })
       }, {
         maxRetries: OFFICIAL_GARDEN_MAX_RETRIES,

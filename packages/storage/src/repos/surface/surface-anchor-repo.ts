@@ -1,13 +1,14 @@
 import { SurfaceAnchorSchema, type EventLogEntry, type SurfaceAnchor } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import {
   getEventLogWriter,
   insertEventLogEntry,
   type EventLogDraftInput
 } from "../runtime/writes/event-log-writer.js";
 import { parseNonEmptyString } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
 
 export interface SurfaceAnchorRepo {
   create(anchor: Readonly<SurfaceAnchor>): Promise<Readonly<SurfaceAnchor>>;
@@ -184,7 +185,7 @@ export class SqliteSurfaceAnchorRepo implements SurfaceAnchorRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId) as SurfaceAnchorRow[];
+      const rows = parseRows(this.findBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId), { parse: (value: unknown) => value as SurfaceAnchorRow }, "surface anchor row");
       return rows.map((row) => parseSurfaceAnchorRow(row));
     } catch (error) {
       throw new StorageError(
@@ -199,7 +200,7 @@ export class SqliteSurfaceAnchorRepo implements SurfaceAnchorRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findByWorkspaceStatement.all(parsedWorkspaceId) as SurfaceAnchorRow[];
+      const rows = parseRows(this.findByWorkspaceStatement.all(parsedWorkspaceId), { parse: (value: unknown) => value as SurfaceAnchorRow }, "surface anchor row");
       return rows.map((row) => parseSurfaceAnchorRow(row));
     } catch (error) {
       throw new StorageError(

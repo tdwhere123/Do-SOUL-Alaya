@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { memoryRecallTarget, type Guard, type QueryProgram, type TypedObservation } from "@do-soul/alaya-protocol";
 import { BindingContextStore, BindingContextResourceError, BindingContextUnavailableError,
   encodeBindingContext, parseBindingContext, evaluateGuard } from "../../../../recall/conditional-field/engine/binding-environment.js";
-import { adjacencyEffectsForRows, seedActivationsForObservation } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { seedActivationsForObservation } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { compileConditionalFieldQuery } from "../../../../recall/conditional-field/query/compile-query.js";
 import { buildTypedObservation, sourceRowEligible, relationRowEligible } from "../../../../recall/conditional-field/observers/observation-admission.js";
 import { startObserverCursor, type ObserveConditionalFieldInput } from "../../../../recall/conditional-field/observers/observe.js";

@@ -344,6 +344,9 @@ function collectPages(
     const page = runConditionalFieldWorkerRecall(worker, {
       ...payload(budget, query), ...extra, continuation
     });
+    if (page.preparation_id === undefined) {
+      throw new Error("expected preparation_id for worker delivery settle");
+    }
     settleWorkerDelivery(worker, {
       preparation_id: page.preparation_id,
       issued_entry_ids: page.index.entries.map(indexEntryCacheKey),

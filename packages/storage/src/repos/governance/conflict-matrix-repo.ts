@@ -6,7 +6,14 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import {
+  parseRows,
+  readNonEmptyStringField,
+  readPositiveIntField,
+  readRecord,
+  type RowParser
+} from "../shared/parse-row.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface ConflictMatrixRepo {
@@ -165,8 +172,11 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
     const parsedClaimId = parseClaimId(claimId);
 
     try {
-      const rows = this.findBySourceClaimStatement.all(parsedClaimId) as ConflictMatrixEdgeRow[];
-      return rows.map((row) => parseConflictMatrixEdgeRow(row));
+      return parseRows(
+        this.findBySourceClaimStatement.all(parsedClaimId),
+        ConflictMatrixEdgeRowParser,
+        "conflict matrix edge row"
+      );
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -180,8 +190,11 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
     const parsedClaimId = parseClaimId(claimId);
 
     try {
-      const rows = this.findByTargetClaimStatement.all(parsedClaimId) as ConflictMatrixEdgeRow[];
-      return rows.map((row) => parseConflictMatrixEdgeRow(row));
+      return parseRows(
+        this.findByTargetClaimStatement.all(parsedClaimId),
+        ConflictMatrixEdgeRowParser,
+        "conflict matrix edge row"
+      );
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -195,8 +208,11 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
     const parsedWorkspaceId = parseWorkspaceId(workspaceId);
 
     try {
-      const rows = this.findByWorkspaceStatement.all(parsedWorkspaceId) as ConflictMatrixEdgeRow[];
-      return rows.map((row) => parseConflictMatrixEdgeRow(row));
+      return parseRows(
+        this.findByWorkspaceStatement.all(parsedWorkspaceId),
+        ConflictMatrixEdgeRowParser,
+        "conflict matrix edge row"
+      );
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -214,13 +230,16 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
     const parsedTargetClaimId = parseClaimId(targetClaimId);
 
     try {
-      const rows = this.findBetweenClaimsStatement.all(
-        parsedSourceClaimId,
-        parsedTargetClaimId,
-        parsedTargetClaimId,
-        parsedSourceClaimId
-      ) as ConflictMatrixEdgeRow[];
-      return rows.map((row) => parseConflictMatrixEdgeRow(row));
+      return parseRows(
+        this.findBetweenClaimsStatement.all(
+          parsedSourceClaimId,
+          parsedTargetClaimId,
+          parsedTargetClaimId,
+          parsedSourceClaimId
+        ),
+        ConflictMatrixEdgeRowParser,
+        "conflict matrix edge row"
+      );
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -261,21 +280,26 @@ function parseConflictMatrixEdge(value: Readonly<ConflictMatrixEdge>): Readonly<
   }
 }
 
-function parseConflictMatrixEdgeRow(row: ConflictMatrixEdgeRow): Readonly<ConflictMatrixEdge> {
+const ConflictMatrixEdgeRowParser: RowParser<Readonly<ConflictMatrixEdge>> = {
+  parse: parseConflictMatrixEdgeRow
+};
+
+function parseConflictMatrixEdgeRow(value: unknown): Readonly<ConflictMatrixEdge> {
+  const row = readRecord(value, "conflict matrix edge row");
   try {
     return deepFreeze(
       ConflictMatrixEdgeSchema.parse({
-        object_id: row.object_id,
-        object_kind: row.object_kind,
-        schema_version: row.schema_version,
-        lifecycle_state: row.lifecycle_state,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        created_by: row.created_by,
-        source_claim_id: row.source_claim_id,
-        target_claim_id: row.target_claim_id,
-        edge_type: parseEdgeType(row.edge_type),
-        workspace_id: row.workspace_id
+        object_id: readNonEmptyStringField(row, "object_id"),
+        object_kind: readNonEmptyStringField(row, "object_kind"),
+        schema_version: readPositiveIntField(row, "schema_version"),
+        lifecycle_state: readNonEmptyStringField(row, "lifecycle_state"),
+        created_at: readNonEmptyStringField(row, "created_at"),
+        updated_at: readNonEmptyStringField(row, "updated_at"),
+        created_by: readNonEmptyStringField(row, "created_by"),
+        source_claim_id: readNonEmptyStringField(row, "source_claim_id"),
+        target_claim_id: readNonEmptyStringField(row, "target_claim_id"),
+        edge_type: parseEdgeType(readNonEmptyStringField(row, "edge_type")),
+        workspace_id: readNonEmptyStringField(row, "workspace_id")
       })
     );
   } catch (error) {

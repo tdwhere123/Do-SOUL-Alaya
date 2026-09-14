@@ -7,8 +7,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
 
 export interface DeferredObligationRepo {
   getById(obligationId: string): Promise<Readonly<DeferredObligation> | null>;
@@ -253,7 +254,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
     const parsedRunId = parseNonEmptyString(runId, "run id");
 
     try {
-      const rows = this.findActiveByRunStatement.all(parsedRunId) as DeferredObligationRow[];
+      const rows = parseRows(this.findActiveByRunStatement.all(parsedRunId), { parse: (value: unknown) => value as DeferredObligationRow }, "deferred obligation row");
       return rows.map((row) => this.mapRowToDomain(row));
     } catch (error) {
       throw new StorageError(
@@ -270,7 +271,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findActiveByWorkspaceStatement.all(parsedWorkspaceId) as DeferredObligationRow[];
+      const rows = parseRows(this.findActiveByWorkspaceStatement.all(parsedWorkspaceId), { parse: (value: unknown) => value as DeferredObligationRow }, "deferred obligation row");
       return rows.map((row) => this.mapRowToDomain(row));
     } catch (error) {
       throw new StorageError(
@@ -285,7 +286,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
     const parsedNow = parseIsoDatetimeNow(now);
 
     try {
-      const rows = this.findExpiredStatement.all(parsedNow) as DeferredObligationRow[];
+      const rows = parseRows(this.findExpiredStatement.all(parsedNow), { parse: (value: unknown) => value as DeferredObligationRow }, "deferred obligation row");
       return rows.map((row) => this.mapRowToDomain(row));
     } catch (error) {
       throw new StorageError(

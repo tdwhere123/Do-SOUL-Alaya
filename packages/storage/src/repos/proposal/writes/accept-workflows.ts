@@ -11,7 +11,7 @@ import {
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { assertLegacyPathRelationReadAllowed } from "../../../sqlite/temporal-projection-selection.js";
 import { StorageError } from "../../../shared/errors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { insertEventLogEntry } from "../../runtime/writes/event-log-writer.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import {

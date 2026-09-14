@@ -7,6 +7,7 @@ import {
   type LocalOnnxEmbeddingIpcHost
 } from "./local-onnx-process/ipc-client.js";
 import { LOCAL_ONNX_EMBEDDING_DIMENSIONS } from "./local-onnx-process/protocol.js";
+import type { EnvLookup } from "@do-soul/alaya-protocol";
 import os from "node:os";
 import path from "node:path";
 
@@ -78,6 +79,8 @@ export interface LocalOnnxEmbeddingClientOptions {
   readonly execution?: "in_process" | "child_process";
   /** Test seam: replace the forked ORT worker. */
   readonly ipcHost?: LocalOnnxEmbeddingIpcHost;
+  /** Environment for cache-dir / session-thread resolution. */
+  readonly env?: EnvLookup;
 }
 
 export const DEFAULT_LOCAL_ONNX_MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
@@ -124,6 +127,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   private readonly cacheDir: string | null;
   private readonly pipelineLoader: LocalOnnxPipelineLoader;
   private readonly now: () => number;
+  private readonly env: EnvLookup;
   private readonly isolated: LocalOnnxEmbeddingIpcSession | null;
   private extractorPromise: Promise<LocalOnnxFeatureExtractor> | null = null;
   private isolatedReady: Promise<void> | null = null;
@@ -138,8 +142,9 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   public constructor(options: LocalOnnxEmbeddingClientOptions = {}) {
     this.modelId = options.modelId?.trim() || DEFAULT_LOCAL_ONNX_MODEL_ID;
     this.schemaVersion = options.schemaVersion ?? 1;
+    this.env = options.env ?? {};
     this.cacheDir = options.cacheDir === undefined
-      ? defaultLocalOnnxCacheDir()
+      ? defaultLocalOnnxCacheDir(this.env)
       : options.cacheDir;
     const importer = options.transformersImporter ?? importLocalOnnxTransformers;
     this.pipelineLoader = options.pipelineLoader ?? ((modelId, cacheDir, loaderOptions) =>
@@ -198,6 +203,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
         // The isolated child owns the cross-process lock; holding it in the
         // parent while awaiting IPC would deadlock the child on the same DB.
         enabled: this.isolated === null ? undefined : false,
+        env: this.env,
         signal: deadline.signal,
         timeoutMs: options.timeoutMs > 0 ? options.timeoutMs : undefined
       }
@@ -309,7 +315,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
       this.modelId,
       this.cacheDir,
       {
-        sessionOptions: resolveLocalOnnxSessionOptionsFromEnv(process.env)
+        sessionOptions: resolveLocalOnnxSessionOptionsFromEnv(this.env)
       }
     ).catch((error) => {
       // Reset so a later call can retry instead of permanently caching a
@@ -389,8 +395,8 @@ function embeddingCancellationError(signal: AbortSignal): Error {
     : new Error("Local ONNX embedding was cancelled.");
 }
 
-export function defaultLocalOnnxCacheDir(): string {
-  const xdgCacheHome = process.env.XDG_CACHE_HOME?.trim();
+export function defaultLocalOnnxCacheDir(env: EnvLookup = {}): string {
+  const xdgCacheHome = env.XDG_CACHE_HOME?.trim();
   const cacheHome = xdgCacheHome && xdgCacheHome.length > 0
     ? xdgCacheHome
     : path.join(os.homedir(), ".cache");

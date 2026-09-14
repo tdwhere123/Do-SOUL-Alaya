@@ -51,6 +51,8 @@ export interface OpenAIEmbeddingClientOptions {
   // Diagnostics sink for retry activity. When unset, retries emit a structured
   // process warning so flakiness is never fully silent.
   readonly onRetry?: (event: EmbeddingRetryEvent) => void;
+  /** When true, skip private/loopback provider URL rejection. */
+  readonly allowPrivateProviderUrl?: boolean;
 }
 
 function clampEmbeddingRequestAttempts(value: number | undefined): number {
@@ -141,13 +143,15 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
   private readonly now: () => number;
   private readonly random: () => number;
   private readonly onRetry: (event: EmbeddingRetryEvent) => void;
+  private readonly allowPrivateProviderUrl: boolean;
 
   public constructor(options: OpenAIEmbeddingClientOptions) {
     this.apiKey = options.apiKey;
     this.modelId = resolveOpenAIEmbeddingModelId(options.model);
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? "https://api.openai.com/v1");
+    this.allowPrivateProviderUrl = options.allowPrivateProviderUrl === true;
     assertPublicHttpProviderUrl(this.baseUrl, {
-      allowPrivate: process.env.ALAYA_ALLOW_PRIVATE_PROVIDER_URL === "1"
+      allowPrivate: this.allowPrivateProviderUrl
     });
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.maxAttempts = clampEmbeddingRequestAttempts(options.maxAttempts);
@@ -220,7 +224,7 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     texts: readonly string[],
     abortTimeoutMs: number
   ): Promise<Response> {
-    await assertResolvedPublicEmbeddingHost(this.baseUrl);
+    await assertResolvedPublicEmbeddingHost(this.baseUrl, this.allowPrivateProviderUrl);
     const backstopMs =
       (Number.isFinite(abortTimeoutMs) && abortTimeoutMs > 0 ? abortTimeoutMs : 0) +
       this.transportBackstopMarginMs;
@@ -388,8 +392,11 @@ function normalizeBaseUrl(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
-async function assertResolvedPublicEmbeddingHost(baseUrl: string): Promise<void> {
-  if (process.env.ALAYA_ALLOW_PRIVATE_PROVIDER_URL === "1") {
+async function assertResolvedPublicEmbeddingHost(
+  baseUrl: string,
+  allowPrivateProviderUrl: boolean
+): Promise<void> {
+  if (allowPrivateProviderUrl) {
     return;
   }
   const host = parseHttpProviderUrl(baseUrl).hostname.replace(/^\[|\]$/gu, "");

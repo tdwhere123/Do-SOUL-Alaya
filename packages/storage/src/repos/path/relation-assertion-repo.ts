@@ -258,8 +258,7 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
   ): void {
     requireUniqueRelationAssertionEvidenceIds(evidenceReceipts.map((receipt) => receipt.evidence_id));
     try {
-      const rows = parseRows(
-        this.assertEvidenceReceiptsStatement.all(JSON.stringify(evidenceReceipts)),
+      const rows = parseRows(this.assertEvidenceReceiptsStatement.all(JSON.stringify(evidenceReceipts)),
         EvidenceReceiptVerificationRowParser,
         "relation assertion evidence receipt verification row"
       );

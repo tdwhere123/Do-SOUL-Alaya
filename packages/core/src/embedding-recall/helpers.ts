@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { hashMemoryContent as hashMemoryContentWith } from "@do-soul/alaya-protocol";
 import {
   DEFAULT_QUERY_EMBEDDING_CACHE_SIZE,
   DEFAULT_QUERY_TIMEOUT_MS,
@@ -13,6 +14,12 @@ import type {
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingQuerySnapshot
 } from "./types.js";
+
+export function hashMemoryContent(content: string): string {
+  return hashMemoryContentWith(content, (value) =>
+    createHash("sha256").update(value, "utf8").digest("hex")
+  );
+}
 
 export function clampQueryTimeout(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
@@ -84,12 +91,6 @@ export async function waitForPreparedQuery(settled: Promise<unknown>, timeoutMs:
       clearTimeout(timeoutHandle);
     }
   }
-}
-
-// Content-hash owner for embedding freshness. Storage's mapper copy remains
-// until that file can import this helper (storage cannot import core).
-export function hashMemoryContent(content: string): string {
-  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
 export function cosineSimilarity(left: Float32Array, right: Float32Array): number {

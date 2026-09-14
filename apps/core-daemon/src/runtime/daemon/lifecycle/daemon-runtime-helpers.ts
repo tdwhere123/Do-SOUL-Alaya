@@ -1,8 +1,12 @@
 import { pino, type Logger, type LoggerOptions } from "pino";
+import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
   ManifestationBudgetConfigSchema,
+  bindDiagnosticLogger,
+  type LoggerPort,
   type ManifestationBudgetConfig
 } from "@do-soul/alaya-protocol";
+export type { LoggerPort } from "@do-soul/alaya-protocol";
 import type { WorkspaceService } from "@do-soul/alaya-core";
 
 type ConfigRepoPort = {
@@ -20,16 +24,7 @@ type CurrencyRecordRepo = {
   findById(id: string): Promise<CurrencyRecord | null>;
 };
 
-export type LoggerPort = Readonly<{
-  trace(message: string, meta: Record<string, unknown>): void;
-  debug(message: string, meta: Record<string, unknown>): void;
-  info(message: string, meta: Record<string, unknown>): void;
-  warn(message: string, meta: Record<string, unknown>): void;
-  error(message: string, meta: Record<string, unknown>): void;
-  fatal(message: string, meta: Record<string, unknown>): void;
-}>;
-
-export type WarnLogger = LoggerPort;
+export type WarnLogger = Pick<LoggerPort, "warn">;
 
 type UnhandledRejectionListener = (reason: unknown) => void;
 type UncaughtExceptionListener = (error: unknown) => void;
@@ -132,7 +127,7 @@ const REDACT_PATHS: readonly string[] = [
 
 function resolveLogLevel(): LoggerOptions["level"] {
   // ALAYA_-prefixed per the project env convention; bare LOG_LEVEL kept as fallback.
-  const raw = (process.env.ALAYA_LOG_LEVEL ?? process.env.LOG_LEVEL)?.trim().toLowerCase();
+  const raw = (processEnvLookup().ALAYA_LOG_LEVEL ?? processEnvLookup().LOG_LEVEL)?.trim().toLowerCase();
   const allowed = ["trace", "debug", "info", "warn", "error", "fatal", "silent"];
   return raw !== undefined && allowed.includes(raw) ? (raw as LoggerOptions["level"]) : "info";
 }
@@ -190,7 +185,7 @@ function formatUnknownErrorMessage(error: unknown): string {
 
 export function createWarnLogger(): LoggerPort {
   const logger = getSharedPinoLogger();
-  return Object.freeze({
+  const port = Object.freeze({
     trace: (message: string, meta: Record<string, unknown>) => {
       logger.trace(meta, message);
     },
@@ -212,6 +207,8 @@ export function createWarnLogger(): LoggerPort {
       logger.fatal(meta, message);
     }
   });
+  bindDiagnosticLogger(port);
+  return port;
 }
 
 export function installUnhandledRejectionHandler(

@@ -7,6 +7,7 @@
  */
 import type { AlayaDaemonRuntime } from "../index.js";
 import { writeCliFailure } from "./errors/error-reporting.js";
+import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
 
 export const ALAYA_SYSEXITS = Object.freeze({
   OK: 0,
@@ -196,7 +197,7 @@ function createBridgeState(
     entries: [],
     byName: new Map<string, AlayaSubcommandSpec<unknown>>(),
     cwd: options.cwd ?? process.cwd(),
-    env: options.env ?? process.env,
+    env: options.env ?? processEnvLookup(),
     stdin: options.stdin ?? process.stdin,
     stdout,
     stderr: options.stderr ?? process.stderr,

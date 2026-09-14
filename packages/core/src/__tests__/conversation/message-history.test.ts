@@ -82,17 +82,20 @@ describe("message history rebuild", () => {
         message_id: "msg-user",
         role: "user",
         content: "Summarize the memory plane.",
-        file_ids: ["file-1", "file-2"]
+        file_ids: ["file-1", "file-2"],
+        created_at: "2026-06-01T00:00:01.000Z"
       },
       {
         message_id: "msg-engine",
         role: "assistant",
-        content: "Memory objects are ontology."
+        content: "Memory objects are ontology.",
+        created_at: "2026-06-01T00:00:02.000Z"
       },
       {
         message_id: "msg-stream",
         role: "assistant",
-        content: "Surfaces route truth; they are not truth."
+        content: "Surfaces route truth; they are not truth.",
+        created_at: "2026-06-01T00:00:03.000Z"
       }
     ]);
     expect(rebuildMessageHistory(events)).toEqual([
@@ -147,18 +150,21 @@ describe("message history rebuild", () => {
       {
         message_id: "msg-duplicate",
         role: "user",
-        content: "Repeatable input"
+        content: "Repeatable input",
+        created_at: "2026-06-01T00:00:00.000Z"
       },
       {
         message_id: "msg-duplicate",
         role: "user",
-        content: "Repeatable input"
+        content: "Repeatable input",
+        created_at: "2026-06-01T00:00:00.000Z"
       }
     ]);
     expect(messages.at(-1)).toEqual({
       message_id: "msg-large-63",
       role: "user",
-      content: "message 63"
+      content: "message 63",
+      created_at: "2026-06-01T00:02:03.000Z"
     });
   });
 });

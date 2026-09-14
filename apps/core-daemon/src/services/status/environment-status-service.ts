@@ -3,6 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import { ToolchainStatusSchema, type ToolchainStatus } from "@do-soul/alaya-protocol";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
 export interface EnvironmentStatusService {
   getStatus(): Promise<ToolchainStatus>;
@@ -60,7 +61,7 @@ const ENVIRONMENT_PROBE_CHILD_ENV_ALLOWLIST = [
 ] as const;
 
 async function defaultProbeTool(toolName: string): Promise<boolean> {
-  return await findExecutableOnPath(toolName, process.env);
+  return await findExecutableOnPath(toolName, processEnvLookup());
 }
 
 async function defaultCountActiveWorktrees(): Promise<number | null> {
@@ -163,7 +164,7 @@ async function isExecutablePath(candidatePath: string): Promise<boolean> {
   }
 }
 
-function createEnvironmentProbeChildEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+function createEnvironmentProbeChildEnv(source: NodeJS.ProcessEnv = processEnvLookup()): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const variableName of ENVIRONMENT_PROBE_CHILD_ENV_ALLOWLIST) {
     const value = source[variableName];

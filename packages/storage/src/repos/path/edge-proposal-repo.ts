@@ -28,6 +28,8 @@ import {
   type EdgeProposalReviewInput
 } from "./edge-proposal-types.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
+import { EdgeProposalRowParser } from "./mappers/edge-proposal-rows.js";
 
 export type {
   EdgeProposalCreateInput,
@@ -141,15 +143,18 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
     const limit = filter.limit ?? 100;
 
     try {
-      const rows = this.db.connection
-        .prepare(
-          `SELECT *
+      const rows = parseRows(this.db.connection
+          .prepare(
+            `SELECT *
            FROM edge_proposals
            WHERE ${conditions.join(" AND ")}
            ORDER BY created_at ASC, proposal_id ASC
            LIMIT ?`
-        )
-        .all(...args, limit) as EdgeProposalRow[];
+          )
+          .all(...args, limit),
+        EdgeProposalRowParser,
+        "edge proposal row"
+      );
       return Object.freeze(rows.map((row) => parseEdgeProposalRow(row)));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list edge proposals for workspace ${parsedWorkspaceId}.`, error);
@@ -163,9 +168,9 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
       throw new StorageError("VALIDATION_FAILED", `listExpiredPending limit must be a positive integer: ${limit}`);
     }
     try {
-      const rows = this.db.connection
-        .prepare(
-          `SELECT *
+      const rows = parseRows(this.db.connection
+          .prepare(
+            `SELECT *
            FROM edge_proposals
            WHERE workspace_id = ?
              AND status = 'pending'
@@ -173,8 +178,11 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
              AND expires_at < ?
            ORDER BY expires_at ASC, proposal_id ASC
            LIMIT ?`
-        )
-        .all(parsedWorkspaceId, now, limit) as EdgeProposalRow[];
+          )
+          .all(parsedWorkspaceId, now, limit),
+        EdgeProposalRowParser,
+        "edge proposal row"
+      );
       return Object.freeze(rows.map((row) => parseEdgeProposalRow(row)));
     } catch (error) {
       throw new StorageError(
@@ -197,11 +205,11 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
       let offset = 0;
 
       while (awaiting.length < limit) {
-        const rows = this.statements.listAcceptedAwaitingPathStatement.all(
+        const rows = parseRows(this.statements.listAcceptedAwaitingPathStatement.all(
           parsedWorkspaceId,
           batchSize,
           offset
-        ) as EdgeProposalRow[];
+        ), EdgeProposalRowParser, "edge proposal row");
         if (rows.length === 0) {
           break;
         }

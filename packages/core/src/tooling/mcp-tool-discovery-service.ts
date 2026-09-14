@@ -10,7 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseExtensionToolProvider } from "./extension-descriptor-parsers.js";
 import { readNow } from "../shared/time.js";
 

@@ -7,13 +7,14 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import {
   getEventLogWriter,
   insertEventLogEntry,
   type EventLogDraftInput
 } from "../runtime/writes/event-log-writer.js";
 import { parseNonEmptyString, parseSurfaceUri, parseTimestamp } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
 
 export interface CrossCuttingPermissionRecord {
   readonly permission_id: string;
@@ -268,7 +269,7 @@ export class SqliteCrossCuttingPermissionRepo implements CrossCuttingPermissionR
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findByWorkspaceStatement.all(parsedWorkspaceId) as CrossCuttingPermissionRow[];
+      const rows = parseRows(this.findByWorkspaceStatement.all(parsedWorkspaceId), { parse: (value: unknown) => value as CrossCuttingPermissionRow }, "cross cutting permission row");
       return rows.map((row) => parseCrossCuttingPermissionRow(row));
     } catch (error) {
       if (error instanceof StorageError) {

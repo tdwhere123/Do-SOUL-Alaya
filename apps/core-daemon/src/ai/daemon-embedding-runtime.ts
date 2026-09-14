@@ -26,6 +26,7 @@ import {
   createEmbeddingStatusService,
   type EmbeddingStatusDegradationSource
 } from "../services/status/embedding-status-service.js";
+import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
 import {
   DEFAULT_OPENAI_EMBEDDING_MODEL,
   createOptionalEvidenceRecallEmbeddingRepo,
@@ -312,8 +313,10 @@ function resolveEmbeddingProvider(input: {
   }
 
   if (input.providerKind === "local_onnx") {
+    const env = processEnvLookup();
     return new LocalOnnxEmbeddingClient({
-      cacheDir: input.localCacheDir ?? defaultLocalOnnxCacheDir(),
+      env,
+      cacheDir: input.localCacheDir ?? defaultLocalOnnxCacheDir(env),
       ...(input.localModel === null ? {} : { modelId: input.localModel }),
       ...(input.localSchemaVersion === null ? {} : { schemaVersion: input.localSchemaVersion })
     });
@@ -330,7 +333,8 @@ function resolveEmbeddingProvider(input: {
   return new OpenAIEmbeddingClient({
     apiKey: input.apiKey,
     model: input.openAiModel ?? undefined,
-    baseUrl: input.openAiBaseUrl ?? undefined
+    baseUrl: input.openAiBaseUrl ?? undefined,
+    allowPrivateProviderUrl: processEnvLookup().ALAYA_ALLOW_PRIVATE_PROVIDER_URL === "1"
   });
 }
 

@@ -7,6 +7,13 @@ import {
   type EdgeProposal
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
+import {
+  readFiniteNumberField,
+  readNonEmptyStringField,
+  readNullableStringField,
+  readRecord,
+  type RowParser
+} from "../../shared/parse-row.js";
 import { parseNonEmptyString, parseTimestamp } from "../../shared/validators.js";
 import type { EdgeProposalCreateInput } from "../edge-proposal-types.js";
 
@@ -56,6 +63,30 @@ export function parseCreateInput(input: EdgeProposalCreateInput): EdgeProposalCr
     expires_at: input.expires_at === null ? null : parseTimestamp(input.expires_at)
   };
 }
+
+export const EdgeProposalRowParser: RowParser<EdgeProposalRow> = {
+  parse(value: unknown): EdgeProposalRow {
+    const record = readRecord(value, "edge proposal row");
+    return {
+      proposal_id: readNonEmptyStringField(record, "proposal_id"),
+      workspace_id: readNonEmptyStringField(record, "workspace_id"),
+      source_memory_id: readNonEmptyStringField(record, "source_memory_id"),
+      target_memory_id: readNonEmptyStringField(record, "target_memory_id"),
+      edge_type: readNonEmptyStringField(record, "edge_type"),
+      trigger_source: readNonEmptyStringField(record, "trigger_source"),
+      confidence: readFiniteNumberField(record, "confidence"),
+      reason: readNullableStringField(record, "reason"),
+      source_signal_id: readNullableStringField(record, "source_signal_id"),
+      run_id: readNullableStringField(record, "run_id"),
+      status: readNonEmptyStringField(record, "status"),
+      reviewer_identity: readNullableStringField(record, "reviewer_identity"),
+      review_reason: readNullableStringField(record, "review_reason"),
+      created_at: readNonEmptyStringField(record, "created_at"),
+      updated_at: readNonEmptyStringField(record, "updated_at"),
+      expires_at: readNullableStringField(record, "expires_at")
+    };
+  }
+};
 
 export function parseEdgeProposalRow(row: EdgeProposalRow): EdgeProposal {
   return deepFreeze(

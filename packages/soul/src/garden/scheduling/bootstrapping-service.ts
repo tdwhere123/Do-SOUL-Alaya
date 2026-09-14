@@ -8,7 +8,7 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { buildBootstrappingPathId, buildBootstrappingRecordId } from "./bootstrapping-ids.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 
 export interface BootstrappingDependencies {
   readonly templates: readonly Readonly<BootstrappingPathTemplate>[];

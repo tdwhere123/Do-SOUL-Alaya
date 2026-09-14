@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  diagnosticWarn,
   CandidateMemorySignalSchema,
   SignalSource,
   type CandidateMemorySignal,
@@ -9,6 +10,7 @@ import { GardenProviderKind, type GardenCompileContext, type GardenComputeProvid
 import { buildHeuristicPreferenceProfile } from "../extraction/local-preference-profile.js";
 import { buildSchemaGroundedRawPayload } from "../ingestion/schema-grounding.js";
 import {
+  isRelativeTimeConcern,
   normalizeWindowDigest,
   resolveTemporalProjection,
   timeConcernPattern,
@@ -173,7 +175,7 @@ interface CompileSignalState {
   readonly normalizedTurnContent: string;
   readonly context: GardenCompileContext;
   readonly createdAt: string;
-  readonly temporalAnchor: string;
+  readonly temporalAnchor: string | null;
   readonly seenMatches: Set<string>;
   readonly signals: CandidateMemorySignal[];
 }
@@ -196,9 +198,10 @@ function createCompileState(
     normalizedTurnContent,
     context,
     createdAt: normalizedObservedAt ?? fallbackNow,
+    // Relative windows need a source observation; never fall back to wall clock.
     temporalAnchor: normalizedObservedAt === undefined
-      ? fallbackNow
-      : context.source_observed_at?.trim() ?? fallbackNow,
+      ? null
+      : context.source_observed_at?.trim() || null,
     seenMatches: new Set<string>(),
     signals: []
   };
@@ -330,7 +333,7 @@ function appendCandidateSignal(
       })
     );
   } catch (error) {
-    console.warn("garden/local-heuristics: dropped one heuristic signal", {
+    diagnosticWarn("garden/local-heuristics: dropped one heuristic signal", {
       runId: state.context.run_id,
       signalKind: input.signalKind,
       error: error instanceof Error ? error.message : String(error)
@@ -353,7 +356,10 @@ function buildTurnExcerpt(turnContent: string, matchedText: string): string {
   return turnContent.slice(start, end).trim();
 }
 
-function extractTimeConcerns(turnContent: string, anchorIso: string): readonly TimeConcernMatch[] {
+function extractTimeConcerns(
+  turnContent: string,
+  anchorIso: string | null
+): readonly TimeConcernMatch[] {
   const pattern = timeConcernPattern();
   const matches: TimeConcernMatch[] = [];
   for (const sentence of splitSentences(turnContent)) {
@@ -367,11 +373,17 @@ function extractTimeConcerns(turnContent: string, anchorIso: string): readonly T
       if (matchedText.length === 0) {
         continue;
       }
+      const temporal_projection = resolveTemporalProjection(matchedText, anchorIso);
+      // Relative phrases without a source observation must not invent wall-clock windows.
+      // Absolute calendar hits may still emit with a null projection (e.g. impossible dates).
+      if (temporal_projection === null && isRelativeTimeConcern(matchedText)) {
+        continue;
+      }
       matches.push({
         matched_text: matchedText,
         window_digest: normalizeWindowDigest(matchedText),
         excerpt: sentence,
-        temporal_projection: resolveTemporalProjection(matchedText, anchorIso)
+        temporal_projection
       });
     }
   }

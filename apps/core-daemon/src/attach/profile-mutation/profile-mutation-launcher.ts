@@ -1,5 +1,6 @@
 import path, { dirname } from "node:path";
 import { ALAYA_MCP_ARGS, ALAYA_MCP_COMMAND, ALAYA_SLASH_ARGS } from "./profile-mutation-constants.js";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
 type AlayaLauncherRootInput =
   | string
@@ -9,7 +10,7 @@ type AlayaLauncherRootInput =
     };
 
 export function resolveAlayaMcpLauncher(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = processEnvLookup(),
   rootInput?: AlayaLauncherRootInput
 ): { readonly command: string; readonly args: readonly string[] } {
   const override = env.ALAYA_MCP_LAUNCHER?.trim();
@@ -25,7 +26,7 @@ export function resolveAlayaMcpLauncher(
 }
 
 export function resolveAlayaSlashCommand(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = processEnvLookup(),
   rootInput?: AlayaLauncherRootInput
 ): string {
   const override = env.ALAYA_SLASH_LAUNCHER?.trim();

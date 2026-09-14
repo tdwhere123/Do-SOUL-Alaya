@@ -99,7 +99,7 @@ describe("Auditor evidence check — GreenStatus revoke guard", () => {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 10, claim_count: 10 })),
         generateDraftCandidates: vi.fn(async () => []),
         findHighFrequencyPatterns: vi.fn(async () => []),
-        createSynthesisCandidate: vi.fn(async () => ({ candidate_id: "c1" })),
+        createSynthesisCandidate: vi.fn( () => ({ candidate_id: "c1" })),
         hasPendingSynthesisCandidate: vi.fn(async () => false)
       },
       scheduler,
@@ -144,7 +144,7 @@ describe("Auditor evidence check — GreenStatus revoke guard", () => {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 10, claim_count: 10 })),
         generateDraftCandidates: vi.fn(async () => []),
         findHighFrequencyPatterns: vi.fn(async () => []),
-        createSynthesisCandidate: vi.fn(async () => ({ candidate_id: "c1" })),
+        createSynthesisCandidate: vi.fn( () => ({ candidate_id: "c1" })),
         hasPendingSynthesisCandidate: vi.fn(async () => false)
       },
       scheduler,

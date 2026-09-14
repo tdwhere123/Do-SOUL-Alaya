@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { hashMemoryContent as hashMemoryContentWith } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
 import { parseNonEmptyString, parseTimestamp } from "../../shared/validators.js";
 import type { MemoryEmbeddingMetadataRow, MemoryEmbeddingRow } from "../../shared/sqlite-row-schemas.js";
@@ -8,6 +9,12 @@ import {
   encodeEmbeddingBlob,
   isFiniteNonzeroEmbedding
 } from "../embedding-vector-validity.js";
+
+export function hashMemoryContent(content: string): string {
+  return hashMemoryContentWith(content, (value) =>
+    createHash("sha256").update(value, "utf8").digest("hex")
+  );
+}
 
 export type { MemoryEmbeddingMetadataRow, MemoryEmbeddingRow } from "../../shared/sqlite-row-schemas.js";
 
@@ -58,10 +65,6 @@ export function chunkObjectIds(objectIds: readonly string[]): readonly (readonly
     chunks.push(objectIds.slice(offset, offset + MEMORY_EMBEDDING_OBJECT_ID_CHUNK_SIZE));
   }
   return chunks;
-}
-
-export function hashMemoryContent(content: string): string {
-  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
 export function runUpsertArgs(parsedRecord: Readonly<MemoryEmbeddingRecord>): [

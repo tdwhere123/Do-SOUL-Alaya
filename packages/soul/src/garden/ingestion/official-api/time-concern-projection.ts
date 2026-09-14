@@ -22,15 +22,19 @@ export type OfficialApiTimeConcernProjection = Readonly<{
 
 export function projectOfficialApiTimeConcern(input: Readonly<{
   readonly sourceAssertion: string;
-  readonly sourceObservedAt: string;
+  readonly sourceObservedAt: string | undefined;
   readonly temporalProjection: OfficialApiTemporalProjectionDraft | undefined;
 }>): OfficialApiTimeConcernProjection {
+  if (input.sourceObservedAt === undefined) {
+    return unavailable("event_time_unavailable");
+  }
+  const sourceObservedAt = input.sourceObservedAt;
   const projection = input.temporalProjection;
   if (projection?.event_time_start === undefined || projection.event_time_end === undefined) {
     return unavailable("event_time_unavailable");
   }
   const term = extractTemporalTerms(input.sourceAssertion).find((candidate) => {
-    const resolved = resolveTemporalProjection(candidate, input.sourceObservedAt);
+    const resolved = resolveTemporalProjection(candidate, sourceObservedAt);
     return resolved !== null && resolved.event_time_start === projection.event_time_start &&
       resolved.event_time_end === projection.event_time_end;
   });

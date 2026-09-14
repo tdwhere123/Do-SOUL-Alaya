@@ -1,6 +1,6 @@
 import { type ConversationRuntimeContext, type ToolUseBlock } from "@do-soul/alaya-protocol";
 import { soulToolDefs } from "../provider/soul-tool-specs.js";
-import { parseEnvPositiveInt } from "./env-value.js";
+import { parseEnvPositiveInt } from "@do-soul/alaya-protocol";
 import { withTimeout } from "./with-timeout.js";
 
 export const DEFAULT_TOOL_TIMEOUT_MS = 30000;
@@ -23,6 +23,10 @@ export interface McpBridgeDependencies {
     runtimeContext?: Readonly<ConversationRuntimeContext>
   ) => Promise<McpToolResultBlock>;
   readonly hasConversationToolName?: (toolName: string) => boolean;
+  /** Pre-resolved tool timeout; when omitted, uses DEFAULT_TOOL_TIMEOUT_MS. */
+  readonly toolTimeoutMs?: number;
+  /** Raw ALAYA_MCP_TOOL_TIMEOUT_MS value when toolTimeoutMs is not set. */
+  readonly toolTimeoutEnv?: string;
 }
 
 export class McpBridge {
@@ -46,7 +50,8 @@ export class McpBridge {
           "no tools handler injected for this MCP bridge"
         ));
     this.hasConversationToolName = dependencies.hasConversationToolName ?? (() => false);
-    this.timeoutMs = resolveMcpToolTimeoutMs();
+    this.timeoutMs = dependencies.toolTimeoutMs
+      ?? resolveMcpToolTimeoutMs(dependencies.toolTimeoutEnv);
   }
 
   public async executeToolUse(
@@ -95,9 +100,7 @@ export class McpBridge {
 
 const allowedSoulToolNames = createStringLookup(soulToolDefs.map((toolDef) => toolDef.name));
 
-export function resolveMcpToolTimeoutMs(
-  raw: string | undefined = process.env[MCP_TOOL_TIMEOUT_ENV]
-): number {
+export function resolveMcpToolTimeoutMs(raw: string | undefined): number {
   return parseEnvPositiveInt(raw, MCP_TOOL_TIMEOUT_ENV) ?? DEFAULT_TOOL_TIMEOUT_MS;
 }
 

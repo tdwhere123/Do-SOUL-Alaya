@@ -35,7 +35,8 @@ export * from "./embedding-recall/embedding-recall-service.js";
 export { assertValidEmbeddingBatch, hashMemoryContent } from "./embedding-recall/helpers.js";
 export {
   EMBEDDING_INJECTION_SIMILARITY_FLOOR,
-  EMBEDDING_MAX_INJECTED_DELIVERY
+  EMBEDDING_MAX_INJECTED_DELIVERY,
+  EVIDENCE_DOCUMENT_MAX_OPERATOR_ID
 } from "./embedding-recall/constants.js";
 export * from "./embedding-recall/embed-text-resolver.js";
 export * from "./embedding-recall/local-onnx-embedding-client.js";
@@ -127,8 +128,6 @@ export {
   verifyRecallQueryFactFrameExtractionCapture,
   type RecallQueryFactFrameExtractionCapture
 } from "./recall/field/query-attribution/query-fact-frame-attribution-producer.js";
-export * from "./shared/cjk-segmentation.js";
-export * from "./shared/entity-extraction-port.js";
 export {
   assertRecallZeroLiveExtraction,
   refuseRecallCampaignLiveExtraction,
@@ -145,10 +144,18 @@ export * from "./runtime/serial-delegation-service.js";
 export * from "./governance/proposals/session-override-service.js";
 export * from "./shared/actors.js";
 export * from "./shared/clamp.js";
-export * from "./shared/deep-freeze.js";
 export * from "./shared/event-utils.js";
+export {
+  KeyedMutex,
+  CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
+  readCjkSegmentationStatus,
+  isCjkSegmentationCandidate,
+  segmentCjkRun,
+  warmCjkSegmentation
+} from "@do-soul/alaya-protocol";
+export type { CjkSegmentationStatus } from "@do-soul/alaya-protocol";
+
 export * from "./tooling/extension-descriptor-parsers.js";
-export * from "./governance/keyed-mutex.js";
 export * from "./manifestation/load-or-default-with-workspace-guard.js";
 export * from "./shared/recall-policy.js";
 export * from "./manifestation/product-formation/defaults.js";

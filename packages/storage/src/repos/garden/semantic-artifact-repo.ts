@@ -1,13 +1,25 @@
 import { memorySourceRevision } from "../memory-entry/source-revision.js";
 import { createHash, randomUUID } from "node:crypto";
-import { GardenRole, GardenTaskKind, SOURCE_ENRICHMENT_CONTRACT, type AdmittedSemanticArtifact,
-  type SemanticArtifactRepositoryPort, type SemanticArtifactWork,
-  type SemanticEnrichmentTask, type SemanticExtractionProfile,
-  type SemanticSourceSnapshot, type SemanticTransportAttempt } from "@do-soul/alaya-protocol";
+import {
+  GardenRole,
+  GardenTaskKind,
+  SOURCE_ENRICHMENT_CONTRACT,
+  canonicalizeSemanticExtractionProfile,
+  semanticExtractionProfilePreimage,
+  semanticExtractionProfilesEqual,
+  type AdmittedSemanticArtifact,
+  type SemanticArtifactRepositoryPort,
+  type SemanticArtifactWork,
+  type SemanticEnrichmentTask,
+  type SemanticExtractionProfile,
+  type SemanticSourceSnapshot,
+  type SemanticTransportAttempt
+} from "@do-soul/alaya-protocol";
 import { buildWorkspaceFtsScopeMatch, buildFtsMatchExpression } from "../shared/fts-lane-routing.js";
 import { assertSemanticArtifactCandidateSchema } from "./semantic-artifact-schema.js";
 import type { SqliteConnection } from "../../sqlite/db.js";
 import type { SqliteGardenTaskRepo } from "./garden-task-repo.js";
+import { parseRows } from "../shared/parse-row.js";
 import { prepareGardenTaskClaimStatements, prepareGardenTaskMaintenanceStatements } from
   "./statements/garden-task-statement-groups.js";
 
@@ -72,14 +84,8 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     this.requireTransaction();
     const source = this.source(workspaceId, objectId);
     if (!source) throw new Error("source missing, revoked, or outside trusted scope");
-    const canonicalProfile: SemanticExtractionProfile = {
-      capability: profile.capability, model: profile.model, requestProfile: profile.requestProfile,
-      promptRevision: profile.promptRevision, outputSchema: profile.outputSchema
-    };
-    if (Object.values(canonicalProfile).some((value) => typeof value !== 'string' || value.trim().length === 0)) {
-      throw new Error("invalid semantic extraction profile");
-    }
-    if (this.defaultProfile !== null && profilesEqual(canonicalProfile, this.defaultProfile)) {
+    const canonicalProfile = canonicalizeSemanticExtractionProfile(profile);
+    if (this.defaultProfile !== null && semanticExtractionProfilesEqual(canonicalProfile, this.defaultProfile)) {
       const existingId = this.findSourceEnrichmentTaskId(workspaceId, objectId, source.sourceEventRevision);
       if (existingId !== null) {
         this.upsertIntent(workspaceId, objectId, existingId, capacity);
@@ -314,7 +320,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     const callId = ++this.nextVisitCall;
     const state = { visits: 0, bytes: 0, limit };
     this.visitState.set(callId, state);
-    let read: SemanticProjectionReadRow[];
+    let read: readonly SemanticProjectionReadRow[];
     try {
       read = this.readReadyRows(workspaceId, match, limit, callId);
     } catch (error) {
@@ -344,9 +350,9 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     return { ...observation, rows };
   }
 
-  private readReadyRows(workspaceId: string, match: string, limit: number, callId: number): SemanticProjectionReadRow[] {
+  private readReadyRows(workspaceId: string, match: string, limit: number, callId: number): readonly SemanticProjectionReadRow[] {
     // Complete canonical ordering or no winners: a native budget abort never exposes an arrival-order prefix.
-    return this.db.prepare(`WITH candidate AS MATERIALIZED (
+    return parseRows(this.db.prepare(`WITH candidate AS MATERIALIZED (
       SELECT workspace_id, object_id
       FROM garden_semantic_fts WHERE garden_semantic_fts MATCH ? AND workspace_id=?
         AND ${this.visitFunction}(object_id, ?)
@@ -370,7 +376,10 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       LEFT JOIN garden_semantic_intents i ON i.workspace_id=p.workspace_id AND i.object_id=p.object_id
     ) SELECT *, CASE WHEN sourceEligible=1 AND observedSourceRevision=expectedSourceRevision
         THEN 1 ELSE 0 END AS eligible FROM validated ORDER BY object_id`)
-      .all(match, workspaceId, callId, limit) as SemanticProjectionReadRow[];
+      .all(match, workspaceId, callId, limit),
+      { parse: (value: unknown) => value as SemanticProjectionReadRow },
+      "semantic projection read row"
+    );
   }
 
   private assertAttemptOwnership(task: SemanticEnrichmentTask, attemptId: string): void {
@@ -501,19 +510,10 @@ function semanticEnrichmentTaskId(
     workspaceId,
     objectId,
     revision,
-    profile.capability,
-    profile.model,
-    profile.requestProfile,
-    profile.promptRevision,
-    profile.outputSchema
+    ...semanticExtractionProfilePreimage(profile)
   ]))}`;
 }
 
-function profilesEqual(left: SemanticExtractionProfile, right: SemanticExtractionProfile): boolean {
-  return left.capability === right.capability && left.model === right.model &&
-    left.requestProfile === right.requestProfile && left.promptRevision === right.promptRevision &&
-    left.outputSchema === right.outputSchema;
-}
 
 function isProfile(value: unknown): value is SemanticExtractionProfile {
   if (value === null || typeof value !== 'object') return false;

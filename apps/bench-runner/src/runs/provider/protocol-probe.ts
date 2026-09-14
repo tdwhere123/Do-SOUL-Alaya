@@ -72,7 +72,8 @@ export async function probeProviderProtocol(
     jsonObject: true,
     timeoutMs: 20_000,
     maxOutputTokens: 256,
-    fetchImpl
+    fetchImpl,
+    env: process.env
   }, {
     maxRetries: 0,
     retryDelaysMs: []

@@ -2,6 +2,7 @@ import { EngineBindingRecordSchema, type EngineBindingRecord } from "@do-soul/al
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
+import { parseRows } from "../shared/parse-row.js";
 import {
   decryptApiKeyAtRest,
   encryptApiKeyAtRest
@@ -150,7 +151,7 @@ export class SqliteEngineBindingRepo implements EngineBindingRepo {
 
   public async listByWorkspace(workspaceId: string): Promise<readonly EngineBindingRecord[]> {
     try {
-      const rows = this.statementHolder.active().listByWorkspaceStatement.all(workspaceId) as EngineBindingRow[];
+      const rows = parseRows(this.statementHolder.active().listByWorkspaceStatement.all(workspaceId), { parse: (value: unknown) => value as EngineBindingRow }, "engine binding row");
       return rows.map((row) => parseEngineBindingRecord(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list engine bindings for workspace ${workspaceId}.`, error);

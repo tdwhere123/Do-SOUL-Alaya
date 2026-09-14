@@ -11,7 +11,7 @@ import {
 import { startObserverCursor } from "../conditional-field/observers/observe.js";
 import { applyObserverPage, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { isPhysicalRegionKind } from "../conditional-field/engine/field-update.js";
-import { hasOpenPairs } from "../conditional-field/engine/path-composition.js";
+import { hasOpenPairs } from "../conditional-field/engine/path-routing.js";
 
 const INCOMPLETE_OBSERVER: ReadonlySet<ObserverStatus> = new Set([
   "cancelled",

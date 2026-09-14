@@ -1,6 +1,14 @@
 import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
 import {
+  readNonEmptyStringField,
+  readNonNegativeIntField,
+  readIntegerField,
+  readRecord,
+  type RowParser
+} from "../repos/shared/parse-row.js";
+import { selectRows } from "../repos/shared/select-rows.js";
+import {
   isCompatibleProjectionIdentity,
   type ProjectionIdentity
 } from "./projection-identity.js";
@@ -18,6 +26,37 @@ type BindKeyRow = ProjectionIdentity & Readonly<{
   readonly rowid: number;
 }>;
 
+const BindKeyGroupParser: RowParser<{ readonly as_of: string; readonly history_digest: string }> = {
+  parse(value: unknown): { readonly as_of: string; readonly history_digest: string } {
+    const record = readRecord(value, "verified bind-key group");
+    return {
+      as_of: readNonEmptyStringField(record, "as_of"),
+      history_digest: readNonEmptyStringField(record, "history_digest")
+    };
+  }
+};
+
+const BindKeyRowParser: RowParser<BindKeyRow> = {
+  parse(value: unknown): BindKeyRow {
+    const record = readRecord(value, "verified bind-key row");
+    return {
+      rowid: readIntegerField(record, "rowid"),
+      generation: readNonEmptyStringField(record, "generation"),
+      projection_count: readNonNegativeIntField(record, "projection_count"),
+      projection_digest: readNonEmptyStringField(record, "projection_digest"),
+      assertion_schema_generation: readNonEmptyStringField(record, "assertion_schema_generation"),
+      assertion_event_contract_generation: readNonEmptyStringField(
+        record,
+        "assertion_event_contract_generation"
+      ),
+      projection_schema_generation: readNonEmptyStringField(record, "projection_schema_generation"),
+      projection_policy_id: readNonEmptyStringField(record, "projection_policy_id"),
+      projection_policy_sha256: readNonEmptyStringField(record, "projection_policy_sha256")
+    };
+  }
+};
+
+
 export function migrateVerifiedProjectionBindKey(database: SqliteConnection): void {
   collapseCompatibleVerifiedBindKeyDuplicates(database);
   database.exec(`
@@ -28,13 +67,19 @@ export function migrateVerifiedProjectionBindKey(database: SqliteConnection): vo
 }
 
 function collapseCompatibleVerifiedBindKeyDuplicates(database: SqliteConnection): void {
-  const groups = database.prepare(`
+  const groups = selectRows(
+    database,
+    `
     SELECT as_of, history_digest
     FROM temporal_projection_generations
     WHERE status = 'verified'
     GROUP BY as_of, history_digest
     HAVING COUNT(*) > 1
-  `).all() as ReadonlyArray<{ readonly as_of: string; readonly history_digest: string }>;
+  `,
+    [],
+    BindKeyGroupParser,
+    "verified bind-key group"
+  );
   if (groups.length === 0) return;
 
   const active = readActiveProjectionGeneration(database);
@@ -49,14 +94,20 @@ function collapseVerifiedBindKeyGroup(
   historyDigest: string,
   activeGeneration: string | null
 ): void {
-  const rows = database.prepare(`
+  const rows = selectRows(
+    database,
+    `
     SELECT rowid, generation, projection_count, projection_digest,
            assertion_schema_generation, assertion_event_contract_generation,
            projection_schema_generation, projection_policy_id, projection_policy_sha256
     FROM temporal_projection_generations
     WHERE as_of = ? AND history_digest = ? AND status = 'verified'
     ORDER BY generation ASC, rowid ASC
-  `).all(asOf, historyDigest) as BindKeyRow[];
+  `,
+    [asOf, historyDigest],
+    BindKeyRowParser,
+    "verified bind-key row"
+  );
   const winner = selectCompatibleWinner(rows, activeGeneration);
   deleteLosingVerifiedGenerations(database, rows, winner.generation);
 }

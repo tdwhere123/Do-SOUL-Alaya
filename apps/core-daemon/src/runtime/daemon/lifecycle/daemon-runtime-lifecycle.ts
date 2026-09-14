@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import type { CoreDaemonLifecycleState, RequestProtectionConfig } from "../../app.js";
 import { closeDaemonSqliteWriteQueue } from "../../startup/database.js";
 import { closeServer, finalizeServerClose, type CloseableHttpServer } from "./daemon-server-close.js";
+import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
   clearSignalShutdownTimeout,
   installSignalShutdownHandler,
@@ -224,9 +225,9 @@ function createHttpServerStarter(
     ensureServerNotRunning(state);
     logEphemeralTokenStartup(input, options);
 
-    const policy = resolveDaemonListenPolicy(process.env);
+    const policy = resolveDaemonListenPolicy(processEnvLookup());
     const hostname = options.hostname ?? (policy.kind === "unix" ? policy.tcpHost : policy.host);
-    const port = options.port ?? parsePort(process.env.PORT, 3000);
+    const port = options.port ?? parsePort(processEnvLookup().PORT, 3000);
     const serverFactory = input.serverFactory ?? serve;
     const tcpServer = serverFactory({
       fetch: input.app.fetch,
@@ -253,9 +254,8 @@ function createHttpServerStarter(
     }
     startBackgroundServices();
     installSignalShutdownHandlersOnce(state, input, shutdown);
-    warnIfRemoteDaemonListening(process.env, hostname, (message) => {
+    warnIfRemoteDaemonListening(processEnvLookup(), hostname, (message) => {
       input.warnLogger.warn(message, {});
-      process.stderr.write(`${message}\n`);
     });
     logListeningAddress(input, hostname, port, policy.kind === "unix" ? policy.path : undefined);
     return Object.freeze({ hostname, port, close: shutdown });
@@ -289,8 +289,8 @@ function logEphemeralTokenStartup(
   }
 
   input.warnLogger.warn("starting managed daemon with ephemeral request token", {
-    host: options.hostname ?? resolveDaemonHostFromEnv(process.env),
-    port: options.port ?? parsePort(process.env.PORT, 3000)
+    host: options.hostname ?? resolveDaemonHostFromEnv(processEnvLookup()),
+    port: options.port ?? parsePort(processEnvLookup().PORT, 3000)
   });
 }
 

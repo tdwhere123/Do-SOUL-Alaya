@@ -175,7 +175,7 @@ export function createGardenDataPorts(
       })),
       generateDraftCandidates: vi.fn(async () => []),
       findHighFrequencyPatterns: vi.fn(async () => []),
-      createSynthesisCandidate: vi.fn(async () => ({ candidate_id: "candidate-1" })),
+      createSynthesisCandidate: vi.fn( () => ({ candidate_id: "candidate-1" })),
       hasPendingSynthesisCandidate: vi.fn(async () => false)
     },
     tieringPort: {

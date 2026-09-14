@@ -105,7 +105,7 @@ describe("Auditor HealthIssueGroup wiring", () => {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 5, claim_count: 5 })),
         generateDraftCandidates: vi.fn(async () => []),
         findHighFrequencyPatterns: vi.fn(async () => []),
-        createSynthesisCandidate: vi.fn(async () => ({ candidate_id: "candidate-1" })),
+        createSynthesisCandidate: vi.fn( () => ({ candidate_id: "candidate-1" })),
         hasPendingSynthesisCandidate: vi.fn(async () => false)
       },
       scheduler: { reportCompletion: vi.fn(async () => undefined) },
@@ -152,7 +152,7 @@ describe("Auditor HealthIssueGroup wiring", () => {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 5, claim_count: 5 })),
         generateDraftCandidates: vi.fn(async () => []),
         findHighFrequencyPatterns: vi.fn(async () => []),
-        createSynthesisCandidate: vi.fn(async () => ({ candidate_id: "candidate-1" })),
+        createSynthesisCandidate: vi.fn( () => ({ candidate_id: "candidate-1" })),
         hasPendingSynthesisCandidate: vi.fn(async () => false)
       },
       scheduler: { reportCompletion: vi.fn(async () => undefined) },
@@ -202,7 +202,7 @@ describe("Auditor HealthIssueGroup wiring", () => {
         assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 5, claim_count: 5 })),
         generateDraftCandidates: vi.fn(async () => []),
         findHighFrequencyPatterns: vi.fn(async () => []),
-        createSynthesisCandidate: vi.fn(async () => ({ candidate_id: "candidate-1" })),
+        createSynthesisCandidate: vi.fn( () => ({ candidate_id: "candidate-1" })),
         hasPendingSynthesisCandidate: vi.fn(async () => false)
       },
       scheduler: { reportCompletion: vi.fn(async () => undefined) },
@@ -302,7 +302,7 @@ function createOrphanAuditor(
       assessColdStart: vi.fn(async () => ({ is_cold_start: false, memory_count: 5, claim_count: 5 })),
       generateDraftCandidates: vi.fn(async () => []),
       findHighFrequencyPatterns: vi.fn(async () => []),
-      createSynthesisCandidate: vi.fn(async () => ({ candidate_id: "candidate-1" })),
+      createSynthesisCandidate: vi.fn( () => ({ candidate_id: "candidate-1" })),
       hasPendingSynthesisCandidate: vi.fn(async () => false)
     },
     scheduler,

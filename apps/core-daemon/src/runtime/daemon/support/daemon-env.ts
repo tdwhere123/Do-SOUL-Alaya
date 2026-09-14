@@ -1,3 +1,4 @@
+import { processEnvLookup } from "../../config/daemon-config-environment.js";
 const ALLOWED_LOG_LEVELS = new Set([
   "trace",
   "debug",
@@ -33,7 +34,7 @@ export const DaemonEnvSchema = Object.freeze({
   }
 });
 
-export function validateDaemonEnv(env: DaemonEnvLike = process.env): ValidatedDaemonEnv {
+export function validateDaemonEnv(env: DaemonEnvLike = processEnvLookup()): ValidatedDaemonEnv {
   return DaemonEnvSchema.parse(env);
 }
 

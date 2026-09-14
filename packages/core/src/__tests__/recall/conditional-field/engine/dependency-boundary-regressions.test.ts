@@ -4,7 +4,9 @@ import { type Derivation, type ObserverPage, type QueryInterpretation, type Quer
 import { applyObserverPage, createConditionalField, withdrawDerivationLeaves } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import { derivationForest, evaluateDerivation, leafDerivation, seedDerivationIdentity } from "../../../../recall/conditional-field/engine/path-derivation.js";
-import { adjacencyEffectsForRows, seedProgramStates, transitionKey } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
+import { transitionKey } from "../../../../recall/conditional-field/engine/path-composition.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { localLeafIds, traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";

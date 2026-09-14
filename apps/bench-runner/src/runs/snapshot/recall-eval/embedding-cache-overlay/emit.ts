@@ -125,6 +125,7 @@ export function productOverlayEmbeddingClientOptions(
   const cacheDir = env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR?.trim();
   const modelId = env.ALAYA_LOCAL_EMBEDDING_MODEL?.trim();
   return {
+    env,
     // Omit cacheDir so LocalOnnxEmbeddingClient uses the product default tree.
     ...(cacheDir === undefined || cacheDir.length === 0 ? {} : { cacheDir }),
     ...(modelId === undefined || modelId.length === 0 ? {} : { modelId })

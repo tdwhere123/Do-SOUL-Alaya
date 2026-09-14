@@ -26,8 +26,7 @@
   },
   "dependencies": {
     "@do-soul/alaya-graph-algorithms": "workspace:*",
-    "@do-soul/alaya-protocol": "workspace:*",
-    "@node-rs/jieba": "2.0.3"
+    "@do-soul/alaya-protocol": "workspace:*"
   },
   "devDependencies": {
     "@do-soul/alaya-soul": "workspace:*",

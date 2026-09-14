@@ -283,6 +283,17 @@ do not need the full envelope). Daemon wiring instantiates one
 concrete `RuntimeNotifier` and registers it on `EventPublisher` at
 startup step 3 of `Daemon Startup Ordering` below.
 
+Production services take a fully wired `EventPublisher`. Legacy call
+sites may still pass a raw EventLog repo through
+`bindEventPublisher({ purpose, eventLogRepo })`. That adapter emits
+`ALAYA_EVENT_PUBLISHER_ADAPTER_FALLBACK` when `runtimeNotifier` or
+`runHotStateService` is omitted, then falls back to inert ports so
+EventLog rows commit without waking subscribers. **Removal gate:**
+delete `bindEventPublisher`'s inert fallback once every production
+call site injects `runtimeNotifier` and `runHotStateService` (or an
+already-constructed `eventPublisher`). Until then, inert success
+without the warning is a regression.
+
 **No SSE.** Alaya does not expose an SSE stream because no surface
 consumes one. The agent-attach surfaces (MCP server + CLI fallback)
 do not stream; the Memory Inspector consumes daemon HTTP routes via

@@ -34,6 +34,7 @@ import { registerRetainedSourceChunkDigest } from "./retained-source-chunk-diges
 import { migrateRetainedSourceChunks } from "./retained-source-migration.js";
 import { migrateEmbeddingVectorValidity } from "./embedding-vector-validity-migration.js";
 import { parseRows, type RowParser } from "../repos/shared/parse-row.js";
+import { diagnosticWarn } from "@do-soul/alaya-protocol";
 
 export { TEMPORAL_OFFLINE_MIGRATION_VERSION, type TemporalDatabaseMode } from "./temporal-cutover-gate.js";
 
@@ -416,7 +417,7 @@ function readPersistedMaxVersion(database: SqliteConnection): number | null {
       .get() as Readonly<{ max_version: number | null }> | undefined;
     return row?.max_version ?? null;
   } catch (error) {
-    console.warn("sqlite/db: failed to read schema_version max; treating as unknown", error);
+    diagnosticWarn("sqlite/db: failed to read schema_version max; treating as unknown", { error: String(error) });
     return null;
   }
 }

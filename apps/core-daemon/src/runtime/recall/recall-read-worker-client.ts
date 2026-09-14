@@ -29,7 +29,7 @@ import {
   resolveDefaultWorkerUrl
 } from "../recall-read-worker/client-config.js";
 import { encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
-import { createTierWindowChunkConsumer } from "../recall-read-worker/tier-window-client.js";
+import { readRecallTierWindowOverIpc } from "../recall-read-worker/tier-window-client.js";
 import {
   createWorkerMemoryRepo,
   type WorkerTierWindowResult
@@ -119,10 +119,12 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   public readonly memoryRepo: RecallServiceMemoryRepoPort = createWorkerMemoryRepo({
     request: async (operation, payload) => await this.request(operation, payload),
     readTierWindow: async (query) =>
-      await this.dispatch<WorkerTierWindowResult>(
-        "memory.findRecallTierWindow",
-        query,
-        createTierWindowChunkConsumer()
+      await readRecallTierWindowOverIpc(query, async (pageQuery, consumePage) =>
+        await this.dispatch<WorkerTierWindowResult>(
+          "memory.findRecallTierWindow",
+          pageQuery,
+          consumePage
+        )
       )
   });
 

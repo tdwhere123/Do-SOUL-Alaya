@@ -58,6 +58,9 @@ export interface TrustStatePersistenceRepoPort {
   createDelivery(record: ContextDeliveryRecord): Readonly<ContextDeliveryRecord>;
   createUsage(record: UsageProofRecord): Readonly<UsageProofRecord>;
   findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
+  findDeliveriesByIds(
+    deliveryIds: readonly string[]
+  ): Promise<ReadonlyMap<string, Readonly<ContextDeliveryRecord> | null>>;
   listDeliveriesByAgentTarget(agentTarget: string): Promise<readonly Readonly<ContextDeliveryRecord>[]>;
   listUsageByDeliveryIds(deliveryIds: readonly string[]): Promise<readonly Readonly<UsageProofRecord>[]>;
 }
@@ -189,6 +192,12 @@ export class TrustStateRecorder {
 
   public async findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null> {
     return await this.repo.findDeliveryById(deliveryId);
+  }
+
+  public async findDeliveriesByIds(
+    deliveryIds: readonly string[]
+  ): Promise<ReadonlyMap<string, Readonly<ContextDeliveryRecord> | null>> {
+    return await this.repo.findDeliveriesByIds(deliveryIds);
   }
 
   public async recordUsage(
@@ -447,6 +456,17 @@ class InMemoryTrustStateRepo implements TrustStatePersistenceRepoPort {
 
   public async findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null> {
     return this.deliveriesById.get(NonEmptyStringSchema.parse(deliveryId)) ?? null;
+  }
+
+  public async findDeliveriesByIds(
+    deliveryIds: readonly string[]
+  ): Promise<ReadonlyMap<string, Readonly<ContextDeliveryRecord> | null>> {
+    const result = new Map<string, Readonly<ContextDeliveryRecord> | null>();
+    for (const deliveryId of deliveryIds) {
+      const parsed = NonEmptyStringSchema.parse(deliveryId);
+      result.set(parsed, this.deliveriesById.get(parsed) ?? null);
+    }
+    return result;
   }
 
   public async listDeliveriesByAgentTarget(agentTarget: string): Promise<readonly Readonly<ContextDeliveryRecord>[]> {

@@ -9,7 +9,7 @@ import {
   canRolePeekPending,
   compareTasks
 } from "./scheduler-helpers.js";
-import { KeyedMutex } from "./keyed-mutex.js";
+import { KeyedMutex } from "@do-soul/alaya-protocol";
 import type {
   GardenSchedulerEventLogPort,
   GardenSchedulerEventInput,

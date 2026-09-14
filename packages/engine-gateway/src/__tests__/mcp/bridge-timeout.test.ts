@@ -29,12 +29,12 @@ describe("resolveMcpToolTimeoutMs", () => {
     );
   });
 
-  it("fails bridge construction when the process env is written-invalid", () => {
-    process.env[TIMEOUT_ENV] = "60000ms";
+  it("fails bridge construction when toolTimeoutEnv is written-invalid", () => {
     expect(() => new McpBridge({
       soulHandler: async () => {
         throw new Error("unused");
-      }
+      },
+      toolTimeoutEnv: "60000ms"
     })).toThrow(/ALAYA_MCP_TOOL_TIMEOUT_MS must be a positive integer/);
   });
 });

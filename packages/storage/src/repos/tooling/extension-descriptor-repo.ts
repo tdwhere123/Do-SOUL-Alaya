@@ -7,6 +7,7 @@ import {
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { parseNonEmptyString } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
 
 const TOOL_PROVIDER_DESCRIPTOR_TYPE = "tool_provider";
 const SKILL_PACKAGE_DESCRIPTOR_TYPE = "skill_package";
@@ -140,9 +141,9 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
 
   public async findToolProviders(): Promise<readonly Readonly<ToolProvider>[]> {
     try {
-      const rows = this.listToolProvidersStatement.all(
+      const rows = parseRows(this.listToolProvidersStatement.all(
         TOOL_PROVIDER_DESCRIPTOR_TYPE
-      ) as ExtensionDescriptorRow[];
+      ), { parse: (value: unknown) => value as ExtensionDescriptorRow }, "extension descriptor row");
 
       return rows.map((row) => parseToolProviderRow(row));
     } catch (error) {

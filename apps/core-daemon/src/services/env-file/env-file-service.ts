@@ -1,5 +1,6 @@
 import path from "node:path";
 import { CoreError } from "@do-soul/alaya-core";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   assertPublicHttpProviderUrl,
   formatFileSecretRef,
@@ -404,7 +405,7 @@ function assertPatchedProviderUrl(providerUrl: string | null, invalidPatch: () =
   }
   try {
     assertPublicHttpProviderUrl(providerUrl, {
-      allowPrivate: process.env.ALAYA_ALLOW_PRIVATE_PROVIDER_URL === "1"
+      allowPrivate: processEnvLookup().ALAYA_ALLOW_PRIVATE_PROVIDER_URL === "1"
     });
   } catch {
     throw invalidPatch();

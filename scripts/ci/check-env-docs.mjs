@@ -65,8 +65,11 @@ function loadRegistryKeys() {
   const keys = new Set();
   for (const rel of registryFiles) {
     const source = readFileSync(path.join(repoRoot, rel), "utf8");
-    for (const match of source.matchAll(/"([A-Z][A-Z0-9_]{2,})"/g)) {
-      keys.add(match[1]);
+    // Object-value env keys only — skip prefixes ("ALAYA_") and warning codes (`code: "..."`).
+    for (const match of source.matchAll(/^\s+(?!code\b)\w+:\s*"([A-Z][A-Z0-9_]{2,})"/gm)) {
+      const key = match[1];
+      if (key.endsWith("_")) continue;
+      keys.add(key);
     }
   }
   return keys;

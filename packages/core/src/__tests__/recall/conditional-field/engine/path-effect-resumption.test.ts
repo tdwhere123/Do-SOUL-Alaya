@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { productSubjectId, type QueryInterpretation, type QueryProgram } from "@do-soul/alaya-protocol";
-import { createAdjacencyEffectCursor, adjacencyEffectsForRows, seedProgramStates, composedFacetPathId, facetBelongsToOutput } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { createAdjacencyEffectCursor, adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { composedFacetPathId, facetBelongsToOutput } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
+import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
 import { applyObserverPage, createConditionalField, type FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
 import type { ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";

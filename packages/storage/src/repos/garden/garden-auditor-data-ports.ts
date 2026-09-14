@@ -235,7 +235,7 @@ export function createBootstrappingPort(
         frequency: row.frequency
       }));
     },
-    createSynthesisCandidate: async (workspaceId, patternKey) => {
+    createSynthesisCandidate: (workspaceId, patternKey) => {
       const candidateId = createPendingCandidateProposal(context, {
         workspaceId,
         derivedFrom: buildDerivedKey("bootstrapping", patternKey),

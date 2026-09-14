@@ -5,12 +5,13 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import {
   getEventLogWriter,
   insertEventLogEntry,
   type EventLogDraftInput
 } from "./writes/event-log-writer.js";
+import { parseRows, readRecord, type RowParser } from "../shared/parse-row.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface FileRepo {
@@ -158,8 +159,7 @@ export class SqliteFileRepo implements FileRepo {
     const parsedRunId = parseNonEmptyString(runId, "run_id");
 
     try {
-      const rows = this.findByRunIdStatement.all(parsedRunId) as FileRow[];
-      return rows.map((row) => parseFileRow(row));
+      return parseRows(this.findByRunIdStatement.all(parsedRunId), FileRowParser, "file row");
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list files for run ${parsedRunId}.`, error);
     }
@@ -169,8 +169,11 @@ export class SqliteFileRepo implements FileRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
 
     try {
-      const rows = this.findByWorkspaceIdStatement.all(parsedWorkspaceId) as FileRow[];
-      return rows.map((row) => parseFileRow(row));
+      return parseRows(
+        this.findByWorkspaceIdStatement.all(parsedWorkspaceId),
+        FileRowParser,
+        "file row"
+      );
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -189,20 +192,14 @@ function parseFileRecord(record: Readonly<FileRecord>): Readonly<FileRecord> {
   }
 }
 
-function parseFileRow(row: FileRow): Readonly<FileRecord> {
+const FileRowParser: RowParser<Readonly<FileRecord>> = {
+  parse: parseFileRow
+};
+
+function parseFileRow(value: unknown): Readonly<FileRecord> {
+  const row = readRecord(value, "file row");
   try {
-    return deepFreeze(
-      FileRecordSchema.parse({
-        file_id: row.file_id,
-        filename: row.filename,
-        mime_type: row.mime_type,
-        size_bytes: row.size_bytes,
-        storage_path: row.storage_path,
-        workspace_id: row.workspace_id,
-        run_id: row.run_id,
-        created_at: row.created_at
-      })
-    );
+    return deepFreeze(FileRecordSchema.parse(row));
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate file row.", error);
   }

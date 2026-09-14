@@ -1138,8 +1138,8 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 2418,
-      "expected_sha256": "8ede27cfeae0f78e6628c1634da4d81e083472db418932304250e5e0ae6ca267"
+      "expected_count": 2452,
+      "expected_sha256": "3c58550bee89757fb6b8be666f223d0963c26c75c665ed124b328e1e029c4035"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
@@ -1150,8 +1150,8 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 913,
-      "expected_sha256": "17b30c9d1e3384193631a9b5563e180c3fb77f0949eee7a5c486b271d3e346da"
+      "expected_count": 909,
+      "expected_sha256": "38ce110b183407bd03378ab8a7700a540014fde1c310cb8efa1f8552476d2529"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",
@@ -1180,14 +1180,14 @@
     {
       "specifier": "@do-soul/alaya-soul",
       "path": "packages/soul/src/index.ts",
-      "expected_count": 240,
-      "expected_sha256": "7dda30bfe11215b379792bec1d261ce26fddb5501f9c69773965392ac130b72b"
+      "expected_count": 239,
+      "expected_sha256": "0ec84a7953f9f6be51ba7c864c7983b086dd00690a63ab8f62ee625d3e78e741"
     },
     {
       "specifier": "@do-soul/alaya-storage",
       "path": "packages/storage/src/index.ts",
       "expected_count": 319,
-      "expected_sha256": "98bb849e7d4931653f1b8bd999978758410cb84daa90022365bbcfbbdfa088d5"
+      "expected_sha256": "83000a97e595c908193a1d2e2bc197c1933f2d842af88cc17436ba090e442559"
     },
     {
       "specifier": "@do-soul/alaya",
@@ -1233,9 +1233,10 @@
   "existing_duplicate_export_authorities": [],
   "existing_index_to_index_edges": [
     "apps/core-daemon/src/index.ts -> apps/core-daemon/src/secrets/index.ts",
-    "packages/core/src/index.ts -> packages/core/src/runtime/config/index.ts",
-    "packages/core/src/index.ts -> packages/core/src/relations/path-plasticity/index.ts",
     "packages/core/src/index.ts -> packages/core/src/governance/permission-policy/index.ts",
+    "packages/core/src/index.ts -> packages/core/src/relations/path-plasticity/index.ts",
+    "packages/core/src/index.ts -> packages/core/src/runtime/config/index.ts",
+    "packages/core/src/index.ts -> packages/protocol/src/index.ts",
     "packages/engine-gateway/src/index.ts -> packages/engine-gateway/src/provider/chat-completion/index.ts",
     "packages/eval/src/index.ts -> packages/eval/src/cli/index.ts",
     "packages/protocol/src/index.ts -> packages/protocol/src/recall/conditional-field/index.ts",
@@ -1243,6 +1244,7 @@
     "packages/soul/src/garden/index.ts -> packages/protocol/src/index.ts",
     "packages/soul/src/index.ts -> packages/protocol/src/index.ts",
     "packages/soul/src/index.ts -> packages/soul/src/garden/index.ts",
+    "packages/storage/src/index.ts -> packages/protocol/src/index.ts",
     "packages/storage/src/index.ts -> packages/storage/src/repos/capsules/index.ts",
     "packages/storage/src/index.ts -> packages/storage/src/repos/control/index.ts",
     "packages/storage/src/index.ts -> packages/storage/src/repos/field/index.ts",

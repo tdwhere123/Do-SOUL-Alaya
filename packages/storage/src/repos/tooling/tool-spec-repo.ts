@@ -1,7 +1,8 @@
 import { ToolSpecSchema, type ToolSpec } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import { parseRows, readRecord, type RowParser } from "../shared/parse-row.js";
 import { toSqliteBoolean } from "../shared/sqlite-utils.js";
 
 export interface ToolSpecRepo {
@@ -192,8 +193,7 @@ export class SqliteToolSpecRepo implements ToolSpecRepo {
 
   public async list(): Promise<readonly Readonly<ToolSpec>[]> {
     try {
-      const rows = this.listStatement.all() as ToolSpecRow[];
-      return rows.map((row) => parseToolSpecRow(row));
+      return parseRows(this.listStatement.all(), ToolSpecRowParser, "tool spec row");
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -220,7 +220,12 @@ function parseToolSpec(value: ToolSpec): Readonly<ToolSpec> {
   }
 }
 
-function parseToolSpecRow(row: ToolSpecRow): Readonly<ToolSpec> {
+const ToolSpecRowParser: RowParser<Readonly<ToolSpec>> = {
+  parse: parseToolSpecRow
+};
+
+function parseToolSpecRow(value: unknown): Readonly<ToolSpec> {
+  const row = readRecord(value, "tool spec row");
   try {
     return deepFreeze(
       ToolSpecSchema.parse({

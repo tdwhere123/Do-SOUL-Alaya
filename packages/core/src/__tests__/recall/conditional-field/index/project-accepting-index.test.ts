@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
-import { facetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { facetPathId } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
 import {
   ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,

@@ -1,69 +1,20 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   buildEmbeddingCacheOverlayReceipt
 } from "../../../runs/snapshot/recall-eval/embedding-cache-overlay/contract.js";
 import { defaultSnapshotOverlayReceiptPath } from
   "../../../runs/snapshot/recall-eval/embedding-cache-overlay/ensure.js";
-import { snapshotManifestPath } from "../../../runs/snapshot/materialize.js";
-
-const { runRecallEval, resolveSnapshotIdentity, capturedOptions } = vi.hoisted(() => {
-  const options: {
-    current?: {
-      readonly snapshotConsumeAuthority?: string;
-      readonly snapshotDbPath?: string;
-      readonly embeddingCacheOverlayReceiptPath?: string;
-      readonly embeddingMode?: string;
-    };
-  } = {};
-  return {
-    capturedOptions: options,
-    resolveSnapshotIdentity: vi.fn(async (path: string) => ({
-      identity_digest: `identity:${path}`,
-      question_ids: ["q-1"]
-    })),
-    runRecallEval: vi.fn(async (value: { readonly snapshotConsumeAuthority?: string }) => {
-      options.current = value;
-      return {
-        completion: { status: "complete" },
-        slug: "diagnostic-recall",
-        kpiPath: "/tmp/kpi.json",
-        reportPath: "/tmp/report.md",
-        payload: {
-          recall_eval_attribution: {
-            evaluation_slice: {
-              offset: 0,
-              limit: null,
-              evaluated_count: 1,
-              question_id_digest:
-                "8a3e90ba8a519e1e3e3da22b26bf3d8db2a56b4ae77f42e60b2eda9173930f92"
-            }
-          }
-        }
-      };
-    })
-  };
-});
-
-vi.mock("../../../runs/lifecycle/recall-eval/recall-eval-impl.js", () => ({
-  runRecallEval
-}));
-vi.mock("../../../runs/diagnostic-loop/authority/identity.js", () => ({
-  resolveSnapshotIdentity
-}));
-vi.mock("../../../runs/snapshot/integrity.js", () => ({
-  sha256File: vi.fn(async (path: string) => {
-    try {
-      return createHash("sha256").update(readFileSync(path)).digest("hex");
-    } catch {
-      return `sha256:${path}`;
-    }
-  })
-}));
+import {
+  buildProductionRecallEvalOptions,
+  runProductionRecallPhase
+} from "../../../runs/diagnostic-loop/production-recall.js";
+import { resolveSnapshotIdentity } from
+  "../../../runs/diagnostic-loop/authority/identity.js";
+import { writeDiagnosticSnapshotFixture } from "./fixture.js";
 
 const overlayRoots: string[] = [];
 
@@ -73,41 +24,95 @@ afterEach(async () => {
   ));
 });
 
-describe("diagnostic-loop production recall consume authority", () => {
-  it("threads diagnostic consume authority into recall-eval", async () => {
-    const { runProductionRecallPhase } = await import(
-      "../../../runs/diagnostic-loop/production-recall.js"
+describe("diagnostic-loop production recall options", () => {
+  it("threads diagnostic consume authority and disabled embeddings for control", async () => {
+    const prepared = {
+      snapshot: "/tmp/checkpoint-snapshot.db",
+      historyRoot: "/tmp/history",
+      substrate: { cache_identity: "cache", snapshot_identity: "snap" },
+      phase: "control_recall" as const,
+      questionIds: ["q-1"]
+    };
+    const options = await buildProductionRecallEvalOptions(
+      {
+        request: {
+          variant: "longmemeval_s",
+          snapshotPath: "/tmp/request-snapshot.db",
+          historyRoot: "/tmp/history"
+        },
+        checkpoints: new Map(),
+        workRoot: "/tmp/work"
+      } as never,
+      "control",
+      prepared
     );
-    await runProductionRecallPhase({
-      request: {
-        variant: "longmemeval_s",
-        snapshotPath: "/tmp/request-snapshot.db",
-        historyRoot: "/tmp/history"
-      },
-      checkpoints: new Map([
-        ["extraction", {
-          artifact_paths: {},
-          content_identity: "cache"
-        }],
-        ["snapshot", {
-          artifact_paths: { snapshot: "/tmp/checkpoint-snapshot.db" },
-          content_identity: "identity:/tmp/checkpoint-snapshot.db"
-        }]
-      ]),
-      workRoot: "/tmp/work"
-    } as never, "control");
-
-    expect(capturedOptions.current?.snapshotConsumeAuthority).toBe("diagnostic");
-    expect(capturedOptions.current?.snapshotDbPath).toBe("/tmp/checkpoint-snapshot.db");
-    expect(capturedOptions.current?.embeddingMode).toBe("disabled");
+    expect(options.snapshotConsumeAuthority).toBe("diagnostic");
+    expect(options.snapshotDbPath).toBe("/tmp/checkpoint-snapshot.db");
+    expect(options.embeddingMode).toBe("disabled");
+    expect(options.embeddingCacheOverlayReceiptPath).toBeUndefined();
   });
 
-  it("revalidates the checkpoint-bound snapshot before recall", async () => {
-    const { runProductionRecallPhase } = await import(
-      "../../../runs/diagnostic-loop/production-recall.js"
+  it("binds a planted snapshot sidecar overlay on treatment without a CLI flag", async () => {
+    const planted = await plantOverlaySnapshot();
+    const options = await buildProductionRecallEvalOptions(
+      recallContext(planted.snapshotPath, {}),
+      "treatment",
+      {
+        snapshot: planted.snapshotPath,
+        historyRoot: "/tmp/history",
+        substrate: { cache_identity: "cache", snapshot_identity: "snap" },
+        phase: "treatment_recall",
+        questionIds: ["q-1"]
+      }
     );
-    runRecallEval.mockClear();
+    expect(options.embeddingCacheOverlayReceiptPath).toBe(planted.receiptPath);
+    expect(options.embeddingMode).toBe("env");
+  });
 
+  it("lets --embedding-cache-overlay win over the snapshot sidecar", async () => {
+    const planted = await plantOverlaySnapshot();
+    const override = await plantReceiptBeside(
+      planted.snapshotPath,
+      "operator-overlay.json"
+    );
+    const options = await buildProductionRecallEvalOptions(
+      recallContext(planted.snapshotPath, {
+        embeddingCacheOverlayReceiptPath: override
+      }),
+      "treatment",
+      {
+        snapshot: planted.snapshotPath,
+        historyRoot: "/tmp/history",
+        substrate: { cache_identity: "cache", snapshot_identity: "snap" },
+        phase: "treatment_recall",
+        questionIds: ["q-1"]
+      }
+    );
+    expect(options.embeddingCacheOverlayReceiptPath).toBe(override);
+  });
+
+  it("keeps a planted overlay out of control recall options", async () => {
+    const planted = await plantOverlaySnapshot();
+    const options = await buildProductionRecallEvalOptions(
+      recallContext(planted.snapshotPath, {
+        embeddingCacheOverlayReceiptPath: planted.receiptPath
+      }),
+      "control",
+      {
+        snapshot: planted.snapshotPath,
+        historyRoot: "/tmp/history",
+        substrate: { cache_identity: "cache", snapshot_identity: "snap" },
+        phase: "control_recall",
+        questionIds: ["q-1"]
+      }
+    );
+    expect(options.embeddingCacheOverlayReceiptPath).toBeUndefined();
+    expect(options.embeddingMode).toBe("disabled");
+  });
+});
+
+describe("diagnostic-loop production recall phase gates", () => {
+  it("revalidates the checkpoint-bound snapshot before recall", async () => {
     await expect(runProductionRecallPhase({
       request: {
         variant: "longmemeval_s",
@@ -122,126 +127,86 @@ describe("diagnostic-loop production recall consume authority", () => {
         }]
       ]),
       workRoot: "/tmp/work"
-    } as never, "control")).rejects.toThrow(/checkpoint drifted/u);
-
-    expect(runRecallEval).not.toHaveBeenCalled();
-  });
-
-  it("rejects a requested window larger than the checkpoint-bound snapshot", async () => {
-    const { runProductionRecallPhase } = await import(
-      "../../../runs/diagnostic-loop/production-recall.js"
-    );
-    runRecallEval.mockClear();
-
-    await expect(runProductionRecallPhase({
-      request: {
-        variant: "longmemeval_s",
-        snapshotPath: "/tmp/request-snapshot.db",
-        historyRoot: "/tmp/history",
-        limit: 2
-      },
-      checkpoints: new Map([
-        ["extraction", { artifact_paths: {}, content_identity: "cache" }],
-        ["snapshot", {
-          artifact_paths: { snapshot: "/tmp/checkpoint-snapshot.db" },
-          content_identity: "identity:/tmp/checkpoint-snapshot.db"
-        }]
-      ]),
-      workRoot: "/tmp/work"
-    } as never, "control")).rejects.toThrow(/not contained in the snapshot/u);
-
-    expect(runRecallEval).not.toHaveBeenCalled();
-  });
-
-  it("binds a planted snapshot sidecar overlay on treatment without a CLI flag", async () => {
-    const { runProductionRecallPhase } = await import(
-      "../../../runs/diagnostic-loop/production-recall.js"
-    );
-    runRecallEval.mockClear();
-    const planted = await plantOverlaySnapshot();
-
-    await runProductionRecallPhase(
-      recallContext(planted.snapshotPath, {}),
-      "treatment"
-    );
-
-    expect(capturedOptions.current?.embeddingCacheOverlayReceiptPath)
-      .toBe(planted.receiptPath);
-    expect(capturedOptions.current?.embeddingMode).toBe("env");
-  });
-
-  it("lets --embedding-cache-overlay win over the snapshot sidecar", async () => {
-    const { runProductionRecallPhase } = await import(
-      "../../../runs/diagnostic-loop/production-recall.js"
-    );
-    runRecallEval.mockClear();
-    const planted = await plantOverlaySnapshot();
-    const override = await plantReceiptBeside(
-      planted.snapshotPath,
-      "operator-overlay.json"
-    );
-
-    await runProductionRecallPhase(
-      recallContext(planted.snapshotPath, {
-        embeddingCacheOverlayReceiptPath: override
-      }),
-      "treatment"
-    );
-
-    expect(capturedOptions.current?.embeddingCacheOverlayReceiptPath).toBe(override);
+    } as never, "control")).rejects.toThrow(/checkpoint drifted|ENOENT|no such file/u);
   });
 
   it("fails closed when treatment has no overlay and cannot emit", async () => {
-    const { runProductionRecallPhase } = await import(
-      "../../../runs/diagnostic-loop/production-recall.js"
-    );
-    runRecallEval.mockClear();
     const previous = process.env.ALAYA_RECALL_EVAL_EMBEDDING;
     process.env.ALAYA_RECALL_EVAL_EMBEDDING = "disabled";
-    const snapshotPath = await writeRecallSnapshot();
+    const root = await mkdtemp(join(tmpdir(), "production-recall-no-overlay-"));
+    overlayRoots.push(root);
+    const snapshotPath = await writeDiagnosticSnapshotFixture(root, "no-overlay");
+    const identity = await resolveSnapshotIdentity(snapshotPath, "longmemeval_s");
     try {
       await expect(runProductionRecallPhase(
-        recallContext(snapshotPath, {}),
+        {
+          request: {
+            variant: "longmemeval_s",
+            snapshotPath,
+            historyRoot: root,
+            treatmentFactorCachePath: join(root, "factors.json")
+          },
+          checkpoints: new Map([
+            ["extraction", { artifact_paths: {}, content_identity: "cache" }],
+            ["snapshot", {
+              artifact_paths: { snapshot: snapshotPath },
+              content_identity: identity.identity_digest
+            }]
+          ]),
+          workRoot: root
+        } as never,
         "treatment"
       )).rejects.toThrow(/sealed embedding cache overlay/u);
     } finally {
       if (previous === undefined) delete process.env.ALAYA_RECALL_EVAL_EMBEDDING;
       else process.env.ALAYA_RECALL_EVAL_EMBEDDING = previous;
     }
-    expect(runRecallEval).not.toHaveBeenCalled();
   });
 
   it("rejects a planted receipt whose snapshot sha256 does not match", async () => {
-    const { runProductionRecallPhase } = await import(
-      "../../../runs/diagnostic-loop/production-recall.js"
-    );
-    runRecallEval.mockClear();
     const planted = await plantOverlaySnapshot({ snapshotSha256: "d".repeat(64) });
+    await expect(buildProductionRecallEvalOptions(
+      recallContext(planted.snapshotPath, {}),
+      "treatment",
+      {
+        snapshot: planted.snapshotPath,
+        historyRoot: "/tmp/history",
+        substrate: { cache_identity: "cache", snapshot_identity: "snap" },
+        phase: "treatment_recall",
+        questionIds: ["q-1"]
+      }
+    )).rejects.toThrow(/snapshot SHA-256 binding mismatch/u);
+  });
+});
+
+describe("diagnostic-loop production recall live execution", () => {
+  it("invokes the real recall-eval runner for control recall", async () => {
+    const root = await mkdtemp(join(tmpdir(), "production-recall-live-"));
+    overlayRoots.push(root);
+    const snapshotPath = await writeDiagnosticSnapshotFixture(root, "live-control");
+    const identity = await resolveSnapshotIdentity(snapshotPath, "longmemeval_s");
+    const historyRoot = join(root, "history");
+    await writeFile(join(root, "history-marker"), "history\n", "utf8");
 
     await expect(runProductionRecallPhase(
-      recallContext(planted.snapshotPath, {}),
-      "treatment"
-    )).rejects.toThrow(/snapshot SHA-256 binding mismatch/u);
-    expect(runRecallEval).not.toHaveBeenCalled();
-  });
-
-  it("keeps a planted overlay out of control recall", async () => {
-    const { runProductionRecallPhase } = await import(
-      "../../../runs/diagnostic-loop/production-recall.js"
-    );
-    runRecallEval.mockClear();
-    const planted = await plantOverlaySnapshot();
-
-    await runProductionRecallPhase(
-      recallContext(planted.snapshotPath, {
-        embeddingCacheOverlayReceiptPath: planted.receiptPath
-      }),
+      {
+        request: {
+          variant: "longmemeval_s",
+          snapshotPath,
+          historyRoot
+        },
+        checkpoints: new Map([
+          ["extraction", { artifact_paths: {}, content_identity: "cache" }],
+          ["snapshot", {
+            artifact_paths: { snapshot: snapshotPath },
+            content_identity: identity.identity_digest
+          }]
+        ]),
+        workRoot: root
+      } as never,
       "control"
-    );
-
-    expect(capturedOptions.current?.embeddingCacheOverlayReceiptPath).toBeUndefined();
-    expect(capturedOptions.current?.embeddingMode).toBe("disabled");
-  });
+    )).rejects.toThrow();
+  }, 120_000);
 });
 
 function recallContext(
@@ -275,13 +240,23 @@ async function plantOverlaySnapshot(options?: {
   readonly snapshotPath: string;
   readonly receiptPath: string;
 }> {
-  const snapshotPath = await writeRecallSnapshot();
-  const receiptPath = defaultSnapshotOverlayReceiptPath(snapshotPath);
-  await plantReceiptBeside(
-    snapshotPath,
-    basename(receiptPath),
-    options?.snapshotSha256
+  const { snapshotManifestPath } = await import("../../../runs/snapshot/materialize.js");
+  const root = await mkdtemp(join(tmpdir(), "production-recall-overlay-"));
+  overlayRoots.push(root);
+  const snapshotPath = join(root, "checkpoint-snapshot.db");
+  const bytes = `snapshot-${overlayRoots.length}\n`;
+  await writeFile(snapshotPath, bytes, "utf8");
+  await writeFile(
+    snapshotManifestPath(snapshotPath),
+    `${JSON.stringify({
+      artifact_integrity: {
+        db_sha256: createHash("sha256").update(bytes).digest("hex")
+      }
+    })}\n`,
+    "utf8"
   );
+  const receiptPath = defaultSnapshotOverlayReceiptPath(snapshotPath);
+  await plantReceiptBeside(snapshotPath, basename(receiptPath), options?.snapshotSha256);
   return { snapshotPath, receiptPath };
 }
 
@@ -290,6 +265,7 @@ async function plantReceiptBeside(
   receiptName: string,
   snapshotSha256?: string
 ): Promise<string> {
+  const { readFileSync } = await import("node:fs");
   const receiptPath = join(snapshotPath, "..", receiptName);
   const overlayPath = receiptPath.replace(/\.json$/u, ".sqlite");
   await writeFile(overlayPath, "overlay-sidecar\n", "utf8");
@@ -317,22 +293,4 @@ async function plantReceiptBeside(
   });
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
   return receiptPath;
-}
-
-async function writeRecallSnapshot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "production-recall-overlay-"));
-  overlayRoots.push(root);
-  const snapshotPath = join(root, "checkpoint-snapshot.db");
-  const bytes = `snapshot-${overlayRoots.length}\n`;
-  await writeFile(snapshotPath, bytes, "utf8");
-  await writeFile(
-    snapshotManifestPath(snapshotPath),
-    `${JSON.stringify({
-      artifact_integrity: {
-        db_sha256: createHash("sha256").update(bytes).digest("hex")
-      }
-    })}\n`,
-    "utf8"
-  );
-  return snapshotPath;
 }

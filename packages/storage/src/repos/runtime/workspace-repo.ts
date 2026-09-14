@@ -8,6 +8,7 @@ import {
   type WorkspaceStatements
 } from "./statements/workspace-statements.js";
 import { isUniqueConstraintError } from "../garden/garden-task-errors.js";
+import { parseRows, readRecord, type RowParser } from "../shared/parse-row.js";
 
 export type WorkspaceCreateInput = Omit<Workspace, "created_at" | "archived_at" | "repo_path"> & {
   readonly repo_path?: Workspace["repo_path"];
@@ -108,11 +109,13 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
 
   public async list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]> {
     try {
-      const rows =
-        page === undefined
-          ? (this.active().listStatement.all() as WorkspaceRow[])
-          : (this.active().listPagedStatement.all(page.limit, page.offset) as WorkspaceRow[]);
-      return rows.map((row) => parseWorkspace(row));
+      const rows = parseRows(page === undefined
+          ? this.active().listStatement.all()
+          : this.active().listPagedStatement.all(page.limit, page.offset),
+        WorkspaceRowParser,
+        "workspace row"
+      );
+      return rows;
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to list workspaces.", error);
     }
@@ -208,7 +211,14 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
   }
 }
 
-function parseWorkspace(row: WorkspaceRow): Workspace {
+const WorkspaceRowParser: RowParser<Workspace> = {
+  parse(value: unknown): Workspace {
+    return parseWorkspace(value);
+  }
+};
+
+function parseWorkspace(value: unknown): Workspace {
+  const row = readRecord(value, "workspace row");
   try {
     return WorkspaceSchema.parse(row);
   } catch (error) {

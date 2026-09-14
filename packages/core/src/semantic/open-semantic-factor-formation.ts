@@ -10,8 +10,6 @@ import {
   type OpenSemanticFactorFormationCaptureBody
 } from "@do-soul/alaya-protocol";
 
-export { sourceTextDigest };
-
 export function materializeOpenSemanticFactorFormation(params: Readonly<{
   readonly source_kind: "evidence" | "query";
   readonly source_text: string | null;

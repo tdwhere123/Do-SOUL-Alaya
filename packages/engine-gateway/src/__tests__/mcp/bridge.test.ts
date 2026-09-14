@@ -370,39 +370,28 @@ describe("McpBridge", () => {
   });
 
   it("returns a handler_timeout error result when a soul handler hangs past the bound", async () => {
-    const previous = process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
-    process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"] = "25";
-    try {
-      const bridge = new McpBridge({
-        soulHandler: () => new Promise<never>(() => {})
-      });
+    const bridge = new McpBridge({
+      soulHandler: () => new Promise<never>(() => {}),
+      toolTimeoutMs: 25
+    });
 
-      const result = await bridge.executeToolUse(toolUse, runtimeContext);
+    const result = await bridge.executeToolUse(toolUse, runtimeContext);
 
-      expect(result).toEqual({
-        type: "tool_result",
-        tool_use_id: toolUse.id,
-        content: JSON.stringify({
-          error: {
-            error_code: "handler_timeout",
-            message: "MCP tool execution timed out.",
-            error_type: "TimeoutError"
-          }
-        }),
-        is_error: true
-      });
-    } finally {
-      if (previous === undefined) {
-        delete process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
-      } else {
-        process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"] = previous;
-      }
-    }
+    expect(result).toEqual({
+      type: "tool_result",
+      tool_use_id: toolUse.id,
+      content: JSON.stringify({
+        error: {
+          error_code: "handler_timeout",
+          message: "MCP tool execution timed out.",
+          error_type: "TimeoutError"
+        }
+      }),
+      is_error: true
+    });
   });
 
   it("does not crash the process when a soul handler rejects after the timeout fires", async () => {
-    const previous = process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
-    process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"] = "25";
     const unhandled = vi.fn();
     process.on("unhandledRejection", unhandled);
     try {
@@ -411,7 +400,8 @@ describe("McpBridge", () => {
         soulHandler: () =>
           new Promise<never>((_resolve, reject) => {
             rejectLate = reject;
-          })
+          }),
+        toolTimeoutMs: 25
       });
 
       const result = await bridge.executeToolUse(toolUse, runtimeContext);
@@ -433,11 +423,6 @@ describe("McpBridge", () => {
       expect(unhandled).not.toHaveBeenCalled();
     } finally {
       process.off("unhandledRejection", unhandled);
-      if (previous === undefined) {
-        delete process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
-      } else {
-        process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"] = previous;
-      }
     }
   });
 

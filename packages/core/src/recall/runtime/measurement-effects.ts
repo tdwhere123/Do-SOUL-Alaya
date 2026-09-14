@@ -3,7 +3,7 @@ import type { ObserverActionResult } from "../conditional-field/observers/observ
 import type { ObservationMeasurement } from "../conditional-field/observers/measure-stored.js";
 import type { FieldObservationEffect } from "../conditional-field/engine/field-engine.js";
 import { capContractId } from "../conditional-field/cap-contract.js";
-import { seedActivationsForObservation } from "../conditional-field/engine/path-composition.js";
+import { seedActivationsForObservation } from "../conditional-field/engine/path-composition-seed.js";
 import type { BindingContextStore } from "../conditional-field/engine/binding-environment.js";
 
 export function measurementEffectsFor(result: ObserverActionResult, interpretation?: QueryInterpretation,

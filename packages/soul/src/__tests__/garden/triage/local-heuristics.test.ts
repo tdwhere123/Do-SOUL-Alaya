@@ -92,13 +92,12 @@ describe("LocalHeuristics", () => {
   });
 
   it("extracts a time_concern fact signal from dated factual phrasing", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-20T10:20:30.000Z"));
     const provider = new LocalHeuristics();
+    const sourceObservedAt = "2026-03-20T10:20:30.000Z";
 
     const signals = await provider.compile(
       "We reviewed the release blocker yesterday and agreed to keep the fix loop open.",
-      createContext()
+      createContext({ source_observed_at: sourceObservedAt })
     );
 
     expect(signals).toHaveLength(1);
@@ -145,7 +144,10 @@ describe("LocalHeuristics", () => {
   it("extracts a strict temporal projection from Chinese explicit dates", async () => {
     const provider = new LocalHeuristics();
 
-    const signals = await provider.compile("2026年3月19日我们完成发布复盘。", createContext());
+    const signals = await provider.compile(
+      "2026年3月19日我们完成发布复盘。",
+      createContext({ source_observed_at: "2026-03-20T10:20:30.000Z" })
+    );
 
     expect(signals).toHaveLength(1);
     expect(signals[0]!.raw_payload).toMatchObject({
@@ -163,7 +165,10 @@ describe("LocalHeuristics", () => {
   it("does not rollover impossible explicit calendar dates", async () => {
     const provider = new LocalHeuristics();
 
-    const signals = await provider.compile("2026-02-31 we reviewed the blocker.", createContext());
+    const signals = await provider.compile(
+      "2026-02-31 we reviewed the blocker.",
+      createContext({ source_observed_at: "2026-03-20T10:20:30.000Z" })
+    );
 
     expect(signals).toHaveLength(1);
     expect(signals[0]!.raw_payload).not.toHaveProperty("temporal_projection");
@@ -178,7 +183,7 @@ describe("LocalHeuristics", () => {
 
     const signals = await provider.compile(
       "昨天我们确认继续完成全部修复。",
-      createContext()
+      createContext({ source_observed_at: "2026-03-20T10:20:30.000Z" })
     );
 
     expect(signals).toHaveLength(1);
@@ -309,19 +314,28 @@ describe("LocalHeuristics event-time extraction", () => {
   const anchorIso = "2026-03-18T10:20:30.000Z";
 
   async function timeConcernFor(text: string) {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(anchorIso));
-    const signals = await new LocalHeuristics().compile(text, createContext());
+    const signals = await new LocalHeuristics().compile(
+      text,
+      createContext({ source_observed_at: anchorIso })
+    );
     return signals.find((signal) => signal.domain_tags.includes("time_concern"));
   }
 
-  it("writes event time for relative terms without environment configuration", async () => {
+  it("writes event time for relative terms from source observation time, not the wall clock", async () => {
     const signal = await timeConcernFor("We planned the migration last week.");
     expect(signal!.raw_payload.temporal_projection).toMatchObject({
       event_time_start: "2026-03-09T00:00:00.000Z",
       event_time_end: "2026-03-15T23:59:59.999Z",
       time_source: "relative_resolved"
     });
+  });
+
+  it("skips relative time concerns when source observation time is unavailable", async () => {
+    const signals = await new LocalHeuristics().compile(
+      "We planned the migration last week.",
+      createContext()
+    );
+    expect(signals.find((signal) => signal.domain_tags.includes("time_concern"))).toBeUndefined();
   });
 
   it("preserves the source observation offset for relative windows", async () => {
@@ -414,7 +428,7 @@ describe("LocalHeuristics event-time extraction", () => {
   });
 });
 
-function createContext(): GardenCompileContext {
+function createContext(overrides: Partial<GardenCompileContext> = {}): GardenCompileContext {
   return {
     workspace_id: "ws_1",
     run_id: "run_1",
@@ -430,6 +444,7 @@ function createContext(): GardenCompileContext {
         role: "assistant",
         content: "Understood."
       }
-    ]
+    ],
+    ...overrides
   };
 }

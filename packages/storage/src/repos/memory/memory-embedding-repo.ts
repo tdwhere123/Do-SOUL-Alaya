@@ -301,8 +301,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     try {
       rejectUnboundedWorkspaceEmbeddingQuery(options);
       const query = buildWorkspaceEmbeddingQuery(parsedWorkspaceId, options, "blob");
-      const rows = parseRows(
-        this.db.connection.prepare(query.sql).all(...query.args),
+      const rows = parseRows(this.db.connection.prepare(query.sql).all(...query.args),
         MemoryEmbeddingRowParser,
         "memory embedding row"
       );
@@ -358,8 +357,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     }
 
     try {
-      const rows = parseRows(
-        this.listByObjectIdFilterStatement.all(JSON.stringify(parsedObjectIds), parsedWorkspaceId),
+      const rows = parseRows(this.listByObjectIdFilterStatement.all(JSON.stringify(parsedObjectIds), parsedWorkspaceId),
         MemoryEmbeddingRowParser,
         "memory embedding row"
       );

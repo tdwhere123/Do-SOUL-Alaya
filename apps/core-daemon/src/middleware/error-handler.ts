@@ -1,7 +1,12 @@
 import type { Hono } from "hono";
 import { z } from "zod";
 import { CoreError } from "@do-soul/alaya-core";
-import { EngineError, EngineErrorKind } from "@do-soul/alaya-protocol";
+import {
+  EngineError,
+  EngineErrorKind,
+  withLoggerCorrelation,
+  type LoggerPort
+} from "@do-soul/alaya-protocol";
 import { StorageError } from "@do-soul/alaya-storage";
 import {
   isRequestBodyTooLargeError,
@@ -19,9 +24,7 @@ const SAFE_PUBLIC_VALIDATION_MESSAGES = new Set([
   "Config patch body must be a JSON object"
 ]);
 
-export interface ErrorLoggerPort {
-  error(message: string, meta: Record<string, unknown>): void;
-}
+export type ErrorLoggerPort = Pick<LoggerPort, "error">;
 
 export function registerErrorHandler(app: Hono, logger: ErrorLoggerPort): void {
   app.onError((error, context) => handleDaemonError(error, context, logger));
@@ -30,6 +33,22 @@ export function registerErrorHandler(app: Hono, logger: ErrorLoggerPort): void {
 function readRequestId(context: { get(name: string): unknown }): string | undefined {
   const requestId = context.get("requestId");
   return typeof requestId === "string" && requestId.length > 0 ? requestId : undefined;
+}
+
+function readRunId(context: { get(name: string): unknown }): string | undefined {
+  const runId = context.get("runId");
+  return typeof runId === "string" && runId.length > 0 ? runId : undefined;
+}
+
+function correlatedErrorMeta(
+  context: { get(name: string): unknown },
+  meta: Record<string, unknown>
+): Record<string, unknown> {
+  return withLoggerCorrelation(meta, {
+    request_id: readRequestId(context),
+    correlation_id: readRequestId(context),
+    run_id: readRunId(context)
+  });
 }
 
 function summarizeHandledError(
@@ -190,7 +209,10 @@ function handleDaemonError(
   if (zodErrorResponse !== null) {
     return zodErrorResponse;
   }
-  logger.error("[daemon] unhandled error", summarizeUnhandledError(error, requestId));
+  logger.error(
+    "[daemon] unhandled error",
+    correlatedErrorMeta(context, summarizeUnhandledError(error, requestId))
+  );
   return context.json({ success: false, error: "Internal server error" }, 500);
 }
 
@@ -206,11 +228,14 @@ function handleStorageDaemonError(
   const publicMessage = publicMessageForStorageError(error);
   logger.error(
     "[daemon] sanitized storage error",
-    summarizeHandledError(error, {
-      code: error.code,
-      publicMessage,
-      request_id: requestId
-    })
+    correlatedErrorMeta(
+      context,
+      summarizeHandledError(error, {
+        code: error.code,
+        publicMessage,
+        request_id: requestId
+      })
+    )
   );
   return context.json({ success: false, error: publicMessage }, statusForStorageError(error));
 }
@@ -235,10 +260,13 @@ function handleRequestBodyTooLarge(
   }
   logger.error(
     "[daemon] sanitized request body limit error",
-    summarizeHandledError(error instanceof Error ? error : new Error("request body too large"), {
-      publicMessage: REQUEST_BODY_TOO_LARGE_MESSAGE,
-      request_id: requestId
-    })
+    correlatedErrorMeta(
+      context,
+      summarizeHandledError(error instanceof Error ? error : new Error("request body too large"), {
+        publicMessage: REQUEST_BODY_TOO_LARGE_MESSAGE,
+        request_id: requestId
+      })
+    )
   );
   return context.json({ success: false, error: REQUEST_BODY_TOO_LARGE_MESSAGE }, 413);
 }
@@ -256,11 +284,14 @@ function handleCoreDaemonError(
   if (error.code === "VALIDATION" && publicMessage !== error.message) {
     logger.error(
       "[daemon] sanitized core validation error",
-      summarizeHandledError(error, {
-        code: error.code,
-        publicMessage,
-        request_id: requestId
-      })
+      correlatedErrorMeta(
+        context,
+        summarizeHandledError(error, {
+          code: error.code,
+          publicMessage,
+          request_id: requestId
+        })
+      )
     );
   }
   return context.json({ success: false, error: publicMessage }, statusForCoreError(error));
@@ -278,11 +309,14 @@ function handleEngineDaemonError(
   const publicMessage = publicMessageForEngineError(error);
   logger.error(
     "[daemon] sanitized engine error",
-    summarizeHandledError(error, {
-      kind: error.kind,
-      publicMessage,
-      request_id: requestId
-    })
+    correlatedErrorMeta(
+      context,
+      summarizeHandledError(error, {
+        kind: error.kind,
+        publicMessage,
+        request_id: requestId
+      })
+    )
   );
   return context.json({ success: false, error: publicMessage, kind: error.kind }, 502);
 }
@@ -298,10 +332,13 @@ function handleZodDaemonError(
   }
   logger.error(
     "[daemon] sanitized zod validation error",
-    summarizeHandledError(error instanceof Error ? error : new Error("zod validation failure"), {
-      publicMessage: "Invalid request",
-      request_id: requestId
-    })
+    correlatedErrorMeta(
+      context,
+      summarizeHandledError(error instanceof Error ? error : new Error("zod validation failure"), {
+        publicMessage: "Invalid request",
+        request_id: requestId
+      })
+    )
   );
   return context.json({ success: false, error: "Invalid request" }, 400);
 }

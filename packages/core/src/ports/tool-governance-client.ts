@@ -1,5 +1,5 @@
 import type { ToolGovernanceDecision, ToolGovernancePort, ToolGovernanceQuery } from "@do-soul/alaya-protocol";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { stableStringify } from "../shared/stable-stringify.js";
 
 export interface ToolGovernanceClientDependencies {

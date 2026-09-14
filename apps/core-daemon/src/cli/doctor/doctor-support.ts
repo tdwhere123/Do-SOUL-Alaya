@@ -1,4 +1,5 @@
 import { access, constants as fsConstants, stat } from "node:fs/promises";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   localOnnxHostSingleFlightEnabled,
   type WorkspaceBootstrapReconcileResult
@@ -409,11 +410,11 @@ function writeRecallGraphSummary(stream: NodeJS.WritableStream, report: DoctorRe
 }
 
 function writeLocalOnnxHostSingleFlightHint(stream: NodeJS.WritableStream): void {
-  const provider = process.env.ALAYA_EMBEDDING_PROVIDER?.trim().toLowerCase();
+  const provider = processEnvLookup().ALAYA_EMBEDDING_PROVIDER?.trim().toLowerCase();
   if (provider !== undefined && provider !== "" && provider !== "local_onnx") {
     return;
   }
-  if (localOnnxHostSingleFlightEnabled()) {
+  if (localOnnxHostSingleFlightEnabled(processEnvLookup())) {
     stream.write("local ONNX host single-flight: enabled\n");
     return;
   }

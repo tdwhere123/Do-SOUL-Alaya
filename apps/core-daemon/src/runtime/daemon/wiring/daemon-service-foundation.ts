@@ -1,3 +1,4 @@
+import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
   ArbitrationService,
   BudgetBankruptcyService,
@@ -124,11 +125,11 @@ async function createEnvironmentSecurityFoundation(input: DaemonServiceFoundatio
   });
   const environmentStatus = await environmentStatusService.getStatus();
   const principalCodingAvailability = derivePrincipalCodingAvailability({
-    runtimeConfigured: process.env.ALAYA_PRINCIPAL_RUNTIME === "claude_code",
+    runtimeConfigured: processEnvLookup().ALAYA_PRINCIPAL_RUNTIME === "claude_code",
     tools: environmentStatus.tools
   });
   const zeroDaySecurityLayer = new ZeroDaySecurityLayer({
-    loadPolicies: async () => parseZeroDayPoliciesJson(process.env.ZERO_DAY_POLICIES_JSON)
+    loadPolicies: async () => parseZeroDayPoliciesJson(processEnvLookup().ZERO_DAY_POLICIES_JSON)
   });
   const {
     eventPublisher,

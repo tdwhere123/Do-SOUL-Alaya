@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
 export interface AlayaConfigPaths {
   readonly configDir: string;
@@ -19,7 +20,7 @@ export interface ResolveConfigDirOptions {
 const APP_NAME = "alaya";
 
 export function resolveAlayaConfigDir(options: ResolveConfigDirOptions = {}): string {
-  const env = options.env ?? process.env;
+  const env = options.env ?? processEnvLookup();
   const overrideDir = env.ALAYA_CONFIG_DIR?.trim();
   if (overrideDir && overrideDir.length > 0) {
     return path.resolve(overrideDir);

@@ -6,7 +6,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
+import { parseRows } from "../shared/parse-row.js";
 import {
   DEFAULT_REPO_LIST_PAGE_LIMIT,
   parseNonEmptyString,
@@ -217,7 +218,7 @@ export class SqliteGlobalMemoryRepo implements GlobalMemoryRepo {
     `);
 
     try {
-      const rows = statement.all(...values) as GlobalMemoryEntryRow[];
+      const rows = parseRows(statement.all(...values), { parse: (value: unknown) => value as GlobalMemoryEntryRow }, "global memory entry row");
       return rows.map((row) => parseGlobalMemoryEntryRow(row));
     } catch (error) {
       if (error instanceof StorageError) {

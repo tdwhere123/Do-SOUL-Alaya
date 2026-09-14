@@ -19,6 +19,7 @@ import type { StorageDatabase } from "../../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../../sqlite/refreshable-statement-holder.js";
 import { parseNullableJsonColumn } from "../../shared/parse-json-column.js";
 import { parseEvidenceCapsuleRow } from "../mappers/evidence-capsule-mappers.js";
+import { parseRows } from "../../shared/parse-row.js";
 import type {
   EvidenceSearchMatch,
   RecallQualifiedEvidence,
@@ -122,10 +123,10 @@ export class RecallQualifiedEvidenceReader {
     );
     if (candidates.length === 0) return [];
     const projections = readQualifiedProjectionIndex(
-      this.statementHolder.active().findProjectionRows.all(
+      parseRows(this.statementHolder.active().findProjectionRows.all(
         workspaceId,
         JSON.stringify(evidenceObjectIds)
-      ) as StoredProjectionRow[]
+      ), { parse: (value: unknown) => value as StoredProjectionRow }, "stored projection row")
     );
     const candidateById = new Map(candidates.map((candidate) => [
       candidate.capsule.object_id,
@@ -180,10 +181,10 @@ export class RecallQualifiedEvidenceReader {
     evidenceObjectIds: readonly string[]
   ): QualificationInputs {
     const candidates = readEvidenceCandidates(
-      this.statementHolder.active().findEvidenceRows.all(
+      parseRows(this.statementHolder.active().findEvidenceRows.all(
         workspaceId,
         JSON.stringify(evidenceObjectIds)
-      ) as EvidenceQualificationRow[],
+      ), { parse: (value: unknown) => value as EvidenceQualificationRow }, "evidence qualification row"),
       {
         strictParse: this.strictParse,
         recordSkip: () => {
@@ -194,15 +195,15 @@ export class RecallQualifiedEvidenceReader {
     const signalIds = [...new Set(candidates.flatMap((candidate) =>
       candidate.signalId === null ? [] : [candidate.signalId]
     ))];
-    const signals = readSignals(this.statementHolder.active().findSignalRows.all(
+    const signals = readSignals(parseRows(this.statementHolder.active().findSignalRows.all(
       workspaceId,
       JSON.stringify(signalIds)
-    ) as StoredSignalRow[]);
-    const events = groupEvents(this.statementHolder.active().findMaterializationRows.all(
+    ), { parse: (value: unknown) => value as StoredSignalRow }, "stored signal row"));
+    const events = groupEvents(parseRows(this.statementHolder.active().findMaterializationRows.all(
       workspaceId,
       JSON.stringify(signalIds),
       SignalEventType.SOUL_SIGNAL_MATERIALIZED
-    ) as StoredMaterializationRow[]);
+    ), { parse: (value: unknown) => value as StoredMaterializationRow }, "stored materialization row"));
     return { candidates, signals, events };
   }
 }

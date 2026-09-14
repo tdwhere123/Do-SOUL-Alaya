@@ -207,8 +207,7 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     }
     const afterRecordedAt = options.afterRecordedAt ?? "";
     const afterRecordId = options.afterRecordId ?? "";
-    const rows = parseRows(
-      this.pageStatement.all(workspaceId, afterRecordedAt, afterRecordId, limit),
+    const rows = parseRows(this.pageStatement.all(workspaceId, afterRecordedAt, afterRecordId, limit),
       fieldSourceRecordParser,
       "source record"
     );

@@ -20,7 +20,10 @@ import {
 import { enqueueRecallReadRequest } from "../recall-read-worker/request-queue.js";
 import { attachRecallReadRequestListener } from "../recall-read-worker/unexpected-queue-failure.js";
 import { asPayload, readString } from "../recall-read-worker/payload-readers.js";
-import { parseWorkerOperationPayload } from "../recall-read-worker/operation-schemas.js";
+import {
+  parseWorkerOperationPayload,
+  type WorkerOperationPayload
+} from "../recall-read-worker/operation-schemas.js";
 import { readRecallTierWindowQuery } from "../recall-read-worker/memory-window.js";
 import { postRecallTierWindowChunks } from "../recall-read-worker/tier-window-stream.js";
 import { runOperation } from "../recall-read-worker/dispatch.js";
@@ -72,9 +75,10 @@ async function handleRequest(message: unknown): Promise<void> {
       throw new Error("recall read worker database is closed");
     }
     if (message.operation === "memory.findRecallTierWindow") {
-      const payload = parseWorkerOperationPayload(message.operation, message.payload);
+      const payload: WorkerOperationPayload<"memory.findRecallTierWindow"> =
+        parseWorkerOperationPayload(message.operation, message.payload);
       const result = await runtime.memoryEntryRepo.findRecallTierWindow(
-        readRecallTierWindowQuery(asPayload(payload))
+        readRecallTierWindowQuery(payload)
       );
       await postRecallTierWindowChunks(message.id, result, postResponse);
       return;

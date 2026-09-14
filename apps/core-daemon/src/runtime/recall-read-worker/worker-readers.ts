@@ -16,12 +16,12 @@ export type WorkerKeywordSearchQuery = Readonly<{
 }>;
 
 export function readPathProjectionReadOptions(
-  payload: Record<string, unknown>
+  payload: Readonly<{ readonly asOf?: string }>
 ): RecallPathProjectionReadOptions {
   if (payload.asOf === undefined) {
     return Object.freeze({});
   }
-  return Object.freeze({ asOf: readString(payload.asOf, "asOf") });
+  return Object.freeze({ asOf: payload.asOf });
 }
 
 export function readKeywordSearchBatchQueries(

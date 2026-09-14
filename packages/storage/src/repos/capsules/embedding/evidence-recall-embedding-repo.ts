@@ -2,6 +2,7 @@ import { OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
 import { parseJsonColumn } from "../../shared/parse-json-column.js";
+import { parseRows } from "../../shared/parse-row.js";
 import {
   decodeValidEmbeddingBlob,
   encodeEmbeddingBlob,
@@ -85,8 +86,8 @@ export class SqliteEvidenceRecallEmbeddingRepo {
   ): Promise<readonly Readonly<EvidenceRecallEmbeddingSource>[]> {
     try {
       const rows = [
-        ...(this.listOwnerSources.all(workspaceId) as SourceRow[]),
-        ...(this.listProjectionSources.all(workspaceId) as SourceRow[])
+        ...(parseRows(this.listOwnerSources.all(workspaceId), { parse: (value: unknown) => value as SourceRow }, "source row")),
+        ...(parseRows(this.listProjectionSources.all(workspaceId), { parse: (value: unknown) => value as SourceRow }, "source row"))
       ];
       return Object.freeze(rows.map(parseSource).sort(compareSources));
     } catch (error) {
@@ -109,7 +110,7 @@ export class SqliteEvidenceRecallEmbeddingRepo {
   }): Promise<readonly Readonly<EvidenceRecallEmbeddingRecord>[]> {
     if (input.documents.length === 0) return Object.freeze([]);
     try {
-      const rows = this.findByDocumentsStatement.all(
+      const rows = parseRows(this.findByDocumentsStatement.all(
         JSON.stringify(input.documents.map((document) => ({
           ownerObjectId: document.ownerObjectId,
           documentIdentity: document.documentIdentity,
@@ -120,7 +121,7 @@ export class SqliteEvidenceRecallEmbeddingRepo {
         input.providerKind,
         input.modelId,
         input.schemaVersion
-      ) as EmbeddingRow[];
+      ), { parse: (value: unknown) => value as EmbeddingRow }, "embedding row");
       return Object.freeze(rows.map(parseEmbeddingRow));
     } catch (error) {
       throw new StorageError(

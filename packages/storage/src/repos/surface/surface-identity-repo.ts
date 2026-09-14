@@ -7,13 +7,14 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import {
   getEventLogWriter,
   insertEventLogEntry,
   type EventLogDraftInput
 } from "../runtime/writes/event-log-writer.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
 
 export interface SurfaceIdentityRepo {
   create(identity: Readonly<SurfaceIdentity>): Promise<Readonly<SurfaceIdentity>>;
@@ -223,7 +224,7 @@ export class SqliteSurfaceIdentityRepo implements SurfaceIdentityRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findByWorkspaceStatement.all(parsedWorkspaceId) as SurfaceIdentityRow[];
+      const rows = parseRows(this.findByWorkspaceStatement.all(parsedWorkspaceId), { parse: (value: unknown) => value as SurfaceIdentityRow }, "surface identity row");
       return rows.map((row) => parseSurfaceIdentityRow(row));
     } catch (error) {
       throw new StorageError(

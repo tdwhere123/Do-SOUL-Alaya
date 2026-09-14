@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { CoreError } from "@do-soul/alaya-core";
+import { diagnosticWarn } from "@do-soul/alaya-protocol";
 
 export const REQUEST_BODY_TOO_LARGE_MESSAGE = "Request body exceeds the 10 MB limit";
 export const REQUEST_BODY_NOT_ALLOWED_MESSAGE = "Request body is not allowed for this route";
@@ -191,7 +192,7 @@ async function cancelRequestBodyStream(
     if (isRequestBodyTooLargeError(error)) {
       return;
     }
-    console.warn("[routes/shared] request body reader cancel failed after inspection", {
+    diagnosticWarn("[routes/shared] request body reader cancel failed after inspection", {
       method: context.req.method,
       path: context.req.path,
       error
@@ -233,7 +234,7 @@ async function probeRequestBodyStream(
       if (isRequestBodyTooLargeError(error)) {
         return;
       }
-      console.warn("[routes/shared] request body reader cancel failed after inspection", {
+      diagnosticWarn("[routes/shared] request body reader cancel failed after inspection", {
         method: context.req.method,
         path: context.req.path,
         error

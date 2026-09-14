@@ -88,7 +88,6 @@ export {
   SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
   SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256,
   sourceBoundF3Seal,
-  assertSourceBoundF3SealCurrent,
   traceSourceBoundF3Proposal,
   parseOfficialApiSemanticFactorGraphProjectionAudit,
   inspectOfficialApiSemanticFactorGraphProjection,

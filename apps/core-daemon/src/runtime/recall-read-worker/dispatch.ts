@@ -2,11 +2,12 @@ import {
   isRecallReadWorkerOperation,
   type RecallReadWorkerRequest
 } from "./protocol.js";
-import { asPayload } from "./payload-readers.js";
 import {
   BoundedRequestSchema,
   parseWorkerOperationPayload,
-  parseWorkerOperationResult
+  parseWorkerOperationResult,
+  type WorkerOperationPayload,
+  type WorkerOperationPayloadMap
 } from "./operation-schemas.js";
 import { createBoundedActiveConstraintsReader, runWorkerActiveConstraints } from "./active-constraints.js";
 import { runMemoryOperation } from "./memory-operations.js";
@@ -18,6 +19,14 @@ import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { settleWorkerDelivery } from "./prepared-delivery.js";
 
 const boundedConstraintsReaders = new WeakMap<RecallReadWorkerRuntime, ReturnType<typeof createBoundedActiveConstraintsReader>>();
+
+type DispatchParsedOperation = Exclude<
+  RecallReadWorkerRequest["operation"],
+  | "constraints.readBounded"
+  | "conditionalField.recall"
+  | "conditionalField.acknowledge"
+  | "conditionalField.discard"
+>;
 
 export async function runOperation(
   runtime: RecallReadWorkerRuntime,
@@ -44,24 +53,44 @@ export async function runOperation(
       request.operation,
       runConditionalFieldWorkerRecall(
         runtime,
-        parsedPayload as Parameters<typeof runConditionalFieldWorkerRecall>[1]
+        parsedPayload as WorkerOperationPayload<"conditionalField.recall">
       )
     );
   }
-  const payload = asPayload(parsedPayload);
-  if (request.operation === "conditionalField.acknowledge" || request.operation === "conditionalField.discard") {
+  if (request.operation === "conditionalField.acknowledge") {
     return parseWorkerOperationResult(
       request.operation,
-      settleWorkerDelivery(runtime, payload, request.operation === "conditionalField.discard")
+      settleWorkerDelivery(
+        runtime,
+        parsedPayload as WorkerOperationPayload<"conditionalField.acknowledge">,
+        false
+      )
     );
   }
-  return parseWorkerOperationResult(request.operation, await dispatchParsed(runtime, request.operation, payload));
+  if (request.operation === "conditionalField.discard") {
+    return parseWorkerOperationResult(
+      request.operation,
+      settleWorkerDelivery(
+        runtime,
+        parsedPayload as WorkerOperationPayload<"conditionalField.discard">,
+        true
+      )
+    );
+  }
+  return parseWorkerOperationResult(
+    request.operation,
+    await dispatchParsed(
+      runtime,
+      request.operation,
+      parsedPayload as WorkerOperationPayloadMap[DispatchParsedOperation]
+    )
+  );
 }
 
 async function dispatchParsed(
   runtime: RecallReadWorkerRuntime,
-  operation: RecallReadWorkerRequest["operation"],
-  payload: Record<string, unknown>
+  operation: DispatchParsedOperation,
+  payload: WorkerOperationPayloadMap[DispatchParsedOperation]
 ): Promise<unknown> {
   switch (operation) {
     case "ready":
@@ -82,7 +111,11 @@ async function dispatchParsed(
     case "memory.findByEvidenceRefs":
     case "memory.findBoundEvidenceRefs":
     case "memory.findByIds":
-      return await runMemoryOperation(runtime, operation, payload);
+      return await runMemoryOperation(
+        runtime,
+        operation,
+        payload as WorkerOperationPayloadMap[Extract<DispatchParsedOperation, `memory.${string}`>]
+      );
     case "evidence.searchByKeyword":
     case "evidence.searchByKeywordField":
     case "evidence.searchManyByKeywordField":
@@ -90,19 +123,33 @@ async function dispatchParsed(
     case "evidence.findRecallQualifiedByIds":
     case "evidence.findRecallQualifiedFactKeysByIds":
     case "evidence.findSourceAnchorsByIds":
-      return await runEvidenceOperation(runtime, operation, payload);
+      return await runEvidenceOperation(
+        runtime,
+        operation,
+        payload as WorkerOperationPayloadMap[Extract<DispatchParsedOperation, `evidence.${string}`>]
+      );
     case "synthesis.searchByKeyword":
     case "synthesis.searchByKeywordField":
     case "synthesis.searchManyByKeywordField":
     case "synthesis.findByIds":
-      return await runSynthesisOperation(runtime, operation, payload);
+      return await runSynthesisOperation(
+        runtime,
+        operation,
+        payload as WorkerOperationPayloadMap[Extract<DispatchParsedOperation, `synthesis.${string}`>]
+      );
     case "path.findByAnchors":
     case "path.findByTimeConcernWindowDigests":
     case "pathPlasticity.getStrengthByMemoryId":
-      return await runPathOperation(runtime, operation, payload);
+      return await runPathOperation(
+        runtime,
+        operation,
+        payload as WorkerOperationPayloadMap[
+          Extract<DispatchParsedOperation, `path${string}` | "pathPlasticity.getStrengthByMemoryId">
+        ]
+      );
     case "constraints.findActive":
       return await runWorkerActiveConstraints({
-        payload,
+        payload: payload as WorkerOperationPayload<"constraints.findActive">,
         memoryRepo: runtime.memoryEntryRepo,
         claimFormRepo: runtime.claimFormRepo,
         pathReadPorts: runtime.recallPathReadPorts

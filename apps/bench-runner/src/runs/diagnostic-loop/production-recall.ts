@@ -72,7 +72,15 @@ async function executeRecallEvaluation(
   arm: "control" | "treatment",
   prepared: Awaited<ReturnType<typeof prepareRecallPhase>>
 ) {
-  return await runRecallEval({
+  return await runRecallEval(await buildProductionRecallEvalOptions(context, arm, prepared));
+}
+
+export async function buildProductionRecallEvalOptions(
+  context: DiagnosticLoopPhaseContext,
+  arm: "control" | "treatment",
+  prepared: Awaited<ReturnType<typeof prepareRecallPhase>>
+): Promise<Parameters<typeof runRecallEval>[0]> {
+  return {
     snapshotDbPath: prepared.snapshot,
     variant: context.request.variant,
     historyRoot: prepared.historyRoot,
@@ -84,7 +92,7 @@ async function executeRecallEvaluation(
     ...(context.request.dataDir === undefined ? {} : { dataDir: context.request.dataDir }),
     ...await treatmentOverlayEvalOptions(context, arm, prepared.snapshot),
     ...treatmentRecallCacheOptions(context, arm)
-  });
+  };
 }
 
 async function treatmentOverlayEvalOptions(

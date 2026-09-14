@@ -4,7 +4,7 @@ import {
   type FieldValue,
   type SeedActivation
 } from "@do-soul/alaya-protocol";
-import { composedFacetPathId, facetBelongsToOutput, facetPathId } from "../engine/path-composition.js";
+import { composedFacetPathId, facetBelongsToOutput, facetPathId } from "../engine/path-composition-facet.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 
 export type FacetVisitIndex = Readonly<{

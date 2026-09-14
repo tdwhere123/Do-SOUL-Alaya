@@ -27,13 +27,9 @@ import {
   type FieldEngineState,
   type FieldObservationEffect
 } from "../conditional-field/engine/field-engine.js";
-import {
-  hasOpenPairs,
-  overlayIsRoutingOnly,
-  pairKey,
-  programRelationKinds,
-  seedActivationsForObservation
-} from "../conditional-field/engine/path-composition.js";
+import { programRelationKinds } from "../conditional-field/engine/path-composition-adjacency.js";
+import { seedActivationsForObservation } from "../conditional-field/engine/path-composition-seed.js";
+import { hasOpenPairs, overlayIsRoutingOnly, pairKey } from "../conditional-field/engine/path-routing.js";
 import { STORED_RELATION_KIND } from "../conditional-field/query/ordinary-language.js";
 import { ObservedSourceFacts, recordObservedAt, recordSourceRootFacts } from "./observed-source-facts.js";
 import {

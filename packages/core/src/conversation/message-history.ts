@@ -27,6 +27,7 @@ export function rebuildConversationMessages(events: readonly EventLogEntry[]): C
           message_id: payload.message_id,
           role: payload.role,
           content: payload.content,
+          created_at: event.created_at,
           ...(fileIds !== undefined && fileIds.length > 0 ? { file_ids: fileIds } : {})
         });
         break;
@@ -36,7 +37,8 @@ export function rebuildConversationMessages(events: readonly EventLogEntry[]): C
         messages.push({
           message_id: payload.message_id,
           role: "assistant",
-          content: payload.content
+          content: payload.content,
+          created_at: event.created_at
         });
         break;
       }
@@ -45,7 +47,8 @@ export function rebuildConversationMessages(events: readonly EventLogEntry[]): C
         messages.push({
           message_id: payload.messageId,
           role: "assistant",
-          content: payload.content
+          content: payload.content,
+          created_at: event.created_at
         });
         break;
       }

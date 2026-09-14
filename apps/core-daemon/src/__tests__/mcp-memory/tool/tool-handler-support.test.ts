@@ -4,6 +4,7 @@ import { PUBLIC_ERROR_CODE_MESSAGES } from "@do-soul/alaya-protocol";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import {
   McpToolError,
+  RecallHitTierPromotionCasMiss,
   ToolValidationError,
   classifyError,
   fail,
@@ -80,5 +81,11 @@ describe("sanitizeError", () => {
         message: PUBLIC_ERROR_CODE_MESSAGES.UNKNOWN_TOOL
       }
     });
+  });
+
+  it("classifies RecallHitTierPromotionCasMiss via McpToolError instanceof", () => {
+    const error = new RecallHitTierPromotionCasMiss();
+    expect(error).toBeInstanceOf(McpToolError);
+    expect(classifyError(error)).toBe("UNAVAILABLE");
   });
 });

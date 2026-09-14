@@ -13,7 +13,7 @@ import {
   __setCjkSegmentationLoaderForTests,
   segmentCjkRun,
   warmCjkSegmentation
-} from "../../shared/cjk-segmentation.js";
+} from "@do-soul/alaya-protocol";
 
 describe("compileRecallQueryProbes", () => {
   it("extracts multilingual structural probes without a provider", () => {
@@ -219,7 +219,7 @@ describe("splitLexicalTokens CJK segmentation fail-soft", () => {
     expect(emitWarning).toHaveBeenCalledWith(
       "[CjkSegmentation] @node-rs/jieba not ready; using surface-token fallback for this call",
       expect.objectContaining({
-        code: "ALAYA_CORE_CJK_SEGMENTATION_COLD_FALLBACK"
+        code: "ALAYA_CJK_SEGMENTATION_COLD_FALLBACK"
       })
     );
 
@@ -241,9 +241,9 @@ describe("splitLexicalTokens CJK segmentation fail-soft", () => {
     expect(emitWarning).toHaveBeenCalledWith(
       "[CjkSegmentation] @node-rs/jieba unavailable; using surface-token fallback",
       expect.objectContaining({
-        code: "ALAYA_CORE_CJK_SEGMENTATION_FALLBACK",
+        code: "ALAYA_CJK_SEGMENTATION_FALLBACK",
         detail: JSON.stringify({
-          layer: "core",
+          layer: "protocol",
           error: "mock jieba load failure"
         })
       })

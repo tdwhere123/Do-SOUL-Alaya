@@ -145,8 +145,7 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
   private discoverSubjects(row: FieldEraseBarrierRow): readonly EraseSubject[] {
     const sql = descendantSql(row.subject_kind);
     if (sql === null) return [{ subject_kind: row.subject_kind, subject_id: row.subject_id }];
-    const descendants = parseRows(
-      this.database.connection.prepare(sql).all({
+    const descendants = parseRows(this.database.connection.prepare(sql).all({
         workspaceId: row.workspace_id,
         subjectId: row.subject_id
       }),

@@ -1,3 +1,5 @@
+import type { EnvLookup } from "@do-soul/alaya-protocol";
+
 export const PROVIDER_REQUEST_PROFILES = [
   "provider-default-v1",
   "deepseek-v4-nonthinking-v1",
@@ -32,6 +34,8 @@ export type ProviderChatCompletionRequest = Readonly<{
   /** Versioned compatibility authority for providers documented to omit SSE sentinels. */
   readonly sseCompletionPolicy?: ProviderSseCompletionPolicy;
   readonly fetchImpl?: typeof fetch;
+  /** Process env bind for private-provider URL opt-in; omit treats private hosts as blocked. */
+  readonly env?: EnvLookup;
 }>;
 
 export type ProviderUsage = Readonly<{

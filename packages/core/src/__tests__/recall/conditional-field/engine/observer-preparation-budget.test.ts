@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { QueryInterpretation } from "@do-soul/alaya-protocol";
 import { createConditionalField } from "../../../../recall/conditional-field/engine/field-engine.js";
-import { createAdjacencyEffectCursor, seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { createAdjacencyEffectCursor } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 

@@ -41,6 +41,7 @@ async function preflightLocalOnnxProvider(
   const cacheDir = env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR?.trim() || null;
   const modelId = env.ALAYA_LOCAL_EMBEDDING_MODEL?.trim() || undefined;
   const client = new LocalOnnxEmbeddingClient({
+    env,
     cacheDir,
     ...(modelId === undefined ? {} : { modelId })
   });

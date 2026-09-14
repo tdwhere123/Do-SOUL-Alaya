@@ -3,7 +3,8 @@ import type { ObserverPage, QueryInterpretation } from "@do-soul/alaya-protocol"
 import { BindingContextStore, BindingContextResourceError, BindingContextUnavailableError,
   encodeBindingContext, parseBindingContext } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import { createConditionalField, applyObserverPage } from "../../../../recall/conditional-field/engine/field-engine.js";
-import { adjacencyEffectsForRows, createAdjacencyEffectCursor, seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { adjacencyEffectsForRows, createAdjacencyEffectCursor } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { claimObligationAccepts } from "../../../../recall/conditional-field/index/claim-obligation.js";
 import { retainedFieldLevels, snapshotRestoredEngineWork } from "../../../../recall/runtime/request-cost-engine-snapshot.js";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";

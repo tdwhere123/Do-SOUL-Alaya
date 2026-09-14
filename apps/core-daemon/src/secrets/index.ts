@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
 import {
   isContainedFileSecretPath,
   parseSecretRefKeychainTarget,
@@ -40,7 +41,7 @@ const KEYCHAIN_REF_PREFIX = SECRET_REF_KEYCHAIN_PREFIX;
 const ENV_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const defaultSecretRefReader: SecretRefReader = {
-  readEnv: (name) => process.env[name],
+  readEnv: (name) => processEnvLookup()[name],
   readFile: (filePath) => readFileSync(filePath, "utf8"),
   readKeychain: (service, account) => readPlatformKeychainSecret(service, account),
   get secretsDir() {
@@ -198,7 +199,7 @@ function resolveKeychainRef(ref: SecretRef, reader: SecretRefReader): ResolvedSe
 }
 
 function resolveConfiguredSecretsDir(): string {
-  return resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: process.env })).secretsDir;
+  return resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: processEnvLookup() })).secretsDir;
 }
 
 function isNodeErrorWithCode(error: unknown): error is NodeJS.ErrnoException & { readonly code: string } {

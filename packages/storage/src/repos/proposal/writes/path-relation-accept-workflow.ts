@@ -6,7 +6,7 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { insertEventLogEntry } from "../../runtime/writes/event-log-writer.js";
 import { parseRows } from "../../shared/parse-row.js";
 import type { SqliteProposalWorkflowContext } from "./accept-workflows.js";
@@ -31,8 +31,7 @@ export function upsertStrictlyGovernedPathRelation(
   proposalRow: ProposalRow
 ): Readonly<{ readonly pathRelation: Readonly<PathRelation>; readonly event: EventLogEntry | null }> {
   const proposedPathRelation = parseProposedPathRelation(proposalRow.proposed_path_relation);
-  const existingRows = parseRows(
-    ctx.findPathRelationByAnchorMemoryIdStatement.all(
+  const existingRows = parseRows(ctx.findPathRelationByAnchorMemoryIdStatement.all(
       input.workspace_id,
       input.target_object_id,
       input.target_object_id,

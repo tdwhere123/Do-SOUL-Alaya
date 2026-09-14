@@ -1,4 +1,4 @@
-import { isEnvFlagDisabled } from "../env-bool.js";
+import { isEnvFlagDisabled, type EnvLookup } from "@do-soul/alaya-protocol";
 import { configureSqliteWriteQueuePort, getSqliteWriteQueuePort } from "../db.js";
 import type { SqliteWriteQueuePort } from "./port.js";
 import {
@@ -8,7 +8,7 @@ import {
 
 export const ALAYA_SQLITE_WRITE_QUEUE_ENV = "ALAYA_SQLITE_WRITE_QUEUE";
 
-export function isSqliteWriteQueueDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isSqliteWriteQueueDisabled(env: EnvLookup): boolean {
   return isEnvFlagDisabled(env[ALAYA_SQLITE_WRITE_QUEUE_ENV]);
 }
 
@@ -18,7 +18,7 @@ export function isSqliteWriteQueueDisabled(env: NodeJS.ProcessEnv = process.env)
  * Replaces any previously configured port after awaiting its close.
  */
 export async function installDefaultSqliteWriteQueue(
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvLookup,
   resolveWorkerUrl: () => URL | null = resolveSqliteWriteQueueWorkerUrl
 ): Promise<SqliteWriteQueuePort | null> {
   await closeConfiguredSqliteWriteQueuePort();

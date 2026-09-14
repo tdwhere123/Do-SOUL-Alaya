@@ -13,7 +13,7 @@ import {
   type StorageTier
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { readJsonColumn, readRecord, type RowParser } from "../../shared/parse-row.js";
 import { parseNonEmptyString, parseTimestamp } from "../../shared/validators.js";
 import type { MemoryEntryRepoDynamicsUpdateFields, MemoryEntryRepoUpdateFields } from "../types.js";

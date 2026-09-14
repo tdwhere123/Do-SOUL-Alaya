@@ -9,6 +9,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { isUniqueConstraintError } from "../garden/garden-task-errors.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
 
 interface DriftLeaseRow {
   readonly lease_id: string;
@@ -129,7 +130,7 @@ export class SqliteDriftLeaseRepo implements DriftLeaseRepo {
     const referenceTime = parseTimestamp(this.now());
 
     try {
-      const rows = this.findActiveStatement.all(parsedWorkspaceId, referenceTime) as DriftLeaseRow[];
+      const rows = parseRows(this.findActiveStatement.all(parsedWorkspaceId, referenceTime), { parse: (value: unknown) => value as DriftLeaseRow }, "drift lease row");
       return rows.map((row) => parseDriftLeaseRow(row));
     } catch (error) {
       throw new StorageError(

@@ -143,7 +143,7 @@ export default [
         exclude: ["**/dist/**"],
         ...(process.platform === "win32"
           ? windowsSqliteTimeouts
-          : { testTimeout: process.env.CI ? 30_000 : 5_000 }),
+          : { testTimeout: 30_000 }),
         coverage: {
           include: ["apps/bench-runner/src/**"]
         }

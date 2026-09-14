@@ -1,8 +1,9 @@
 import { DirtyStateDossierSchema, type DirtyStateDossier } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
 
 interface DirtyStateDossierRow {
   readonly dossier_id: string;
@@ -138,7 +139,7 @@ export class SqliteDirtyStateDossierRepo implements DirtyStateDossierRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findByWorkspaceStatement.all(parsedWorkspaceId) as DirtyStateDossierRow[];
+      const rows = parseRows(this.findByWorkspaceStatement.all(parsedWorkspaceId), { parse: (value: unknown) => value as DirtyStateDossierRow }, "dirty state dossier row");
       return deepFreeze(rows.map((row) => parseDirtyStateDossierRow(row)));
     } catch (error) {
       if (error instanceof StorageError) {
@@ -171,7 +172,7 @@ export class SqliteDirtyStateDossierRepo implements DirtyStateDossierRepo {
     const parsedWorkerRunId = parseNonEmptyString(workerRunId, "worker run id");
 
     try {
-      const rows = this.findByWorkerRunStatement.all(parsedWorkerRunId) as DirtyStateDossierRow[];
+      const rows = parseRows(this.findByWorkerRunStatement.all(parsedWorkerRunId), { parse: (value: unknown) => value as DirtyStateDossierRow }, "dirty state dossier row");
       return deepFreeze(rows.map((row) => parseDirtyStateDossierRow(row)));
     } catch (error) {
       if (error instanceof StorageError) {

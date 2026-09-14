@@ -48,7 +48,7 @@ import { parseEnv } from "../../../services/env-file/env-file-service.js";
 import { resolveConfiguredDatabasePath } from "../support/storage-config.js";
 import { isNodeErrorWithCode } from "../../../services/support/private-file-service.js";
 import { resolveSecretRef, type ResolveSecretError } from "../../../secrets/index.js";
-import { assertRegisteredDaemonEnvKey } from "../../config/daemon-config-environment.js";
+import { assertRegisteredDaemonEnvKey, processEnvLookup } from "../../config/daemon-config-environment.js";
 import type { AlayaRuntimeNotifier } from "../support/runtime-notifier.js";
 export {
   classifySoulGraphOriginKind,
@@ -70,7 +70,7 @@ type RequestProtectionEnvLike = RequestTokenProtectionEnvLike &
   }>;
 
 export function createRequestProtection(
-  env: RequestProtectionEnvLike = process.env,
+  env: RequestProtectionEnvLike = processEnvLookup(),
   warn?: (message: string, meta?: Record<string, unknown>) => void
 ): RequestProtectionConfig {
   const configuredRequestToken = env.ALAYA_REQUEST_TOKEN?.trim();
@@ -129,7 +129,7 @@ export async function resolveDatabasePath(
   fallbackPath: string
 ): Promise<string> {
   return await resolveConfiguredDatabasePath(configPaths, {
-    env: process.env,
+    env: processEnvLookup(),
     fallbackPath
   });
 }
@@ -164,7 +164,7 @@ export async function loadConfigEnv(
 
 export function readConfigEnvValue(configEnv: ReadonlyMap<string, string>, key: string): string | undefined {
   assertRegisteredDaemonEnvKey(key);
-  return process.env[key] ?? configEnv.get(key);
+  return processEnvLookup()[key] ?? configEnv.get(key);
 }
 
 export function readNonEmptyEnv(value: string | undefined): string | null {

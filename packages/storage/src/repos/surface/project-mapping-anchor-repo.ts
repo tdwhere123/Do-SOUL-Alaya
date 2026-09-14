@@ -8,8 +8,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../shared/validators.js";
+import { parseRows } from "../shared/parse-row.js";
 
 const acceptedByValues = ["user", "review", "deterministic_rule"] as const;
 
@@ -203,7 +204,7 @@ export class SqliteProjectMappingAnchorRepo implements ProjectMappingAnchorRepo 
     `);
 
     try {
-      const rows = statement.all(...parsedObjectIds) as ProjectMappingAnchorRow[];
+      const rows = parseRows(statement.all(...parsedObjectIds), { parse: (value: unknown) => value as ProjectMappingAnchorRow }, "project mapping anchor row");
       return rows.map((row) => parseProjectMappingAnchorRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to load project mapping anchors by ids.", error);
@@ -220,11 +221,11 @@ export class SqliteProjectMappingAnchorRepo implements ProjectMappingAnchorRepo 
     try {
       const rows =
         parsedState === undefined
-          ? (this.findByWorkspaceStatement.all(parsedWorkspaceId) as ProjectMappingAnchorRow[])
-          : (this.findByWorkspaceAndStateStatement.all(
+          ? (parseRows(this.findByWorkspaceStatement.all(parsedWorkspaceId), { parse: (value: unknown) => value as ProjectMappingAnchorRow }, "project mapping anchor row"))
+          : (parseRows(this.findByWorkspaceAndStateStatement.all(
               parsedWorkspaceId,
               parsedState
-            ) as ProjectMappingAnchorRow[]);
+            ), { parse: (value: unknown) => value as ProjectMappingAnchorRow }, "project mapping anchor row"));
 
       return rows.map((row) => parseProjectMappingAnchorRow(row));
     } catch (error) {
@@ -299,7 +300,7 @@ export class SqliteProjectMappingAnchorRepo implements ProjectMappingAnchorRepo 
     const parsedWorkspaceId = parseWorkspaceId(workspaceId);
 
     try {
-      const rows = this.listPendingStatement.all(parsedWorkspaceId) as ProjectMappingAnchorRow[];
+      const rows = parseRows(this.listPendingStatement.all(parsedWorkspaceId), { parse: (value: unknown) => value as ProjectMappingAnchorRow }, "project mapping anchor row");
       return rows.map((row) => parseProjectMappingAnchorRow(row));
     } catch (error) {
       throw new StorageError(

@@ -1,7 +1,7 @@
 import { StrongRefSchema, type StrongRef } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseOptionalRow, parseRows, readNonNegativeIntField, readRecord } from "../shared/parse-row.js";
 import { StrongRefRowParser, type StrongRefRow } from "../shared/sqlite-row-schemas.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
@@ -130,8 +130,7 @@ export class SqliteStrongRefRepo implements StrongRefRepo {
     const parsedTargetEntityId = parseNonEmptyString(targetEntityId, "target entity id");
 
     try {
-      const rows = parseRows(
-        this.findByTargetStatement.all(parsedWorkspaceId, parsedTargetEntityType, parsedTargetEntityId),
+      const rows = parseRows(this.findByTargetStatement.all(parsedWorkspaceId, parsedTargetEntityType, parsedTargetEntityId),
         StrongRefRowParser,
         "strong ref row"
       );
@@ -167,8 +166,7 @@ export class SqliteStrongRefRepo implements StrongRefRepo {
     `);
 
     try {
-      const rows = parseRows(
-        statement.all(parsedWorkspaceId, parsedTargetEntityType, ...parsedTargetEntityIds),
+      const rows = parseRows(statement.all(parsedWorkspaceId, parsedTargetEntityType, ...parsedTargetEntityIds),
         StrongRefRowParser,
         "strong ref row"
       );
@@ -186,8 +184,7 @@ export class SqliteStrongRefRepo implements StrongRefRepo {
     const parsedSourceEntityId = parseNonEmptyString(sourceEntityId, "source entity id");
 
     try {
-      const rows = parseRows(
-        this.findBySourceStatement.all(parsedSourceEntityId),
+      const rows = parseRows(this.findBySourceStatement.all(parsedSourceEntityId),
         StrongRefRowParser,
         "strong ref row"
       );

@@ -1,4 +1,5 @@
 import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import type {
   EmbeddingQueryWarmupSummary,
   WorkspaceBootstrapReconcileResult
@@ -95,7 +96,7 @@ export interface DoctorCommandDependencies {
   readonly getToolchainStatus: () => Promise<ToolchainStatus>;
   /**
    * Report the daemon's live request-protection wiring (token / origin source).
-   * When omitted, doctor derives a conservative snapshot from process.env using
+   * When omitted, doctor derives a conservative snapshot from processEnvLookup() using
    * the same rule as createRequestProtection, so `alaya doctor` still surfaces
    * an ephemeral-token warning without a running daemon.
    */
@@ -389,7 +390,7 @@ async function readDoctorServices(
   const runtimeWiring = withRuntimeWiringDefaults(
     deps.getRuntimeWiring
       ? await deps.getRuntimeWiring()
-      : resolveRuntimeWiringFromEnv(process.env)
+      : resolveRuntimeWiringFromEnv(processEnvLookup())
   );
   return {
     storage,

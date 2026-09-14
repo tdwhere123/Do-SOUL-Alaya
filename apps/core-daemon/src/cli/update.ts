@@ -6,6 +6,7 @@ import {
   type AlayaCliArgsSchema,
   type AlayaSubcommandSpec
 } from "./bridge.js";
+import { resolveAlayaConfigDir } from "./support/config-files.js";
 
 type UpdateArgs = Record<string, never>;
 
@@ -27,10 +28,20 @@ export function createUpdateCommand(): AlayaSubcommandSpec<UpdateArgs> {
     requiresDaemonReady: false,
     handler: async (ctx) => {
       const current = getCurrentVersion();
+      const configDir = resolveAlayaConfigDir({ env: ctx.env });
+      const backupsDir = resolve(configDir, "backups");
+      const liveDb = resolve(configDir, "alaya.db");
       ctx.stdout.write(`Current version: ${current}\n`);
       ctx.stdout.write(
         "Alaya is distributed through GitHub Release source tarballs and source builds; npm/global install is not a supported update channel.\n" +
           "To upgrade an installer-based setup, rerun scripts/install.sh with ALAYA_VERSION set to the target tag, or omit it for the latest release.\n" +
+          "That installer snapshots the live database with VACUUM INTO before swapping binaries.\n" +
+          `Backup directory: ${backupsDir}\n` +
+          `Live database: ${liveDb} (toml storage.db_path / DATA_DIR may override the filename)\n` +
+          "Schema only migrates forward. To restore a pre-upgrade snapshot:\n" +
+          "  1. stop the daemon\n" +
+          `  2. cp '<timestamped-backup-from-${backupsDir}>' '${liveDb}'\n` +
+          "  3. mv \"$ALAYA_HOME.bak\" \"$ALAYA_HOME\" if you also need the previous binary\n" +
           "To upgrade a source checkout, pull the repository, run pnpm install, then run pnpm build.\n"
       );
       return { exitCode: ALAYA_SYSEXITS.OK };

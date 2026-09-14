@@ -1,3 +1,4 @@
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   ExtensionRegistryService,
   McpToolDiscoveryService,
@@ -40,7 +41,7 @@ export async function bootstrapDaemonMcpTooling(input: {
   });
   const daemonMcpRuntimeRegistry = createDaemonMcpRuntimeRegistry({
     serverConfigs: parseDaemonMcpServerRuntimeConfigs(
-      process.env.ALAYA_MCP_SERVER_CONFIG_JSON,
+      processEnvLookup().ALAYA_MCP_SERVER_CONFIG_JSON,
       input.warnLogger.warn
     ),
     now: input.now,

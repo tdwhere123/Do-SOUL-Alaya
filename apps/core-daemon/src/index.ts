@@ -28,6 +28,10 @@ import { resolveCoreDaemonFilesDirectory } from "./runtime/daemon/support/files-
 import { finalizeDaemonRuntimeFromWiring } from "./runtime/daemon/lifecycle/finalize-daemon-runtime-wiring.js";
 import { createAnswersWithCrystallizer } from "./runtime/garden-wiring/garden-answers-with-crystallizer.js";
 import { createGardenRuntimeWiring } from "./runtime/garden-wiring/garden-runtime-wiring.js";
+import {
+  DAEMON_ONLY_CONFIG_ENV_KEYS,
+  warnUnregisteredPrefixedDaemonEnvKeys
+} from "./runtime/config/daemon-config-environment.js";
 import { closeDaemonStartupResourcesAfterFailure } from "./runtime/startup/cleanup.js";
 import { openDaemonDatabase } from "./runtime/startup/database.js";
 import { createRecallAndCoreWiring } from "./runtime/startup/recall-core-wiring.js";
@@ -35,7 +39,6 @@ import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker
 import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
-import { DAEMON_ONLY_CONFIG_ENV_KEYS } from "./runtime/config/daemon-config-environment.js";
 import type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
 import type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
 
@@ -107,6 +110,7 @@ export async function createAlayaDaemonRuntime(
 async function createRuntimeBootstrapContext() {
   const startupSteps: DaemonStartupStepRecord[] = [];
   const validatedEnv = validateDaemonEnv(process.env);
+  warnUnregisteredPrefixedDaemonEnvKeys(process.env);
   const warnLogger = createWarnLogger();
   startCjkSegmentationWarmup(warnLogger);
   installUnhandledRejectionHandler(warnLogger);

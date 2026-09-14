@@ -1,7 +1,8 @@
 import { z } from "zod";
 import {
   QueryOsfSemanticCompletenessReceiptSchema,
-  RecallOriginPlaneSchema
+  RecallOriginPlaneSchema,
+  RecallTokenEconomySampleSchema
 } from "@do-soul/alaya-protocol";
 import { assertBiEncoderRunActivation } from "../embedding/embedding-treatment-activation.js";
 import { refuseRetiredLocalCrossEncoderTreatment } from
@@ -298,19 +299,8 @@ const FineAssessmentPrunedCandidateDiagnosticSchema = z
   .strict()
   .readonly();
 
-// Per-call view of the eval-owned sample family. Aggregates stay on eval.
-export const RecallTokenEconomySchema = z
-  .object({
-    delivered_context_tokens_estimate: z.number().int().nonnegative(),
-    coarse_pool_size: z.number().int().nonnegative(),
-    fine_evaluated: z.number().int().nonnegative(),
-    fine_pruned_count: z.number().int().nonnegative(),
-    fine_priority_overflow_count: z.number().int().nonnegative().default(0),
-    fusion_families_with_hits: z.number().int().nonnegative(),
-    embedding_inference_calls: z.number().int().nonnegative()
-  })
-  .strict()
-  .readonly();
+// Narrow adapter: flat per-call view owned by protocol sample schema.
+export const RecallTokenEconomySchema = RecallTokenEconomySampleSchema;
 
 const RecallGraphExpansionPlaneCountPerHopSchema = z
   .tuple([

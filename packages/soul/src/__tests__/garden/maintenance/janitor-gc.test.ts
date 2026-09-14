@@ -19,7 +19,7 @@ describe("Janitor GC task kinds", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => []),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
@@ -57,7 +57,7 @@ describe("Janitor GC task kinds", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => []),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
@@ -95,7 +95,7 @@ describe("Janitor GC task kinds", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => []),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
@@ -127,7 +127,7 @@ describe("Janitor GC task kinds", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => []),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
@@ -162,7 +162,7 @@ describe("Janitor GC task kinds", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => []),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
@@ -198,7 +198,7 @@ describe("Janitor GC task kinds", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => []),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
@@ -238,7 +238,7 @@ describe("Janitor GC task kinds", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => []),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
@@ -275,7 +275,7 @@ describe("Janitor GC task kinds", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => []),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
@@ -317,7 +317,7 @@ describe("Janitor GC task kinds", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => []),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
@@ -369,7 +369,7 @@ describe("Janitor GC task kinds", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => []),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
@@ -419,7 +419,7 @@ describe("Janitor GC task kinds", () => {
     const janitor = new Janitor({
       cleanupPort: {
         findExpiredObjects: vi.fn(async () => []),
-        removeExpiredObjects: vi.fn(async () => undefined)
+        removeExpiredObjects: vi.fn(() => undefined)
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),

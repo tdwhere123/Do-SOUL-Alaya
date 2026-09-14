@@ -4,7 +4,7 @@ import {
   type TargetRevalidateResult
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { deepFreeze } from "@do-soul/alaya-protocol";
 import type { StrongRefRepoPort } from "../memory/strong-ref-service.js";
 
 export interface TargetCurrencyCheckPort {

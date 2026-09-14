@@ -57,6 +57,25 @@ describe("extraction empty envelope classification", () => {
     })).toBe("completed_signals");
   });
 
+  it("classifies empty raw envelopes in content-closure when assertions are present", async () => {
+    const { inspectExtractionRawEnvelope, assertCoverageValidExtractionEnvelope } =
+      await import("../../../runs/extraction/content-closure.js");
+    const classified = inspectExtractionRawEnvelope(EMPTY_SIGNALS_ENVELOPE, {
+      sourceAssertionCount: 2,
+      planMembership: "in_plan"
+    });
+    expect(classified).toMatchObject({
+      rawSignalCount: 0,
+      emptyClassification: "provider_empty_with_assertions"
+    });
+    expect(() => assertCoverageValidExtractionEnvelope(classified)).toThrow(
+      /provider_empty_with_assertions/
+    );
+    const unclassified = inspectExtractionRawEnvelope(EMPTY_SIGNALS_ENVELOPE);
+    expect(unclassified.emptyClassification).toBeUndefined();
+    expect(unclassified.rawSignalCount).toBe(0);
+  });
+
   it("quarantines provider-empty shards with assertions out of coverage", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "empty-class-"));
     roots.push(cacheRoot);

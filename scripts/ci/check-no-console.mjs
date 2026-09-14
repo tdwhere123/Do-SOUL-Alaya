@@ -8,24 +8,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 // Remaining production console.*/stderr.write sites owned by other workstreams.
 // Shrink this list; do not add new entries.
 const ALLOWED_RELATIVE_PATHS = new Set([
-  "packages/storage/src/sqlite/db.ts",
+  // CLI user-facing output (not daemon/library diagnostics).
   "packages/eval/src/history/history.ts",
-  "packages/eval/src/cli/cli.ts",
-  "packages/soul/src/garden/scheduling/wall-clock-timeout.ts",
-  "packages/soul/src/garden/triage/local-heuristics.ts",
-  "packages/soul/src/garden/materialization/materialization-router/memory-routes.ts",
-  "packages/soul/src/garden/materialization/materialization-router/path-side-effects.ts",
-  "packages/soul/src/garden/ingestion/compute-provider.ts",
-  "packages/soul/src/garden/ingestion/official-api/request-diagnostic.ts",
-  "packages/core/src/memory/signal-service.ts",
-  "apps/core-daemon/src/mcp/tool-runtime/tool-runtime.ts",
-  "apps/core-daemon/src/garden/runtime/runtime.ts",
-  "apps/core-daemon/src/mcp/catalog/mcp-catalog-parsing.ts",
-  "apps/core-daemon/src/routes/shared/shared.ts",
-  "apps/core-daemon/src/routes/workspace/run-snapshot/run-snapshot.ts",
-  "apps/core-daemon/src/services/config/config-service.ts",
-  "apps/core-daemon/src/runtime/daemon/lifecycle/daemon-runtime-lifecycle.ts",
-  "apps/core-daemon/src/runtime/recall-read-worker/unexpected-queue-failure.ts"
+  "packages/eval/src/cli/cli.ts"
 ]);
 
 const patterns = [

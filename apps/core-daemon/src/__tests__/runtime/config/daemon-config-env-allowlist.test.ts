@@ -1,10 +1,12 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   listRegisteredDaemonEnvKeys,
-  readDaemonProcessEnv
+  listUnregisteredPrefixedDaemonEnvKeys,
+  readDaemonProcessEnv,
+  warnUnregisteredPrefixedDaemonEnvKeys
 } from "../../../runtime/config/daemon-config-environment.js";
 import { readConfigEnvValue } from "../../../runtime/daemon/lifecycle/daemon-runtime-support.js";
 
@@ -50,6 +52,26 @@ describe("daemon env registry allowlist", () => {
     );
     expect(() => readConfigEnvValue(new Map(), "ALAYA_UNREGISTERED_KNOB")).toThrow(
       /unregistered daemon env key: ALAYA_UNREGISTERED_KNOB/
+    );
+  });
+
+  it("warns when ALAYA_*/OFFICIAL_* keys are set but unregistered", () => {
+    const emitWarning = vi.fn();
+    const unknown = warnUnregisteredPrefixedDaemonEnvKeys(
+      {
+        OFFICIAL_GARDEN_MODEL: "typo-key",
+        ALAYA_NOT_A_REAL_KNOB: "1",
+        OFFICIAL_API_GARDEN_MODEL: "ok"
+      },
+      emitWarning as typeof process.emitWarning
+    );
+    expect(unknown).toEqual(["ALAYA_NOT_A_REAL_KNOB", "OFFICIAL_GARDEN_MODEL"]);
+    expect(listUnregisteredPrefixedDaemonEnvKeys({
+      OFFICIAL_GARDEN_MODEL: "typo-key"
+    })).toEqual(["OFFICIAL_GARDEN_MODEL"]);
+    expect(emitWarning).toHaveBeenCalledWith(
+      expect.stringContaining("OFFICIAL_GARDEN_MODEL"),
+      expect.objectContaining({ code: "ALAYA_UNREGISTERED_ENV_KEYS" })
     );
   });
 });

@@ -27,13 +27,9 @@ import {
   applyObserverPage,
   createConditionalField
 } from "../../../../recall/conditional-field/engine/field-engine.js";
-import {
-  adjacencyEffectsForRows,
-  overlayIsRoutingOnly,
-  routingDiscoveryEffect,
-  seedActivationsForObservation,
-  seedFromObservation
-} from "../../../../recall/conditional-field/engine/path-composition.js";
+import { adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { seedActivationsForObservation, seedFromObservation } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
+import { overlayIsRoutingOnly, routingDiscoveryEffect } from "../../../../recall/conditional-field/engine/path-routing.js";
 import {
   encodeBindingContext,
   BindingContextStore,
