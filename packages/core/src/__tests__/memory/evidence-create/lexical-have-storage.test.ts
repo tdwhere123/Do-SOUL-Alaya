@@ -2,8 +2,7 @@ import { expect, it, vi } from "vitest";
 import { formatVerifiedUserAssertionSourceHash } from "@do-soul/alaya-protocol";
 import { SqliteEventLogRepo } from "@do-soul/alaya-storage";
 import { EvidenceService } from "../../../memory/evidence-service.js";
-import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from
-  "../../../memory/fact-frame-formation/declarative-normalizer.js";
+import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from "@do-soul/alaya-protocol/node/source-frame";
 import { createRecallRealStorage } from "../../shared/real-sqlite.test-support.js";
 import { createEvidenceInput } from "../evidence-service-fixture.js";
 

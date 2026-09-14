@@ -16,7 +16,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { materializeOpenSemanticFactorFormation } from
   "../../semantic/open-semantic-factor-formation.js";
-import { factFramePreservesSourceObligations } from "../fact-frame-formation/declarative-normalizer.js";
+import { factFramePreservesSourceObligations } from "@do-soul/alaya-protocol/node/source-frame";
 
 export { EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID } from
   "@do-soul/alaya-protocol";

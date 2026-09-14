@@ -108,9 +108,22 @@ Record-only roots remain deliverable after optional memory formation fails.
 Optional fact-frame formation rejects unquoted trailing dependent scope such as
 `if`, `unless`, and `only`; an opaque value containing the condition does not
 establish its meaning. Explicit proposals, automatic normalization, historical
-frame replay and Core certification share this boundary. Source assertion
-fragments must retain a scope-bearing sentence unless a supported bounded
-grammar demonstrates their independence. Source text still persists when the
+frame replay, Core certification and current Storage qualification share the
+complete source-frame contract in Protocol's Node-only `node/source-frame`
+entry. This grammar requires recognized leading qualifiers and modality,
+and coverage of every source token after the predicate; it preserves the
+existing auxiliary normalization. Core owns admission and effects. Its public
+normalizer export serves daemon configuration and benchmark replay/backfill
+consumers by exporting the same Protocol implementation. The Protocol browser
+root's receipt verifier proves historical frame-to-graph binding only; current
+source qualification must also use the source-frame contract. Native CJK
+segmentation stays outside the browser root.
+
+Source assertion fragments require demonstrated bounded independence;
+mechanical coordination or a sentence-ending period is insufficient. Adjacent
+dependent continuations retain their matrix context across whitespace, stopping
+at explicit source-role boundaries. Unresolved references remain unsupported.
+Source text still persists when the
 optional frame, OSF certificate or F3 incidence cannot form.
 
 Current extraction uses assertion-catalog locator version 3 and fact-frame
@@ -118,6 +131,11 @@ normalizer version 4. Historical locator version 2 receipts and prompt bytes
 remain readable as historical data; current source qualification and extraction
 do not reinterpret their catalog ids. New requests, prompt identities and
 derived cache commitments bind the current catalog contract.
+Historical capture and certificate bytes remain intact, while current qualified
+OSF and fact-key reads reject incomplete source obligations, including the
+pre-capture Signal fallback. Raw field factor rows participate in immutable
+frontier identity; the current conditional-field runtime does not consume them
+as semantic readiness or truth. Retained source-root reads remain available.
 
 Mandatory original-source imports use Core `createAuditedSourceAdmission`,
 which composes existing source identity/span validation inside the formation

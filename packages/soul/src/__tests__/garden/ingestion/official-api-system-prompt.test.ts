@@ -196,7 +196,7 @@ describe("official API system prompt", () => {
     const g8Sha256 =
       "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
     const currentSha256Expected =
-      "b283f340eb28a44edf7dd28ade0a113c8a50e4f42a8deaa2c183f7c0692d15e1";
+      "cdb968269d0585f9144509c9ae6a237ec7caeedb3d176fcea0abbcc29be56da8";
     const previousCatalogPrompt = resolveOfficialApiSystemPrompt(
       "1775799d80bebde5797ded3a5fdddf209c96839489cde4a947518822110a76fd"
     );

@@ -34,8 +34,7 @@ import {
   type FieldFormationStores
 } from "./evidence-create/field-stores.js";
 import { createSourceAdmissionPort } from "./evidence-create/source-admission.js";
-import type { EvidenceFactFrameProposalNormalizer } from
-  "./fact-frame-formation/declarative-normalizer.js";
+import type { EvidenceFactFrameProposalNormalizer } from "@do-soul/alaya-protocol/node/source-frame";
 import type { SourceWriteGardenIntentPort } from "./source-write-garden-intent.js";
 
 const evidenceHealthTransitions: Readonly<Record<EvidenceHealthState, readonly EvidenceHealthState[]>> = {

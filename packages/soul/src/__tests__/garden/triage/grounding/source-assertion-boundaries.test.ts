@@ -111,7 +111,8 @@ describe("source assertion boundaries", () => {
       "I've used my GPS, like when I drove for six hours to Washington D.C. recently, " +
         "but I'm not sure about my next route.",
       "I drove for six hours to Washington D.C. recently",
-      "I've used my GPS, like when I drove for six hours to Washington D.C. recently"
+      "I've used my GPS, like when I drove for six hours to Washington D.C. recently, " +
+        "but I'm not sure about my next route."
     ],
     [
       "I stayed in a hostel in Tokyo that cost around $30 per night, so it's possible to find deals.",

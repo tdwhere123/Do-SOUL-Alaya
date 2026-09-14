@@ -4,8 +4,7 @@ import {
   MemoryGovernanceEventType,
   formatVerifiedUserAssertionSourceHash
 } from "@do-soul/alaya-protocol";
-import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from
-  "../../memory/fact-frame-formation/declarative-normalizer.js";
+import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from "@do-soul/alaya-protocol/node/source-frame";
 import {
   createCreationHarness,
   createEvidenceInput

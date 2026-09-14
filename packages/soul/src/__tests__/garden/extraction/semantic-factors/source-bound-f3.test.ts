@@ -9,7 +9,7 @@ import { traceSourceBoundF3Proposal } from "../../../../garden/extraction/semant
 const SOURCE = "I learned to cook pasta.";
 
 const LOCKED_SOURCE_BOUND_F3_SEAL = {
-  evidence_prompt_sha256: "b283f340eb28a44edf7dd28ade0a113c8a50e4f42a8deaa2c183f7c0692d15e1",
+  evidence_prompt_sha256: "cdb968269d0585f9144509c9ae6a237ec7caeedb3d176fcea0abbcc29be56da8",
   query_prompt_sha256: "747e5bac75b445dc0b6ec2a1441684ef103bf9903270f8153b4846e67c4da66d",
   evidence_request_template_sha256:
     "7bf6b3c9f0d0c758fd16a475a529d21b57c7f243c986299fbe7d07059c432306",

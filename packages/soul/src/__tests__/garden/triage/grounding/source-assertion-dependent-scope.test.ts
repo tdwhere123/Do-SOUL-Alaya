@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { resolveSourceAssertion } from "../../../../garden/triage/grounding/source-assertion.js";
+import { resolveAtomicSourceAssertion, resolveSourceAssertion } from "../../../../garden/triage/grounding/source-assertion.js";
 import { atomicAssertionSpans } from "../../../../garden/triage/grounding/source-assertion/atomic-spans.js";
 import { sentenceSpans } from "../../../../garden/triage/grounding/source-assertion/clause-spans.js";
 import { buildOfficialApiSourceAssertions, buildOfficialApiSourceCorpus, parseOfficialApiSourceLocator,
@@ -25,6 +25,49 @@ it.each([
   expect(resolveOfficialApiSourceLocatorQuote(corpus,
     { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 }, fragment))
     .toEqual({ status: "grounded", assertion: source });
+});
+
+it.each([
+  ["I like tea or coffee.", "I like tea"],
+  ["I can access a PC from anywhere and with any device.", "I can access a PC from anywhere"],
+  ["Now a global cloud computing company chaired by Octave Klaba, OVHcloud founder, SHADOW looks forward notably through new cloud solutions for both personal and business use.",
+    "Now a global cloud computing company chaired by Octave Klaba, OVHcloud founder, SHADOW looks forward notably through new cloud solutions for both personal"],
+  ["In 2022, SHADOW’s revamped subscription service featured a brand new Power Upgrade, including better performance and infinite possibilities.",
+    "In 2022, SHADOW’s revamped subscription service featured a brand new Power Upgrade, including better performance"]
+])("does not detach nominal alternatives or adjuncts from their source: %s", (source, fragment) => {
+  expect(resolveSourceAssertion(source, fragment)).toEqual({ status: "grounded", assertion: source });
+  const corpus = buildOfficialApiSourceCorpus(source, []);
+  expect(buildOfficialApiSourceAssertions(corpus)).toEqual([{ assertion_id: 1, text: `User: ${source}` }]);
+  expect(resolveOfficialApiSourceLocatorQuote(corpus,
+    { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 }, fragment))
+    .toEqual({ status: "grounded", assertion: source });
+});
+
+it("does not evade unresolved possessive reference by deleting the coordinated adjunct", () => {
+  const source = "With Shadow, everyone can access a full Windows PC, in the cloud, from anywhere and with the device of their choice.";
+  const fragment = "With Shadow, everyone can access a full Windows PC, in the cloud, from anywhere";
+  expect(resolveSourceAssertion(source, fragment).status).toBe("rejected");
+  const corpus = buildOfficialApiSourceCorpus(source, []);
+  expect(buildOfficialApiSourceAssertions(corpus)).toEqual([]);
+  expect(resolveOfficialApiSourceLocatorQuote(corpus,
+    { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 }, fragment).status).toBe("rejected");
+});
+
+it.each([" ", "\n"])("keeps a dependent continuation attached across punctuation and whitespace %j", (separator) => {
+  const source = `I can enter the lab.${separator}But only if I have a badge.`;
+  expect(resolveSourceAssertion(source, "I can enter the lab.").status).toBe("rejected");
+  const result = resolveSourceAssertion(source, "But only if I have a badge.");
+  expect(result.status !== "grounded" || result.assertion === source).toBe(true);
+  expect(buildOfficialApiSourceAssertions(`User: ${source}`)).toEqual([]);
+  expect(sentenceSpans(source).flatMap((sentence) => atomicAssertionSpans(source, sentence))).toEqual([]);
+});
+
+it.each(["Assistant", "User"])("respects a new %s role boundary after an independent assertion", (role) => {
+  const source = `User: I can enter the lab.\n${role}: But only if I have a badge.`;
+  expect(resolveSourceAssertion(source, "I can enter the lab.")).toEqual({ status: "grounded", assertion: "I can enter the lab." });
+  expect(buildOfficialApiSourceAssertions(source)).toContainEqual({ assertion_id: 1, text: "User: I can enter the lab." });
+  expect(buildOfficialApiSourceAssertions(source)).toHaveLength(1);
+  expect(resolveAtomicSourceAssertion("But only if I have a badge.").status).toBe("rejected");
 });
 
 it("does not recover a partial conditional quote through the conversational fallback", () => {

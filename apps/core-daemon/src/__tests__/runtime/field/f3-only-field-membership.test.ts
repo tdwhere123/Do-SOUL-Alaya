@@ -37,6 +37,20 @@ describe("source-bound semantic factor publication", () => {
     expect(field.fieldRepos.factors.listDescriptors(WORKSPACE_ID).filter((row) => row.family === "f3")).toEqual([]);
     expect(field.fieldRepos.factors.listIncidences(WORKSPACE_ID).length).toBeGreaterThan(0);
   });
+
+  it.each(["without a mentor", "with a mentor", "except on Sundays", "after the surgery", "or used the equipment"])(
+    "does not publish F3 when an explicit frame omits the trailing source: %s", async (tail) => {
+      const database = planted.openMemoryDatabase();
+      const field = composeField(database);
+      const source = `${EXCERPT} ${tail}.`;
+      await createF3Evidence(database, field, source);
+      expect((await new SqliteEvidenceCapsuleRepo(database).findById(EVIDENCE_ID))?.excerpt).toBe(source);
+      expect(database.connection.prepare("SELECT status FROM evidence_fact_frame_formations WHERE evidence_object_id = ?")
+        .get(EVIDENCE_ID)).toEqual({ status: "rejected" });
+      expect(database.connection.prepare("SELECT status, graph_json FROM evidence_semantic_factor_formations WHERE evidence_object_id = ?")
+        .get(EVIDENCE_ID)).toEqual({ status: "unavailable", graph_json: null });
+      expect(field.fieldRepos.factors.listDescriptors(WORKSPACE_ID).filter(({ family }) => family === "f3")).toEqual([]);
+    });
 });
 
 async function createF3Evidence(
@@ -96,7 +110,7 @@ function sourceSemanticProposal(source: string) {
           semantic_identity: "i" },
         { factor_id: "learn.cook", surface: SOURCE_SURFACE,
           source_occurrence: 0, semantic_identity: F3_IDENTITY },
-        { factor_id: "skill", surface: "Sichuan recipes", source_occurrence: 0,
+        { factor_id: "skill", surface: "Sichuan recipes last autumn", source_occurrence: 0,
           semantic_identity: "sichuan recipes" }
       ],
       variables: [],
@@ -125,7 +139,7 @@ function sourceFactFrameProposal(source: string) {
       slots: [
         { role: "subject" as const, text: "I" },
         { role: "relation" as const, text: SOURCE_SURFACE },
-        { role: "value" as const, text: "Sichuan recipes" }
+        { role: "value" as const, text: "Sichuan recipes last autumn" }
       ]
     }
   };

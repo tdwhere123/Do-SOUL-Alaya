@@ -1,6 +1,6 @@
 {
   "name": "@do-soul/alaya-protocol",
-  "version": "4.9.0",
+  "version": "4.10.0",
   "private": true,
   "description": "Zod schemas + JSON-schema export for the Do-SOUL Alaya MCP catalog (leaf — no internal deps).",
   "license": "AGPL-3.0-only",
@@ -32,6 +32,10 @@
     "./cjk-segmentation": {
       "types": "./src/shared/cjk-segmentation.ts",
       "import": "./dist/shared/cjk-segmentation.js"
+    },
+    "./node/source-frame": {
+      "types": "./dist/node/source-frame.d.ts",
+      "import": "./dist/node/source-frame.js"
     }
   },
   "dependencies": {

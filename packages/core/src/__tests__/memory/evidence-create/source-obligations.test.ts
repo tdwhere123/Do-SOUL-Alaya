@@ -8,8 +8,7 @@ import { materializeEvidenceFactFrameFormation, replayEvidenceFactFrameFormation
   "../../../memory/evidence-fact-frame-formation.js";
 import { certifyEvidenceSemanticCompleteness } from "../../../memory/evidence-create/evidence-semantic-completeness.js";
 import { materializeOpenSemanticFactorFormation } from "../../../semantic/open-semantic-factor-formation.js";
-import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER as normalizer } from
-  "../../../memory/fact-frame-formation/declarative-normalizer.js";
+import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER as normalizer } from "@do-soul/alaya-protocol/node/source-frame";
 import { createRecallRealStorage } from "../../shared/real-sqlite.test-support.js";
 import { createEvidenceInput } from "../evidence-service-fixture.js";
 
@@ -104,6 +103,17 @@ it.each(['"Only If"', "'Only If'", "“Only If”", "‘Only If’"])(
     const proposal = normalizer.propose(source)!;
     expect(proposal).toBeDefined();
     expect(materialize(source, proposal.fact_frame).capture.status).toBe("formed");
+  });
+
+it.each(["without a badge", "with a badge", "except on Sundays", "after the surgery", "or use the equipment"])(
+  "rejects incomplete source coverage without enumerating the omitted adjunct: %s", (tail) => {
+    const source = `I can enter the lab ${tail}.`;
+    expect(materialize(source, enterFrame)).toMatchObject({ capture: { status: "rejected" }, searchProjections: [] });
+    expect(() => replayEvidenceFactFrameFormationCapture({ sourceAssertion: source, sourceHash,
+      capture: historicalCapture(enterFrame) })).toThrow();
+    const complete = normalizer.propose(source)!;
+    expect(complete.fact_frame.slots.at(-1)?.text).toBe(`the lab ${tail}`);
+    expect(materialize(source, complete.fact_frame).capture.status).toBe("formed");
   });
 
 it.each(["do not", "don't", "don’t", "never", "currently", "usually"])(

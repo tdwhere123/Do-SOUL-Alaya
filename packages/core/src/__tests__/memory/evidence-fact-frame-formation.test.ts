@@ -3,8 +3,7 @@ import { verifyEvidenceFactFrameFormationCapture } from
   "@do-soul/alaya-protocol";
 import { materializeEvidenceFactFrameFormation } from
   "../../memory/evidence-fact-frame-formation.js";
-import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from
-  "../../memory/fact-frame-formation/declarative-normalizer.js";
+import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from "@do-soul/alaya-protocol/node/source-frame";
 import { replayEvidenceFactFrameFormationCapture } from
   "../../memory/evidence-fact-frame-formation.js";
 import { createHash } from "node:crypto";

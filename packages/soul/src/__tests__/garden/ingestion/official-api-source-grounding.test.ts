@@ -225,7 +225,7 @@ describe("official Garden source grounding", () => {
     const [signal] = await provider.compile(source, CONTEXT);
     expect(signal?.raw_payload.source_grounding).toMatchObject({
       status: "rejected",
-      reasons: ["source_assertion_incomplete"]
+      reasons: ["source_assertion_not_self_contained"]
     });
   });
 
@@ -241,7 +241,7 @@ describe("official Garden source grounding", () => {
     const [signal] = await provider.compile(source, CONTEXT);
     expect(signal?.raw_payload.source_grounding).toMatchObject({
       status: "rejected",
-      reasons: ["source_assertion_incomplete"]
+      reasons: ["source_assertion_not_self_contained"]
     });
   });
 

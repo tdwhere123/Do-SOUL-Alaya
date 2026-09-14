@@ -1,19 +1,19 @@
 import {
   EvidenceFactFrameFormationProposalSchema,
   ASSOCIATIVE_FACT_FRAME_SLOT_LIMIT,
-  hasUnquotedSourceDependentScope,
-  isInsideSourceQuotation,
+  groundAssociativeFactFrameSlots,
   type AssociativeFactFrame,
   type AssociativeFactSlot,
   type EvidenceFactFrameFormationProposal
-} from "@do-soul/alaya-protocol";
+} from "../../associative-fact-frame.js";
+import { hasUnquotedSourceDependentScope, isInsideSourceQuotation } from "../../source-dependent-scope.js";
 import { skipLeadingAdjunctSpan } from
-  "../../shared/fact-frame-grammar/leading-adjunct.js";
+  "./leading-adjunct.js";
 import {
   sliceFactFrameTokens,
   tokenizeFactFrameSource,
   type FactFrameSourceToken
-} from "../../shared/fact-frame-grammar/source-text.js";
+} from "./source-text.js";
 
 export const RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID =
   "rule_based_evidence_fact_frame_normalizer_v4";
@@ -110,6 +110,14 @@ Readonly<EvidenceFactFrameProposalNormalizer> = Object.freeze(
 export function factFramePreservesSourceObligations(source: string, frame: Readonly<AssociativeFactFrame>): boolean {
   const assertion = source.trim();
   const tokens = tokenizeFactFrameSource(assertion);
+  const grounded = groundAssociativeFactFrameSlots(frame, assertion);
+  const relations = grounded?.filter(({ role }) => role === "relation");
+  if (grounded === null || relations?.length !== 1) return false;
+  // Grounding proves presence; completeness also requires every source token
+  // after the predicate to survive in an ordered slot. Punctuation is not a token.
+  const relationEnd = relations[0]!.source_span[1];
+  if (tokens.some((token) => token.end > relationEnd && !grounded.some(({ source_span: [start, end] }) =>
+    start <= token.start && token.end <= end))) return false;
   const located = readInitialSubject(assertion, tokens);
   const subject = located === null ? readExplicitSubjectAnchor(assertion, tokens, frame) : located;
   if (subject == null) return false;

@@ -4,17 +4,9 @@ import {
   type AssociativeFactSlot,
   type AssociativeFactSlotRole
 } from "@do-soul/alaya-protocol";
-import {
-  AUXILIARIES,
-  BE_AUXILIARIES,
-  CLAUSE_BOUNDARIES,
-  WH_WORDS
-} from "./clause-boundaries.js";
+import { FACT_FRAME_AUXILIARIES as AUXILIARIES, FACT_FRAME_BE_AUXILIARIES as BE_AUXILIARIES, FACT_FRAME_CLAUSE_BOUNDARIES as CLAUSE_BOUNDARIES, FACT_FRAME_WH_WORDS as WH_WORDS } from "@do-soul/alaya-protocol/node/source-frame";
 import { SUBJECT_PRONOUNS } from "./result-slots.js";
-import {
-  sliceFactFrameTokens,
-  type FactFrameSourceToken
-} from "./source-text.js";
+import { sliceFactFrameTokens, type FactFrameSourceToken } from "@do-soul/alaya-protocol/node/source-frame";
 
 export type SubjectSpan = Readonly<{
   readonly text: string;

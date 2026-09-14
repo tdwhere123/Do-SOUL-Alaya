@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
-import {
-  verifyEvidenceFactFrameFormationCapture,
-  type EvidenceFactFrameFormationCapture
-} from "@do-soul/alaya-protocol";
+import { verifyEvidenceFactFrameFormationCapture, type EvidenceFactFrameFormationCapture } from "@do-soul/alaya-protocol";
+import { factFramePreservesSourceObligations } from "@do-soul/alaya-protocol/node/source-frame";
 
 export interface StoredFactFrameFormationColumns {
   readonly formation_workspace_id: string | null;
@@ -18,7 +16,8 @@ export interface StoredFactFrameFormationColumns {
 export function readStoredFactFrameFormation(
   row: Readonly<StoredFactFrameFormationColumns>,
   expectedWorkspaceId: string,
-  expectedProjectionSourceHash: string
+  expectedProjectionSourceHash: string,
+  expectedSourceText: string | null
 ): Readonly<EvidenceFactFrameFormationCapture> | undefined {
   if (row.formation_operator_id === null) return undefined;
   if (row.formation_workspace_id !== expectedWorkspaceId) {
@@ -37,6 +36,8 @@ export function readStoredFactFrameFormation(
       capture.source_hash !== expectedProjectionSourceHash) {
     throw new Error("fact-frame formation source does not match its projection");
   }
+  if (capture.status === "formed" && (expectedSourceText === null || capture.fact_frame === null ||
+      !factFramePreservesSourceObligations(expectedSourceText, capture.fact_frame))) return undefined;
   return capture;
 }
 

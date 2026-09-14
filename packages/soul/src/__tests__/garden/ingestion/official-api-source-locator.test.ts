@@ -4,7 +4,7 @@ import {
   type GardenCompileContext
 } from "../../../garden/ingestion/compute-provider.js";
 import { resolveGardenSignalGrounding } from "../../../garden/triage/grounding/signal-source-grounding.js";
-import { buildOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
+import { buildOfficialApiSourceAssertions, buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 import { createSignal } from "../materialization/materialization-router-fixture.js";
 import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
@@ -24,7 +24,7 @@ describe("official API assertion catalog locator", () => {
     ].join(" ");
     const source = `${sourceAssertion} What's the best type of spinner lure to use?`;
     const provider = providerFor({
-      source_locator: assertionLocator(2),
+      source_locator: assertionLocator(1),
       matched_text: matchedText
     });
 
@@ -41,7 +41,7 @@ describe("official API assertion catalog locator", () => {
     const quote = "I just recently changed my last name, and I'm still getting used to it - it's funny, my old name was Johnson, but now it's Winters.";
     const source = "I need to update my address with my health insurance provider. Can you walk me through the process or give me a phone number to call? By the way, " + quote;
     const provider = providerFor({
-      source_locator: assertionLocator(2),
+      source_locator: assertionLocator(1),
       matched_text: quote
     });
 
@@ -58,20 +58,10 @@ describe("official API assertion catalog locator", () => {
     });
   });
 
-  it("grounds the complete pre-but bronchitis clause selected by assertion_id", async () => {
+  it("does not use a complex coordinated prefix to evade an unresolved reference", () => {
     const source = "I actually recently had a bad case of bronchitis that I initially thought was just a cold, but it turned out to be bronchitis.";
-    const provider = providerSelectingAssertion((text) =>
-      text.includes("initially thought") && !text.includes("turned out")
-    );
-    const [signal] = await provider.compile(source, contextForUser(source));
-
-    expect(signal?.raw_payload.source_locator).toMatchObject({
-      contract_version: 3,
-      kind: "assertion_catalog"
-    });
-    expect(signal?.raw_payload.distilled_fact).toBe(
-      "I actually recently had a bad case of bronchitis that I initially thought was just a cold"
-    );
+    expect(buildOfficialApiSourceAssertions(source)).toEqual([]);
+    expect(buildOfficialApiSourceCorpus(source, [])).toContain(source);
   });
 
   it.each([
@@ -93,11 +83,10 @@ describe("official API assertion catalog locator", () => {
       .toBe(true);
   });
 
-  it("publishes the groundable bronchitis clause but not its rejected sentence", () => {
+  it("keeps an unsupported coordinated sentence out of the catalog without losing its source", () => {
     const source = "I actually recently had a bad case of bronchitis that I initially thought was just a cold, but it turned out to be a lot more serious.";
-    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
-      "I actually recently had a bad case of bronchitis that I initially thought was just a cold"
-    ]);
+    expect(buildOfficialApiSourceAssertions(source)).toEqual([]);
+    expect(buildOfficialApiSourceCorpus(source, [])).toContain(source);
   });
 
   it("enumerates exact resolver-grounded atoms beneath conversational wrappers", () => {
@@ -161,11 +150,10 @@ describe("official API assertion catalog locator", () => {
     ]);
   });
 
-  it("appends a closed wrapper atom after preserving a legacy assertion from the same sentence", () => {
+  it("retains the complete assertion before an independently removable wrapper", () => {
     const source = "I moved to Berlin, and I redeemed a $5 coupon last Sunday, which was a nice surprise to them.";
 
     expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
-      "I moved to Berlin",
       "I moved to Berlin, and I redeemed a $5 coupon last Sunday"
     ]);
   });

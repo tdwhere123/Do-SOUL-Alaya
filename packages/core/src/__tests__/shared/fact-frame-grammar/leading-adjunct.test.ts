@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { skipLeadingAdjunctSpan } from
-  "../../../shared/fact-frame-grammar/leading-adjunct.js";
-import { tokenizeFactFrameSource } from
-  "../../../shared/fact-frame-grammar/source-text.js";
+import { skipLeadingAdjunctSpan } from "@do-soul/alaya-protocol/node/source-frame";
+import { tokenizeFactFrameSource } from "@do-soul/alaya-protocol/node/source-frame";
 
 const SUBJECTS = new Set(["i", "you", "he", "she", "it", "we", "they"]);
 

@@ -87,8 +87,8 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
           signal_kind: "potential_claim",
           object_kind: "decision",
           confidence: 0.75,
-          matched_text: "we deploy on Tuesdays",
-          distilled_fact: "The team deploys releases on Tuesdays."
+          matched_text: "we use TypeScript",
+          distilled_fact: "The team uses TypeScript."
         }, 2)
       ]
     }));
@@ -101,12 +101,12 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
       })()
     });
 
-    const turn = "I prefer dark mode, and we deploy on Tuesdays.";
+    const turn = "I prefer dark mode, and we use TypeScript.";
     const signals = await provider.compile(turn, createContext(turn));
     expect(signals).toHaveLength(2);
     expect(signals.map((s) => (s.raw_payload as { distilled_fact: string }).distilled_fact)).toEqual([
-      "I prefer dark mode, and we deploy on Tuesdays.",
-      "we deploy on Tuesdays."
+      "I prefer dark mode, and we use TypeScript.",
+      "we use TypeScript."
     ]);
   });
 

@@ -1,22 +1,5 @@
-import {
-  buildAttributedAssociativeFactKeyProjections,
-  EvidenceSearchProjectionKindSchema,
-  EvidenceSearchProjectionSchema,
-  groundAssociativeFactFrame,
-  isGardenSourceTurnFallbackV2Receipt,
-  projectGardenSourceTurnFallbackV2AssistantObservations,
-  projectGardenSourceTurnFallbackV2UserContent,
-  parseVerifiedUserAssertionSourceHash,
-  type EvidenceCapsule,
-  type EvidenceFactFrameFormationCapture,
-  type EvidenceSearchProjection,
-  type AssociativeFactFrame,
-  type AssociativeFactKeyProjectionForm,
-  type CandidateMemorySignal,
-  type GardenSourceTurnFallbackVerifiedReceipt,
-  type OpenSemanticFactorFormationCapture,
-  KIND_PROJECTION_KIND_VALUE_LIMIT
-} from "@do-soul/alaya-protocol";
+import { buildAttributedAssociativeFactKeyProjections, EvidenceSearchProjectionKindSchema, EvidenceSearchProjectionSchema, groundAssociativeFactFrame, isGardenSourceTurnFallbackV2Receipt, projectGardenSourceTurnFallbackV2AssistantObservations, projectGardenSourceTurnFallbackV2UserContent, parseVerifiedUserAssertionSourceHash, type EvidenceCapsule, type EvidenceFactFrameFormationCapture, type EvidenceSearchProjection, type AssociativeFactFrame, type AssociativeFactKeyProjectionForm, type CandidateMemorySignal, type GardenSourceTurnFallbackVerifiedReceipt, type OpenSemanticFactorFormationCapture, KIND_PROJECTION_KIND_VALUE_LIMIT } from "@do-soul/alaya-protocol";
+import { factFramePreservesSourceObligations } from "@do-soul/alaya-protocol/node/source-frame";
 import type {
   EvidenceSearchMatch,
   EvidenceSearchProjectionIdentity,
@@ -34,6 +17,7 @@ export interface StoredProjectionRow extends StoredFactFrameFormationColumns {
   readonly workspace_id: string;
   readonly source_hash: string;
   readonly content: string;
+  readonly source_text: string | null;
 }
 
 interface BoundProjection {
@@ -87,7 +71,8 @@ export function readQualifiedProjectionIndex(
       factFrameFormation = readStoredFactFrameFormation(
         row,
         row.workspace_id,
-        row.source_hash
+        row.source_hash,
+        row.source_text
       );
     } catch (error) {
       throw new EvidenceProjectionIntegrityError(
@@ -285,6 +270,8 @@ function matchRederivedFactKey(
   stored: BoundProjection,
   frame: Readonly<AssociativeFactFrame>
 ): Readonly<RederivedFactKeyProjection> | null {
+  // Historical signal fallback and stored captures obey the same source contract.
+  if (capsule.excerpt === null || !factFramePreservesSourceObligations(capsule.excerpt, frame)) return null;
   const attributed = buildAttributedAssociativeFactKeyProjections(frame).find(
     ({ projection }) => projection.projection_id === identity.projection_id
   );

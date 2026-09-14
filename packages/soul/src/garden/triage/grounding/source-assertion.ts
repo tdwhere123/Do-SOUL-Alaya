@@ -18,7 +18,7 @@ import {
   hasRelativeClauseSuffix
 } from "./source-assertion/relative-clause.js";
 import { stripSourceRoleMarker } from "./source-role/marker.js";
-import { sourceAssertionPreservesDependentScope } from "./source-assertion/scope.js";
+import { hasAssertionPreservingWorthSuffix, sourceAssertionPreservesScope } from "./source-assertion/scope.js";
 
 export type SourceAssertionResolution =
   | { readonly status: "grounded"; readonly assertion: string }
@@ -91,7 +91,7 @@ export function resolveAtomicSourceAssertion(
   if (assertion.length > maxChars) {
     return { status: "rejected", reason: "source_assertion_too_long" };
   }
-  if (!isLocallyClosedAtomicAssertion(assertion)) {
+  if (!sourceAssertionPreservesScope(assertion, 0, assertion.length) || !isLocallyClosedAtomicAssertion(assertion)) {
     return { status: "rejected", reason: "source_assertion_not_self_contained" };
   }
   if (isVacuousFirstPersonStub(assertion) || !hasCompleteClause(assertion, false)) {
@@ -132,10 +132,9 @@ function resolveBoundedVerbatimPrefix(
     return { status: "rejected", reason: "source_assertion_too_long" };
   }
   const suffix = source.slice(offset + matched.length);
-  const worthSuffix = hasWorthItSuffix(assertion, suffix);
+  const worthSuffix = hasAssertionPreservingWorthSuffix(assertion, suffix);
   const relativeSuffix = hasRelativeClauseSuffix(suffix);
   if (!(relativeSuffix || worthSuffix) || !hasFirstPersonAssertionAnchor(assertion)) return null;
-  if (!sourceAssertionPreservesDependentScope(source, offset, offset + matched.length)) return null;
   if (source.indexOf(matched, offset + 1) >= 0) {
     return { status: "rejected", reason: "matched_text_ambiguous" };
   }
@@ -148,6 +147,7 @@ function resolveBoundedVerbatimPrefix(
   if (isVacuousFirstPersonStub(assertion)) {
     return { status: "rejected", reason: "source_assertion_incomplete" };
   }
+  if (!sourceAssertionPreservesScope(source, offset, offset + matched.length)) return null;
   if (!hasUnresolvedReference(assertion) && hasCompleteClause(assertion, false)) {
     return { status: "grounded", assertion };
   }
@@ -158,10 +158,6 @@ function hasMatchedTextStartBoundary(source: string, offset: number): boolean {
   return !isWordCharacter(source[offset - 1]);
 }
 
-function hasWorthItSuffix(assertion: string, suffix: string): boolean {
-  return /^it\s+(?:took|takes|will\s+take)\s+me\b/iu.test(assertion) &&
-    /^\s*,\s*but\s+it\s+(?:was|is|will\s+be)\s+worth\b/iu.test(suffix);
-}
 
 function hasFirstPersonAssertionAnchor(assertion: string): boolean {
   return /^(?:i\b|i['’](?:m|d|ll|ve)\b)/iu.test(assertion) ||
@@ -322,7 +318,7 @@ function evaluateAssertionCandidate(
   maxChars: number
 ): SourceAssertionResolution {
   const assertion = stripSourceRoleLabel(source.slice(candidate.span.start, candidate.span.end));
-  if (!sourceAssertionPreservesDependentScope(source, candidate.span.start, candidate.span.end)) {
+  if (!sourceAssertionPreservesScope(source, candidate.span.start, candidate.span.end)) {
     return { status: "rejected", reason: "source_assertion_not_self_contained" };
   }
   if (candidate.exact && !/[.!?。！？]$/u.test(assertion) &&

@@ -1,10 +1,6 @@
 import type { AssociativeFactFrame, AssociativeFactSlot } from
   "@do-soul/alaya-protocol";
-import {
-  AUXILIARIES,
-  CLAUSE_BOUNDARIES,
-  WH_WORDS
-} from "./clause-boundaries.js";
+import { FACT_FRAME_AUXILIARIES as AUXILIARIES, FACT_FRAME_CLAUSE_BOUNDARIES as CLAUSE_BOUNDARIES, FACT_FRAME_WH_WORDS as WH_WORDS } from "@do-soul/alaya-protocol/node/source-frame";
 import { COPULAR_MEASURE_WORDS, SUBJECT_PRONOUNS } from "./result-slots.js";
 import {
   EMPTY_TOKEN,
@@ -26,10 +22,7 @@ import {
   takeSubject,
   type SubjectSpan
 } from "./english-clause-tokens.js";
-import {
-  sliceFactFrameTokens,
-  type FactFrameSourceToken
-} from "./source-text.js";
+import { sliceFactFrameTokens, type FactFrameSourceToken } from "@do-soul/alaya-protocol/node/source-frame";
 
 export function parseCopularMeasureFrame(
   query: string,

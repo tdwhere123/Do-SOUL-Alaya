@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { factFramePreservesSourceObligations } from "@do-soul/alaya-protocol/node/source-frame";
 import {
   EvidenceOsfSemanticCompletenessReceiptSchema,
   sourceTextDigest,
@@ -63,7 +64,8 @@ function hasCertifiedCompleteness(
   sourceText: string | null
 ): boolean {
   if (row.semantic_completeness_json === null || factFrame?.status !== "formed" ||
-      sourceText === null) return false;
+      sourceText === null || factFrame.fact_frame === null ||
+      !factFramePreservesSourceObligations(sourceText, factFrame.fact_frame)) return false;
   try {
     verifyEvidenceOsfSemanticCompleteness({
       receipt: EvidenceOsfSemanticCompletenessReceiptSchema.parse(

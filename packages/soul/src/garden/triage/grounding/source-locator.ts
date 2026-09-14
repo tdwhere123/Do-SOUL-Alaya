@@ -10,7 +10,7 @@ import {
   type SourceAssertionResolution
 } from "./source-assertion.js";
 import { parseDirectPreferenceRelation } from "./preference-relation.js";
-import { sourceAssertionPreservesDependentScope } from "./source-assertion/scope.js";
+import { sourceAssertionPreservesScope } from "./source-assertion/scope.js";
 import {
   collectSourceRoleMarkers,
   sourceRoleMarkerPrefixLength,
@@ -199,7 +199,7 @@ function resolveCatalogVerbatimQuote(
   if (resolution.status === "grounded" || resolution.reason !== "source_assertion_not_self_contained") {
     return resolution;
   }
-  if (!sourceAssertionPreservesDependentScope(sourceText, offset, offset + quote.length) ||
+  if (!sourceAssertionPreservesScope(sourceText, offset, offset + quote.length) ||
       !isRecoverableVerbatimUserQuote(quote, maxChars)) return resolution;
   return { status: "grounded", assertion: stripSourceRoleMarker(quote) };
 }

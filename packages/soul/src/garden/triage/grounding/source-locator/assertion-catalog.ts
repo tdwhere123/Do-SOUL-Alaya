@@ -13,7 +13,7 @@ import {
   type AssertionSpan
 } from "../source-assertion/clause-spans.js";
 import { atomicAssertionSpans } from "../source-assertion/atomic-spans.js";
-import { boundedIndirectQuestionPrefix } from "../source-assertion/scope.js";
+import { boundedIndirectQuestionPrefix, sourceAssertionPreservesScope } from "../source-assertion/scope.js";
 import {
   collectSourceRoleMarkers,
   stripSourceRoleMarker,
@@ -148,6 +148,7 @@ function appendAssertion(
   const key = `${span.start}:${span.end}`;
   if (seen.has(key)) return;
   seen.add(key);
+  if (!sourceAssertionPreservesScope(sourceText, span.start, span.end)) return;
   const assertionText = sourceText.slice(span.start, span.end);
   const sentenceText = sourceText.slice(sentence.start, sentence.end);
   const maxChars = parseDirectPreferenceRelation(assertionText) === undefined

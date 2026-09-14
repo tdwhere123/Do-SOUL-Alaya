@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { factFrameWordPiecesCoverRun } from
-  "../../../shared/fact-frame-grammar/source-text.js";
+  "../../../shared/fact-frame-grammar/word-piece-coverage.js";
 
 describe("fact-frame word-piece run coverage", () => {
   it("covers a longer contiguous CJK evidence run", () => {

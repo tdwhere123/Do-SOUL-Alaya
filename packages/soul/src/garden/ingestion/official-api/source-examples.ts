@@ -21,10 +21,6 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
         {
           "assertion_id": 1,
           "text": "User: In 2020, I opened a workshop and promised to lend tools."
-        },
-        {
-          "assertion_id": 2,
-          "text": "User: In 2020, I opened a workshop"
         }
       ]
     },
