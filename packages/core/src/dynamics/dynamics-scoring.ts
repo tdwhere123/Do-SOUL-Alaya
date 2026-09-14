@@ -68,6 +68,7 @@ export function computeRetentionFromKarma(memory: Readonly<MemoryEntry>, karmaSu
   return computeRetentionFromProfile({
     decayProfile,
     formationKind: memory.formation_kind,
+    dimension: memory.dimension,
     karmaSumAmount: karmaSum,
     createdAt: memory.created_at,
     now

@@ -433,6 +433,7 @@ function semanticCompletenessReceipt(
     reason_code: "complete" as const,
     fact_frame_capture_digest: factFrame.capture_digest,
     semantic_formation_capture_digest: semantic.capture_digest,
+    upstream_semantic_formation: semantic,
     predicate: slot("relation", "bought", null),
     arguments: [slot("subject", "I", 0), slot("qualifier", "from IKEA", 1),
       slot("value", "my bookshelf", 2)],

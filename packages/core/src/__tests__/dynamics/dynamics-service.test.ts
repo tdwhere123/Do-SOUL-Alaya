@@ -153,6 +153,22 @@ function createHarness(memoryEntries: readonly MemoryEntry[], options: { readonl
 }
 
 describe("DynamicsService", () => {
+  it("keeps observation confidence unknown through creation, karma and decay", async () => {
+    const harness = createHarness([]);
+    const initial = harness.service.assignInitialDynamics({
+      dimension: "observation", formation_kind: "extracted", created_at: "2026-03-23T00:00:00.000Z"
+    });
+    expect(initial).toMatchObject({ confidence: null, retention_score: 0.5,
+      activation_score: 0.3, decay_profile: "normal", retention_state: "working", manifestation_state: "excerpt" });
+    const entry = createMemoryEntry({ ...initial, dimension: "observation", formation_kind: "extracted",
+      created_at: "2026-03-23T00:00:00.000Z" });
+    harness.entriesById.set(entry.object_id, entry);
+    await harness.service.processKarmaEvent(createKarmaEvent());
+    expect(harness.entriesById.get(entry.object_id)).toMatchObject({ confidence: null, retention_score: 0.65 });
+    await harness.service.scanRetentionDecay(entry.workspace_id);
+    expect(harness.entriesById.get(entry.object_id)?.confidence).toBeNull();
+    expect(harness.entriesById.get(entry.object_id)?.retention_score).toBeCloseTo(0.65);
+  });
   it("assigns initial dynamics by dimension and formation kind", () => {
     const { service } = createHarness([]);
 

@@ -98,7 +98,7 @@ describe("initDatabase uninitialized-file probe retry", () => {
     const maxVersion = database.connection.prepare(
       "SELECT MAX(version) AS max_version FROM schema_version"
     ).get() as { readonly max_version: number };
-    expect(maxVersion.max_version).toBe(15);
+    expect(maxVersion.max_version).toBe(17);
     expect(mockedOpen.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 });

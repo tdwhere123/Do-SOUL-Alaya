@@ -47,7 +47,7 @@ describe("initDatabase concurrent migration", () => {
     const maxVersion = second.connection.prepare(
       "SELECT MAX(version) AS max_version FROM schema_version"
     ).get() as { readonly max_version: number };
-    expect(maxVersion.max_version).toBe(15);
+    expect(maxVersion.max_version).toBe(17);
   });
 
   it.skipIf(!existsSync(distInitModule) || !existsSync(distBusyRetryModule))(
@@ -67,7 +67,7 @@ describe("initDatabase concurrent migration", () => {
         const maxVersion = probe.prepare(
           "SELECT MAX(version) AS max_version FROM schema_version"
         ).get() as { readonly max_version: number };
-        expect(maxVersion.max_version).toBe(15);
+        expect(maxVersion.max_version).toBe(17);
       } finally {
         probe.close();
       }
@@ -85,7 +85,7 @@ describe("initDatabase uninitialized-file probe", () => {
     const maxVersion = database.connection.prepare(
       "SELECT MAX(version) AS max_version FROM schema_version"
     ).get() as { readonly max_version: number };
-    expect(maxVersion.max_version).toBe(15);
+    expect(maxVersion.max_version).toBe(17);
   });
 
   it("keeps the runtime temporal gate on an unreadable existing file", () => {

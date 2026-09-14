@@ -255,7 +255,7 @@ describe("EvidenceService source formation", () => {
     });
   });
 
-  it("rejects a unary evidence graph that omits the fact-frame value argument", async () => {
+  it("independently forms the complete source while retaining an incomplete nomination", async () => {
     const stores = createInMemoryFieldStores();
     const { service, create } = createCreationHarness({
       fieldStores: stores,
@@ -271,23 +271,26 @@ describe("EvidenceService source formation", () => {
     );
 
     expect(create.mock.calls[0]?.[3]).toMatchObject({
-      status: "rejected",
-      graph: null
+      status: "formed",
+      graph: { propositions: [{ arguments: [
+        { position: 0, binding_identity: "subject", reference_id: "argument_0" },
+        { position: 1, binding_identity: "value", reference_id: "argument_1" }
+      ] }] }
     });
-    expect(
-      stores.listFactors("workspace-1").filter((factor) => factor.family === "f3")
-    ).toEqual([]);
+    expect(create.mock.calls[0]?.[4]).toMatchObject({
+      upstream_semantic_formation: { graph: { propositions: [{ arguments: [expect.anything()] }] } }
+    });
     expect(stores.getJob("workspace-1", hashDerivationJobId({
       purpose: "f3_semantic_capture",
       operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
       input_evidence_ids: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"]
-    }, fieldSha256))).toBeNull();
+    }, fieldSha256))).not.toBeNull();
   });
 
   it.each([
     ["swapped positions", [1, 0]],
     ["duplicate positions", [0, 0]]
-  ])("rejects %s in a source-bound proposition", async (_name, positions) => {
+  ])("does not inherit %s from a nomination into independent source structure", async (_name, positions) => {
     const stores = createInMemoryFieldStores();
     const { service, create } = createCreationHarness({
       fieldStores: stores,
@@ -299,10 +302,12 @@ describe("EvidenceService source formation", () => {
     await service.create(createEvidenceInput({ excerpt: source }), [],
       evidenceFactFrame(source), semanticProposal(source, graph));
 
-    expect(create.mock.calls[0]?.[3]).toMatchObject({ graph: null });
-    expect(create.mock.calls[0]?.[3]?.status).not.toBe("formed");
-    expect(stores.listFactors("workspace-1").filter(({ family }) => family === "f3"))
-      .toEqual([]);
+    expect(create.mock.calls[0]?.[3]).toMatchObject({ status: "formed",
+      graph: { propositions: [{ arguments: [
+        { position: 0, binding_identity: "subject", reference_id: "argument_0" },
+        { position: 1, binding_identity: "value", reference_id: "argument_1" }
+      ] }] } });
+    expect(create.mock.calls[0]?.[4]?.upstream_semantic_formation).toBeDefined();
   });
 
   it("does not persist F3 lineage for rejected or unavailable semantic formation", async () => {

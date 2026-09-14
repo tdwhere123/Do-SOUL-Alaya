@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   DYNAMICS_CONSTANTS,
+  resolveMemoryDynamicsPolicy,
   type KarmaEvent,
   type KarmaEventKind,
   type ManifestationState,
@@ -15,16 +16,10 @@ import {
   computeRetentionFromKarma,
   determineManifestation
 } from "./dynamics-scoring.js";
-import {
-  DIMENSION_DEFAULT_DECAY_PROFILE,
-  INITIAL_ACTIVATION_FROM_CONFIDENCE_FACTOR
-} from "./dynamics-constants-runtime.js";
-import { clamp01 } from "../shared/clamp.js";
 import { KarmaTransitionEngine } from "./karma-transition-engine.js";
 import { RetentionDecayScanner, type RetentionDecayScanResult } from "./retention-decay-scanner.js";
 import {
   assertActivationWeightsSumToOne,
-  confidenceByFormationKind,
   parseDimension,
   parseFormationKind,
   type DynamicsEventLogInput,
@@ -148,7 +143,7 @@ export class DynamicsService {
     readonly created_at: string;
   }): {
     readonly decay_profile: MemoryEntry["decay_profile"];
-    readonly confidence: number;
+    readonly confidence: number | null;
     readonly retention_score: number;
     readonly retention_state: RetentionState;
     readonly activation_score: number;
@@ -158,10 +153,11 @@ export class DynamicsService {
   } {
     const parsedDimension = parseDimension(params.dimension);
     const parsedFormationKind = parseFormationKind(params.formation_kind);
-    const decayProfile = DIMENSION_DEFAULT_DECAY_PROFILE[parsedDimension];
-    const confidence = confidenceByFormationKind(parsedFormationKind);
-    const retentionScore = confidence;
-    const activationScore = clamp01(confidence * INITIAL_ACTIVATION_FROM_CONFIDENCE_FACTOR);
+    const policy = resolveMemoryDynamicsPolicy(parsedDimension, parsedFormationKind);
+    const decayProfile = policy.decay_profile;
+    const confidence = policy.confidence;
+    const retentionScore = policy.initial_retention;
+    const activationScore = policy.initial_activation;
 
     return Object.freeze({
       decay_profile: decayProfile,

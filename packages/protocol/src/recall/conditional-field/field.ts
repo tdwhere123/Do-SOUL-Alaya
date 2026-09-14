@@ -91,6 +91,11 @@ export const FieldValueSchema = z
   })
   .strict()
   .superRefine((value, context) => {
+    if (value.activation?.kind === "incomparable") {
+      if (value.milligrades !== undefined || value.low_milligrades !== undefined || value.high_milligrades !== undefined
+        || value.cap_contract_id !== undefined) context.addIssue({ code: "custom", message: "incomparable activation has no common scalar or contract" });
+      return;
+    }
     if (value.activation?.kind === "unreachable") {
       if (value.milligrades !== undefined) {
         context.addIssue({
@@ -134,6 +139,8 @@ export const FieldSnapshotSchema = z
     schema_version: SchemaVersionSchema,
     snapshot_id: Sha256DigestSchema,
     query_id: ConditionalFieldIdSchema,
+    // Summary of represented activations; this is not a solver-completion seal.
+    has_incomparable_activations: z.boolean().optional(),
     seeds: z.array(SeedActivationSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     values: z.array(FieldValueSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     retained_transitions: z.array(TransitionSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),

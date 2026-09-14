@@ -1,21 +1,31 @@
 import { describe, expect, it } from "vitest";
+import { DYNAMICS_CONSTANTS } from "@do-soul/alaya-protocol";
 import {
   DIMENSION_DEFAULT_DECAY_PROFILE,
   computeDecayedRetention,
+  computeRetentionFromProfile,
   computeFreshnessFactor,
   determineManifestation
 } from "../../dynamics/dynamics-constants-runtime.js";
 
 describe("dynamics constants runtime", () => {
+  it("decays observation retention independently of formation confidence", () => {
+    const createdAt = "2026-09-14T00:00:00.000Z";
+    const now = new Date(Date.parse(createdAt) + DYNAMICS_CONSTANTS.decay_profiles.normal.half_life).toISOString();
+    const params = { createdAt, now, decayProfile: "normal" as const,
+      formationKind: "extracted" as const, karmaSumAmount: 0 };
+    expect(computeRetentionFromProfile({ ...params, dimension: "observation" })).toBeCloseTo(0.25);
+    expect(computeRetentionFromProfile({ ...params, dimension: "fact" })).toBeCloseTo(0.3);
+  });
   it("maps dimensions to expected default decay profiles", () => {
     expect(DIMENSION_DEFAULT_DECAY_PROFILE.hazard).toBe("hazard");
     expect(DIMENSION_DEFAULT_DECAY_PROFILE.glossary).toBe("pinned");
     expect(DIMENSION_DEFAULT_DECAY_PROFILE.episode).toBe("volatile");
   });
 
-  it("keeps pinned retention at max(r_min, confidence + karma)", () => {
+  it("keeps pinned retention at max(r_min, initial retention + karma)", () => {
     const retention = computeDecayedRetention({
-      initialConfidence: 0.7,
+      initialRetention: 0.7,
       karmaSumAmount: -0.05,
       halfLifeMs: Infinity,
       rMin: 0.8,
@@ -25,9 +35,9 @@ describe("dynamics constants runtime", () => {
     expect(retention).toBe(0.8);
   });
 
-  it("returns confidence + karma when elapsed time is zero", () => {
+  it("returns initial retention + karma when elapsed time is zero", () => {
     const retention = computeDecayedRetention({
-      initialConfidence: 0.6,
+      initialRetention: 0.6,
       karmaSumAmount: 0.1,
       halfLifeMs: 1000,
       rMin: 0.1,
@@ -39,7 +49,7 @@ describe("dynamics constants runtime", () => {
 
   it("halves base retention at one half-life", () => {
     const retention = computeDecayedRetention({
-      initialConfidence: 0.6,
+      initialRetention: 0.6,
       karmaSumAmount: 0.1,
       halfLifeMs: 1000,
       rMin: 0.1,

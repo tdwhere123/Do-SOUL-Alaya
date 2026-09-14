@@ -93,7 +93,8 @@ export const VERIFICATION_VALID_UNTIL_BY_DIMENSION = Object.freeze({
   fact: 30,
   hazard: 7,
   glossary: 30,
-  episode: null
+  episode: null,
+  observation: null
 } satisfies Record<z.infer<typeof MemoryDimensionSchema>, number | null>);
 
 export type GreenState = z.infer<typeof GreenStateSchema>;

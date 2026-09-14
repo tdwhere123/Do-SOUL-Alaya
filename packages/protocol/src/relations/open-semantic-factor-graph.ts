@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { findSourceTextOccurrence, SourceOccurrenceSchema, SourceTextSpanSchema } from "../evidence/source-selection.js";
 
 export const OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION = 2 as const;
 export const OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID =
@@ -12,21 +13,14 @@ export const CanonicalIdSchema = z.string()
   .min(1)
   .max(128)
   .regex(/^[a-z][a-z0-9._:-]*$/u);
-const SourceSpanSchema = z.tuple([
-  z.number().int().nonnegative(),
-  z.number().int().positive()
-]).superRefine(([start, end], context) => {
-  if (end <= start) {
-    context.addIssue({ code: "custom", message: "source span must be non-empty" });
-  }
-}).readonly();
+const SourceSpanSchema = SourceTextSpanSchema;
 const GroundedSurfaceSchema = z.object({
   surface: z.string().min(1).max(512),
   source_span: SourceSpanSchema
 }).strict();
 const ProposedSurfaceSchema = z.object({
   surface: z.string().min(1).max(512),
-  source_occurrence: z.number().int().nonnegative().lt(128).default(0)
+  source_occurrence: SourceOccurrenceSchema.default(0)
 }).strict();
 export const SemanticIdentitySchema = z.string().min(1).max(512).superRefine(
   (value, context) => {
@@ -381,7 +375,7 @@ function groundProposedSurfaces<T extends Readonly<{
   readonly source_span: readonly [number, number];
 }>[] | null {
   const grounded = items.map((item) => {
-    const sourceSpan = findSourceOccurrence(
+    const sourceSpan = findSourceTextOccurrence(
       sourceText,
       item.surface,
       item.source_occurrence
@@ -395,21 +389,6 @@ function groundProposedSurfaces<T extends Readonly<{
     : grounded as readonly Readonly<Omit<T, "source_occurrence"> & {
       readonly source_span: readonly [number, number];
     }>[];
-}
-
-function findSourceOccurrence(
-  sourceText: string,
-  surface: string,
-  occurrence: number
-): readonly [number, number] | null {
-  let offset = 0;
-  for (let index = 0; index <= occurrence; index += 1) {
-    const start = sourceText.indexOf(surface, offset);
-    if (start < 0) return null;
-    if (index === occurrence) return Object.freeze([start, start + surface.length]);
-    offset = start + surface.length;
-  }
-  return null;
 }
 
 function canonicalGraph(graph: OpenSemanticFactorGraph): OpenSemanticFactorGraph {

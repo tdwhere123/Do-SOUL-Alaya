@@ -28,7 +28,8 @@ const GRACE_HOURS_BY_DIMENSION: Readonly<Record<MemoryDimensionType, number | nu
   [MemoryDimension.FACT]: 72,
   [MemoryDimension.HAZARD]: 6,
   [MemoryDimension.GLOSSARY]: 72,
-  [MemoryDimension.EPISODE]: null
+  [MemoryDimension.EPISODE]: null,
+  [MemoryDimension.OBSERVATION]: null
 } as const;
 
 const NON_RECOVERABLE_REVOKE_REASONS = new Set<RevokeReasonType>([

@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { RunMode, RunState, WorkspaceKind, WorkspaceState, type CandidateMemorySignal, type ContextLens, type ConversationMessage, type EventLogEntry, type Run, type Workspace, type WorkingProjection } from "@do-soul/alaya-protocol";
+import { RunMode, RunState, WorkspaceKind, WorkspaceState, type LegacyCandidateMemorySignal, type ContextLens, type ConversationMessage, type EventLogEntry, type Run, type Workspace, type WorkingProjection } from "@do-soul/alaya-protocol";
 import { ConversationService, type ConversationServiceDependencies } from "../../conversation/conversation-service.js";
 
 export function createService(
@@ -31,7 +31,7 @@ export function createService(
       compile: vi.fn(async () => [])
     },
     signalReceiver: {
-      receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
+      receiveSignal: vi.fn(async (signal: LegacyCandidateMemorySignal) => ({
         signal,
         triage_result: "dropped" as const,
         materialization: null
@@ -122,7 +122,7 @@ export function createWorkingProjection(): WorkingProjection {
   };
 }
 
-export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+export function createSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): LegacyCandidateMemorySignal {
   return {
     signal_id: "signal-1",
     workspace_id: "workspace-1",

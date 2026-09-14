@@ -226,6 +226,7 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
     }
 
     try {
+      if (signal.interpretation_contract !== undefined) throw new TypeError("source interpretation cannot evaluate a legacy conflict");
       await port.evaluate({
         signalId: signal.signal_id,
         workspaceId: signal.workspace_id,

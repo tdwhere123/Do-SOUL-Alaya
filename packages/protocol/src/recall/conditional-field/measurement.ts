@@ -68,6 +68,7 @@ export const ProjectedCapSchema = z.discriminatedUnion("status", [
 ]);
 
 export const FieldActivationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("incomparable"), reason: z.literal("cap_contract_conflict") }).strict().readonly(),
   z
     .object({
       kind: z.literal("unreachable")

@@ -120,6 +120,7 @@ export class InMemoryHandoffGapHandler implements HandoffGapHandler {
 }
 
 function looksLikeGapSignal(signal: CandidateMemorySignal): boolean {
+  if (signal.interpretation_contract !== undefined) return false;
   if (signal.raw_payload.gap_detected === true) {
     return true;
   }

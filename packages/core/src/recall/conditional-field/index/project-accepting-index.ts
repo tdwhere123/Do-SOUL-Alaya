@@ -49,6 +49,7 @@ import {
   continuationInvalidated,
   invalidatedCompleteness,
   resourceRejectedCompleteness,
+  withCapContractConflict,
   type ObserverCoverage
 } from "./completeness.js";
 import {
@@ -354,7 +355,7 @@ function encodeAcceptingIndex(page: Readonly<{
     ...(mixedPayload ? { mixed_generation: true } : {}),
     ...(input.support_work_status === undefined ? {} : { explanation_work: input.support_work_status }),
     ...(resourceOpen ? { resource_work: "open" as const } : {})
-  });
+  }, projected.has_incomparable_activations);
 
   const nextOffset = offset + members.length;
   const scanOffset = projected.truncated || useEmittedSet
@@ -451,9 +452,10 @@ function retractionUpdates(
 
 function indexCompleteness(
   input: AcceptingProjectionInput,
-  extra: Parameters<typeof composeCompleteness>[0]
+  extra: Parameters<typeof composeCompleteness>[0], scannedConflict?: boolean
 ): ReturnType<typeof composeCompleteness> {
-  const residuals = extra.residuals ?? input.observer?.open_regions ?? [];
+  const residuals = withCapContractConflict(extra.residuals ?? input.observer?.open_regions ?? [],
+    (scannedConflict ?? input.snapshot.has_incomparable_activations) !== false);
   return composeCompleteness({
     ...extra,
     observer: extra.observer ?? input.observer,

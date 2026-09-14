@@ -1,8 +1,8 @@
 import { vi } from "vitest";
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import type { LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
 import type { SignalServiceDependencies } from "../../memory/signal-service-types.js";
 
-export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+export function createSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): LegacyCandidateMemorySignal {
   const { signal_state, ...restOverrides } = overrides;
 
   return {
@@ -35,13 +35,13 @@ export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Ca
 export function atomicUpdateState(
   impl: (
     signalId: string,
-    state: CandidateMemorySignal["signal_state"]
-  ) => CandidateMemorySignal = (signalId, state) => createSignal({ signal_id: signalId, signal_state: state })
+    state: LegacyCandidateMemorySignal["signal_state"]
+  ) => LegacyCandidateMemorySignal = (signalId, state) => createSignal({ signal_id: signalId, signal_state: state })
 ) {
   const updateStateInCurrentTransaction = vi.fn(impl);
   const updateState = vi.fn(async (
     signalId: string,
-    state: CandidateMemorySignal["signal_state"]
+    state: LegacyCandidateMemorySignal["signal_state"]
   ) => impl(signalId, state));
   return { updateState, updateStateInCurrentTransaction };
 }

@@ -70,6 +70,7 @@ describe("OfficialApiGardenProvider verified assertion receipt", () => {
       excerpt: assertion,
       source_hash: sourceHash
     });
+    if (signal?.interpretation_contract !== undefined) throw new Error("expected legacy signal fixture");
     const tampered = {
       ...signal!,
       raw_payload: {

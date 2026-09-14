@@ -235,6 +235,9 @@ export function hasInvalidSchemaGrounding(
 }
 
 export function evaluateSignalTriage(signal: CandidateMemorySignal): SignalTriageResult {
+  // The source-observation admission writer must replace this deferral when
+  // connected; a format discriminator never grants the old scored route.
+  if (signal.interpretation_contract !== undefined) return "deferred";
   if (hasInvalidSchemaGrounding(signal)) return "deferred";
   if (signal.confidence < 0.3 && signal.signal_kind === "potential_conflict") return "deferred";
   // Signals below this evidence/confidence floor stay out of the durable path;
@@ -250,6 +253,7 @@ function buildSignalReplayFingerprint(signal: CandidateMemorySignal): string {
     surface_id: signal.surface_id,
     source: signal.source,
     signal_kind: signal.signal_kind,
+    ...(signal.interpretation_contract === undefined ? {} : { interpretation_contract: signal.interpretation_contract }),
     object_kind: signal.object_kind,
     scope_hint: signal.scope_hint,
     domain_tags: signal.domain_tags,

@@ -7,7 +7,7 @@ import {
   isGardenTurnEvidenceFallback
 } from "@do-soul/alaya-soul";
 import type {
-  CandidateMemorySignal,
+  LegacyCandidateMemorySignal,
   ConversationMessage
 } from "@do-soul/alaya-protocol";
 import { buildEvidenceInput } from
@@ -322,7 +322,9 @@ function buildFallback(
   turnContent: string,
   reason: "empty_extraction" | "no_evidence_created"
 ) {
-  return buildGardenTurnEvidenceFallback(fallbackInput(turnContent, reason));
+  const signal = buildGardenTurnEvidenceFallback(fallbackInput(turnContent, reason));
+  if (signal?.interpretation_contract !== undefined) throw new Error("expected legacy fallback fixture");
+  return signal;
 }
 
 function buildStructuredFallback(
@@ -360,7 +362,7 @@ function message(
 }
 
 function trustedObservation(): NonNullable<
-  CandidateMemorySignal["source_observation"]
+  LegacyCandidateMemorySignal["source_observation"]
 > {
   return {
     observed_at: CREATED_AT,

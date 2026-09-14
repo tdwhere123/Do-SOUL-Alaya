@@ -150,6 +150,8 @@ export type FieldEngineState = Readonly<{
   readonly solver_completed_work?: number;
   readonly remaining_reserve: number;
   readonly remaining_memory_bytes: number;
+  /** Conservative allocation charges retained across forks and resets in this epoch. */
+  readonly solver_retained_bytes?: number;
   readonly memory_exhausted: boolean;
   readonly retention_rejected?: "memory" | "work";
   readonly seen_identities: RetainedRows<ProductStateKey>;

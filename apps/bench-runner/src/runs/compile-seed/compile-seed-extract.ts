@@ -103,6 +103,9 @@ function buildOfficialSeedDrafts(
 ): readonly SeedInputDraft[] {
   const drafts: SeedInputDraft[] = [];
   for (const signal of signals) {
+    if (signal.interpretation_contract !== undefined) {
+      throw new Error("Source interpretation seed materialization is not connected yet");
+    }
     const distilled =
       readRawString(signal.raw_payload, "distilled_fact") ??
       readRawString(signal.raw_payload, "matched_text");

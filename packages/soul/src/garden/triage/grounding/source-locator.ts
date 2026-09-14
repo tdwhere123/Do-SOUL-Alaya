@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ConversationMessage } from "@do-soul/alaya-protocol";
+import { SourceAssertionIdSchema, type ConversationMessage } from "@do-soul/alaya-protocol";
 import {
   buildSourceVerificationText,
   isAmbiguousBareStandaloneAssertion,
@@ -31,7 +31,7 @@ export {
 const AssertionCatalogLocatorSchema = z.object({
   contract_version: z.literal(OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION),
   kind: z.literal("assertion_catalog"),
-  assertion_id: z.number().int().positive()
+  assertion_id: SourceAssertionIdSchema
 }).strict().readonly();
 
 export const OfficialApiSourceLocatorSchema = AssertionCatalogLocatorSchema;

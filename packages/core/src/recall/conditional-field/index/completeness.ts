@@ -21,6 +21,20 @@ import {
 } from "../engine/interpretation-coverage.js";
 import { aggregateObserverStatus } from "../reference/accepting-projection.js";
 
+const CONTRACT_CONFLICT_REGION = "field.cap-contract-conflict";
+
+/** A reachable product on incomparable scales cannot establish a complete empty result. */
+export function withCapContractConflict(
+  residuals: readonly CoverageRegion[], conflicted: boolean
+): readonly CoverageRegion[] {
+  const retained = residuals.filter((region) => region.region_id !== CONTRACT_CONFLICT_REGION);
+  return conflicted ? [...retained, {
+    schema_version: 1, region_id: CONTRACT_CONFLICT_REGION, kind: "binding", status: "unknown",
+    conservative_bound_milligrades: 1000, cursor_id: CONTRACT_CONFLICT_REGION, coverage_role: "required",
+    semantic_effects: ["membership", "grade_bound", "order"]
+  }] : retained.length === residuals.length ? residuals : retained;
+}
+
 export {
   completenessForInterpretationStatus,
   interpretationCoverage,

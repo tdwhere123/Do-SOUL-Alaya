@@ -5,7 +5,7 @@ import {
   SoulSignalMaterializedPayloadSchema,
   buildVerifiedUserAssertionReceiptV2Preimage,
   formatVerifiedUserAssertionV2SourceHash,
-  type CandidateMemorySignal,
+  type LegacyCandidateMemorySignal,
   type EvidenceCapsule
 } from "@do-soul/alaya-protocol";
 import {
@@ -150,7 +150,7 @@ describe("official API verified assertion receipt integration", () => {
 async function compileSignal(
   messages: ReturnType<typeof oversizedUserMessages>,
   signalId: string
-): Promise<Readonly<CandidateMemorySignal>> {
+): Promise<Readonly<LegacyCandidateMemorySignal>> {
   const provider = new OfficialApiGardenProvider({
     apiKey: "sk-test",
     extractor: { extract: async ({ userPrompt }) => {
@@ -170,7 +170,7 @@ async function compileSignal(
     surface_id: null,
     turn_messages: messages
   });
-  if (signal === undefined) throw new Error("expected one grounded assertion signal");
+  if (signal === undefined || signal.interpretation_contract !== undefined) throw new Error("expected one legacy grounded assertion signal");
   return signal;
 }
 
@@ -192,7 +192,7 @@ function sha256(value: string): string {
 
 async function persistSignal(
   database: StorageDatabase,
-  signal: Readonly<CandidateMemorySignal>
+  signal: Readonly<LegacyCandidateMemorySignal>
 ): Promise<void> {
   const signalRepo = new SqliteSignalRepo(database);
   await signalRepo.create(signal);
@@ -201,7 +201,7 @@ async function persistSignal(
 
 function insertMaterializationEvent(
   database: StorageDatabase,
-  signal: Readonly<CandidateMemorySignal>,
+  signal: Readonly<LegacyCandidateMemorySignal>,
   capsule: Readonly<EvidenceCapsule>
 ): void {
   const payload = SoulSignalMaterializedPayloadSchema.parse({

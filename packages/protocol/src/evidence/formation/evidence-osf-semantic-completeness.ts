@@ -8,15 +8,18 @@ import {
 } from "../associative-fact-frame.js";
 import {
   OpenSemanticFactorGraphSchema,
+  OpenSemanticFactorFormationCaptureSchema,
+  verifyOpenSemanticFactorFormationCapture,
   groundOpenSemanticFactorGraph,
   type OpenSemanticFactorGraph,
   type OpenSemanticFactorFormationCapture,
   type OpenSemanticFactorGraphProposal
 } from "../../relations/open-semantic-factor-graph.js";
 import { canonicalJson } from "../../recall/selection/capture/canonical-json.js";
+import { sourceTextDigest } from "../../relations/relation-assertion.js";
 
 export const EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID =
-  "evidence_osf_semantic_completeness_v2" as const;
+  "evidence_osf_semantic_completeness_v3" as const;
 const Digest = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const Slot = z.object({ role: AssociativeFactSlotRoleSchema,
   surface: z.string().min(1), source_span: z.tuple([
@@ -25,15 +28,20 @@ const Slot = z.object({ role: AssociativeFactSlotRoleSchema,
 
 export const EvidenceOsfSemanticCompletenessReceiptSchema = z.object({
   schema_version: z.literal(1),
-  operator_id: z.literal(EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID),
+  operator_id: z.enum(["evidence_osf_semantic_completeness_v2", EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID]),
   status: z.enum(["certified", "rejected", "not_applicable"]),
   reason_code: z.enum(["complete", "upstream_not_formed",
     "invalid_fact_frame_obligation", "semantic_graph_incomplete"]),
   fact_frame_capture_digest: Digest,
   semantic_formation_capture_digest: Digest,
   predicate: Slot.nullable(), arguments: z.array(Slot).readonly(),
-  arity: z.number().int().nonnegative().nullable(), receipt_digest: Digest
+  arity: z.number().int().nonnegative().nullable(), receipt_digest: Digest,
+  upstream_semantic_formation: OpenSemanticFactorFormationCaptureSchema.optional()
 }).strict().superRefine((receipt, context) => {
+  if ((receipt.operator_id === EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID) !==
+      (receipt.upstream_semantic_formation !== undefined)) {
+    context.addIssue({ code: "custom", message: "current completeness receipt requires upstream provenance" });
+  }
   if ((receipt.status === "certified") !== (receipt.reason_code === "complete") ||
       (receipt.status === "certified" && (receipt.predicate === null ||
         receipt.arity !== receipt.arguments.length))) {
@@ -72,6 +80,12 @@ export function verifyEvidenceOsfSemanticCompleteness(input: Readonly<{
   sha256: (preimage: string) => string;
 }>): EvidenceOsfSemanticCompletenessReceipt {
   const receipt = EvidenceOsfSemanticCompletenessReceiptSchema.parse(input.receipt);
+  if (receipt.upstream_semantic_formation !== undefined) {
+    const upstream = verifyOpenSemanticFactorFormationCapture(receipt.upstream_semantic_formation, input.sha256);
+    if (upstream.source_sha256 !== sourceTextDigest(input.source_text, input.sha256)) {
+      throw new Error("upstream semantic formation source mismatch");
+    }
+  }
   const { receipt_digest: _digest, ...body } = receipt;
   const digest = `sha256:${input.sha256(evidenceOsfSemanticCompletenessPreimage(body))}`;
   if (receipt.status !== "certified" || receipt.receipt_digest !== digest ||

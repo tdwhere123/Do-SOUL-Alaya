@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import type { LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { RunMode, RunState, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
@@ -17,7 +17,7 @@ afterEach(() => {
   databases.clear();
 });
 
-function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+function createSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): LegacyCandidateMemorySignal {
   const { signal_state, ...restOverrides } = overrides;
 
   return {

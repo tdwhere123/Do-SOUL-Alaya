@@ -459,23 +459,23 @@ describe("conditional-field engine", () => {
     expect(resumed.remaining_work.some((row) => row.kind === "relaxation")).toBe(false);
   });
 
-  it("resumes the guaranteed worklist without cold-starting it as the possible system", () => {
+  it("resumes both unfinished bands without cold-starting the guaranteed system", () => {
     const hops: Transition[] = [];
     for (let index = 0; index < 8; index += 1) {
       hops.push(edge(productKey(`n${index}`), productKey(`n${index + 1}`), "chain", 900, true));
     }
     const paused = createConditionalField({
       interpretation: interpretation(),
-      budget: defaultBudget({ work_units: 39, finalization_reserve: 0, min_envelope: 0 }),
+      budget: defaultBudget({ work_units: 20, finalization_reserve: 0, min_envelope: 0 }),
       seeds: [seed(productKey("n0"), 900)],
       transitions: hops
     });
     expect(paused.binding.kind).toBe("bound");
     if (paused.binding.kind !== "bound") return;
-    expect(paused.binding.possible_complete).toBe(true);
+    expect(paused.binding.possible_complete).toBe(false);
     expect(paused.binding.guaranteed_complete).toBe(false);
     expect(paused.binding.solver_complete).toBe(false);
-    expect(valueOf(paused, "n8")).toBe(900);
+    expect(valueOf(paused, "n8")).toBe(0);
     expect(lowOf(paused, "n8")).toBeUndefined();
     expect(paused.binding.guaranteed_values?.get(productStateNodeId(productKey("n0")))).toBe(900);
     expect(paused.binding.guaranteed_values?.has(productStateNodeId(productKey("n8")))).toBe(false);
@@ -489,9 +489,9 @@ describe("conditional-field engine", () => {
     });
     expect(stepped.binding.kind).toBe("bound");
     if (stepped.binding.kind !== "bound") return;
-    expect(stepped.binding.possible_complete).toBe(true);
+    expect(stepped.binding.possible_complete).toBe(false);
     expect(stepped.binding.guaranteed_complete).toBe(false);
-    expect(stepped.binding.guaranteed_values?.has(productStateNodeId(productKey("n2")))).toBe(true);
+    expect(stepped.binding.guaranteed_values?.get(productStateNodeId(productKey("n0")))).toBe(900);
     const resumed = bindEngineState({
       ...rest,
       remaining_exploration: 100,

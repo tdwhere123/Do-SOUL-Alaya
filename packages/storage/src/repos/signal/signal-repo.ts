@@ -52,10 +52,11 @@ interface SignalRow {
   readonly surface_id: string | null;
   readonly source: string;
   readonly signal_kind: string;
-  readonly object_kind: string;
+  readonly object_kind: string | null;
+  readonly interpretation_contract: string | null;
   readonly scope_hint: string | null;
   readonly domain_tags_json: string;
-  readonly confidence: number;
+  readonly confidence: number | null;
   readonly evidence_refs_json: string;
   readonly source_memory_refs_json: string;
   readonly supersedes_refs_json: string;
@@ -105,7 +106,8 @@ const SIGNAL_SELECT_COLUMNS = `
         source_delivery_ids_json,
         source_observation_json,
         signal_state,
-        created_at
+        created_at,
+        interpretation_contract
 `;
 
 const CREATE_SIGNAL_SQL = `
@@ -130,8 +132,9 @@ const CREATE_SIGNAL_SQL = `
         source_delivery_ids_json,
         source_observation_json,
         signal_state,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        created_at,
+        interpretation_contract
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 interface SignalStatements {
@@ -200,7 +203,8 @@ export class SqliteSignalRepo implements SignalRepo {
       parsedSignal.source_delivery_ids === undefined ? null : JSON.stringify(parsedSignal.source_delivery_ids),
       parsedSignal.source_observation === null ? null : JSON.stringify(parsedSignal.source_observation),
       SignalState.EMITTED,
-      parsedSignal.created_at
+      parsedSignal.created_at,
+      parsedSignal.interpretation_contract ?? null
     );
     const persisted = this.getByIdInCurrentTransaction(parsedSignal.signal_id);
     if (persisted === null) {
@@ -375,6 +379,7 @@ function parseSignalRow(value: unknown): CandidateMemorySignal {
   const row = readRecord(value, "signal row");
   const sourceDeliveryIdsJson = readNullableStringField(row, "source_delivery_ids_json");
   const sourceObservationJson = readNullableStringField(row, "source_observation_json");
+  const interpretationContract = readNullableStringField(row, "interpretation_contract");
   try {
     return CandidateMemorySignalSchema.parse({
       signal_id: readNonEmptyStringField(row, "signal_id"),
@@ -384,10 +389,11 @@ function parseSignalRow(value: unknown): CandidateMemorySignal {
       source: readNonEmptyStringField(row, "source"),
       signal_kind: readNonEmptyStringField(row, "signal_kind"),
       signal_state: readNonEmptyStringField(row, "signal_state"),
-      object_kind: readNonEmptyStringField(row, "object_kind"),
+      object_kind: readNullableStringField(row, "object_kind"),
+      ...(interpretationContract === null ? {} : { interpretation_contract: interpretationContract }),
       scope_hint: readNullableStringField(row, "scope_hint"),
       domain_tags: readJsonColumn(row, "domain_tags_json"),
-      confidence: readFiniteNumberField(row, "confidence"),
+      confidence: row.confidence === null ? null : readFiniteNumberField(row, "confidence"),
       evidence_refs: readJsonColumn(row, "evidence_refs_json"),
       source_memory_refs: readJsonColumn(row, "source_memory_refs_json"),
       supersedes_refs: readJsonColumn(row, "supersedes_refs_json"),

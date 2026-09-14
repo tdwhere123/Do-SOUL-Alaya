@@ -1,83 +1,47 @@
 import { createHash } from "node:crypto";
-import type {
-  EvidenceFactFrameFormationCapture,
-  OpenSemanticFactorFormationCapture,
-  OpenSemanticFactorGraph
-} from "@do-soul/alaya-protocol";
 import {
   EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
   EvidenceOsfSemanticCompletenessReceiptSchema,
-  evidenceFactFrameGraphIsComplete,
   groundEvidenceFactFrameObligation,
   evidenceOsfSemanticCompletenessPreimage,
-  normalizeMemoryObjectKeySurface,
   verifyEvidenceOsfSemanticCompleteness,
+  type EvidenceFactFrameFormationCapture,
+  type OpenSemanticFactorFormationCapture,
   type EvidenceOsfSemanticCompletenessReceipt
 } from "@do-soul/alaya-protocol";
-import { materializeOpenSemanticFactorFormation } from
-  "../../semantic/open-semantic-factor-formation.js";
-import { factFramePreservesSourceObligations } from "@do-soul/alaya-protocol/node/source-frame";
+import { compileSourceFrameSemanticGraph } from "@do-soul/alaya-protocol/node/source-frame";
+import { materializeOpenSemanticFactorFormation } from "../../semantic/open-semantic-factor-formation.js";
 
-export { EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID } from
-  "@do-soul/alaya-protocol";
-
-export const FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID =
-  "core_fact_frame_canonical_open_semantic_factor_v1";
-
-const GARDEN_SOURCE_BOUND_OSF_PRODUCER_OPERATOR_ID =
-  "garden_source_bound_open_semantic_factor_v3";
-
-type GroundedObligationSlot = NonNullable<EvidenceOsfSemanticCompletenessReceipt["predicate"]>;
-
+export { EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID } from "@do-soul/alaya-protocol";
 export type { EvidenceOsfSemanticCompletenessReceipt } from "@do-soul/alaya-protocol";
 
-export function certifyEvidenceSemanticCompleteness(input: Readonly<{
-  readonly sourceText: string;
-  readonly factFrame: Readonly<EvidenceFactFrameFormationCapture>;
-  readonly semanticFormation: Readonly<OpenSemanticFactorFormationCapture>;
-}>): Readonly<{
-  readonly semanticFormation: Readonly<OpenSemanticFactorFormationCapture>;
-  readonly receipt: EvidenceOsfSemanticCompletenessReceipt;
-}> {
-  if (input.semanticFormation.status !== "formed") {
-    return result(input.semanticFormation, receipt(input, "not_applicable",
-      "upstream_not_formed", null));
-  }
-  if (input.factFrame.status !== "formed") {
-    return unavailableUpstream(input);
-  }
-  const obligation = buildObligation(input.sourceText, input.factFrame);
-  if (obligation === null) {
-    return rejected(input, "invalid_fact_frame_obligation", null);
-  }
-  if (input.semanticFormation.graph === null || !evidenceFactFrameGraphIsComplete({
-    source_text: input.sourceText,
-    fact_frame: input.factFrame.fact_frame,
-    graph: input.semanticFormation.graph
-  })) {
-    const canonical = canonicalizeGardenSemanticFormation(input, obligation);
-    if (canonical === null) {
-      return rejected(input, "semantic_graph_incomplete", obligation);
-    }
-    const canonicalInput = Object.freeze({ ...input, semanticFormation: canonical });
-    return result(canonical, receipt(canonicalInput, "certified", "complete", obligation));
-  }
-  return result(input.semanticFormation, receipt(input, "certified", "complete", obligation));
-}
+export const FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID =
+  "core_fact_frame_canonical_open_semantic_factor_v2";
 
-type EvidenceObligation = Readonly<{
-  readonly predicate: GroundedObligationSlot;
-  readonly arguments: readonly GroundedObligationSlot[];
+type CompletenessInput = Readonly<{
+  sourceText: string;
+  factFrame: Readonly<EvidenceFactFrameFormationCapture>;
+  semanticFormation: Readonly<OpenSemanticFactorFormationCapture>;
 }>;
 
-function canonicalizeGardenSemanticFormation(
-  input: Parameters<typeof certifyEvidenceSemanticCompleteness>[0],
-  obligation: EvidenceObligation
-): OpenSemanticFactorFormationCapture | null {
-  const upstream = input.semanticFormation;
-  if (upstream.producer_operator_id !== GARDEN_SOURCE_BOUND_OSF_PRODUCER_OPERATOR_ID ||
-      upstream.graph === null) return null;
-  const proposal = canonicalGraphProposal(input.sourceText, obligation, upstream.graph);
+/** A qualified source frame owns formation; nomination failure is retained separately. */
+export function certifyEvidenceSemanticCompleteness(input: CompletenessInput): Readonly<{
+  semanticFormation: Readonly<OpenSemanticFactorFormationCapture>;
+  receipt: EvidenceOsfSemanticCompletenessReceipt;
+}> {
+  const frame = input.factFrame.fact_frame;
+  if (input.factFrame.status !== "formed" || frame === null) {
+    const upstream = input.semanticFormation;
+    const formation = upstream.status === "formed"
+      ? materializeOpenSemanticFactorFormation({ source_kind: "evidence", source_text: input.sourceText })
+      : upstream;
+    return result(input, formation, "not_applicable", "upstream_not_formed", null);
+  }
+  const graph = compileSourceFrameSemanticGraph(input.sourceText, frame);
+  if (graph === null) {
+    return result(input, rejectedFormation(input.sourceText), "rejected", "invalid_fact_frame_obligation", null);
+  }
+  const obligation = groundEvidenceFactFrameObligation(input.sourceText, frame);
   const formation = materializeOpenSemanticFactorFormation({
     source_kind: "evidence",
     source_text: input.sourceText,
@@ -85,156 +49,62 @@ function canonicalizeGardenSemanticFormation(
       schema_version: 1,
       producer_operator_id: FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID,
       source_text: input.sourceText,
-      graph: proposal
+      graph
     }
   });
-  return formation.status === "formed" && formation.graph !== null &&
-    evidenceFactFrameGraphIsComplete({
-      source_text: input.sourceText,
-      fact_frame: input.factFrame.fact_frame,
-      graph: formation.graph
-    })
-    ? formation
-    : null;
-}
-
-function canonicalGraphProposal(
-  source: string,
-  obligation: EvidenceObligation,
-  upstream: Readonly<OpenSemanticFactorGraph>
-) {
-  const slots = [obligation.predicate, ...obligation.arguments];
-  const factors = slots.map((slot, index) => ({
-    factor_id: index === 0 ? "predicate" : `argument_${index - 1}`,
-    surface: slot.surface,
-    source_occurrence: sourceOccurrence(source, slot.surface, slot.source_span[0]),
-    semantic_identity: semanticIdentityForSlot(slot, upstream)
-  }));
-  return Object.freeze({
-    schema_version: 2 as const,
-    source_kind: "evidence" as const,
-    result_variable_ids: Object.freeze([]),
-    propositions: Object.freeze([Object.freeze({
-      proposition_id: "fact_frame",
-      predicate_factor_id: "predicate",
-      arguments: Object.freeze(obligation.arguments.map((slot, index) => Object.freeze({
-        position: index,
-        binding_identity: slot.role,
-        reference_kind: "factor" as const,
-        reference_id: `argument_${index}`
-      })))
-    })]),
-    factors: Object.freeze(factors.map(Object.freeze)),
-    variables: Object.freeze([])
-  });
-}
-
-function semanticIdentityForSlot(
-  slot: GroundedObligationSlot,
-  graph: Readonly<OpenSemanticFactorGraph>
-): string {
-  const aligned = [...graph.factors]
-    .filter((factor) => factor.source_span[0] === slot.source_span[0] &&
-      factor.source_span[1] === slot.source_span[1])
-    .sort((left, right) =>
-      left.factor_id.localeCompare(right.factor_id));
-  return aligned[0]?.semantic_identity ?? normalizeMemoryObjectKeySurface(slot.surface);
-}
-
-function sourceOccurrence(source: string, surface: string, expectedStart: number): number {
-  let occurrence = 0;
-  let cursor = 0;
-  while (cursor <= expectedStart) {
-    const start = source.indexOf(surface, cursor);
-    if (start === expectedStart) return occurrence;
-    if (start < 0 || start > expectedStart) break;
-    occurrence += 1;
-    cursor = start + surface.length;
+  if (formation.status !== "formed") {
+    return result(input, rejectedFormation(input.sourceText), "rejected", "semantic_graph_incomplete", obligation);
   }
-  return 0;
+  return result(input, formation, "certified", "complete", obligation);
 }
 
-function unavailableUpstream(
-  input: Parameters<typeof certifyEvidenceSemanticCompleteness>[0]
-): ReturnType<typeof certifyEvidenceSemanticCompleteness> {
-  const formation = materializeOpenSemanticFactorFormation({
-    source_kind: "evidence",
-    source_text: input.sourceText
+function rejectedFormation(source: string): OpenSemanticFactorFormationCapture {
+  return materializeOpenSemanticFactorFormation({
+    source_kind: "evidence", source_text: source, negative_status: "rejected"
   });
-  return result(formation, receipt(
-    Object.freeze({ ...input, semanticFormation: formation }),
-    "not_applicable",
-    "upstream_not_formed",
-    null
-  ));
 }
 
-function rejected(
-  input: Parameters<typeof certifyEvidenceSemanticCompleteness>[0],
-  reason: "invalid_fact_frame_obligation" | "semantic_graph_incomplete",
-  obligation: EvidenceObligation | null
-): ReturnType<typeof certifyEvidenceSemanticCompleteness> {
-  const formation = materializeOpenSemanticFactorFormation({
-    source_kind: "evidence",
-    source_text: input.sourceText,
-    negative_status: "rejected"
-  });
-  return result(formation, receipt(input, "rejected", reason, obligation));
-}
-
-function buildObligation(
-  source: string,
-  capture: Readonly<EvidenceFactFrameFormationCapture>
-): EvidenceObligation | null {
-  if (capture.fact_frame === null ||
-    !factFramePreservesSourceObligations(source, capture.fact_frame)) return null;
-  return groundEvidenceFactFrameObligation(source, capture.fact_frame);
-}
-
-function receipt(
-  input: Parameters<typeof certifyEvidenceSemanticCompleteness>[0],
+function result(
+  input: CompletenessInput,
+  formation: OpenSemanticFactorFormationCapture,
   status: EvidenceOsfSemanticCompletenessReceipt["status"],
   reason: EvidenceOsfSemanticCompletenessReceipt["reason_code"],
-  obligation: EvidenceObligation | null
-): EvidenceOsfSemanticCompletenessReceipt {
+  obligation: ReturnType<typeof groundEvidenceFactFrameObligation>
+) {
   const body = {
     schema_version: 1 as const,
     operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
     status,
     reason_code: reason,
     fact_frame_capture_digest: input.factFrame.capture_digest,
-    semantic_formation_capture_digest: input.semanticFormation.capture_digest,
+    semantic_formation_capture_digest: formation.capture_digest,
     predicate: obligation?.predicate ?? null,
-    arguments: obligation?.arguments ?? Object.freeze([]),
-    arity: obligation?.arguments.length ?? null
+    arguments: obligation?.arguments ?? [],
+    arity: obligation?.arguments.length ?? null,
+    upstream_semantic_formation: input.semanticFormation
   };
-  return EvidenceOsfSemanticCompletenessReceiptSchema.parse(Object.freeze({
-    ...body, receipt_digest: digest(evidenceOsfSemanticCompletenessPreimage(body))
-  }));
-}
-
-function result(
-  semanticFormation: OpenSemanticFactorFormationCapture,
-  semanticCompleteness: EvidenceOsfSemanticCompletenessReceipt
-): ReturnType<typeof certifyEvidenceSemanticCompleteness> {
-  return Object.freeze({ semanticFormation, receipt: semanticCompleteness });
-}
-
-function digest(value: string): string {
-  return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
+  const receipt = EvidenceOsfSemanticCompletenessReceiptSchema.parse({
+    ...body,
+    receipt_digest: `sha256:${sha256(evidenceOsfSemanticCompletenessPreimage(body))}`
+  });
+  return Object.freeze({ semanticFormation: formation, receipt });
 }
 
 export function verifyEvidenceSemanticCompletenessReceipt(input: Readonly<{
-  readonly receipt: Readonly<EvidenceOsfSemanticCompletenessReceipt>;
-  readonly sourceText: string;
-  readonly factFrame: Readonly<EvidenceFactFrameFormationCapture>;
-  readonly semanticFormation: Readonly<OpenSemanticFactorFormationCapture>;
+  receipt: Readonly<EvidenceOsfSemanticCompletenessReceipt>;
+  sourceText: string;
+  factFrame: Readonly<EvidenceFactFrameFormationCapture>;
+  semanticFormation: Readonly<OpenSemanticFactorFormationCapture>;
 }>): EvidenceOsfSemanticCompletenessReceipt {
   return verifyEvidenceOsfSemanticCompleteness({
     receipt: input.receipt,
     source_text: input.sourceText,
     fact_frame: input.factFrame,
     semantic_formation: input.semanticFormation,
-    sha256: (preimage) => createHash("sha256").update(preimage, "utf8").digest("hex")
+    sha256
   });
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }

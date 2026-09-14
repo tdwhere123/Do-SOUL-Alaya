@@ -1,75 +1,92 @@
 import { CONDITIONAL_FIELD_SCHEMA_VERSION, MILLIGRADE_BOTTOM, MILLIGRADE_TOP,
   type FieldValue } from "@do-soul/alaya-protocol";
-import { bindMaxMinField, productStateNodeId, type BindMaxMinResult, type BindMaxMinSuccess
+import { preparedFieldBinding, productStateNodeId, type BindMaxMinResult, type BindMaxMinSuccess
 } from "../reference/bind-max-min.js";
 import type { BindableState, FieldEngineState, RemainingWork } from "./field-engine.js";
-import type { FieldGraphAdditions } from "./field-graph-preparation.js";
+import { appendFieldGraph, fieldGraphComplete, nextFieldGraphAtom, stepFieldGraph, type FieldGraphAdditions } from "./field-graph-preparation.js";
 import { residualGradeUpper, residualsInvalidateBounds } from "../index/completeness.js";
+import { isHardIdentityContractId } from "../cap-contract.js";
+import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 
 const NO_ADDITIONS: FieldGraphAdditions = { seeds: [], transitions: [] };
 
-type SolveBand = Readonly<{ binding: BindMaxMinSuccess; exploration: number; reserve: number; runs: number; steps: number }>;
+type SolveBand = Readonly<{ binding: BindMaxMinSuccess; runs: number; steps: number }>;
 
 export function bindChargedField(charged: BindableState, remainingWork: RemainingWork[]): {
   readonly binding: BindMaxMinResult; readonly exploration: number; readonly reserve: number; readonly complete: boolean;
+  readonly remaining_memory_bytes: number; readonly solver_retained_bytes: number; readonly memory_exhausted: boolean;
 } {
   const prior = charged.proven_binding?.kind === "bound" ? charged.proven_binding : undefined;
   const reusable = prior?.preparation !== undefined && charged.binding_delta?.reset !== true;
-  const possible = runBand(charged, reusable ? prior : undefined,
+  let possibleGraph = appendFieldGraph(reusable ? prior.preparation : undefined,
     reusable ? charged.binding_delta?.possible ?? NO_ADDITIONS : { seeds: charged.seeds, transitions: charged.transitions },
-    charged.remaining_exploration, charged.remaining_reserve, false);
-  const guaranteedPrior = reusable ? priorGuaranteed(prior!) : undefined;
-  const guaranteed = runBand(charged, guaranteedPrior,
-    reusable ? charged.binding_delta?.guaranteed ?? NO_ADDITIONS
-      : { seeds: charged.guaranteed_seeds, transitions: charged.guaranteed_transitions },
-    possible.binding.solver_complete ? possible.exploration : 0,
-    possible.binding.solver_complete ? possible.reserve : 0, true);
+    { seeds: charged.seeds, transitions: charged.transitions });
+  let guaranteedGraph = appendFieldGraph(reusable ? prior.guaranteed_preparation : undefined,
+    reusable ? charged.binding_delta?.guaranteed ?? NO_ADDITIONS : { seeds: charged.guaranteed_seeds, transitions: charged.guaranteed_transitions },
+    { seeds: charged.guaranteed_seeds, transitions: charged.guaranteed_transitions });
+  let next = reusable ? prior.next_band ?? "possible" : "possible";
+  let cross = reusable && possibleGraph.nodes === prior.preparation?.nodes
+    && guaranteedGraph.nodes === prior.guaranteed_preparation?.nodes && prior.cross_contract_conflicts !== undefined
+    ? prior.cross_contract_conflicts : { products: new PersistentStringMap<boolean>(), count: 0 };
+  let possibleSteps = 0;
+  let guaranteedSteps = 0;
+  let memory = charged.remaining_memory_bytes;
+  let retained = charged.solver_retained_bytes ?? 0;
+  let possibleBlocked = false;
+  let guaranteedBlocked = false;
+  const allowance = charged.remaining_exploration + charged.remaining_reserve;
+  while (possibleSteps + guaranteedSteps < allowance && (!fieldGraphComplete(possibleGraph) || !fieldGraphComplete(guaranteedGraph))) {
+    const possibleRunnable = !possibleBlocked && !fieldGraphComplete(possibleGraph);
+    const guaranteedRunnable = !guaranteedBlocked && !fieldGraphComplete(guaranteedGraph);
+    if (!possibleRunnable && !guaranteedRunnable) break;
+    const usePossible = !guaranteedRunnable || next === "possible" && possibleRunnable;
+    const atom = nextFieldGraphAtom(usePossible ? possibleGraph : guaranteedGraph, cross.products.size);
+    if (atom.bytes > memory) {
+      if (usePossible) possibleBlocked = true; else guaranteedBlocked = true;
+      continue;
+    }
+    if (usePossible) { possibleGraph = stepFieldGraph(possibleGraph, memory, atom); possibleSteps += 1; next = "guaranteed"; }
+    else { guaranteedGraph = stepFieldGraph(guaranteedGraph, memory, atom); guaranteedSteps += 1; next = "possible"; }
+    const changed = (usePossible ? possibleGraph : guaranteedGraph).changedProduct;
+    if (changed !== undefined) {
+      const conflicted = crossContractConflict(possibleGraph.values, guaranteedGraph.values, changed);
+      const was = cross.products.get(changed) === true;
+      if (conflicted !== was) cross = { products: cross.products.with(changed, conflicted),
+        count: cross.count + Number(conflicted) - Number(was) };
+    }
+    memory -= atom.bytes;
+    retained += atom.bytes;
+  }
+  const possible = bandResult(charged, possibleGraph, possibleSteps, false);
+  const guaranteed = bandResult(charged, guaranteedGraph, guaranteedSteps, true);
   const complete = possible.binding.solver_complete && guaranteed.binding.solver_complete;
   if (!complete && !remainingWork.some((row) => row.kind === "relaxation")) {
     remainingWork.push({ kind: "relaxation", units: Math.max(1,
       (possible.binding.work_queue?.size ?? 0) + (guaranteed.binding.work_queue?.size ?? 0)) });
   }
   return {
-    binding: annotateBounds(charged, possible, guaranteed),
-    exploration: possible.binding.solver_complete ? guaranteed.exploration : possible.exploration,
-    reserve: possible.binding.solver_complete ? guaranteed.reserve : possible.reserve,
-    complete
+    binding: annotateBounds(charged, possible, guaranteed, next, cross),
+    exploration: Math.max(0, charged.remaining_exploration - possibleSteps - guaranteedSteps),
+    reserve: charged.remaining_reserve - Math.max(0, possibleSteps + guaranteedSteps - charged.remaining_exploration),
+    complete, remaining_memory_bytes: memory, solver_retained_bytes: retained,
+    memory_exhausted: charged.memory_exhausted || possibleBlocked || guaranteedBlocked
   };
 }
 
-function runBand(state: BindableState, prior: BindMaxMinSuccess | undefined, additions: FieldGraphAdditions,
-  exploration: number, reserve: number, guaranteed: boolean): SolveBand {
-  if (prior?.solver_complete && additions.seeds.length === 0 && additions.transitions.length === 0) {
-    return { binding: prior, exploration, reserve, runs: 0, steps: 0 };
-  }
-  const limit = exploration + reserve;
-  const result = bindMaxMinField({
+function bandResult(state: BindableState, preparation: NonNullable<BindMaxMinSuccess["preparation"]>, steps: number,
+  guaranteed: boolean): SolveBand {
+  const binding = preparedFieldBinding({
     query_id: state.query_id, snapshot_id: state.snapshot_id, budget: state.budget,
     seeds: guaranteed ? state.guaranteed_seeds : state.seeds,
     transitions: guaranteed ? state.guaranteed_transitions : state.transitions,
     identities: state.identity_index,
     facets: state.facets,
-    prior_values: prior?.values,
-    work_limit: limit,
-    incremental: { prior: prior?.preparation, additions, queue: prior?.work_queue }
-  });
-  if (result.kind !== "bound") throw new Error("admitted field budget changed during binding");
-  const spent = result.solver_steps;
-  const explorationPaid = Math.min(exploration, spent);
-  return { binding: result, exploration: exploration - explorationPaid,
-    reserve: reserve - (spent - explorationPaid), runs: spent > 0 ? 1 : 0, steps: spent };
+  }, preparation, steps);
+  return { binding, steps, runs: steps > 0 ? 1 : 0 };
 }
 
-function priorGuaranteed(prior: BindMaxMinSuccess): BindMaxMinSuccess | undefined {
-  if (prior.guaranteed_preparation === undefined) return undefined;
-  return { kind: "bound", values: prior.guaranteed_values ?? new Map(),
-    preparation: prior.guaranteed_preparation, work_queue: prior.guaranteed_queue,
-    solver_steps: 0, solver_runs: 0, solver_complete: prior.guaranteed_complete === true,
-    get remaining_worklist() { return [...prior.guaranteed_queue ?? []]; },
-    snapshot: prior.snapshot };
-}
-
-function annotateBounds(state: BindableState, possible: SolveBand, guaranteed: SolveBand): BindMaxMinSuccess {
+function annotateBounds(state: BindableState, possible: SolveBand, guaranteed: SolveBand,
+  next: "possible" | "guaranteed", cross: NonNullable<BindMaxMinSuccess["cross_contract_conflicts"]>): BindMaxMinSuccess {
   const bound = possible.binding;
   const lower = guaranteed.binding;
   const residualHigh = residualGradeUpper(state.residuals);
@@ -80,6 +97,8 @@ function annotateBounds(state: BindableState, possible: SolveBand, guaranteed: S
   let facets: readonly import("@do-soul/alaya-protocol").FacetVector[] | undefined;
   return {
     kind: "bound", values: bound.values,
+    next_band: next,
+    cross_contract_conflicts: cross,
     solver_steps: possible.steps + guaranteed.steps,
     solver_runs: possible.runs + guaranteed.runs,
     solver_complete: bound.solver_complete && lower.solver_complete,
@@ -96,15 +115,17 @@ function annotateBounds(state: BindableState, possible: SolveBand, guaranteed: S
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       query_id: state.query_id,
       snapshot_id: state.snapshot_id,
+      has_incomparable_activations: cross.count > 0 || bound.preparation!.values.conflictCount > 0
+        || lower.preparation!.values.conflictCount > 0,
       get seeds() { return seeds ??= [...state.seeds]; },
       get facets() { return facets ??= [...state.facets]; },
       get retained_transitions() { return retainedTransitions ??= state.transitions.filter((row) => row.applicable); },
       get values() {
-        materialized ??= bound.snapshot.values.map((value) => value.activation?.kind === "unreachable" ? value : {
-          ...value,
-          ...valueBounds(value.milligrades ?? MILLIGRADE_BOTTOM,
-            lower.values.get(productStateNodeId(value.state)), residualHigh, invalidated)
-        });
+        if (materialized === undefined) {
+          const keys = state.identity_index ?? new Map([...bound.preparation!.keys, ...lower.preparation!.keys]);
+          materialized = [...keys.values()].map((key) => projectedValue(key, bound, lower.values,
+            lower.preparation, residualHigh, invalidated));
+        }
         return materialized;
       }
     }
@@ -120,20 +141,52 @@ export function orderedProjectionValues(state: FieldEngineState): Readonly<{ siz
   return { size: identities.size, at(index) {
     const key = identities.entryAt(index)?.[1];
     if (key === undefined) return undefined;
-    const id = productStateNodeId(key);
-    const grade = binding.values.get(id);
-    return grade === undefined ? { schema_version: 1, state: key, accepting: key.program_state === "accepting", activation: { kind: "unreachable" } }
-      : { schema_version: 1, state: key, accepting: key.program_state === "accepting", activation: { kind: "reachable", milligrades: grade },
-        milligrades: grade, ...valueBounds(grade, binding.guaranteed_values?.get(id), residualHigh, invalidated) };
+    return projectedValue(key, binding, binding.guaranteed_values, binding.guaranteed_preparation, residualHigh, invalidated);
   } };
 }
 
+function projectedValue(key: FieldValue["state"], bound: BindMaxMinSuccess, lower: ReadonlyMap<string, number> | undefined,
+  lowerPreparation: BindMaxMinSuccess["preparation"], residualHigh: number | undefined, invalidated: boolean): FieldValue {
+  const id = productStateNodeId(key);
+  const possibleGrade = bound.values.get(id);
+  const low = lower?.get(id);
+  const possibleContract = bound.preparation?.values.contract(id);
+  const lowerContract = lowerPreparation?.values.contract(id);
+  const possibleHard = possibleContract === undefined || isHardIdentityContractId(possibleContract);
+  const lowerHard = lowerContract === undefined || isHardIdentityContractId(lowerContract);
+  const conflict = bound.preparation?.values.conflicted(id) || lowerPreparation?.values.conflicted(id)
+    || bound.preparation !== undefined && lowerPreparation !== undefined
+      && crossContractConflict(bound.preparation.values, lowerPreparation.values, id);
+  const sameContract = possibleGrade === undefined || low === undefined
+    || possibleContract === lowerContract || possibleHard && lowerHard;
+  const useLowerContract = low !== undefined && (possibleGrade === undefined || possibleHard && !lowerHard);
+  const grade = conflict ? undefined : sameContract && low !== undefined ? Math.max(possibleGrade ?? low, low)
+    : useLowerContract ? low : possibleGrade;
+  const base = { schema_version: 1 as const, state: key, accepting: key.program_state === "accepting" };
+  if (conflict) return { ...base, activation: { kind: "incomparable", reason: "cap_contract_conflict" } };
+  if (grade === undefined) return { ...base, activation: { kind: "unreachable" } };
+  const contract = useLowerContract ? lowerContract : possibleContract;
+  const admitted = low !== undefined && (useLowerContract || sameContract) ? low : undefined;
+  return { ...base, activation: { kind: "reachable", milligrades: grade,
+      ...(contract === undefined ? {} : { cap_contract_id: contract }) }, milligrades: grade,
+    ...(contract === undefined ? {} : { cap_contract_id: contract }),
+    ...valueBounds(grade, admitted, residualHigh, invalidated, bound.possible_complete ?? bound.solver_complete) };
+}
+
+function crossContractConflict(possible: NonNullable<BindMaxMinSuccess["preparation"]>["values"],
+  guaranteed: NonNullable<BindMaxMinSuccess["preparation"]>["values"], id: string): boolean {
+  const highContract = possible.contract(id);
+  const lowContract = guaranteed.contract(id);
+  return possible.has(id) && guaranteed.has(id) && highContract !== undefined && lowContract !== undefined
+    && highContract !== lowContract && !isHardIdentityContractId(highContract) && !isHardIdentityContractId(lowContract);
+}
+
 function valueBounds(grade: number, admitted: number | undefined, residualHigh: number | undefined,
-  invalidated: boolean): Pick<FieldValue, "high_milligrades"> & Partial<Pick<FieldValue, "low_milligrades">> {
+  invalidated: boolean, possibleComplete: boolean): Pick<FieldValue, "high_milligrades"> & Partial<Pick<FieldValue, "low_milligrades">> {
   return {
     ...(invalidated
       ? { low_milligrades: MILLIGRADE_BOTTOM }
       : admitted === undefined ? {} : { low_milligrades: admitted }),
-    high_milligrades: invalidated ? MILLIGRADE_TOP : residualHigh === undefined ? grade : Math.max(grade, residualHigh)
+    high_milligrades: invalidated || !possibleComplete ? MILLIGRADE_TOP : Math.max(grade, admitted ?? grade, residualHigh ?? grade)
   };
 }

@@ -58,6 +58,7 @@ export function acceptingEntries(
   readonly next: number;
   readonly remaining: number;
   readonly facet: FacetVisitProgress;
+  readonly has_incomparable_activations: boolean | undefined;
 } {
   const entries: IndexEntry[] = [];
   const members: IndexEntry[] = [];
@@ -72,10 +73,12 @@ export function acceptingEntries(
     ? 0
     : input.projection_scan_offset
       ?? Number(cursorMatch?.[1] ?? 0);
-  const sorted = sortFieldValues(input.snapshot.values, emitted === undefined ? "canonical" : policy);
-  const values = input.ordered_values !== undefined && emitted === undefined
-    ? input.ordered_values
-    : { size: sorted.length, at: (index: number) => sorted[index] };
+  let values: NonNullable<AcceptingProjectionInput["ordered_values"]>;
+  if (input.ordered_values !== undefined && emitted === undefined) values = input.ordered_values;
+  else {
+    const sorted = sortFieldValues(input.snapshot.values, emitted === undefined ? "canonical" : policy);
+    values = { size: sorted.length, at: (index: number) => sorted[index] };
+  }
   const payloadWork = input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1;
   const pageLimited = input.projection_scan_offset !== undefined || input.delivered_product_ids !== undefined
     || input.delivered_entry_revisions !== undefined || input.grounding_complete === false
@@ -85,6 +88,7 @@ export function acceptingEntries(
   if (input.budget.page_budget === 0) {
     return {
       entries, members, updates, retracted, unemitted: values.size,
+      has_incomparable_activations: input.snapshot.has_incomparable_activations ?? (values.size === 0 ? false : undefined),
       truncated: start < values.size, next: start, remaining: allowance,
       facet: accountFacetPreparation(input.snapshot.facets, input.snapshot.seeds, 0,
         input.projection_facet_index, scanOffset).facet
@@ -102,13 +106,16 @@ export function acceptingEntries(
   if (prepared.truncated && allowance <= 0) {
     return {
       entries, members, updates, retracted, unemitted: values.size,
+      has_incomparable_activations: input.snapshot.has_incomparable_activations,
       truncated: true, next: start, remaining: allowance, facet
     };
   }
   let next = start;
+  let encounteredConflict = false;
   ({ next, truncated, groundingDeferred, allowance, facet } = scanAcceptingValues({
     input: indexed, emitted, pageEnd, pageLimited, values, start, next, truncated,
-    groundingDeferred, allowance, facet, entries, members, updates
+    groundingDeferred, allowance, facet, entries, members, updates,
+    onConflict: () => { encounteredConflict = true; }
   }));
   const unemitted = emitted === undefined
     ? Math.max(0, entries.length)
@@ -125,7 +132,9 @@ export function acceptingEntries(
     truncated: truncated || groundingDeferred,
     next,
     remaining: allowance,
-    facet
+    facet,
+    has_incomparable_activations: encounteredConflict ? true : input.snapshot.has_incomparable_activations
+      ?? (start === 0 && next === values.size && !truncated ? false : undefined)
   };
 }
 
@@ -144,6 +153,7 @@ function scanAcceptingValues(scan: {
   readonly entries: IndexEntry[];
   readonly members: IndexEntry[];
   readonly updates: IndexEntry[];
+  readonly onConflict: () => void;
 }): {
   next: number;
   truncated: boolean;
@@ -153,9 +163,16 @@ function scanAcceptingValues(scan: {
 } {
   const { input, emitted, pageEnd, pageLimited, values, entries, members, updates } = scan;
   let { next, truncated, groundingDeferred, allowance, facet } = scan;
+  const needsConflictScan = input.snapshot.has_incomparable_activations === undefined;
+  const entryVisit = needsConflictScan ? 0 : 1;
   for (let index = scan.start; index < values.size; index += 1) {
+    if (needsConflictScan && allowance < 1) { truncated = true; break; }
     const value = values.at(index);
     if (value === undefined) break;
+    if (needsConflictScan) {
+      allowance -= 1;
+      if (value.activation?.kind === "incomparable") scan.onConflict();
+    }
     const key = sharedProductIdentity(value.state);
     if (emitted !== undefined) {
       const prior = emitted[key];
@@ -168,8 +185,8 @@ function scanAcceptingValues(scan: {
           next += 1;
           continue;
         }
-        if (allowance < 1 || updates.length >= input.budget.page_budget) { truncated = true; break; }
-        allowance -= 1;
+        if (allowance < entryVisit || updates.length >= input.budget.page_budget) { truncated = true; break; }
+        allowance -= entryVisit;
         updates.push(entry);
         next += 1;
         continue;
@@ -197,12 +214,12 @@ function scanAcceptingValues(scan: {
     const collected = emitted === undefined ? entries.length : members.length;
     const payloadReserve = input.finalize_payload === undefined ? 0
       : (input.payload_work_per_entry ?? 1) * (collected + (value.accepting && grounded ? 1 : 0));
-    if (allowance < 1 + payloadReserve) {
+    if (allowance < entryVisit + payloadReserve) {
       truncated = true;
       facet = { ...facet, scan_offset: Math.max(facet.scan_offset, 1) };
       break;
     }
-    allowance -= 1;
+    allowance -= entryVisit;
     if (!grounded) {
       groundingDeferred ||= value.accepting;
       if (value.accepting && input.delivered_product_ids === undefined && emitted === undefined) break;

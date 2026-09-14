@@ -22,7 +22,8 @@ const memoryDimensionValues = [
   "fact",
   "hazard",
   "glossary",
-  "episode"
+  "episode",
+  "observation"
 ] as const;
 
 const sourceKindValues = ["compiler", "user", "seed", "import", "review"] as const;
@@ -68,7 +69,8 @@ export const MemoryDimension = {
   FACT: "fact",
   HAZARD: "hazard",
   GLOSSARY: "glossary",
-  EPISODE: "episode"
+  EPISODE: "episode",
+  OBSERVATION: "observation"
 } as const;
 
 export const SourceKind = {

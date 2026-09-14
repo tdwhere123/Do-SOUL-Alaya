@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   DEFAULT_EXTRACTION_SOURCE_PACKING, extractionSourcePackingSize,
+  SourceAssertionIdSchema,
   type ExtractionSourcePacking, type ConversationMessage
 } from "@do-soul/alaya-protocol";
 import {
@@ -30,7 +31,7 @@ export const OFFICIAL_API_EXTRACTION_BATCH_CONTRACT_VERSION = 1;
 export const OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH = 8;
 
 const OfficialApiSourceAssertionSchema = z.object({
-  assertion_id: z.number().int().positive(),
+  assertion_id: SourceAssertionIdSchema,
   text: z.string().trim().min(1)
 }).strict().readonly();
 

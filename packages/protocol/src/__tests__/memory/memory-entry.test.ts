@@ -371,7 +371,8 @@ describe("MemoryEntry enums", () => {
       "fact",
       "hazard",
       "glossary",
-      "episode"
+      "episode",
+      "observation"
     ]);
   });
 

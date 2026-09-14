@@ -234,7 +234,7 @@ export interface MemoryServiceDynamicsPort {
     readonly created_at: string;
   }): {
     readonly decay_profile: MemoryEntry["decay_profile"];
-    readonly confidence: number;
+    readonly confidence: number | null;
     readonly retention_score: number;
     readonly retention_state: MemoryEntry["retention_state"];
     readonly activation_score: number;

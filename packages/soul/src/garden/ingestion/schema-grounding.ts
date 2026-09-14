@@ -1,5 +1,6 @@
 import {
-  CandidateMemorySignalSchema,
+  LegacyCandidateMemorySignalSchema,
+  type LegacyCandidateMemorySignal,
   type CandidateMemorySignal
 } from "@do-soul/alaya-protocol";
 
@@ -78,8 +79,9 @@ export function buildSchemaGroundedRawPayload(
 
 export function normalizeSchemaGroundedSignal(
   signal: Readonly<CandidateMemorySignal>
-): Readonly<CandidateMemorySignal> {
-  return CandidateMemorySignalSchema.parse({
+): Readonly<LegacyCandidateMemorySignal> {
+  if (signal.interpretation_contract !== undefined) throw new TypeError("source interpretation cannot use legacy schema grounding");
+  return LegacyCandidateMemorySignalSchema.parse({
     ...signal,
     raw_payload: buildSchemaGroundedRawPayload({
       rawPayload: signal.raw_payload,
@@ -93,6 +95,9 @@ export function normalizeSchemaGroundedSignal(
 export function validateSchemaGroundingForSignal(
   signal: Readonly<CandidateMemorySignal>
 ): SchemaGroundingValidationResult {
+  if (signal.interpretation_contract !== undefined) {
+    return { declared: true, status: "invalid", reasons: ["source interpretation requires its own admission"], field_count: 0 };
+  }
   if (!declaresSchemaGrounding(signal.raw_payload)) {
     return Object.freeze({
       declared: false,
@@ -121,6 +126,7 @@ export function validateSchemaGroundingForSignal(
 export function readSchemaGroundedContent(
   signal: Readonly<CandidateMemorySignal>
 ): string | null {
+  if (signal.interpretation_contract !== undefined) return null;
   const fieldCandidates = readFieldCandidates(signal.raw_payload.field_candidates);
   const contentField = fieldCandidates.find((field) => field.field_name === fieldNameForObjectKind(signal.object_kind));
   const selected = contentField ?? fieldCandidates[0] ?? null;

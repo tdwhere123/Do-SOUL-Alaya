@@ -54,6 +54,7 @@ const DEFAULT_BUSY_TIMEOUT_MS = 5_000;
 const UNINITIALIZED_DATABASE_PROBE_TIMEOUT_MS = 50;
 const MAX_SQLITE_BUSY_TIMEOUT_MS = 2_147_483_647;
 const MEMORY_ENTRY_ENUM_CHECK_MIGRATION_VERSION = 14;
+const OBSERVATION_MEMORY_DIMENSION_MIGRATION_VERSION = 17;
 const EMBEDDING_VECTOR_VALIDITY_MIGRATION_VERSION = 15;
 
 const databaseCache = new LruCache<string, StorageDatabase>(MAX_DATABASE_CACHE_ENTRIES);
@@ -369,7 +370,12 @@ function runMigrations(
   // Keep 1..13 atomic so a concurrent opener never observes a pre-temporal ledger.
   applyMigrationBatch(database, migrationsDirectory, beforeRebuild, temporalMode, false, busyTimeoutMs);
   applyMigrationBatch(database, migrationsDirectory, rebuild, temporalMode, true, busyTimeoutMs);
-  applyMigrationBatch(database, migrationsDirectory, afterRebuild, temporalMode, false, busyTimeoutMs);
+  const beforeObservation = afterRebuild.filter((fileName) => parseMigrationVersion(fileName) < OBSERVATION_MEMORY_DIMENSION_MIGRATION_VERSION);
+  const observation = afterRebuild.filter((fileName) => parseMigrationVersion(fileName) === OBSERVATION_MEMORY_DIMENSION_MIGRATION_VERSION);
+  const later = afterRebuild.filter((fileName) => parseMigrationVersion(fileName) > OBSERVATION_MEMORY_DIMENSION_MIGRATION_VERSION);
+  applyMigrationBatch(database, migrationsDirectory, beforeObservation, temporalMode, false, busyTimeoutMs);
+  applyMigrationBatch(database, migrationsDirectory, observation, temporalMode, true, busyTimeoutMs);
+  applyMigrationBatch(database, migrationsDirectory, later, temporalMode, false, busyTimeoutMs);
 }
 
 function ensureSchemaVersionTable(database: SqliteConnection): void {

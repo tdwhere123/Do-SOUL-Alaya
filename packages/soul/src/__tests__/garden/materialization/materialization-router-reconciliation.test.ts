@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { bindDiagnosticLogger } from "@do-soul/alaya-protocol";
 import { MaterializationRouter } from "@do-soul/alaya-soul";
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import type { LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
 import {
   type EnqueueFn,
   type MockPathRelationProposalFn,
@@ -12,7 +12,7 @@ import {
 } from "./materialization-router-fixture.js";
 
 describe("MaterializationRouter ingest reconciliation", () => {
-  function factSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+  function factSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): LegacyCandidateMemorySignal {
     return createSignal({
       object_kind: "fact",
       signal_kind: "potential_claim",

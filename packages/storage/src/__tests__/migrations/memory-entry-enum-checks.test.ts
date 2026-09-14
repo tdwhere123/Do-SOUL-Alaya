@@ -145,7 +145,7 @@ describe("memory_entries enum CHECKs", () => {
     databases.add(migrated);
     expect(
       migrated.connection.prepare("SELECT MAX(version) AS version FROM schema_version").get()
-    ).toEqual({ version: 15 });
+    ).toEqual({ version: 17 });
     const insert = migrated.connection.prepare(`
       INSERT INTO memory_entries (
         object_id, created_at, updated_at, created_by,

@@ -233,7 +233,8 @@ export function parseDimension(value: MemoryDimension): MemoryDimension {
     value === "fact" ||
     value === "hazard" ||
     value === "glossary" ||
-    value === "episode"
+    value === "episode" ||
+    value === "observation"
   ) {
     return value;
   }

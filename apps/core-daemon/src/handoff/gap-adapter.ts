@@ -24,6 +24,7 @@ function normalizeObjectKind(objectKind: string): string {
 }
 
 function looksLikeGapSignal(signal: CandidateMemorySignal): boolean {
+  if (signal.interpretation_contract !== undefined) return false;
   if (signal.raw_payload.gap_detected === true) {
     return true;
   }

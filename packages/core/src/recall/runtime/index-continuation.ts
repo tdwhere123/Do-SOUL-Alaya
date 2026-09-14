@@ -220,6 +220,9 @@ export function continuationPolicyMismatch(input: Readonly<{
 export function resumeIndexProjection(state: FieldEngineState, snapshot: FieldSnapshot): ProjectionProgress {
   const references = [state.binding.kind === "bound" ? state.binding.values : snapshot.values,
     state.binding.kind === "bound" ? state.binding.guaranteed_values : null,
+    state.binding.kind === "bound" ? state.binding.possible_complete : null,
+    state.binding.kind === "bound" ? state.binding.guaranteed_complete : null,
+    state.residuals,
     state.ordered_identities, state.seeds, state.facets,
     state.claims, state.claim_propositions, state.transitions, state.derivations, state.transition_derivations
   ];

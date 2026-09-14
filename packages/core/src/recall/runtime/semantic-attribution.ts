@@ -16,7 +16,11 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
   const solverComplete = state.binding.kind === "bound" && state.binding.solver_complete;
   const references = [state.query_id, state.snapshot_id, input.as_of,
     state.observed_relations, state.transitions, state.transition_derivations, state.derivations, state.ordered_identities,
-    state.seeds, solverComplete];
+    state.seeds, state.guaranteed_seeds, solverComplete,
+    state.binding.kind === "bound" ? state.binding.values : undefined,
+    state.binding.kind === "bound" ? state.binding.guaranteed_values : undefined,
+    state.binding.kind === "bound" ? state.binding.possible_complete : undefined,
+    state.binding.kind === "bound" ? state.binding.guaranteed_complete : undefined];
   const same = state.support_dependency_revision !== undefined
     && references.every((reference, index) => reference === state.support_dependency_references?.[index]);
   if (same && state.support_work_status === "complete") return state;

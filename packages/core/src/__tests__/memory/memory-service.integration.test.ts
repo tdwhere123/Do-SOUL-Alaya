@@ -10,9 +10,11 @@ import {
 import {
   SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
+  SqliteKarmaEventRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { MemoryService } from "../../memory/memory-service.js";
+import { DynamicsService } from "../../dynamics/dynamics-service.js";
 import {
   REAL_SQLITE_TEST_RUN_ID,
   REAL_SQLITE_TEST_WORKSPACE_ID,
@@ -29,7 +31,7 @@ afterEach(() => {
 });
 
 // anti-patterns-lint-allow: real-DB smoke mirrors recall integration precedents on purpose.
-async function createMemoryServiceFixture(): Promise<{
+async function createMemoryServiceFixture(withDynamics = false): Promise<{
   readonly database: StorageDatabase;
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
   readonly eventLogRepo: SqliteEventLogRepo;
@@ -51,13 +53,32 @@ async function createMemoryServiceFixture(): Promise<{
     },
     eventLogRepo,
     memoryEntryRepo,
-    runtimeNotifier: { notifyEntry: notifySpy }
+    runtimeNotifier: { notifyEntry: notifySpy },
+    ...(withDynamics ? { dynamicsService: new DynamicsService({
+      memoryRepo: memoryEntryRepo,
+      karmaEventRepo: new SqliteKarmaEventRepo(database),
+      eventLogRepo, runtimeNotifier: { notifyEntry: notifySpy }
+    }) } : {})
   });
 
   return { database, memoryEntryRepo, eventLogRepo, service, notifySpy };
 }
 
 describe("MemoryService integration (:memory:)", () => {
+  it("persists unknown observation confidence through the actual Dynamics write boundary", async () => {
+    const { service, memoryEntryRepo } = await createMemoryServiceFixture(true);
+    const created = await service.create({
+      created_by: "garden_compile", dimension: "observation", source_kind: "compiler",
+      formation_kind: "extracted", scope_class: "project", content: "A sent mail.",
+      domain_tags: [], evidence_refs: [], workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
+      run_id: REAL_SQLITE_TEST_RUN_ID, surface_id: null
+    });
+    expect(created).toMatchObject({ confidence: null, retention_score: 0.5,
+      activation_score: 0.3, decay_profile: "normal", manifestation_state: "excerpt" });
+    expect(await memoryEntryRepo.findById(created.object_id)).toMatchObject({
+      dimension: "observation", confidence: null, retention_score: 0.5, activation_score: 0.3
+    });
+  });
   it("creates a memory row and audit event through real sqlite repos", async () => {
     const { service, memoryEntryRepo, eventLogRepo, notifySpy } = await createMemoryServiceFixture();
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import type { LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
 import {
   buildSchemaGroundedRawPayload,
   normalizeSchemaGroundedSignal,
@@ -7,7 +7,7 @@ import {
   validateSchemaGroundingForSignal
 } from "../../../garden/ingestion/schema-grounding.js";
 
-function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+function createSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): LegacyCandidateMemorySignal {
   const { source_observation = null, ...signalOverrides } = overrides;
   return {
     signal_id: "signal-1",

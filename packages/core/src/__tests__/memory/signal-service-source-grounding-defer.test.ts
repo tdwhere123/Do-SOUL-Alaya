@@ -61,6 +61,7 @@ function createHarness(options?: {
         throw new Error("claim mismatch");
       }
       const signal = { ...input.signal, signal_state: "deferred" as const };
+      if (signal.interpretation_contract !== undefined) throw new Error("fixture only exercises legacy grounding");
       signals.set(signal.signal_id, signal);
       const queue_result = queue.enqueue({
         signal_id: signal.signal_id,

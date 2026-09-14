@@ -17,7 +17,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { completenessForInterpretationStatus } from "../reference/interpret-query.js";
 import { aggregateObserverStatus } from "../reference/accepting-projection.js";
-import { classifyResidualInfluence } from "../index/completeness.js";
+import { classifyResidualInfluence, withCapContractConflict } from "../index/completeness.js";
 import { productStateNodeId, productIndexOrderKey } from "../reference/bind-max-min.js";
 import { bindChargedField } from "./field-solve.js";
 import type { FairWorkRegion } from "../reference/schedule-fair-work.js";
@@ -68,14 +68,24 @@ export function isPhysicalRegionKind(kind: CoverageRegion["kind"]): kind is Phys
 }
 
 export function bindEngineState(state: BindableState): FieldEngineState {
-  const charged = chargeIdentities(state);
+  const retained = chargeIdentities(state);
+  // These residuals are derived from this solve, not immutable observation facts.
+  // Remove the prior generation before constructing lazy numeric bound getters.
+  const charged = { ...retained, residuals: solverResourceResiduals(withCapContractConflict(retained.residuals, false), false) };
   const remainingWork = [...charged.remaining_work];
   const bound = bindChargedField(charged, remainingWork);
+  const semanticResiduals = withCapContractConflict(charged.residuals, bound.binding.kind === "bound"
+    && bound.binding.snapshot.has_incomparable_activations === true);
+  const residuals = solverResourceResiduals(semanticResiduals, bound.memory_exhausted);
   const { proven_binding: _proven, binding_delta: _delta, ...chargedRest } = charged;
   const retainedIndex = charged.retained_index ?? indexFieldRetention(charged);
   const next: FieldEngineState = {
     ...chargedRest,
     ...retainedIndex.rows,
+    residuals,
+    remaining_memory_bytes: bound.remaining_memory_bytes,
+    solver_retained_bytes: bound.solver_retained_bytes,
+    memory_exhausted: bound.memory_exhausted,
     solver_completed_work: (state.solver_completed_work ?? 0) + (bound.binding.kind === "bound" ? bound.binding.solver_steps : 0),
     remaining_exploration: bound.exploration,
     remaining_reserve: bound.reserve,
@@ -86,9 +96,19 @@ export function bindEngineState(state: BindableState): FieldEngineState {
     ),
     retained_index: retainedIndex,
     binding: bound.binding,
-    closure: closureFacts(charged, bound.complete && bound.binding.kind === "bound" ? "fixed_point" : "open")
+    closure: closureFacts({ ...charged, residuals, memory_exhausted: bound.memory_exhausted },
+      bound.complete && bound.binding.kind === "bound" ? "fixed_point" : "open")
   };
   return Object.freeze(next);
+}
+
+function solverResourceResiduals(residuals: readonly CoverageRegion[], exhausted: boolean): readonly CoverageRegion[] {
+  const regionId = "field.solver-memory";
+  const remaining = residuals.filter((region) => region.region_id !== regionId);
+  return exhausted ? [...remaining, { schema_version: 1, region_id: regionId, kind: "binding", status: "interrupted",
+    cursor_id: regionId, coverage_role: "required", conservative_bound_milligrades: 1000,
+    semantic_effects: ["membership", "grade_bound", "order"] }]
+    : remaining.length === residuals.length ? residuals : remaining;
 }
 
 export function absorbObservations(

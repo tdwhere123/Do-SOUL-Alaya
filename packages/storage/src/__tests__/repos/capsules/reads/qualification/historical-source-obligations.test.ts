@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import {
   EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID,
-  EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
   buildAssociativeFactKeyProjections,
   evidenceFactFrameFormationCapturePreimage,
@@ -149,7 +148,7 @@ function historicalCaptures(source: string, sourceHash: string, frame: Associati
   const semanticBody: OpenSemanticFactorFormationCaptureBody = { schema_version: 1, operator_id: OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
     status: "formed", producer_operator_id: "core_fact_frame_canonical_open_semantic_factor_v1", source_sha256: `sha256:${sha256(source)}`, graph };
   const semantic = { ...semanticBody, capture_digest: `sha256:${sha256(openSemanticFactorFormationCapturePreimage(semanticBody))}` };
-  const certificateBody = { schema_version: 1 as const, operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
+  const certificateBody = { schema_version: 1 as const, operator_id: "evidence_osf_semantic_completeness_v2" as const,
     status: "certified" as const, reason_code: "complete" as const, fact_frame_capture_digest: factFrame.capture_digest,
     semantic_formation_capture_digest: semantic.capture_digest, predicate, arguments: args, arity: args.length };
   return { factFrame, semantic, certificate: { ...certificateBody,

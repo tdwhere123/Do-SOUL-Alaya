@@ -123,6 +123,14 @@ root's receipt verifier proves historical frame-to-graph binding only; current
 source qualification must also use the source-frame contract. Native CJK
 segmentation stays outside the browser root.
 
+A source-qualified frame independently compiles its canonical graph through
+Protocol's Node source-frame owner. Missing, rejected or incompatible model
+graph nominations cannot veto that compilation or supply its identities.
+Completeness receipts from operator v3 retain the complete upstream nomination
+capture, including rejection, and bind it to the same source. Historical v2
+receipt shapes and digests remain readable. This does not broaden the supported
+source grammar or bypass source grounding, admission or current qualification.
+
 Object-key minting and retrofit read derived fact keys and OSF graphs through
 the same current stored-formation qualification owners. Fact-key contents must
 also match their canonical projections. Unqualified historical derivatives do
@@ -272,6 +280,28 @@ One request pins its interpretation clock, snapshot and generation. Native
 readers advance cursors within their allowances. Grounding, support, projection
 and previews share request accounting and retain concrete unfinished work.
 Cursor acceptance and retained effects must be atomic.
+
+Possible and guaranteed field bands alternate charged preparation or relaxation
+steps, retaining their next-band cursor across continuation. An idle band yields
+to the other. Contract-separated numeric nodes prevent propagation between
+incompatible grade domains; newly admitted rows extend retained preparation.
+Guaranteed products may become known before possible-band discovery reaches them.
+An unfinished possible solve retains an unknown upper bound, never its current
+growing iterate as a certified upper bound. Both bands' values and completion
+states invalidate dependent projections and support assessments. This scheduling
+does not waive ordering, delivery, memory or completeness requirements.
+
+Reachable products under incomparable cap contracts retain an `incomparable`
+activation with `cap_contract_conflict`, without a scalar or low/high pair.
+A required binding residual prevents a complete-empty result. Withdrawal or
+compatible reconstruction can resolve that state; absent measurement is not
+evidence of no path. Prepared solver growth reserves a conservative accounted
+representation bound before each growing atom. This measures retained
+representation, not JavaScript RSS. A memory-blocked band leaves its cursor
+unchanged while the other may advance. Existing continuation roots can retain
+prior allocations, so same-epoch reconstruction does not refund that charge;
+a new epoch starts a new owner. Deferred input remains bounded, and replacing
+one band's deferred preparation preserves source rows and the other band.
 
 The public index distinguishes interpretation coverage, observed coverage,
 logical-index completeness, transport completeness and payload completeness.

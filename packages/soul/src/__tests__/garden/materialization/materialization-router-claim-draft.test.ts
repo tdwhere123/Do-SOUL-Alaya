@@ -3,7 +3,7 @@ import {
   InMemoryHandoffGapHandler,
   MaterializationRouter,
   type MaterializationRouterDeps} from "@do-soul/alaya-soul";
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import type { LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
 
 type EvidenceCreate = MaterializationRouterDeps["evidenceService"]["create"];
 type MemoryCreate = MaterializationRouterDeps["memoryService"]["create"];
@@ -17,7 +17,7 @@ type ClaimCreate = MaterializationRouterDeps["claimService"]["create"];
 // potential_conflict to ConflictDetectionPort.evaluate.
 // see also: packages/soul/src/garden/materialization/materialization-router/router.ts route()
 // see also: packages/core/src/governance/claim-service.ts create() (DRAFT default)
-function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+function createSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): LegacyCandidateMemorySignal {
   const { source_observation = null, ...signalOverrides } = overrides;
   return {
     signal_id: "signal-1",

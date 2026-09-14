@@ -301,6 +301,7 @@ export function buildMemoryInput(
   evidenceRefs: readonly string[],
   enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"]
 ): MemoryMaterializationInput {
+  if (signal.interpretation_contract !== undefined) throw new TypeError("source observation requires its own memory admission");
   const temporalProjection = readMemoryTemporalProjectionPayload(signal.raw_payload);
   const preferenceProfile = readMemoryPreferenceProfilePayload(signal.raw_payload);
   const content = buildDistilledFact(signal);
@@ -379,6 +380,7 @@ export function buildClaimInput(
   evidenceRefs: readonly string[],
   sourceObjectRefs: readonly string[]
 ): ClaimMaterializationInput {
+  if (signal.interpretation_contract !== undefined) throw new TypeError("source interpretation cannot create a claim");
   const claimKind = toClaimKind(signal.object_kind);
   const enforcementLevel: EnforcementLevelValue =
     claimKind === "constraint" || claimKind === "factual_policy" ? "strict" : "preferred";

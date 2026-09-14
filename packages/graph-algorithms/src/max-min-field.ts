@@ -53,6 +53,8 @@ export function extendMaxMinGraph(prior: MaxMinPreparedGraph | undefined,
 
 export interface MaxMinResult {
   readonly values: ReadonlyMap<string, number>;
+  /** Only coordinates changed by this invocation, for bounded downstream projection. */
+  readonly changedValues: ReadonlyMap<string, number>;
   readonly retainedTransitions: readonly MaxMinTransition[];
   readonly remainingWorklist: readonly MaxMinWorkItem[];
   readonly steps: number;
@@ -61,9 +63,10 @@ export interface MaxMinResult {
 }
 
 export function solveMaxMinField(input: MaxMinInput): MaxMinResult {
+  const changedValues = new Map<string, number>();
   const top = requireIntegerTop(input.top, input.bottom);
   const nodeIds = input.preparedGraph === undefined ? uniqueNodeIds(input.nodeIds) : [];
-  const values = initialValues(input.preparedGraph?.nodeIds ?? new Set(nodeIds), input.seeds, input.bottom, top, input.priorValues);
+  const values = initialValues(input.preparedGraph?.nodeIds ?? new Set(nodeIds), input.seeds, input.bottom, top, input.priorValues, changedValues);
   const retainedTransitions = input.preparedGraph === undefined
     ? legalTransitions(nodeIds, input.transitions, input.bottom, top) : input.transitions;
   const relaxed = relaxMaxMin(
@@ -71,10 +74,12 @@ export function solveMaxMinField(input: MaxMinInput): MaxMinResult {
     input.preparedGraph?.edges ?? adjacency(retainedTransitions),
     input.worklist,
     input.workLimit,
-    input.workQueue
+    input.workQueue,
+    changedValues
   );
   return {
     values: relaxed.values,
+    changedValues,
     retainedTransitions,
     get remainingWorklist() { return [...relaxed.workQueue]; },
     workQueue: relaxed.workQueue,
@@ -107,7 +112,8 @@ function initialValues(
   seeds: ReadonlyMap<string, number>,
   bottom: 0,
   top: number,
-  priorValues: ReadonlyMap<string, number> | undefined
+  priorValues: ReadonlyMap<string, number> | undefined,
+  changedValues: Map<string, number>
 ): PersistentStringMap<number> {
   let values = priorValues instanceof PersistentStringMap ? priorValues : new PersistentStringMap<number>();
   for (const [nodeId, value] of priorValues instanceof PersistentStringMap ? [] : priorValues ?? []) {
@@ -119,7 +125,10 @@ function initialValues(
   for (const [nodeId, value] of seeds) {
     if (!nodeIds.has(nodeId)) continue;
     const grade = clampInteger(value, bottom, top);
-    if (!values.has(nodeId) || grade > values.get(nodeId)!) values = values.with(nodeId, grade);
+    if (!values.has(nodeId) || grade > values.get(nodeId)!) {
+      values = values.with(nodeId, grade);
+      changedValues.set(nodeId, grade);
+    }
   }
   return values;
 }
@@ -158,7 +167,8 @@ function relaxMaxMin(
   edges: ReadonlyMap<string, MaxMinOutgoingEdges>,
   worklist: readonly MaxMinWorkItem[] | undefined,
   workLimit: number | undefined,
-  retainedQueue: MaxMinWorkQueue | undefined
+  retainedQueue: MaxMinWorkQueue | undefined,
+  changedValues: Map<string, number>
 ): { values: PersistentStringMap<number>; workQueue: MaxMinWorkQueue; steps: number; complete: boolean } {
   let values = priorValues;
   let heap = retainedQueue ?? new MaxMinWorkQueue();
@@ -186,6 +196,7 @@ function relaxMaxMin(
       const prior = values.get(transition.to);
       if (prior !== undefined && next <= prior) continue;
       values = values.with(transition.to, next);
+      changedValues.set(transition.to, next);
       heap = heap.push({ strength: next, nodeId: transition.to });
     }
   }

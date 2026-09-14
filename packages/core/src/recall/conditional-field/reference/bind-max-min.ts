@@ -4,6 +4,7 @@ import {
   type MaxMinWorkItem,
   type MaxMinWorkQueue
 } from "@do-soul/alaya-graph-algorithms";
+import type { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import {
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
@@ -18,7 +19,8 @@ import {
   type SeedActivation,
   type Transition
 } from "@do-soul/alaya-protocol";
-import { prepareFieldGraph, type FieldGraphAdditions, type PreparedFieldGraph } from "../engine/field-graph-preparation.js";
+import { appendFieldGraph, fieldGraphComplete, stepFieldGraph,
+  type FieldGraphAdditions, type PreparedFieldGraph } from "../engine/field-graph-preparation.js";
 import type { RetainedRows } from "../engine/retained-sequence.js";
 import { hardIdentityCapContractId, isHardIdentityContractId } from "../cap-contract.js";
 
@@ -38,6 +40,8 @@ export type BindMaxMinSuccess = Readonly<{
   readonly guaranteed_preparation?: PreparedFieldGraph;
   readonly work_queue?: MaxMinWorkQueue;
   readonly guaranteed_queue?: MaxMinWorkQueue;
+  readonly next_band?: "possible" | "guaranteed";
+  readonly cross_contract_conflicts?: Readonly<{ products: PersistentStringMap<boolean>; count: number }>;
 }>;
 
 export type BindMaxMinRejection = Readonly<{
@@ -115,28 +119,56 @@ export function bindMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
   if (admitRequestBudget(input.budget) === "resource_rejected") {
     return { kind: "resource_rejected", completeness: resourceRejectedCompleteness() };
   }
+  if (input.incremental !== undefined) {
+    let prepared = appendFieldGraph(input.incremental.prior, input.incremental.additions,
+      { seeds: input.seeds, transitions: input.transitions });
+    let steps = 0;
+    while (!fieldGraphComplete(prepared) && steps < (input.work_limit ?? Number.MAX_SAFE_INTEGER)) {
+      const next = stepFieldGraph(prepared, input.budget.memory_bytes - prepared.retainedBytes);
+      if (next === prepared) break;
+      prepared = next;
+      steps += 1;
+    }
+    return preparedFieldBinding(input, prepared, steps);
+  }
   const contract = uniqueGradeContract(input.seeds, input.transitions);
   if (contract === "mixed") return bindPartitionedMaxMinField(input);
   return bindNumericMaxMinField(input, contract === "" ? undefined : contract);
 }
 
+export function preparedFieldBinding(input: BindMaxMinInput, prepared: PreparedFieldGraph, steps: number): BindMaxMinSuccess {
+  let snapshotValues: readonly FieldValue[] | undefined;
+  return {
+    kind: "bound", values: prepared.values, preparation: prepared,
+    solver_steps: steps, solver_runs: steps > 0 ? 1 : 0, solver_complete: fieldGraphComplete(prepared),
+    work_queue: prepared.queue, get remaining_worklist() { return [...prepared.queue]; },
+    snapshot: {
+      schema_version: 1, query_id: input.query_id, snapshot_id: input.snapshot_id,
+      has_incomparable_activations: prepared.values.conflictCount > 0,
+      get seeds() { return [...input.seeds]; },
+      get facets() { return [...input.facets ?? []]; },
+      get retained_transitions() { return input.transitions.filter((row) => row.applicable); },
+      get values() {
+        return snapshotValues ??= fieldValues(input.identities ?? prepared.keys, prepared.values, undefined,
+          { get: (id: string) => prepared.values.contract(id) }, (id) => prepared.values.conflicted(id));
+      }
+    }
+  };
+}
+
 function bindNumericMaxMinField(input: BindMaxMinInput, contractId: string | undefined): BindMaxMinResult {
-  const prepared = input.incremental === undefined ? undefined : prepareFieldGraph({ prior: input.incremental.prior,
-    additions: input.incremental.additions, priorValues: input.prior_values, workQueue: input.incremental.queue,
-    workLimit: input.work_limit ?? Number.MAX_SAFE_INTEGER });
-  const keys = input.identities ?? prepared?.preparation.keys ?? collectKeys(input.seeds, input.transitions);
-  const seeds = prepared?.seedChanges ?? new Map(input.seeds.map((seed) => [productStateNodeId(seed.state), seed.milligrades]));
-  const legalTransitions = prepared === undefined ? input.transitions.filter((transition) => transition.applicable) : undefined;
+  const keys = input.identities ?? collectKeys(input.seeds, input.transitions);
+  const seeds = new Map(input.seeds.map((seed) => [productStateNodeId(seed.state), seed.milligrades]));
+  const legalTransitions = input.transitions.filter((transition) => transition.applicable);
   const solved = solveMaxMinField({
-    nodeIds: prepared === undefined ? [...keys.keys()] : [],
+    nodeIds: [...keys.keys()],
     seeds,
-    transitions: legalTransitions?.map(toMaxMinTransition) ?? [],
+    transitions: legalTransitions.map(toMaxMinTransition),
     bottom: MILLIGRADE_BOTTOM,
     top: MILLIGRADE_TOP,
     ...(input.prior_values === undefined ? {} : { priorValues: input.prior_values }),
     ...(input.worklist === undefined ? {} : { worklist: input.worklist }),
-    ...(input.work_limit === undefined ? {} : { workLimit: Math.max(0, input.work_limit - (prepared?.steps ?? 0)) }),
-    ...(prepared === undefined ? {} : { preparedGraph: prepared.preparation.graph, workQueue: prepared.queue })
+    ...(input.work_limit === undefined ? {} : { workLimit: input.work_limit })
   });
   let snapshotSeeds: FieldSnapshot["seeds"] | undefined;
   let snapshotValues: FieldSnapshot["values"] | undefined;
@@ -145,20 +177,19 @@ function bindNumericMaxMinField(input: BindMaxMinInput, contractId: string | und
   return {
     kind: "bound",
     values: solved.values,
-    solver_steps: solved.steps + (prepared?.steps ?? 0),
+    solver_steps: solved.steps,
     solver_runs: 1,
-    solver_complete: solved.complete && (prepared?.complete ?? true),
+    solver_complete: solved.complete,
     get remaining_worklist() { return solved.remainingWorklist; },
     work_queue: solved.workQueue,
-    preparation: prepared?.preparation,
     snapshot: {
       schema_version: 1,
       snapshot_id: input.snapshot_id,
       query_id: input.query_id,
+      has_incomparable_activations: false,
       get seeds() { return snapshotSeeds ??= [...input.seeds]; },
       get values() { return snapshotValues ??= fieldValues(keys, solved.values, contractId); },
-      get retained_transitions() { return snapshotTransitions ??= prepared === undefined
-        ? retainedProtocolTransitions(legalTransitions!, solved.retainedTransitions) : input.transitions.filter((row) => row.applicable); },
+      get retained_transitions() { return snapshotTransitions ??= retainedProtocolTransitions(legalTransitions, solved.retainedTransitions); },
       get facets() { return snapshotFacets ??= [...input.facets ?? []]; }
     }
   };
@@ -182,6 +213,7 @@ function bindPartitionedMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
   const parts: BindMaxMinSuccess[] = [];
   const contractByNode = new Map<string, string>();
   const values = new Map<string, number>();
+  const conflicts = new Set<string>();
   let steps = 0;
   let complete = true;
   for (const [contract, group] of groups) {
@@ -197,6 +229,7 @@ function bindPartitionedMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
     steps += bound.solver_steps;
     complete = complete && bound.solver_complete;
     for (const [nodeId, milligrades] of bound.values) {
+      if (conflicts.has(nodeId)) continue;
       const prior = values.get(nodeId);
       const priorContract = contractByNode.get(nodeId);
       if (prior === undefined || priorContract === undefined) {
@@ -215,6 +248,7 @@ function bindPartitionedMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
       } else if (!keepPrior) {
         values.delete(nodeId);
         contractByNode.delete(nodeId);
+        conflicts.add(nodeId);
       }
     }
   }
@@ -236,9 +270,10 @@ function bindPartitionedMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
       schema_version: 1,
       snapshot_id: input.snapshot_id,
       query_id: input.query_id,
+      has_incomparable_activations: conflicts.size > 0,
       get seeds() { return snapshotSeeds ??= [...input.seeds]; },
       get values() {
-        return snapshotValues ??= fieldValues(keys, values, undefined, contractByNode);
+        return snapshotValues ??= fieldValues(keys, values, undefined, contractByNode, (id) => conflicts.has(id));
       },
       get retained_transitions() {
         return snapshotTransitions ??= input.transitions.filter((row) => row.applicable);
@@ -297,10 +332,16 @@ function fieldValues(
   keys: ReadonlyMap<string, ProductStateKey>,
   values: ReadonlyMap<string, number>,
   contractId?: string,
-  contractByNode?: ReadonlyMap<string, string>
+  contractByNode?: Pick<ReadonlyMap<string, string>, "get">,
+  incomparable?: (id: string) => boolean
 ): readonly FieldValue[] {
   const fields: FieldValue[] = [];
   for (const [nodeId, state] of keys) {
+    if (incomparable?.(nodeId)) {
+      fields.push({ schema_version: 1, state, accepting: state.program_state === "accepting",
+        activation: { kind: "incomparable", reason: "cap_contract_conflict" } });
+      continue;
+    }
     const milligrades = values.get(nodeId);
     if (milligrades === undefined) {
       fields.push({

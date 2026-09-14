@@ -1,4 +1,4 @@
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import type { CandidateMemorySignal, LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { validateSchemaGroundingForSignal } from "../../ingestion/schema-grounding.js";
 import {
   requiresGardenSourceGrounding,
@@ -135,6 +135,7 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
   }
 
   public route(signal: CandidateMemorySignal): MaterializationTarget {
+    if (signal.interpretation_contract !== undefined) return sourceObservationDeferred();
     // Evidence anchors archive source input; they do not assert a fact and
     // therefore must not be blocked by the durable-fact grounding guard.
     if (isGardenTurnEvidenceFallback(signal)) {
@@ -177,7 +178,7 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
     };
   }
 
-  private routeDurableSignal(signal: CandidateMemorySignal): MaterializationTarget | null {
+  private routeDurableSignal(signal: LegacyCandidateMemorySignal): MaterializationTarget | null {
     const floor = this.dependencies.materializationConfidenceFloor ?? 0.5;
     const eligibleKind = signal.signal_kind === "potential_claim" ||
       signal.signal_kind === "potential_preference" ||
@@ -211,6 +212,9 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
     target: MaterializationTarget,
     context: MaterializationContext = EMPTY_MATERIALIZATION_CONTEXT
   ): Promise<MaterializationResult> {
+    if (signal.interpretation_contract !== undefined) {
+      return this.materializeDeferred(signal, sourceObservationDeferred(), context);
+    }
     if (target.route_target === "memory_entry_only") {
       return await this.materializeMemoryEntryOnly(signal, target, context);
     }
@@ -252,4 +256,9 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
     }
   }
 
+}
+
+function sourceObservationDeferred(): MaterializationTarget {
+  return { kind: "deferred", route_target: "deferred",
+    routing_reason: "source observation admission is not connected" };
 }

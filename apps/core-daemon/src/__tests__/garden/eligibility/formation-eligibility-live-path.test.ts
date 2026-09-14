@@ -24,7 +24,7 @@ import {
   withoutVerifiedAssertionHash
 } from "./formation-eligibility-live-path-fixture.js";
 
-const QUALIFIED_NEGATIVE_CASES = [
+const INDEPENDENT_NOMINATION_CASES = [
   { name: "graphless", payload: {}, status: "unavailable" },
   {
     name: "unbound",
@@ -65,11 +65,11 @@ describe("formation eligibility live producer to consumer path", () => {
     if (evidenceId === undefined) throw new Error("provider fixture must create evidence");
     const capture = await readQualifiedCapture(runtime.evidenceRepo, evidenceId);
     expect(capture).toMatchObject({ status: "formed",
-      producer_operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID });
+      producer_operator_id: FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID });
   });
 
-  it.each(QUALIFIED_NEGATIVE_CASES)(
-    "fail-closes $name through sqlite qualification and recall",
+  it.each(INDEPENDENT_NOMINATION_CASES)(
+    "independently forms source with $name nomination through sqlite qualification and recall",
     async (testCase) => {
       const runtime = await openEligibilityRuntime();
       const received = await runtime.signalService.receiveSignal(
@@ -78,14 +78,24 @@ describe("formation eligibility live producer to consumer path", () => {
       expect(received.triage_result).toBe("accepted");
       expect(createdEvidenceId(received)).toBe(EVIDENCE_ID);
       const capture = await readQualifiedCapture(runtime.evidenceRepo, EVIDENCE_ID);
-      expect(capture).toMatchObject({ status: testCase.status, graph: null });
-      expect(capture).toHaveProperty("status", testCase.status);
+      expect(capture).toMatchObject({ status: "formed",
+        producer_operator_id: FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID });
+      const row = runtime.database.connection.prepare(`SELECT semantic_completeness_json
+        FROM evidence_semantic_factor_formations WHERE evidence_object_id = ?`)
+        .get(EVIDENCE_ID) as { semantic_completeness_json: string };
+      expect(JSON.parse(row.semantic_completeness_json)).toMatchObject({
+        status: "certified", operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
+        upstream_semantic_formation: { status: testCase.status, graph: null }
+      });
       expect(hasGoldAuthorityKey(capture)).toBe(false);
-      expect(f3Factors(runtime.field)).toEqual([]);
+      expect(f3Factors(runtime.field)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ family: "f3", canonical_payload: "atlas" }),
+        expect.objectContaining({ family: "f3", canonical_payload: "used" })
+      ]));
       expect(f3CaptureJob(
         runtime.field,
-        GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID
-      )).toBeNull();
+        EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID
+      )).toMatchObject({ status: "succeeded" });
       expect(JSON.stringify(capture)).not.toContain("gold-atlas");
 
       const index = await recallLiveSource(runtime, EVIDENCE_ID);
@@ -158,7 +168,7 @@ describe("formation eligibility live producer to consumer path", () => {
     expect(hasGoldAuthorityKey(capture)).toBe(false);
     expect(f3Factors(runtime.field)).toEqual(expect.arrayContaining([
       expect.objectContaining({ family: "f3", canonical_payload: "atlas" }),
-      expect.objectContaining({ family: "f3", canonical_payload: "use" })
+      expect.objectContaining({ family: "f3", canonical_payload: "used" })
     ]));
     expect(f3CaptureJob(
       runtime.field,
@@ -184,14 +194,14 @@ describe("formation eligibility live producer to consumer path", () => {
     const capture = await readQualifiedCapture(runtime.evidenceRepo, EVIDENCE_ID);
     expect(capture).toMatchObject({
       status: "formed",
-      producer_operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
+      producer_operator_id: FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID,
       graph: { source_kind: "evidence" }
     });
     expect(capture?.graph).not.toBeNull();
     expect(hasGoldAuthorityKey(capture)).toBe(false);
     expect(f3Factors(runtime.field)).toEqual(expect.arrayContaining([
       expect.objectContaining({ family: "f3", canonical_payload: "atlas" }),
-      expect.objectContaining({ family: "f3", canonical_payload: "use" })
+      expect.objectContaining({ family: "f3", canonical_payload: "used" })
     ]));
     expect(f3CaptureJob(
       runtime.field,

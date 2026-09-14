@@ -3,7 +3,8 @@ import { materializeEvidenceFactFrameFormation } from
   "../../../memory/evidence-fact-frame-formation.js";
 import {
   FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID,
-  certifyEvidenceSemanticCompleteness
+  certifyEvidenceSemanticCompleteness,
+  verifyEvidenceSemanticCompletenessReceipt
 } from "../../../memory/evidence-create/evidence-semantic-completeness.js";
 import { materializeOpenSemanticFactorFormation } from
   "../../../semantic/open-semantic-factor-formation.js";
@@ -13,6 +14,23 @@ import { rematerializeG8LiveFormation } from
 const GARDEN_PRODUCER = "garden_source_bound_open_semantic_factor_v3";
 
 describe("evidence semantic completeness", () => {
+  it("retains rejected nomination provenance without letting it veto independent source formation", () => {
+    const source = "I like tea.";
+    const upstream = materializeOpenSemanticFactorFormation({
+      source_kind: "evidence", source_text: source, negative_status: "rejected"
+    });
+    const frame = factFrame(source, [["subject", "I"], ["relation", "like"], ["value", "tea"]]);
+    const certified = certifyEvidenceSemanticCompleteness({ sourceText: source, factFrame: frame, semanticFormation: upstream });
+    expect(certified.semanticFormation.status).toBe("formed");
+    expect(certified.receipt.upstream_semantic_formation).toEqual(upstream);
+    expect(verifyEvidenceSemanticCompletenessReceipt({ sourceText: source, factFrame: frame,
+      semanticFormation: certified.semanticFormation, receipt: certified.receipt })).toEqual(certified.receipt);
+    expect(() => verifyEvidenceSemanticCompletenessReceipt({ sourceText: source, factFrame: frame,
+      semanticFormation: certified.semanticFormation,
+      receipt: { ...certified.receipt, upstream_semantic_formation: { ...upstream, status: "unavailable" } }
+    })).toThrow();
+  });
+
   it("canonicalizes a Garden graph that omitted the source-bound subject", () => {
     const source = "I graduated with a degree in Business Administration, which has definitely helped me in my new role.";
     const semanticFormation = formation(source, graduationGraph());
@@ -33,7 +51,7 @@ describe("evidence semantic completeness", () => {
         producer_operator_id: FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID,
         graph: {
           factors: expect.arrayContaining([
-            expect.objectContaining({ surface: "graduated", semantic_identity: "graduate" }),
+            expect.objectContaining({ surface: "graduated", semantic_identity: "graduated" }),
             expect.objectContaining({ surface: "I", semantic_identity: "i" }),
             expect.objectContaining({
               surface: "with a degree in Business Administration, which has definitely helped me in my new role",
@@ -43,6 +61,18 @@ describe("evidence semantic completeness", () => {
         }
       }
     });
+    const alteredGraph = graduationGraph();
+    const altered = certifyEvidenceSemanticCompleteness({
+      sourceText: source,
+      factFrame: factFrame(source, [
+        ["subject", "I"], ["relation", "graduated"],
+        ["value", "with a degree in Business Administration, which has definitely helped me in my new role"]
+      ]),
+      semanticFormation: formation(source, { ...alteredGraph,
+        factors: alteredGraph.factors.map((factor) => ({ ...factor, semantic_identity: "invented entity" })) })
+    });
+    expect(altered.semanticFormation).toEqual(certified.semanticFormation);
+    expect(altered.receipt.upstream_semantic_formation).not.toEqual(certified.receipt.upstream_semantic_formation);
   });
 
   it.each([

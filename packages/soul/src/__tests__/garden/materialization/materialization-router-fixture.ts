@@ -6,7 +6,7 @@ import {
   type PathCandidateMintOutcome,
   type PathRelationProposalPayload
 } from "@do-soul/alaya-soul";
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import type { LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
 
 type EvidenceCreate = MaterializationRouterDeps["evidenceService"]["create"];
 type MemoryCreate = MaterializationRouterDeps["memoryService"]["create"];
@@ -25,8 +25,8 @@ export type DetectFn = NonNullable<
 export type EnqueueFn = NonNullable<MaterializationRouterDeps["enrichPendingPort"]>["enqueue"];
 
 export function createSignal(
-  overrides: Partial<CandidateMemorySignal> = {}
-): CandidateMemorySignal {
+  overrides: Partial<LegacyCandidateMemorySignal> = {}
+): LegacyCandidateMemorySignal {
   const { source_observation = null, ...signalOverrides } = overrides;
   return {
     signal_id: "signal-1",

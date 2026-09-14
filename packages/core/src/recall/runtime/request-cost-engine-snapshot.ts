@@ -1,5 +1,6 @@
 export type EngineCostField = Readonly<{
   readonly solver_completed_work?: number;
+  readonly solver_retained_bytes?: number;
   readonly seen_identities: { readonly length: number };
   readonly remaining_memory_bytes: number;
   readonly remaining_work: readonly { readonly units: number }[];
@@ -38,7 +39,7 @@ export function snapshotRestoredEngineWork(
     solver_completed_work: field.solver_completed_work ?? 0,
     charged_identities: field.seen_identities.length,
     remaining_memory_bytes: Math.max(0, memoryBytes - (field.pending_path_effects?.retained_bytes ?? 0)
-      - (field.binding_context_bytes ?? field.binding_contexts?.bytes ?? 0))
+      - (field.binding_context_bytes ?? field.binding_contexts?.bytes ?? 0) - (field.solver_retained_bytes ?? 0))
   };
 }
 

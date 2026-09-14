@@ -88,8 +88,9 @@ describe("compile-seed raw payload projection", () => {
   }, 60_000);
 
   it("projects a near-cap provider payload without losing its semantic fields or identity", async () => {
+    // Keep payload pressure separate from ambiguous lowercase sentence continuation.
     const turnContent = (
-      "The source turn records one durable fact. " + "context ".repeat(256)
+      "The source turn records one durable fact. " + "Background details remain available. ".repeat(64)
     );
     const productionRawPayload = {
       matched_text: "The source turn records one durable fact.",
@@ -126,7 +127,9 @@ describe("compile-seed raw payload projection", () => {
     expect(signal?.raw_payload).toMatchObject({
       matched_text: productionRawPayload.distilled_fact,
       distilled_fact: productionRawPayload.distilled_fact,
-      bench_source_raw_payload_projected: true
+      bench_source_raw_payload_projected: true,
+      source_grounding: { status: "grounded", source_assertion: productionRawPayload.distilled_fact },
+      validation_result: { status: "valid" }
     });
     expect(signal?.raw_payload.canonical_entities).toEqual(["source turn"]);
     expect(signal?.raw_payload.bench_source_raw_payload_key_count).toBeGreaterThan(

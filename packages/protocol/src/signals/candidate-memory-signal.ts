@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SOURCE_INTERPRETATION_CONTRACT, SourceLocatedInterpretationSchema } from "../garden/source-interpretation.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_EVIDENCE_ARRAY_MAX,
@@ -122,7 +123,7 @@ export const SignalSourceObservationSchema = z
   .strict()
   .readonly();
 
-export const CandidateMemorySignalSchema = z.object({
+const CandidateMemorySignalBaseSchema = z.object({
   signal_id: BoundedIdSchema,
   workspace_id: BoundedIdSchema,
   run_id: BoundedIdSchema,
@@ -145,24 +146,48 @@ export const CandidateMemorySignalSchema = z.object({
   source_delivery_ids: SourceDeliveryIdsSchema.optional(),
   source_observation: SignalSourceObservationSchema.nullable().default(null),
   created_at: IsoDatetimeStringSchema
+});
+
+export const LegacyCandidateMemorySignalSchema = CandidateMemorySignalBaseSchema.extend({
+  interpretation_contract: z.undefined().optional()
 }).readonly();
+const EmptyMemoryRefsSchema = MemoryRefsSchema.pipe(z.array(BoundedIdSchema).max(0).readonly());
+const InterpretationFields = {
+  interpretation_contract: z.literal(SOURCE_INTERPRETATION_CONTRACT),
+  signal_kind: z.literal(SignalKind.POTENTIAL_SEMANTIC_OBSERVATION),
+  object_kind: z.null(),
+  confidence: z.null(),
+  canonical_entities: z.null().optional(),
+  source_memory_refs: EmptyMemoryRefsSchema,
+  supersedes_refs: EmptyMemoryRefsSchema,
+  exception_to_refs: EmptyMemoryRefsSchema,
+  contradicts_refs: EmptyMemoryRefsSchema,
+  incompatible_with_refs: EmptyMemoryRefsSchema,
+  raw_payload: RawPayloadSchema.and(z.object({
+    source_interpretation: SourceLocatedInterpretationSchema
+  }).loose())
+} as const;
+export const SourceInterpretationSignalSchema = CandidateMemorySignalBaseSchema.extend({
+  ...InterpretationFields,
+  source: z.literal(SignalSource.GARDEN_COMPILE),
+  source_observation: SignalSourceObservationSchema
+}).readonly();
+export const CandidateMemorySignalSchema = z.union([
+  LegacyCandidateMemorySignalSchema, SourceInterpretationSignalSchema
+]);
 
 // Content-only fields that the agent supplies. workspace_id / run_id /
 // surface_id are bound from trusted MCP context per invariants §29
 // Default Scope; see McpEmitCandidateSignalRequestSchema below.
-const CandidateMemorySignalContentFieldsSchema = z.object({
-  signal_kind: SignalKindSchema,
-  object_kind: BoundedLabelSchema,
-  scope_hint: BoundedLabelSchema.nullable(),
-  domain_tags: DomainTagsSchema,
-  confidence: ConfidenceSchema,
-  evidence_refs: EvidenceRefsSchema,
+const CandidateMemorySignalContentFieldsSchema = CandidateMemorySignalBaseSchema.pick({
+  signal_kind: true, object_kind: true, scope_hint: true, domain_tags: true,
+  confidence: true, evidence_refs: true, raw_payload: true
+}).extend({
   source_memory_refs: MemoryRefsSchema.optional(),
   supersedes_refs: MemoryRefsSchema.optional(),
   exception_to_refs: MemoryRefsSchema.optional(),
   contradicts_refs: MemoryRefsSchema.optional(),
-  incompatible_with_refs: MemoryRefsSchema.optional(),
-  raw_payload: RawPayloadSchema
+  incompatible_with_refs: MemoryRefsSchema.optional()
 });
 
 export const CandidateMemorySignalContentSchema = CandidateMemorySignalContentFieldsSchema
@@ -209,6 +234,8 @@ export type SignalKind = z.infer<typeof SignalKindSchema>;
 export type SignalSource = z.infer<typeof SignalSourceSchema>;
 export type SignalState = z.infer<typeof SignalStateSchema>;
 export type CandidateMemorySignal = z.infer<typeof CandidateMemorySignalSchema>;
+export type LegacyCandidateMemorySignal = z.infer<typeof LegacyCandidateMemorySignalSchema>;
+export type SourceInterpretationSignal = z.infer<typeof SourceInterpretationSignalSchema>;
 export type CandidateMemorySignalInput = z.infer<typeof CandidateMemorySignalInputSchema>;
 export type EmitCandidateSignalRequest = z.infer<typeof EmitCandidateSignalRequestSchema>;
 export type McpEmitCandidateSignalRequest = z.infer<typeof McpEmitCandidateSignalRequestSchema>;
