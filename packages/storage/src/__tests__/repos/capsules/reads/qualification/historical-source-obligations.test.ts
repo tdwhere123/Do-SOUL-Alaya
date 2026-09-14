@@ -20,6 +20,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../../../../sqlite/db.js";
 import { SqliteEvidenceCapsuleRepo } from "../../../../../repos/capsules/evidence-capsule-repo.js";
+import { readObjectKeyEvidenceSources } from "../../../../../repos/capsules/reads/object-key-source-reader.js";
 import { createEvidenceCapsuleRepo, evidenceCapsuleDatabases } from "../../evidence-capsule-repo-fixture.js";
 import { removeTempDirectorySync } from "../../../../temp-directory.js";
 import { assertionCapsule, insertMaterializationEvent, persistAssertionSignal, verifiedAssertionSourceHash } from
@@ -53,6 +54,17 @@ it.each([
 it("refuses a historical frame that loses modality while its v1 source proof still qualifies", async () => {
   await assertHistoricalRead("I can enter the lab.", { ...frame,
     slots: frame.slots.filter(({ role }) => role !== "qualifier") }, false);
+});
+
+it.each([
+  { source: "I can enter the lab or use the equipment.", subject: "I", qualifier: "can", relation: "use" },
+  { source: "Alice enters the lab or uses the equipment.", subject: "Alice enters the lab or", relation: "uses" }
+])("refuses historical frames whose proposed anchors skip the primary source predicate: $subject", async (entry) => {
+  await assertHistoricalRead(entry.source, { schema_version: 1, slots: [
+    { role: "subject", text: entry.subject },
+    ...(entry.qualifier === undefined ? [] : [{ role: "qualifier" as const, text: entry.qualifier }]),
+    { role: "relation", text: entry.relation }, { role: "value", text: "the equipment" }
+  ] }, false);
 });
 
 it.each(["I can enter the lab.", "I have entered the lab."])(
@@ -92,6 +104,11 @@ async function assertHistoricalRead(source: string, factFrame: AssociativeFactFr
   expect(qualified?.capsule.excerpt).toBe(source);
   expect(qualified?.fact_frame_formation).toEqual(supported ? captures.factFrame : undefined);
   expect(qualified?.semantic_factor_formation).toEqual(supported ? captures.semantic : undefined);
+  expect(readObjectKeyEvidenceSources(reopened, "workspace-1", [capsule.object_id])).toEqual([{
+    object_id: capsule.object_id, gist: corpus,
+    fact_key_contents: supported ? buildAssociativeFactKeyProjections(factFrame).map(({ content }) => content) : [],
+    osf_graph: supported ? captures.semantic.graph : null
+  }]);
   const verify = () => verifyEvidenceOsfSemanticCompleteness({ receipt: captures.certificate,
     source_text: source, fact_frame: captures.factFrame, semantic_formation: captures.semantic, sha256 });
   if (supported) {

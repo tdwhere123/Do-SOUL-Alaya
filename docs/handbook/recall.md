@@ -111,13 +111,23 @@ establish its meaning. Explicit proposals, automatic normalization, historical
 frame replay, Core certification and current Storage qualification share the
 complete source-frame contract in Protocol's Node-only `node/source-frame`
 entry. This grammar requires recognized leading qualifiers and modality,
-and coverage of every source token after the predicate; it preserves the
-existing auxiliary normalization. Core owns admission and effects. Its public
+and coverage of every source token from the independently located predicate;
+submitted slots cannot choose their own subject or predicate anchor. Explicit
+subjects are bounded to recognized pronouns, `the user`, or a single capitalized
+name at source start. Multiword named subjects and CJK subject grammar remain
+unsupported; existing CJK tokenization is unchanged. Existing auxiliary
+normalization and explicit source-head copulas remain supported. Core owns admission and effects. Its public
 normalizer export serves daemon configuration and benchmark replay/backfill
 consumers by exporting the same Protocol implementation. The Protocol browser
 root's receipt verifier proves historical frame-to-graph binding only; current
 source qualification must also use the source-frame contract. Native CJK
 segmentation stays outside the browser root.
+
+Object-key minting and retrofit read derived fact keys and OSF graphs through
+the same current stored-formation qualification owners. Fact-key contents must
+also match their canonical projections. Unqualified historical derivatives do
+not supply these inputs; gist, original source text, and ordinary memory remain
+independently readable.
 
 Source assertion fragments require demonstrated bounded independence;
 mechanical coordination or a sentence-ending period is insufficient. Adjacent

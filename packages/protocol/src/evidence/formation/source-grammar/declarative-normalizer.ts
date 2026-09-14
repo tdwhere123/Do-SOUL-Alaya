@@ -7,6 +7,7 @@ import {
   type EvidenceFactFrameFormationProposal
 } from "../../associative-fact-frame.js";
 import { hasUnquotedSourceDependentScope, isInsideSourceQuotation } from "../../source-dependent-scope.js";
+import { BE_AUXILIARIES } from "./clause-boundaries.js";
 import { skipLeadingAdjunctSpan } from
   "./leading-adjunct.js";
 import {
@@ -113,16 +114,28 @@ export function factFramePreservesSourceObligations(source: string, frame: Reado
   const grounded = groundAssociativeFactFrameSlots(frame, assertion);
   const relations = grounded?.filter(({ role }) => role === "relation");
   if (grounded === null || relations?.length !== 1) return false;
+  const located = readInitialSubject(assertion, tokens);
+  const subject = located === null ? readNamedSubjectAnchor(tokens) : located;
+  if (subject == null || frame.slots.filter((slot) => slot.role === "subject").length !== 1 ||
+      frame.slots.find((slot) => slot.role === "subject")?.text !== subject.text) return false;
+  const predicate = readPredicate(tokens, subject.nextIndex, subject.modalQualifier);
+  if (!predicate.supported) return false;
+  const lexical = tokens[predicate.relationIndex];
+  // Explicit copulas may retain the source's first auxiliary. Both anchors come
+  // from the source grammar, never a proposed slot's chosen endpoint.
+  let headIndex = subject.nextIndex;
+  while (tokens[headIndex] !== undefined && isPredicateQualifier(tokens[headIndex]!)) headIndex += 1;
+  const head = tokens[headIndex];
+  const relation = relations[0]!;
+  const sourceRelation = lexical?.start === relation.source_span[0] && isRelationToken(tokens, predicate.relationIndex)
+    ? lexical : head !== undefined && BE_AUXILIARIES.has(head.normalized) && head.start === relation.source_span[0]
+      ? head : undefined;
+  if (sourceRelation === undefined || sourceRelation.end > relation.source_span[1]) return false;
   // Grounding proves presence; completeness also requires every source token
   // after the predicate to survive in an ordered slot. Punctuation is not a token.
-  const relationEnd = relations[0]!.source_span[1];
-  if (tokens.some((token) => token.end > relationEnd && !grounded.some(({ source_span: [start, end] }) =>
+  if (tokens.some((token) => token.start >= sourceRelation.start && !grounded.some(({ source_span: [start, end] }) =>
     start <= token.start && token.end <= end))) return false;
-  const located = readInitialSubject(assertion, tokens);
-  const subject = located === null ? readExplicitSubjectAnchor(assertion, tokens, frame) : located;
-  if (subject == null) return false;
-  const predicate = readPredicate(tokens, subject.nextIndex, subject.modalQualifier);
-  if (valueCrossesUnsupportedScope(assertion, tokens, predicate.relationIndex + 1)) return false;
+  if (valueCrossesUnsupportedScope(assertion, tokens, tokens.indexOf(sourceRelation) + 1)) return false;
   if (predicate.qualifiers.length > MAX_QUALIFIERS) return false;
   const required = [...(subject.prefix === undefined ? [] : [subject.prefix]),
     ...predicate.qualifiers.map((token) => token.text)];
@@ -136,16 +149,13 @@ export function factFramePreservesSourceObligations(source: string, frame: Reado
   });
 }
 
-/** Explicit frames can locate an existing source-start subject without teaching the normalizer new NPs. */
-function readExplicitSubjectAnchor(source: string, tokens: readonly FactFrameSourceToken[],
-  frame: Readonly<AssociativeFactFrame>): SubjectSpan | undefined {
-  const subject = frame.slots.find((slot) => slot.role === "subject");
-  if (subject === undefined || tokens[0]?.start !== 0 || !source.startsWith(subject.text)) return undefined;
-  const nextIndex = tokens.findIndex((token) => token.start >= subject.text.length);
-  if (nextIndex < 1 || tokens[nextIndex - 1]!.end > subject.text.length ||
-      tokens.slice(0, nextIndex).some((token) => isPredicateQualifier(token) ||
-        /^(?:i|you|he|she|it|we|they)['\u2019](?:d|ll)$/u.test(token.normalized))) return undefined;
-  return { text: subject.text, nextIndex };
+/** The bounded explicit NP anchor is one source-start capitalized name token. */
+function readNamedSubjectAnchor(tokens: readonly FactFrameSourceToken[]): SubjectSpan | undefined {
+  const first = tokens[0];
+  if (first?.start !== 0 || !/^\p{Lu}\p{L}*$/u.test(first.text) ||
+      AUXILIARIES.has(first.normalized) || RELATION_STOP_WORDS.has(first.normalized) ||
+      isPredicateQualifier(first)) return undefined;
+  return { text: first.text, nextIndex: 1 };
 }
 
 /** null: unrecognized subject; undefined: located subject crosses an unsupported boundary. */

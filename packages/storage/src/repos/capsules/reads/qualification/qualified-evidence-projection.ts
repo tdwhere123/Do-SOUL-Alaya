@@ -36,6 +36,20 @@ interface RederivedFactKeyProjection {
 
 export type QualifiedProjectionIndex = ReadonlyMap<string, BoundProjection>;
 
+/** Object-key consumers need current derived facts, independently of source receipt routing. */
+export function readCurrentStoredFactKeyContents(
+  capsule: Readonly<Pick<EvidenceCapsule, "object_id" | "workspace_id" | "source_hash" | "excerpt">>,
+  projections: QualifiedProjectionIndex
+): readonly string[] {
+  return Object.freeze([...projections.values()].flatMap((stored) => {
+    const frame = stored.factFrameFormation;
+    if (stored.evidenceObjectId !== capsule.object_id || stored.projection.projection_kind !== "fact_key" ||
+        frame?.status !== "formed" || frame.fact_frame === null) return [];
+    const matched = matchRederivedFactKey(stored.projection, capsule, stored, frame.fact_frame);
+    return matched === null ? [] : [matched.projection.content];
+  }));
+}
+
 export class EvidenceProjectionIntegrityError extends Error {
   public constructor(evidenceObjectId: string, reason: string) {
     super(`Evidence projection integrity failed for ${evidenceObjectId}: ${reason}`);
@@ -266,7 +280,7 @@ function rederiveFactKeyProjection(
 
 function matchRederivedFactKey(
   identity: EvidenceSearchProjectionIdentity,
-  capsule: Readonly<EvidenceCapsule>,
+  capsule: Readonly<Pick<EvidenceCapsule, "object_id" | "workspace_id" | "source_hash" | "excerpt">>,
   stored: BoundProjection,
   frame: Readonly<AssociativeFactFrame>
 ): Readonly<RederivedFactKeyProjection> | null {

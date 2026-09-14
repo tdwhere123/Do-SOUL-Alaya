@@ -33,9 +33,48 @@ function historicalCapture(frame: AssociativeFactFrame, producer = "rule_based_e
 }
 
 it.each([
+  { source: "I can enter the lab or use the equipment.", subject: "I", qualifier: "can" },
+  { source: "Alice enters the lab or uses the equipment.", subject: "Alice enters the lab or" },
+  { source: "Alice enters the lab or uses the equipment.", subject: "Alice" },
+  { source: "I enter the lab or use the equipment.", subject: "I enter the lab or" }
+])("refuses a submitted subject or relation that skips the source predicate: $source / $subject", (entry) => {
+  const relation = entry.source.includes("uses") ? "uses" : "use";
+  const frame: AssociativeFactFrame = { schema_version: 1, slots: [
+    { role: "subject", text: entry.subject },
+    ...(entry.qualifier === undefined ? [] : [{ role: "qualifier" as const, text: entry.qualifier }]),
+    { role: "relation", text: relation }, { role: "value", text: "the equipment" }
+  ] };
+  expect(materialize(entry.source, frame)).toMatchObject({ capture: { status: "rejected" }, searchProjections: [] });
+  const capture = historicalCapture(frame);
+  expect(() => replayEvidenceFactFrameFormationCapture({ sourceAssertion: entry.source, sourceHash, capture })).toThrow();
+  const semanticFormation = materializeOpenSemanticFactorFormation({ source_kind: "evidence", source_text: entry.source,
+    proposal: { schema_version: 1, producer_operator_id: "garden_source_bound_open_semantic_factor_v3",
+      source_text: entry.source, graph: { schema_version: 2, source_kind: "evidence", variables: [], result_variable_ids: [],
+        factors: [{ factor_id: "verb", surface: relation, semantic_identity: "use" },
+          { factor_id: "object", surface: "the equipment", semantic_identity: "equipment" }],
+        propositions: [{ proposition_id: "p", predicate_factor_id: "verb", arguments: [
+          { position: 0, binding_identity: "object", reference_kind: "factor", reference_id: "object" }
+        ] }] } } });
+  expect(semanticFormation.status).toBe("formed");
+  expect(certifyEvidenceSemanticCompleteness({ sourceText: entry.source, factFrame: capture, semanticFormation }))
+    .toMatchObject({ receipt: { status: "rejected", reason_code: "invalid_fact_frame_obligation" },
+      semanticFormation: { status: "rejected", graph: null } });
+});
+
+it.each([
+  { source: "Alice Smith likes tea.", subject: "Alice Smith", relation: "likes", value: "tea" },
+  { source: "张三喜欢咖啡。", subject: "张三", relation: "喜欢", value: "咖啡" }
+])("leaves explicit subjects outside the independently anchored grammar unsupported: $subject", (entry) => {
+  expect(materialize(entry.source, { schema_version: 1, slots: [
+    { role: "subject", text: entry.subject }, { role: "relation", text: entry.relation }, { role: "value", text: entry.value }
+  ] }).capture.status).toBe("rejected");
+});
+
+it.each([
   { source: "I am not a doctor.", subject: "I", relation: "am", qualifier: "not", value: "a doctor", copula: true },
   { source: 'Alice likes the song "Never Again".', subject: "Alice", relation: "likes", value: 'the song "Never Again"' },
   { source: 'Alice likes the song "Quiet Days".', subject: "Alice", relation: "likes", value: 'the song "Quiet Days"' },
+  { source: "I bought my bookshelf from IKEA.", subject: "I", relation: "bought my bookshelf from", value: "IKEA" },
   { source: 'Alice never likes the song "Quiet Days".', subject: "Alice", relation: "likes", qualifier: "never", value: 'the song "Quiet Days"' }
 ])("validates explicit obligations independently of automatic frame generation: $source", (entry) => {
   const qualifier = entry.qualifier === undefined ? [] : [{ role: "qualifier" as const, text: entry.qualifier }];
