@@ -4,12 +4,13 @@ import {
   type TemporalWindow
 } from "@do-soul/alaya-graph-algorithms";
 import { parseStrictCalendarDateToUtcDay } from "./temporal-date.js";
+import type { TimePrecision, TimeSource } from "@do-soul/alaya-protocol";
 
 export interface TemporalProjection {
   readonly event_time_start: string;
   readonly event_time_end: string;
-  readonly time_precision: "day" | "month" | "year" | "range" | "relative" | "unknown";
-  readonly time_source: "explicit" | "session_timestamp" | "relative_resolved";
+  readonly time_precision: TimePrecision;
+  readonly time_source: TimeSource;
   readonly projection_schema_version: 1;
 }
 
@@ -23,8 +24,15 @@ const TIME_CONCERN_PATTERN =
   /\b(?:today|yesterday|tomorrow|tonight|(?:last|this|next)\s+(?:week|month|year|spring|summer|autumn|fall|winter|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:\d{1,3}|a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:days?|weeks?|months?|years?)\s+ago|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+(?:\d{1,2}(?:st|nd|rd|th)?(?:,\s*|\s+)\d{4}|\d{4})|\d{1,2}(?:st|nd|rd|th)?\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}|\d{4}-\d{2}(?:-\d{2})?)\b|(?:今天|昨天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{1,3}(?:天|周|个月|年)前|\d{4}年\d{1,2}月(?:\d{1,2}日)?|\d{4}-\d{2}(?:-\d{2})?)/giu;
 
 export function timeConcernPattern(): RegExp {
-  return new RegExp(TIME_CONCERN_PATTERN.source, TIME_CONCERN_PATTERN.flags);
+  return new RegExp(`${TIME_CONCERN_PATTERN.source}|${ABSOLUTE_YEAR_PATTERN.source}`, "giu");
 }
+
+// Bare numerals are not source dates. A temporal preposition and a closed
+// numeral are required; units, model suffixes and finer date prefixes do not
+// establish a year. The source-role owner also checks dependent continuations,
+// so a rejected alternative cannot disappear behind a lone match.
+const ABSOLUTE_YEAR_PATTERN =
+  /\b(?:in|during|from|since|before|after|until|through|to|by)\s+(?:the\s+year\s+)?[1-9]\d{3}(?=$|[,.!?;:](?=\s|$)|\s+(?:with|when|and|or|but|while|as|to|through|until|the|a|an|we|i|it|they|he|she)\b)|(?:在|于|自|从|到|至)[1-9]\d{3}年(?!\d|月)|[1-9]\d{3}年(?=[，。；！？]|$)/giu;
 
 export function resolveTemporalProjection(
   matchedText: string,
@@ -46,6 +54,11 @@ export function resolveTemporalProjection(
     );
   }
   const normalized = normalizeWindowDigest(matchedText);
+  const year = /^(?:(?:in|during|from|since|before|after|until|through|to|by)_(?:the_year_)?|[在于自从到至])?([1-9]\d{3})年?$/u.exec(normalized);
+  if (year !== null) {
+    const value = Number(year[1]);
+    return projection(Date.UTC(value, 0, 1), Date.UTC(value + 1, 0, 1) - 1, "year", "explicit");
+  }
   const month = resolveAbsoluteMonthProjection(normalized);
   if (month !== null) return month;
   const explicit = parseEnglishCalendarDate(matchedText) ?? parseStrictCalendarDateToUtcDay(normalized);

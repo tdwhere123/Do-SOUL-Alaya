@@ -32,6 +32,7 @@ const DURABLE_PROJECTION_PROMPT_PARTS = Object.freeze([
   'Include "canonical_entities" with at most 3 lowercase names or stable source phrases that occur in matched_text. Do not infer an alias, identity, or pronoun resolution that is absent from that assertion.',
   'When the assertion explicitly states event time or validity, include "temporal_projection" with "projection_schema_version":1, "time_precision", "time_source":"explicit", and only the applicable ISO fields.',
   'Use "event_time_start" and "event_time_end" for when an event occurred. Use "valid_from" and optional "valid_to" only for an explicitly effective or ongoing interval; omit "valid_to" for an open interval. Never copy event time into valid time.',
+  'Temporal projection version 1 uses inclusive starts and ends: an explicit year runs from January 1 at 00:00:00.000Z through December 31 at 23:59:59.999Z. Use the final millisecond of the stated day, month, year, or bounded range, not the start of the next period.',
   'For relative dates, omit absolute temporal_projection values; the runtime resolves them from the trusted source observation.',
   'For a durable preference, include "preference_profile" with "projection_schema_version":1 and the exact keys "preference_subject", "preference_predicate", "preference_object", optional "preference_category", and "preference_polarity".',
   '"preference_polarity" must be exactly "positive", "negative", or "neutral".'

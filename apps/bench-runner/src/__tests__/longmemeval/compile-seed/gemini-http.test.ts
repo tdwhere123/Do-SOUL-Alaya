@@ -46,6 +46,18 @@ async function withServer(
 }
 
 describe("native Gemini interactive extraction", () => {
+  it("binds the actual shared response shape into raw cache identity", () => {
+    const request = stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest("I enjoy coffee.", []));
+    const original = computeCacheKey(config.model, config.requestProfile, input.systemPrompt, request);
+    const changed = structuredClone(soul.officialApiExtractionResponseSchema(request)) as { title?: string };
+    changed.title = "Changed generation contract";
+    const schema = vi.spyOn(soul, "officialApiExtractionResponseSchema").mockReturnValue(changed);
+    try {
+      expect(computeCacheKey(config.model, config.requestProfile, input.systemPrompt, request)).not.toBe(original);
+    } finally { schema.mockRestore(); }
+    expect(computeCacheKey(config.model, config.requestProfile, input.systemPrompt, request)).toBe(original);
+  });
+
   it("changes only thinking level on the actual wire and keeps minimal and low cache identities distinct", async () => {
     const wires: unknown[] = [];
     await withServer((req, res) => {
@@ -110,6 +122,14 @@ describe("native Gemini interactive extraction", () => {
         ]);
         expect(schema.properties.signals.items.properties.semantic_factor_graph.properties)
           .toHaveProperty("propositions");
+        expect(schema.properties.signals.items.properties.temporal_projection).toMatchObject({
+          type: "object", required: ["projection_schema_version", "time_precision", "time_source"],
+          properties: {
+            event_time_end: { type: "string", format: "date-time", description: expect.stringContaining("Inclusive") },
+            valid_from: { type: "string", format: "date-time" },
+            projection_schema_version: { type: "number", enum: [1] }
+          }
+        });
         observed = true;
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ candidates: [{ finishReason: "STOP",

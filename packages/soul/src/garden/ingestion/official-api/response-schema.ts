@@ -4,6 +4,7 @@ import { OfficialApiSourceLocatorSchema } from "../../triage/grounding/source-lo
 import { OFFICIAL_API_SIGNAL_LIMIT } from "../official-api-signal-parser.js";
 import { OFFICIAL_API_OBJECT_KINDS } from "./object-kind-contract.js";
 import { parseOfficialApiExtractionRequest } from "./extraction-request.js";
+import { OfficialApiTemporalProjectionDraftSchema } from "../../extraction/temporal/projection-draft.js";
 
 // This constrains generation, not admission: older/raw proposals still pass
 // through the shared parser and grounding owners, including graph rejection.
@@ -14,7 +15,8 @@ const responseSchema = z.toJSONSchema(z.object({
     confidence: z.number().min(0).max(1),
     matched_text: z.string(),
     source_locator: OfficialApiSourceLocatorSchema,
-    semantic_factor_graph: OpenSemanticFactorGraphProposalSchema
+    semantic_factor_graph: OpenSemanticFactorGraphProposalSchema,
+    temporal_projection: OfficialApiTemporalProjectionDraftSchema.optional()
   })).max(OFFICIAL_API_SIGNAL_LIMIT)
 }).strict(), {
   io: "input",
@@ -26,6 +28,8 @@ const responseSchema = z.toJSONSchema(z.object({
     }
   }
 });
+
+export const OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE = JSON.stringify(responseSchema);
 
 /** Query/protocol probes have different envelopes and must not inherit this schema. */
 export function officialApiExtractionResponseSchema(userPrompt: string): object | undefined {

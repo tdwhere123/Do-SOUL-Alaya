@@ -72,13 +72,13 @@ export const EXTRACTION_CACHE_MANIFEST_VERSION = 3;
 export const EXTRACTION_CACHE_MANIFEST_FILENAME = "manifest.json";
 /** Documented cache-key formula. The persisted identity is the digest below. */
 export const EXTRACTION_CACHE_KEY_ALGO_DOCUMENTATION =
-  "sha256(model\\0requestProfile\\0systemPrompt\\0canonicalExtractionRequest)";
+  "sha256(model\\0requestProfile\\0systemPrompt\\0canonicalExtractionRequest\\0responseSchemaJson)";
 /**
  * Pinned digest of computeCacheKey(EXTRACTION_CACHE_KEY_GOLDEN_VECTOR).
  * Run-start recomputes the golden vector; a derivation change is a mismatch.
  */
 export const EXTRACTION_CACHE_KEY_ALGO =
-  "1eb13a99343ca78359552d365bb72bb9154942817843c54219a8fa722ae7548f";
+  "e9aeddaa17d7f0b069b6dfc4ebcda523e50b12785d4d75ca881ff7fbb5215717";
 
 export function computeExtractionCacheKeyAlgoDigest(): string {
   return computeCacheKey(

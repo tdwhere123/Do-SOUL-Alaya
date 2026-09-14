@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   buildOfficialApiExtractionRequests,
+  officialApiExtractionResponseSchema,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import { ExtractionCacheInvariantError } from
@@ -13,7 +14,7 @@ export const EXTRACTION_CACHE_KEY_GOLDEN_VECTOR = Object.freeze({
   model: "alaya-cache-key-golden-model",
   requestProfile: "provider-default-v1" as CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: "alaya-cache-key-golden-system-prompt",
-  extractionRequest: "{\"schema_version\":2}"
+  extractionRequest: '{"schema_version":2,"source_locator_contract_version":3,"batch_contract_version":1,"source_corpus_identity":"4f59a38bf6928c41ab6efd0c80fb480d2336a8ce210459597d2a816eb88066cd","batch_index":0,"batch_count":1,"source_assertions":[{"assertion_id":1,"text":"User: I enjoy coffee."}]}'
 });
 
 export function computeCacheKey(
@@ -30,6 +31,8 @@ export function computeCacheKey(
     .update(systemPrompt, "utf8")
     .update("\u0000", "utf8")
     .update(extractionRequest, "utf8")
+    .update("\u0000", "utf8")
+    .update(JSON.stringify(officialApiExtractionResponseSchema(extractionRequest) ?? null), "utf8")
     .digest("hex");
 }
 

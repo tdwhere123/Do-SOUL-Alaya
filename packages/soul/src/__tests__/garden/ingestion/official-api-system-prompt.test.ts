@@ -44,7 +44,7 @@ describe("official API system prompt", () => {
           "I", "opened", "a workshop", "2020", "promised", "to lend tools"
         ].sort());
         expect(grounded.draft.temporal_projection).toMatchObject({ time_source: "explicit", time_precision: "year",
-          event_time_start: "2020-01-01T00:00:00.000Z", event_time_end: "2021-01-01T00:00:00.000Z" });
+          event_time_start: "2020-01-01T00:00:00.000Z", event_time_end: "2020-12-31T23:59:59.999Z" });
         expect(graph!.propositions.map((proposition) => proposition.arguments.at(-1)?.reference_id)).toEqual(["year", "year"]);
       } else {
         expect(graph!.factors.map((factor) => factor.surface).sort()).toEqual([
@@ -196,7 +196,7 @@ describe("official API system prompt", () => {
     const g8Sha256 =
       "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
     const currentSha256Expected =
-      "cdb968269d0585f9144509c9ae6a237ec7caeedb3d176fcea0abbcc29be56da8";
+      "f18b2d40f913326786018e38f23b12a26e87c0867e7bdbedd6f329a6e31a7d20";
     const previousCatalogPrompt = resolveOfficialApiSystemPrompt(
       "1775799d80bebde5797ded3a5fdddf209c96839489cde4a947518822110a76fd"
     );
@@ -210,6 +210,9 @@ describe("official API system prompt", () => {
     const g8 = resolveOfficialApiSystemPrompt(g8Sha256);
 
     expect(currentSha256).toBe(currentSha256Expected);
+    const priorTemporalPrompt = resolveOfficialApiSystemPrompt("cdb968269d0585f9144509c9ae6a237ec7caeedb3d176fcea0abbcc29be56da8");
+    expect(priorTemporalPrompt).toContain('"event_time_end":"2021-01-01T00:00:00.000Z"');
+    expect(priorTemporalPrompt).not.toBe(OFFICIAL_API_SYSTEM_PROMPT);
     expect(previousCatalogPrompt).toBeDefined();
     expect(sha256(previousCatalogPrompt!)).toBe("1775799d80bebde5797ded3a5fdddf209c96839489cde4a947518822110a76fd");
     expect(resolveOfficialApiSystemPrompt(currentSha256)).toBe(OFFICIAL_API_SYSTEM_PROMPT);

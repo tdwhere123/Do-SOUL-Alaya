@@ -1,5 +1,5 @@
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
-import { parseOfficialApiTemporalProjection } from "../../extraction/temporal/observed-projection.js";
+import { parseOfficialApiTemporalProjection } from "../../extraction/temporal/projection-draft.js";
 import type { MemoryMaterializationInput } from "./contracts.js";
 
 type MemoryTemporalProjection = Partial<Pick<

@@ -26,7 +26,7 @@ import { inspectOfficialApiSemanticFactorGraphProjection } from
   "./semantic-factor-projection.js";
 
 // invariant: cache-compatibility decisions pin formation behavior independently of raw JSON.
-export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v9";
+export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v10";
 
 export type OfficialApiSignalAuditDisposition = "admitted" | "deferred" | "rejected" | "invalid";
 
@@ -343,7 +343,10 @@ function formGroundedDraft(
 }
 
 function resolveAuditTiming(input: OfficialApiSignalFormationAuditInput): AuditTiming {
-  const sourceObservedAt = normalizeSourceObservedAt(input.source_observed_at);
+  // Validation must not discard the civil offset before relative resolution.
+  // The host receipt owns the canonical observation instant independently.
+  const sourceObservedAt = normalizeSourceObservedAt(input.source_observed_at) === undefined
+    ? undefined : input.source_observed_at!.trim();
   return {
     createdAt: normalizeSourceObservedAt(input.created_at),
     sourceObservedAt,

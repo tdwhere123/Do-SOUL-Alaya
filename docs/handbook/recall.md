@@ -416,6 +416,28 @@ whole-record limit is not an algorithm requirement for global unique parsing.
 Packed source-filter time bounds are inclusive; typed event-time and relation
 intervals remain half-open, and event time never substitutes for creation time.
 
+Garden `temporal_projection` version 1 and the corresponding MemoryEntry fields
+retain inclusive endpoints, matching Graph `TemporalWindow`: a year ends on
+December 31 at `23:59:59.999Z`. They do not adapt to typed source event-time or
+relation intervals. The Soul temporal draft schema owns generation and parsing;
+Protocol owns the shared precision/provenance enums. Historical final-day
+date-only nominations may normalize to that day's final millisecond, but an
+exclusive next-period endpoint is not reinterpreted as v1. Historical raw bytes
+and stored v1 windows are not rewritten.
+
+Soul's source-time owner binds discovered dates to their local roles before
+official, replay, or local heuristic event projection. Absolute years 1000–9999
+require a temporal preposition and a closed numeral, or an explicit Chinese
+calendar-year context; bare identifiers, amounts, quantities, partial dates,
+alternative years, and unresolved before/after bounds do not establish an event
+window. Closed `from ... to ...` ranges retain both endpoints; explicit validity
+or `since` yields validity, never an event copy. Missing source clocks leave
+relative dates unresolved; live and replay preserve a supplied fixed offset for
+civil-time resolution. Absolute calendar years use UTC and need no clock.
+Generation response-schema JSON participates in raw cache identity; current
+parser, grounding and formation identities separate newly derived artifacts
+from historical raw or previously qualified generations.
+
 Finite max-min oracles establish only their stated finite reference properties.
 Real SQLite, worker, MCP/CLI, continuation and attribution tests establish the
 specific producer-consumer cases they exercise. Neither set establishes dataset

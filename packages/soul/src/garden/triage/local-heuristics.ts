@@ -12,11 +12,11 @@ import { buildSchemaGroundedRawPayload } from "../ingestion/schema-grounding.js"
 import {
   isRelativeTimeConcern,
   normalizeWindowDigest,
-  resolveTemporalProjection,
   timeConcernPattern,
   type TemporalProjection
 } from "../extraction/time-concern-projection.js";
 import { normalizeSourceObservedAt } from "../extraction/temporal/observed-projection.js";
+import { resolveSourceTemporalCandidates } from "../extraction/temporal/source-time.js";
 import { buildSourceVerificationText } from "./grounding/source-assertion.js";
 
 interface PatternDefinition {
@@ -368,12 +368,14 @@ function extractTimeConcerns(
     }
 
     pattern.lastIndex = 0;
+    const candidates = resolveSourceTemporalCandidates(sentence, anchorIso ?? undefined);
     for (const match of sentence.matchAll(pattern)) {
       const matchedText = normalizeMatchedText(match[0]);
       if (matchedText.length === 0) {
         continue;
       }
-      const temporal_projection = resolveTemporalProjection(matchedText, anchorIso);
+      const temporal_projection = candidates.find((candidate) => candidate.role === "event" &&
+        candidate.start >= match.index && candidate.end <= match.index + match[0].length)?.projection ?? null;
       // Relative phrases without a source observation must not invent wall-clock windows.
       // Absolute calendar hits may still emit with a null projection (e.g. impossible dates).
       if (temporal_projection === null && isRelativeTimeConcern(matchedText)) {

@@ -19,6 +19,7 @@ import {
   type ExtractionCacheManifestV3
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { hasCompleteExtractionFillAuthority } from "../../../runs/extraction/fill/fill-authority.js";
+import { assertExtractionCacheIdentity } from "../../../runs/extraction/cache/cache-identity.js";
 import {
   computeCacheKey,
   EXTRACTION_CACHE_KEY_GOLDEN_VECTOR
@@ -53,11 +54,11 @@ describe("extraction-cache-manifest", () => {
 
   it("pins the live golden cache-key digest and demotes the formula to documentation", () => {
     expect(EXTRACTION_CACHE_KEY_ALGO_DOCUMENTATION).toBe(
-      "sha256(model\\0requestProfile\\0systemPrompt\\0canonicalExtractionRequest)"
+      "sha256(model\\0requestProfile\\0systemPrompt\\0canonicalExtractionRequest\\0responseSchemaJson)"
     );
     expect(computeExtractionCacheKeyAlgoDigest()).toBe(EXTRACTION_CACHE_KEY_ALGO);
     expect(computeExtractionCacheKeyAlgoDigest()).toBe(
-      "1eb13a99343ca78359552d365bb72bb9154942817843c54219a8fa722ae7548f"
+      "e9aeddaa17d7f0b069b6dfc4ebcda523e50b12785d4d75ca881ff7fbb5215717"
     );
     expect(computeCacheKey(
       EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.model,
@@ -65,6 +66,19 @@ describe("extraction-cache-manifest", () => {
       `${EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.systemPrompt}-mutated`,
       EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.extractionRequest
     )).not.toBe(EXTRACTION_CACHE_KEY_ALGO);
+  });
+
+  it("rejects a prior generation algorithm even when its prompt and provider identity match", () => {
+    const systemPrompt = "same prompt bytes";
+    const manifest: ExtractionCacheManifestV3 = { ...BASE_MANIFEST, schema_version: 3,
+      model_family: BASE_MANIFEST.extraction_model, request_profile: "provider-default-v1",
+      system_prompt_sha256: computeSystemPromptSha256(systemPrompt),
+      cache_key_algo: "1eb13a99343ca78359552d365bb72bb9154942817843c54219a8fa722ae7548f" };
+    const input = { config: { model: manifest.extraction_model, modelFamily: manifest.model_family,
+      providerUrl: manifest.provider_url, requestProfile: manifest.request_profile },
+      systemPrompt, manifest, validateProvider: true };
+    expect(() => assertExtractionCacheIdentity(input)).toThrow(/cache-key algorithm mismatch/u);
+    expect(() => assertExtractionCacheIdentity({ ...input, manifest: { ...manifest, cache_key_algo: EXTRACTION_CACHE_KEY_ALGO } })).not.toThrow();
   });
 
   afterEach(async () => {
