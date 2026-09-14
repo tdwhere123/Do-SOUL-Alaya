@@ -19,30 +19,13 @@ export function resolveSourceTemporalCandidates(
   source: string,
   anchor: string | undefined
 ): readonly SourceTemporalCandidate[] {
-  const matches: TemporalMatch[] = [];
-  const unresolved: TemporalSpan[] = [];
-  for (const match of source.matchAll(timeConcernPattern())) {
-    const projection = resolveTemporalProjection(match[0], anchor ?? null);
-    // An unresolved date is part of the inventory too. Omitting it could turn
-    // a partial alternative/range into an apparently unique absolute date.
-    if (projection === null) {
-      unresolved.push({ start: match.index, end: match.index + match[0].length });
-      continue;
-    }
-    if (projection.time_source === "explicit" &&
-        (/[a-z\d]$/iu.test(source.slice(0, match.index)) ||
-          /^(?:[-/]\d|[a-z\d])/iu.test(source.slice(match.index + match[0].length)))) continue;
-    // Year discovery includes its preposition; role/range binding needs the
-    // actual date span, just as month/day discovery does.
-    const yearOffset = projection.time_precision === "year" && projection.time_source === "explicit"
-      ? match[0].search(/[1-9]\d{3}/u) : 0;
-    matches.push({ start: match.index + Math.max(0, yearOffset), end: match.index + match[0].length, projection });
-  }
+  const { matches, unresolved } = sourceTemporalInventory(source, anchor);
+  const inventory = [...matches, ...unresolved];
   const range = sourceRangeMatch(source, matches);
   const candidates = (range === undefined ? matches : [range]).map((candidate) => {
     const bounded = candidate === range;
-    const before = sourceRolePrefix(source, candidate, matches);
-    const role = (hasDependentDateNeighbor(source, candidate, [...matches, ...unresolved]) ||
+    const before = sourceRolePrefix(source, candidate, inventory);
+    const role = (hasDependentDateNeighbor(source, candidate, inventory) ||
       hasUnresolvedEndpointExclusion(source, candidate) ||
       /^\s*[,，]?\s*(?:or\b|或)/iu.test(source.slice(candidate.end)) ||
       /^(?:\s+(?:or|and|to|through|until)\s+(?:the\s+year\s+)?\d|\s*(?:或|和|至|到)\s*\d)/iu.test(source.slice(candidate.end)))
@@ -52,6 +35,39 @@ export function resolveSourceTemporalCandidates(
     return Object.freeze({ ...candidate, role, bounded });
   });
   return candidates.some((candidate) => candidate.role === "unknown") ? [] : candidates;
+}
+
+function sourceTemporalInventory(source: string, anchor: string | undefined): {
+  readonly matches: readonly TemporalMatch[];
+  readonly unresolved: readonly TemporalSpan[];
+} {
+  const matches: TemporalMatch[] = [];
+  const unresolved: TemporalSpan[] = [];
+  for (const match of source.matchAll(timeConcernPattern())) {
+    const span = temporalLexicalExtent(source, match.index, match.index + match[0].length);
+    const projection = resolveTemporalProjection(match[0], anchor ?? null);
+    // Preserve rejected branches before interpreting their dependencies. A
+    // matched calendar prefix is not evidence for the complete attached token.
+    if (projection === null || (projection.time_source === "explicit" &&
+        (span.start !== match.index || span.end !== match.index + match[0].length))) {
+      unresolved.push(span);
+      continue;
+    }
+    // Year discovery includes its preposition; role/range binding needs the
+    // actual date span, just as month/day discovery does.
+    const yearOffset = projection.time_precision === "year" && projection.time_source === "explicit"
+      ? match[0].search(/[1-9]\d{3}/u) : 0;
+    matches.push({ start: match.index + Math.max(0, yearOffset), end: match.index + match[0].length, projection });
+  }
+  return { matches, unresolved };
+}
+
+function temporalLexicalExtent(source: string, start: number, end: number): TemporalSpan {
+  // ASCII date punctuation and identifier characters can extend a discovered
+  // prefix. Preserve that lexical unit; whitespace/clause punctuation ends it.
+  while (start > 0 && /[a-z\d_/-]/iu.test(source[start - 1]!)) start -= 1;
+  while (end < source.length && /[a-z\d_/-]/iu.test(source[end]!)) end += 1;
+  return { start, end };
 }
 
 function sourceRangeMatch(source: string, matches: readonly TemporalMatch[]): TemporalMatch | undefined {
@@ -78,7 +94,7 @@ function hasDependentDateNeighbor(source: string, candidate: TemporalMatch, matc
     if (other === candidate) return false;
     const between = other.end <= candidate.start ? source.slice(other.end, candidate.start)
       : candidate.end <= other.start ? source.slice(candidate.end, other.start) : undefined;
-    return between !== undefined && /^\s*(?:(?:or|and|to|through|until|[-–—]|至|到|或|和)\s*)?(?:(?:in|on|during|from|before|after|the\s+year)\s*)?$/iu.test(between);
+    return between !== undefined && /^\s*[,，]?\s*(?:(?:or|and|to|through|until|[-–—]|至|到|或|和)\s*)?(?:(?:in|on|during|from|before|after|the\s+year|在|于|自|从|到|至)\s*)?$/iu.test(between);
   });
 }
 
@@ -104,19 +120,18 @@ function hasUnresolvedEndpointExclusion(source: string, candidate: TemporalMatch
     /^\s*[,;:]?\s*\(?\s*(?:exclusive\b|excluding\b|not\s+including\b)/iu.test(source.slice(candidate.end));
 }
 
-function sourceRolePrefix(source: string, candidate: TemporalMatch, matches: readonly TemporalMatch[]): string {
+function sourceRolePrefix(source: string, candidate: TemporalMatch, matches: readonly TemporalSpan[]): string {
   const previous = [...matches].filter((match) => match.end <= candidate.start)
     .sort((left, right) => right.end - left.end)[0];
-  // Role cues cannot cross the clause separating neighboring dates. With no
-  // neighbor, retain the local clause so bounds on a date are not discarded.
-  const earliest = Math.max(0, candidate.start - 96);
-  const start = clauseStartAfter(source, previous?.end ?? earliest, candidate.start,
-    previous === undefined ? earliest : candidate.start);
+  // Keep the intervening construction even when two dates share one clause;
+  // a previous date is a lower bound on context, not proof of an empty prefix.
+  const earliest = previous?.end ?? 0;
+  const start = clauseStartAfter(source, earliest, candidate.start);
   return source.slice(start, candidate.start);
 }
 
-function clauseStartAfter(source: string, start: number, end: number, noBoundary: number): number {
+function clauseStartAfter(source: string, start: number, end: number): number {
   const separators = [...source.slice(start, end).matchAll(ROLE_CLAUSE_SEPARATOR)];
   const separator = separators[separators.length - 1];
-  return separator === undefined ? noBoundary : start + separator.index + separator[0].length;
+  return separator === undefined ? start : start + separator.index + separator[0].length;
 }

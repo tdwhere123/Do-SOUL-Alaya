@@ -1,4 +1,4 @@
-import { DEFAULT_EXTRACTION_SOURCE_PACKING, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   readExtractionCacheManifest,
   type ExtractionCacheManifest

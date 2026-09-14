@@ -449,8 +449,11 @@ alternative years, and unresolved before/after bounds do not establish an event
 window. Supported closed `to` and `through` ranges retain both endpoints as one
 candidate, including in local heuristics. Unresolved `until` or explicitly excluded
 endpoints remain unavailable. Validity requires a construction directly governing
-the date; a descriptive adjective elsewhere cannot supply that role. A nomination
-that omits a source-established closed validity end remains rejected in the audit,
+the date; a descriptive adjective elsewhere cannot supply that role. Local role
+context retains the construction between two dates in the same clause. Unsupported
+date fragments retain their complete lexical extent in the source inventory, so
+an alternative or range cannot become certain by dropping its unresolved branch.
+A nomination that omits a source-established closed validity end remains rejected in the audit,
 even when the independent source owner can preserve the complete range. Missing
 source clocks leave relative dates unresolved; live and replay preserve a supplied
 fixed offset for every civil-time consumer, including time-concern proposals.

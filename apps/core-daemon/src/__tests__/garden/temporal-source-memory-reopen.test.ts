@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { EventPublisher, EvidenceService, MemoryService, SignalService, createSignalEmissionWriter } from "@do-soul/alaya-core";
-import { InMemoryHandoffGapHandler, MaterializationRouter, OfficialApiGardenProvider, auditOfficialApiSignalFormation } from "@do-soul/alaya-soul";
+import { InMemoryHandoffGapHandler, LocalHeuristics, MaterializationRouter, OfficialApiGardenProvider,
+  auditOfficialApiSignalFormation, buildOfficialApiExtractionRequests } from "@do-soul/alaya-soul";
 import {
   initDatabase, SqliteEvidenceCapsuleRepo, SqliteEventLogRepo,
   SqliteMemoryEntryRepo, SqliteWorkspaceRepo, SqliteRunRepo, SqliteSignalRepo
@@ -21,6 +22,7 @@ interface TemporalCase {
   readonly validEnd?: string;
   readonly nomination?: Record<string, unknown>;
   readonly audit?: "formed" | "rejected" | "unavailable";
+  readonly localMatch?: string;
 }
 const CASES: readonly TemporalCase[] = [
   { source: "I released the product in 2016.", eventStart: "2016-01-01T00:00:00.000Z", eventEnd: "2016-12-31T23:59:59.999Z", validStart: null },
@@ -44,8 +46,34 @@ const CASES: readonly TemporalCase[] = [
   { source: "I worked last year.", eventStart: "2022-12-31T10:00:00.000Z", eventEnd: "2023-12-31T09:59:59.999Z", validStart: null }
 ];
 
+const LATER_EVENT = { projection_schema_version: 1, event_time_start: "2017-01-01T00:00:00.000Z",
+  event_time_end: "2017-12-31T23:59:59.999Z", time_precision: "year", time_source: "explicit" };
+const LATER_VALIDITY = { projection_schema_version: 1, valid_from: "2017-01-01T00:00:00.000Z",
+  time_precision: "year", time_source: "explicit" };
+const NO_TIME = { eventStart: null, eventEnd: null, validStart: null };
+const CONTEXT_CASES: readonly TemporalCase[] = [
+  { source: "I announced in 2016 a policy effective from 2017.", ...NO_TIME, audit: "unavailable" },
+  { source: "I announced in 2016 a policy effective from 2017.", ...NO_TIME, nomination: LATER_EVENT, audit: "rejected" },
+  { source: "I announced in 2016 a policy effective from 2017.", ...NO_TIME, validStart: LATER_VALIDITY.valid_from,
+    nomination: LATER_VALIDITY, audit: "formed" },
+  { source: "I announced in 2016 a policy valid from 2017.", ...NO_TIME, nomination: LATER_EVENT, audit: "rejected" },
+  { source: "I announced in 2016 a policy valid from 2017.", ...NO_TIME, validStart: LATER_VALIDITY.valid_from,
+    nomination: LATER_VALIDITY, audit: "formed" },
+  { source: "I announced in 2016 a policy effective from 2017.", ...NO_TIME, localMatch: "2017" },
+  { source: `I have a permit valid from ${"\t ".repeat(64)}2017.`, ...NO_TIME, localMatch: "2017" },
+  { source: "I released the product on 2016-02/03 or in 2017.", ...NO_TIME, audit: "unavailable" },
+  { source: "I released the product on 2016-02/03 or in 2017.", ...NO_TIME, nomination: LATER_EVENT, audit: "rejected" },
+  { source: "I released the product on 2016-02/03 or in 2017.", ...NO_TIME, nomination: LATER_VALIDITY, audit: "rejected" },
+  { source: "I released the product on 2016-02-03x or in 2017.", ...NO_TIME, audit: "unavailable" },
+  { source: "I worked from 2016-02/03 to 2017.", ...NO_TIME, audit: "unavailable" },
+  { source: "I released the product on 2016-02/03 or in 2017.", ...NO_TIME, localMatch: "in 2017" }
+];
+
 describe("source temporal projection persistence", () => {
-  it("stores inclusive windows and separate validity through Garden and reopens the original source clock", async () => {
+  it.each([
+    { name: "stores inclusive windows and separate validity through Garden and reopens the original source clock", cases: CASES, catalog: false },
+    { name: "retains temporal context and rejected branches through live replay and SQLite reopen", cases: CONTEXT_CASES, catalog: true }
+  ])("$name", async ({ cases, catalog }) => {
     const directory = await mkdtemp(join(tmpdir(), "alaya-source-time-"));
     const filename = join(directory, "memory.sqlite");
     let database = initDatabase({ filename });
@@ -74,18 +102,25 @@ describe("source temporal projection persistence", () => {
         emissionWriter: createSignalEmissionWriter({ eventPublisher, signalRepo }),
         postTriageMaterializer: { materialize: (signal, context) => router.materializeSignal(signal, context) } });
       const persisted: { memoryId: string; source: string; evidenceId: string }[] = [];
-      for (const [index, fixture] of CASES.entries()) {
+      for (const [index, fixture] of cases.entries()) {
         admit.mockClear();
         const signalId = `temporal-signal-${index}`;
+        const messages = catalog ? [{ message_id: `source-${index}`, role: "user" as const, content: fixture.source }] : [];
+        const context = { workspace_id: "workspace-1", run_id: "run-1", surface_id: null, turn_messages: messages,
+          allow_legacy_single_user_source: !catalog, source_observed_at: OBSERVED_AT };
+        const assertion = catalog ? buildOfficialApiExtractionRequests(fixture.source, messages)
+          .flatMap((request) => request.source_assertions).find((entry) => entry.text === `User: ${fixture.source}`) : undefined;
+        if (catalog && fixture.localMatch === undefined) expect(assertion).toBeDefined();
         const raw = JSON.stringify({ signals: [{ object_kind: "fact", confidence: 0.9,
           matched_text: fixture.source, distilled_fact: fixture.source,
+          ...(assertion === undefined ? {} : { source_locator: { contract_version: 3, kind: "assertion_catalog", assertion_id: assertion.assertion_id } }),
           ...(fixture.nomination === undefined ? {} : { temporal_projection: fixture.nomination }) }] });
         const extractor = createOpenSemanticExtractor(raw);
-        const [signal] = await new OfficialApiGardenProvider({ apiKey: "local-test", extractor,
-          generateSignalId: () => signalId, now: () => CREATED_AT }).compile(fixture.source, {
-          workspace_id: "workspace-1", run_id: "run-1", surface_id: null, turn_messages: [],
-          allow_legacy_single_user_source: true, source_observed_at: OBSERVED_AT
-        });
+        const signal = fixture.localMatch === undefined
+          ? (await new OfficialApiGardenProvider({ apiKey: "local-test", extractor,
+              generateSignalId: () => signalId, now: () => CREATED_AT }).compile(fixture.source, context))[0]
+          : (await new LocalHeuristics().compile(fixture.source, context))
+              .find((candidate) => candidate.raw_payload.matched_text === fixture.localMatch);
         expect(signal).toBeDefined();
         if (fixture.audit !== undefined) expect(signal!.raw_payload.temporal_projection_audit).toMatchObject({ status: fixture.audit });
         // The host owns the trusted observation receipt; the extractor does not.
@@ -110,19 +145,20 @@ describe("source temporal projection persistence", () => {
         persisted.push({ memoryId: memoryId!, evidenceId: evidenceId!, source: fixture.source });
         // Historical raw is reinterpreted by the same current formation owner;
         // the receipt's replay time must not replace the source observation.
-        const extracted = await extractor.extract({ systemPrompt: "local", userPrompt: "local" });
-        const replay = auditOfficialApiSignalFormation({ raw_json: extracted.rawJson,
-          turn_content: fixture.source, allow_legacy_single_user_source: true,
-          workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
-          created_at: "2030-01-01T00:00:00.000Z", source_observed_at: OBSERVED_AT, signal_id_for: () => signalId });
-        expect(replay.entries[0]?.signal?.raw_payload).toEqual(signal?.raw_payload);
+        if (fixture.localMatch === undefined) {
+          const extracted = await extractor.extract({ systemPrompt: "local", userPrompt: "local" });
+          const replay = auditOfficialApiSignalFormation({ raw_json: extracted.rawJson,
+            turn_content: fixture.source, ...context,
+            created_at: "2030-01-01T00:00:00.000Z", signal_id_for: () => signalId });
+          expect(replay.entries[0]?.signal?.raw_payload).toEqual(signal?.raw_payload);
+        }
       }
       database.close();
       database = initDatabase({ filename });
       const reopenedMemories = new SqliteMemoryEntryRepo(database);
       const reopenedEvidence = new SqliteEvidenceCapsuleRepo(database);
       for (const [index, saved] of persisted.entries()) {
-        const fixture = CASES[index]!;
+        const fixture = cases[index]!;
         const memory = await reopenedMemories.findById(saved.memoryId);
         expect(memory?.content).toBe(saved.source);
         expect(memory?.event_time_start ?? null).toBe(fixture.eventStart);

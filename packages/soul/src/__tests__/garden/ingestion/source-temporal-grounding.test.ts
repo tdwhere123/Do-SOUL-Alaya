@@ -6,6 +6,7 @@ import { OfficialApiGardenProvider } from "../../../garden/ingestion/compute-pro
 import { LocalHeuristics } from "../../../garden/triage/local-heuristics.js";
 import { buildMemoryInput } from "../../../garden/materialization/materialization-router/inputs.js";
 import { createContext, createOpenSemanticExtractor } from "./compute-provider-fixtures.js";
+import { resolveSourceTemporalCandidates } from "../../../garden/extraction/temporal/source-time.js";
 
 const year = {
   projection_schema_version: 1 as const,
@@ -14,6 +15,85 @@ const year = {
   time_precision: "year" as const,
   time_source: "explicit" as const
 };
+
+describe("temporal evidence inventory", () => {
+  const laterYear = { ...year, event_time_start: "2017-01-01T00:00:00.000Z", event_time_end: "2017-12-31T23:59:59.999Z" };
+  const laterValidity = { projection_schema_version: 1 as const, valid_from: laterYear.event_time_start,
+    time_precision: "year" as const, time_source: "explicit" as const };
+
+  it.each(["effective", "valid"])("retains a directly governing %s construction after an earlier date", async (role) => {
+    const source = `I announced in 2016 a policy ${role} from 2017.`;
+    expect(resolveSourceTemporalCandidates(source, undefined).map((candidate) => candidate.role)).toEqual(["event", "validity"]);
+    expect(inspectObservedTemporalProjection(source, undefined, undefined).projection).toBeUndefined();
+    expect(inspectObservedTemporalProjection(source, laterYear, undefined)).toMatchObject({ audit: { status: "rejected" } });
+    expect(inspectObservedTemporalProjection(source, laterYear, undefined).projection).toBeUndefined();
+    expect(inspectObservedTemporalProjection(source, laterValidity, undefined)).toEqual({
+      projection: laterValidity, audit: { status: "formed", reason: "valid_time_source_verified" }
+    });
+    expect(inspectObservedTemporalProjection(source, year, undefined).projection).toEqual(year);
+    const context = { ...createContext(), turn_messages: [], allow_legacy_single_user_source: true };
+    const local = (await new LocalHeuristics().compile(source, context))
+      .filter((signal) => signal.raw_payload.time_concern !== undefined);
+    expect(local).toHaveLength(2);
+    expect(local[0]!.raw_payload.temporal_projection).toEqual({ ...year, projection_schema_version: "1" });
+    expect(local[1]!.raw_payload.temporal_projection).toBeUndefined();
+    expect(buildMemoryInput(local[1]!, ["source"]).event_time_start).toBeUndefined();
+  });
+
+  it.each([
+    "I released the product on 2016-02/03 or in 2017.",
+    "I released the product on 2016-02/03, or in 2017.",
+    "I released the product on 2016-02-03x or in 2017.",
+    "I released the product on 2016-02_03 or in 2017.",
+    "I released the product on 2016-13 or in 2017.",
+    "I worked from 2016-02/03 to 2017.",
+    "I worked from 2016-02-03x through 2017.",
+    "我在2016-02/03或在2017年发布产品。",
+    "我在2016-02/03，或在2017年发布产品。",
+    "我在2016-02-03x或于2017年发布产品。",
+    "我从2016-02/03至2017年工作。"
+  ])("retains an unsupported branch in alternative or range evidence: %s", async (source) => {
+    expect(resolveSourceTemporalCandidates(source, undefined)).toEqual([]);
+    expect(inspectObservedTemporalProjection(source, undefined, undefined).projection).toBeUndefined();
+    for (const nomination of [laterYear, laterValidity]) {
+      const result = inspectObservedTemporalProjection(source, nomination, undefined);
+      expect(result.audit.status).toBe("rejected");
+      expect(result.projection).toBeUndefined();
+    }
+    const context = { ...createContext(), turn_messages: [], allow_legacy_single_user_source: true };
+    const local = (await new LocalHeuristics().compile(source, context))
+      .filter((signal) => signal.raw_payload.time_concern !== undefined);
+    expect(local.length).toBeGreaterThan(0);
+    for (const signal of local) {
+      expect(signal.raw_payload.temporal_projection).toBeUndefined();
+      expect(buildMemoryInput(signal, ["source"]).event_time_start).toBeUndefined();
+    }
+  });
+
+  it("preserves a governing role across whitespace allowed by date discovery", async () => {
+    const source = `I have a permit valid from ${"\t ".repeat(64)}2017.`;
+    expect(inspectObservedTemporalProjection(source, undefined, undefined)).toEqual({
+      projection: laterValidity, audit: { status: "formed", reason: "source_valid_time_derived" }
+    });
+    expect(inspectObservedTemporalProjection(source, laterYear, undefined).audit.status).toBe("rejected");
+    const local = (await new LocalHeuristics().compile(source, { ...createContext(), turn_messages: [],
+      allow_legacy_single_user_source: true })).filter((signal) => signal.raw_payload.time_concern !== undefined);
+    expect(local).toHaveLength(1);
+    expect(local[0]!.raw_payload.temporal_projection).toBeUndefined();
+  });
+
+  it("keeps isolated invalid tokens, descriptive adjectives and separate clauses independent", () => {
+    for (const source of ["I own model 2016.", "I paid 2016 dollars.", "I processed 2016 requests.", "I used 2016-02/03."]) {
+      expect(resolveSourceTemporalCandidates(source, undefined)).toEqual([]);
+    }
+    for (const source of ["I used 2016-02/03. I launched an effective product in 2017.",
+      "I announced in 2016 a policy and released a product in 2017."]) {
+      expect(inspectObservedTemporalProjection(source, laterYear, undefined).audit.status).toBe("formed");
+    }
+    expect(inspectObservedTemporalProjection("I released an effective product in 2017.", undefined, undefined).projection).toEqual(laterYear);
+    expect(inspectObservedTemporalProjection("我在2017年发布产品。", undefined, undefined).projection).toEqual(laterYear);
+  });
+});
 
 describe("source calendar windows and temporal roles", () => {
   it.each([
