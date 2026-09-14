@@ -67,7 +67,7 @@ describe("compile seed source observation", () => {
     ]);
     expect(seeded[0]?.productionRawPayload).toMatchObject({
       source_locator: {
-        contract_version: 2,
+        contract_version: 3,
         kind: "assertion_catalog",
         assertion_id: 1
       },
@@ -93,7 +93,7 @@ function relativeSignalEnvelope(): string {
         time_source: "turn_text"
       },
       source_locator: {
-        contract_version: 2,
+        contract_version: 3,
         kind: "assertion_catalog",
         assertion_id: 1
       }

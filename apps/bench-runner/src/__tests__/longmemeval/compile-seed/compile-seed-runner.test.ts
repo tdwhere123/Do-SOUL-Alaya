@@ -151,7 +151,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
             matched_text: "I moved to Berlin.",
             distilled_fact: "I moved to Berlin.",
             source_locator: {
-              contract_version: 2,
+              contract_version: 3,
               kind: "assertion_catalog",
               assertion_id: 1
             }
@@ -182,7 +182,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(seeded[0]?.distilledFact).toBe("I moved to Berlin.");
     expect(seeded[0]?.productionRawPayload).toMatchObject({
       source_locator: {
-        contract_version: 2,
+        contract_version: 3,
         kind: "assertion_catalog",
         assertion_id: 1
       },
@@ -465,9 +465,9 @@ describe("createCompileSeedRunner — compile-based seed", () => {
         extract: async () => ({
           ...providerBackedResult(""),
           rawJson: signalsEnvelope([
-            { distilled: "Fact A.", matched: "Fact A." },
-            { distilled: "Fact B.", matched: "Fact B." },
-            { distilled: "Fact C.", matched: "Fact C." }
+            { distilled: "I like apples.", matched: "I like apples." },
+            { distilled: "I enjoy coffee.", matched: "I enjoy coffee.", assertionId: 2 },
+            { distilled: "I read novels.", matched: "I read novels.", assertionId: 3 }
           ])
         })
       })
@@ -476,7 +476,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     const sidecar = new Map<string, { sessionId: string; hasAnswer: boolean }>();
     const result = await runner.seedTurn({
       daemon,
-      turnContent: "Fact A. Fact B. Fact C.",
+      turnContent: "I like apples. I enjoy coffee. I read novels.",
       evidenceRefBase: "q1-s0-t0",
       seedIndex: 0,
       ...SEED_CONTEXT

@@ -6,12 +6,7 @@ import type {
   QueryFactFrameExtractionPort
 } from
   "./query-fact-frame-extraction-port.js";
-import {
-  AUXILIARIES,
-  BE_AUXILIARIES,
-  CLAUSE_BOUNDARIES,
-  WH_WORDS
-} from "./fact-frame-grammar/clause-boundaries.js";
+import { FACT_FRAME_AUXILIARIES as AUXILIARIES, FACT_FRAME_BE_AUXILIARIES as BE_AUXILIARIES, FACT_FRAME_CLAUSE_BOUNDARIES as CLAUSE_BOUNDARIES, FACT_FRAME_WH_WORDS as WH_WORDS } from "@do-soul/alaya-protocol/node/source-frame";
 import { isCjkSegmentationCandidate, warmCjkSegmentation } from "@do-soul/alaya-protocol/cjk-segmentation";
 import { parseCjkInterrogativeFactFrame } from
   "./fact-frame-grammar/cjk-interrogative.js";
@@ -36,11 +31,7 @@ import {
   parseOfComplementFrame,
   parseUnmarkedWhVerbalFrame
 } from "./fact-frame-grammar/english-recoverable-interrogatives.js";
-import {
-  sliceFactFrameTokens,
-  tokenizeFactFrameSource,
-  type FactFrameSourceToken
-} from "./fact-frame-grammar/source-text.js";
+import { sliceFactFrameTokens, tokenizeFactFrameSource, type FactFrameSourceToken } from "@do-soul/alaya-protocol/node/source-frame";
 
 export {
   COPULAR_MEASURE_WORDS,

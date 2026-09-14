@@ -188,7 +188,7 @@ describe("LongMemEval source evidence fallback integration", () => {
               matched_text: "I take the 7:15 train.",
               distilled_fact: "The user takes the 7:15 train.",
               source_locator: {
-                contract_version: 2,
+                contract_version: 3,
                 kind: "assertion_catalog",
                 assertion_id: 1
               }
@@ -275,7 +275,7 @@ describe("LongMemEval source evidence fallback integration", () => {
               matched_text: "I take the 7:15 train.",
               distilled_fact: "The user takes the 7:15 train.",
               source_locator: {
-                contract_version: 2,
+                contract_version: 3,
                 kind: "assertion_catalog",
                 assertion_id: 1
               }

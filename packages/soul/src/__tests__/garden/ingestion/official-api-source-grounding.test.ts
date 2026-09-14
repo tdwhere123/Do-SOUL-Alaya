@@ -225,7 +225,7 @@ describe("official Garden source grounding", () => {
     const [signal] = await provider.compile(source, CONTEXT);
     expect(signal?.raw_payload.source_grounding).toMatchObject({
       status: "rejected",
-      reasons: ["source_assertion_incomplete"]
+      reasons: ["source_assertion_not_self_contained"]
     });
   });
 
@@ -241,7 +241,7 @@ describe("official Garden source grounding", () => {
     const [signal] = await provider.compile(source, CONTEXT);
     expect(signal?.raw_payload.source_grounding).toMatchObject({
       status: "rejected",
-      reasons: ["source_assertion_incomplete"]
+      reasons: ["source_assertion_not_self_contained"]
     });
   });
 
@@ -419,7 +419,7 @@ describe("official Garden source grounding", () => {
     expect(signal?.raw_payload.full_turn_content).toContain(assertion);
     expect(String(signal?.raw_payload.full_turn_content).length).toBeLessThanOrEqual(2_048);
     expect(signal?.raw_payload).toMatchObject({
-      source_locator: { contract_version: 2, kind: "assertion_catalog" },
+      source_locator: { contract_version: 3, kind: "assertion_catalog" },
       verified_user_assertion_source_hash: expect.any(String)
     });
   });

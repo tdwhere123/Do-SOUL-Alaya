@@ -6,8 +6,7 @@ import { EvidenceService } from "../../../memory/evidence-service.js";
 import { materializeEvidenceFactFrameFormation, replayEvidenceFactFrameFormationCapture } from "../../../memory/evidence-fact-frame-formation.js";
 import { certifyEvidenceSemanticCompleteness } from "../../../memory/evidence-create/evidence-semantic-completeness.js";
 import { materializeOpenSemanticFactorFormation } from "../../../semantic/open-semantic-factor-formation.js";
-import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER as normalizer } from
-  "../../../memory/fact-frame-formation/declarative-normalizer.js";
+import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER as normalizer } from "@do-soul/alaya-protocol/node/source-frame";
 import { createRecallRealStorage } from "../../shared/real-sqlite.test-support.js";
 import { createEvidenceInput } from "../evidence-service-fixture.js";
 

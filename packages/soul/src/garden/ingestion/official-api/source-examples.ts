@@ -1,5 +1,5 @@
 import { computeOfficialApiSourceCorpusIdentity } from "./extraction-request.js";
-import { buildOfficialApiSourceCorpus } from "../../triage/grounding/source-locator.js";
+import { buildOfficialApiSourceCorpus, OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION } from "../../triage/grounding/source-locator.js";
 
 function exampleSourceCorpusIdentity(source: string): string {
   return computeOfficialApiSourceCorpusIdentity(buildOfficialApiSourceCorpus(source, []));
@@ -10,7 +10,7 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
   {
     "input": {
       "schema_version": 2,
-      "source_locator_contract_version": 2,
+      "source_locator_contract_version": OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
       "batch_contract_version": 1,
       "source_corpus_identity": exampleSourceCorpusIdentity(
         "In 2020, I opened a workshop and promised to lend tools."
@@ -21,10 +21,6 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
         {
           "assertion_id": 1,
           "text": "User: In 2020, I opened a workshop and promised to lend tools."
-        },
-        {
-          "assertion_id": 2,
-          "text": "User: In 2020, I opened a workshop"
         }
       ]
     },
@@ -35,7 +31,7 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
           "confidence": 1,
           "matched_text": "In 2020, I opened a workshop and promised to lend tools.",
           "source_locator": {
-            "contract_version": 2,
+            "contract_version": OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
             "kind": "assertion_catalog",
             "assertion_id": 1
           },
@@ -145,7 +141,7 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
   {
     "input": {
       "schema_version": 2,
-      "source_locator_contract_version": 2,
+      "source_locator_contract_version": OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
       "batch_contract_version": 1,
       "source_corpus_identity": exampleSourceCorpusIdentity(
         "I can borrow tools in the workshop only on Saturdays."
@@ -166,7 +162,7 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
           "confidence": 1,
           "matched_text": "I can borrow tools in the workshop only on Saturdays.",
           "source_locator": {
-            "contract_version": 2,
+            "contract_version": OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
             "kind": "assertion_catalog",
             "assertion_id": 1
           },

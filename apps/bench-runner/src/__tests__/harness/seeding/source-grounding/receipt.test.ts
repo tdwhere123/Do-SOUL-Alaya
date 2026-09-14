@@ -333,7 +333,7 @@ function receiptV2Digest(
 
 function assertionLocator(assertionId: number) {
   return {
-    contract_version: 2,
+    contract_version: 3,
     kind: "assertion_catalog",
     assertion_id: assertionId
   };

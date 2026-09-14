@@ -105,6 +105,48 @@ the same legal membership. Source records and retained capsule text have
 bounded discovery and UTF-8 payload readers through the ordinary worker route.
 Record-only roots remain deliverable after optional memory formation fails.
 
+Optional fact-frame formation rejects unquoted trailing dependent scope such as
+`if`, `unless`, and `only`; an opaque value containing the condition does not
+establish its meaning. Explicit proposals, automatic normalization, historical
+frame replay, Core certification and current Storage qualification share the
+complete source-frame contract in Protocol's Node-only `node/source-frame`
+entry. This grammar requires recognized leading qualifiers and modality,
+and coverage of every source token from the independently located predicate;
+submitted slots cannot choose their own subject or predicate anchor. Explicit
+subjects are bounded to recognized pronouns, `the user`, or a single capitalized
+name at source start. Multiword named subjects and CJK subject grammar remain
+unsupported; existing CJK tokenization is unchanged. Existing auxiliary
+normalization and explicit source-head copulas remain supported. Core owns admission and effects. Its public
+normalizer export serves daemon configuration and benchmark replay/backfill
+consumers by exporting the same Protocol implementation. The Protocol browser
+root's receipt verifier proves historical frame-to-graph binding only; current
+source qualification must also use the source-frame contract. Native CJK
+segmentation stays outside the browser root.
+
+Object-key minting and retrofit read derived fact keys and OSF graphs through
+the same current stored-formation qualification owners. Fact-key contents must
+also match their canonical projections. Unqualified historical derivatives do
+not supply these inputs; gist, original source text, and ordinary memory remain
+independently readable.
+
+Source assertion fragments require demonstrated bounded independence;
+mechanical coordination or a sentence-ending period is insufficient. Adjacent
+dependent continuations retain their matrix context across whitespace, stopping
+at explicit source-role boundaries. Unresolved references remain unsupported.
+Source text still persists when the
+optional frame, OSF certificate or F3 incidence cannot form.
+
+Current extraction uses assertion-catalog locator version 3 and fact-frame
+normalizer version 4. Historical locator version 2 receipts and prompt bytes
+remain readable as historical data; current source qualification and extraction
+do not reinterpret their catalog ids. New requests, prompt identities and
+derived cache commitments bind the current catalog contract.
+Historical capture and certificate bytes remain intact, while current qualified
+OSF and fact-key reads reject incomplete source obligations, including the
+pre-capture Signal fallback. Raw field factor rows participate in immutable
+frontier identity; the current conditional-field runtime does not consume them
+as semantic readiness or truth. Retained source-root reads remain available.
+
 Mandatory original-source imports use Core `createAuditedSourceAdmission`,
 which composes existing source identity/span validation inside the formation
 store transaction and then appends the receipt-first source audit. A failed

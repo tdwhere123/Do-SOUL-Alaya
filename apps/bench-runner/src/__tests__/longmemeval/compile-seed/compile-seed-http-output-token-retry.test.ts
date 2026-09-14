@@ -335,7 +335,7 @@ function requestAssertionIds(
 function assertionBatchPrompt(assertionIds: readonly number[]): string {
   return JSON.stringify({
     schema_version: 2,
-    source_locator_contract_version: 2,
+    source_locator_contract_version: 3,
     batch_contract_version: 1,
     source_corpus_identity: "a".repeat(64),
     batch_index: 0,
@@ -350,7 +350,7 @@ function assertionBatchPrompt(assertionIds: readonly number[]): string {
 function signal(assertionId: number, value: string) {
   return {
     source_locator: {
-      contract_version: 2,
+      contract_version: 3,
       kind: "assertion_catalog",
       assertion_id: assertionId
     },

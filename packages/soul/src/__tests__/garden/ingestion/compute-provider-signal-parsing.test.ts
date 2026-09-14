@@ -87,8 +87,8 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
           signal_kind: "potential_claim",
           object_kind: "decision",
           confidence: 0.75,
-          matched_text: "we deploy on Tuesdays",
-          distilled_fact: "The team deploys releases on Tuesdays."
+          matched_text: "we use TypeScript",
+          distilled_fact: "The team uses TypeScript."
         }, 2)
       ]
     }));
@@ -101,12 +101,12 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
       })()
     });
 
-    const turn = "I prefer dark mode, and we deploy on Tuesdays.";
+    const turn = "I prefer dark mode, and we use TypeScript.";
     const signals = await provider.compile(turn, createContext(turn));
     expect(signals).toHaveLength(2);
     expect(signals.map((s) => (s.raw_payload as { distilled_fact: string }).distilled_fact)).toEqual([
-      "I prefer dark mode, and we deploy on Tuesdays.",
-      "we deploy on Tuesdays."
+      "I prefer dark mode, and we use TypeScript.",
+      "we use TypeScript."
     ]);
   });
 
@@ -151,7 +151,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
 
     expect(JSON.parse(vi.mocked(extractor.extract).mock.calls[0]![0].userPrompt)).toEqual({
       schema_version: 2,
-      source_locator_contract_version: 2,
+      source_locator_contract_version: 3,
       batch_contract_version: 1,
       source_corpus_identity: expect.stringMatching(/^[a-f0-9]{64}$/u),
       batch_index: 0,
@@ -260,7 +260,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
         confidence: 0.8,
         matched_text: "The build is green.",
         source_locator: {
-          contract_version: 2,
+          contract_version: 3,
           kind: "assertion_catalog",
           assertion_id: 1
         }
@@ -296,7 +296,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
           confidence: 0.8,
           matched_text: "The build is green.",
           source_locator: {
-            contract_version: 2,
+            contract_version: 3,
             kind: "assertion_catalog",
             assertion_id: 1
           },

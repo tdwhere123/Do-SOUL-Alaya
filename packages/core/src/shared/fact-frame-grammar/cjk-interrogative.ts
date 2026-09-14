@@ -10,7 +10,7 @@ import {
   isCjkLocationResultToken,
   isRuleBasedCopularPredicate
 } from "./result-slots.js";
-import type { FactFrameSourceToken } from "./source-text.js";
+import type { FactFrameSourceToken } from "@do-soul/alaya-protocol/node/source-frame";
 
 type CjkOsfLayout = Readonly<{
   readonly value: Readonly<{ surface: string; source_span: readonly [number, number] }>;

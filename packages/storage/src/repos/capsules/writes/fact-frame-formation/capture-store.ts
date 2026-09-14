@@ -1,11 +1,6 @@
 import { createHash } from "node:crypto";
-import {
-  buildAssociativeFactKeyProjections,
-  verifyEvidenceFactFrameFormationCapture,
-  type EvidenceCapsule,
-  type EvidenceFactFrameFormationCapture,
-  type EvidenceSearchProjection
-} from "@do-soul/alaya-protocol";
+import { buildAssociativeFactKeyProjections, verifyEvidenceFactFrameFormationCapture, type EvidenceCapsule, type EvidenceFactFrameFormationCapture, type EvidenceSearchProjection } from "@do-soul/alaya-protocol";
+import { factFramePreservesSourceObligations } from "@do-soul/alaya-protocol/node/source-frame";
 
 export type EvidenceFactFrameFormationInsertArgs = readonly [
   evidenceObjectId: string,
@@ -34,6 +29,10 @@ export function prepareFactFrameFormationInsert(
   const verified = verifyEvidenceFactFrameFormationCapture(capture, sha256);
   if (verified.source_hash !== null && verified.source_hash !== capsule.source_hash) {
     throw new Error("fact-frame formation source hash does not match its evidence capsule");
+  }
+  if (verified.fact_frame !== null && (capsule.excerpt === null ||
+      !factFramePreservesSourceObligations(capsule.excerpt, verified.fact_frame))) {
+    throw new Error("fact-frame formation does not preserve its source obligations");
   }
   const expected = verified.fact_frame === null
     ? []

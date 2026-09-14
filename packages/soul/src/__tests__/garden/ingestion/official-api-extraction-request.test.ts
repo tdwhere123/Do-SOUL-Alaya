@@ -25,7 +25,7 @@ describe("official API extraction request", () => {
 
     expect(request).toEqual({
       schema_version: OFFICIAL_API_EXTRACTION_REQUEST_SCHEMA_VERSION,
-      source_locator_contract_version: 2,
+      source_locator_contract_version: 3,
       batch_contract_version: OFFICIAL_API_EXTRACTION_BATCH_CONTRACT_VERSION,
       source_corpus_identity: expect.stringMatching(/^[a-f0-9]{64}$/u),
       batch_index: 0,
@@ -38,7 +38,7 @@ describe("official API extraction request", () => {
   it("has one strict parser and rejects retired request fields", () => {
     expect(() => parseOfficialApiExtractionRequest({
       schema_version: OFFICIAL_API_EXTRACTION_REQUEST_SCHEMA_VERSION,
-      source_locator_contract_version: 2,
+      source_locator_contract_version: 3,
       source_assertions: [],
       turn_content: "retired"
     })).toThrow(/invalid official API extraction request/u);

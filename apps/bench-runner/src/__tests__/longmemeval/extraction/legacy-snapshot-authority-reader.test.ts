@@ -8,8 +8,7 @@ import {
   OFFICIAL_API_SYSTEM_PROMPT,
   buildOfficialApiExtractionRequests,
   planOfficialApiSemanticWorkset,
-  stringifyOfficialApiExtractionRequest,
-  type OfficialApiExtractionRequest
+  stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import { computeCacheKey } from
   "../../../runs/compile-seed/cache/cache-key.js";
@@ -86,7 +85,7 @@ async function fixture(options: Readonly<{
     matched_text: options.matchedText ??
       request.source_assertions[0]!.text.replace(/^(?:User|Assistant): /u, ""),
     source_locator: {
-      contract_version: 2,
+      contract_version: 3,
       kind: "assertion_catalog",
       assertion_id: request.source_assertions[0]!.assertion_id
     }
@@ -389,91 +388,10 @@ describe("legacy conversion snapshot authority reader", () => {
     } as never)).toThrow(/unavailable|authority|trust root/iu);
   });
 
-  it("refuses a historical MiMo prompt under the changed current prompt identity", async () => {
+  it("refuses a historical catalog response before creating current extraction authority", async () => {
     const cacheKey = "0c297b4cd1547986994b6f4acd44b7bfa1e40d5eba9c803e2c53cba93bafc295";
-    const datasetRevision =
-      "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442";
     const fixtures = dirname(fileURLToPath(import.meta.url)) + "/fixtures";
-    const turns = JSON.parse(await readFile(join(fixtures, "mimo-legacy-turns.json"), "utf8")) as
-      readonly {
-        readonly cache_key: string;
-        readonly turn: {
-          readonly turnContent: string;
-          readonly turnMessages: readonly { role: "user" | "assistant"; content: string }[];
-        };
-        readonly request: OfficialApiExtractionRequest;
-      }[];
-    const turn = turns.find((item) => item.cache_key === cacheKey);
-    if (turn === undefined) throw new Error("missing sealed MiMo turn fixture");
-    const cacheRoot = await mkdtemp(join(tmpdir(), "mimo-sealed-cache-"));
-    const authorityRoot = await mkdtemp(join(tmpdir(), "mimo-sealed-pin-"));
-    roots.push(cacheRoot, authorityRoot);
-    const providerUrl = "https://provider.invalid/v1";
-    const entry = JSON.parse(await readFile(join(fixtures, `${cacheKey}.shard.json`), "utf8")) as
-      CachedExtractionEntry;
-    const bound: CachedExtractionEntry = {
-      ...entry,
-      transport_provenance: {
-        provider_url_sha256: `sha256:${createHash("sha256").update(providerUrl, "utf8").digest("hex")}`,
-        model: entry.transport_provenance?.model ?? entry.model
-      }
-    };
-    const shardPath = join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
-    await mkdir(dirname(shardPath), { recursive: true });
-    await writeFile(shardPath, JSON.stringify(bound), "utf8");
-    const closure = {
-      cacheKey,
-      model: bound.model,
-      requestProfile: bound.request_profile,
-      ...inspectExtractionRawJson(entry.raw_json)
-    };
-    writeExtractionCacheManifest(cacheRoot, {
-      schema_version: 3,
-      extraction_model: entry.model,
-      model_family: "mimo-v2.5",
-      request_profile: entry.request_profile,
-      provider_url: providerUrl,
-      system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
-      cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
-      dataset: "sealed-mimo-fixture",
-      dataset_revision: datasetRevision,
-      requested_turns: 1,
-      cached_turns: 1,
-      coverage: 1,
-      storage: "git-tracked",
-      built_at: entry.extracted_at,
-      builder: "fixture",
-      fill_status: "complete",
-      window_offset: 0,
-      window_limit: 1,
-      expected_turns: 1,
-      expected_key_set_sha256: computeExtractionKeySetSha256([cacheKey]),
-      content_closure_sha256: computeExtractionContentClosureSha256([closure]),
-      content_closure_index: buildExtractionContentClosureIndex([closure])
-    });
-    const captured = captureSnapshotExtractionAuthority(cacheRoot);
-    await writeFile(
-      join(authorityRoot, LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME),
-      renderSnapshotExtractionAuthority(captured.authority)
-    );
-    const authority = await loadGlobalExtractionAuthority(authorityRoot);
-    if (authority === null) throw new Error("fixture authority did not load");
-    const unit = planOfficialApiSemanticWorkset(
-      turn.turn.turnContent,
-      turn.turn.turnMessages,
-      datasetRevision
-    ).units.find((item) => item.assertionId === turn.request.source_assertions[0]!.assertion_id);
-    if (unit === undefined) throw new Error("missing minted binding");
-    const report = convertLegacyExtractionShard({
-      sealedEntry: readVerifiedLegacyExtractionEntry({
-        root: cacheRoot, cacheKey, authority
-      }),
-      request: turn.request,
-      sourceUnits: [unit],
-      semanticContract: unit.semanticIdentity.contractId,
-      expectedSystemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    expect(report.converted).toEqual([]);
-    expect(report.unresolved).toEqual([{ reason: "legacy shard cache key does not match prompt, request, model, and profile" }]);
+    const entry = JSON.parse(await readFile(join(fixtures, `${cacheKey}.shard.json`), "utf8")) as CachedExtractionEntry;
+    expect(() => inspectExtractionRawJson(entry.raw_json)).toThrow(/signal_entry_invalid/u);
   });
 });

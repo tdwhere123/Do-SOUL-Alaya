@@ -85,12 +85,12 @@ describe("official API verified assertion receipt integration", () => {
     const raw = signal.raw_payload as Readonly<Record<string, unknown>>;
     const corpus = String(raw.full_turn_content);
     const invalidLocator = {
-      contract_version: 2 as const,
+      contract_version: 3 as const,
       kind: "assertion_catalog" as const,
       assertion_id: 2
     };
     const validLocator = raw.source_locator as {
-      readonly contract_version: 2;
+      readonly contract_version: 3;
       readonly kind: "assertion_catalog";
       readonly assertion_id: number;
     };
@@ -234,7 +234,7 @@ function openSignal(assertionId: number) {
     confidence: 0.9,
     matched_text: ASSERTION,
     source_locator: {
-      contract_version: 2,
+      contract_version: 3,
       kind: "assertion_catalog",
       assertion_id: assertionId
     },

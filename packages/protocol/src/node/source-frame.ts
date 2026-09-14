@@ -1,0 +1,4 @@
+export { RuleBasedEvidenceFactFrameNormalizer, RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID, RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER, factFramePreservesSourceObligations, type EvidenceFactFrameProposalNormalizer } from "../evidence/formation/source-grammar/declarative-normalizer.js";
+export { tokenizeFactFrameSource, tokenizeFactFrameWordPieces, sliceFactFrameTokens, type FactFrameSourceToken } from "../evidence/formation/source-grammar/source-text.js";
+export { skipLeadingAdjunctSpan } from "../evidence/formation/source-grammar/leading-adjunct.js";
+export { AUXILIARIES as FACT_FRAME_AUXILIARIES, BE_AUXILIARIES as FACT_FRAME_BE_AUXILIARIES, WH_WORDS as FACT_FRAME_WH_WORDS, CLAUSE_BOUNDARIES as FACT_FRAME_CLAUSE_BOUNDARIES } from "../evidence/formation/source-grammar/clause-boundaries.js";

@@ -6,6 +6,7 @@ export const VERIFIED_USER_ASSERTION_SOURCE_HASH_V2_PREFIX =
 const SHA256_DIGEST_PATTERN = /^[a-f0-9]{64}$/u;
 const FORBIDDEN_CORPUS_SEPARATOR_PATTERN = /[\r\n\u2028\u2029]/u;
 const USER_CORPUS_PREFIX = "User: ";
+export const VERIFIED_USER_ASSERTION_CATALOG_CONTRACT_VERSION = 3;
 
 export interface VerifiedUserAssertionReceiptInput {
   readonly workspace_id: string;
@@ -16,7 +17,7 @@ export interface VerifiedUserAssertionReceiptInput {
 }
 
 export interface VerifiedUserAssertionCatalogLocator {
-  readonly contract_version: 2;
+  readonly contract_version: 2 | typeof VERIFIED_USER_ASSERTION_CATALOG_CONTRACT_VERSION;
   readonly kind: "assertion_catalog";
   readonly assertion_id: number;
 }
@@ -114,11 +115,11 @@ export function parseVerifiedUserAssertionCatalogLocator(
   const locator = value as Readonly<Record<string, unknown>>;
   const keys = Object.keys(locator);
   return keys.length === 3 &&
-    locator.contract_version === 2 &&
+    (locator.contract_version === 2 || locator.contract_version === VERIFIED_USER_ASSERTION_CATALOG_CONTRACT_VERSION) &&
     locator.kind === "assertion_catalog" &&
     Number.isInteger(locator.assertion_id) && Number(locator.assertion_id) > 0
       ? {
-          contract_version: 2,
+          contract_version: locator.contract_version,
           kind: "assertion_catalog",
           assertion_id: Number(locator.assertion_id)
         }

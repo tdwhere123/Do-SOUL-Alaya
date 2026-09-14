@@ -237,7 +237,7 @@ function providerFor(fields: Readonly<Record<string, unknown>>): OfficialApiGard
             object_kind: "preference",
             confidence: 0.9,
             source_locator: {
-              contract_version: 2,
+              contract_version: 3,
               kind: "assertion_catalog",
               assertion_id: 1
             },

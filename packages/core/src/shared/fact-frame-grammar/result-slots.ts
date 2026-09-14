@@ -1,10 +1,10 @@
-import { BE_AUXILIARIES } from "./clause-boundaries.js";
+import { FACT_FRAME_BE_AUXILIARIES as BE_AUXILIARIES } from "@do-soul/alaya-protocol/node/source-frame";
 import {
   CJK_COPULAR_MEASURE_FORMS,
   CJK_COPULAR_PREDICATE_FORMS,
   CJK_LOCATION_RESULT_FORMS
 } from "./cjk-interrogative-forms.js";
-import { tokenizeFactFrameSource } from "./source-text.js";
+import { tokenizeFactFrameSource } from "@do-soul/alaya-protocol/node/source-frame";
 
 export const COPULAR_MEASURE_WORDS: ReadonlySet<string> = new Set(["long"]);
 const CJK_COPULAR_MEASURE_FORM_SET: ReadonlySet<string> =

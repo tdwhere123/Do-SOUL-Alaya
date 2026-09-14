@@ -255,7 +255,7 @@ describe("extraction cache write is atomic", () => {
         object_kind: "user_preference",
         confidence: 0.9,
         matched_text: "Atomic turn persists a complete shard.",
-        source_locator: { contract_version: 2, kind: "assertion_catalog", assertion_id: 1 },
+        source_locator: { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 },
         distilled_fact: `Fact number ${i}.`
       }))
     });

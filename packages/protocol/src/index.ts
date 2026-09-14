@@ -65,6 +65,7 @@ export {
   type EvidenceFactFrameFormationStatus, type EvidenceFactFrameFormationProposal,
   type EvidenceFactFrameFormationCapture, type EvidenceFactFrameFormationCaptureBody
 } from "./evidence/associative-fact-frame.js";
+export { hasUnquotedSourceDependentScope, isInsideSourceQuotation } from "./evidence/source-dependent-scope.js";
 export * from "./relations/open-semantic-factor-graph.js";
 export * from "./recall/open-semantic-factor-activation-state.js";
 export * from "./relations/open-semantic-structural-role.js";

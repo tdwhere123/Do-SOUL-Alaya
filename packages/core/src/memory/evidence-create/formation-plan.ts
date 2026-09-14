@@ -21,8 +21,7 @@ import { materializeOpenSemanticFactorFormation } from
 import { CoreError } from "../../shared/errors.js";
 import { materializeEvidenceFactFrameFormation } from
   "../evidence-fact-frame-formation.js";
-import type { EvidenceFactFrameProposalNormalizer } from
-  "../fact-frame-formation/declarative-normalizer.js";
+import type { EvidenceFactFrameProposalNormalizer } from "@do-soul/alaya-protocol/node/source-frame";
 import type { OpenSemanticFactorExtractionPort } from
   "../../semantic/open-semantic-factor-extraction-port.js";
 import { emitDeterministicIncidences } from "./factor-emit.js";

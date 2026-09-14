@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe("readObjectKeyEvidenceSources", () => {
-  it("loads gist, fact-key contents, and a formed OSF graph for minting", async () => {
+  it("keeps gist while refusing fact keys and raw formed graphs without a qualified frame", async () => {
     const { database, repo } = await createEvidenceCapsuleRepo();
     const capsule = createEvidenceCapsule({
       object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
@@ -37,8 +37,8 @@ describe("readObjectKeyEvidenceSources", () => {
     )).toEqual([{
       object_id: capsule.object_id,
       gist: "She loves her Golden Retriever.",
-      fact_key_contents: ["I took my niece to the museum"],
-      osf_graph: osfGraph()
+      fact_key_contents: [],
+      osf_graph: null
     }]);
   });
 

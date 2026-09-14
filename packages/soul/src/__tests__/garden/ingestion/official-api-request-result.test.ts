@@ -8,7 +8,7 @@ const request = buildOfficialApiExtractionRequest(source, []);
 const selected = {
   signal_kind: "potential_preference", object_kind: "user_preference", confidence: 0.9,
   matched_text: "I prefer coffee in the morning.",
-  source_locator: { contract_version: 2, kind: "assertion_catalog", assertion_id: 2 }
+  source_locator: { contract_version: 3, kind: "assertion_catalog", assertion_id: 2 }
 };
 
 it("classifies a valid empty selection as completed even with source assertions", () => {

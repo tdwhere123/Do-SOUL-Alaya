@@ -1,6 +1,4 @@
-import { isCjkSegmentationCandidate, segmentCjkRun } from "@do-soul/alaya-protocol/cjk-segmentation";
-
-export { factFrameWordPiecesCoverRun } from "./word-piece-coverage.js";
+import { isCjkSegmentationCandidate, segmentCjkRun } from "../../../shared/cjk-segmentation.js";
 
 export type FactFrameSourceToken = Readonly<{
   readonly text: string;

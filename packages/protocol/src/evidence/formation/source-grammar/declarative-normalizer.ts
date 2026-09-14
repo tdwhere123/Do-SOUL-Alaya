@@ -1,20 +1,23 @@
 import {
   EvidenceFactFrameFormationProposalSchema,
   ASSOCIATIVE_FACT_FRAME_SLOT_LIMIT,
+  groundAssociativeFactFrameSlots,
   type AssociativeFactFrame,
   type AssociativeFactSlot,
   type EvidenceFactFrameFormationProposal
-} from "@do-soul/alaya-protocol";
+} from "../../associative-fact-frame.js";
+import { hasUnquotedSourceDependentScope, isInsideSourceQuotation } from "../../source-dependent-scope.js";
+import { BE_AUXILIARIES } from "./clause-boundaries.js";
 import { skipLeadingAdjunctSpan } from
-  "../../shared/fact-frame-grammar/leading-adjunct.js";
+  "./leading-adjunct.js";
 import {
   sliceFactFrameTokens,
   tokenizeFactFrameSource,
   type FactFrameSourceToken
-} from "../../shared/fact-frame-grammar/source-text.js";
+} from "./source-text.js";
 
 export const RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID =
-  "rule_based_evidence_fact_frame_normalizer_v3";
+  "rule_based_evidence_fact_frame_normalizer_v4";
 
 export interface EvidenceFactFrameProposalNormalizer {
   readonly operator_id: string;
@@ -47,7 +50,7 @@ implements EvidenceFactFrameProposalNormalizer {
     const valueStart = predicate.relationIndex + 1;
     if (relation === undefined || valueStart >= tokens.length ||
         !isRelationToken(tokens, predicate.relationIndex)) return undefined;
-    if (valueContainsFiniteClauseBoundary(assertion, tokens, valueStart)) {
+    if (valueCrossesUnsupportedScope(assertion, tokens, valueStart)) {
       return undefined;
     }
     const value = sliceFactFrameTokens(assertion, tokens, valueStart, tokens.length);
@@ -70,14 +73,16 @@ implements EvidenceFactFrameProposalNormalizer {
   }
 }
 
-function valueContainsFiniteClauseBoundary(
+function valueCrossesUnsupportedScope(
   source: string,
   tokens: readonly FactFrameSourceToken[],
   valueStart: number
 ): boolean {
+  // An opaque value cannot certify the scope of a dependent condition.
+  if (hasUnquotedSourceDependentScope(source, tokens[valueStart]?.start ?? source.length)) return true;
   if (AUXILIARIES.has(tokens[valueStart]?.normalized ?? "")) return true;
   for (let index = valueStart + 1; index < tokens.length; index += 1) {
-    if (isInsideQuotation(source, tokens[index]!.start)) continue;
+    if (isInsideSourceQuotation(source, tokens[index]!.start)) continue;
     const subject = readSubject(source, tokens, index);
     if (subject === null) continue;
     const predicate = readPredicate(tokens, subject.nextIndex, subject.modalQualifier);
@@ -106,11 +111,31 @@ Readonly<EvidenceFactFrameProposalNormalizer> = Object.freeze(
 export function factFramePreservesSourceObligations(source: string, frame: Readonly<AssociativeFactFrame>): boolean {
   const assertion = source.trim();
   const tokens = tokenizeFactFrameSource(assertion);
+  const grounded = groundAssociativeFactFrameSlots(frame, assertion);
+  const relations = grounded?.filter(({ role }) => role === "relation");
+  if (grounded === null || relations?.length !== 1) return false;
   const located = readInitialSubject(assertion, tokens);
-  const subject = located === null ? readExplicitSubjectAnchor(assertion, tokens, frame) : located;
-  if (subject == null) return false;
+  const subject = located === null ? readNamedSubjectAnchor(tokens) : located;
+  if (subject == null || frame.slots.filter((slot) => slot.role === "subject").length !== 1 ||
+      frame.slots.find((slot) => slot.role === "subject")?.text !== subject.text) return false;
   const predicate = readPredicate(tokens, subject.nextIndex, subject.modalQualifier);
-  if (valueContainsFiniteClauseBoundary(assertion, tokens, predicate.relationIndex + 1)) return false;
+  if (!predicate.supported) return false;
+  const lexical = tokens[predicate.relationIndex];
+  // Explicit copulas may retain the source's first auxiliary. Both anchors come
+  // from the source grammar, never a proposed slot's chosen endpoint.
+  let headIndex = subject.nextIndex;
+  while (tokens[headIndex] !== undefined && isPredicateQualifier(tokens[headIndex]!)) headIndex += 1;
+  const head = tokens[headIndex];
+  const relation = relations[0]!;
+  const sourceRelation = lexical?.start === relation.source_span[0] && isRelationToken(tokens, predicate.relationIndex)
+    ? lexical : head !== undefined && BE_AUXILIARIES.has(head.normalized) && head.start === relation.source_span[0]
+      ? head : undefined;
+  if (sourceRelation === undefined || sourceRelation.end > relation.source_span[1]) return false;
+  // Grounding proves presence; completeness also requires every source token
+  // after the predicate to survive in an ordered slot. Punctuation is not a token.
+  if (tokens.some((token) => token.start >= sourceRelation.start && !grounded.some(({ source_span: [start, end] }) =>
+    start <= token.start && token.end <= end))) return false;
+  if (valueCrossesUnsupportedScope(assertion, tokens, tokens.indexOf(sourceRelation) + 1)) return false;
   if (predicate.qualifiers.length > MAX_QUALIFIERS) return false;
   const required = [...(subject.prefix === undefined ? [] : [subject.prefix]),
     ...predicate.qualifiers.map((token) => token.text)];
@@ -124,48 +149,26 @@ export function factFramePreservesSourceObligations(source: string, frame: Reado
   });
 }
 
-/** Explicit frames can locate an existing source-start subject without teaching the normalizer new NPs. */
-function readExplicitSubjectAnchor(source: string, tokens: readonly FactFrameSourceToken[],
-  frame: Readonly<AssociativeFactFrame>): SubjectSpan | undefined {
-  const subject = frame.slots.find((slot) => slot.role === "subject");
-  if (subject === undefined || tokens[0]?.start !== 0 || !source.startsWith(subject.text)) return undefined;
-  const nextIndex = tokens.findIndex((token) => token.start >= subject.text.length);
-  if (nextIndex < 1 || tokens[nextIndex - 1]!.end > subject.text.length ||
-      tokens.slice(0, nextIndex).some((token) => isPredicateQualifier(token) ||
-        /^(?:i|you|he|she|it|we|they)['\u2019](?:d|ll)$/u.test(token.normalized))) return undefined;
-  return { text: subject.text, nextIndex };
+/** The bounded explicit NP anchor is one source-start capitalized name token. */
+function readNamedSubjectAnchor(tokens: readonly FactFrameSourceToken[]): SubjectSpan | undefined {
+  const first = tokens[0];
+  if (first?.start !== 0 || !/^\p{Lu}\p{L}*$/u.test(first.text) ||
+      AUXILIARIES.has(first.normalized) || RELATION_STOP_WORDS.has(first.normalized) ||
+      isPredicateQualifier(first)) return undefined;
+  return { text: first.text, nextIndex: 1 };
 }
 
 /** null: unrecognized subject; undefined: located subject crosses an unsupported boundary. */
 function readInitialSubject(source: string, tokens: readonly FactFrameSourceToken[]): SubjectSpan | null | undefined {
   // An unclosed quotation cannot hide the rest of the source from clause checks.
-  if (isInsideQuotation(source, source.length)) return undefined;
+  if (isInsideSourceQuotation(source, source.length)) return undefined;
   const start = skipLeadingAdjunctSpan(tokens, (index) => readSubject(source, tokens, index) !== null);
   const subject = readSubject(source, tokens, start);
   if (subject === null) return null;
-  if (isInsideQuotation(source, tokens[start]!.start)) return undefined;
+  if (isInsideSourceQuotation(source, tokens[start]!.start)) return undefined;
   const prefix = source.slice(0, tokens[start]!.start).trim();
   if (prefix.length > MAX_SLOT_TEXT_LENGTH) return undefined;
   return { ...subject, ...(prefix.length === 0 ? {} : { prefix }) };
-}
-
-function isInsideQuotation(source: string, offset: number): boolean {
-  let closing: string | undefined;
-  for (let index = 0; index < offset; index += 1) {
-    const character = source[index]!;
-    // Apostrophes inside words belong to contractions/possessives, not quotations.
-    if ((character === "'" || character === "’") &&
-        /[\p{L}\p{N}]/u.test(source[index - 1] ?? "") && /[\p{L}\p{N}]/u.test(source[index + 1] ?? "")) continue;
-    if (closing !== undefined) {
-      if (character === closing) closing = undefined;
-    } else if (character === "'" && /[\p{L}\p{N}]/u.test(source[index - 1] ?? "")) {
-      // A trailing apostrophe outside a quotation is a possessive, e.g. parents'.
-      continue;
-    } else if (character === '"' || character === "'") closing = character;
-    else if (character === "“") closing = "”";
-    else if (character === "‘") closing = "’";
-  }
-  return closing !== undefined;
 }
 
 function readSubject(

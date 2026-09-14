@@ -165,7 +165,7 @@ describe("native Gemini interactive extraction", () => {
     const source = "I collect vintage postcards.";
     const request = buildOfficialApiExtractionRequest(source, []);
     const signal = { object_kind: "user_preference", confidence: 0.9, matched_text: source,
-      source_locator: { contract_version: 2, kind: "assertion_catalog", assertion_id: 1 } };
+      source_locator: { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 } };
     expect(() => soul.classifyOfficialApiRequestResult(JSON.stringify({
       signals: Array.from({ length: 65 }, () => signal)
     }), request)).toThrow("rejected signal entries");

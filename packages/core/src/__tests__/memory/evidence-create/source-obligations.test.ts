@@ -8,8 +8,7 @@ import { materializeEvidenceFactFrameFormation, replayEvidenceFactFrameFormation
   "../../../memory/evidence-fact-frame-formation.js";
 import { certifyEvidenceSemanticCompleteness } from "../../../memory/evidence-create/evidence-semantic-completeness.js";
 import { materializeOpenSemanticFactorFormation } from "../../../semantic/open-semantic-factor-formation.js";
-import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER as normalizer } from
-  "../../../memory/fact-frame-formation/declarative-normalizer.js";
+import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER as normalizer } from "@do-soul/alaya-protocol/node/source-frame";
 import { createRecallRealStorage } from "../../shared/real-sqlite.test-support.js";
 import { createEvidenceInput } from "../evidence-service-fixture.js";
 
@@ -34,9 +33,48 @@ function historicalCapture(frame: AssociativeFactFrame, producer = "rule_based_e
 }
 
 it.each([
+  { source: "I can enter the lab or use the equipment.", subject: "I", qualifier: "can" },
+  { source: "Alice enters the lab or uses the equipment.", subject: "Alice enters the lab or" },
+  { source: "Alice enters the lab or uses the equipment.", subject: "Alice" },
+  { source: "I enter the lab or use the equipment.", subject: "I enter the lab or" }
+])("refuses a submitted subject or relation that skips the source predicate: $source / $subject", (entry) => {
+  const relation = entry.source.includes("uses") ? "uses" : "use";
+  const frame: AssociativeFactFrame = { schema_version: 1, slots: [
+    { role: "subject", text: entry.subject },
+    ...(entry.qualifier === undefined ? [] : [{ role: "qualifier" as const, text: entry.qualifier }]),
+    { role: "relation", text: relation }, { role: "value", text: "the equipment" }
+  ] };
+  expect(materialize(entry.source, frame)).toMatchObject({ capture: { status: "rejected" }, searchProjections: [] });
+  const capture = historicalCapture(frame);
+  expect(() => replayEvidenceFactFrameFormationCapture({ sourceAssertion: entry.source, sourceHash, capture })).toThrow();
+  const semanticFormation = materializeOpenSemanticFactorFormation({ source_kind: "evidence", source_text: entry.source,
+    proposal: { schema_version: 1, producer_operator_id: "garden_source_bound_open_semantic_factor_v3",
+      source_text: entry.source, graph: { schema_version: 2, source_kind: "evidence", variables: [], result_variable_ids: [],
+        factors: [{ factor_id: "verb", surface: relation, semantic_identity: "use" },
+          { factor_id: "object", surface: "the equipment", semantic_identity: "equipment" }],
+        propositions: [{ proposition_id: "p", predicate_factor_id: "verb", arguments: [
+          { position: 0, binding_identity: "object", reference_kind: "factor", reference_id: "object" }
+        ] }] } } });
+  expect(semanticFormation.status).toBe("formed");
+  expect(certifyEvidenceSemanticCompleteness({ sourceText: entry.source, factFrame: capture, semanticFormation }))
+    .toMatchObject({ receipt: { status: "rejected", reason_code: "invalid_fact_frame_obligation" },
+      semanticFormation: { status: "rejected", graph: null } });
+});
+
+it.each([
+  { source: "Alice Smith likes tea.", subject: "Alice Smith", relation: "likes", value: "tea" },
+  { source: "张三喜欢咖啡。", subject: "张三", relation: "喜欢", value: "咖啡" }
+])("leaves explicit subjects outside the independently anchored grammar unsupported: $subject", (entry) => {
+  expect(materialize(entry.source, { schema_version: 1, slots: [
+    { role: "subject", text: entry.subject }, { role: "relation", text: entry.relation }, { role: "value", text: entry.value }
+  ] }).capture.status).toBe("rejected");
+});
+
+it.each([
   { source: "I am not a doctor.", subject: "I", relation: "am", qualifier: "not", value: "a doctor", copula: true },
   { source: 'Alice likes the song "Never Again".', subject: "Alice", relation: "likes", value: 'the song "Never Again"' },
   { source: 'Alice likes the song "Quiet Days".', subject: "Alice", relation: "likes", value: 'the song "Quiet Days"' },
+  { source: "I bought my bookshelf from IKEA.", subject: "I", relation: "bought my bookshelf from", value: "IKEA" },
   { source: 'Alice never likes the song "Quiet Days".', subject: "Alice", relation: "likes", qualifier: "never", value: 'the song "Quiet Days"' }
 ])("validates explicit obligations independently of automatic frame generation: $source", (entry) => {
   const qualifier = entry.qualifier === undefined ? [] : [{ role: "qualifier" as const, text: entry.qualifier }];
@@ -65,6 +103,56 @@ it.each(["With the badge", "Without the badge", "Before the surgery", "After the
     expect(materialize(source, enterFrame).capture.status).toBe("rejected");
     expect(() => replayEvidenceFactFrameFormationCapture({ sourceAssertion: source, sourceHash,
       capture: historicalCapture(enterFrame) })).toThrow();
+  });
+
+it.each([
+  "only if I have a badge", "if I have a badge", "unless I lose my badge",
+  "unless authorized", "provided that I have a badge", "as long as I have a badge",
+  "and use the equipment only if I have a badge", ", but only if I have a badge",
+  "and the user leaves only if I have a badge", "only on Sundays"
+])("refuses trailing dependent scope through automatic, explicit and historical frames: %s", (tail) => {
+  const source = `I can enter the lab ${tail}.`;
+  expect(normalizer.propose(source)).toBeUndefined();
+  const opaque: AssociativeFactFrame = { ...enterFrame, slots: [...enterFrame.slots.slice(0, -1),
+    { role: "value", text: `the lab ${tail}` }] };
+  const qualified: AssociativeFactFrame = { ...enterFrame, slots: [...enterFrame.slots,
+    { role: "qualifier", text: tail }] };
+  for (const frame of [enterFrame, opaque, qualified]) {
+    expect(materialize(source, frame)).toMatchObject({ capture: { status: "rejected" }, searchProjections: [] });
+    const capture = historicalCapture(frame, "rule_based_evidence_fact_frame_normalizer_v3");
+    expect(() => replayEvidenceFactFrameFormationCapture({ sourceAssertion: source, sourceHash, capture })).toThrow();
+    const semanticFormation = materializeOpenSemanticFactorFormation({ source_kind: "evidence", source_text: source,
+      proposal: { schema_version: 1, producer_operator_id: "garden_source_bound_open_semantic_factor_v3",
+        source_text: source, graph: { schema_version: 2, source_kind: "evidence", variables: [], result_variable_ids: [],
+          factors: [{ factor_id: "enter", surface: "enter", semantic_identity: "enter" },
+            { factor_id: "lab", surface: "the lab", semantic_identity: "the lab" }],
+          propositions: [{ proposition_id: "p", predicate_factor_id: "enter", arguments: [
+            { position: 0, binding_identity: "object", reference_kind: "factor", reference_id: "lab" }
+          ] }] } } });
+    expect(semanticFormation.status).toBe("formed");
+    expect(certifyEvidenceSemanticCompleteness({ sourceText: source, factFrame: capture, semanticFormation }))
+      .toMatchObject({ receipt: { status: "rejected", reason_code: "invalid_fact_frame_obligation" },
+        semanticFormation: { status: "rejected", graph: null } });
+  }
+});
+
+it.each(['"Only If"', "'Only If'", "“Only If”", "‘Only If’"])(
+  "preserves a quoted value containing scope vocabulary: %s", (title) => {
+    const source = `I read ${title} and coffee recipes.`;
+    const proposal = normalizer.propose(source)!;
+    expect(proposal).toBeDefined();
+    expect(materialize(source, proposal.fact_frame).capture.status).toBe("formed");
+  });
+
+it.each(["without a badge", "with a badge", "except on Sundays", "after the surgery", "or use the equipment"])(
+  "rejects incomplete source coverage without enumerating the omitted adjunct: %s", (tail) => {
+    const source = `I can enter the lab ${tail}.`;
+    expect(materialize(source, enterFrame)).toMatchObject({ capture: { status: "rejected" }, searchProjections: [] });
+    expect(() => replayEvidenceFactFrameFormationCapture({ sourceAssertion: source, sourceHash,
+      capture: historicalCapture(enterFrame) })).toThrow();
+    const complete = normalizer.propose(source)!;
+    expect(complete.fact_frame.slots.at(-1)?.text).toBe(`the lab ${tail}`);
+    expect(materialize(source, complete.fact_frame).capture.status).toBe("formed");
   });
 
 it.each(["do not", "don't", "don’t", "never", "currently", "usually"])(

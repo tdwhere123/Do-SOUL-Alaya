@@ -266,7 +266,7 @@ function readFactFrameFormation(
 ): Readonly<EvidenceFactFrameFormationCapture> | undefined {
   if (capsule.source_hash === null) return undefined;
   try {
-    return readStoredFactFrameFormation(row, capsule.workspace_id, capsule.source_hash);
+    return readStoredFactFrameFormation(row, capsule.workspace_id, capsule.source_hash, capsule.excerpt);
   } catch (error) {
     throw new EvidenceProjectionIntegrityError(
       capsule.object_id,

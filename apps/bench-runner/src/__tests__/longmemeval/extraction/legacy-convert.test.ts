@@ -33,7 +33,7 @@ describe("legacy shard conversion", () => {
       } as VerifiedLegacyExtractionEntry,
       request: {
         schema_version: 2,
-        source_locator_contract_version: 2,
+        source_locator_contract_version: 3,
         batch_contract_version: 1,
         source_corpus_identity: task.binding.sourceCorpusIdentity,
         batch_index: 0,

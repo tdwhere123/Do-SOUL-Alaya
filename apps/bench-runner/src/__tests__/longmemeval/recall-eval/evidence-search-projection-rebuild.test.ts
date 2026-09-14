@@ -359,7 +359,8 @@ describe("receipt-v2 evidence search projection rebuild", () => {
       ]);
   });
 
-  it.each(["I can use Atlas.", "Without the badge I can use Atlas.", "I do not use Atlas."])(
+  it.each(["I can use Atlas.", "Without the badge I can use Atlas.", "I do not use Atlas.",
+    "I use Atlas only if I have a license.", "I use Atlas unless I lose my license."])(
     "rejects a historical incomplete capture and rolls back the working-copy rebuild: %s", async (source) => {
     const fixture = await createSourceFixture([{
       signalId: "signal-historical-modal",

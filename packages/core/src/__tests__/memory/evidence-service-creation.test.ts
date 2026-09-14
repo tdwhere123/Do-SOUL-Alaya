@@ -4,8 +4,7 @@ import {
   MemoryGovernanceEventType,
   formatVerifiedUserAssertionSourceHash
 } from "@do-soul/alaya-protocol";
-import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from
-  "../../memory/fact-frame-formation/declarative-normalizer.js";
+import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from "@do-soul/alaya-protocol/node/source-frame";
 import {
   createCreationHarness,
   createEvidenceInput
@@ -130,7 +129,7 @@ describe("EvidenceService creation", () => {
     ]));
     expect(assertion.create.mock.calls[0]?.[2]).toMatchObject({
       status: "formed",
-      producer_operator_id: "rule_based_evidence_fact_frame_normalizer_v3"
+      producer_operator_id: "rule_based_evidence_fact_frame_normalizer_v4"
     });
   });
 

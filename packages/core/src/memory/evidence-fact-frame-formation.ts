@@ -13,8 +13,7 @@ import {
   type EvidenceFactFrameFormationStatus,
   type EvidenceSearchProjection
 } from "@do-soul/alaya-protocol";
-import { factFramePreservesSourceObligations, type EvidenceFactFrameProposalNormalizer } from
-  "./fact-frame-formation/declarative-normalizer.js";
+import { factFramePreservesSourceObligations, type EvidenceFactFrameProposalNormalizer } from "@do-soul/alaya-protocol/node/source-frame";
 
 export type MaterializedEvidenceFactFrameFormation = Readonly<{
   readonly capture: Readonly<EvidenceFactFrameFormationCapture>;

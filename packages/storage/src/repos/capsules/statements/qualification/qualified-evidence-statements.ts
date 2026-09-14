@@ -95,7 +95,7 @@ const FIND_MATERIALIZATION_ROWS_SQL = `
 const FIND_PROJECTION_ROWS_SQL = `
   SELECT projection.evidence_object_id, projection.projection_id,
          projection.projection_kind, projection.workspace_id, projection.source_hash,
-         projection.content, formation.workspace_id AS formation_workspace_id,
+         projection.content, evidence.excerpt AS source_text, formation.workspace_id AS formation_workspace_id,
          formation.schema_version AS formation_schema_version,
          formation.operator_id AS formation_operator_id, formation.status AS formation_status,
          formation.producer_operator_id AS formation_producer_operator_id,
@@ -103,6 +103,7 @@ const FIND_PROJECTION_ROWS_SQL = `
          formation.fact_frame_json AS formation_fact_frame_json,
          formation.capture_digest AS formation_capture_digest
   FROM evidence_search_projections AS projection
+  JOIN evidence_capsules AS evidence ON evidence.object_id = projection.evidence_object_id
   LEFT JOIN evidence_fact_frame_formations AS formation
     ON formation.evidence_object_id = projection.evidence_object_id
   WHERE projection.workspace_id = ?

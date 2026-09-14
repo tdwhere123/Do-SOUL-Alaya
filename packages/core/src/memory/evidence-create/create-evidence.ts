@@ -20,8 +20,7 @@ import {
 import { runEventLogTransaction } from "../memory-service/memory-audit-append.js";
 import type { OpenSemanticFactorExtractionPort } from
   "../../semantic/open-semantic-factor-extraction-port.js";
-import type { EvidenceFactFrameProposalNormalizer } from
-  "../fact-frame-formation/declarative-normalizer.js";
+import type { EvidenceFactFrameProposalNormalizer } from "@do-soul/alaya-protocol/node/source-frame";
 import {
   admitEvidenceFieldFormation,
   planEvidenceFormation,
