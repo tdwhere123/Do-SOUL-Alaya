@@ -24,6 +24,16 @@
     "test": "pnpm exec vitest run --project @do-soul/alaya-protocol",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cjk-segmentation": {
+      "types": "./src/shared/cjk-segmentation.ts",
+      "import": "./dist/shared/cjk-segmentation.js"
+    }
+  },
   "dependencies": {
     "@node-rs/jieba": "2.0.3",
     "zod": "^4.6.2"

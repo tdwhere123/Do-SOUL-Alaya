@@ -235,13 +235,3 @@ export { KeyedMutex } from "./shared/keyed-mutex.js";
 export {
   CJK_INTERROGATIVE_FALLBACK_ATOMS
 } from "./shared/cjk-interrogative-fallback-atoms.js";
-export {
-  CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
-  __resetCjkSegmentationStateForTests,
-  __setCjkSegmentationLoaderForTests,
-  isCjkSegmentationCandidate,
-  readCjkSegmentationStatus,
-  segmentCjkRun,
-  warmCjkSegmentation
-} from "./shared/cjk-segmentation.js";
-export type { CjkSegmentationStatus } from "./shared/cjk-segmentation.js";

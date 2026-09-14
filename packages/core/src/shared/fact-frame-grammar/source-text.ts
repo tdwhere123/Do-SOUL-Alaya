@@ -1,5 +1,4 @@
-import { isCjkSegmentationCandidate, segmentCjkRun } from
-  "@do-soul/alaya-protocol";
+import { isCjkSegmentationCandidate, segmentCjkRun } from "@do-soul/alaya-protocol/cjk-segmentation";
 
 export { factFrameWordPiecesCoverRun } from "./word-piece-coverage.js";
 

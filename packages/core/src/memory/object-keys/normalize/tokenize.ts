@@ -1,4 +1,4 @@
-import { isCjkSegmentationCandidate, segmentCjkRun } from "@do-soul/alaya-protocol";
+import { isCjkSegmentationCandidate, segmentCjkRun } from "@do-soul/alaya-protocol/cjk-segmentation";
 
 export interface TokenSpan {
   readonly token: string;

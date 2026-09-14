@@ -174,7 +174,7 @@ describe("daemon tool runtime bootstrap", () => {
 
   it("warns when CJK segmentation warmups resolve unavailable", async () => {
     const { startCjkSegmentationWarmup } = await import("../../index.js");
-    const protocol = await import("@do-soul/alaya-protocol");
+    const protocol = await import("@do-soul/alaya-protocol/cjk-segmentation");
     const warmSpy = vi.spyOn(protocol, "warmCjkSegmentation").mockResolvedValueOnce(false);
     const warn = vi.fn();
 

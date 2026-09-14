@@ -13,7 +13,7 @@ import {
   __setCjkSegmentationLoaderForTests,
   segmentCjkRun,
   warmCjkSegmentation
-} from "@do-soul/alaya-protocol";
+} from "@do-soul/alaya-protocol/cjk-segmentation";
 
 describe("buildObjectIdFilterSql", () => {
   it("builds parameterized filters for allowlisted object id columns", () => {

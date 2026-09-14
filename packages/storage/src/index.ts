@@ -431,6 +431,6 @@ export {
   isCjkSegmentationCandidate,
   segmentCjkRun,
   warmCjkSegmentation
-} from "@do-soul/alaya-protocol";
-export type { CjkSegmentationStatus } from "@do-soul/alaya-protocol";
+} from "@do-soul/alaya-protocol/cjk-segmentation";
+export type { CjkSegmentationStatus } from "@do-soul/alaya-protocol/cjk-segmentation";
 

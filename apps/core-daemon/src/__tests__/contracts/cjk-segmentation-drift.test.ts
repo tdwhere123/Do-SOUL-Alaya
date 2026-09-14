@@ -3,7 +3,7 @@ import {
   isCjkSegmentationCandidate,
   segmentCjkRun,
   warmCjkSegmentation
-} from "@do-soul/alaya-protocol";
+} from "@do-soul/alaya-protocol/cjk-segmentation";
 
 const CJK_FIXTURES: readonly string[] = [
   "我喜欢咖啡",

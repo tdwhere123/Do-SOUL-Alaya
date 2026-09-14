@@ -1,4 +1,4 @@
-import { warmCjkSegmentation } from "@do-soul/alaya-protocol";
+import { warmCjkSegmentation } from "@do-soul/alaya-protocol/cjk-segmentation";
 
 export async function awaitCjkSegmentationWarmup(warnLogger: {
   warn(message: string, meta: Record<string, unknown>): void;

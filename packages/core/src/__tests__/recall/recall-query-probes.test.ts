@@ -13,7 +13,7 @@ import {
   __setCjkSegmentationLoaderForTests,
   segmentCjkRun,
   warmCjkSegmentation
-} from "@do-soul/alaya-protocol";
+} from "@do-soul/alaya-protocol/cjk-segmentation";
 
 describe("compileRecallQueryProbes", () => {
   it("extracts multilingual structural probes without a provider", () => {

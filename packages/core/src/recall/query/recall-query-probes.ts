@@ -1,7 +1,7 @@
 import { MemoryDimension, ScopeClass, type MemoryDimension as MemoryDimensionType, type ScopeClass as ScopeClassType } from "@do-soul/alaya-protocol";
 import { extractTemporalTerms } from "@do-soul/alaya-graph-algorithms";
 import { recallEnvRaw } from "../../runtime/config/recall-env-access.js";
-import { isCjkSegmentationCandidate, segmentCjkRun } from "@do-soul/alaya-protocol";
+import { isCjkSegmentationCandidate, segmentCjkRun } from "@do-soul/alaya-protocol/cjk-segmentation";
 
 export type RecallQuerySubjectHint = "self_reference";
 
