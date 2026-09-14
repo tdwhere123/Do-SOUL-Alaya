@@ -1,8 +1,9 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, statfsSync } from "node:fs";
 import { join } from "node:path";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiExtractionRequests } from "@do-soul/alaya-soul";
 import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
 import {
   assertRequiredRequestProfile,
@@ -40,6 +41,7 @@ const AUTHORIZED_EXTRACTION_OPERATION = "longmemeval-extraction-fill-v1";
 export interface ExtractionAuthorityInspection {
   readonly observation: ExtractionAuthorityObservation;
   readonly missingKeys: readonly string[];
+  readonly nonemptyKeys?: readonly string[];
   readonly invalidShards: readonly ExtractionRepairShard[];
   readonly preservedValidClosure: ExtractionPreservedValidClosure;
   readonly writerLock: "absent" | "present";
@@ -58,6 +60,7 @@ type ExtractionAuthorityCompletion = ReturnType<typeof inspectExtractionFillComp
  * an authority receipt. This function never constructs a transport delegate.
  */
 export async function inspectExtractionAuthority(input: {
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly variant: LongMemEvalVariant;
   readonly limit?: number;
   readonly offset?: number;
@@ -72,14 +75,14 @@ export async function inspectExtractionAuthority(input: {
   readonly preservedValidExclusionKeys?: readonly string[];
 }): Promise<ExtractionAuthorityInspection> {
   const manifestIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
-  const config = resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest);
+  const config = resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest, input.sourcePacking);
   assertRequiredRequestProfile(config);
   if (isObsoleteRequestProfile(config.requestProfile)) {
     throw new Error(
       `extraction authority refuses obsolete request profile ${config.requestProfile}`
     );
   }
-  const window = await prepareExtractionFillWindow(input, undefined);
+  const window = await prepareExtractionFillWindow({ ...input, sourcePacking: config.sourcePacking }, undefined);
   const authorizedTurns = input.repairInvalidShards === true
     ? window.executionExtractionTurns
     : window.distinctExtractionTurns;
@@ -103,6 +106,7 @@ function inspectAuthorityCompletion(
     cacheRoot: input.cacheRoot,
     model: config.model,
     requestProfile: config.requestProfile,
+    sourcePacking: config.sourcePacking,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
     extractionTurns: authorizedTurns,
     ...(input.excludeContentClosureKeys === undefined ? {} : {
@@ -171,6 +175,9 @@ function buildAuthorityExtractionObservation(
     model: config.model,
     modelFamily: config.modelFamily ?? config.model,
     requestProfile: config.requestProfile,
+    ...(manifestIdentity !== undefined && manifestIdentity.manifest.schema_version < 4 ? {} : {
+      sourcePacking: config.sourcePacking
+    }),
     providerUrl: config.providerUrl,
     systemPromptSha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
     cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
@@ -198,6 +205,7 @@ function buildExtractionAuthorityInspection(
   return Object.freeze({
     observation,
     missingKeys: Object.freeze(shardStatus.missingKeys),
+    nonemptyKeys: Object.freeze(shardStatus.nonemptyKeys ?? []),
     invalidShards: Object.freeze(shardStatus.invalidShards),
     preservedValidClosure: createExtractionPreservedValidClosure(shardStatus.validEntries),
     writerLock: inspectExtractionCacheWriterLock(input.cacheRoot),
@@ -214,17 +222,21 @@ function collectShardStatus(
   preservedValidExclusionKeys: ReadonlySet<string>
 ): {
   readonly missingKeys: readonly string[];
+  readonly nonemptyKeys?: readonly string[];
   readonly invalidShards: readonly ExtractionRepairShard[];
   readonly validEntries: readonly ExtractionContentClosureEntry[];
 } {
   const missingKeys: string[] = [];
+  const nonemptyKeys: string[] = [];
   const invalidShards: ExtractionRepairShard[] = [];
   const validEntries: ExtractionContentClosureEntry[] = [];
   for (const turn of turns) {
     const keys = computeExtractionTurnCacheKeys(
-      config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn
+      config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn, config.sourcePacking
     );
-    for (const key of keys) {
+    const requests = buildOfficialApiExtractionRequests(turn.turnContent, turn.turnMessages, config.sourcePacking);
+    for (const [index, key] of keys.entries()) {
+      if (requests[index]!.source_assertions.length > 0) nonemptyKeys.push(key);
       const shard = inspectCachedExtraction(
         cacheRoot, key, config.model, config.requestProfile
       );
@@ -246,6 +258,7 @@ function collectShardStatus(
   }
   return {
     missingKeys: missingKeys.sort(),
+    nonemptyKeys: [...new Set(nonemptyKeys)].sort(),
     validEntries,
     invalidShards: invalidShards.sort((left, right) =>
       left.cache_key.localeCompare(right.cache_key)

@@ -80,6 +80,7 @@ export function createSourceAssertionSupplementRuntime(input: {
   const provider = new OfficialApiGardenProvider({
     apiKey: null,
     model: input.config.model,
+    sourcePacking: input.config.sourcePacking,
     extractor,
     injectedExtractorCapability: "cache_only",
     diagnosticDir: null
@@ -210,8 +211,8 @@ function requireRequestProfile(
   manifest: ExtractionCacheManifest,
   label: string
 ) {
-  if (manifest.schema_version !== 3 || manifest.request_profile === undefined) {
-    throw new Error(`source assertion supplement ${label} manifest is not v3`);
+  if ((manifest.schema_version !== 3 && manifest.schema_version !== 4) || manifest.request_profile === undefined) {
+    throw new Error(`source assertion supplement ${label} manifest has no request profile`);
   }
   return manifest.request_profile;
 }

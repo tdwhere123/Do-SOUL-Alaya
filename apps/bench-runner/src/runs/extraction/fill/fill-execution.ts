@@ -63,6 +63,7 @@ export interface CompleteFillManifestSupplement {
 export interface ExecutionExtractionAuthority {
   readonly receipt: ExtractionAuthorityReceipt;
   readonly reserveAttempt: (cacheKey: string, signal?: AbortSignal) => Promise<void>;
+  readonly reserveSampleBatch?: (keys: readonly string[], signal?: AbortSignal) => Promise<Readonly<Record<string, number>>>;
   readonly reserveAttemptOrdinal?: (cacheKey: string, signal?: AbortSignal) => Promise<number>;
   readonly abandonPendingShard: (cacheKey: string, attemptOrdinal?: number) => void;
   readonly commitSuccessfulShard: (cacheKey: string) => void;
@@ -90,6 +91,7 @@ export async function executeExtractionFill(
   markProgress: (() => void) | undefined
 ): Promise<import("./semantic-fill-executor.js").SemanticFillReport | undefined> {
   refuseRecallCampaignLiveExtraction("extraction_write");
+  if (authority?.receipt.action === "sample") throw new Error("sample authority is Batch-only");
   const resolved = resolveFillTurns(
     options.cacheKeyAllowlist, prepared, cacheRoot, authority, writeLease
   );
@@ -135,6 +137,7 @@ export async function executeExtractionFill(
     resolved.executionCacheKeys
   );
   await runExtractionPool({
+    sourcePacking: prepared.config.sourcePacking,
     extractor,
     turns: resolved.turns,
     concurrency,
@@ -272,7 +275,7 @@ function resolveRepairTurns(
         prepared.config.model,
         prepared.config.requestProfile,
         OFFICIAL_API_SYSTEM_PROMPT,
-        turn
+        turn, prepared.config.sourcePacking
       ).some((cacheKey) => keys.has(cacheKey))
     ),
     skippedCacheHits: 0,
@@ -455,7 +458,7 @@ function selectProbeTurn(
       prepared.config.model,
       prepared.config.requestProfile,
       OFFICIAL_API_SYSTEM_PROMPT,
-      turn
+      turn, prepared.config.sourcePacking
     ).includes(targetKey)
   );
   if (target === undefined) {

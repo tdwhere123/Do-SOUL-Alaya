@@ -1,5 +1,4 @@
 import {
-  EXTRACTION_CACHE_MANIFEST_VERSION,
   extractionModelFamily,
   readExtractionCacheManifestIdentity
 } from "../../cache/extraction-cache-manifest.js";
@@ -347,7 +346,7 @@ function assertManifestMatchesInspection(
   const observation = inspection.observation;
   const manifest = identity?.manifest;
   if (identity === undefined || manifest === undefined ||
-      manifest.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION ||
+      (manifest.schema_version !== 3 && manifest.schema_version !== 4) ||
       identity.manifestSha256 !== observation.extraction.manifestSha256 ||
       (expectedManifestSha256 !== undefined &&
         identity.manifestSha256 !== expectedManifestSha256) ||

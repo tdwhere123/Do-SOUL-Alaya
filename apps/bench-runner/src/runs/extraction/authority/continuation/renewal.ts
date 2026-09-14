@@ -8,7 +8,7 @@ import type {
 import { sameRootContinuationMode } from "./contract.js";
 
 interface TransportAuthorityReceipt {
-  readonly action: "probe" | "fill";
+  readonly action: "probe" | "fill" | "sample";
   readonly target_selection_digest?: string;
   readonly limits: Readonly<{
     starting_missing: number;

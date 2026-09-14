@@ -31,9 +31,9 @@ if (!Number.isSafeInteger(limit) || limit < 1 ||
 const cacheIdentity = readExtractionCacheManifestIdentity(cacheRoot);
 if (cacheIdentity === undefined) throw new Error("replay cache manifest is missing");
 const cacheManifest = cacheIdentity.manifest;
-if (cacheManifest.schema_version !== 3 || cacheManifest.fill_status !== "complete" ||
+if ((cacheManifest.schema_version !== 3 && cacheManifest.schema_version !== 4) || cacheManifest.fill_status !== "complete" ||
     cacheManifest.content_closure_index === undefined) {
-  throw new Error("replay requires a sealed v3 complete cache manifest");
+  throw new Error("replay requires a sealed complete cache manifest with a request profile");
 }
 const currentPromptDigest = computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT);
 if (datasetRevision !== cacheManifest.dataset_revision ||

@@ -10,6 +10,7 @@ import { OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION } from "../official-api-si
 import { capabilityIdentity, OFFICIAL_API_SIGNALS_CAPABILITY, resolveExtractionCapability } from "./extraction-capability.js";
 import { officialApiExtractionRequestTemplatePreimage } from "./extraction-request.js";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "./system-prompt.js";
+import { OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE } from "./response-schema.js";
 
 export {
   SOURCE_ENRICHMENT_CONTRACT,
@@ -35,6 +36,7 @@ export function computeSemanticArtifactKey(
     canonical.outputSchema,
     OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
     OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION,
+    createHash("sha256").update(OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE, "utf8").digest("hex"),
     createHash("sha256").update(OFFICIAL_API_SYSTEM_PROMPT, "utf8").digest("hex"),
     createHash("sha256").update(officialApiExtractionRequestTemplatePreimage(), "utf8").digest("hex")
   ]), "utf8").digest("hex");

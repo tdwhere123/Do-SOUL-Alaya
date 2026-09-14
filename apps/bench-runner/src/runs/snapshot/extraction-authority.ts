@@ -10,14 +10,13 @@ import {
   type LongMemEvalExtractionAuthority
 } from "@do-soul/alaya-eval/authority";
 import {
-  EXTRACTION_CACHE_MANIFEST_VERSION,
   extractionCacheManifestPath,
   parseExtractionCacheManifestContents,
-  type ExtractionCacheManifestV3
+  type ProfiledExtractionCacheManifest
 } from "../extraction/cache/extraction-cache-manifest.js";
 import { hasCompleteExtractionFillAuthority } from
   "../extraction/fill/fill-authority.js";
-import type { SnapshotExtractionProvenanceV3 } from "./materialize.js";
+import type { ProfiledSnapshotExtractionProvenance } from "./materialize.js";
 import { redactProvenanceUrl } from "../provenance/paired-environment.js";
 import { readRegularFileNoFollow, sha256Buffer } from "./bound-file.js";
 import { redactSupplementalSourceBinding } from
@@ -28,7 +27,7 @@ export const MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES =
 export type SnapshotExtractionAuthority = LongMemEvalExtractionAuthority;
 
 export interface CapturedSnapshotExtractionAuthority {
-  readonly compact: SnapshotExtractionProvenanceV3;
+  readonly compact: ProfiledSnapshotExtractionProvenance;
   readonly authority: SnapshotExtractionAuthority;
   readonly bytes: Buffer;
 }
@@ -52,13 +51,15 @@ export function captureSnapshotExtractionAuthority(
 }
 
 export function buildSnapshotExtractionSummary(
-  manifest: ExtractionCacheManifestV3,
+  manifest: ProfiledExtractionCacheManifest,
   sourceManifestSha256: string
-): SnapshotExtractionProvenanceV3 {
+): ProfiledSnapshotExtractionProvenance {
   const expansion = sanitizedExpansionArtifacts(manifest);
   return {
     manifest_sha256: sourceManifestSha256,
-    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    ...(manifest.schema_version === 4
+      ? { schema_version: 4 as const, source_packing: manifest.source_packing }
+      : { schema_version: 3 as const }),
     extraction_model: manifest.extraction_model,
     model_family: manifest.model_family,
     request_profile: manifest.request_profile,
@@ -87,7 +88,7 @@ export function buildSnapshotExtractionSummary(
 }
 
 export function buildSnapshotExtractionAuthority(
-  manifest: ExtractionCacheManifestV3,
+  manifest: ProfiledExtractionCacheManifest,
   sourceManifestSha256: string,
   compact = buildSnapshotExtractionSummary(manifest, sourceManifestSha256)
 ): SnapshotExtractionAuthority {
@@ -100,11 +101,12 @@ export function buildSnapshotExtractionAuthority(
   });
   const candidate = {
     schema_version: 1,
-    source_manifest_schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    source_manifest_schema_version: manifest.schema_version,
     source_manifest_sha256: sourceManifestSha256,
     extraction_model: manifest.extraction_model,
     model_family: manifest.model_family,
     request_profile: manifest.request_profile,
+    ...(manifest.schema_version === 4 ? { source_packing: manifest.source_packing } : {}),
     system_prompt_sha256: manifest.system_prompt_sha256,
     cache_key_algo: manifest.cache_key_algo,
     dataset: manifest.dataset,
@@ -150,7 +152,7 @@ export function parseSnapshotExtractionAuthorityBytes(
 
 export function assertSnapshotExtractionAuthorityBinding(
   authority: SnapshotExtractionAuthority,
-  compact: SnapshotExtractionProvenanceV3
+  compact: ProfiledSnapshotExtractionProvenance
 ): void {
   assertLongMemEvalExtractionAuthorityBinding({ authority, compact });
 }
@@ -158,7 +160,7 @@ export function assertSnapshotExtractionAuthorityBinding(
 function parseCompleteSourceManifest(
   bytes: Uint8Array,
   filePath: string
-): ExtractionCacheManifestV3 {
+): ProfiledExtractionCacheManifest {
   let raw: string;
   try {
     raw = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -166,9 +168,9 @@ function parseCompleteSourceManifest(
     throw new Error(`extraction manifest is not strict UTF-8 at ${filePath}`, { cause });
   }
   const manifest = parseExtractionCacheManifestContents(raw, filePath);
-  if (manifest.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION ||
+  if ((manifest.schema_version !== 3 && manifest.schema_version !== 4) ||
       !hasCompleteExtractionFillAuthority(manifest)) {
-    throw new Error("snapshot extraction authority requires a complete v3 manifest");
+    throw new Error("snapshot extraction authority requires a complete v3 or v4 manifest");
   }
   return manifest;
 }
@@ -187,7 +189,7 @@ function parseAuthority(value: unknown, label: string): SnapshotExtractionAuthor
   }
 }
 
-function sanitizedExpansionArtifacts(manifest: ExtractionCacheManifestV3) {
+function sanitizedExpansionArtifacts(manifest: ProfiledExtractionCacheManifest) {
   return {
     ...(manifest.expansion_source_anchor === undefined ? {} : {
       expansion_source_anchor: sanitizeSnapshotProvenanceValue(manifest.expansion_source_anchor)
@@ -205,7 +207,7 @@ export function sanitizeSnapshotProvenanceValue<T>(value: T): T {
       : nested)) as T;
 }
 
-function expansionDigests(compact: SnapshotExtractionProvenanceV3) {
+function expansionDigests(compact: ProfiledSnapshotExtractionProvenance) {
   return {
     ...(compact.expansion_source_anchor === undefined ? {} : {
       expansion_source_anchor_sha256: hashLongMemEvalExpansionArtifact(

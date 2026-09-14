@@ -43,6 +43,7 @@ export async function runExtractionFillCommand(
       deps.signalSource,
       (signal) => deps.runExtractionFill({
         variant: opts.variant,
+        sourcePacking: opts.extractionSourcePacking,
         ...(batch === undefined ? {} : { batch }),
         ...(opts.limit === undefined ? {} : { limit: opts.limit }),
         ...(opts.offset === undefined ? {} : { offset: opts.offset }),

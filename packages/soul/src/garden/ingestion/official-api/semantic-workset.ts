@@ -1,3 +1,4 @@
+import type { ReferenceTransportBatchSize } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import { mintOfficialApiAssertionWork } from "./extraction-request.js";
@@ -56,7 +57,7 @@ interface PlannedOfficialApiSemanticWorkset extends OfficialApiSemanticWorkset {
   readonly units: readonly VerifiedOfficialApiSemanticWorkUnit[];
 }
 
-export type OfficialApiTransportBatchSize = 8 | 16 | 24 | 32;
+export type OfficialApiTransportBatchSize = ReferenceTransportBatchSize;
 
 export function planOfficialApiSemanticWorkset(
   turnContent: string,

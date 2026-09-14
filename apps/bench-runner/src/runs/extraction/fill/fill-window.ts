@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import type { LongMemEvalVariant } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { loadDatasetWithIdentity } from "../../../datasets/longmemeval/ingestion/fetch.js";
 import type { PreparedExpansionFillAuthority } from "../expansion-fill-authority.js";
@@ -7,6 +8,7 @@ import {
 } from "../turn-contents.js";
 
 interface ExtractionFillWindowOptions {
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly variant: LongMemEvalVariant;
   readonly limit?: number;
   readonly offset?: number;
@@ -49,7 +51,7 @@ function prepareExpansionWindow(
   if (options.questionBatchLimit !== undefined) {
     throw new Error("question-bounded extraction cannot mix an expansion capability");
   }
-  const keySpace = inspectTurnContentKeySpace(expansion.nextQuestions);
+  const keySpace = inspectTurnContentKeySpace(expansion.nextQuestions, options.sourcePacking);
   assertSameTurnWindow(keySpace.distinctExtractionTurns, expansion.nextTurns);
   const turnContents = expansion.nextTurns.map(({ turnContent }) => turnContent);
   return {
@@ -82,10 +84,10 @@ async function prepareDatasetWindow(
     : offset + options.limit;
   const questions = dataset.questions.slice(offset, sliceEnd);
   const batchLimit = resolveQuestionBatchLimit(options.questionBatchLimit, questions.length);
-  const windowKeySpace = inspectTurnContentKeySpace(questions);
+  const windowKeySpace = inspectTurnContentKeySpace(questions, options.sourcePacking);
   const executionKeySpace = batchLimit === questions.length
     ? windowKeySpace
-    : inspectTurnContentKeySpace(questions.slice(0, batchLimit));
+    : inspectTurnContentKeySpace(questions.slice(0, batchLimit), options.sourcePacking);
   const distinctTurns = windowKeySpace.distinctTurnContents;
   const executionTurns = executionKeySpace.distinctTurnContents;
   return {

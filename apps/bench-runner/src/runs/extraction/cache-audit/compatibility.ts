@@ -1,8 +1,10 @@
+import { DEFAULT_EXTRACTION_SOURCE_PACKING, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync } from "node:fs";
 import { resolve } from "node:path";
 
 export interface RawExtractionCacheIdentity {
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly datasetRevision: string;
   readonly model: string;
   readonly requestProfile: string;
@@ -37,6 +39,7 @@ export interface ExtractionReplayClosure {
 }
 
 export type RawExtractionCacheCompatibilityReason =
+  | "source_packing_mismatch"
   | "dataset_revision_mismatch"
   | "model_mismatch"
   | "request_profile_mismatch"
@@ -156,9 +159,12 @@ function rawIdentityDifferences(
   source: RawExtractionCacheIdentity,
   final: RawExtractionCacheIdentity
 ): RawExtractionCacheCompatibilityReason[] {
-  return rawCompatibilityFields.flatMap(({ field, reason }) =>
+  const reasons = rawCompatibilityFields.flatMap(({ field, reason }) =>
     source[field] === final[field] && isPresent(source[field]) ? [] : [reason]
   );
+  if ((source.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING) !==
+      (final.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING)) reasons.push("source_packing_mismatch");
+  return reasons;
 }
 
 function projectionIdentityDifferences(
@@ -178,7 +184,7 @@ function isReplayClosed(replay: ExtractionReplayClosure): boolean {
 }
 
 const rawCompatibilityFields: readonly {
-  readonly field: keyof RawExtractionCacheIdentity;
+  readonly field: Exclude<keyof RawExtractionCacheIdentity, "sourcePacking">;
   readonly reason: RawExtractionCacheCompatibilityReason;
 }[] = [
   { field: "datasetRevision", reason: "dataset_revision_mismatch" },

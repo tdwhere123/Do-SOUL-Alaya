@@ -139,7 +139,7 @@ export async function inspectExtractionFillPreparation(
   const startingIdentity = manifestSnapshot.identity;
   const existingManifest = startingIdentity?.manifest;
   if (existingManifest === undefined) assertManifestlessCacheIsEmpty(cacheRoot);
-  const config = resolveFillConfig(existingManifest);
+  const config = resolveFillConfig(existingManifest, options.sourcePacking);
   const { window, completion } = await inspectPreparedFillWindow({
     options, cacheRoot, startingIdentity, config, expansion
   });
@@ -232,6 +232,7 @@ export function inspectFillWindow(
     cacheRoot,
     model: config.model,
     requestProfile: config.requestProfile,
+    sourcePacking: config.sourcePacking,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
     extractionTurns
   });
@@ -258,7 +259,7 @@ async function inspectPreparedFillWindow(input: {
   readonly config: CompileSeedExtractionConfig;
   readonly expansion: PreparedExpansionFillAuthority | undefined;
 }) {
-  const window = await prepareExtractionFillWindow(input.options, input.expansion);
+  const window = await prepareExtractionFillWindow({ ...input.options, sourcePacking: input.config.sourcePacking }, input.expansion);
   assertPreparationIdentityUnchanged(
     input.startingIdentity,
     readExtractionCacheManifestIdentity(input.cacheRoot)
@@ -319,9 +320,10 @@ function preflightAndPinExtractionIdentity(input: {
 }
 
 function resolveFillConfig(
-  manifest: ExtractionCacheManifest | undefined
+  manifest: ExtractionCacheManifest | undefined,
+  sourcePacking?: CompileSeedExtractionConfig["sourcePacking"]
 ): CompileSeedExtractionConfig {
-  const config = resolveCompileSeedExtractionConfig(process.env, manifest);
+  const config = resolveCompileSeedExtractionConfig(process.env, manifest, sourcePacking);
   if (config.model.trim().length === 0) {
     throw new Error(
       "extraction-fill: resolved extraction model is empty; refusing to fill " +

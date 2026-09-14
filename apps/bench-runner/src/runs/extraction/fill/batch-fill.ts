@@ -1,3 +1,4 @@
+import { assertSampleExecutionOptions, assertSampleKeys } from "../authority/sample-scope.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
@@ -62,7 +63,10 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
           job.usage === undefined || job.lineKeys.some((key) => job.outcomes[key]?.status !== "admitted")))))) {
     throw new Error("Batch campaign requires successful, fully accounted predecessor jobs");
   }
-  const selected = authority.receipt.action === "probe" ? new Set([authority.receipt.probe_key!])
+  assertSampleExecutionOptions(authority.receipt, input.options);
+  const selected = authority.receipt.action === "sample"
+    ? new Set(authority.receipt.sample_scope!.keys)
+    : authority.receipt.action === "probe" ? new Set([authority.receipt.probe_key!])
     : authority.receipt.catalog_refill === undefined ? undefined
       : new Set(authority.receipt.catalog_refill.keys);
   if (authority.receipt.repair_scope !== undefined) throw new Error("Batch repair needs a fresh missing-unit authority");
@@ -88,6 +92,10 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
     ...(input.options.signal === undefined ? {} : { signal: input.options.signal }),
     ...(batch.reconcile === undefined ? {} : { reconcile: batch.reconcile }),
     reserveSubmission: async (lines) => {
+      if (authority.receipt.sample_scope !== undefined) {
+        if (authority.reserveSampleBatch === undefined) throw new Error("sample reservation authority is missing");
+        return authority.reserveSampleBatch(lines.map((line) => line.key), input.options.signal);
+      }
       if (authority.reserveAttemptOrdinal === undefined) throw new Error("Batch requires bound attempt authority");
       const ordinals: Record<string, number> = {};
       for (const line of lines) ordinals[line.key] = await authority.reserveAttemptOrdinal(line.key, input.options.signal);
@@ -115,6 +123,7 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
     if (!(cause instanceof ExtractionCacheInvariantError)) throw cause;
     status = "in_progress";
   }
+  if (authority.receipt.action === "sample") status = "in_progress";
   const manifest = buildFillManifest({ config: input.prepared.config, variant: input.prepared.variant,
     existingManifest: readExtractionCacheManifestIdentity(input.cacheRoot)?.manifest,
     datasetRevision: input.prepared.datasetRevision, windowOffset: input.prepared.windowOffset,
@@ -146,6 +155,11 @@ function bindBatchPlan(input: BatchFillInput, workset: BatchExtractionWorkset,
     throw new Error("Batch request limit must be a positive safe integer");
   }
   if (!/^[a-zA-Z0-9_-]{1,64}$/u.test(window)) throw new Error("invalid Batch window name");
+  const sample = input.authority!.receipt.sample_scope;
+  if (sample !== undefined) {
+    assertSampleKeys(sample, workset.requests.map((request) => request.line.key));
+    if (workset.deterministicEmptyRequests.length !== 0) throw new Error("sample cannot include empty requests");
+  }
   const identity = batchDigest(JSON.stringify({
     window,
     ...(requestLimit === undefined ? {} : { requestLimit }),
@@ -154,6 +168,10 @@ function bindBatchPlan(input: BatchFillInput, workset: BatchExtractionWorkset,
     requests: workset.requests.map(({ line }) => line), model, requestProfile,
     limits: input.options.batch!.limits
   }));
+  if (sample !== undefined && readRootBatchRuns(input.writeLease)
+    .some((run) => run.plan.identity !== identity)) {
+    throw new Error("sample authority already has its sole Batch job in this cache root");
+  }
   const path = join(input.writeLease.stableRootPath,
     window === "initial" ? "gemini-batch-plan.json" : `gemini-batch-plan-${window}.json`);
   if (existsSync(path)) {
@@ -163,6 +181,7 @@ function bindBatchPlan(input: BatchFillInput, workset: BatchExtractionWorkset,
         JSON.stringify(saved.limits) !== JSON.stringify(input.options.batch!.limits)) {
       throw new Error("Batch source/authority/settings changed since preparation");
     }
+    if (sample !== undefined) assertSampleKeys(sample, saved.lines.map((line) => line.key));
     if (isBatchPlanAdmitted(input.writeLease, saved)) {
       const requests = new Map(workset.requests.map(({ line }) => [line.key, JSON.stringify(line)]));
       for (const line of saved.lines) {
@@ -174,6 +193,7 @@ function bindBatchPlan(input: BatchFillInput, workset: BatchExtractionWorkset,
   if (input.options.batch!.operation !== "prepare") throw new Error("Batch must be prepared before operation");
   const lines = [...workset.lines].sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0)
     .slice(0, requestLimit);
+  if (sample !== undefined) assertSampleKeys(sample, lines.map((line) => line.key));
   let plan: GeminiBatchPlan;
   try {
     plan = canonicalBatchPlan({ identity, model, requestProfile, lines, limits: input.options.batch!.limits });

@@ -1,3 +1,4 @@
+import { ReferenceTransportBatchSizeSchema } from "@do-soul/alaya-protocol";
 import {
   officialApiSemanticWorksetFromUnits,
   planOfficialApiTransport,
@@ -211,7 +212,7 @@ export function assertSafeBudget(value: number, label: string): void {
 function assertTransportPolicy(policy: SemanticTransportPolicy): void {
   if (policy.kind === "reference_batch_8") return;
   if (policy.kind === "reference_batch") {
-    if (![8, 16, 24, 32].includes(policy.assertionsPerPack)) {
+    if (!ReferenceTransportBatchSizeSchema.safeParse(policy.assertionsPerPack).success) {
       throw new Error("reference transport policy is invalid");
     }
     return;

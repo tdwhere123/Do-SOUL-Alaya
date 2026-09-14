@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
 import type {
   BenchPolicyShape,
@@ -100,6 +101,7 @@ export interface LongMemEvalRunOptions {
   // cache + arbitrary model instead of the committed production manifest,
   // decoupling the integration tests from the live extraction model.
   readonly extractionCacheRoot?: string;
+  readonly extractionSourcePacking?: ExtractionSourcePacking;
   // @anchor longmemeval-qa: end-to-end QA scoring (answer-LLM + LLM-judge over
   // delivered recall). Undefined => zero LLM calls and byte-identical kpi/sidecar.
   readonly qa?: LongMemEvalQaRunOption;

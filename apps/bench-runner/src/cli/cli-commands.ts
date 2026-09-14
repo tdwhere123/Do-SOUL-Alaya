@@ -134,6 +134,7 @@ function buildLongMemEvalRunOptions(
     ...(opts.materializeQuestionDbs ? { materializeQuestionDbs: true } : {}),
     ...(opts.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: opts.pinnedMetaRoot }),
     ...(opts.extractionCacheRoot === undefined ? {} : { extractionCacheRoot: opts.extractionCacheRoot }),
+    ...(opts.extractionSourcePacking === undefined ? {} : { extractionSourcePacking: opts.extractionSourcePacking }),
     ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
     ...(opts.expectedReconciliationBasis === undefined
       ? {}

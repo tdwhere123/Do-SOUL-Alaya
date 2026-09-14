@@ -39,7 +39,7 @@ export function collectSemanticFillTasks(
       prepared.config.model,
       prepared.config.requestProfile,
       OFFICIAL_API_SYSTEM_PROMPT,
-      turn
+      turn, prepared.config.sourcePacking
     );
     assertDemandKeysAreSubstrateMembers(
       substrateCacheKeys,

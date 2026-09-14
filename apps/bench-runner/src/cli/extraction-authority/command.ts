@@ -1,3 +1,5 @@
+import { createExtractionSampleScope } from "../../runs/extraction/authority/sample-scope.js";
+import { readBoundedCanonicalUtf8Artifact } from "../../runs/extraction/cache-audit/bounded-artifact-reader.js";
 import process from "node:process";
 import { parseFlags } from "../cli-options.js";
 import { resolveEffectiveExtractionCacheRoot } from "../../runs/compile-seed/compile-seed-config.js";
@@ -199,6 +201,7 @@ async function inspectAuthorityForReceipt(
 ) {
   const inspectInput = {
     variant: flags.variant,
+    sourcePacking: flags.extractionSourcePacking,
     ...(flags.limit === undefined ? {} : { limit: flags.limit }),
     ...(flags.offset === undefined ? {} : { offset: flags.offset }),
     ...(flags.questionBatchLimit === undefined ? {} : {
@@ -320,6 +323,10 @@ function buildReceiptInput(input: {
 }) {
   return {
     action: input.authority.action,
+    ...(input.authority.sampleKeysPath === undefined ? {} : { sampleScope: createExtractionSampleScope(
+      JSON.parse(readBoundedCanonicalUtf8Artifact({ path: input.authority.sampleKeysPath,
+        maxBytes: 4 * 1024 * 1024, label: "proposed extraction sample keys" })), input.inspection
+    ) }),
     observation: input.inspection.observation,
     outputTokenCap: {
       field: input.authority.outputTokenField, value: input.authority.outputTokenCap
@@ -333,7 +340,7 @@ function buildReceiptInput(input: {
     ...(input.maxConcurrency === undefined ? {} : { maxConcurrency: input.maxConcurrency }),
     ...(input.authority.probeKey === undefined ? {} : { probeKey: input.authority.probeKey }),
     ...(input.carriedLimits === undefined ? {} : { cumulativeLimits: input.carriedLimits }),
-    inspection: inspectionSummary(input.inspection),
+    inspection: input.inspection,
     ...(input.targetSelection === undefined ? {} : {
       targetSelectionDigest: input.targetSelection.receipt_digest
     }),
@@ -342,15 +349,6 @@ function buildReceiptInput(input: {
     ...(input.targetSelection === undefined || input.continuation === undefined ? {} : {
       now: new Date(input.targetSelection.created_at)
     })
-  };
-}
-
-function inspectionSummary(inspection: ExtractionAuthorityInspection) {
-  return {
-    writerLock: inspection.writerLock,
-    disk: inspection.disk,
-    credentialStatus: inspection.credentialStatus,
-    modelReadiness: inspection.modelReadiness
   };
 }
 

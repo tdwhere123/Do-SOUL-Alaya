@@ -38,6 +38,26 @@ afterEach(() => {
 });
 
 describe("snapshot extraction authority", () => {
+  it("binds singleton packing and the manifest version through summary and persisted authority", () => {
+    const manifest = { ...extractionManifest(2, "singleton"), schema_version: 4 as const,
+      source_packing: "singleton" as const };
+    const compact = buildSnapshotExtractionSummary(manifest, SOURCE_SHA);
+    if (compact.schema_version !== 4) throw new Error("fixture requires the current packing contract");
+    const authority = buildSnapshotExtractionAuthority(manifest, SOURCE_SHA, compact);
+    const reopened = parseSnapshotExtractionAuthorityBytes(renderSnapshotExtractionAuthority(authority), "singleton");
+    expect(compact).toMatchObject({ schema_version: 4, source_packing: "singleton" });
+    expect(reopened).toMatchObject({ schema_version: 1, source_manifest_schema_version: 4, source_packing: "singleton" });
+    expect(() => assertSnapshotExtractionAuthorityBinding(reopened, compact)).not.toThrow();
+    expect(() => assertSnapshotExtractionAuthorityBinding(reopened, { ...compact, source_packing: "reference-eight" }))
+      .toThrow(/source_packing/u);
+    const { source_packing: _packing, ...withoutPacking } = compact;
+    const { source_packing: _authorityPacking, ...missingAuthorityPacking } = reopened;
+    expect(() => parseSnapshotExtractionAuthorityBytes(Buffer.from(JSON.stringify(missingAuthorityPacking)), "missing packing"))
+      .toThrow();
+    expect(() => assertSnapshotExtractionAuthorityBinding(reopened, { ...withoutPacking, schema_version: 3 }))
+      .toThrow(/source_manifest_schema_version/u);
+  });
+
   it("keeps provider identity out of the full authority artifact", () => {
     const manifest = extractionManifest(2, "provider-secret");
     const compact = buildSnapshotExtractionSummary(manifest, SOURCE_SHA);

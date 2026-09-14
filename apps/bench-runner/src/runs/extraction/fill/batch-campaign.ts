@@ -146,7 +146,7 @@ function advanceCampaign(state: BatchCampaignState, result: ExtractionFillResult
   if (settled && jobs.some((job) => job.usageUnknown || job.usage === undefined)) {
     state.status = "stopped"; state.stopReason = "batch_usage_unknown"; return;
   }
-  if (result.manifest.schema_version === 3 && result.manifest.fill_status === "complete" && result.coverage === 1 && settled) {
+  if ((result.manifest.schema_version === 3 || result.manifest.schema_version === 4) && result.manifest.fill_status === "complete" && result.coverage === 1 && settled) {
     state.status = "complete"; state.nextCheckAt = 0; return;
   }
   if (state.phase === "prepare") state.phase = "submit";

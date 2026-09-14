@@ -1,8 +1,7 @@
 import { createTimeConcernWindowDigest } from "@do-soul/alaya-protocol";
-import { extractTemporalTerms } from "@do-soul/alaya-graph-algorithms";
 import type { OfficialApiTemporalProjectionDraft } from
-  "../../extraction/temporal/observed-projection.js";
-import { resolveTemporalProjection } from "../../extraction/time-concern-projection.js";
+  "../../extraction/temporal/projection-draft.js";
+import { resolveSourceTemporalCandidates } from "../../extraction/temporal/source-time.js";
 
 export type OfficialApiTimeConcernProjectionAudit = Readonly<{
   readonly status: "formed" | "unavailable";
@@ -33,19 +32,18 @@ export function projectOfficialApiTimeConcern(input: Readonly<{
   if (projection?.event_time_start === undefined || projection.event_time_end === undefined) {
     return unavailable("event_time_unavailable");
   }
-  const term = extractTemporalTerms(input.sourceAssertion).find((candidate) => {
-    const resolved = resolveTemporalProjection(candidate, sourceObservedAt);
-    return resolved !== null && resolved.event_time_start === projection.event_time_start &&
-      resolved.event_time_end === projection.event_time_end;
+  const candidate = resolveSourceTemporalCandidates(input.sourceAssertion, sourceObservedAt).find((candidate) => {
+    return candidate.role === "event" && candidate.projection.event_time_start === projection.event_time_start &&
+      candidate.projection.event_time_end === projection.event_time_end;
   });
-  if (term === undefined) return unavailable("source_temporal_term_unmatched");
+  if (candidate === undefined) return unavailable("source_temporal_term_unmatched");
   return Object.freeze({
     payload: Object.freeze({
       window_digest: createTimeConcernWindowDigest(
         projection.event_time_start,
         projection.event_time_end
       ),
-      matched_text: term
+      matched_text: input.sourceAssertion.slice(candidate.start, candidate.end)
     }),
     audit: Object.freeze({
       status: "formed",

@@ -17,12 +17,12 @@ export interface ExpansionManifestArtifacts {
 
 export function parseExpansionManifestArtifacts(input: {
   readonly record: Readonly<Record<string, unknown>>;
-  readonly schemaVersion: 1 | 2 | 3;
+  readonly schemaVersion: 1 | 2 | 3 | 4;
   readonly fill: ExtractionFillManifestContract;
   readonly filePath: string;
 }): ExpansionManifestArtifacts {
   const { record, schemaVersion, filePath } = input;
-  if (schemaVersion !== 3) {
+  if (schemaVersion !== 3 && schemaVersion !== 4) {
     assertLegacyArtifactsAbsent(record, schemaVersion, filePath);
     return {};
   }

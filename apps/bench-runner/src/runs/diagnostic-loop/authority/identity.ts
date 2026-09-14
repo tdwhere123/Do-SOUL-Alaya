@@ -7,7 +7,7 @@ import {
 } from "../../compile-seed/cache/cache-shard.js";
 import {
   readExtractionCacheManifestIdentity,
-  type ExtractionCacheManifestV3
+  type ProfiledExtractionCacheManifest
 } from "../../extraction/cache/extraction-cache-manifest.js";
 import { hasCompleteExtractionFillAuthority } from
   "../../extraction/fill/fill-authority.js";
@@ -95,7 +95,7 @@ export interface ResolvedDiagnosticLoopIdentity {
   readonly treatment_exposure_policy: typeof CACHED_F3_EXPOSURE_POLICY;
 }
 
-type CompleteExtractionManifest = ExtractionCacheManifestV3 & Readonly<{
+type CompleteExtractionManifest = ProfiledExtractionCacheManifest & Readonly<{
   fill_status: "complete";
   expected_turns: number;
   expected_key_set_sha256: string;

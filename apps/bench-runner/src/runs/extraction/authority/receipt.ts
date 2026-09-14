@@ -1,3 +1,6 @@
+import { assertSampleReceipt, assertSampleInspection, assertExtractionSampleScope, type ExtractionSampleScope } from "./sample-scope.js";
+import { ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import type { ExtractionAuthorityInspection as NativeExtractionAuthorityInspection } from "./inspection.js";
 import { createHash } from "node:crypto";
 import {
   isExtractionRequestProfile,
@@ -73,6 +76,7 @@ export interface ExtractionAuthorityObservation {
     readonly model: string;
     readonly modelFamily: string;
     readonly requestProfile: ExtractionRequestProfile;
+    readonly sourcePacking?: ExtractionSourcePacking;
     readonly providerUrl: string;
     readonly systemPromptSha256: string;
     readonly cacheKeyAlgorithm: string;
@@ -96,7 +100,7 @@ export interface ExtractionAuthorityReceipt {
     typeof PREVIOUS_RECEIPT_VERSION | typeof PARTITIONLESS_RECEIPT_VERSION |
     typeof CURRENT_RECEIPT_VERSION;
   readonly kind: "longmemeval-extraction-authority";
-  readonly action: "probe" | "fill";
+  readonly action: "probe" | "fill" | "sample";
   readonly generated_at: string;
   readonly identity_digest: string;
   readonly lineage_digest: string;
@@ -106,6 +110,7 @@ export interface ExtractionAuthorityReceipt {
   readonly limits: ExtractionAuthorityReceiptLimits;
   readonly price: ExtractionAuthorityReceiptPrice;
   readonly probe_key?: string;
+  readonly sample_scope?: ExtractionSampleScope;
   readonly target_selection_digest?: string;
   readonly direct_spend?: DirectExtractionSpendAuthorization;
   readonly repair_scope?: ExtractionRepairScope;
@@ -128,9 +133,10 @@ export interface ExtractionAuthorityReceiptInput {
   };
   readonly priceEstimate: ExtractionAuthorityPriceEstimate;
   readonly diskFloorBytes: number;
-  readonly inspection: ExtractionAuthorityInspection;
+  readonly inspection: ExtractionAuthorityInspection | NativeExtractionAuthorityInspection;
   readonly maxConcurrency?: number;
   readonly probeKey?: string;
+  readonly sampleScope?: ExtractionSampleScope;
   readonly targetSelectionDigest?: string;
   readonly cumulativeLimits?: {
     readonly startingMissing: number;
@@ -148,12 +154,14 @@ export function createExtractionAuthorityReceipt(input: ExtractionAuthorityRecei
   assertReceiptCreationInput(input);
   const unsigned = buildUnsignedReceipt(input);
   assertExtractionAuthorityRenewal(unsigned);
-  return Object.freeze({ ...unsigned, receipt_digest: computeReceiptDigest(unsigned) });
+  const receipt = Object.freeze({ ...unsigned, receipt_digest: computeReceiptDigest(unsigned) });
+  assertSampleReceipt(receipt);
+  return receipt;
 }
 
 function assertReceiptCreationInput(input: ExtractionAuthorityReceiptInput): void {
   assertObservation(input.observation);
-  if (input.directSpend !== undefined) {
+  if (input.directSpend !== undefined && input.action !== "sample") {
     assertDirectExtractionSpendAuthorization({
       action: input.action,
       authorization: input.directSpend,
@@ -195,11 +203,25 @@ function assertReceiptCreationInput(input: ExtractionAuthorityReceiptInput): voi
     throw new Error("extraction target selection digest is invalid");
   }
   assertInspection(input.inspection);
+  if (input.sampleScope !== undefined) {
+    if (!("missingKeys" in input.inspection)) {
+      throw new Error("sample receipt requires its native inventory inspection");
+    }
+    assertSampleInspection(input.sampleScope, input.inspection);
+    if (computeExtractionAuthorityIdentityDigest(input.observation) !==
+        computeExtractionAuthorityIdentityDigest(input.inspection.observation)) {
+      throw new Error("sample receipt observation differs from its native inventory inspection");
+    }
+  }
 }
 
 function buildUnsignedReceipt(
   input: ExtractionAuthorityReceiptInput
 ): Omit<ExtractionAuthorityReceipt, "receipt_digest"> {
+  if (input.sampleScope !== undefined) assertExtractionSampleScope(input.sampleScope);
+  if ((input.action === "sample") !== (input.sampleScope !== undefined)) {
+    throw new Error("sample action requires its finite scope");
+  }
   const limits = resolveExtractionAuthorityReceiptLimits(input);
   const price = resolveExtractionAuthorityReceiptPrice(input.priceEstimate, limits);
   const probeKey = input.action === "probe" ? requireProbeKey(input.probeKey) : undefined;
@@ -210,7 +232,7 @@ function buildUnsignedReceipt(
     generated_at: (input.now ?? new Date()).toISOString(),
     identity_digest: computeExtractionAuthorityIdentityDigest(input.observation),
     lineage_digest: computeExtractionAuthorityLineageDigest(
-      input.observation, input.continuation
+      input.observation, input.continuation, input.sampleScope
     ),
     observation: freezeAuthorityObservation(input.observation),
     inspection: freezeAuthorityInspection(input.inspection),
@@ -227,7 +249,11 @@ function buildUnsignedReceipt(
     ...(input.catalogRefillScope === undefined ? {} : {
       catalog_refill: input.catalogRefillScope
     }),
-    ...(input.continuation === undefined ? {} : { continuation: input.continuation })
+    ...(input.continuation === undefined ? {} : { continuation: input.continuation }),
+    ...(input.sampleScope === undefined ? {} : { sample_scope: Object.freeze({
+      keys: Object.freeze([...input.sampleScope.keys]),
+      key_set_sha256: input.sampleScope.key_set_sha256
+    }) })
   };
 }
 
@@ -237,7 +263,7 @@ export function assertExtractionAuthorityReceipt(
 ): void {
   assertReceiptShape(receipt);
   assertObservation(observation);
-  if (receipt.direct_spend !== undefined) {
+  if (receipt.direct_spend !== undefined && receipt.action !== "sample") {
     assertDirectExtractionSpendAuthorization({
       action: receipt.action,
       authorization: receipt.direct_spend,
@@ -246,7 +272,7 @@ export function assertExtractionAuthorityReceipt(
   }
   assertReceiptIdentity(receipt);
   if (receipt.lineage_digest !== computeExtractionAuthorityLineageDigest(
-    observation, receipt.continuation
+    observation, receipt.continuation, receipt.sample_scope
   )) {
     throw new Error("extraction authority receipt does not match the current identity drift");
   }
@@ -261,7 +287,8 @@ export function assertExtractionAuthorityReceipt(
     action: receipt.action,
     startingMissing: receipt.limits.starting_missing,
     maximumAttempts: receipt.limits.maximum_attempts,
-    successfulShardCeiling: receipt.limits.successful_shard_ceiling
+    successfulShardCeiling: receipt.limits.successful_shard_ceiling,
+    sampleCount: receipt.sample_scope?.keys.length
   })) {
     throw new Error("extraction authority receipt has reset or widened its cumulative limits");
   }
@@ -300,14 +327,17 @@ export function computeExtractionAuthorityIdentityDigest(
 
 export function computeExtractionAuthorityLineageDigest(
   observation: ExtractionAuthorityObservation,
-  continuation?: SameRootExtractionContinuation
+  continuation?: SameRootExtractionContinuation,
+  sampleScope?: ExtractionSampleScope
 ): string {
   assertObservation(observation);
   if (continuation !== undefined) assertSameRootExtractionContinuation(continuation);
+  if (sampleScope !== undefined) assertExtractionSampleScope(sampleScope);
   return createHash("sha256")
     .update(JSON.stringify({
       ...canonicalAuthorityLineage(observation),
-      ...(continuation === undefined ? {} : { continuation })
+      ...(continuation === undefined ? {} : { continuation }),
+      ...(sampleScope === undefined ? {} : { sample_scope: sampleScope })
     }), "utf8")
     .digest("hex");
 }
@@ -348,7 +378,7 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
        receipt.schema_version !== PARTITIONLESS_RECEIPT_VERSION &&
        receipt.schema_version !== CURRENT_RECEIPT_VERSION) ||
       receipt.kind !== "longmemeval-extraction-authority" ||
-      (receipt.action !== "probe" && receipt.action !== "fill") ||
+      (receipt.action !== "probe" && receipt.action !== "fill" && receipt.action !== "sample") ||
       typeof receipt.generated_at !== "string" ||
       !isDigest(receipt.identity_digest) ||
       !isDigest(receipt.lineage_digest) ||
@@ -403,6 +433,7 @@ function isObservation(value: unknown): value is ExtractionAuthorityObservation 
     isObject(extraction) && typeof extraction.model === "string" &&
     typeof extraction.modelFamily === "string" &&
     isExtractionRequestProfile(extraction.requestProfile) &&
+    (extraction.sourcePacking === undefined || ExtractionSourcePackingSchema.safeParse(extraction.sourcePacking).success) &&
     typeof extraction.providerUrl === "string" && isDigest(extraction.systemPromptSha256) &&
     typeof extraction.cacheKeyAlgorithm === "string" &&
     (extraction.manifestSha256 === null || isDigest(extraction.manifestSha256)) &&
@@ -432,7 +463,7 @@ function isInspection(value: unknown): value is ExtractionAuthorityInspection {
 function assertReceiptIdentity(receipt: ExtractionAuthorityReceipt): void {
   if (receipt.identity_digest !== computeExtractionAuthorityIdentityDigest(receipt.observation) ||
       receipt.lineage_digest !== computeExtractionAuthorityLineageDigest(
-        receipt.observation, receipt.continuation
+        receipt.observation, receipt.continuation, receipt.sample_scope
       )) {
     throw new Error("extraction authority receipt identity digest is invalid");
   }

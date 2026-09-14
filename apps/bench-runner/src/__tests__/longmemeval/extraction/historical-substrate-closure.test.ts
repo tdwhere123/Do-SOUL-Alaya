@@ -107,6 +107,7 @@ function writeCompleteHistoricalRoot(cacheRoot: string): string {
   const entry = { cacheKey, model, requestProfile, ...inspection };
   writeExtractionCacheManifest(cacheRoot, {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    source_packing: "reference-eight",
     extraction_model: model,
     model_family: model,
     request_profile: requestProfile,

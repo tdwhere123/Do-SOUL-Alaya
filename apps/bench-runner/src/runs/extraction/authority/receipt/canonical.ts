@@ -33,6 +33,9 @@ export function canonicalAuthorityLineage(
       model: observation.extraction.model,
       modelFamily: observation.extraction.modelFamily,
       requestProfile: observation.extraction.requestProfile,
+      ...(observation.extraction.sourcePacking === undefined ? {} : {
+        sourcePacking: observation.extraction.sourcePacking
+      }),
       providerUrl: observation.extraction.providerUrl,
       systemPromptSha256: observation.extraction.systemPromptSha256,
       cacheKeyAlgorithm: observation.extraction.cacheKeyAlgorithm

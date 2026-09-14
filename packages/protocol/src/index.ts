@@ -227,6 +227,7 @@ export {
 } from "./shared/standard-response.js";
 export { ManifestationBudgetConfigRouteDataSchema } from "./recall/manifestation-budget.js";
 export * from "./garden/semantic-artifact.js";
+export * from "./garden/source-packing.js";
 export {
   canonicalizeSemanticExtractionProfile,
   semanticExtractionProfilesEqual,

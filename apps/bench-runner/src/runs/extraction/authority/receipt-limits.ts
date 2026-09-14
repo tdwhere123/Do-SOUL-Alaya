@@ -1,3 +1,4 @@
+import type { ExtractionSampleScope } from "./sample-scope.js";
 import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "@do-soul/alaya-soul";
 import { BENCH_HTTP_MAX_RETRIES } from "../../compile-seed/http/garden-http-retry-policy.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
@@ -39,7 +40,8 @@ export interface ExtractionAuthorityReceiptPrice {
 }
 
 export interface ExtractionAuthorityReceiptLimitInput {
-  readonly action: "probe" | "fill";
+  readonly action: "probe" | "fill" | "sample";
+  readonly sampleScope?: ExtractionSampleScope;
   readonly observation: { readonly inventory: { readonly missingTurns: number } };
   readonly outputTokenCap: {
     readonly field: ExtractionAuthorityReceiptLimits["output_token_field"];
@@ -65,7 +67,10 @@ export function resolveExtractionAuthorityReceiptLimits(
 ): ExtractionAuthorityReceiptLimits {
   const carried = input.cumulativeLimits;
   const missing = carried?.startingMissing ?? input.observation.inventory.missingTurns;
-  const expected = expectedExtractionAuthorityLimits(input.action, missing);
+  if (input.action === "sample" && carried !== undefined) throw new Error("sample limits cannot be carried or renewed");
+  const expected = expectedExtractionAuthorityLimits(
+    input.action, input.action === "sample" ? input.sampleScope!.keys.length : missing
+  );
   if (carried !== undefined && (carried.maximumAttempts !== expected.maximumAttempts ||
       carried.successfulShardCeiling !== expected.successfulShardCeiling)) {
     throw new Error("extraction authority cumulative limits are not derivable from its starting inventory");
@@ -128,9 +133,13 @@ export function resolveExtractionAuthorityReceiptPrice(
 }
 
 export function expectedExtractionAuthorityLimits(
-  action: "probe" | "fill",
+  action: "probe" | "fill" | "sample",
   missing: number
 ): { readonly maximumAttempts: number; readonly successfulShardCeiling: number } {
+  if (action === "sample") {
+    if (!Number.isSafeInteger(missing) || missing < 1) throw new Error("sample requires a nonempty scope");
+    return { maximumAttempts: missing, successfulShardCeiling: missing };
+  }
   if (action === "probe") {
     if (missing < 1) throw new Error("extraction probe requires at least one missing shard");
     return { maximumAttempts: 1, successfulShardCeiling: 1 };

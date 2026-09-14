@@ -180,6 +180,7 @@ async function inspectSelection(
 ): Promise<Awaited<ReturnType<typeof inspectExtractionAuthority>>> {
   const inspection = await (deps.inspect ?? inspectExtractionAuthority)({
     variant: flags.variant,
+    sourcePacking: flags.extractionSourcePacking,
     ...(flags.limit === undefined ? {} : { limit: flags.limit }),
     ...(flags.offset === undefined ? {} : { offset: flags.offset }),
     cacheRoot,

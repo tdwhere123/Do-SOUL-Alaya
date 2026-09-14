@@ -58,6 +58,10 @@ describe("recall-eval query cache authority window", () => {
     const bound = await bindRecallEvalQuerySemanticFactorCache(options, bundle);
     expect(bound.binding.entry_count).toBe(COUNT);
     expect(bound.captures_by_source_text.size).toBe(COUNT);
+    await expect(bindRecallEvalQuerySemanticFactorCache(options, {
+      ...bundle, extractionAuthority: { ...bundle.extractionAuthority,
+        source_manifest_schema_version: 4, source_packing: "singleton" }
+    })).rejects.toThrow(/mismatched extraction identity/u);
     expect(() => recallOptionsForQuestion({
       recallOptions: { maxResults: 5, conflictAwareness: true },
       querySemanticFactorCache: bound

@@ -1,3 +1,4 @@
+import { ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   diagnosticWarn,
   AlayaError,
@@ -154,6 +155,7 @@ export interface GardenComputeProvider {
 type GardenProviderErrorKind = "auth" | "network" | "provider_failure" | "invalid_response";
 
 interface OfficialApiGardenProviderDependencies {
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly apiKey?: string | null;
   readonly model?: string | null;
   readonly endpoint?: string | null;
@@ -205,10 +207,11 @@ function wallClockBudgetFor(readTimeoutMs: number): number {
 }
 export const OFFICIAL_API_GARDEN_MODEL = "gpt-4.1-mini";
 export const OFFICIAL_API_SOURCE_GROUNDING_SEMANTICS_VERSION =
-  "official-api-source-grounding-v3";
+  "official-api-source-grounding-v4";
 
 export class OfficialApiGardenProvider implements GardenComputeProvider {
   public readonly provider_kind = GardenProviderKind.OFFICIAL_API;
+  private readonly sourcePacking: ExtractionSourcePacking;
   private readonly apiKey: string | null;
   private readonly model: string;
   private readonly endpoint: string | null;
@@ -225,6 +228,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   private readonly diagnosticDir: string | null;
 
   public constructor(deps: OfficialApiGardenProviderDependencies = {}) {
+    this.sourcePacking = ExtractionSourcePackingSchema.parse(deps.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING);
     this.apiKey = normalizeOptionalString(deps.apiKey ?? null);
     this.canUseCredentiallessCacheExtractor =
       deps.injectedExtractorCapability === "cache_only";
@@ -330,12 +334,13 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     );
     const groundedDraft = grounding.draft;
     const confidence = clampConfidence(groundedDraft.confidence);
-    const sourceObservedAt = normalizeSourceObservedAt(sourceObservedAtRaw);
+    const sourceObservedAt = normalizeSourceObservedAt(sourceObservedAtRaw) === undefined
+      ? undefined : sourceObservedAtRaw?.trim();
     const temporalSelection = grounding.status === "grounded"
       ? inspectObservedTemporalProjection(
           groundedDraft.matched_text,
           groundedDraft.temporal_projection,
-          sourceObservedAtRaw,
+          sourceObservedAt,
           groundedDraft.temporal_projection_audit
         )
       : undefined;
@@ -355,7 +360,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         providerKind: this.provider_kind,
         signalId: this.generateSignalId(),
         createdAt,
-        sourceObservedAt: sourceObservedAt ?? createdAt,
+        sourceObservedAt,
         sourceGrounding: grounding.audit
       }));
     } catch (error) {
@@ -378,7 +383,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
 
-    const requests = buildOfficialApiExtractionRequests(turnContent, context.turn_messages);
+    const requests = buildOfficialApiExtractionRequests(turnContent, context.turn_messages, this.sourcePacking);
     const drafts: OfficialApiSignalDraft[] = [];
     for (const request of requests) {
       drafts.push(...await this.requestSignalBatch(request, context));

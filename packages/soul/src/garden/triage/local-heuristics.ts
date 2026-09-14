@@ -12,12 +12,13 @@ import { buildSchemaGroundedRawPayload } from "../ingestion/schema-grounding.js"
 import {
   isRelativeTimeConcern,
   normalizeWindowDigest,
-  resolveTemporalProjection,
   timeConcernPattern,
   type TemporalProjection
 } from "../extraction/time-concern-projection.js";
 import { normalizeSourceObservedAt } from "../extraction/temporal/observed-projection.js";
+import { resolveSourceTemporalCandidates } from "../extraction/temporal/source-time.js";
 import { buildSourceVerificationText } from "./grounding/source-assertion.js";
+import { sentenceSpans } from "./grounding/source-assertion/clause-spans.js";
 
 interface PatternDefinition {
   readonly pattern: RegExp;
@@ -362,28 +363,45 @@ function extractTimeConcerns(
 ): readonly TimeConcernMatch[] {
   const pattern = timeConcernPattern();
   const matches: TimeConcernMatch[] = [];
-  for (const sentence of splitSentences(turnContent)) {
+  // Qualification sees the complete source before any presentation boundary.
+  // A sentence-like excerpt cannot discard an unresolved temporal branch.
+  const sourceCandidates = resolveSourceTemporalCandidates(turnContent, anchorIso ?? undefined);
+  for (const span of sentenceSpans(turnContent)) {
+    const sentence = turnContent.slice(span.start, span.end);
     if (isQuestion(sentence)) {
       continue;
     }
 
     pattern.lastIndex = 0;
+    const candidates = sourceCandidates.filter((candidate) => span.start <= candidate.start && candidate.end <= span.end);
+    for (const candidate of candidates) {
+      const matchedText = turnContent.slice(candidate.start, candidate.end).trim();
+      matches.push({
+        matched_text: matchedText,
+        window_digest: normalizeWindowDigest(matchedText),
+        excerpt: sentence,
+        temporal_projection: candidate.role === "event" ? candidate.projection : null
+      });
+    }
     for (const match of sentence.matchAll(pattern)) {
+      // A bound range is one source candidate, not two independently projected
+      // endpoints. Raw hits remain only for genuinely unresolved source terms.
+      if (candidates.some((candidate) => candidate.start < span.start + match.index + match[0].length &&
+          span.start + match.index < candidate.end)) continue;
       const matchedText = normalizeMatchedText(match[0]);
       if (matchedText.length === 0) {
         continue;
       }
-      const temporal_projection = resolveTemporalProjection(matchedText, anchorIso);
       // Relative phrases without a source observation must not invent wall-clock windows.
       // Absolute calendar hits may still emit with a null projection (e.g. impossible dates).
-      if (temporal_projection === null && isRelativeTimeConcern(matchedText)) {
+      if (isRelativeTimeConcern(matchedText)) {
         continue;
       }
       matches.push({
         matched_text: matchedText,
         window_digest: normalizeWindowDigest(matchedText),
         excerpt: sentence,
-        temporal_projection
+        temporal_projection: null
       });
     }
   }
@@ -401,13 +419,6 @@ function formatTemporalProjection(projection: TemporalProjection | null): Record
     time_source: projection.time_source,
     projection_schema_version: String(projection.projection_schema_version)
   };
-}
-
-function splitSentences(turnContent: string): readonly string[] {
-  return turnContent
-    .split(/(?<=[.!?。！？])\s+|\n+/u)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 0);
 }
 
 function isQuestion(sentence: string): boolean {

@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtractionCacheManifestV3 } from
+import type { ProfiledExtractionCacheManifest } from
   "../../../cache/extraction-cache-manifest.js";
 import type { ExtractionCacheInventory } from "../../inventory.js";
 import {
@@ -24,7 +24,7 @@ const COMPLETION = /^\.catalog-refill-completion\.([a-f0-9]{64})\.json$/u;
 export function assertPristineInProgressSuccessor(input: {
   readonly targetRoot: string;
   readonly commit: ExtractionCacheMaterializationCommit;
-  readonly manifest: ExtractionCacheManifestV3;
+  readonly manifest: ProfiledExtractionCacheManifest;
   readonly manifestSha256: string;
   readonly inventory: ExtractionCacheInventory;
 }): void {
@@ -60,7 +60,7 @@ export function assertCompletedSuccessorControls(input: {
 
 function assertManifest(
   commit: ExtractionCacheMaterializationCommit,
-  manifest: ExtractionCacheManifestV3,
+  manifest: ProfiledExtractionCacheManifest,
   manifestSha256: string
 ): void {
   const initial = commit.initial_target_manifest;

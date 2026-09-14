@@ -412,7 +412,7 @@ function writeCompleteManifest(
     parsedDraftCount: round.draftCount!
   })).sort((left, right) => left.cacheKey.localeCompare(right.cacheKey));
   const manifest: ExtractionCacheManifestV3 = {
-    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    schema_version: 3,
     extraction_model: CREDENTIALLED_CONFIG.model,
     model_family: CREDENTIALLED_CONFIG.model,
     request_profile: CREDENTIALLED_CONFIG.requestProfile,

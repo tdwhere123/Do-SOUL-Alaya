@@ -1,13 +1,11 @@
 import { isCacheOnlySeedExtractionPath, type SeedExtractionPath } from
   "@do-soul/alaya-eval";
-import { EXTRACTION_CACHE_MANIFEST_VERSION } from
-  "../../extraction/cache/extraction-cache-manifest.js";
 import {
   containsExtractionFillQuestionWindow,
   hasCompleteExtractionFillSummary
 } from "../../extraction/fill/fill-authority.js";
 import type { LongMemEvalRunProvenance } from "../../provenance/run.js";
-import type { SnapshotExtractionProvenanceV3 } from "../materialize.js";
+import type { ProfiledSnapshotExtractionProvenance } from "../materialize.js";
 
 export type SnapshotWriteAuthority = "diagnostic" | "promotion";
 export type SnapshotConsumeAuthority = SnapshotWriteAuthority;
@@ -22,7 +20,7 @@ export interface DiagnosticSnapshotProvenance {
 }
 
 export interface DiagnosticSnapshotWriteInput {
-  readonly extraction: SnapshotExtractionProvenanceV3;
+  readonly extraction: ProfiledSnapshotExtractionProvenance;
   readonly seedExtractionPath: SeedExtractionPath;
   readonly runProvenance: DiagnosticSnapshotProvenance;
   readonly datasetSha256: string;
@@ -33,7 +31,7 @@ export function assertDiagnosticSnapshotWriteAuthority(
   role: DiagnosticSnapshotAuthorityRole = "writer"
 ): void {
   assertDiagnosticCacheOnlyPath(input.seedExtractionPath, role);
-  const cache = requireCompleteV3Fill(input, role);
+  const cache = requireCompleteProfiledFill(input, role);
   assertDiagnosticFillWindow(cache, input.runProvenance, role);
   assertDiagnosticIdentity(input, cache, role);
 }
@@ -55,18 +53,18 @@ function assertDiagnosticCacheOnlyPath(
   }
 }
 
-function requireCompleteV3Fill(
+function requireCompleteProfiledFill(
   input: DiagnosticSnapshotWriteInput,
   role: DiagnosticSnapshotAuthorityRole
 ): NonNullable<DiagnosticSnapshotProvenance["extraction_cache"]> & {
-  readonly schema_version: typeof EXTRACTION_CACHE_MANIFEST_VERSION;
+  readonly schema_version: 3 | 4;
 } {
   const cache = input.runProvenance.extraction_cache;
-  if (cache?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION ||
+  if ((cache?.schema_version !== 3 && cache?.schema_version !== 4) ||
       !hasCompleteExtractionFillSummary(cache) ||
       !hasCompleteExtractionFillSummary(input.extraction)) {
     throw new Error(
-      `${diagnosticRoleLabel(role)} requires a complete v3 fill summary`
+      `${diagnosticRoleLabel(role)} requires a complete v3 or v4 fill summary`
     );
   }
   return cache;

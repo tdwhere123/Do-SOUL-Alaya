@@ -132,7 +132,7 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
             "time_precision": "year",
             "time_source": "explicit",
             "event_time_start": "2020-01-01T00:00:00.000Z",
-            "event_time_end": "2021-01-01T00:00:00.000Z"
+            "event_time_end": "2020-12-31T23:59:59.999Z"
           }
         }
       ]

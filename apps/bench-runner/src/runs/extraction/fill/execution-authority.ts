@@ -1,3 +1,5 @@
+import { assertSampleKey, assertSampleKeys, assertSampleReceipt } from "../authority/sample-scope.js";
+import { readRootBatchRuns } from "./batch/store.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import { inspectExtractionAuthorityDisk } from "../authority/inspection.js";
 import {
@@ -27,6 +29,7 @@ export function createExtractionExecutionAuthority(
   targetSelection: ExtractionTargetSelectionReceipt | undefined = undefined,
   writeLease: ExtractionCacheWriteLease | undefined = undefined
 ): ExecutionExtractionAuthority {
+  assertSampleReceipt(receipt);
   return receipt.limits.maximum_attempts === 0
     ? createExhaustedExecutionAuthority(receipt)
     : createLedgerExecutionAuthority(
@@ -79,6 +82,7 @@ function createLedgerExecutionAuthority(
   const ledger = openReceiptAttemptLedger(receipt, cacheRoot);
   assertCatalogRefillLedgerIsCurrent(receipt, ledger.snapshot());
   const reserveAttemptOrdinal = async (cacheKey: string, signal?: AbortSignal): Promise<number> => {
+    assertSampleKey(receipt.sample_scope, cacheKey);
     assertScopeKeyAllowed(repairKeys, catalogRefillKeys, cacheKey);
     assertTarget();
     assertAuthorityDiskFloor(cacheRoot, receipt.limits.disk_floor_bytes);
@@ -90,19 +94,44 @@ function createLedgerExecutionAuthority(
   return {
     receipt,
     reserveAttempt: async (cacheKey, signal) => {
+      if (receipt.sample_scope !== undefined) throw new Error("sample requires the exact Batch submission reservation");
       await reserveAttemptOrdinal(cacheKey, signal);
     },
-    reserveAttemptOrdinal,
-    abandonPendingShard: ledger.abandonPendingShard,
-    commitSuccessfulShard: ledger.commitSuccessfulShard,
-    commitDeterministicShard: receipt.catalog_refill === undefined
+    reserveAttemptOrdinal: receipt.sample_scope === undefined ? reserveAttemptOrdinal : undefined,
+    reserveSampleBatch: receipt.sample_scope === undefined ? undefined : async (keys, signal) => {
+      assertSampleKeys(receipt.sample_scope!, keys);
+      assertTarget();
+      if (writeLease === undefined) throw new Error("sample requires the cache write lease");
+      const jobs = readRootBatchRuns(writeLease).flatMap((run) => run.state.jobs)
+        .filter((job) => job.submittedAt !== undefined);
+      if (jobs.length !== 1 || jobs[0]!.status !== "submission_unknown" ||
+          jobs[0]!.attemptOrdinals !== undefined || ledger.snapshot().attempts !== 0) {
+        throw new Error("sample reservation requires its single fresh durable submission intent");
+      }
+      assertSampleKeys(receipt.sample_scope!, jobs[0]!.lineKeys);
+      const ordinals: Record<string, number> = {};
+      for (const key of keys) ordinals[key] = await reserveAttemptOrdinal(key, signal);
+      return Object.freeze(ordinals);
+    },
+    abandonPendingShard: (key, ordinal) => {
+      assertSampleKey(receipt.sample_scope, key);
+      ledger.abandonPendingShard(key, ordinal);
+    },
+    commitSuccessfulShard: (key) => {
+      assertSampleKey(receipt.sample_scope, key);
+      ledger.commitSuccessfulShard(key);
+    },
+    commitDeterministicShard: receipt.catalog_refill === undefined && receipt.sample_scope === undefined
       ? ledger.commitDeterministicShard
       : () => {
           throw new ExtractionCacheInvariantError(
             "catalog refill cannot commit a deterministic shard"
           );
         },
-    recordTransportOutcome: ledger.recordTransportOutcome,
+    recordTransportOutcome: (key, outcome, ordinal) => {
+      assertSampleKey(receipt.sample_scope, key);
+      return ledger.recordTransportOutcome(key, outcome, ordinal);
+    },
     snapshot: ledger.snapshot
   };
 }

@@ -256,7 +256,7 @@ function extraction(
     parsedDraftCount: 1
   }] : [])].sort((left, right) => left.cacheKey.localeCompare(right.cacheKey));
   const manifest: ExtractionCacheManifestV3 = {
-    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    schema_version: 3,
     extraction_model: MODEL,
     model_family: MODEL,
     request_profile: PROFILE,
@@ -306,7 +306,7 @@ function completeManifest(
   windowLimit: number
 ): ExtractionCacheManifestV3 {
   return {
-    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    schema_version: 3,
     extraction_model: MODEL,
     model_family: MODEL,
     request_profile: PROFILE,

@@ -1,3 +1,4 @@
+import { ExtractionSourcePackingSchema } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
@@ -50,7 +51,17 @@ const SnapshotExtractionCacheIdentitySchema = z.discriminatedUnion(
       request_profile: z.never().optional()
     }).strict(),
     ExtractionCacheIdentityBaseSchema.extend({
+      schema_version: z.literal(3),
+      model_family: z.string().min(1),
+      request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
+      supplemental_source_receipt: SupplementalSourceProvenanceBindingSchema.optional(),
+      expansion_source_anchor: LongMemEvalExpansionSourceAnchorSchema.optional(),
+      expansion_lineage: LongMemEvalExpansionLineageSchema.optional(),
+      ...EXTRACTION_FILL_IDENTITY_SCHEMA_FIELDS
+    }).strict(),
+    ExtractionCacheIdentityBaseSchema.extend({
       schema_version: z.literal(EXTRACTION_CACHE_MANIFEST_VERSION),
+      source_packing: ExtractionSourcePackingSchema,
       model_family: z.string().min(1),
       request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
       supplemental_source_receipt: SupplementalSourceProvenanceBindingSchema.optional(),
@@ -79,7 +90,7 @@ export function compactSnapshotRunProvenance(
     unwrapVerifiedLazyReceiptForRunProvenance(provenance);
   }
   const cache = provenance.extraction_cache;
-  if (cache?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION) {
+  if ((cache?.schema_version !== 3 && cache?.schema_version !== 4)) {
     throw new Error("current snapshot requires current extraction run provenance");
   }
   const { content_closure_index: _contentClosureIndex, ...summary } = cache;
@@ -136,7 +147,7 @@ export function bindSnapshotRunProvenanceAuthority(
     throw new Error("snapshot provenance cannot attach a lazy receipt handle without a receipt");
   }
   const cache = captured.extractionCache;
-  if (cache?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION) {
+  if ((cache?.schema_version !== 3 && cache?.schema_version !== 4)) {
     throw new Error("snapshot run provenance has no current extraction summary");
   }
   assertSnapshotExtractionAuthorityBinding(authority, cache);
@@ -157,6 +168,7 @@ export function bindSnapshotRunProvenanceAuthority(
     receipt,
     extraction: {
       schema_version: authority.source_manifest_schema_version,
+      ...(authority.source_packing === undefined ? {} : { source_packing: authority.source_packing }),
       manifest_sha256: authority.source_manifest_sha256,
       dataset: authority.dataset,
       dataset_revision: authority.dataset_revision,
@@ -238,7 +250,7 @@ function expectedCompactRunIdentity(
   captured: ReturnType<typeof freezeSnapshotProvenancePremises>
 ): string | undefined {
   const cache = captured.extractionCache;
-  if (cache?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION) return undefined;
+  if ((cache?.schema_version !== 3 && cache?.schema_version !== 4)) return undefined;
   const substrate = cache.content_closure_sha256 ?? cache.expected_key_set_sha256;
   if (typeof substrate !== "string" || captured.ingestionMode === undefined) {
     return undefined;
@@ -267,7 +279,7 @@ function assertCompactRunIdentityBinding(
   const expected = expectedCompactRunIdentity(captured);
   if (expected === undefined) {
     throw new Error(
-      captured.extractionCache?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION
+      (captured.extractionCache?.schema_version !== 3 && captured.extractionCache?.schema_version !== 4)
         ? "snapshot run provenance has no current extraction summary"
         : "compact run provenance v2 requires substrate and ingestion_mode"
     );

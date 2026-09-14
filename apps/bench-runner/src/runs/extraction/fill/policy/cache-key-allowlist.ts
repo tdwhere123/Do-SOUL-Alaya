@@ -10,7 +10,7 @@ import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error
 import type { LongMemEvalExtractionTurn } from "../../turn-contents.js";
 
 interface CacheKeyAllowlistPrepared {
-  readonly config: Pick<CompileSeedExtractionConfig, "model" | "requestProfile">;
+  readonly config: Pick<CompileSeedExtractionConfig, "model" | "requestProfile" | "sourcePacking">;
   readonly pinnedCachedTurns: number | undefined;
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
@@ -259,7 +259,7 @@ function indexTurns(
 ): ReadonlyMap<string, LongMemEvalExtractionTurn> {
   return new Map(turns.flatMap((turn) =>
     computeExtractionTurnCacheKeys(
-      config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn
+      config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn, config.sourcePacking
     ).map((cacheKey) => [cacheKey, turn] as const)
   ));
 }

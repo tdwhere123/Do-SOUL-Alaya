@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import {
   buildLongMemEvalRoundMessages,
@@ -28,9 +29,10 @@ export function buildExtractionOccurrenceIndex(input: {
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly systemPrompt: string;
+  readonly sourcePacking?: ExtractionSourcePacking;
 }): readonly ExtractionOccurrence[] {
   const occurrences = input.questions.flatMap((question) =>
-    occurrencesForQuestion(question, input.model, input.requestProfile, input.systemPrompt)
+    occurrencesForQuestion(question, input.model, input.requestProfile, input.systemPrompt, input.sourcePacking)
   );
   assertUniqueOccurrenceIds(occurrences);
   return Object.freeze(occurrences.sort(compareOccurrences));
@@ -52,7 +54,8 @@ function occurrencesForQuestion(
   question: LongMemEvalQuestion,
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
-  systemPrompt: string
+  systemPrompt: string,
+  sourcePacking?: ExtractionSourcePacking
 ): readonly ExtractionOccurrence[] {
   return question.haystack_sessions.flatMap((session, sessionIndex) => {
     const sourceObservedAt = requireLongMemEvalTimestamp(question.haystack_dates[sessionIndex]);
@@ -64,7 +67,7 @@ function occurrencesForQuestion(
       );
       return buildOccurrence({
         question, sessionIndex, roundIndex, sourceObservedAt, turnContent: round.content,
-        turnMessages, model, requestProfile, systemPrompt
+        turnMessages, model, requestProfile, systemPrompt, sourcePacking
       });
     });
   });
@@ -80,6 +83,7 @@ function buildOccurrence(input: {
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly systemPrompt: string;
+  readonly sourcePacking?: ExtractionSourcePacking;
 }): ExtractionOccurrence {
   const id = `${input.question.question_id}-s${input.sessionIndex}-r${input.roundIndex}`;
   const trustedRoleCorpusDigest = computeTrustedRoleCorpusDigest(input.turnMessages);
@@ -97,7 +101,7 @@ function buildOccurrence(input: {
       input.model,
       input.requestProfile,
       input.systemPrompt,
-      { turnContent: input.turnContent.trim(), turnMessages: input.turnMessages }
+      { turnContent: input.turnContent.trim(), turnMessages: input.turnMessages }, input.sourcePacking
     )
   });
 }

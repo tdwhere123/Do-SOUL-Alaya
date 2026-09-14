@@ -4,7 +4,7 @@ import type { ExtractionAttemptLedgerSnapshot } from "../../authority/attempt-le
 import type { ExtractionAuthorityReceipt } from "../../authority/receipt.js";
 import { readBoundedCanonicalUtf8Artifact } from
   "../../cache-audit/bounded-artifact-reader.js";
-import type { ExtractionCacheManifestV3 } from "../../cache/extraction-cache-manifest.js";
+import type { ProfiledExtractionCacheManifest } from "../../cache/extraction-cache-manifest.js";
 import {
   createSupplementalSourceReceipt,
   supplementalSourceManifestBinding,
@@ -18,7 +18,7 @@ const MAX_REFILL_SHARD_BYTES = 128 * 1024;
 export function assertCatalogRefillTransportReadiness(
   authority: ExecutionExtractionAuthority | undefined,
   cacheRoot: string,
-  manifest: ExtractionCacheManifestV3 | undefined
+  manifest: ProfiledExtractionCacheManifest | undefined
 ): void {
   if (authority?.receipt.catalog_refill === undefined) return;
   assertCompleteTransportOverride();
@@ -47,7 +47,7 @@ export function prepareCatalogRefillSupplementalReceipt(input: {
   readonly authority: ExecutionExtractionAuthority | undefined;
   readonly cacheRoot: string;
   readonly ledger: ExtractionAttemptLedgerSnapshot | undefined;
-  readonly manifest: ExtractionCacheManifestV3;
+  readonly manifest: ProfiledExtractionCacheManifest;
   readonly createdAt: string;
 }): SupplementalSourceReceipt | undefined {
   const authority = input.authority;
@@ -104,7 +104,7 @@ function assertLedgerShardTransports(
 
 function assertLogicalIdentity(
   receipt: ExtractionAuthorityReceipt,
-  manifest: ExtractionCacheManifestV3 | undefined
+  manifest: ProfiledExtractionCacheManifest | undefined
 ): void {
   const extraction = receipt.observation.extraction;
   if (manifest === undefined || manifest.extraction_model !== extraction.model ||
@@ -115,14 +115,14 @@ function assertLogicalIdentity(
   }
 }
 
-function assertRefillTarget(manifest: ExtractionCacheManifestV3 | undefined): void {
+function assertRefillTarget(manifest: ProfiledExtractionCacheManifest | undefined): void {
   if (manifest?.archive_url !== undefined || manifest?.archive_sha256 !== undefined ||
       manifest?.storage !== "git-tracked") {
     throw invalidTransport("catalog refill requires a git-tracked target without archive storage");
   }
 }
 
-function assertAliasTarget(manifest: ExtractionCacheManifestV3 | undefined): void {
+function assertAliasTarget(manifest: ProfiledExtractionCacheManifest | undefined): void {
   if (manifest?.supplemental_source_receipt !== undefined) {
     throw invalidTransport("physical alias refill requires an unbound git-tracked target");
   }

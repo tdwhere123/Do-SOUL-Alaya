@@ -1,9 +1,10 @@
+import { DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
 import { lstatSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { computeExtractionKeySetSha256 } from
   "../../content-closure.js";
-import { parseExtractionCacheManifestContents, type ExtractionCacheManifestV3 } from
+import { parseExtractionCacheManifestContents, type ProfiledExtractionCacheManifest } from
   "../../cache/extraction-cache-manifest.js";
 import type { ExtractionCacheWriteLease } from
   "../../fill/manifest/fill-root-guard.js";
@@ -31,7 +32,7 @@ export const DEFAULT_MAX_SHARD_BYTES = MAX_MATERIALIZATION_SHARD_BYTES;
 export const MAX_SOURCE_MANIFEST_BYTES = 32 * 1024 * 1024;
 
 export interface MaterializationPreflight {
-  readonly sourceManifest: ExtractionCacheManifestV3;
+  readonly sourceManifest: ProfiledExtractionCacheManifest;
   readonly sourceManifestBytes: Buffer;
   readonly sourceIdentity: { readonly device: string; readonly inode: string };
   readonly descriptors: readonly MaterializationShardDescriptor[];
@@ -101,7 +102,7 @@ export function assertSourceStillBound(input: {
 
 function auditedManifest(
   input: Parameters<typeof preflightMaterialization>[0]
-): ExtractionCacheManifestV3 {
+): ProfiledExtractionCacheManifest {
   const bytes = Buffer.from(input.auditedSourceManifestRaw, "utf8");
   if (bytes.byteLength > MAX_SOURCE_MANIFEST_BYTES ||
       digest(bytes) !== input.auditReceipt.source_manifest_sha256) {
@@ -110,7 +111,7 @@ function auditedManifest(
   const parsed = parseExtractionCacheManifestContents(
     input.auditedSourceManifestRaw, "audited source manifest"
   );
-  if (parsed.schema_version !== 3) throw new Error("materialization requires a V3 source manifest");
+  if (parsed.schema_version !== 3 && parsed.schema_version !== 4) throw new Error("materialization requires a V3 or V4 source manifest");
   const live = matchStableRegularFileNoFollow(
     `${input.sourceLease.stableRootPath}/manifest.json`, bytes, MAX_SOURCE_MANIFEST_BYTES
   );
@@ -160,7 +161,7 @@ function assertAudit(
 
 function assertSelection(
   input: Parameters<typeof preflightMaterialization>[0],
-  manifest: ExtractionCacheManifestV3,
+  manifest: ProfiledExtractionCacheManifest,
   inventory: ExtractionCacheInventory
 ): void {
   const selection = input.targetSelection;
@@ -182,26 +183,30 @@ function assertSelection(
 function assertIdentityBindings(
   audit: ExtractionCacheAuditReceipt,
   selection: ExtractionTargetSelectionReceipt,
-  manifest: ExtractionCacheManifestV3
+  manifest: ProfiledExtractionCacheManifest
 ): void {
   const source = audit.decision.raw.source;
   const final = audit.decision.raw.final;
   const selected = selection.final_identity;
   const sourceValues = [
     manifest.dataset_revision, manifest.extraction_model, manifest.request_profile,
-    manifest.provider_url, manifest.system_prompt_sha256, manifest.cache_key_algo
+    manifest.provider_url, manifest.system_prompt_sha256, manifest.cache_key_algo,
+    manifest.schema_version === 4 ? manifest.source_packing : DEFAULT_EXTRACTION_SOURCE_PACKING
   ];
   const auditedValues = [
     source.datasetRevision, source.model, source.requestProfile, source.providerUrl,
-    source.systemPromptSha256, source.cacheKeyAlgorithm
+    source.systemPromptSha256, source.cacheKeyAlgorithm,
+    source.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING
   ];
   const finalValues = [
     selected.dataset_revision_sha256, selected.model, selected.request_profile,
-    selected.provider_url, selected.system_prompt_sha256, selected.cache_key_algorithm
+    selected.provider_url, selected.system_prompt_sha256, selected.cache_key_algorithm,
+    selected.source_packing ?? DEFAULT_EXTRACTION_SOURCE_PACKING
   ];
   const expectedFinal = [
     final.datasetRevision, final.model, final.requestProfile, final.providerUrl,
-    final.systemPromptSha256, final.cacheKeyAlgorithm
+    final.systemPromptSha256, final.cacheKeyAlgorithm,
+    final.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING
   ];
   const providerValues = [
     manifest.provider_url, source.providerUrl, final.providerUrl, selected.provider_url

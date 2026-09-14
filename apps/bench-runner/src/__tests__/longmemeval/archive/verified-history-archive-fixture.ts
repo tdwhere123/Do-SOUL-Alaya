@@ -324,6 +324,7 @@ function buildRunProvenance(payload: KpiPayload) {
     },
     extraction_cache: {
       schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+      source_packing: "reference-eight",
       manifest_sha256: "e".repeat(64),
       extraction_model: extractionModel,
       model_family: "fixture-family",

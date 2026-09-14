@@ -196,6 +196,7 @@ function fixtureExtractionCache(count: number) {
   return {
     manifest_sha256: "c".repeat(64),
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    source_packing: "reference-eight",
     extraction_model: extractionModel,
     model_family: "fixture-model-family",
     request_profile: requestProfile,

@@ -1,9 +1,11 @@
+import { assertSampleReceipt } from "../sample-scope.js";
 import { assertCatalogRefillScopeMatchesReceipt } from "../catalog-refill/scope.js";
 import type { ExtractionAuthorityReceipt } from "../receipt.js";
 
 export function assertExtractionAuthorityReceiptScope(
   receipt: ExtractionAuthorityReceipt
 ): void {
+  assertSampleReceipt(receipt);
   assertContinuationScope(receipt);
   assertCatalogRefillScope(receipt);
   assertRepairScope(receipt);

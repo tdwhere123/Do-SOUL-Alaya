@@ -1,3 +1,4 @@
+import { ExtractionSourcePackingSchema } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 import {
   SeedExtractionPathSchema,
@@ -53,7 +54,17 @@ const SnapshotExtractionProvenanceSchema = z.discriminatedUnion("schema_version"
     request_profile: z.never().optional()
   }).strict(),
   SnapshotExtractionBaseSchema.extend({
+    schema_version: z.literal(3),
+    model_family: z.string().min(1),
+    request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
+    supplemental_source_receipt: SupplementalSourceProvenanceBindingSchema.optional(),
+    expansion_source_anchor: LongMemEvalExpansionSourceAnchorSchema.optional(),
+    expansion_lineage: LongMemEvalExpansionLineageSchema.optional(),
+    ...EXTRACTION_FILL_IDENTITY_SCHEMA_FIELDS
+  }).strict(),
+  SnapshotExtractionBaseSchema.extend({
     schema_version: z.literal(EXTRACTION_CACHE_MANIFEST_VERSION),
+    source_packing: ExtractionSourcePackingSchema,
     model_family: z.string().min(1),
     request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
     supplemental_source_receipt: SupplementalSourceProvenanceBindingSchema.optional(),

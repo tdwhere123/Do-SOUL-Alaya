@@ -9,10 +9,9 @@ import {
 import { DISTILLED_FACT_MAX_CHARS } from "../materialization/materialization-router.js";
 import {
   inspectOfficialApiTemporalProjection,
-  parseOfficialApiTemporalProjection,
-  type OfficialApiTemporalProjectionAudit,
-  type OfficialApiTemporalProjectionDraft
+  type OfficialApiTemporalProjectionAudit
 } from "../extraction/temporal/observed-projection.js";
+import { parseOfficialApiTemporalProjection, type OfficialApiTemporalProjectionDraft } from "../extraction/temporal/projection-draft.js";
 import {
   OfficialApiSourceLocatorSchema,
   type OfficialApiSourceLocator
@@ -36,7 +35,7 @@ export {
   OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND
 } from "./official-api/object-kind-contract.js";
 // Raw cache identity and parser projection identity evolve independently.
-export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v10";
+export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v11";
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
 const CANONICAL_CONFIDENCE_PATTERN = /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/u;
@@ -167,7 +166,7 @@ const OpenOfficialApiSignalEntrySchema = z.object({
   ...OfficialApiSignalEntrySharedShape
 }).loose().readonly();
 
-export type { OfficialApiTemporalProjectionDraft } from "../extraction/temporal/observed-projection.js";
+export type { OfficialApiTemporalProjectionDraft } from "../extraction/temporal/projection-draft.js";
 export type {
   OfficialApiSemanticFactorGraphFields,
   OfficialApiSemanticFactorGraphProjectionAudit,

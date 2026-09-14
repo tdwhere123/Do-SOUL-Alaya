@@ -1,3 +1,4 @@
+import { ReferenceTransportBatchSizeSchema } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { readdirSync, realpathSync } from "node:fs";
 import { z } from "zod";
@@ -44,9 +45,7 @@ export const CENSUS_LAZY_SEMANTIC_UNIQUE_COUNT = 35_946;
 const TransportPolicySchema = z.union([
   z.object({ kind: z.literal("reference_batch_8") }).strict(),
   z.object({
-    kind: z.literal("reference_batch"), assertionsPerPack: z.union([
-      z.literal(8), z.literal(16), z.literal(24), z.literal(32)
-    ])
+    kind: z.literal("reference_batch"), assertionsPerPack: ReferenceTransportBatchSizeSchema
   }).strict(),
   z.object({
     kind: z.literal("token_aware"),

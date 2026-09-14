@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/authority";
 import { selectOffsetLimitWindow } from "../../../runs/window.js";
@@ -124,7 +125,8 @@ export async function prepareLongMemEvalRun(
       extractionCacheRoot,
       Math.max(0, opts.offset ?? 0),
       dataset.sha256,
-      executionPolicy.captureSnapshot
+      executionPolicy.captureSnapshot,
+      opts.extractionSourcePacking
     ),
     extractionCacheRoot,
     recallWeightOverrides,
@@ -233,9 +235,10 @@ function createLongMemEvalSeedRunner(
   extractionCacheRoot: string,
   offset: number,
   datasetSha256: string,
-  captureSnapshot: boolean
+  captureSnapshot: boolean,
+  sourcePacking?: ExtractionSourcePacking
 ) {
-  const requiredTurns = inspectTurnContentKeySpace(window);
+  const requiredTurns = inspectTurnContentKeySpace(window, sourcePacking);
   const requiredQuestionWindow = { offset, limit: window.length };
   const extractionCachePreflightProof = captureSnapshot
     ? createCurrentPostFillCacheAuthorityProof({
@@ -244,13 +247,15 @@ function createLongMemEvalSeedRunner(
         requiredTurnContents: requiredTurns.distinctTurnContents,
         requiredExtractionTurns: requiredTurns.distinctExtractionTurns,
         requiredQuestionWindow,
-        env: process.env
+        env: process.env,
+        sourcePacking
       })
     : undefined;
   const sourceAssertionSupplement = resolveSourceAssertionSupplementOptions(
     process.env
   );
   return createCompileSeedRunner({
+    sourcePacking,
     requiredTurnContents: requiredTurns.distinctTurnContents,
     requiredExtractionTurns: requiredTurns.distinctExtractionTurns,
     requiredQuestionWindow,

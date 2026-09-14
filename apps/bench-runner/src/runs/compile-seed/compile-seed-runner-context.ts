@@ -13,6 +13,7 @@ import {
 } from "./cache/runner-raw-shard-inspector.js";
 import {
   resolveCompileSeedExtractionConfig,
+  resolveExtractionSourcePacking,
   resolveExtractionCacheRoot,
   resolveBenchExtractionCacheMinCoverage,
   resolveBenchRequireExtractionCacheManifest
@@ -54,8 +55,11 @@ export function createCompileSeedRunnerContext(
   const cacheRoot = options?.cacheRoot ?? resolveExtractionCacheRoot();
   const manifestIdentity = readExtractionCacheManifestIdentity(cacheRoot);
   const manifest = manifestIdentity?.manifest;
-  const config =
-    options?.config ?? resolveCompileSeedExtractionConfig(process.env, manifest);
+  const config = options?.config === undefined
+    ? resolveCompileSeedExtractionConfig(process.env, manifest, options?.sourcePacking)
+    : { ...options.config, sourcePacking: resolveExtractionSourcePacking(
+        process.env, manifest, options.sourcePacking, options.config.sourcePacking
+      ) };
   const credentialled = config.apiKey !== null;
   const cacheOnly =
     manifest !== undefined &&
@@ -224,6 +228,7 @@ function createOfficialApiProvider(input: {
     allowLiveExtraction: input.credentialled && input.options?.allowLiveExtraction === true
   });
   return new OfficialApiGardenProvider({
+    sourcePacking: input.config.sourcePacking,
     apiKey: input.config.apiKey,
     model: input.config.model,
     ...(input.config.providerUrl === ""

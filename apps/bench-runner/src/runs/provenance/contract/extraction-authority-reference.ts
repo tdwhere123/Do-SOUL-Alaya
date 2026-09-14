@@ -261,7 +261,7 @@ function requireCurrentCompactCache(
   provenance: LongMemEvalSnapshotRunProvenance
 ) {
   const cache = provenance.extraction_cache;
-  if (cache?.schema_version !== 3) {
+  if ((cache?.schema_version !== 3 && cache?.schema_version !== 4)) {
     throw new Error("shard run provenance has no current extraction summary");
   }
   return cache;

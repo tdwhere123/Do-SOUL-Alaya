@@ -5,7 +5,6 @@ import {
 import type { LongMemEvalSnapshotRunProvenance } from "./run-provenance.js";
 import { isSnapshotRunProvenanceSummaryGateEligible } from
   "./run-provenance.js";
-import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../extraction/cache/extraction-cache-manifest.js";
 import {
   hasMatchingCompleteExtractionFillSummary
 } from "../extraction/fill/fill-authority.js";
@@ -70,8 +69,10 @@ function hasGateEligibleExtractionCache(
   }
   return (
     cache !== null && snapshotCache != null &&
-    cache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&
-    snapshotCache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&
+    (cache.schema_version === 3 || cache.schema_version === 4) &&
+    (snapshotCache.schema_version === 3 || snapshotCache.schema_version === 4) &&
+    snapshotCache.schema_version === cache.schema_version &&
+    snapshotCache.source_packing === (cache.schema_version === 4 ? cache.source_packing : undefined) &&
     hasMatchingCompleteExtractionFillSummary(cache, snapshotCache) &&
     provenanceDatasetSha !== undefined &&
     datasetSha256 === provenanceDatasetSha &&

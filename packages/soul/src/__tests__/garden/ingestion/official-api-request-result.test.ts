@@ -2,6 +2,8 @@ import { expect, it } from "vitest";
 import { buildOfficialApiExtractionRequest } from "../../../garden/ingestion/official-api/extraction-request.js";
 import { classifyOfficialApiRequestResult } from "../../../garden/ingestion/official-api/request-result.js";
 import { officialApiExtractionResponseSchema } from "../../../garden/ingestion/official-api/response-schema.js";
+import { OfficialApiTemporalProjectionDraftSchema } from "../../../garden/extraction/temporal/projection-draft.js";
+import { z } from "zod";
 
 const source = "I own a blue bicycle. I prefer coffee in the morning.";
 const request = buildOfficialApiExtractionRequest(source, []);
@@ -64,4 +66,24 @@ it("isolates nested generation schema mutations between callers", () => {
   changed.properties.signals.items.properties.source_locator = { type: "string" };
   expect(officialApiExtractionResponseSchema(prompt)).toEqual(original);
   expect(changed).not.toEqual(original);
+});
+
+it("describes the owned optional temporal draft without requiring optional projections", () => {
+  const schema = officialApiExtractionResponseSchema(JSON.stringify(request)) as {
+    properties: { signals: { items: { required: string[]; properties: Record<string, unknown> } } }
+  };
+  const signal = schema.properties.signals.items;
+  expect(signal.required).toEqual(["object_kind", "confidence", "matched_text", "source_locator", "semantic_factor_graph"]);
+  const temporal = z.toJSONSchema(OfficialApiTemporalProjectionDraftSchema, { io: "input", override: ({ jsonSchema }) => {
+    if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
+  } });
+  const { $schema: _, ...shape } = temporal;
+  expect(signal.properties.temporal_projection).toEqual(shape);
+  expect(signal.properties).not.toHaveProperty("preference_profile");
+  for (const temporal_projection of [undefined, { projection_schema_version: 1, time_precision: "year", time_source: "invented" }]) {
+    const result = classifyOfficialApiRequestResult(JSON.stringify({ signals: [{ ...selected, temporal_projection }] }), request);
+    expect(result.status).toBe("completed_signals");
+    expect(result.drafts[0]?.temporal_projection).toBeUndefined();
+    expect(result.drafts[0]?.temporal_projection_audit?.status).toBe(temporal_projection === undefined ? "unavailable" : "rejected");
+  }
 });

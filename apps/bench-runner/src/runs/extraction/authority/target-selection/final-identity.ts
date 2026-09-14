@@ -1,3 +1,4 @@
+import { DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
 import type { ExtractionCacheCompatibilityDecision } from
   "../../cache-audit/compatibility.js";
 import type { ExtractionAuthorityObservation } from "../receipt.js";
@@ -9,7 +10,9 @@ export function assertAuditFinalIdentity(
 ): void {
   const current = extractionTargetFinalIdentity(observation);
   const raw = auditDecision.raw.final;
-  if (raw.datasetRevision !== current.dataset_revision_sha256 ||
+  if ((raw.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING) !==
+      (current.source_packing ?? DEFAULT_EXTRACTION_SOURCE_PACKING) ||
+      raw.datasetRevision !== current.dataset_revision_sha256 ||
       raw.model !== current.model ||
       auditDecision.projection.final.modelFamily !== current.model_family ||
       raw.requestProfile !== current.request_profile || raw.providerUrl !== current.provider_url ||
@@ -63,6 +66,9 @@ export function extractionTargetFinalIdentity(
     model: observation.extraction.model,
     model_family: observation.extraction.modelFamily,
     request_profile: observation.extraction.requestProfile,
+    ...(observation.extraction.sourcePacking === undefined ? {} : {
+      source_packing: observation.extraction.sourcePacking
+    }),
     provider_url: observation.extraction.providerUrl,
     system_prompt_sha256: observation.extraction.systemPromptSha256,
     cache_key_algorithm: observation.extraction.cacheKeyAlgorithm
@@ -76,6 +82,8 @@ function sameLogicalIdentity(
   return left.dataset_variant === right.dataset_variant &&
     left.dataset_revision_sha256 === right.dataset_revision_sha256 &&
     left.model === right.model && left.model_family === right.model_family &&
+    (left.source_packing ?? DEFAULT_EXTRACTION_SOURCE_PACKING) ===
+      (right.source_packing ?? DEFAULT_EXTRACTION_SOURCE_PACKING) &&
     left.request_profile === right.request_profile && left.provider_url === right.provider_url &&
     left.system_prompt_sha256 === right.system_prompt_sha256 &&
     left.cache_key_algorithm === right.cache_key_algorithm;

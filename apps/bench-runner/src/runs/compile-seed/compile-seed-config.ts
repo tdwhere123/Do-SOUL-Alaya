@@ -1,3 +1,4 @@
+import { ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSecretRef } from "@do-soul/alaya";
@@ -116,7 +117,8 @@ export function toSeedExtractionPathKpi(
  */
 export function resolveCompileSeedExtractionConfig(
   env: NodeJS.ProcessEnv = process.env,
-  manifest?: ExtractionCacheManifest | undefined
+  manifest?: ExtractionCacheManifest | undefined,
+  sourcePackingOverride?: ExtractionSourcePacking
 ): CompileSeedExtractionConfig {
   const providerUrlValue = readNonEmpty(env[GARDEN_PROVIDER_URL_ENV]) ?? manifest?.provider_url;
   if (providerUrlValue === undefined) {
@@ -132,6 +134,7 @@ export function resolveCompileSeedExtractionConfig(
     manifest?.model_family ??
     model;
   const requestProfile = resolveExtractionRequestProfile(env, manifest);
+  const sourcePacking = resolveExtractionSourcePacking(env, manifest, sourcePackingOverride);
   const transportProviderUrl = readNonEmpty(env[EXTRACTION_TRANSPORT_PROVIDER_URL_ENV]);
   const transportModel = readNonEmpty(env[EXTRACTION_TRANSPORT_MODEL_ENV]);
   const transport = {
@@ -142,15 +145,34 @@ export function resolveCompileSeedExtractionConfig(
   };
   const secretRef = readNonEmpty(env[GARDEN_SECRET_REF_ENV]);
   if (secretRef === undefined) {
-    return { providerUrl, model, modelFamily, requestProfile, ...transport, apiKey: null };
+    return { providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, apiKey: null };
   }
   const resolved = resolveSecretRef(secretRef);
   if ("value" in resolved) {
     return {
-      providerUrl, model, modelFamily, requestProfile, ...transport, apiKey: resolved.value
+      providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, apiKey: resolved.value
     };
   }
-  return { providerUrl, model, modelFamily, requestProfile, ...transport, apiKey: null };
+  return { providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, apiKey: null };
+}
+
+export function resolveExtractionSourcePacking(
+  env: Readonly<Record<string, string | undefined>>,
+  manifest: ExtractionCacheManifest | undefined,
+  ...overrides: readonly (ExtractionSourcePacking | undefined)[]
+): ExtractionSourcePacking {
+  const explicit = [...overrides, readNonEmpty(env.ALAYA_BENCH_EXTRACTION_SOURCE_PACKING)]
+    .filter((value) => value !== undefined).map((value) => ExtractionSourcePackingSchema.parse(value));
+  if (new Set(explicit).size > 1) {
+    throw new Error("extraction source packing overrides disagree");
+  }
+  const bound = manifest?.schema_version === 4
+    ? manifest.source_packing : DEFAULT_EXTRACTION_SOURCE_PACKING;
+  const sourcePacking = explicit[0] ?? bound;
+  if (manifest !== undefined && sourcePacking !== bound) {
+    throw new Error("extraction source packing differs from the cache generation");
+  }
+  return sourcePacking;
 }
 
 function resolveExtractionRequestProfile(
@@ -158,7 +180,7 @@ function resolveExtractionRequestProfile(
   manifest: ExtractionCacheManifest | undefined
 ): ExtractionRequestProfile {
   const value = readNonEmpty(env[EXTRACTION_REQUEST_PROFILE_ENV]) ??
-    (manifest?.schema_version === 3 ? manifest.request_profile : undefined);
+    (manifest !== undefined && manifest.schema_version >= 3 ? manifest.request_profile : undefined);
   if (value === undefined) {
     throw new Error(
       `bench extraction request profile is unresolved: set ${EXTRACTION_REQUEST_PROFILE_ENV} ` +

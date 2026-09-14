@@ -73,7 +73,7 @@ function supplementalExtractionProvenance(
 ): SnapshotExtractionProvenanceV3 {
   return {
     manifest_sha256: "a".repeat(64),
-    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    schema_version: 3,
     extraction_model: "fixture-model",
     model_family: "fixture-family",
     request_profile: "deepseek-v4-nonthinking-v1" as const,
@@ -328,7 +328,7 @@ describe("snapshot plumbing", () => {
     const snapshotDbPath = join(tmpDir, "snapshot.db");
     const common = {
       manifest_sha256: "a".repeat(64),
-      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+      schema_version: 3,
       extraction_model: "fixture-model",
       model_family: "fixture-family",
       provider_url: `sha256:${"b".repeat(64)}`,
@@ -359,7 +359,7 @@ describe("snapshot plumbing", () => {
       } as LongMemEvalSnapshotManifest["extraction_provenance"]
     }));
     expect(readSnapshotManifest(snapshotDbPath).extraction_provenance).toMatchObject({
-      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+      schema_version: 3,
       request_profile: "deepseek-v4-nonthinking-v1",
       fill_status: "complete",
       expected_key_set_sha256: "e".repeat(64),

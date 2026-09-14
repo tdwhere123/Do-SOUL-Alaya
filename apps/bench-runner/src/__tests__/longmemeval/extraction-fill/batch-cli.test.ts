@@ -26,15 +26,17 @@ let pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks((roots) => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots));
 afterEach(() => vi.unstubAllGlobals());
 
-it("prepares, submits, resumes and reimports through the actual fill CLI without duplicate spend", async () => {
+it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens and consumes %s through the actual fill CLI without duplicate spend", async (sourcePacking) => {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gemini-2.5-flash-lite");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "gemini-2.5-nonthinking-v1");
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid");
   const questions = [buildAuthorityQuestion("q1", "alpha", "decoy")];
+  if (sourcePacking === "singleton") questions[0]!.haystack_sessions[0]![0]!.content += " I completed beta.";
+  const expectedDrafts = sourcePacking === "singleton" ? 2 : 1;
   await writeDataset(questions);
   const inspection = await inspectExtractionAuthority({ variant: EXTRACTION_FILL_VARIANT,
-    cacheRoot, dataDir, pinnedMetaRoot, revision: readCurrentExtractionAuthorityRevision(), action: "fill" });
+    cacheRoot, dataDir, pinnedMetaRoot, sourcePacking, revision: readCurrentExtractionAuthorityRevision(), action: "fill" });
   const receipt = createExtractionAuthorityReceipt({ action: "fill", observation: inspection.observation,
     outputTokenCap: { field: "maxOutputTokens", value: 512 }, diskFloorBytes: 0,
     priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2, maximumInputTokensPerAttempt: 100_000 },
@@ -77,11 +79,13 @@ it("prepares, submits, resumes and reimports through the actual fill CLI without
     throw new Error(`unexpected fixture request ${path}`);
   });
   vi.stubGlobal("fetch", fetchMock);
-  const run = (operation: string) => runCli(["extraction-fill", "--variant", "oracle",
+  const run = (operation: string, packing?: string) => runCli(["extraction-fill", "--variant", "oracle",
     "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
     "--extraction-cache-root", cacheRoot, "--extraction-authority", receiptPath,
-    "--batch-operation", operation, "--batch-limits", limitsPath]);
-  expect(await run("prepare")).toBe(0);
+    "--batch-operation", operation, "--batch-limits", limitsPath,
+    ...(packing === undefined ? [] : ["--extraction-source-packing", packing])]);
+  expect(await run("prepare", sourcePacking)).toBe(0);
+  if (sourcePacking === "singleton") expect(await run("prepare", "reference-eight")).toBe(2);
   expect(fetchMock).not.toHaveBeenCalled();
   expect(await run("submit")).toBe(0);
   expect(creates).toBe(1);
@@ -91,24 +95,28 @@ it("prepares, submits, resumes and reimports through the actual fill CLI without
   expect(await run("import")).toBe(0);
   expect(fetchMock).toHaveBeenCalledTimes(calls);
   expect(creates).toBe(1);
-  const turn = inspectTurnContentKeySpace(questions).distinctExtractionTurns[0]!;
+  const turn = inspectTurnContentKeySpace(questions, sourcePacking).distinctExtractionTurns[0]!;
+  const config = resolveCompileSeedExtractionConfig(process.env, readExtractionCacheManifestIdentity(cacheRoot)!.manifest);
+  expect(config.sourcePacking).toBe(sourcePacking);
   const stats = newFillStats();
-  const provider = new OfficialApiGardenProvider({ diagnosticDir: null, injectedExtractorCapability: "cache_only",
+  const provider = new OfficialApiGardenProvider({ sourcePacking: config.sourcePacking, diagnosticDir: null, injectedExtractorCapability: "cache_only",
     extractor: createCachingSignalExtractor({ cacheRoot, stats, allowLiveExtraction: false,
-      config: resolveCompileSeedExtractionConfig(),
+      config,
       delegate: { extract: async () => { throw new Error("prepared consumer must stay cache-only"); } } }) });
+  vi.stubEnv("ALAYA_INGEST_RECONCILIATION_ENABLED", "0");
+  vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "");
   const daemon = await startBenchDaemon({ dataDirRoot: join(cacheRoot, "consumer"),
     workspaceId: "batch-consumer", runId: "batch-consumer-run" });
   try {
     const drafts = await extractSeedInputs({ provider, stats, turnContent: turn.turnContent, seedIndex: 1,
       context: { workspace_id: daemon.workspaceId, run_id: daemon.runId, surface_id: null,
         turn_messages: turn.turnMessages } });
-    expect(drafts).toHaveLength(1);
+    expect(drafts).toHaveLength(expectedDrafts);
     const result = await daemon.proposeMemoriesFromCompileSignals(drafts.map((draft) => ({
       ...draft, evidenceRef: "batch-consumer-evidence"
     })));
     expect(result.dropped).toEqual([]);
-    expect(result.seeds).toHaveLength(1);
+    expect(result.seeds).toHaveLength(expectedDrafts);
     expect(result.createdEvidence).toBe(true);
     const seed = result.seeds[0]!;
     expect(seed.evidenceId).not.toBeNull();
@@ -149,4 +157,12 @@ it("prepares, submits, resumes and reimports through the actual fill CLI without
     expect(stats.llmCalls).toBe(0);
     expect(fetchMock).toHaveBeenCalledTimes(calls);
   } finally { await daemon.shutdown(); }
+  const reopened = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+  try {
+    const sources = new SqliteFieldSourceRecordRepo(reopened, fieldContractSha256).listByWorkspace(daemon.workspaceId);
+    expect(sources.some((row) => row.source_body?.includes("I completed alpha."))).toBe(true);
+    if (sourcePacking === "singleton") {
+      expect(sources.some((row) => row.source_body?.includes("I completed beta."))).toBe(true);
+    }
+  } finally { reopened.close(); }
 }, 60_000);

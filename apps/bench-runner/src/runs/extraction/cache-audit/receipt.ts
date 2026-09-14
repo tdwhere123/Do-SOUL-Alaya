@@ -1,3 +1,4 @@
+import { ExtractionSourcePackingSchema } from "@do-soul/alaya-protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { readBoundedCanonicalUtf8Artifact } from "./bounded-artifact-reader.js";
@@ -148,7 +149,8 @@ function isProjectionDecision(value: unknown): boolean {
 }
 
 function isRawIdentity(value: unknown): value is RawExtractionCacheIdentity {
-  return isRecord(value) && rawIdentityFields.every((field) => typeof value[field] === "string");
+  return isRecord(value) && rawIdentityFields.every((field) => typeof value[field] === "string") &&
+    (value.sourcePacking === undefined || ExtractionSourcePackingSchema.safeParse(value.sourcePacking).success);
 }
 
 function isProjectionIdentity(value: unknown): value is ExtractionProjectionIdentity {
@@ -202,7 +204,7 @@ const replayCountFields: readonly (keyof Omit<ExtractionReplayClosure, "ledgerSh
 ];
 
 const rawReasons = new Set<RawExtractionCacheCompatibilityReason>([
-  "dataset_revision_mismatch", "model_mismatch", "request_profile_mismatch",
+  "source_packing_mismatch", "dataset_revision_mismatch", "model_mismatch", "request_profile_mismatch",
   "provider_url_mismatch", "system_prompt_mismatch", "cache_key_algorithm_mismatch",
   "raw_closure_mismatch", "raw_inventory_not_closed", "retired_source_keys"
 ]);
