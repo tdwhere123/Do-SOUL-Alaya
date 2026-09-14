@@ -450,9 +450,25 @@ window. Supported closed `to` and `through` ranges retain both endpoints as one
 candidate, including in local heuristics. Unresolved `until` or explicitly excluded
 endpoints remain unavailable. Validity requires a construction directly governing
 the date; a descriptive adjective elsewhere cannot supply that role. Local role
-context retains the construction between two dates in the same clause. Unsupported
-date fragments retain their complete lexical extent in the source inventory, so
-an alternative or range cannot become certain by dropping its unresolved branch.
+context retains the construction between two dates in the same clause. Before
+calendar acceptance, source inventory preserves arguments introduced by temporal
+prepositions through their clause or connector boundary, including unknown words
+and unsupported date formats. A choice or range between those arguments remains
+unresolved with unparsed intervening text: punctuation or conjunctions inside it
+do not prove independence. This bounded owner also abstains across sentences when
+it cannot establish that a preceding temporal choice is independent of a later date.
+Unlinked statements and ordinary object alternatives retain their date eligibility.
+Raw range dependence requires a governing `from`/validity opening; otherwise the
+existing calendar owner must establish the endpoints. A bare `to` does not turn
+a purpose or object into a temporal endpoint. An explicit occurrence year can
+remain supported without interpreting such an unmarked suffix as a range; this
+does not claim complete temporal understanding of that suffix.
+Recognized but rejected date fragments also retain their complete lexical extent.
+This bounded argument discovery does not extend the accepted calendar grammar or
+create local heuristic candidates for unknown words. An alternative or range cannot
+become certain by dropping its unresolved branch.
+Local heuristics qualify the complete source before using shared sentence spans
+for excerpts; presentation boundaries cannot recreate a rejected time window.
 A nomination that omits a source-established closed validity end remains rejected in the audit,
 even when the independent source owner can preserve the complete range. Missing
 source clocks leave relative dates unresolved; live and replay preserve a supplied

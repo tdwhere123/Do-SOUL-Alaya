@@ -41,6 +41,25 @@ describe("temporal evidence inventory", () => {
   });
 
   it.each([
+    "I released the product in 2016/17 or in 2017.",
+    "I released the product on 2016/02/03 or in 2017.",
+    "I released the product on Christmas or in 2017.",
+    "I released the product on Christmas or maybe in 2017.",
+    "I released the product on Christmas or, by and large, in 2017.",
+    "I released the product on Christmas or e.g. in 2017.",
+    "I released the product on Christmas, or perhaps in 2017.",
+    "I released the product on Christmas or, perhaps, in 2017.",
+    "I released the product on Christmas, perhaps, or maybe in 2017.",
+    "I released the product in an unknown year or in 2017.",
+    "I released the product in 2017 or on Christmas.",
+    "I released the product in 2017 with a partner or on Christmas.",
+    "I worked from Christmas to 2017.",
+    "I worked from Christmas to perhaps in 2017.",
+    "I have a permit valid from 2017 to Christmas.",
+    "I released the product on Christmas or Easter. I moved in 2017.",
+    "我在2016/02/03或在2017年发布产品。",
+    "我在未知年份或在2017年发布产品。",
+    "我在未知年份或可能在2017年发布产品。",
     "I released the product on 2016-02/03 or in 2017.",
     "I released the product on 2016-02/03, or in 2017.",
     "I released the product on 2016-02-03x or in 2017.",
@@ -87,11 +106,40 @@ describe("temporal evidence inventory", () => {
       expect(resolveSourceTemporalCandidates(source, undefined)).toEqual([]);
     }
     for (const source of ["I used 2016-02/03. I launched an effective product in 2017.",
+      "I released the product on Christmas. I moved in 2017.",
+      "Product code 2016/02/03. I released the product in 2017.",
+      "我在未知年份发布产品。我在2017年搬家。",
+      "I released a product or a service in 2017.",
       "I announced in 2016 a policy and released a product in 2017."]) {
       expect(inspectObservedTemporalProjection(source, laterYear, undefined).audit.status).toBe("formed");
     }
     expect(inspectObservedTemporalProjection("I released an effective product in 2017.", undefined, undefined).projection).toEqual(laterYear);
     expect(inspectObservedTemporalProjection("我在2017年发布产品。", undefined, undefined).projection).toEqual(laterYear);
+  });
+
+  it("retains the accepted calendar grammar without creating local candidates for unknown words", async () => {
+    expect(inspectObservedTemporalProjection("I worked from 2016 through 2017.", undefined, undefined).projection)
+      .toMatchObject({ event_time_start: year.event_time_start, event_time_end: laterYear.event_time_end, time_precision: "range" });
+    expect(inspectObservedTemporalProjection("I have a permit valid from 2016 to 2017.", undefined, undefined).projection)
+      .toMatchObject({ valid_from: year.event_time_start, valid_to: laterYear.event_time_end, time_precision: "range" });
+    for (const source of ["I released the product on Christmas.", "I released the product in an unknown year."]) {
+      expect(resolveSourceTemporalCandidates(source, undefined)).toEqual([]);
+      const local = await new LocalHeuristics().compile(source, { ...createContext(), turn_messages: [],
+        allow_legacy_single_user_source: true });
+      expect(local.filter((signal) => signal.raw_payload.time_concern !== undefined)).toEqual([]);
+    }
+  });
+
+  it.each([
+    "I released the product in 2016 to help people.",
+    "SHADOW’s original product was released in 2016 with the promise of allowing all individuals to enjoy the power of a high-end PC from the cloud."
+  ])("retains an occurrence year without turning a purpose or object to into a range: %s", async (source) => {
+    expect(inspectObservedTemporalProjection(source, undefined, undefined).projection).toEqual(year);
+    expect(inspectObservedTemporalProjection(source, year, undefined).audit.status).toBe("formed");
+    const local = (await new LocalHeuristics().compile(source, { ...createContext(), turn_messages: [],
+      allow_legacy_single_user_source: true })).filter((signal) => signal.raw_payload.time_concern !== undefined);
+    expect(local).toHaveLength(1);
+    expect(local[0]!.raw_payload.temporal_projection).toEqual({ ...year, projection_schema_version: "1" });
   });
 });
 

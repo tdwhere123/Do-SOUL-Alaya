@@ -8,9 +8,10 @@ import { InMemoryHandoffGapHandler, LocalHeuristics, MaterializationRouter, Offi
   auditOfficialApiSignalFormation, buildOfficialApiExtractionRequests } from "@do-soul/alaya-soul";
 import {
   initDatabase, SqliteEvidenceCapsuleRepo, SqliteEventLogRepo,
-  SqliteMemoryEntryRepo, SqliteWorkspaceRepo, SqliteRunRepo, SqliteSignalRepo
+  SqliteMemoryEntryRepo, SqliteWorkspaceRepo, SqliteRunRepo, SqliteSignalRepo, SqliteSourceGroundingDeferQueueRepo
 } from "@do-soul/alaya-storage";
 import { createOpenSemanticExtractor } from "../../../../../packages/soul/src/__tests__/garden/ingestion/compute-provider-fixtures.js";
+import { createSourceGroundingDeferTransitions } from "../../runtime/source-grounding-defer/transitions.js";
 
 const OBSERVED_AT = "2024-01-01T00:30:00+14:00";
 const CREATED_AT = "2026-09-14T12:00:00.000Z";
@@ -23,6 +24,7 @@ interface TemporalCase {
   readonly nomination?: Record<string, unknown>;
   readonly audit?: "formed" | "rejected" | "unavailable";
   readonly localMatch?: string;
+  readonly deferred?: true;
 }
 const CASES: readonly TemporalCase[] = [
   { source: "I released the product in 2016.", eventStart: "2016-01-01T00:00:00.000Z", eventEnd: "2016-12-31T23:59:59.999Z", validStart: null },
@@ -68,11 +70,40 @@ const CONTEXT_CASES: readonly TemporalCase[] = [
   { source: "I worked from 2016-02/03 to 2017.", ...NO_TIME, audit: "unavailable" },
   { source: "I released the product on 2016-02/03 or in 2017.", ...NO_TIME, localMatch: "in 2017" }
 ];
+const ARGUMENT_CASES: readonly TemporalCase[] = [
+  { source: "I released the product in 2016/17 or in 2017.", ...NO_TIME, audit: "unavailable" },
+  { source: "I released the product in 2016/17 or in 2017.", ...NO_TIME, nomination: LATER_EVENT, audit: "rejected" },
+  { source: "I released the product in 2016/17 or in 2017.", ...NO_TIME, nomination: LATER_VALIDITY, audit: "rejected" },
+  { source: "I released the product in 2016/17 or in 2017.", ...NO_TIME, localMatch: "in 2017" },
+  { source: "I released the product on 2016/02/03 or in 2017.", ...NO_TIME, audit: "unavailable" },
+  { source: "我在2016/02/03或在2017年发布产品。", ...NO_TIME, audit: "unavailable" },
+  { source: "I released the product on Christmas or in 2017.", ...NO_TIME, audit: "unavailable" },
+  { source: "I released the product on Christmas or in 2017.", ...NO_TIME, nomination: LATER_EVENT, audit: "rejected" },
+  { source: "I released the product on Christmas or in 2017.", ...NO_TIME, nomination: LATER_VALIDITY, audit: "rejected" },
+  { source: "I released the product on Christmas or maybe in 2017.", ...NO_TIME, audit: "unavailable" },
+  { source: "I released the product on Christmas or maybe in 2017.", ...NO_TIME, localMatch: "in 2017" },
+  { source: "I released the product on Christmas or, by and large, in 2017.", ...NO_TIME, audit: "unavailable" },
+  { source: "I released the product on Christmas or, by and large, in 2017.", ...NO_TIME, nomination: LATER_EVENT, audit: "rejected" },
+  { source: "I released the product on Christmas or e.g. in 2017.", ...NO_TIME, audit: "unavailable" },
+  { source: "I released the product on Christmas or e.g. in 2017.", ...NO_TIME, nomination: LATER_VALIDITY, audit: "rejected" },
+  { source: "I released the product on Christmas or e.g. in 2017.", ...NO_TIME, localMatch: "in 2017", deferred: true },
+  { source: "I released the product in an unknown year or in 2017.", ...NO_TIME, audit: "unavailable" },
+  { source: "I have a permit valid from 2017 to Christmas.", ...NO_TIME, nomination: LATER_VALIDITY, audit: "rejected" },
+  { source: "I released a product or a service in 2017.", eventStart: LATER_EVENT.event_time_start,
+    eventEnd: LATER_EVENT.event_time_end, validStart: null, audit: "formed" },
+  { source: "I released the product in 2016 to help people.", eventStart: "2016-01-01T00:00:00.000Z",
+    eventEnd: "2016-12-31T23:59:59.999Z", validStart: null, audit: "formed" },
+  { source: "SHADOW’s original product was released in 2016 with the promise of allowing all individuals to enjoy the power of a high-end PC from the cloud.",
+    eventStart: "2016-01-01T00:00:00.000Z", eventEnd: "2016-12-31T23:59:59.999Z", validStart: null, audit: "formed" },
+  { source: "I released the product in 2016 to help people.",
+    eventStart: "2016-01-01T00:00:00.000Z", eventEnd: "2016-12-31T23:59:59.999Z", validStart: null, localMatch: "2016" }
+];
 
 describe("source temporal projection persistence", () => {
   it.each([
     { name: "stores inclusive windows and separate validity through Garden and reopens the original source clock", cases: CASES, catalog: false },
-    { name: "retains temporal context and rejected branches through live replay and SQLite reopen", cases: CONTEXT_CASES, catalog: true }
+    { name: "retains temporal context and rejected branches through live replay and SQLite reopen", cases: CONTEXT_CASES, catalog: true },
+    { name: "retains unparsed temporal arguments through live replay and SQLite reopen", cases: ARGUMENT_CASES, catalog: true }
   ])("$name", async ({ cases, catalog }) => {
     const directory = await mkdtemp(join(tmpdir(), "alaya-source-time-"));
     const filename = join(directory, "memory.sqlite");
@@ -96,12 +127,16 @@ describe("source temporal projection persistence", () => {
         claimService: { create: async () => { throw new Error("unexpected claim route"); } },
         handoffGapHandler: new InMemoryHandoffGapHandler(), fullTurnEvidenceExcerpt: true });
       const signalRepo = new SqliteSignalRepo(database);
+      const queueRepo = new SqliteSourceGroundingDeferQueueRepo(database);
       const eventPublisher = new EventPublisher({ eventLogRepo, runtimeNotifier: notifier,
         runHotStateService: { apply: async () => undefined } });
       const signalService = new SignalService({ eventLogRepo, signalRepo, runtimeNotifier: notifier,
         emissionWriter: createSignalEmissionWriter({ eventPublisher, signalRepo }),
+        sourceGroundingDeferQueue: queueRepo,
+        sourceGroundingDeferTransitions: createSourceGroundingDeferTransitions({ eventLogRepo, signalRepo, queueRepo }),
         postTriageMaterializer: { materialize: (signal, context) => router.materializeSignal(signal, context) } });
-      const persisted: { memoryId: string; source: string; evidenceId: string }[] = [];
+      const persisted: { memoryId: string; fixture: TemporalCase; evidenceId: string }[] = [];
+      const deferred: { signalId: string; source: string }[] = [];
       for (const [index, fixture] of cases.entries()) {
         admit.mockClear();
         const signalId = `temporal-signal-${index}`;
@@ -126,8 +161,19 @@ describe("source temporal projection persistence", () => {
         // The host owns the trusted observation receipt; the extractor does not.
         const received = await signalService.receiveSignal({ ...signal!, source_observation: {
           observed_at: "2023-12-31T10:30:00.000Z", authority: "trusted_host_event", source_event_id: "source-clock"
-        } });
+        } }).catch((cause: unknown) => {
+          throw new Error(`Temporal source failed materialization (${fixture.localMatch ?? "official"}): ${fixture.source}`, { cause });
+        });
         const materialized = received.materialization;
+        if (fixture.deferred) {
+          expect(received.triage_result).toBe("deferred");
+          expect(materialized?.target_kind).toBe("deferred");
+          expect(materialized?.created_objects).toEqual([]);
+          expect(signal!.raw_payload.temporal_projection).toBeUndefined();
+          expect(admit).not.toHaveBeenCalled();
+          deferred.push({ signalId: signal!.signal_id, source: fixture.source });
+          continue;
+        }
         expect(materialized?.success).toBe(true);
         if (fixture.source === "I worked last year.") {
           expect(admit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
@@ -142,7 +188,7 @@ describe("source temporal projection persistence", () => {
         const evidenceId = materialized?.created_objects.find((object) => object.object_kind === "evidence_capsule")?.object_id;
         expect(memoryId).toBeDefined();
         expect(evidenceId).toBeDefined();
-        persisted.push({ memoryId: memoryId!, evidenceId: evidenceId!, source: fixture.source });
+        persisted.push({ memoryId: memoryId!, evidenceId: evidenceId!, fixture });
         // Historical raw is reinterpreted by the same current formation owner;
         // the receipt's replay time must not replace the source observation.
         if (fixture.localMatch === undefined) {
@@ -157,19 +203,28 @@ describe("source temporal projection persistence", () => {
       database = initDatabase({ filename });
       const reopenedMemories = new SqliteMemoryEntryRepo(database);
       const reopenedEvidence = new SqliteEvidenceCapsuleRepo(database);
-      for (const [index, saved] of persisted.entries()) {
-        const fixture = cases[index]!;
+      for (const saved of persisted) {
+        const fixture = saved.fixture;
         const memory = await reopenedMemories.findById(saved.memoryId);
-        expect(memory?.content).toBe(saved.source);
+        expect(memory?.content).toBe(fixture.source);
         expect(memory?.event_time_start ?? null).toBe(fixture.eventStart);
         expect(memory?.event_time_end ?? null).toBe(fixture.eventEnd);
         expect(memory?.valid_from ?? null).toBe(fixture.validStart);
         expect(memory?.valid_to ?? null).toBe(fixture.validEnd ?? null);
         const evidence = await reopenedEvidence.findById(saved.evidenceId);
-        expect(evidence?.excerpt).toContain(saved.source);
+        expect(evidence?.excerpt).toContain(fixture.source);
         expect(evidence?.event_anchor?.occurred_at).toBe("2023-12-31T10:30:00.000Z");
         expect(memory?.created_at).toBe(CREATED_AT);
       }
+      for (const saved of deferred) {
+        const signal = await new SqliteSignalRepo(database).getById(saved.signalId);
+        expect(signal?.signal_state).toBe("deferred");
+        expect(signal?.raw_payload.full_turn_content).toContain(saved.source);
+        expect(signal?.raw_payload.temporal_projection).toBeUndefined();
+        expect(signal?.source_observation?.observed_at).toBe("2023-12-31T10:30:00.000Z");
+        expect(new SqliteSourceGroundingDeferQueueRepo(database).get("workspace-1", saved.signalId)).not.toBeNull();
+      }
+      expect(database.connection.prepare("SELECT count(*) AS count FROM memory_entries").get()).toEqual({ count: persisted.length });
     } finally {
       database.close();
       await rm(directory, { recursive: true, force: true });

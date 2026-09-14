@@ -18,6 +18,7 @@ import {
 import { normalizeSourceObservedAt } from "../extraction/temporal/observed-projection.js";
 import { resolveSourceTemporalCandidates } from "../extraction/temporal/source-time.js";
 import { buildSourceVerificationText } from "./grounding/source-assertion.js";
+import { sentenceSpans } from "./grounding/source-assertion/clause-spans.js";
 
 interface PatternDefinition {
   readonly pattern: RegExp;
@@ -362,15 +363,19 @@ function extractTimeConcerns(
 ): readonly TimeConcernMatch[] {
   const pattern = timeConcernPattern();
   const matches: TimeConcernMatch[] = [];
-  for (const sentence of splitSentences(turnContent)) {
+  // Qualification sees the complete source before any presentation boundary.
+  // A sentence-like excerpt cannot discard an unresolved temporal branch.
+  const sourceCandidates = resolveSourceTemporalCandidates(turnContent, anchorIso ?? undefined);
+  for (const span of sentenceSpans(turnContent)) {
+    const sentence = turnContent.slice(span.start, span.end);
     if (isQuestion(sentence)) {
       continue;
     }
 
     pattern.lastIndex = 0;
-    const candidates = resolveSourceTemporalCandidates(sentence, anchorIso ?? undefined);
+    const candidates = sourceCandidates.filter((candidate) => span.start <= candidate.start && candidate.end <= span.end);
     for (const candidate of candidates) {
-      const matchedText = sentence.slice(candidate.start, candidate.end).trim();
+      const matchedText = turnContent.slice(candidate.start, candidate.end).trim();
       matches.push({
         matched_text: matchedText,
         window_digest: normalizeWindowDigest(matchedText),
@@ -381,8 +386,8 @@ function extractTimeConcerns(
     for (const match of sentence.matchAll(pattern)) {
       // A bound range is one source candidate, not two independently projected
       // endpoints. Raw hits remain only for genuinely unresolved source terms.
-      if (candidates.some((candidate) => candidate.start < match.index + match[0].length &&
-          match.index < candidate.end)) continue;
+      if (candidates.some((candidate) => candidate.start < span.start + match.index + match[0].length &&
+          span.start + match.index < candidate.end)) continue;
       const matchedText = normalizeMatchedText(match[0]);
       if (matchedText.length === 0) {
         continue;
@@ -414,13 +419,6 @@ function formatTemporalProjection(projection: TemporalProjection | null): Record
     time_source: projection.time_source,
     projection_schema_version: String(projection.projection_schema_version)
   };
-}
-
-function splitSentences(turnContent: string): readonly string[] {
-  return turnContent
-    .split(/(?<=[.!?。！？])\s+|\n+/u)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 0);
 }
 
 function isQuestion(sentence: string): boolean {

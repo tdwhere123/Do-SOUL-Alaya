@@ -2,6 +2,16 @@ import { resolveTemporalProjection, timeConcernPattern, type TemporalProjection 
 
 const ROLE_CLAUSE_SEPARATOR =
   /(?:[;,.!?\n；，。！？]+|\b(?:and|but|while|whereas|then)\b|(?:并且|而|但|然后|同时))/giu;
+// These locate possible arguments, not accepted dates. Unparsed words remain
+// evidence of uncertainty without extending the calendar parser's grammar.
+const TEMPORAL_ARGUMENT_PREFIX_SOURCE = String.raw`(?:\b(?:in|on|during|from|since|before|after|until|through|to|by)\s+(?:the\s+year\s+)?|\bthe\s+year\s+|(?:在|于|自|从|到|至))`;
+const TEMPORAL_ARGUMENT_PREFIX = new RegExp(TEMPORAL_ARGUMENT_PREFIX_SOURCE, "giu");
+const TEMPORAL_CLAUSE_BOUNDARY_SOURCE = String.raw`(?:[;!?\n；，。！？]+|[,.](?=\s|$)|\b(?:and|but|while|whereas|then)\b|(?:和|并且|而|但|然后|同时))`;
+const TEMPORAL_ARGUMENT_BOUNDARY = new RegExp(`${TEMPORAL_CLAUSE_BOUNDARY_SOURCE}|\\b(?:or|to|through|until)\\b|(?:或|至|到)`, "giu");
+const TEMPORAL_DEPENDENCY_GAP = new RegExp(String.raw`^\s*[,，]?\s*(?:(?:or|and|to|through|until|[-–—]|至|到|或|和)\s*)?(?:${TEMPORAL_ARGUMENT_PREFIX_SOURCE})?\s*$`, "iu");
+const PRECEDING_TEMPORAL_ALTERNATIVE = new RegExp(String.raw`(?:\bor\s+|或\s*)(?:${TEMPORAL_ARGUMENT_PREFIX_SOURCE})?$`, "iu");
+const TEMPORAL_RANGE_OPENING = /\b(?:from|since)\s+(?:the\s+year\s+)?$|(?:自|从)\s*$/iu;
+const TEMPORAL_RANGE_CONNECTOR = /\b(?:to|through|until)\b|至|到/iu;
 
 export interface SourceTemporalCandidate {
   readonly start: number;
@@ -13,22 +23,27 @@ export interface SourceTemporalCandidate {
 
 type TemporalMatch = Pick<SourceTemporalCandidate, "start" | "end" | "projection">;
 type TemporalSpan = Pick<SourceTemporalCandidate, "start" | "end">;
+type TemporalArgument = TemporalSpan & Readonly<{ rangeStart: boolean }>;
 
 /** Source inventory, range binding and role interpretation share one owner. */
 export function resolveSourceTemporalCandidates(
   source: string,
   anchor: string | undefined
 ): readonly SourceTemporalCandidate[] {
-  const { matches, unresolved } = sourceTemporalInventory(source, anchor);
-  const inventory = [...matches, ...unresolved];
+  const { arguments_, matches, unresolved } = sourceTemporalInventory(source, anchor);
+  const calendarEvidence = [...matches, ...unresolved];
   const range = sourceRangeMatch(source, matches);
   const candidates = (range === undefined ? matches : [range]).map((candidate) => {
     const bounded = candidate === range;
-    const before = sourceRolePrefix(source, candidate, inventory);
-    const role = (hasDependentDateNeighbor(source, candidate, inventory) ||
+    const before = sourceRolePrefix(source, candidate, calendarEvidence);
+    const opensRange = !bounded && (TEMPORAL_RANGE_OPENING.test(before) || hasValidityConstruction(before));
+    const role = (hasUnresolvedTemporalDependency(source, temporalDependencyExtent(candidate, arguments_),
+      calendarEvidence, arguments_, opensRange) ||
+      PRECEDING_TEMPORAL_ALTERNATIVE.test(before) ||
       hasUnresolvedEndpointExclusion(source, candidate) ||
       /^\s*[,，]?\s*(?:or\b|或)/iu.test(source.slice(candidate.end)) ||
-      /^(?:\s+(?:or|and|to|through|until)\s+(?:the\s+year\s+)?\d|\s*(?:或|和|至|到)\s*\d)/iu.test(source.slice(candidate.end)))
+      /^(?:\s+(?:or|and|to|through|until)\s+(?:the\s+year\s+)?\d|\s*(?:或|和|至|到)\s*\d)/iu.test(source.slice(candidate.end)) ||
+      (opensRange && /^\s*(?:to\b|through\b|until\b|至|到)/iu.test(source.slice(candidate.end))))
       ? "unknown"
       : sourceTemporalRole(before,
         source.slice(candidate.end, candidate.end + 8), bounded);
@@ -37,10 +52,36 @@ export function resolveSourceTemporalCandidates(
   return candidates.some((candidate) => candidate.role === "unknown") ? [] : candidates;
 }
 
+function sourceTemporalArguments(source: string): readonly TemporalArgument[] {
+  const boundaries = [...source.matchAll(TEMPORAL_ARGUMENT_BOUNDARY)];
+  const arguments_: TemporalArgument[] = [];
+  let boundaryIndex = 0;
+  for (const prefix of source.matchAll(TEMPORAL_ARGUMENT_PREFIX)) {
+    const start = prefix.index + prefix[0].length;
+    while (boundaries[boundaryIndex] !== undefined && boundaries[boundaryIndex]!.index < start) boundaryIndex += 1;
+    let end = boundaries[boundaryIndex]?.index ?? source.length;
+    while (end > start && /\s/u.test(source[end - 1]!)) end -= 1;
+    if (end > start) arguments_.push({ start, end, rangeStart: TEMPORAL_RANGE_OPENING.test(prefix[0]) });
+  }
+  return arguments_;
+}
+
+function temporalDependencyExtent(candidate: TemporalSpan, arguments_: readonly TemporalSpan[]): TemporalSpan {
+  // The closest governing argument preserves adjuncts between its date and a
+  // connector. Wider overlapping arguments must not hide an inner validity cue.
+  const starting = arguments_.filter((span) => span.start <= candidate.start && candidate.start < span.end).at(-1);
+  const ending = arguments_.filter((span) => span.start < candidate.end && candidate.end <= span.end).at(-1);
+  return { start: starting?.start ?? candidate.start, end: ending?.end ?? candidate.end };
+}
+
 function sourceTemporalInventory(source: string, anchor: string | undefined): {
+  readonly arguments_: readonly TemporalArgument[];
   readonly matches: readonly TemporalMatch[];
   readonly unresolved: readonly TemporalSpan[];
 } {
+  // Argument discovery precedes calendar acceptance. An unknown word or
+  // format can still be a branch of the same temporal alternative/range.
+  const arguments_ = sourceTemporalArguments(source);
   const matches: TemporalMatch[] = [];
   const unresolved: TemporalSpan[] = [];
   for (const match of source.matchAll(timeConcernPattern())) {
@@ -59,7 +100,7 @@ function sourceTemporalInventory(source: string, anchor: string | undefined): {
       ? match[0].search(/[1-9]\d{3}/u) : 0;
     matches.push({ start: match.index + Math.max(0, yearOffset), end: match.index + match[0].length, projection });
   }
-  return { matches, unresolved };
+  return { arguments_, matches, unresolved };
 }
 
 function temporalLexicalExtent(source: string, start: number, end: number): TemporalSpan {
@@ -89,12 +130,23 @@ function sourceRangeMatch(source: string, matches: readonly TemporalMatch[]): Te
   });
 }
 
-function hasDependentDateNeighbor(source: string, candidate: TemporalMatch, matches: readonly TemporalSpan[]): boolean {
-  return matches.some((other) => {
-    if (other === candidate) return false;
+function hasUnresolvedTemporalDependency(
+  source: string, candidate: TemporalSpan, calendarEvidence: readonly TemporalSpan[],
+  arguments_: readonly TemporalArgument[], opensRange: boolean
+): boolean {
+  return [...calendarEvidence, ...arguments_].some((other) => {
     const between = other.end <= candidate.start ? source.slice(other.end, candidate.start)
       : candidate.end <= other.start ? source.slice(candidate.end, other.start) : undefined;
-    return between !== undefined && /^\s*[,，]?\s*(?:(?:or|and|to|through|until|[-–—]|至|到|或|和)\s*)?(?:(?:in|on|during|from|before|after|the\s+year|在|于|自|从|到|至)\s*)?$/iu.test(between);
+    if (between === undefined) return false;
+    if (!("rangeStart" in other)) return TEMPORAL_DEPENDENCY_GAP.test(between);
+    // A choice or range between raw temporal arguments survives all unparsed
+    // gap text. Punctuation and conjunctions inside that text cannot prove
+    // independence; this bounded owner abstains instead of guessing a clause.
+    if (/\bor\b|或/iu.test(between)) return true;
+    // An arbitrary `to` may introduce a purpose or object. Only a governing
+    // range opening (or the calendar evidence above) can make it an endpoint.
+    const leftOpensRange = other.end <= candidate.start ? other.rangeStart : opensRange;
+    return leftOpensRange && TEMPORAL_RANGE_CONNECTOR.test(between);
   });
 }
 
