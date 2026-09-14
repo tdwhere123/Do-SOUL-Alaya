@@ -1,7 +1,7 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildOfficialApiExtractionRequests,
   OFFICIAL_API_SYSTEM_PROMPT,
@@ -10,9 +10,10 @@ import {
 } from "@do-soul/alaya-soul";
 import {
   createCachingSignalExtractor,
+  computeCacheKey,
   inspectCachedExtraction
 } from "../../../runs/compile-seed/compile-seed-cache.js";
-import { inspectCachedRawExtraction } from
+import { cacheFilePath, inspectCachedRawExtraction, writeCachedExtraction } from
   "../../../runs/compile-seed/cache/cache-shard.js";
 import { inspectExtractionFillCompletion } from
   "../../../runs/extraction/fill/fill-completion.js";
@@ -31,11 +32,24 @@ import { openExtractionAttemptLedger } from
 import { newFillStats } from "../../../runs/extraction/fill/fill-stats.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
+  TEST_PROVIDER_COMPLETION_METADATA,
+  TEST_CACHED_PROVIDER_COMPLETION_METADATA,
+  testExtractionTransportProvenance,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
 import { semanticTask } from "./semantic-artifact-fixture.js";
+import { inspectExtractionCacheInventory } from "../../../runs/extraction/cache-audit/inventory.js";
+import { inspectBoundedMaterializationInventory } from
+  "../../../runs/extraction/cache-audit/materialization/preflight-inventory.js";
 
 const roots: string[] = [];
+
+function inspectMaterialization(cacheRoot: string, cacheKey: string) {
+  const input = { cacheRoot, cacheKeys: [cacheKey], model: "test-model", requestProfile: "provider-default-v1" as const };
+  return inspectBoundedMaterializationInventory({ sourceRoot: cacheRoot,
+    audited: inspectExtractionCacheInventory(input), model: input.model,
+    requestProfile: input.requestProfile, maxShardBytes: 32_768 });
+}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -76,7 +90,7 @@ describe("extraction empty envelope classification", () => {
     expect(unclassified.rawSignalCount).toBe(0);
   });
 
-  it("quarantines provider-empty shards with assertions out of coverage", async () => {
+  it("counts witnessed request abstention without satisfying a semantic capability", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "empty-class-"));
     roots.push(cacheRoot);
     writeExtractionCacheTestManifest({
@@ -88,7 +102,7 @@ describe("extraction empty envelope classification", () => {
     )[0]!;
     const stats = newFillStats();
     const extractor = createCachingSignalExtractor({
-      delegate: { extract: async () => ({ rawJson: '{"signals":[]}' }) },
+      delegate: { extract: async () => ({ rawJson: '{"signals":[]}', responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }) },
       config: {
         model: "test-model",
         modelFamily: "test-model",
@@ -103,9 +117,15 @@ describe("extraction empty envelope classification", () => {
       userPrompt: stringifyOfficialApiExtractionRequest(request)
     });
     const cacheKey = stats.lastCacheKey!;
+    expect(inspectMaterialization(cacheRoot, cacheKey).descriptors).toHaveLength(1);
     expect(inspectCachedExtraction(
       cacheRoot, cacheKey, "test-model", "provider-default-v1"
-    ).status).toBe("quarantined");
+    ).status).toBe("hit");
+    const stored = JSON.parse(await readFile(cacheFilePath(cacheRoot, cacheKey), "utf8"));
+    expect(stored).toMatchObject({ empty_classification: "completed_empty",
+      request_completion: { version: 1, status: "completed_empty" },
+      response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA,
+      transport_provenance: { model: "test-model" } });
     const completion = inspectExtractionFillCompletion({
       cacheRoot,
       model: "test-model",
@@ -116,11 +136,17 @@ describe("extraction empty envelope classification", () => {
         turnMessages: [{ message_id: "m0", role: "user", content: "I moved to Berlin." }]
       }]
     });
-    expect(completion.coverage).toBeLessThan(1);
-    expect(completion.validTurns).toBe(0);
+    expect(completion.coverage).toBe(1);
+    expect(completion.validTurns).toBe(1);
     expect(inspectCachedRawExtraction(
       cacheRoot, cacheKey, "test-model", "provider-default-v1"
-    ).status).toBe("quarantined");
+    ).status).toBe("hit");
+    const delegate = { extract: vi.fn(async () => { throw new Error("cache reopen must not dispatch"); }) };
+    const reopened = createCachingSignalExtractor({ delegate, cacheRoot, allowLiveExtraction: false,
+      config: { model: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1" } });
+    expect(await reopened.extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      userPrompt: stringifyOfficialApiExtractionRequest(request) })).toMatchObject({ rawJson: EMPTY_SIGNALS_ENVELOPE });
+    expect(delegate.extract).not.toHaveBeenCalled();
     const task = semanticTask("I moved to Berlin.");
     const semanticRoot = await mkdtemp(join(tmpdir(), "empty-semantic-"));
     roots.push(semanticRoot);
@@ -152,7 +178,7 @@ describe("extraction empty envelope classification", () => {
       .toBe("quarantined");
   });
 
-  it("abandons a reserved live provider-empty shard without committing success", async () => {
+  it("settles a witnessed provider-empty request without reserving another attempt", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "empty-pending-"));
     roots.push(cacheRoot);
     writeExtractionCacheTestManifest({
@@ -174,7 +200,7 @@ describe("extraction empty envelope classification", () => {
       delegate: {
         extract: async (input) => {
           await input.onTransportAttempt?.(input.abortSignal);
-          return { rawJson: EMPTY_SIGNALS_ENVELOPE };
+          return { rawJson: EMPTY_SIGNALS_ENVELOPE, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA };
         }
       },
       config: {
@@ -195,9 +221,74 @@ describe("extraction empty envelope classification", () => {
     });
     expect(ledger.snapshot()).toMatchObject({
       attempts: 1,
-      successfulShards: 0,
+      successfulShards: 1,
       pendingKeys: []
     });
+  });
+
+  it.each([undefined, "provider_empty_with_assertions"] as const)(
+    "preserves legacy %s empties as diagnostic quarantine and refuses extraction without dispatch", async (classification) => {
+      const cacheRoot = await mkdtemp(join(tmpdir(), "legacy-empty-"));
+      roots.push(cacheRoot);
+      const request = buildOfficialApiExtractionRequests("I moved to Berlin.", [])[0]!;
+      const userPrompt = stringifyOfficialApiExtractionRequest(request);
+      const key = computeCacheKey("test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, userPrompt);
+      writeCachedExtraction(cacheRoot, key, { model: "test-model", request_profile: "provider-default-v1",
+        cache_key: key, raw_json: EMPTY_SIGNALS_ENVELOPE, extracted_at: "2023-01-01T00:00:00.000Z",
+        empty_classification: classification, response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA });
+      const before = await readFile(cacheFilePath(cacheRoot, key), "utf8");
+      expect(inspectCachedExtraction(cacheRoot, key, "test-model", "provider-default-v1").status).toBe("quarantined");
+      expect(inspectCachedRawExtraction(cacheRoot, key, "test-model", "provider-default-v1"))
+        .toMatchObject({ status: "quarantined", rawJson: EMPTY_SIGNALS_ENVELOPE });
+      expect(inspectMaterialization(cacheRoot, key)).toMatchObject({ descriptors: [],
+        inventory: { shards: [{ status: "invalid" }] } });
+      const delegate = { extract: vi.fn(async () => { throw new Error("must not dispatch"); }) };
+      const extractor = createCachingSignalExtractor({ delegate, cacheRoot,
+        config: { model: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1" } });
+      await expect(extractor.extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, userPrompt })).rejects.toThrow("quarantined");
+      expect(delegate.extract).not.toHaveBeenCalled();
+      expect(await readFile(cacheFilePath(cacheRoot, key), "utf8")).toBe(before);
+    });
+
+  it("refuses an unwitnessed live empty response before cache publication", async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), "unwitnessed-empty-"));
+    roots.push(cacheRoot);
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: OFFICIAL_API_SYSTEM_PROMPT });
+    const request = buildOfficialApiExtractionRequests("I moved to Berlin.", [])[0]!;
+    const userPrompt = stringifyOfficialApiExtractionRequest(request);
+    const key = computeCacheKey("test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, userPrompt);
+    const extractor = createCachingSignalExtractor({ cacheRoot,
+      config: { model: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1" },
+      delegate: { extract: async () => ({ rawJson: EMPTY_SIGNALS_ENVELOPE }) } });
+    await expect(extractor.extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, userPrompt })).rejects.toThrow();
+    await expect(stat(cacheFilePath(cacheRoot, key))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(inspectCachedRawExtraction(cacheRoot, key, "test-model", "provider-default-v1").status).toBe("missing");
+  });
+
+  it.each([
+    { request_completion: undefined },
+    { request_completion: { version: 2, status: "completed_empty" } },
+    { transport_provenance: undefined },
+    { response_metadata: undefined },
+    { response_metadata: { finish_reason: "STOP" } },
+    { response_metadata: { ...TEST_CACHED_PROVIDER_COMPLETION_METADATA, finish_reason: "length" } },
+    { raw_json: '{"signals":[' },
+    { raw_json: '{"signals":[{}]}' }
+  ])("rejects contradictory or unwitnessed stored completion: %j", async (changes) => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), "invalid-completed-empty-"));
+    roots.push(cacheRoot);
+    const key = "c".repeat(64);
+    const entry = { model: "test-model", request_profile: "provider-default-v1" as const,
+      cache_key: key, raw_json: EMPTY_SIGNALS_ENVELOPE, extracted_at: "2023-01-01T00:00:00.000Z",
+      empty_classification: "completed_empty" as const, request_completion: { version: 1 as const, status: "completed_empty" as const },
+      transport_provenance: testExtractionTransportProvenance("test-model"), response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA };
+    // Corrupt persisted data deliberately bypasses the typed writer contract.
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(cacheRoot, key.slice(0, 2)));
+    await writeFile(cacheFilePath(cacheRoot, key), JSON.stringify({ ...entry, ...changes }));
+    expect(inspectCachedExtraction(cacheRoot, key, "test-model", "provider-default-v1").status).toBe("invalid");
+    expect(inspectCachedRawExtraction(cacheRoot, key, "test-model", "provider-default-v1").status).toBe("invalid");
+    expect(inspectMaterialization(cacheRoot, key).descriptors).toEqual([]);
   });
 
   it("marks out-of-allowlist keys as plan-skipped without counting cache hits", async () => {

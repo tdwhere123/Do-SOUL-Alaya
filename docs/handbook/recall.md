@@ -469,6 +469,17 @@ create local heuristic candidates for unknown words. An alternative or range can
 become certain by dropping its unresolved branch.
 Local heuristics qualify the complete source before using shared sentence spans
 for excerpts; presentation boundaries cannot recreate a rejected time window.
+Relative terms obey the same complete lexical-unit check as explicit dates.
+Attached ASCII/curly apostrophe `s` suffixes, ASCII identifier characters,
+ASCII hyphen/Unicode hyphen/nonbreaking-hyphen compounds and the Chinese marker
+`的` remain unresolved rather than establishing an event window. En/em dashes
+retain their existing calendar-range meaning. This bounded delimiter check
+does not recognize every possible lexical attachment. It checks
+modifier eligibility, not general rhetoric or part-of-speech semantics. Existing
+standalone calendar adjuncts remain supported; an independent `yesterday` does
+not inherit an attached `today's` modifier's date. Outer quotation alone does
+not invalidate an otherwise supported adjunct. Rejected terms remain in the
+dependency inventory, and relative windows still require the trusted source clock.
 A nomination that omits a source-established closed validity end remains rejected in the audit,
 even when the independent source owner can preserve the complete range. Missing
 source clocks leave relative dates unresolved; live and replay preserve a supplied

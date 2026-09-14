@@ -192,6 +192,13 @@ HTTP parsing, or completion classification. A provider-backed extraction cache
 write is admissible only with a versioned completion witness. Cache-only replay
 uses an exact canonical request manifest and a provider-absent receipt rather
 than inferring authority from credentials, a model name, or a key subset.
+Bench persists Soul's strict request-result status as version 1 `request_completion`.
+Provider `completed_empty` requires that status, transport provenance and witnessed
+completion; it counts as a completed request, without proving semantic coverage.
+Deterministic catalog-empty work remains a separate zero-dispatch state. Legacy
+`provider_empty_with_assertions` and unclassified empty shards remain quarantined;
+cache reads refuse them without rewriting history or starting another request.
+Semantic capability obligations still require their own qualifying signals.
 
 ## Surface Shape
 

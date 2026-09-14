@@ -1,5 +1,5 @@
 import { parseOfficialApiRequestSignals } from "../compute-provider.js";
-import type { OfficialApiExtractionRequest } from "./extraction-request.js";
+import { computeOfficialApiSourceCorpusIdentity, type OfficialApiExtractionRequest } from "./extraction-request.js";
 import { resolvePreferenceAwareSourceGrounding } from "../../triage/grounding/preference-profile.js";
 
 /** Completion describes the extraction request, not exhaustive memory formation. */
@@ -8,6 +8,9 @@ export function classifyOfficialApiRequestResult(
   request: OfficialApiExtractionRequest,
   sourceCorpus?: string
 ) {
+  if (sourceCorpus !== undefined && computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
+    throw new Error("official API completed result source corpus differs from its request");
+  }
   const envelope: unknown = JSON.parse(rawJson);
   if (typeof envelope !== "object" || envelope === null || Array.isArray(envelope) ||
       !("signals" in envelope) || !Array.isArray(envelope.signals)) {

@@ -12,7 +12,7 @@ import { createExtractionAuthorityReceipt, readExtractionAuthorityReceipt,
 import { createFreshRetiredSourceRebuildTargetSelection,
   writeExtractionTargetSelectionReceipt } from "../../../runs/extraction/authority/target-selection/receipt.js";
 import { computeExtractionTurnCacheKeys } from "../../../runs/compile-seed/cache/cache-key.js";
-import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
+import { cacheFilePath, inspectCachedExtraction, inspectCachedRawExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { createCompileSeedRunner } from "../../../runs/compile-seed.js";
 import { runAuthorizeExtractionCommand } from "../../../cli/extraction-authority/command.js";
 import { readExtractionCacheManifestIdentity } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
@@ -91,7 +91,7 @@ async function sampleScenario() {
 async function startProvider() {
   let endpoint = "";
   const state = { creates: 0, uploads: [] as string[], ambiguous: false,
-    finished: false, displayName: "", quarantine: false };
+    finished: false, displayName: "", quarantine: false, empty: false };
   server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
@@ -115,7 +115,7 @@ async function startProvider() {
     } else if (req.url === "/download/v1beta/files/output:download?alt=media") {
       res.end(state.uploads[0]!.trim().split("\n").reverse().map((line) => {
         const input = JSON.parse(line);
-        const raw = state.quarantine ? '{"signals":[]}'
+        const raw = state.quarantine ? '{"signals":[{}]}' : state.empty ? '{"signals":[]}'
           : buildGroundedSignalResponse(input.request.contents[0].parts[0].text);
         return JSON.stringify({ key: input.key, response: {
           candidates: [{ finishReason: "STOP", content: { parts: [{ text: raw }] } }],
@@ -242,21 +242,54 @@ it("does not retry sample keys after transport success is quarantined by strict 
   const result = await fixture.run("resume");
   expect(result.authorityTelemetry).toMatchObject({ attempts: 8, successfulShards: 0 });
   expect(result.manifest).toMatchObject({ fill_status: "in_progress", cached_turns: 0 });
-  await expect(fixture.run("import")).rejects.toThrow(/invalid/iu);
-  await expect(fixture.run("submit")).rejects.toThrow(/invalid/iu);
-  // Even if a separate cleanup removes quarantined raw, the durable job is still attempted.
-  for (const key of fixture.selected) rmSync(cacheFilePath(roots.cacheRoot, key), { force: true });
   const plan = JSON.parse(readFileSync(join(roots.cacheRoot, "gemini-batch-plan-sample.json"), "utf8"));
   const statePath = join(roots.cacheRoot, `batch-state-${plan.identity}.json`);
   const state = readFileSync(statePath);
   const ledgerPath = join(roots.cacheRoot, `extraction-attempt-ledger.${fixture.receipt.lineage_digest}.json`);
   const ledger = readFileSync(ledgerPath);
+  // Strictly malformed responses remain durable outcomes without becoming cache shards.
+  for (const key of fixture.selected) expect(existsSync(cacheFilePath(roots.cacheRoot, key))).toBe(false);
+  for (const operation of ["import", "submit"] as const) {
+    const reopened = await fixture.run(operation);
+    expect(reopened.authorityTelemetry).toMatchObject({ attempts: 8, successfulShards: 0 });
+    expect(reopened.manifest).toMatchObject({ fill_status: "in_progress", cached_turns: 0 });
+    expect(readFileSync(statePath)).toEqual(state);
+    expect(readFileSync(ledgerPath)).toEqual(ledger);
+  }
   await expect(fixture.run("prepare", { batch: { operation: "prepare", limits: fixture.limits,
     window: "retry" } })).rejects.toThrow(/jobs|overlap|sample/iu);
   expect(existsSync(join(roots.cacheRoot, "gemini-batch-plan-retry.json"))).toBe(false);
   expect(readFileSync(statePath)).toEqual(state);
   expect(readFileSync(ledgerPath)).toEqual(ledger);
   expect(fixture.provider.state.creates).toBe(1);
+});
+
+it("imports witnessed empty Batch responses, reopens their completion and never redispatches", async () => {
+  const fixture = await sampleScenario();
+  await fixture.run("prepare", { sourcePacking: "singleton" });
+  await fixture.run("submit");
+  fixture.provider.state.finished = true;
+  fixture.provider.state.empty = true;
+  const imported = await fixture.run("resume");
+  expect(imported.authorityTelemetry).toMatchObject({ attempts: 8, successfulShards: 8 });
+  expect(imported.manifest).toMatchObject({ fill_status: "in_progress", cached_turns: 8, expected_turns: 20 });
+  for (const key of fixture.selected) {
+    const persisted = JSON.parse(readFileSync(cacheFilePath(roots.cacheRoot, key), "utf8"));
+    expect(persisted).toMatchObject({ raw_json: '{"signals":[]}', empty_classification: "completed_empty",
+      request_completion: { version: 1, status: "completed_empty" },
+      transport_provenance: { model: "gemini-3.1-flash-lite" }, response_metadata: {
+        finish_reason: "STOP", completion_contract_version: 1, completion_witness: "finish_reason" } });
+    expect(inspectCachedExtraction(roots.cacheRoot, key, "gemini-3.1-flash-lite", "gemini-3.1-low-v1"))
+      .toMatchObject({ status: "hit", rawSignalCount: 0, parsedDraftCount: 0 });
+    expect(inspectCachedRawExtraction(roots.cacheRoot, key, "gemini-3.1-flash-lite", "gemini-3.1-low-v1"))
+      .toMatchObject({ status: "hit", rawSignalCount: 0 });
+  }
+  const ledgerPath = join(roots.cacheRoot, `extraction-attempt-ledger.${fixture.receipt.lineage_digest}.json`);
+  const ledger = readFileSync(ledgerPath);
+  await fixture.run("import");
+  await fixture.run("submit");
+  expect(fixture.provider.state.creates).toBe(1);
+  expect(readFileSync(ledgerPath)).toEqual(ledger);
 });
 
 it("rejects persisted sample plans with omitted, substituted, or duplicate lines before dispatch", async () => {

@@ -8,6 +8,8 @@ import {
 import {
   classifyExtractionEnvelope,
   extractionEnvelopeCountsTowardCoverage,
+  EXTRACTION_REQUEST_COMPLETION_VERSION,
+  type PersistedExtractionRequestCompletion,
   type ExtractionEmptyClassification
 } from "../../extraction/empty-classification.js";
 import { replaceBytesDurable } from
@@ -39,6 +41,7 @@ export interface CachedExtractionEntry {
   readonly raw_json: string;
   readonly extracted_at: string;
   readonly empty_classification?: ExtractionEmptyClassification;
+  readonly request_completion?: PersistedExtractionRequestCompletion;
   readonly response_metadata?: CachedExtractionResponseMetadata;
   readonly transport_provenance?: ExtractionTransportProvenance;
 }
@@ -102,12 +105,7 @@ export function inspectCachedExtraction(
 ): CachedExtractionInspection {
   const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile, observer);
   if (cached.status !== "hit") return cached;
-  return inspectCachedContent(
-    cached.entry.raw_json,
-    cached.entry.response_metadata,
-    cached.entry.transport_provenance !== undefined,
-    cached.entry.empty_classification
-  );
+  return inspectCachedExtractionContent(cached.entry);
 }
 
 export function inspectCachedRawExtraction(
@@ -128,7 +126,8 @@ export function inspectCachedRawExtraction(
     const classification = resolveStoredEmptyClassification(
       envelope.rawSignalCount,
       cached.entry.transport_provenance !== undefined,
-      cached.entry.empty_classification
+      cached.entry.empty_classification,
+      cached.entry.request_completion
     );
     if (!extractionEnvelopeCountsTowardCoverage(classification)) {
       return {
@@ -197,19 +196,21 @@ export function writeCachedExtraction(
   });
 }
 
-function inspectCachedContent(
-  rawJson: string,
-  responseMetadata: CachedExtractionResponseMetadata | undefined,
-  providerBacked: boolean,
-  storedClassification: ExtractionEmptyClassification | undefined
+export function inspectCachedExtractionContent(
+  entry: Pick<CachedExtractionEntry, "raw_json" | "response_metadata" |
+    "transport_provenance" | "empty_classification" | "request_completion">
 ): CachedExtractionInspection {
+  const { raw_json: rawJson, response_metadata: responseMetadata,
+    empty_classification: storedClassification, request_completion: requestCompletion } = entry;
+  const providerBacked = entry.transport_provenance !== undefined;
   const rawJsonSha256 = computeExtractionRawJsonSha256(rawJson);
   try {
     const envelope = inspectExtractionRawJson(rawJson);
     const classification = resolveStoredEmptyClassification(
       envelope.rawSignalCount,
       providerBacked,
-      storedClassification
+      storedClassification,
+      requestCompletion
     );
     if (!extractionEnvelopeCountsTowardCoverage(classification)) {
       return {
@@ -235,8 +236,25 @@ function inspectCachedContent(
 function resolveStoredEmptyClassification(
   rawSignalCount: number,
   providerBacked: boolean,
-  storedClassification: ExtractionEmptyClassification | undefined
+  storedClassification: ExtractionEmptyClassification | undefined,
+  requestCompletion: PersistedExtractionRequestCompletion | undefined
 ): ExtractionEmptyClassification {
+  if (requestCompletion !== undefined &&
+      (requestCompletion.version !== EXTRACTION_REQUEST_COMPLETION_VERSION ||
+       requestCompletion.status !== storedClassification || !providerBacked ||
+       (requestCompletion.status !== "completed_empty" && requestCompletion.status !== "completed_signals"))) {
+    throw new Error("stored request completion binding is invalid");
+  }
+  if (storedClassification === "completed_empty" &&
+      (!providerBacked || requestCompletion?.status !== "completed_empty")) {
+    throw new Error("completed empty lacks provider-backed request completion");
+  }
+  if ((storedClassification === "completed_signals" && rawSignalCount === 0) ||
+      (storedClassification === "completed_empty" && rawSignalCount !== 0) ||
+      (storedClassification === "deterministic_empty" && (rawSignalCount !== 0 || providerBacked))) {
+    throw new Error("stored extraction classification contradicts its response");
+  }
+  if (storedClassification === undefined && rawSignalCount === 0) return "unclassified_empty";
   return storedClassification ?? classifyExtractionEnvelope({
     rawSignalCount,
     sourceAssertionCount: providerBacked && rawSignalCount === 0 ? 1 : 0,

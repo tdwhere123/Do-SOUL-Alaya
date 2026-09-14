@@ -4,6 +4,7 @@ import { classifyOfficialApiRequestResult } from "../../../garden/ingestion/offi
 import { officialApiExtractionResponseSchema } from "../../../garden/ingestion/official-api/response-schema.js";
 import { OfficialApiTemporalProjectionDraftSchema } from "../../../garden/extraction/temporal/projection-draft.js";
 import { z } from "zod";
+import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 
 const source = "I own a blue bicycle. I prefer coffee in the morning.";
 const request = buildOfficialApiExtractionRequest(source, []);
@@ -18,6 +19,13 @@ it("classifies a valid empty selection as completed even with source assertions"
   expect(classifyOfficialApiRequestResult('{"signals":[]}', request)).toEqual({
     status: "completed_empty", drafts: []
   });
+});
+
+it("binds completion to the provided source corpus even when no signal is selected", () => {
+  expect(classifyOfficialApiRequestResult('{"signals":[]}', request, buildOfficialApiSourceCorpus(source, [])).status)
+    .toBe("completed_empty");
+  expect(() => classifyOfficialApiRequestResult('{"signals":[]}', request, "I own a red bicycle."))
+    .toThrow("source corpus differs");
 });
 
 it("admits a grounded selective subset without requiring a semantic graph", () => {

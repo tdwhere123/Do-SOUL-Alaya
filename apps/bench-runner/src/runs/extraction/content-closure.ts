@@ -5,6 +5,7 @@ import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js"
 import {
   classifyExtractionEnvelope,
   extractionEnvelopeCountsTowardCoverage,
+  type ExtractionRequestCompletion,
   type ExtractionEmptyClassification
 } from "./empty-classification.js";
 
@@ -24,6 +25,7 @@ export type ExtractionRawEnvelopeInspection = Readonly<{
 export type ExtractionEnvelopeClassificationContext = Readonly<{
   readonly sourceAssertionCount: number;
   readonly planMembership: "in_plan" | "skipped";
+  readonly requestCompletion?: ExtractionRequestCompletion;
 }>;
 
 export interface ExtractionContentClosureEntry extends ExtractionRawJsonInspection {
@@ -103,7 +105,8 @@ function classifiedEnvelope(
     emptyClassification: classifyExtractionEnvelope({
       rawSignalCount,
       sourceAssertionCount: classificationContext.sourceAssertionCount,
-      planMembership: classificationContext.planMembership
+      planMembership: classificationContext.planMembership,
+      requestCompletion: classificationContext.requestCompletion
     })
   };
 }
@@ -119,7 +122,8 @@ export function assertCoverageValidExtractionEnvelope(
       : classifyExtractionEnvelope({
         rawSignalCount: inspection.rawSignalCount,
         sourceAssertionCount: classificationContext.sourceAssertionCount,
-        planMembership: classificationContext.planMembership
+        planMembership: classificationContext.planMembership,
+        requestCompletion: classificationContext.requestCompletion
       })
   );
   if (emptyClassification === undefined) {

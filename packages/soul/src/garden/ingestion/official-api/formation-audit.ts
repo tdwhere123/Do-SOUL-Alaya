@@ -26,7 +26,7 @@ import { inspectOfficialApiSemanticFactorGraphProjection } from
   "./semantic-factor-projection.js";
 
 // invariant: cache-compatibility decisions pin formation behavior independently of raw JSON.
-export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v10";
+export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v11";
 
 export type OfficialApiSignalAuditDisposition = "admitted" | "deferred" | "rejected" | "invalid";
 
