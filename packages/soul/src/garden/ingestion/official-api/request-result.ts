@@ -3,6 +3,7 @@ import {
   type OfficialApiSignalDraft,
   type OfficialApiSignalParseOptions
 } from "../official-api-signal-parser.js";
+import type { OfficialApiInterpretationEntryRejection } from "./source-interpretation-receive.js";
 import {
   computeOfficialApiSourceCorpusIdentity,
   type OfficialApiExtractionRequest
@@ -17,8 +18,8 @@ import {
   type SourceBoundF3Capability
 } from "../../extraction/semantic-factors/source-bound-seal.js";
 
-export const OFFICIAL_API_REQUEST_RECEIVE_CONTRACT_VERSION = 1 as const;
-export const OFFICIAL_API_REQUEST_RECEIVE_PRODUCER =
+const OFFICIAL_API_REQUEST_RECEIVE_CONTRACT_VERSION = 1 as const;
+const OFFICIAL_API_REQUEST_RECEIVE_PRODUCER =
   "official-api-request-receive-v1" as const;
 export const OFFICIAL_API_GARDEN_COMPILE_CONTRACT_VERSION = 1 as const;
 export const OFFICIAL_API_GARDEN_COMPILE_PRODUCER =
@@ -30,13 +31,16 @@ export type OfficialApiCatalogEligibility =
   | "eligible_assertions_present"
   | "catalog_produced_no_eligible_assertion";
 
-export type OfficialApiRequestReceiveStatus = "complete" | "partial";
+type OfficialApiRequestReceiveStatus = "complete" | "partial";
 
-export type OfficialApiRequestEntryRejectionReason =
+type OfficialApiRequestEntryRejectionReason =
   | "locator_outside_batch"
   | "source_grounding_rejected"
   | "source_generation_mismatch"
-  | "source_assertion_mismatch";
+  | "source_assertion_mismatch"
+  | "malformed_response"
+  | "missing_response"
+  | "transport_unknown";
 
 export interface OfficialApiRequestEntryRejection {
   readonly index: number;
@@ -64,7 +68,7 @@ export interface OfficialApiGardenCompileReceipt {
   readonly producer: typeof OFFICIAL_API_GARDEN_COMPILE_PRODUCER;
   readonly status: "partial";
   readonly drafts: readonly OfficialApiSignalDraft[];
-  readonly rejections: readonly OfficialApiRequestEntryRejection[];
+  readonly rejections: readonly (OfficialApiRequestEntryRejection | OfficialApiInterpretationEntryRejection)[];
   readonly pending_batches: readonly OfficialApiGardenCompilePendingBatch[];
   readonly catalog: Pick<
     SourceAssertionCatalogPage,
@@ -167,7 +171,7 @@ export function parseOfficialApiRequestSignals(
 
 export function createOfficialApiGardenCompileReceipt(input: {
   readonly drafts: readonly OfficialApiSignalDraft[];
-  readonly rejections: readonly OfficialApiRequestEntryRejection[];
+  readonly rejections: OfficialApiGardenCompileReceipt["rejections"];
   readonly pending: readonly OfficialApiExtractionRequest[];
   readonly catalog: Pick<
     SourceAssertionCatalogPage,

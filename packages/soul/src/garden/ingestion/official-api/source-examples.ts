@@ -1,4 +1,3 @@
-import { IDENTITY_OBSERVATION_PRODUCER } from "@do-soul/alaya-protocol";
 import { buildOfficialApiExtractionRequest, computeOfficialApiSourceCorpusIdentity } from "./extraction-request.js";
 import { buildOfficialApiSourceCorpus, OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION } from "../../triage/grounding/source-locator.js";
 
@@ -6,17 +5,19 @@ function exampleSourceCorpusIdentity(source: string): string {
   return computeOfficialApiSourceCorpusIdentity(buildOfficialApiSourceCorpus(source, []));
 }
 
-function identityObservation(
-  mentions: readonly string[],
-  unresolved: readonly string[] = []
+function phrase(text: string, occurrence?: number) {
+  return occurrence === undefined ? { text } : { text, occurrence };
+}
+
+function relation(
+  predicate: string,
+  arguments_: readonly { readonly role: string; readonly text: string; readonly occurrence?: number }[],
+  qualifiers: readonly { readonly role: string; readonly text: string; readonly occurrence?: number }[] = []
 ) {
   return {
-    contract_version: 1 as const,
-    producer: IDENTITY_OBSERVATION_PRODUCER,
-    mentions: mentions.map((surface) => ({ surface })),
-    ...(unresolved.length === 0 ? {} : {
-      unresolved_spans: unresolved.map((surface) => ({ surface }))
-    })
+    predicate: { text: predicate },
+    arguments: arguments_.map((item) => ({ role: item.role, phrase: phrase(item.text, item.occurrence) })),
+    qualifiers: qualifiers.map((item) => ({ role: item.role, phrase: phrase(item.text, item.occurrence) }))
   };
 }
 
@@ -40,27 +41,22 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
       ]
     },
     "output": {
-      "signals": [
+      "interpretations": [
         {
-          "object_kind": "episode",
-          "confidence": 1,
-          "matched_text": "In 2020, I opened a workshop and promised to lend tools.",
-          "source_locator": {
-            "contract_version": OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
-            "kind": "assertion_catalog",
-            "assertion_id": 1
-          },
-          "canonical_entities": ["workshop", "tools"],
-          "identity_observation": identityObservation([
-            "I", "opened", "a workshop", "2020", "promised", "to lend tools"
-          ]),
-          "temporal_projection": {
-            "projection_schema_version": 1,
-            "time_precision": "year",
-            "time_source": "explicit",
-            "event_time_start": "2020-01-01T00:00:00.000Z",
-            "event_time_end": "2020-12-31T23:59:59.999Z"
-          }
+          "assertion_id": 1,
+          "relations": [
+            relation(
+              "opened",
+              [
+                { role: "agent", text: "I", occurrence: 1 },
+                { role: "theme", text: "a workshop" }
+              ],
+              [
+                { role: "event_time", text: "2020" },
+                { role: "accompanying_content", text: "promised to lend tools" }
+              ]
+            )
+          ]
         }
       ]
     }
@@ -83,21 +79,22 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
       ]
     },
     "output": {
-      "signals": [
+      "interpretations": [
         {
-          "object_kind": "open_semantic_observation",
-          "confidence": 1,
-          "matched_text": "I can borrow tools in the workshop only on Saturdays.",
-          "source_locator": {
-            "contract_version": OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
-            "kind": "assertion_catalog",
-            "assertion_id": 1
-          },
-          "canonical_entities": ["workshop", "tools"],
-          "identity_observation": identityObservation(
-            ["I", "can", "borrow", "tools", "in the workshop"],
-            ["only on Saturdays"]
-          )
+          "assertion_id": 1,
+          "relations": [
+            relation(
+              "borrow",
+              [
+                { role: "agent", text: "I" },
+                { role: "theme", text: "tools" }
+              ],
+              [
+                { role: "location", text: "in the workshop" },
+                { role: "condition", text: "only on Saturdays" }
+              ]
+            )
+          ]
         }
       ]
     }
@@ -107,30 +104,24 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
       "The exhibit opened in 2019 with the aim of helping visitors learn ceramics.", []
     ),
     "output": {
-      "signals": [
+      "interpretations": [
         {
-          "object_kind": "episode",
-          "confidence": 1,
-          "matched_text": "The exhibit opened in 2019 with the aim of helping visitors learn ceramics.",
-          "source_locator": {
-            "contract_version": OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
-            "kind": "assertion_catalog",
-            "assertion_id": 1
-          },
-          "canonical_entities": ["exhibit", "ceramics"],
-          "identity_observation": identityObservation([
-            "The exhibit",
-            "opened",
-            "2019",
-            "with the aim of helping visitors learn ceramics"
-          ]),
-          "temporal_projection": {
-            "projection_schema_version": 1,
-            "time_precision": "year",
-            "time_source": "explicit",
-            "event_time_start": "2019-01-01T00:00:00.000Z",
-            "event_time_end": "2019-12-31T23:59:59.999Z"
-          }
+          "assertion_id": 1,
+          "relations": [
+            relation(
+              "opened",
+              [
+                { role: "theme", text: "The exhibit" }
+              ],
+              [
+                { role: "event_time", text: "2019" },
+                {
+                  role: "accompanying_content",
+                  text: "with the aim of helping visitors learn ceramics"
+                }
+              ]
+            )
+          ]
         }
       ]
     }

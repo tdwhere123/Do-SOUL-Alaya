@@ -48,7 +48,7 @@ import { assertSnapshotSeedLedgerBinding } from
 import { assertSnapshotDatasetSubstrateIdentity } from "../../../runs/snapshot/substrate-binding.js";
 import {
   CREDENTIALLED_CONFIG,
-  signalsEnvelope
+  interpretationsEnvelope
 } from "../compile-seed/compile-seed-fixture.js";
 import {
   providerBackedExtractionResult,
@@ -82,6 +82,31 @@ afterAll(async () => {
 }, AUTHORITY_HOOK_TIMEOUT_MS);
 
 describe("source evidence snapshot authority", () => {
+  it.each([
+    ["root", "$.source_target.root_id", "wrong-root"],
+    ["digest", "$.source_target.content_digest", `sha256:${"0".repeat(64)}`],
+    ["candidate", "$.candidates[0].predicate.text", "invented predicate"],
+    ["span", "$.assertion_binding.source_span[0]", 999]
+  ])("rejects a current observation with a changed %s", (_label, path, value) => {
+    expect(() => verifyCopy((db) => {
+      db.prepare("UPDATE evidence_capsules SET gist = json_set(gist, ?, ?) WHERE json_valid(gist) AND json_extract(gist, '$.contract') = 'source-interpretation-v1'")
+        .run(path, value);
+    })).toThrow();
+  });
+
+  it("rejects a source body changed after current publication", () => {
+    expect(() => verifyCopy((db) => {
+      db.prepare("UPDATE source_records SET source_body = source_body || ' altered' WHERE source_id LIKE 'compile-seed:%'").run();
+    })).toThrow();
+  });
+
+  it("rejects a current observation attached to a different canonical round", () => {
+    expect(() => verifyCopy((db) => {
+      db.prepare("UPDATE signals SET source_observation_json = json_set(source_observation_json, '$.source_event_id', ?) WHERE interpretation_contract = 'source-interpretation-v1'")
+        .run(`${fixture.question.question_id}-s0-r999`);
+    })).toThrow();
+  });
+
   it("accepts a receipt-bound direct evidence snapshot", () => {
     expect(() => verifyCopy()).not.toThrow();
   });
@@ -368,9 +393,9 @@ async function seedFixture(
       extract: async ({ userPrompt }) => {
         const request = parseOfficialApiExtractionRequest(JSON.parse(userPrompt));
         const assertion = request.source_assertions.find((item) => item.text.includes("I check the platform near the main entrance."));
-        return providerBackedExtractionResult(signalsEnvelope(assertion === undefined ? [] : [{
+        return providerBackedExtractionResult(interpretationsEnvelope(assertion === undefined ? [] : [{
           matched: "I check the platform near the main entrance.",
-          distilled: "The user checks the platform near the main entrance.", assertionId: assertion.assertion_id
+          assertionId: assertion.assertion_id
         }]));
       }
     })

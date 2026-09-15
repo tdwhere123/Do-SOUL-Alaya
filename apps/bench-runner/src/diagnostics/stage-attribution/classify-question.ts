@@ -39,6 +39,9 @@ export function classifyQuestionStage(
   if (question.hit_at_5) {
     stage = "delivered_top5";
     proof = "hit_at_5";
+  } else if (taxonomy === "conditional_field_unattributed") {
+    stage = "unattributed";
+    proof = "conditional_field_miss_without_stage_evidence";
   } else if (
     emptyGold ||
     extractionDrop ||

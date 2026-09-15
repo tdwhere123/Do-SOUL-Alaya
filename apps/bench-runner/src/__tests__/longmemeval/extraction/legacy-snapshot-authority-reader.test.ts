@@ -86,7 +86,7 @@ async function fixture(options: Readonly<{
     matched_text: options.matchedText ??
       request.source_assertions[0]!.text.replace(/^(?:User|Assistant): /u, ""),
     source_locator: {
-      contract_version: 3,
+      contract_version: 4,
       kind: "assertion_catalog",
       assertion_id: request.source_assertions[0]!.assertion_id
     }

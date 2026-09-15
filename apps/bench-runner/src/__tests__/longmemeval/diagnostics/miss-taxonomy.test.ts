@@ -49,7 +49,8 @@ describe("LongMemEval recall diagnostics (legacy/order/pool)", () => {
       "budget_drop",
       "delivery_order_drop",
       "answer_set_coverage_drop",
-      "evaluation_or_gold_issue"
+      "evaluation_or_gold_issue",
+      "conditional_field_unattributed"
     ]);
     const materializationDrop = buildQuestionDiagnostic({
       questionId: "q-materialization-drop",

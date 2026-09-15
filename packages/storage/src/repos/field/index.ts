@@ -44,6 +44,7 @@ export {
   type SourceRootPageInput,
   type SourceRootRow
 } from "./bounded-source-root-reader.js";
+export { SqliteSourceHintReader } from "./source-hint-reader.js";
 export {
   SqliteFieldCausalUsageRepo,
   SqliteFieldProofEffectRepo

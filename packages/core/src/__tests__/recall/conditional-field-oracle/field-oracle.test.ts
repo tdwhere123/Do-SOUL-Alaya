@@ -38,11 +38,11 @@ import {
   yesterdayAnchorGuard
 } from "./finite-worlds.js";
 import {
-  compareObjectMilligrades,
-  compareProducerField,
-  plantBoundSlice
+  compareObjectMilligrades
 } from "./frozen-ports.js";
-import { openBoundSlice } from "./bound-producer.js";
+import { openBoundSlice, plantDeployment, produceField, enumeratedFromField } from "./bound-producer.js";
+import { observeField } from "../../../recall/runtime/conditional-field-observe.js";
+import { observationSettled } from "../../../recall/runtime/index-continuation.js";
 import {
   admitRequestBudget,
   milligradeOf,
@@ -150,8 +150,13 @@ describe("conditional-field independent field oracle", () => {
     expect(milligradeOf(cyclic, "b")).toBe(900);
     expect(milligradeOf(cyclic, "c")).toBe(800);
     const slice = await openBoundSlice((database) => databases.add(database));
-    const ports = await plantBoundSlice(slice);
-    const producer = compareProducerField(ports, world, defaultBudget(), DEPLOYMENT_MILLIGRADES);
+    await plantDeployment(slice);
+    const initial = produceField(slice);
+    let producedField = initial.field;
+    for (let attempt = 0; attempt < 40 && !observationSettled(producedField); attempt += 1) {
+      producedField = observeField(initial.interpretation, { ...initial.observeInput, resume_field: producedField });
+    }
+    const producer = compareObjectMilligrades(enumeratedFromField(producedField), DEPLOYMENT_MILLIGRADES);
     expect(producer.skipped_environments).toBe(0);
     expect(producer.mismatches).toBe(0);
   });

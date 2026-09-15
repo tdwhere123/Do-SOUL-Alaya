@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { OfficialApiGardenProvider } from "../../../garden/ingestion/compute-provider.js";
-import { buildMemoryInput } from "../../../garden/materialization/materialization-router/inputs.js";
 import { inspectObservedTemporalProjection } from "../../../garden/extraction/temporal/observed-projection.js";
 import {
   createContext,
-  createOpenSemanticExtractor,
-  withOpenSemanticFactorGraph
+  createExtractor,
+  interpretationEnvelope,
+  interpretationRelation
 } from "./compute-provider-fixtures.js";
 
 describe("official Garden dual-time observation", () => {
@@ -13,23 +13,9 @@ describe("official Garden dual-time observation", () => {
     const source = "The policy was announced on January 1, 2024 and became effective on February 1, 2024.";
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createOpenSemanticExtractor(JSON.stringify({
-        signals: [withOpenSemanticFactorGraph({
-          signal_kind: "potential_claim",
-          object_kind: "constraint",
-          confidence: 0.9,
-          matched_text: source,
-          distilled_fact: "The policy became effective after it was announced.",
-          temporal_projection: {
-            projection_schema_version: 1,
-            event_time_start: "2024-01-01",
-            event_time_end: "2024-01-01",
-            valid_from: "2024-02-01",
-            time_precision: "day",
-            time_source: "explicit"
-          }
-        })]
-      })),
+      extractor: createExtractor(interpretationEnvelope([
+        interpretationRelation("announced", [], [{ role: "event_time", text: "January 1, 2024" }])
+      ])),
       generateSignalId: () => "signal-unequal-dual-time"
     });
 
@@ -38,20 +24,12 @@ describe("official Garden dual-time observation", () => {
       turn_messages: [],
       allow_legacy_single_user_source: true
     });
-    expect(signal?.raw_payload.temporal_projection_audit).toEqual({
-      status: "formed",
-      reason: "dual_time_source_verified"
-    });
-    expect(signal?.raw_payload.temporal_projection).toMatchObject({
-      event_time_start: "2024-01-01T00:00:00.000Z",
-      event_time_end: "2024-01-01T23:59:59.999Z",
-      valid_from: "2024-02-01T00:00:00.000Z"
-    });
-    expect(buildMemoryInput(signal!, ["evidence-1"])).toMatchObject({
-      event_time_start: "2024-01-01T00:00:00.000Z",
-      event_time_end: "2024-01-01T23:59:59.999Z",
-      valid_from: "2024-02-01T00:00:00.000Z"
-    });
+    expect(signal?.interpretation_contract).toBe("source-interpretation-v1");
+    expect(signal?.object_kind).toBeNull();
+    expect(signal?.raw_payload).not.toHaveProperty("temporal_projection");
+    if (signal?.interpretation_contract !== "source-interpretation-v1") throw new Error("expected interpretation signal");
+    expect(signal.raw_payload.source_interpretation.candidates[0]?.qualifiers[0]?.phrase.text)
+      .toBe("January 1, 2024");
   });
 
   it("does not assign a validity cue to the neighboring event date", () => {

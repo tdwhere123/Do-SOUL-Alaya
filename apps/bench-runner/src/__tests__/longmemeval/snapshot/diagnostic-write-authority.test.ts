@@ -59,7 +59,7 @@ describe("diagnostic snapshot write authority", () => {
           fill_status: "in_progress"
         }
       }
-    })).toThrow(/complete v3 fill summary/u);
+    })).toThrow(/complete v3 or v4 fill summary/u);
 
     expect(() => assertCurrentSnapshotWriteAuthority({
       ...diagnostic,

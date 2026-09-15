@@ -235,9 +235,9 @@ export function hasInvalidSchemaGrounding(
 }
 
 export function evaluateSignalTriage(signal: CandidateMemorySignal): SignalTriageResult {
-  // The source-observation admission writer must replace this deferral when
-  // connected; a format discriminator never grants the old scored route.
-  if (signal.interpretation_contract !== undefined) return "deferred";
+  // Interpretation signals use Core source-observation admission, not the
+  // scored kind/confidence route. A format discriminator never grants that route.
+  if (signal.interpretation_contract !== undefined) return "accepted";
   if (hasInvalidSchemaGrounding(signal)) return "deferred";
   if (signal.confidence < 0.3 && signal.signal_kind === "potential_conflict") return "deferred";
   // Signals below this evidence/confidence floor stay out of the durable path;

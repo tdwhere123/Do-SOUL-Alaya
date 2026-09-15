@@ -1,24 +1,11 @@
 import { z } from "zod";
-import { IdentityObservationSchema } from "@do-soul/alaya-protocol";
-import { OfficialApiSourceLocatorSchema } from "../../triage/grounding/source-locator.js";
-import { OFFICIAL_API_SIGNAL_LIMIT } from "../official-api-signal-parser.js";
-import { OFFICIAL_API_OBJECT_KINDS } from "./object-kind-contract.js";
+import { SourceInterpretationResponseSchema } from "@do-soul/alaya-protocol";
 import { parseOfficialApiExtractionRequest } from "./extraction-request.js";
-import { OfficialApiTemporalProjectionDraftSchema } from "../../extraction/temporal/projection-draft.js";
 
-// This constrains generation, not admission: older/raw proposals still pass
-// through the shared parser and grounding owners, including graph rejection.
-// Additional signal fields preserve the independent optional projections.
-const responseSchema = z.toJSONSchema(z.object({
-  signals: z.array(z.looseObject({
-    object_kind: z.enum(OFFICIAL_API_OBJECT_KINDS),
-    confidence: z.number().min(0).max(1),
-    matched_text: z.string(),
-    source_locator: OfficialApiSourceLocatorSchema,
-    identity_observation: IdentityObservationSchema,
-    temporal_projection: OfficialApiTemporalProjectionDraftSchema.optional()
-  })).max(OFFICIAL_API_SIGNAL_LIMIT)
-}).strict(), {
+// This constrains generation, not admission: historical raw still uses its
+// recorded signals envelope and parser. Live ordinary extraction asks for
+// source-interpretation-v1 only.
+const responseSchema = z.toJSONSchema(SourceInterpretationResponseSchema, {
   io: "input",
   override: ({ jsonSchema }) => {
     // Singleton enums express literals even on providers that ignore `const`.

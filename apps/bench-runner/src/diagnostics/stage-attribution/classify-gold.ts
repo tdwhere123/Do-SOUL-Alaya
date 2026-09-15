@@ -4,6 +4,7 @@ import type {
 } from "../schema/diagnostics-types.js";
 import { isDeliveryAdmissionLoss } from "../schema/diagnostics-private.js";
 import { readGoldObjectIds } from "../gold-object-identities.js";
+import { readQuestionMissTaxonomy } from "../miss/diagnostics-miss-taxonomy.js";
 import { goldPoolRank, hasCoverageOrBudgetSignal } from "./pool-rank.js";
 import {
   classifyHonestHigherRObj,
@@ -34,6 +35,10 @@ export function classifyGoldObjectStage(input: {
   if (finalRank !== null && finalRank <= 5) {
     stage = "delivered_top5";
     proof = "final_rank<=5";
+  } else if (taxonomy === "conditional_field_unattributed" ||
+      (taxonomy == null && readQuestionMissTaxonomy(question) === "conditional_field_unattributed")) {
+    stage = "unattributed";
+    proof = "conditional_field_miss_without_stage_evidence";
   } else if (
     taxonomy === "materialization_drop" ||
     isExtractionDrop(question) ||

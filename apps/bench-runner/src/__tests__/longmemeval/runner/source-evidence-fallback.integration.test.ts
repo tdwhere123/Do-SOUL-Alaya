@@ -1,8 +1,9 @@
+import { installHistoricalSignalReplay } from "../../harness/seeding/historical-signal-replay-fixture.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   startBenchDaemon,
@@ -30,6 +31,7 @@ let daemon: BenchDaemonHandle | undefined;
 let root: string | undefined;
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await daemon?.shutdown().catch(() => undefined);
   daemon = undefined;
   if (root !== undefined) await rm(root, { recursive: true, force: true });
@@ -56,7 +58,7 @@ describe("LongMemEval source evidence fallback integration", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult("{\"signals\":[]}")
+        extract: async () => providerBackedExtractionResult("{\"interpretations\":[]}")
       })
     });
 
@@ -175,12 +177,7 @@ describe("LongMemEval source evidence fallback integration", () => {
       workspaceId: "unroutable-evidence-workspace",
       runId: "unroutable-evidence-run"
     });
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult(JSON.stringify({
+    installHistoricalSignalReplay(JSON.stringify({
             signals: [withOpenSemanticFactorGraph({
               signal_kind: "potential_claim",
               object_kind: "unroutable_observation",
@@ -188,12 +185,18 @@ describe("LongMemEval source evidence fallback integration", () => {
               matched_text: "I take the 7:15 train.",
               distilled_fact: "The user takes the 7:15 train.",
               source_locator: {
-                contract_version: 3,
+                contract_version: 4,
                 kind: "assertion_catalog",
                 assertion_id: 1
               }
             })]
-          }))
+          }));
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      allowLiveExtraction: true,
+      extractorFactory: () => ({
+        extract: async () => { throw new Error("historical replay must not call the live extractor"); }
       })
     });
 
@@ -262,12 +265,7 @@ describe("LongMemEval source evidence fallback integration", () => {
       workspaceId: "no-created-evidence-workspace",
       runId: "no-created-evidence-run"
     });
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult(JSON.stringify({
+    installHistoricalSignalReplay(JSON.stringify({
             signals: [withOpenSemanticFactorGraph({
               signal_kind: "potential_claim",
               object_kind: "unroutable_observation",
@@ -275,12 +273,18 @@ describe("LongMemEval source evidence fallback integration", () => {
               matched_text: "I take the 7:15 train.",
               distilled_fact: "The user takes the 7:15 train.",
               source_locator: {
-                contract_version: 3,
+                contract_version: 4,
                 kind: "assertion_catalog",
                 assertion_id: 1
               }
             })]
-          }))
+          }));
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      allowLiveExtraction: true,
+      extractorFactory: () => ({
+        extract: async () => { throw new Error("historical replay must not call the live extractor"); }
       })
     });
 

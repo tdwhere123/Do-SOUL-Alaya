@@ -1,5 +1,7 @@
 import { sourceRecallTarget, type TypedObservation } from "@do-soul/alaya-protocol";
 import { buildTypedObservation, sourceRootEligible } from "./observation-admission.js";
+import { sourceHintSketch, takeSourceHintPage } from "./source-hint-observe.js";
+import type { ProposalMatchReason } from "./source-proposal-match.js";
 import { scanSourceLiterals } from "./source-literal-stream.js";
 import {
   DEFAULT_SOURCE_BYTE_LIMIT,
@@ -40,15 +42,53 @@ export function observeSourceAwareSeed(
   let resourceLimited = false;
   let sourceCommitted = cursor.source;
   let memoryCommitted = cursor.memory;
-  const share = seedFamilyShare(input, wantMemory, cursor.sourcesDone);
+  let hintCommitted = cursor.hint;
+  const sketch = sourceHintSketch(input);
+  let hintsDone = sketch === undefined || cursor.hintsDone || cursor.sourcesDone;
+  const available = [
+    ...(!hintsDone ? ["hint"] : []),
+    ...(!cursor.sourcesDone ? ["source"] : []),
+    ...(wantMemory && input.seed_query !== undefined && input.readers.lexical !== undefined ? ["memory"] : [])
+  ];
+  const laneTurn = cursor.laneTurn ?? 0;
+  const lane = available[laneTurn % Math.max(1, available.length)];
+  const limit = pageLimit(input);
+  const share = { memoryWork: lane === "memory" ? input.action.work_limit : 0,
+    memoryLimit: lane === "memory" ? limit : 0 };
+  const lanes = { hintWork: lane === "hint" ? input.action.work_limit : 0,
+    hintLimit: lane === "hint" ? limit : 0,
+    sourceWork: lane === "source" ? input.action.work_limit : 0,
+    sourceLimit: lane === "source" ? limit : 0 };
+  let exhaustiveWork = lanes.sourceWork;
+  let exhaustiveLimit = lanes.sourceLimit;
+  let pagedHints = false;
+  const lookupReasons: ProposalMatchReason[] = [];
+  if (sketch !== undefined && !hintsDone && lanes.hintWork > 0) {
+    pagedHints = true;
+    const hinted = takeSourceHintPage(input, sketch, lanes.hintLimit, lanes.hintWork, hintCommitted);
+    observations.push(...hinted.observations);
+    sourceRows.push(...hinted.rows);
+    lookupReasons.push(...hinted.reasons);
+    workUnits += hinted.workUnits;
+    bytes += hinted.bytes;
+    truncated = hinted.truncated;
+    hintCommitted = hinted.hintCommitted;
+    hintsDone = hinted.hintsDone || hinted.hydrationUnavailable;
+    if (hinted.resourceLimited) resourceLimited = true;
+    if (hintsDone) {
+      exhaustiveWork += Math.max(0, lanes.hintWork - hinted.workUnits);
+      exhaustiveLimit += Math.max(0, lanes.hintLimit - hinted.observations.length);
+    }
+  }
   let pagedSources = false;
-  if (!cursor.sourcesDone && share.sourceLimit > 0 && share.sourceWork > 0) {
+  if (!cursor.sourcesDone && exhaustiveLimit > 0 && exhaustiveWork > 0) {
     const sourced = takeSourcePage(
-      input, sourceRoots, share.sourceLimit, share.sourceWork, sourceCommitted, cursor.source
+      input, sourceRoots, exhaustiveLimit, exhaustiveWork, sourceCommitted, cursor.source
     );
     pagedSources = true;
-    observations.push(...sourced.observations);
-    sourceRows.push(...sourced.rows);
+    const seen = new Set(observations.map((row) => row.object_id));
+    observations.push(...sourced.observations.filter((row) => !seen.has(row.object_id)));
+    sourceRows.push(...sourced.rows.filter((row) => !seen.has(row.root_id)));
     workUnits += sourced.workUnits;
     bytes += sourced.bytes;
     sourcesTruncated = sourced.sourcesTruncated;
@@ -74,13 +114,14 @@ export function observeSourceAwareSeed(
       if (taken.resourceLimited) resourceLimited = true;
     }
   }
-  if (!cursor.sourcesDone && !pagedSources && memoryIdle) {
+  if (!cursor.sourcesDone && !pagedSources && memoryIdle && !pagedHints) {
     const sourced = takeSourcePage(
       input, sourceRoots, pageLimit(input), Math.max(0, input.action.work_limit - workUnits), sourceCommitted, cursor.source
     );
     pagedSources = true;
-    observations.push(...sourced.observations);
-    sourceRows.push(...sourced.rows);
+    const seen = new Set(observations.map((row) => row.object_id));
+    observations.push(...sourced.observations.filter((row) => !seen.has(row.object_id)));
+    sourceRows.push(...sourced.rows.filter((row) => !seen.has(row.root_id)));
     workUnits += sourced.workUnits;
     bytes += sourced.bytes;
     sourcesTruncated = sourced.sourcesTruncated;
@@ -93,10 +134,15 @@ export function observeSourceAwareSeed(
     truncated = true;
   }
   const sourcesDone = cursor.sourcesDone || (pagedSources && !sourcesTruncated);
+  if (wantMemory && share.memoryWork === 0) truncated = true;
   const committed = encodeSeedCursor({
     source: sourceCommitted,
     memory: memoryCommitted,
-    sourcesDone
+    sourcesDone,
+    hint: hintCommitted,
+    hintsDone,
+    persistHint: sketch !== undefined || wantMemory,
+    laneTurn: laneTurn + 1
   });
   const cursorOut = committed === null
     ? input.cursor
@@ -114,7 +160,8 @@ export function observeSourceAwareSeed(
         ? { status: "interrupted" as const }
         : {}),
     work: workReceipt(workUnits, workUnits, bytes, truncated || hydrationUnavailable || resourceLimited)
-  }), source_roots: sourceRows };
+  }), source_roots: sourceRows,
+  ...(lookupReasons.length === 0 ? {} : { lookup_reasons: lookupReasons }) };
 }
 
 function takeSourcePage(
@@ -254,50 +301,16 @@ function takeLexicalPage(
   };
 }
 
-function seedFamilyShare(
-  input: ObserveConditionalFieldInput,
-  wantMemory: boolean,
-  sourcesDone: boolean
-): Readonly<{
-  readonly sourceLimit: number;
-  readonly sourceWork: number;
-  readonly memoryLimit: number;
-  readonly memoryWork: number;
-}> {
-  const limit = pageLimit(input);
-  const work = input.action.work_limit;
-  if (!wantMemory) {
-    return { sourceLimit: limit, sourceWork: work, memoryLimit: 0, memoryWork: 0 };
-  }
-  if (sourcesDone) {
-    return { sourceLimit: 0, sourceWork: 0, memoryLimit: Math.max(1, limit), memoryWork: work };
-  }
-  const hasLexical = input.seed_query !== undefined && input.readers.lexical !== undefined;
-  if (!hasLexical) {
-    return { sourceLimit: limit, sourceWork: work, memoryLimit: 0, memoryWork: 0 };
-  }
-  const hydrateReserve = input.readers.source === undefined ? 0 : SOURCE_IDENTITY_HYDRATE_RESERVE;
-  const memoryNeed = 1 + hydrateReserve;
-  const memoryWork = Math.min(work, Math.max(memoryNeed, Math.floor(work / 2)));
-  const sourceWork = Math.max(0, work - memoryWork);
-  const memoryLimit = hydrateReserve === 0
-    ? Math.max(1, limit - Math.max(1, Math.floor(limit / 2)))
-    : Math.max(1, Math.min(limit, memoryWork - hydrateReserve));
-  return {
-    sourceLimit: sourceWork === 0 ? 0 : Math.max(1, Math.floor(limit / 2)),
-    sourceWork,
-    memoryLimit,
-    memoryWork
-  };
-}
-
 function parseSeedCursor(committed: string | null): Readonly<{
+  readonly laneTurn?: number;
   readonly source: string | null;
   readonly memory: string | null;
   readonly sourcesDone: boolean;
+  readonly hint: string | null;
+  readonly hintsDone: boolean;
 }> {
   if (committed === null || committed === "") {
-    return { source: null, memory: null, sourcesDone: false };
+    return { source: null, memory: null, sourcesDone: false, hint: null, hintsDone: false };
   }
   if (committed.startsWith("s:")) return parseBundledSeedCursor(committed.slice(2));
   // `f:` is dual-family source progress; treating it as a memory id would skip remaining roots.
@@ -307,41 +320,61 @@ function parseSeedCursor(committed: string | null): Readonly<{
     || committed.startsWith("o:")
     || committed.startsWith("f:")
   ) {
-    return { source: committed, memory: null, sourcesDone: false };
+    return { source: committed, memory: null, sourcesDone: false, hint: null, hintsDone: false };
   }
   if (committed.startsWith("m:")) {
     const memory = committed.slice(2);
-    return { source: null, memory: memory === "" ? null : memory, sourcesDone: true };
+    return { source: null, memory: memory === "" ? null : memory, sourcesDone: true, hint: null, hintsDone: true };
   }
-  return { source: null, memory: committed, sourcesDone: true };
+  return { source: null, memory: committed, sourcesDone: true, hint: null, hintsDone: true };
 }
 
 function parseBundledSeedCursor(payload: string): Readonly<{
+  readonly laneTurn?: number;
   readonly source: string | null;
   readonly memory: string | null;
   readonly sourcesDone: boolean;
+  readonly hint: string | null;
+  readonly hintsDone: boolean;
 }> {
   try {
     const parsed: unknown = JSON.parse(payload);
     if (parsed === null || typeof parsed !== "object") {
-      return { source: null, memory: null, sourcesDone: false };
+      return { source: null, memory: null, sourcesDone: false, hint: null, hintsDone: true };
     }
     const record = parsed as Record<string, unknown>;
     return {
+      laneTurn: Number.isSafeInteger(record.laneTurn) && (record.laneTurn as number) >= 0 ? record.laneTurn as number : 0,
       source: typeof record.source === "string" && record.source.length > 0 ? record.source : null,
       memory: typeof record.memory === "string" && record.memory.length > 0 ? record.memory : null,
-      sourcesDone: record.sourcesDone === true
+      sourcesDone: record.sourcesDone === true,
+      hint: typeof record.hint === "string" && record.hint.length > 0 ? record.hint : null,
+      hintsDone: record.hintsDone === true
     };
   } catch {
-    return { source: null, memory: null, sourcesDone: false };
+    return { source: null, memory: null, sourcesDone: false, hint: null, hintsDone: true };
   }
 }
 
 function encodeSeedCursor(input: Readonly<{
+  readonly laneTurn: number;
   readonly source: string | null;
   readonly memory: string | null;
   readonly sourcesDone: boolean;
+  readonly hint: string | null;
+  readonly hintsDone: boolean;
+  readonly persistHint: boolean;
 }>): string | null {
+  if (input.persistHint) {
+    return `s:${JSON.stringify({
+      laneTurn: input.laneTurn,
+      source: input.source,
+      memory: input.memory,
+      sourcesDone: input.sourcesDone,
+      hint: input.hint,
+      hintsDone: input.hintsDone
+    })}`;
+  }
   if (!input.sourcesDone && (input.memory === null || input.memory === "")) {
     return input.source;
   }

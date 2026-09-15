@@ -29,9 +29,10 @@ afterEach(() => {
 });
 
 function signalResponse(request: string): string {
-  const unit = JSON.parse(request) as { text: string };
+  const unit = JSON.parse(request) as { source_assertions: { assertion_id: number; text: string }[] };
   return JSON.stringify({
-    signals: [{ object_kind: "decision", confidence: 0.8, matched_text: unit.text, distilled_fact: unit.text }]
+    interpretations: unit.source_assertions.map((assertion) => ({ assertion_id: assertion.assertion_id,
+      relations: [{ predicate: { text: assertion.text }, arguments: [], qualifiers: [] }] }))
   });
 }
 
@@ -136,6 +137,47 @@ async function runTask(
 }
 
 describe("per-source bulk_enrich routing", () => {
+  it("reuses immutable proposals across corpora and locates every current binding", async () => {
+    const { database, garden, eventPublisher, write } = await sourceHarness();
+    const execute = vi.fn(async (request: string) => signalResponse(request));
+    const runtime = createSourceEnrichmentRuntime({ connection: database.connection, gardenTaskRepo: garden,
+      eventPublisher, now: () => NOW, transport: { execute, reconcile: async () => ({ kind: "unknown" }) } });
+    const ids = ["aaaaaaaa-aaaa-4aaa-8aaa-000000000021", "aaaaaaaa-aaaa-4aaa-8aaa-000000000022",
+      "aaaaaaaa-aaaa-4aaa-8aaa-000000000023"];
+    const corpora = ["Preface. Alice owns Orion.", "Preface. Bob likes dogs. Alice owns Orion.", "Preface. Bob likes dogs. Alice owns Orion."];
+    const firstTask = await write(ids[0]!, corpora[0]!);
+    await runTask(descriptor(firstTask, ids[0]!), runtime);
+    const first = database.connection.prepare("SELECT * FROM garden_semantic_artifacts WHERE search_text=?").get("Alice owns Orion.") as {
+      artifact_key: string; raw_json: string; payload_json: string; request_json: string;
+    };
+    expect(JSON.parse(first.payload_json)).toEqual({ contract: "semantic-interpretation-proposal-v1",
+      relations: [{ predicate: { text: "Alice owns Orion." }, arguments: [], qualifiers: [] }] });
+    expect(JSON.parse(first.request_json).source_assertions[0].text).toBe("Alice owns Orion.");
+    for (let i = 1; i < ids.length; i++) {
+      const task = await write(ids[i]!, corpora[i]!);
+      await runTask(descriptor(task, ids[i]!), runtime);
+      await runTask(descriptor(task, ids[i]!), runtime);
+    }
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(database.connection.prepare("SELECT * FROM garden_semantic_artifacts WHERE artifact_key=?")
+      .get(first.artifact_key)).toEqual(first);
+    expect(count(database, "garden_semantic_artifacts")).toBe(2);
+    const bindings = database.connection.prepare("SELECT object_id,binding_json FROM garden_semantic_bindings WHERE artifact_key=? ORDER BY object_id")
+      .all(first.artifact_key) as { object_id: string; binding_json: string }[];
+    expect(bindings).toHaveLength(3);
+    const located = bindings.map((row, index) => {
+      const binding = JSON.parse(row.binding_json);
+      const interpretation = binding.interpretations[0];
+      const corpus = `User: ${corpora[index]}`;
+      const start = corpus.indexOf("Alice owns Orion.");
+      expect(interpretation.assertion_binding.source_span).toEqual([start, start + "Alice owns Orion.".length]);
+      expect(interpretation.source_corpus_digest).toBe(binding.sourceTextDigest);
+      return interpretation;
+    });
+    expect(new Set(located.map((item) => item.source_corpus_digest)).size).toBe(2);
+    expect(new Set(located.map((item) => item.assertion_binding.context_id)).size).toBe(2);
+  });
+
   it("does not claim enrich_pending when the task carries source enrichment identity", async () => {
     const claimBatch = vi.fn(() => []);
     const reportCompletion = vi.fn(async () => undefined);
@@ -233,12 +275,7 @@ describe("per-source bulk_enrich routing", () => {
     expect(pending).toBeDefined();
     expect(await garden.claimAtomic(pending!.id, "librarian-1", "2026-05-31T12:00:01.000Z", "workspace-1"))
       .toBe("claimed");
-    const execute = vi.fn(async (request: string) => {
-      const unit = JSON.parse(request) as { text: string };
-      return JSON.stringify({
-        signals: [{ object_kind: "decision", confidence: 0.8, matched_text: unit.text, distilled_fact: unit.text }]
-      });
-    });
+    const execute = vi.fn(async (request: string) => signalResponse(request));
     const runtime = createSourceEnrichmentRuntime({
       connection: database.connection,
       gardenTaskRepo: garden,
@@ -297,7 +334,7 @@ describe("per-source bulk_enrich routing", () => {
         "source_enrich_capability:configured",
         "source_enrich_spend:unsupported",
         "source_enrich_completion_tokens:unsupported",
-        "source_enrich_family:official_api_signals"
+        "source_enrich_family:source_interpretation"
       ],
       undefined
     );
@@ -382,7 +419,7 @@ describe("per-source bulk_enrich routing", () => {
     });
     expect(runtime?.capability).toMatchObject({
       configured: true,
-      observationFamily: "official_api_signals",
+      observationFamily: "source_interpretation",
       spend: "unsupported",
       completionTokens: "unsupported"
     });
@@ -399,7 +436,7 @@ describe("per-source bulk_enrich routing", () => {
         "source_enrich_capability:configured",
         "source_enrich_spend:unsupported",
         "source_enrich_completion_tokens:unsupported",
-        "source_enrich_family:official_api_signals"
+        "source_enrich_family:source_interpretation"
       ],
       undefined
     );

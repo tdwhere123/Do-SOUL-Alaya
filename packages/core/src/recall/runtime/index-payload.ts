@@ -201,7 +201,7 @@ export class BoundedIndexPayload {
       const metadata = sourceMetadataFrom(page.row);
       if (metadata.dimension !== undefined || metadata.scope_class !== undefined
         || metadata.evidence_refs !== undefined || metadata.staged_warnings !== undefined) {
-        rememberMetadata(this.sourceMetadata, cacheKey, undefined, metadata);
+        rememberMetadata(this.sourceMetadata, cacheKey, undefined, { ...this.sourceMetadata[cacheKey], ...metadata });
       }
     }
     return { ok: !truncated, remaining: nextRemaining, retryable: truncated };
@@ -283,6 +283,7 @@ function observedMemoryRevisionMatches(
 }
 
 function sourceMetadataFrom(row: Readonly<{
+  readonly source_lookup_reasons?: RecallSourceMetadata["source_lookup_reasons"];
   readonly evidence_refs?: readonly string[];
   readonly staged_warnings?: RecallSourceMetadata["staged_warnings"];
   readonly dimension?: string;
@@ -291,6 +292,7 @@ function sourceMetadataFrom(row: Readonly<{
   const dimension = knownEnum(row.dimension, MemoryDimension);
   const scopeClass = knownEnum(row.scope_class, ScopeClass);
   return {
+    ...(row.source_lookup_reasons === undefined ? {} : { source_lookup_reasons: row.source_lookup_reasons }),
     ...(row.evidence_refs === undefined ? {} : { evidence_refs: row.evidence_refs }),
     ...(row.staged_warnings === undefined ? {} : { staged_warnings: row.staged_warnings }),
     ...(dimension === undefined ? {} : { dimension }),

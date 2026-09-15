@@ -15,7 +15,7 @@ import { accountedCost } from "../../../runs/extraction/fill/batch/executor.js";
 import { peelExtractionBatchFlags } from "../../../cli/extraction-fill/batch-flags.js";
 import type { GeminiBatchHttp, GeminiBatchLimits, GeminiBatchOperation } from
   "../../../runs/extraction/fill/batch/contract.js";
-import { buildAuthorityQuestion, buildGroundedSignalResponse, EXTRACTION_FILL_VARIANT,
+import { buildAuthorityQuestion, buildGroundedInterpretationResponse, EXTRACTION_FILL_VARIANT,
   registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 
 let cacheRoot: string;
@@ -71,10 +71,10 @@ async function setup(questionCount = 1) {
         const kind = provider.results[index] ?? "valid";
         if (kind === "missing") return "";
         if (kind === "error") return JSON.stringify({ key: request.key, error: { code: 500, message: "synthetic" } });
-        const raw = JSON.parse(buildGroundedSignalResponse(request.request.contents[0].parts[0].text));
-        if (kind === "empty") raw.signals = [];
-        if (kind === "foreign-quote") raw.signals[0].matched_text = "I completed a foreign activity.";
-        if (kind === "substring") raw.signals[0].matched_text = raw.signals[0].matched_text.replace(/^I /u, "");
+        const raw = JSON.parse(buildGroundedInterpretationResponse(request.request.contents[0].parts[0].text));
+        if (kind === "empty") raw.interpretations = [];
+        if (kind === "foreign-quote") raw.interpretations[0].relations[0].predicate.text = "I completed a foreign activity.";
+        if (kind === "substring") raw.interpretations[0].relations[0].predicate.text = raw.interpretations[0].relations[0].predicate.text.replace(/^User: I /u, "");
         return JSON.stringify({ key: request.key, response: {
           candidates: [{ finishReason: kind === "truncated" ? "MAX_TOKENS" : "STOP",
             content: { parts: [{ text: JSON.stringify(raw) }] } }],

@@ -1,46 +1,39 @@
 import { describe, expect, it } from "vitest";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import {
-  OfficialApiGardenProvider
-} from "../../../garden/ingestion/compute-provider.js";
+  auditOfficialApiSignalFormation
+} from "../../../garden/ingestion/official-api/formation-audit.js";
 import {
   DISTILLED_FACT_MAX_CHARS,
   buildDistilledFact
 } from "../../../garden/materialization/materialization-router.js";
-import { createOpenSemanticExtractor } from "../ingestion/compute-provider-fixtures.js";
 
-// Producer -> consumer join: model paraphrases remain auditable proposals,
-// while durable content is rebuilt from the source assertion.
 
-function createContext() {
-  return {
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: "surface-1",
-    turn_messages: [],
-    allow_legacy_single_user_source: true
-  };
-}
-
-async function compileSingleSignal(
+// Historical signals replay still reconstructs durable text from its source.
+async function replaySingleSignal(
   modelJson: string,
   turnContent: string
 ): Promise<CandidateMemorySignal> {
-  const provider = new OfficialApiGardenProvider({
-    apiKey: "sk-test",
-    extractor: createOpenSemanticExtractor(modelJson),
-    now: () => "2026-04-23T09:00:00.000Z",
-    generateSignalId: () => "signal-1"
+  const audit = auditOfficialApiSignalFormation({
+    raw_json: modelJson,
+    turn_content: turnContent,
+    workspace_id: "workspace-1",
+    run_id: "run-1",
+    surface_id: "surface-1",
+    allow_legacy_single_user_source: true,
+    created_at: "2026-04-23T09:00:00.000Z",
+    source_observed_at: "2026-04-23T08:59:00.000Z",
+    signal_id_for: () => "signal-1"
   });
-  const signals = await provider.compile(turnContent, createContext());
-  expect(signals).toHaveLength(1);
-  return signals[0]!;
+  expect(audit.entries).toHaveLength(1);
+  expect(audit.entries[0]?.disposition).toBe("admitted");
+  return audit.entries[0]!.signal!;
 }
 
-describe("distilled_fact producer -> consumer join", () => {
+describe("historical distilled fact replay and materialization", () => {
   it("uses the source assertion instead of a free model paraphrase", async () => {
     const fact = "The operator prefers to be called Ash in all sessions.";
-    const signal = await compileSingleSignal(
+    const signal = await replaySingleSignal(
       JSON.stringify({
         signals: [
           {
@@ -65,7 +58,7 @@ describe("distilled_fact producer -> consumer join", () => {
     const turn =
       "We decided to ship the release on Friday. The rollout is gradual. " +
       "A third sentence exists to prove only the first claims survive.";
-    const signal = await compileSingleSignal(
+    const signal = await replaySingleSignal(
       JSON.stringify({
         signals: [
           {
@@ -89,7 +82,7 @@ describe("distilled_fact producer -> consumer join", () => {
 
   it("clamps an over-cap proposal without allowing it into durable content", async () => {
     const oversized = "z".repeat(DISTILLED_FACT_MAX_CHARS + 500);
-    const signal = await compileSingleSignal(
+    const signal = await replaySingleSignal(
       JSON.stringify({
         signals: [
           {

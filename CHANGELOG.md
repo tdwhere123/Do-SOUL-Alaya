@@ -8,13 +8,24 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 4.10.0
+## Unreleased — protocol 4.12.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 4.10.0 can move
+heading (currently `## v0.3.11` below). Protocol 4.12.0 can move
 independently of the app semver.
+
+Protocol 4.12.0 is an additive minor change under handbook invariant §25:
+optional `QueryHole.description` preserves unresolved query text, and optional
+`source_lookup_reasons` exposes bounded proposal diagnostics on Recall candidates
+and MCP/CLI search results. These fields do not change source eligibility,
+association grades, or delivery ordering. Ordinary extraction retains its exact
+per-turn source before compilation, publishes through transaction-current Core
+admission, and uses source interpretations across live cache and enrichment paths.
+Native hint lookup meters scans, hydration, and bytes and preserves unfinished
+work across continuation. Local mechanism checks do not establish semantic
+usefulness; the R02 quality gate remains on hold.
 
 Bench adds provider-free `source-snapshot prepare` and `inspect` operations.
 Original messages enter native source records through mandatory atomic Core

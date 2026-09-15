@@ -480,11 +480,11 @@ function capsuleMetadataBytes(row: BoundedCapsuleSource): number {
 }
 
 function sameSourceIdentity(row: SourceRootRow, target: SourceEvidenceTarget): boolean {
+  // Evidence id is a bind diagnostic; current source identity is root/revision/digest.
   return row.kind === target.root_kind
     && row.root_id === target.root_id
     && row.revision === target.source_version
-    && row.digest === target.content_digest
-    && row.evidence_object_id === target.evidence_object_id;
+    && row.digest === target.content_digest;
 }
 
 function hydrateMapped(

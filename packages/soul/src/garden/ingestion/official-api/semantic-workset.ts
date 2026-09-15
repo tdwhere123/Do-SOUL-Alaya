@@ -1,7 +1,7 @@
 import type { ReferenceTransportBatchSize } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
-import { mintOfficialApiAssertionWork } from "./extraction-request.js";
+import { mintOfficialApiAssertionWork, mintOfficialApiAssertionWorkFromCorpus, type MintedOfficialApiAssertionBinding } from "./extraction-request.js";
 import {
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
@@ -65,9 +65,17 @@ export function planOfficialApiSemanticWorkset(
   datasetRevision?: string
 ): PlannedOfficialApiSemanticWorkset {
   const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
+  return worksetFromMinted(sourceCorpus, mintOfficialApiAssertionWork(turnContent, messages, datasetRevision));
+}
+
+/** Replay already retains the canonical corpus; do not add role framing again. */
+export function officialApiSemanticWorksetFromSourceCorpus(sourceCorpus: string, datasetRevision?: string): PlannedOfficialApiSemanticWorkset {
+  return worksetFromMinted(sourceCorpus, mintOfficialApiAssertionWorkFromCorpus(sourceCorpus, [], datasetRevision));
+}
+
+function worksetFromMinted(sourceCorpus: string, work: readonly MintedOfficialApiAssertionBinding[]): PlannedOfficialApiSemanticWorkset {
   const catalog = buildOfficialApiSourceAssertions(sourceCorpus);
   const byId = new Map(catalog.map((assertion) => [assertion.assertion_id, assertion]));
-  const work = mintOfficialApiAssertionWork(turnContent, messages, datasetRevision);
   const units = work.map(({ binding, semanticIdentity }) => {
     const assertion = byId.get(binding.locator.assertion_id);
     if (assertion === undefined) {

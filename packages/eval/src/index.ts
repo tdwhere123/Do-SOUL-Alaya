@@ -1,3 +1,4 @@
+export { MissTaxonomyDistributionSchema } from "./contracts/kpi-quality-schema.js";
 export {
   BenchName,
   BenchPolicyShapeSchema,

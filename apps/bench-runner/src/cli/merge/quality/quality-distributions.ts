@@ -22,7 +22,8 @@ export function accumulateDistributions(
   for (const [key, count] of Object.entries(metric.miss_distribution)) {
     state.missDistribution[key] = (state.missDistribution[key] ?? 0) + count;
   }
-  for (const key of Object.keys(state.missTaxonomyDistribution) as MissTaxonomyKey[]) {
-    state.missTaxonomyDistribution[key] += metric.miss_taxonomy_distribution[key];
+  for (const key of Object.keys(metric.miss_taxonomy_distribution) as MissTaxonomyKey[]) {
+    state.missTaxonomyDistribution[key] = (state.missTaxonomyDistribution[key] ?? 0) +
+      (metric.miss_taxonomy_distribution[key] ?? 0);
   }
 }

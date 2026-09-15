@@ -6,7 +6,7 @@ import type { AdjacencyRow } from "./path-matching.js";
 export type PathComputationStep = Readonly<{ kind: "work"; retained_bytes?: number; retention?: "effect_payload" }>
   | Readonly<{ kind: "effect"; effect: CompiledAdjacencyEffect }>;
 export type PathComputation<Result> = Generator<PathComputationStep, Result, void>;
-export type PendingPathEffects = Readonly<{ cursor?: PathEffectCursor; offset: number; retained_bytes: number; completed_work?: number; page: ObserverPage;
+export type PendingPathEffects = Readonly<{ cursor?: PathEffectCursor; offset: number; retained_bytes: number; completed_work?: number; progress_position?: number; page: ObserverPage;
   input: Readonly<{ rows: Iterable<AdjacencyRow>; options: AdjacencyEffectsInput }> }>;
 const EFFECT_LOG_SLOT_BYTES = 64;
 
@@ -18,6 +18,8 @@ export class PathEffectCursor {
   private preparedPayloadBytes = 0;
   private pendingPayloadBytes = 0;
   private completedWork = 0;
+  private computationPosition = 0;
+  private progressPosition = 0;
   private pending: PathComputationStep | undefined;
   private closed = false;
   private resourceFailed = false;
@@ -32,7 +34,7 @@ export class PathEffectCursor {
   }
 
   public advance(offset: number, allowance: number, memory: number): Readonly<{
-    offset: number; work: number; completed_work: number; retained_bytes: number; effects: readonly CompiledAdjacencyEffect[];
+    offset: number; work: number; completed_work: number; progress_position: number; retained_bytes: number; effects: readonly CompiledAdjacencyEffect[];
     status: "open" | "complete" | "memory_exhausted";
   }> {
     const initialOffset = offset;
@@ -42,6 +44,7 @@ export class PathEffectCursor {
       // Throwing closes a generator. Rebuild its immutable input, preserving the
       // replay log and bindings already referenced by committed field effects.
       this.computation = this.rebuild();
+      this.computationPosition = 0;
       this.replayedEffects = 0;
       this.preparedPayloadBytes = 0;
       this.retainedBytes = this.initialBytes + this.effects.length * EFFECT_LOG_SLOT_BYTES + this.loggedPayloadBytes
@@ -67,9 +70,13 @@ export class PathEffectCursor {
           if (!(error instanceof BindingContextResourceError)) throw error;
           this.retainedBytes += (this.bindingContexts?.bytes ?? 0) - previousBytes;
           this.resourceFailed = true;
-          return { offset: initialOffset, work, completed_work: this.completedWork, retained_bytes: this.retainedBytes,
+          return { offset: initialOffset, work, completed_work: this.completedWork, progress_position: this.progressPosition, retained_bytes: this.retainedBytes,
             effects: [], status: "memory_exhausted" };
         }
+        // Successful iterator positions survive as a high-water mark. Retrying
+        // a failed generator's prefix spends work without inventing progress.
+        this.computationPosition += 1;
+        this.progressPosition = Math.max(this.progressPosition, this.computationPosition);
         this.retainedBytes += (this.bindingContexts?.bytes ?? 0) - previousBytes;
         if (next.done) { this.closed = true; break; }
         this.pending = next.value;
@@ -92,7 +99,7 @@ export class PathEffectCursor {
       this.pending = undefined;
     }
     const pendingBytes = this.pendingAllocation();
-    return { offset, work, completed_work: this.completedWork, retained_bytes: this.retainedBytes, effects,
+    return { offset, work, completed_work: this.completedWork, progress_position: this.progressPosition, retained_bytes: this.retainedBytes, effects,
       status: this.retainedBytes + pendingBytes > memory ? "memory_exhausted"
         : this.closed && offset === this.effects.length ? "complete" : "open" };
   }

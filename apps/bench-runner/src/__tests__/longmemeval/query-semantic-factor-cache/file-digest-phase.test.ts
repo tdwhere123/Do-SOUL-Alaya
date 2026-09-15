@@ -175,8 +175,8 @@ function loopSeal() {
 function snapshotSeal() {
   const authority = currentSnapshotExtractionAuthority();
   const provenance = currentSnapshotManifestFor("q-1").extraction_provenance;
-  if (provenance === undefined || provenance.schema_version !== 3) {
-    throw new Error("fixture requires v3 extraction provenance");
+  if (provenance === undefined || (provenance.schema_version !== 3 && provenance.schema_version !== 4)) {
+    throw new Error("fixture requires profiled extraction provenance");
   }
   return {
     model_id: authority.extraction_model,

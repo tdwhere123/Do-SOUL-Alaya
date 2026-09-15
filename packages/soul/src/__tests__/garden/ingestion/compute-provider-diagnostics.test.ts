@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   GardenProviderError,
-  GardenProviderKind,
   OfficialApiGardenProvider
 } from "../../../garden/ingestion/compute-provider.js";
 import {
@@ -43,31 +42,11 @@ describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () 
     await expect(
       provider.compile("Call me Ash.", createContext())
     ).rejects.toMatchObject({
-      name: "GardenProviderError",
+      name: "OfficialApiGardenCompileIncompleteError",
       kind: "invalid_response"
     } satisfies Partial<GardenProviderError>);
 
-    const files = readdirSync(diagnosticDir).filter((f) => f.endsWith(".json"));
-    expect(files).toHaveLength(1);
-    const dump = JSON.parse(
-      readFileSync(join(diagnosticDir, files[0]!), "utf8")
-    ) as Record<string, unknown>;
-
-    // Schema must carry every field a Phase A.2 preflight reader expects.
-    expect(dump).toMatchObject({
-      captured_at: "2026-05-27T12:00:00.000Z",
-      provider_kind: GardenProviderKind.OFFICIAL_API,
-      model_id: "gpt-test-mini",
-      endpoint: "https://example.test/v1",
-      workspace_id: "workspace-1",
-      run_id: "run-1",
-      surface_id: "surface-1",
-      response_body_total_chars: 18
-    });
-    expect(typeof dump.response_body_prefix).toBe("string");
-    expect((dump.response_body_prefix as string).startsWith('{"not_signals"')).toBe(true);
-    expect(typeof dump.user_prompt_prefix).toBe("string");
-    expect((dump.user_prompt_prefix as string).length).toBeLessThanOrEqual(512);
+    expect(readdirSync(diagnosticDir).filter((f) => f.endsWith(".json"))).toHaveLength(0);
   });
 
   it("dumps a diagnostic envelope when the extractor reports invalid_json", async () => {
@@ -129,12 +108,8 @@ describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () 
     });
     await expect(
       provider.compile("Call me Ash.", createContext())
-    ).rejects.toMatchObject({ name: "GardenProviderError", kind: "invalid_response" });
-    const files = readdirSync(diagnosticDir).filter((f) => f.endsWith(".json"));
-    expect(files).toHaveLength(1);
-    const dump = JSON.parse(readFileSync(join(diagnosticDir, files[0]!), "utf8")) as Record<string, unknown>;
-    expect(dump.recovery_kind).toBe("markdown_strip");
-    expect(dump.extractor_retry_count).toBe(1);
+    ).rejects.toMatchObject({ name: "OfficialApiGardenCompileIncompleteError", kind: "invalid_response" });
+    expect(readdirSync(diagnosticDir).filter((f) => f.endsWith(".json"))).toHaveLength(0);
   });
 
   it("surfaces SignalExtractorError.retryCount on the dump envelope when extract threw", async () => {
@@ -175,7 +150,7 @@ describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () 
     });
     await expect(
       nullDirProvider.compile("Call me Ash.", createContext())
-    ).rejects.toMatchObject({ name: "GardenProviderError", kind: "invalid_response" });
+    ).rejects.toMatchObject({ name: "OfficialApiGardenCompileIncompleteError", kind: "invalid_response" });
     // diagnosticDir untouched (still empty from beforeEach).
     expect(readdirSync(diagnosticDir).filter((f) => f.endsWith(".json"))).toHaveLength(0);
 

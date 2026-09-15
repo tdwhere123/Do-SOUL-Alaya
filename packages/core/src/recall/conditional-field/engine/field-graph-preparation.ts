@@ -10,7 +10,7 @@ type ProductGrade = Readonly<{ hard?: number; hardExplicit?: boolean; soft?: num
 const HARD = hardIdentityCapContractId();
 
 /** Persistent product projection; conflicting declared contracts never regain a scalar by arrival order. */
-export class PreparedProductValues implements ReadonlyMap<string, number> {
+class PreparedProductValues implements ReadonlyMap<string, number> {
   public constructor(private readonly rows = new PersistentStringMap<ProductGrade>(), public readonly size = 0,
     public readonly conflictCount = 0) {}
   public get [Symbol.toStringTag](): string { return "PreparedProductValues"; }

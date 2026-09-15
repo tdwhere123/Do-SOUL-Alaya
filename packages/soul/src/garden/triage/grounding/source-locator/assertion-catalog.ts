@@ -42,9 +42,9 @@ export interface SourceAssertionCatalogCursor {
   readonly after_assertion_id: number;
 }
 
-export type SourceAssertionCatalogCoverage = "source_range_complete" | "budget_complete";
+type SourceAssertionCatalogCoverage = "source_range_complete" | "budget_complete";
 
-export interface SourceAssertionCatalogResidualMember {
+interface SourceAssertionCatalogResidualMember {
   readonly assertion_id: number;
   readonly start: number;
   readonly end: number;

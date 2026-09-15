@@ -258,7 +258,7 @@ function insertSignalAndOwner(
     full_turn_content: corpus,
     source_assertion: ASSERTION,
     source_locator: {
-      contract_version: 3,
+      contract_version: 4,
       kind: "assertion_catalog",
       assertion_id: locatorId
     },
@@ -322,7 +322,7 @@ function receiptV2Hash(corpus: string, locatorId = 1): string {
     buildVerifiedUserAssertionReceiptV2Preimage({
       signal_id: "signal-1",
       source_locator: {
-        contract_version: 3,
+        contract_version: 4,
         kind: "assertion_catalog",
         assertion_id: locatorId
       },

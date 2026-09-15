@@ -11,6 +11,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   buildOfficialApiExtractionRequest,
+  buildOfficialApiSourceCorpus,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
@@ -27,7 +28,7 @@ import {
   type CompileSeedExtractionStats
 } from "../../../runs/compile-seed.js";
 import { BENCH_DAEMON_DB_FILENAME } from "../../../runs/snapshot/materialize.js";
-import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
+import { interpretationsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 import {
   providerBackedExtractionResult,
   TEST_EXTRACTION_PROVIDER_URL,
@@ -213,8 +214,8 @@ describe("materialization fuel inventory integration", () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "seed-fuel-cache-"));
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate = {
-      extract: vi.fn(async () => providerBackedExtractionResult(signalsEnvelope([
-          { distilled: "Alice lives in Berlin.", matched: "moved to Berlin" }
+      extract: vi.fn(async () => providerBackedExtractionResult(interpretationsEnvelope([
+          { matched: "moved to Berlin" }
         ])))
     };
     const warmStats = freshStats();
@@ -231,7 +232,7 @@ describe("materialization fuel inventory integration", () => {
     const userPrompt = stringifyOfficialApiExtractionRequest(
       buildOfficialApiExtractionRequest("I moved to Berlin.", [])
     );
-    await warmExtractor.extract({ systemPrompt: "sys", userPrompt });
+    await warmExtractor.extract({ systemPrompt: "sys", userPrompt, sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", []) });
     expect(warmStats.llmCalls).toBe(1);
 
     const replayStats = freshStats();
@@ -245,8 +246,8 @@ describe("materialization fuel inventory integration", () => {
       cacheRoot,
       stats: replayStats
     });
-    const replay = await replayExtractor.extract({ systemPrompt: "sys", userPrompt });
-    expect(replay.rawJson).toContain("Alice lives in Berlin");
+    const replay = await replayExtractor.extract({ systemPrompt: "sys", userPrompt, sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", []) });
+    expect(replay.rawJson).toContain("moved");
     expect(replayStats.cacheHits).toBe(1);
     expect(replayStats.llmCalls).toBe(0);
     expect(delegate.extract).toHaveBeenCalledTimes(1);

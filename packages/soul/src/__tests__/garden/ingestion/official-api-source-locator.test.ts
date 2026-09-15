@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  OfficialApiGardenCompileIncompleteError,
   OfficialApiGardenProvider,
+  parseOfficialApiSignals,
   type GardenCompileContext
 } from "../../../garden/ingestion/compute-provider.js";
+import { groundOfficialApiDraft } from "../../../garden/ingestion/official-api/source-grounding.js";
 import { resolveGardenSignalGrounding } from "../../../garden/triage/grounding/signal-source-grounding.js";
 import { buildOfficialApiSourceAssertions, buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 import {
@@ -11,7 +12,7 @@ import {
   planOfficialApiExtractionWindow
 } from "../../../garden/ingestion/official-api/extraction-request.js";
 import { createSignal } from "../materialization/materialization-router-fixture.js";
-import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
+import { createContext, withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const EMPTY_CONTEXT: GardenCompileContext = {
   workspace_id: "workspace-locator",
@@ -57,10 +58,6 @@ describe("official API assertion catalog locator", () => {
       source_assertion: quote
     });
     expect(signal?.raw_payload.source_assertion).toBe(quote);
-    expect(resolveGardenSignalGrounding(signal!)).toEqual({
-      status: "grounded",
-      assertion: quote
-    });
   });
 
   it("does not use a complex coordinated prefix to evade an unresolved reference", () => {
@@ -221,10 +218,13 @@ describe("official API assertion catalog locator", () => {
 
   it("builds a bounded deterministic User-only catalog and prefers v2 in the prompt", async () => {
     const extract = vi.fn(async (_input: { readonly userPrompt: string }) =>
-      ({ rawJson: JSON.stringify({ signals: [] }) }));
+      ({ rawJson: JSON.stringify({ interpretations: [] }) }));
     const provider = new OfficialApiGardenProvider({ apiKey: "sk-test", extractor: { extract } });
+    const admitted = createContext();
     await provider.compile("I moved to Berlin.", {
       ...EMPTY_CONTEXT,
+      artifact_key: admitted.artifact_key,
+      source_observation: admitted.source_observation,
       turn_messages: [
         { message_id: "u1", role: "user", content: "I use TypeScript, but I avoid any." },
         { message_id: "a1", role: "assistant", content: "You should use JavaScript." }
@@ -263,14 +263,19 @@ describe("official API assertion catalog locator", () => {
       };
       expect(prompt.source_assertions.length).toBeLessThanOrEqual(8);
       batches.push(prompt.source_assertions.map(({ assertion_id }) => assertion_id));
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: '{"interpretations":[]}' };
     });
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
       extractor: { extract },
       generateSignalId: () => "signal-tail-catalog"
     });
-    const context = contextForUser(source);
+    const admitted = createContext();
+    const context = {
+      ...contextForUser(source),
+      artifact_key: admitted.artifact_key,
+      source_observation: admitted.source_observation
+    };
     expect(await provider.compile(source, context)).toEqual([]);
     const coverage = collectOfficialApiExtractionCoverage(source, context.turn_messages);
     expect(coverage.catalog.coverage).toBe("source_range_complete");
@@ -283,11 +288,11 @@ describe("official API assertion catalog locator", () => {
   });
 
   it("does not admit an out-of-range assertion_id", async () => {
-    const provider = providerFor({ source_locator: assertionLocator(99) });
-    await expect(provider.compile(
+    const [signal] = await providerFor({ source_locator: assertionLocator(99) }).compile(
       "I moved to Berlin.",
       contextForUser("I moved to Berlin.")
-    )).rejects.toBeInstanceOf(OfficialApiGardenCompileIncompleteError);
+    );
+    expect(signal?.raw_payload.source_grounding).toMatchObject({ status: "rejected" });
   });
 
   it("rebuilds the catalog when the persisted assertion matches live full_turn_content", () => {
@@ -392,42 +397,42 @@ function contextForUser(content: string): GardenCompileContext {
   };
 }
 
-function providerFor(fields: Record<string, unknown>): OfficialApiGardenProvider {
-  return new OfficialApiGardenProvider({
-    apiKey: "sk-test",
-    extractor: {
-      extract: async () => ({
-        rawJson: JSON.stringify({
-          signals: [withOpenSemanticFactorGraph({ ...signalJson(), ...fields })]
-        })
-      })
-    },
-    generateSignalId: () => "signal-source-locator"
-  });
+function historicalSignal(turn: string, context: GardenCompileContext, fields: Record<string, unknown>) {
+  const drafts = parseOfficialApiSignals(JSON.stringify({
+    signals: [withOpenSemanticFactorGraph({ ...signalJson(), ...fields })]
+  }));
+  const corpus = buildOfficialApiSourceCorpus(turn, context.turn_messages);
+  const grounded = groundOfficialApiDraft(drafts[0]!, corpus);
+  return {
+    raw_payload: {
+      source_grounding: grounded.audit,
+      distilled_fact: grounded.draft.distilled_fact,
+      source_locator: grounded.draft.source_locator,
+      source_assertion: grounded.audit.status === "grounded" ? grounded.audit.source_assertion : undefined
+    }
+  };
+}
+
+function providerFor(fields: Record<string, unknown>) {
+  return {
+    compile: async (turn: string, context: GardenCompileContext) =>
+      [historicalSignal(turn, context, fields)]
+  };
 }
 
 function providerSelectingAssertion(
   predicate: (text: string) => boolean
-): OfficialApiGardenProvider {
-  return new OfficialApiGardenProvider({
-    apiKey: "sk-test",
-    extractor: {
-      extract: async ({ userPrompt }) => {
-        const prompt = JSON.parse(userPrompt) as {
-          source_assertions: readonly { readonly assertion_id: number; readonly text: string }[];
-        };
-        const selected = prompt.source_assertions.find((assertion) => predicate(assertion.text));
-        if (selected === undefined) throw new Error("expected assertion missing from catalog");
-        return {
-          rawJson: JSON.stringify({ signals: [withOpenSemanticFactorGraph({
-            ...signalJson(),
-            source_locator: assertionLocator(selected.assertion_id),
-            matched_text: selected.text.replace(/^User:\s*/u, ""),
-            distilled_fact: selected.text.replace(/^User:\s*/u, "")
-          })] })
-        };
-      }
-    },
-    generateSignalId: () => "signal-assertion-catalog"
-  });
+) {
+  return {
+    compile: async (turn: string, context: GardenCompileContext) => {
+      const catalog = buildOfficialApiSourceAssertions(buildOfficialApiSourceCorpus(turn, context.turn_messages));
+      const selected = catalog.find((assertion) => predicate(assertion.text));
+      if (selected === undefined) throw new Error("expected assertion missing from catalog");
+      return [historicalSignal(turn, context, {
+        source_locator: assertionLocator(selected.assertion_id),
+        matched_text: selected.text.replace(/^User:\s*/u, ""),
+        distilled_fact: selected.text.replace(/^User:\s*/u, "")
+      })];
+    }
+  };
 }

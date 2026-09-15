@@ -7,7 +7,7 @@ import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
 import {
   buildAuthorityQuestion as question,
   buildExtractionFillQuestion,
-  buildGroundedSignalResponse as signalResponse,
+  buildGroundedInterpretationResponse as signalResponse,
   EXTRACTION_FILL_VARIANT,
   groundedExtractionResult,
   providerBackedExtractionResult,
@@ -262,7 +262,7 @@ describe("extraction authority runtime", () => {
         retryMode: input.retryMode,
         assertionCount: prompt.source_assertions?.length ?? 0
       });
-      return providerBackedExtractionResult('{"signals":[]}');
+      return providerBackedExtractionResult('{"interpretations":[]}');
     });
 
     const probe = await runExtractionFill({

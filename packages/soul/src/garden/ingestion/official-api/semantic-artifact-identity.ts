@@ -51,6 +51,6 @@ export function defaultSourceEnrichmentProfile(input: {
     model: input.model ?? "official-api-interactive",
     requestProfile: "logical-request-v1",
     promptRevision: input.promptRevision ?? "official-api-system-prompt",
-    outputSchema: "official-api-signals-v1"
+    outputSchema: "source-interpretation-v1"
   });
 }

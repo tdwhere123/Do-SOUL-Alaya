@@ -11,7 +11,7 @@ import { classifyQuestionMeasurementStatus } from "../../runs/measurement/questi
 import { readGoldObjectIds } from "../gold-object-identities.js";
 import { isAbstentionDiagnostic } from "../abstention.js";
 
-type MutableMissTaxonomySummary = Record<LongMemEvalMissTaxonomy, number>;
+type MutableMissTaxonomySummary = { -readonly [K in keyof LongMemEvalMissTaxonomySummary]: LongMemEvalMissTaxonomySummary[K] };
 
 export function createEmptyMissTaxonomyDistribution(): MutableMissTaxonomySummary {
   return {
@@ -25,7 +25,7 @@ export function createEmptyMissTaxonomyDistribution(): MutableMissTaxonomySummar
   };
 }
 
-function createMutableMissTaxonomySummary(): Record<LongMemEvalMissTaxonomy, number> {
+function createMutableMissTaxonomySummary(): MutableMissTaxonomySummary {
   return createEmptyMissTaxonomyDistribution();
 }
 
@@ -41,6 +41,9 @@ export function mergeMissTaxonomySummaries(
     merged.delivery_order_drop += summary.delivery_order_drop;
     merged.answer_set_coverage_drop += summary.answer_set_coverage_drop;
     merged.evaluation_or_gold_issue += summary.evaluation_or_gold_issue;
+    if (summary.conditional_field_unattributed !== undefined) {
+      merged.conditional_field_unattributed = (merged.conditional_field_unattributed ?? 0) + summary.conditional_field_unattributed;
+    }
   }
   return Object.freeze({ ...merged });
 }
@@ -56,6 +59,10 @@ export function readCompactMissTaxonomySummary(
   }
   const record = summary as Readonly<Record<string, unknown>>;
   return Object.freeze({
+    ...(record.conditional_field_unattributed === undefined ? {} : {
+      conditional_field_unattributed: requiredCompactNonNegativeInteger(record.conditional_field_unattributed,
+        "miss_taxonomy_summary.conditional_field_unattributed")
+    }),
     candidate_absent: requiredCompactNonNegativeInteger(
       record.candidate_absent,
       "miss_taxonomy_summary.candidate_absent"
@@ -101,6 +108,7 @@ export function classifyGoldMissTaxonomy(input: {
 
 export function classifyQuestionMissTaxonomy(input: {
   readonly hitAt5: boolean;
+  readonly conditionalFieldValidated?: boolean;
   readonly goldMemoryIds: readonly string[];
   readonly goldObjectIds?: readonly string[];
   readonly gold: readonly LongMemEvalGoldDiagnostic[];
@@ -112,6 +120,13 @@ export function classifyQuestionMissTaxonomy(input: {
     return null;
   }
   if (input.isAbstention) return null;
+  if (input.conditionalFieldValidated) {
+    if ((input.goldObjectIds ?? input.goldMemoryIds).length === 0) {
+      if ((input.seedDropReasons?.materialization_drop ?? 0) > 0) return "materialization_drop";
+      if ((input.seedDropReasons?.candidate_absent ?? 0) > 0) return "candidate_absent";
+    }
+    return "conditional_field_unattributed";
+  }
   if (!input.diagnosticsAvailable) {
     return "evaluation_or_gold_issue";
   }
@@ -141,12 +156,13 @@ export function classifyQuestionMissTaxonomy(input: {
 export function readQuestionMissTaxonomy(
   question: LongMemEvalQuestionDiagnostic
 ): LongMemEvalMissTaxonomy | null {
-  if (question.conditional_field_measurement?.status === "validated") return question.miss_taxonomy ?? null;
+
   if (question.miss_taxonomy !== null && question.miss_taxonomy !== undefined) {
     return question.miss_taxonomy;
   }
   return classifyQuestionMissTaxonomy({
     hitAt5: question.hit_at_5,
+    conditionalFieldValidated: question.conditional_field_measurement?.status === "validated",
     goldMemoryIds: question.gold_memory_ids,
     goldObjectIds: readGoldObjectIds(question),
     gold: question.gold,
@@ -166,7 +182,7 @@ export function summarizeLongMemEvalMissTaxonomy(
     if (taxonomy === null) {
       continue;
     }
-    summary[taxonomy] += 1;
+    summary[taxonomy] = (summary[taxonomy] ?? 0) + 1;
   }
   return Object.freeze({ ...summary });
 }

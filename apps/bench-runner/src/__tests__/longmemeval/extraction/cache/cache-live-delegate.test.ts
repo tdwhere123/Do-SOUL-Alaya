@@ -28,6 +28,7 @@ import {
   readShard,
   REQUEST_PROFILE,
   SYSTEM_PROMPT,
+  sourceCorpusWithAssertions,
   userPromptWithAssertions
 } from "./cache-live-delegate/fixture.js";
 
@@ -51,19 +52,19 @@ describe("extraction live delegate atomic persistence", () => {
 
   it("persists a completed empty result once and reuses it without a paid recheck", async () => {
     const usage = { inputTokens: 10, outputTokens: 1, totalTokens: 11 };
-    const delegate = { extract: vi.fn(async () => ({ ...providerBackedResult('{"signals":[]}'), usage })) };
+    const delegate = { extract: vi.fn(async () => ({ ...providerBackedResult('{"interpretations":[]}'), usage })) };
     const onLiveExtractionOutcome = vi.fn();
     const options = { delegate, config: extractionConfig(), cacheRoot, onLiveExtractionOutcome };
-    const request = { systemPrompt: SYSTEM_PROMPT, userPrompt: userPromptWithAssertions() };
+    const request = { systemPrompt: SYSTEM_PROMPT, sourceCorpus: sourceCorpusWithAssertions(), userPrompt: userPromptWithAssertions() };
     const result = await createCachingSignalExtractor(options).extract(request);
-    expect(result).toMatchObject({ rawJson: '{"signals":[]}', usage });
+    expect(result).toMatchObject({ rawJson: '{"interpretations":[]}', usage });
     expect(delegate.extract).toHaveBeenCalledOnce();
     expect(onLiveExtractionOutcome).toHaveBeenCalledOnce();
-    expect(readShard(cacheRoot)).toMatchObject({ raw_json: '{"signals":[]}', response_metadata: {
+    expect(readShard(cacheRoot)).toMatchObject({ raw_json: '{"interpretations":[]}', response_metadata: {
       usage: { input_tokens: 10, output_tokens: 1, total_tokens: 11 }
     } });
     const replay = await createCachingSignalExtractor({ ...options, allowLiveExtraction: false }).extract(request);
-    expect(replay).toMatchObject({ rawJson: '{"signals":[]}' });
+    expect(replay).toMatchObject({ rawJson: '{"interpretations":[]}' });
     expect(delegate.extract).toHaveBeenCalledOnce();
   });
 
@@ -81,7 +82,7 @@ describe("extraction live delegate atomic persistence", () => {
       delegate: {
         extract: vi.fn(async (input) => {
           await input.onTransportAttempt?.(input.abortSignal);
-          return providerBackedResult('{"signals":[]}');
+          return providerBackedResult('{"interpretations":[]}');
         })
       },
       config: extractionConfig(),
@@ -94,12 +95,12 @@ describe("extraction live delegate atomic persistence", () => {
 
     await extractor.extract({
       systemPrompt: SYSTEM_PROMPT,
-      userPrompt: userPromptWithAssertions()
+      sourceCorpus: sourceCorpusWithAssertions(), userPrompt: userPromptWithAssertions()
     });
 
     const expected = {
       attempts: 1,
-      successfulShards: 0,
+      successfulShards: 1,
       pendingKeys: [],
       unresolvedAttempts: [],
       transportFailures: [],
@@ -136,7 +137,7 @@ describe("extraction live delegate atomic persistence", () => {
       userPrompt: stringifyOfficialApiExtractionRequest(
         buildOfficialApiExtractionRequest("", [])
       )
-    })).resolves.toMatchObject({ rawJson: '{"signals":[]}' });
+    })).resolves.toMatchObject({ rawJson: '{"interpretations":[]}' });
 
     expect(delegate.extract).not.toHaveBeenCalled();
     expect(ledger.snapshot()).toMatchObject({
@@ -180,7 +181,7 @@ describe("extraction live delegate atomic persistence", () => {
       },
       request: {
         systemPrompt: SYSTEM_PROMPT,
-        userPrompt: userPromptWithAssertions(),
+        sourceCorpus: sourceCorpusWithAssertions(), userPrompt: userPromptWithAssertions(),
         onTransportAttempt: () => ledger.reserveAttempt(cacheKey)
       },
       stats: undefined,
@@ -227,7 +228,7 @@ describe("extraction live delegate atomic persistence", () => {
 
     await expect(extractor.extract({
       systemPrompt: SYSTEM_PROMPT,
-      userPrompt: userPromptWithAssertions()
+      sourceCorpus: sourceCorpusWithAssertions(), userPrompt: userPromptWithAssertions()
     })).rejects.toThrow(/attempt ceiling exhausted/u);
 
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -250,14 +251,14 @@ describe("extraction live delegate atomic persistence", () => {
 
   it("does not recheck a strict empty request when retries are disabled", async () => {
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedResult('{"signals":[]}'))
+      extract: vi.fn(async () => providerBackedResult('{"interpretations":[]}'))
     };
 
     await extractLiveDelegate({
       delegate,
       request: {
         systemPrompt: SYSTEM_PROMPT,
-        userPrompt: userPromptWithAssertions(),
+        sourceCorpus: sourceCorpusWithAssertions(), userPrompt: userPromptWithAssertions(),
         retryMode: "disabled"
       },
       stats: undefined,
@@ -277,7 +278,7 @@ describe("extraction live delegate atomic persistence", () => {
 
     const result = await extractLiveDelegate({
       delegate,
-      request: { systemPrompt: SYSTEM_PROMPT, userPrompt: userPromptWithAssertions() },
+      request: { systemPrompt: SYSTEM_PROMPT, sourceCorpus: sourceCorpusWithAssertions(), userPrompt: userPromptWithAssertions() },
       stats: undefined,
       onFailure: vi.fn()
     });

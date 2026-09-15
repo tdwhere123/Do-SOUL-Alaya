@@ -89,6 +89,7 @@ export async function createDaemonCoreServices(
     readonly eventPublisher: EventPublisher;
     readonly trustStateRepo: SqliteTrustStateRepo;
     readonly signalService: SignalService;
+    readonly retainCompileSource: NonNullable<ConversationServiceDependencies["retainCompileSource"]>;
     readonly contextLensAssembler: ConversationContextLensAssemblerPort;
     readonly governanceLeaseService: GovernanceLeaseService;
     readonly budgetBankruptcyService: BudgetBankruptcyService;
@@ -194,6 +195,7 @@ function createHotReloadingConfigService(
 
 function createConversationServiceDependencies(
   input: {
+    readonly retainCompileSource: NonNullable<ConversationServiceDependencies["retainCompileSource"]>;
     readonly runRepo: SqliteRunRepo;
     readonly workspaceRepo: SqliteWorkspaceRepo;
     readonly eventLogRepo: SqliteEventLogRepo;
@@ -213,6 +215,7 @@ function createConversationServiceDependencies(
     eventLogRepo: input.eventLogRepo,
     eventPublisher: input.eventPublisher,
     gardenComputeProvider: computeRoutingService.getDefaultProvider(),
+    retainCompileSource: input.retainCompileSource,
     resolveGardenComputeProvider: {
       resolve: (modelRef) => computeRoutingService.resolveProvider(modelRef)
     },

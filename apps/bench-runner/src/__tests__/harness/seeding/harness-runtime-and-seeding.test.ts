@@ -1,8 +1,9 @@
 // @ts-nocheck
+import { installHistoricalSignalReplay } from "./historical-signal-replay-fixture.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   initDatabase,
@@ -24,7 +25,6 @@ import {
   type CompileSeedExtractionConfig
 } from "../../../runs/compile-seed.js";
 import {
-  TEST_PROVIDER_COMPLETION_METADATA,
   writeExtractionCacheTestManifest
 } from "../../longmemeval/extraction/extraction-cache-test-fixture.js";
 import { withOpenSemanticFactorGraph } from
@@ -34,6 +34,7 @@ const handles: BenchDaemonHandle[] = [];
 const tmpRoots: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const h of handles.splice(0)) {
     await h.shutdown().catch(() => undefined);
   }
@@ -269,13 +270,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       // A compile()-shaped envelope: signal_kind potential_claim, a free-form
       // object_kind the router does NOT enumerate (the exact bug trigger),
       // high confidence. Two signals so the whole-turn batch is exercised.
-      const runner = createCompileSeedRunner({
-        config: credentialledConfig,
-        cacheRoot,
-        allowLiveExtraction: true,
-        extractorFactory: () => ({
-          extract: async () => ({
-            rawJson: JSON.stringify({
+      installHistoricalSignalReplay(JSON.stringify({
               signals: [
                 {
                   signal_kind: "potential_claim",
@@ -284,9 +279,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "spend three days in Kyoto",
                   distilled_fact: "The user plans three days in Kyoto.",
                   source_locator: {
-                    contract_version: 3,
+                    contract_version: 4,
                     kind: "assertion_catalog",
-                    assertion_id: 2
+                    assertion_id: 1
                   }
                 },
                 {
@@ -296,27 +291,31 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "I prefer low-impact morning workouts",
                   distilled_fact: "The user prefers low-impact morning workouts.",
                   source_locator: {
-                    contract_version: 3,
+                    contract_version: 4,
                     kind: "assertion_catalog",
-                    assertion_id: 3
+                    assertion_id: 2
                   }
                 }
               ].map(withOpenSemanticFactorGraph)
-            }),
-            responseMetadata: TEST_PROVIDER_COMPLETION_METADATA
-          })
+            }));
+    const runner = createCompileSeedRunner({
+        config: credentialledConfig,
+        cacheRoot,
+        allowLiveExtraction: true,
+        extractorFactory: () => ({
+          extract: async () => { throw new Error("historical replay must not call the live extractor"); }
         })
       });
 
       const result = await runner.seedTurn({
         daemon,
         turnContent:
-          "I'd like to spend three days in Kyoto, and I prefer low-impact morning workouts.",
+          "I would like to spend three days in Kyoto. I prefer low-impact morning workouts.",
         turnMessages: [{
           message_id: "freeform-user-0",
           role: "user",
           content:
-            "I'd like to spend three days in Kyoto, and I prefer low-impact morning workouts."
+            "I would like to spend three days in Kyoto. I prefer low-impact morning workouts."
         }],
         evidenceRefBase: "freeform-q0-t0",
         seedIndex: 0,
@@ -375,18 +374,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         providerUrl: "https://example.test/v1",
         systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
       });
-      const runner = createCompileSeedRunner({
-        config: {
-          providerUrl: "https://example.test/v1",
-          model: "test-model",
-          requestProfile: "provider-default-v1",
-          apiKey: "test-key"
-        },
-        cacheRoot,
-        allowLiveExtraction: true,
-        extractorFactory: () => ({
-          extract: async () => ({
-            rawJson: JSON.stringify({
+      installHistoricalSignalReplay(JSON.stringify({
               signals: [
                 {
                   signal_kind: "potential_preference",
@@ -395,9 +383,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "spend three days in Kyoto",
                   distilled_fact: "The user plans three days in Kyoto.",
                   source_locator: {
-                    contract_version: 3,
+                    contract_version: 4,
                     kind: "assertion_catalog",
-                    assertion_id: 2
+                    assertion_id: 1
                   }
                 },
                 {
@@ -407,20 +395,29 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "I prefer low-impact morning workouts",
                   distilled_fact: "The user prefers low-impact morning workouts.",
                   source_locator: {
-                    contract_version: 3,
+                    contract_version: 4,
                     kind: "assertion_catalog",
-                    assertion_id: 3
+                    assertion_id: 2
                   }
                 }
               ].map(withOpenSemanticFactorGraph)
-            }),
-            responseMetadata: TEST_PROVIDER_COMPLETION_METADATA
-          })
+            }));
+    const runner = createCompileSeedRunner({
+        config: {
+          providerUrl: "https://example.test/v1",
+          model: "test-model",
+          requestProfile: "provider-default-v1",
+          apiKey: "test-key"
+        },
+        cacheRoot,
+        allowLiveExtraction: true,
+        extractorFactory: () => ({
+          extract: async () => { throw new Error("historical replay must not call the live extractor"); }
         })
       });
 
       const fullTurn =
-        "I'd like to spend three days in Kyoto, and I prefer low-impact morning workouts.";
+        "I would like to spend three days in Kyoto. I prefer low-impact morning workouts.";
       const result = await runner.seedTurn({
         daemon,
         turnContent: fullTurn,
@@ -447,7 +444,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(metrics.raw_history_tokens).toBe(Math.ceil(fullTurn.length / 4));
       // stored_memory sums the two verified source assertions.
       expect(metrics.stored_memory_tokens).toBe(
-        Math.ceil("I'd like to spend three days in Kyoto".length / 4) +
+        Math.ceil("I would like to spend three days in Kyoto.".length / 4) +
           Math.ceil("I prefer low-impact morning workouts.".length / 4)
       );
       // The recall emitted exactly one SOUL_CONTEXT_LENS_ASSEMBLED event;

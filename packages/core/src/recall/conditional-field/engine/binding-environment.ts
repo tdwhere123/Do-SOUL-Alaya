@@ -87,6 +87,7 @@ export function alignOutgoingBinding(
 }
 
 export type BoundSourceFacts = Readonly<{
+  readonly source_lookup_reasons?: import("@do-soul/alaya-protocol").RecallCandidate["source_lookup_reasons"];
   readonly object_id: string;
   readonly workspace_id?: string;
   readonly root_kind?: string;

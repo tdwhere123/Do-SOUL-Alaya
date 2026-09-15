@@ -18,7 +18,7 @@ export const CACHED_F3_EXPOSURE_POLICY = {
   control_non_exposure_required: true
 };
 export type TreatmentExposureStatus = "exposed" | "not_exercised" | "inconclusive";
-export type TreatmentExposureStage = "eval_or_write_loss" | "early_absent" | "formation_rejected" | "pre_waist" | "waist_or_later" | "delivered_top5";
+export type TreatmentExposureStage = "unattributed" | "eval_or_write_loss" | "early_absent" | "formation_rejected" | "pre_waist" | "waist_or_later" | "delivered_top5";
 export type TreatmentFormationStatus = "formed" | "ineligible" | "unavailable" | "rejected" | null;
 export type TreatmentCompositionStatus = "composed" | "no_match" | "ineligible" | "unavailable" | "rejected" | null;
 type RetrievalChannelStatus = "complete" | "truncated" | "unavailable" | "ineligible";
@@ -111,7 +111,9 @@ export function assertTreatmentExposureReceipt(value: unknown): asserts value is
 }
 
 export function deriveTreatmentExposureStatus(receipt: TreatmentExposureReceiptBody): TreatmentExposureStatus {
-  if (!receipt.control_non_exposure.observed || !receipt.control_non_exposure.pure ||
+  if (receipt.outcome.control.stage === "unattributed" ||
+      receipt.outcome.treatment.stage === "unattributed" ||
+      !receipt.control_non_exposure.observed || !receipt.control_non_exposure.pure ||
       !receipt.evidence_chain.linked ||
       (receipt.ranking_authority === "prefix_sk" && receipt.capture_receipt_digest === null)) {
     return "inconclusive";
@@ -255,7 +257,7 @@ function isOutcome(value: unknown): boolean {
 }
 function isArmOutcome(value: unknown): boolean {
   return isRecord(value) && hasExactKeys(value, ["stage", "hit_at_5"]) &&
-    ["eval_or_write_loss", "early_absent", "formation_rejected", "pre_waist", "waist_or_later", "delivered_top5"].includes(value.stage as never) && typeof value.hit_at_5 === "boolean";
+    ["unattributed", "eval_or_write_loss", "early_absent", "formation_rejected", "pre_waist", "waist_or_later", "delivered_top5"].includes(value.stage as never) && typeof value.hit_at_5 === "boolean";
 }
 
 function isObservedDeltaValid(

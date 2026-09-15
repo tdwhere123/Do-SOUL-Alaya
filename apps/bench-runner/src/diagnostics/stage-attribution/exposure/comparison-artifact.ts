@@ -14,7 +14,7 @@ import { buildCachedF3ExposureSli } from "./exposure-sli.js";
 import { evaluateCanaryPolarityMatrix } from "./canary-polarity-matrix.js";
 import { RECALL_MECHANISM_SPLIT_KIND } from "../mechanism/types.js";
 
-const STAGES: readonly TreatmentExposureStage[] = ["eval_or_write_loss", "early_absent", "formation_rejected", "pre_waist", "waist_or_later", "delivered_top5"];
+const STAGES: readonly TreatmentExposureStage[] = ["unattributed", "eval_or_write_loss", "early_absent", "formation_rejected", "pre_waist", "waist_or_later", "delivered_top5"];
 
 export async function readDiagnostic100QComparisonArtifact(
   path: string
@@ -77,7 +77,7 @@ function assertPolarityAndStatus(
   const sli = buildCachedF3ExposureSli(receipts);
   const matrix = evaluateCanaryPolarityMatrix(receipts);
   const unlock = buildDiagnostic100QUnlock(matrix);
-  const causal = deriveCausalStatus(matrix, sli);
+  const causal = deriveCausalStatus(matrix, sli, receipts);
   if (!isDeepStrictEqual(comparison.exposure_sli, sli) ||
       !isDeepStrictEqual(comparison.canary_polarity_matrix, matrix) ||
       !isDeepStrictEqual(comparison.diagnostic_100q_unlock, unlock) ||
@@ -143,19 +143,19 @@ function assertUniqueQuestionIds(receipts: readonly TreatmentExposureReceipt[]):
 }
 
 function isStageCounts(value: unknown): value is Readonly<Record<TreatmentExposureStage, number>> {
-  return isRecord(value) && hasExactKeys(value, STAGES) &&
-    STAGES.every((stage) => isCount(value[stage]));
+  return isRecord(value) && hasExactKeys(value, value.unattributed === undefined ? STAGES.filter((stage) => stage !== "unattributed") : STAGES) &&
+    STAGES.every((stage) => isCount(value[stage] ?? (stage === "unattributed" ? 0 : undefined)));
 }
 
 function emptyStageCounts(): Record<TreatmentExposureStage, number> {
-  return { eval_or_write_loss: 0, early_absent: 0, formation_rejected: 0, pre_waist: 0, waist_or_later: 0, delivered_top5: 0 };
+  return { unattributed: 0, eval_or_write_loss: 0, early_absent: 0, formation_rejected: 0, pre_waist: 0, waist_or_later: 0, delivered_top5: 0 };
 }
 
 function sameStageCounts(
   left: Readonly<Record<TreatmentExposureStage, number>>,
   right: Readonly<Record<TreatmentExposureStage, number>>
 ): boolean {
-  return STAGES.every((stage) => left[stage] === right[stage]);
+  return STAGES.every((stage) => (left[stage] ?? 0) === (right[stage] ?? 0));
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {

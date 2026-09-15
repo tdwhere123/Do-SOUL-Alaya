@@ -33,7 +33,7 @@ import { inspectTurnContentKeySpace } from
 import type { LongMemEvalQuestion } from
   "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
-  buildGroundedSignalResponse,
+  buildGroundedInterpretationResponse,
   buildAuthorityQuestion,
   EXTRACTION_FILL_VARIANT,
   providerBackedExtractionResult,
@@ -75,7 +75,7 @@ parentDescribe("cache-key allowlist runtime completion", () => {
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       retryModes.push(input.retryMode);
       await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt));
+      return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt));
     });
     const logs: string[] = [];
 
@@ -151,7 +151,7 @@ parentDescribe("cache-key allowlist runtime authority", () => {
     const authorityReceiptPath = await writeCatalogRefillAuthority(remainingKeys);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt));
+      return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt));
     });
     const logs: string[] = [];
     const options = {
@@ -188,7 +188,7 @@ parentDescribe("cache-key allowlist runtime resume", () => {
       await input.onTransportAttempt?.();
       calls += 1;
       if (calls === 1) {
-        return providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt));
+        return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt));
       }
       throw providerTimeoutFailure();
     });
@@ -226,7 +226,7 @@ parentDescribe("cache-key allowlist runtime resume", () => {
 
     const resumedExtract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt));
+      return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt));
     });
     const result = await runExtractionFill({
       variant: EXTRACTION_FILL_VARIANT,
@@ -268,18 +268,18 @@ parentDescribe("cache-key allowlist runtime recovery", () => {
     writeAuthority: writeCatalogRefillAuthority,
     controlArtifacts,
     providerTimeoutFailure,
-    groundedResponse: buildGroundedSignalResponse
+    groundedResponse: buildGroundedInterpretationResponse
   });
 });
 
 registerCatalogRefillCrashChild(
-  EXTRACTION_FILL_VARIANT, buildGroundedSignalResponse, providerTimeoutFailure
+  EXTRACTION_FILL_VARIANT, buildGroundedInterpretationResponse, providerTimeoutFailure
 );
 
 async function prefillFirstQuestion(): Promise<void> {
   await createInitialTargetSelection();
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
-    providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt))
+    providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt))
   );
   await runExtractionFill({
     variant: EXTRACTION_FILL_VARIANT,

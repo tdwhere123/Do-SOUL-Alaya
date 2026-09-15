@@ -19,6 +19,10 @@ import {
 } from "./inputs.js";
 import { materializationFailure } from "./materialization-results.js";
 import { MaterializationRouterRouteHandlers } from "./route-handlers.js";
+import {
+  materializeSourceObservation,
+  sourceObservationTarget
+} from "./source-observation-route.js";
 
 type SignalRouteStrategy = {
   readonly matches: (signal: CandidateMemorySignal) => boolean;
@@ -135,7 +139,9 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
   }
 
   public route(signal: CandidateMemorySignal): MaterializationTarget {
-    if (signal.interpretation_contract !== undefined) return sourceObservationDeferred();
+    if (signal.interpretation_contract !== undefined) {
+      return sourceObservationTarget(this.dependencies.sourceObservationPublicationPort !== undefined);
+    }
     // Evidence anchors archive source input; they do not assert a fact and
     // therefore must not be blocked by the durable-fact grounding guard.
     if (isGardenTurnEvidenceFallback(signal)) {
@@ -213,7 +219,7 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
     context: MaterializationContext = EMPTY_MATERIALIZATION_CONTEXT
   ): Promise<MaterializationResult> {
     if (signal.interpretation_contract !== undefined) {
-      return this.materializeDeferred(signal, sourceObservationDeferred(), context);
+      return await materializeSourceObservation(this.dependencies, signal, context);
     }
     if (target.route_target === "memory_entry_only") {
       return await this.materializeMemoryEntryOnly(signal, target, context);
@@ -256,9 +262,4 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
     }
   }
 
-}
-
-function sourceObservationDeferred(): MaterializationTarget {
-  return { kind: "deferred", route_target: "deferred",
-    routing_reason: "source observation admission is not connected" };
 }

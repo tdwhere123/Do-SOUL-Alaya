@@ -253,7 +253,8 @@ async function emitPostTurnExtractSignals(
   const candidateSignals = await compilePostTurnExtractTask(
     provider,
     payload,
-    payload.source_observation
+    payload.source_observation,
+    row.id
   );
   const extraIds = await receivePostTurnCandidates({
     ...retainInput,
@@ -261,7 +262,7 @@ async function emitPostTurnExtractSignals(
       CandidateMemorySignalSchema.parse({
         ...signal,
         signal_id: buildGardenTaskSignalId(row.id, index),
-        source_observation: payload.source_observation
+        source_observation: payload.source_observation ?? signal.source_observation
       })
     )
   });
@@ -367,14 +368,19 @@ function buildPostTurnExtractCompletionPayload(
 async function compilePostTurnExtractTask(
   provider: GardenComputeProvider,
   payload: PostTurnExtractTaskPayload,
-  sourceObservation: VerifiedDeliverySourceObservation | null
+  sourceObservation: VerifiedDeliverySourceObservation | null,
+  taskId: string
 ): Promise<readonly CandidateMemorySignal[]> {
   const context: GardenCompileContext = {
     workspace_id: payload.workspace_id,
     run_id: payload.run_id,
     surface_id: null,
     turn_messages: buildPostTurnConversationMessages(payload),
-    ...(sourceObservation === null ? {} : { source_observed_at: sourceObservation.observed_at })
+    artifact_key: `post-turn:${taskId}`,
+    ...(sourceObservation === null ? {} : {
+      source_observed_at: sourceObservation.observed_at,
+      source_observation: sourceObservation
+    })
   };
   let compiled: readonly CandidateMemorySignal[];
   try {
@@ -392,6 +398,7 @@ async function compilePostTurnExtractTask(
       if (parsed.workspace_id !== payload.workspace_id || parsed.run_id !== payload.run_id) {
         throw new Error("Post-turn extract candidate signal escaped the task workspace or run.");
       }
+      if (parsed.interpretation_contract !== undefined) return parsed;
       return normalizeSchemaGroundedSignal(parsed);
     })
   );

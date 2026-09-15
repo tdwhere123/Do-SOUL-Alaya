@@ -121,7 +121,8 @@ describe("extraction cache-key allowlist continuation", () => {
       model: config.model,
       request_profile: config.requestProfile,
       cache_key: firstKey,
-      raw_json: '{"signals":[]}',
+      raw_json: '{"interpretations":[]}',
+      empty_classification: "deterministic_empty",
       extracted_at: "2026-08-09T00:00:00.000Z"
     });
 
@@ -148,7 +149,8 @@ describe("extraction cache-key allowlist continuation", () => {
       model: config.model,
       request_profile: config.requestProfile,
       cache_key: firstKey,
-      raw_json: '{"signals":[]}',
+      raw_json: '{"interpretations":[]}',
+      empty_classification: "deterministic_empty",
       extracted_at: "2026-08-09T00:00:00.000Z"
     });
 
@@ -176,7 +178,8 @@ describe("extraction cache-key allowlist continuation", () => {
       model: config.model,
       request_profile: config.requestProfile,
       cache_key: firstKey,
-      raw_json: '{"signals":[]}',
+      raw_json: '{"interpretations":[]}',
+      empty_classification: "deterministic_empty",
       extracted_at: "2026-08-09T00:00:00.000Z"
     });
 
@@ -267,7 +270,8 @@ describe("extraction cache-key allowlist production window", () => {
         model: config.model,
         request_profile: config.requestProfile,
         cache_key: key,
-        raw_json: status === "hit" ? '{"signals":[]}' : "not-json",
+        raw_json: status === "hit" ? '{"interpretations":[]}' : "not-json",
+        ...(status === "hit" ? { empty_classification: "deterministic_empty" as const } : {}),
         extracted_at: "2026-07-22T00:00:00.000Z"
       });
 

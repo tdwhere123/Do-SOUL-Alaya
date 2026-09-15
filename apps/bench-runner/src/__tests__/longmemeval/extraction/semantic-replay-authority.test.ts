@@ -1,3 +1,4 @@
+import { semanticInterpretation } from "./semantic-artifact-fixture.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -177,19 +178,7 @@ function permutedSourceAuthority(
 }
 
 function rawResult(text: string, assertionId: number) {
-  return {
-    kind: "raw" as const,
-    rawJson: JSON.stringify({ signals: [{
-      object_kind: "fact",
-      confidence: 0.9,
-      matched_text: text.replace(/^(?:User|Assistant): /u, ""),
-      source_locator: {
-        contract_version: 3,
-        kind: "assertion_catalog",
-        assertion_id: assertionId
-      }
-    }] })
-  };
+  return { kind: "raw" as const, rawJson: JSON.stringify({ interpretations: [semanticInterpretation({ text, assertionId })] }) };
 }
 
 describe("offline semantic replay execution identity", () => {
@@ -314,18 +303,7 @@ describe("offline semantic replay execution identity", () => {
       throw new Error("packed drift fixture expected two semantic tasks");
     }
     const policy = { kind: "reference_batch_8" as const };
-    const rawJson = JSON.stringify({
-      signals: tasks.map((task) => ({
-        object_kind: "fact",
-        confidence: 0.9,
-        matched_text: task.text.replace(/^(?:User|Assistant): /u, ""),
-        source_locator: {
-          contract_version: 3,
-          kind: "assertion_catalog",
-          assertion_id: task.assertionId
-        }
-      }))
-    });
+    const rawJson = JSON.stringify({ interpretations: tasks.map(semanticInterpretation) });
     const cold = await runSemanticFill({
       root,
       tasks,

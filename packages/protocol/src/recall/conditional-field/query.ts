@@ -112,6 +112,7 @@ export const QueryHoleSchema = z
     schema_version: SchemaVersionSchema,
     hole_id: ConditionalFieldIdSchema,
     variable: ConditionalFieldIdSchema,
+    description: z.string().max(4096).optional(),
     status: z.enum(["open", "bound", "unresolved"])
   })
   .strict()

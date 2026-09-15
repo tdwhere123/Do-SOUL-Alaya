@@ -447,7 +447,8 @@ async function writeDeterministicShard(cacheKey: string): Promise<void> {
     model: cacheIdentity.model,
     request_profile: cacheIdentity.requestProfile,
     cache_key: cacheKey,
-    raw_json: '{"signals":[]}'
+    raw_json: '{"signals":[]}',
+    empty_classification: "deterministic_empty"
   }));
 }
 

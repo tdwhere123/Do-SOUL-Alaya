@@ -46,7 +46,7 @@ export function resolveSourceTemporalCandidates(
       (opensRange && /^\s*(?:to\b|through\b|until\b|至|到)/iu.test(source.slice(candidate.end))))
       ? "unknown"
       : sourceTemporalRole(before,
-        source.slice(candidate.end, candidate.end + 8), bounded);
+        source.slice(candidate.end, candidate.end + 96), bounded);
     return Object.freeze({ ...candidate, role, bounded });
   });
   return candidates.some((candidate) => candidate.role === "unknown") ? [] : candidates;
@@ -171,7 +171,7 @@ function sourceTemporalRole(before: string, after: string, bounded: boolean): So
   // window. A validity cue cannot override an unresolved inequality either.
   if (/\b(?:before|after|by)\s+(?:the\s+year\s+)?$/iu.test(before) || /^(?:之前|之后|以前|以后|前|后)/u.test(after)) return "unknown";
   if (!bounded && /\b(?:until|through)\s*$|(?:截至|直到)$/iu.test(before)) return "unknown";
-  if (hasValidityConstruction(before)) return "validity";
+  if (hasValidityConstruction(before) || hasTrailingValidityConstruction(after)) return "validity";
   if (!bounded && /\b(?:from|to)\s+(?:the\s+year\s+)?$|(?:自|从|到|至)$/iu.test(before)) return "unknown";
   return "event";
 }
@@ -181,6 +181,12 @@ function hasValidityConstruction(before: string): boolean {
   // in the clause (for example an adjective) cannot supply temporal validity.
   return /\b(?:(?:effective|valid|in\s+effect|appl(?:y|ies))(?:\s+(?:from|since|on))?|since|as\s+of)\s+(?:the\s+year\s+)?$/iu.test(before) ||
     /(?:有效期|生效|有效|适用)\s*(?:自|从|起)?\s*$/u.test(before);
+}
+
+function hasTrailingValidityConstruction(after: string): boolean {
+  // Copula after the date names that date as the validity bound. A later
+  // clause or a descriptive adjective must not supply the role.
+  return /^\s+(?:was|is)\s+the\s+(?:effective|valid)\s+date\b/iu.test(after);
 }
 
 function hasUnresolvedEndpointExclusion(source: string, candidate: TemporalMatch): boolean {

@@ -1,6 +1,6 @@
 import {
   parseOfficialApiExtractionRequest,
-  classifyOfficialApiRequestResult,
+  classifyOfficialApiExtractionResult,
   stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
@@ -9,7 +9,7 @@ import {
   extractionEnvelopeCountsTowardCoverage,
   EXTRACTION_REQUEST_COMPLETION_VERSION,
   type ExtractionRequestCompletion,
-  EMPTY_SIGNALS_ENVELOPE,
+  EMPTY_INTERPRETATIONS_ENVELOPE,
   PLAN_SKIPPED_EXTRACTION_ENVELOPE
 } from "../extraction/empty-classification.js";
 import { EXTRACTION_CACHE_ROOT } from "./compile-seed-config.js";
@@ -144,7 +144,7 @@ export function importExtractionResponse(input: {
   if (key !== input.expectedCacheKey) throw new ExtractionCacheInvariantError("import request identity mismatch");
   let completion: ExtractionRequestCompletion;
   try {
-    completion = classifyOfficialApiRequestResult(result.rawJson, extraction.request, input.sourceCorpus).status;
+    completion = classifyOfficialApiExtractionResult(result.rawJson, extraction.request, input.sourceCorpus).status;
   } catch (cause) {
     throw new ExtractionResponseAdmissionError("provider response failed request-bound admission", { cause });
   }
@@ -230,7 +230,7 @@ async function persistDeterministicEmpty(
       return refuseQuarantinedExtraction(cacheKey, recached.reason);
     }
     const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
-    const result = { rawJson: EMPTY_SIGNALS_ENVELOPE };
+    const result = { rawJson: EMPTY_INTERPRETATIONS_ENVELOPE };
     const persisted = persistExtraction(
       options, cacheRoot, cacheKey, result, false,
       extractCacheInputIdentity(input.userPrompt).request
@@ -343,7 +343,11 @@ async function extractLiveWithLease(
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
   const request = extractCacheInputIdentity(input.userPrompt).request;
-  const completion = classifyOfficialApiRequestResult(result.rawJson, request).status;
+  const completion = classifyOfficialApiExtractionResult(
+    result.rawJson,
+    request,
+    requireExtractSourceCorpus(input)
+  ).status;
   const persisted = persistExtraction(options, cacheRoot, cacheKey, result, true, request, completion);
   recordLiveExtractionSuccess(options, cacheKey, stats, persisted);
   return result;
@@ -355,10 +359,25 @@ function withSemanticValidation(
   return {
     ...input,
     validateRawJson: (rawJson) => {
-      classifyOfficialApiRequestResult(rawJson, extractCacheInputIdentity(input.userPrompt).request);
+      classifyOfficialApiExtractionResult(
+        rawJson,
+        extractCacheInputIdentity(input.userPrompt).request,
+        requireExtractSourceCorpus(input)
+      );
       input.validateRawJson?.(rawJson);
     }
   };
+}
+
+function requireExtractSourceCorpus(
+  input: Parameters<BenchSignalExtractor["extract"]>[0]
+): string {
+  if (input.sourceCorpus === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "live extraction classify requires the source corpus"
+    );
+  }
+  return input.sourceCorpus;
 }
 
 function markLiveExtractionStarted(
@@ -395,6 +414,11 @@ function persistExtraction(
     });
   if (providerBacked && requestCompletion === undefined) {
     throw new ExtractionCacheInvariantError("provider result lacks shared request completion");
+  }
+  if (emptyClassification === "completed_empty" && inspection.rawSignalCount !== 0) {
+    throw new ExtractionCacheInvariantError(
+      "completed_empty contradicts a non-empty interpretations envelope"
+    );
   }
   try {
     writeCachedExtraction(cacheRoot, cacheKey, {

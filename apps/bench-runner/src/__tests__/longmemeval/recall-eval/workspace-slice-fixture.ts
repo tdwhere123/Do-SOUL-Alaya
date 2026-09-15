@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   FACTOR_INCIDENCE_OPERATOR_ID,
+  EvidenceCapsuleSchema,
   MemoryDimension,
   RunMode,
   RunState,
@@ -27,6 +28,9 @@ import {
   digestRelationFormationEventSource,
   initDatabase,
   SqliteEventLogRepo,
+  SqliteEvidenceCapsuleRepo,
+  SqliteFieldSourceRecordRepo,
+  SqliteFieldSourceSpanRepo,
   SqliteMemoryEntryRepo,
   SqliteRelationAssertionRepo,
   SqliteRunRepo,
@@ -249,7 +253,7 @@ async function seedHaystack(
 ): Promise<void> {
   await seedWorkspaceAndRun(database, input.workspaceId, input.runId);
   await seedMemory(database, input);
-  insertEvidence(database, input);
+  await insertEvidence(database, input);
   insertIncidence(database, input.workspaceId, input.token);
 }
 
@@ -313,26 +317,18 @@ export async function seedMemory(
   });
 }
 
-function insertEvidence(
+async function insertEvidence(
   database: ReturnType<typeof initDatabase>,
-  input: {
-    readonly workspaceId: string;
-    readonly runId: string;
-    readonly evidenceId: string;
-    readonly token: string;
-  }
-): void {
-  database.connection.prepare(`
-    INSERT INTO evidence_capsules (
-      object_id, created_at, updated_at, created_by, evidence_kind,
-      semantic_anchor, physical_anchor, evidence_health_state, gist, excerpt,
-      source_hash, run_id, workspace_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    input.evidenceId, CLOCK, CLOCK, "garden_compile", "conversation_excerpt",
-    "{}", null, "verified", `Planted evidence ${input.token}`,
-    `Planted evidence ${input.token}`, "sha256:fixture", input.runId, input.workspaceId
-  );
+  input: { readonly workspaceId: string; readonly runId: string; readonly evidenceId: string; readonly token: string }
+): Promise<void> {
+  const text = `Planted evidence ${input.token}`;
+  await new SqliteEvidenceCapsuleRepo(database).create(EvidenceCapsuleSchema.parse({
+    object_id: input.evidenceId, object_kind: "evidence_capsule", schema_version: 1,
+    created_at: CLOCK, updated_at: CLOCK, created_by: "garden_compile", lifecycle_state: "active",
+    evidence_kind: "conversation_excerpt", semantic_anchor: { topic: text, keywords: [], summary: text },
+    event_anchor: null, physical_anchor: null, evidence_health_state: "verified", gist: text, excerpt: text,
+    source_hash: "sha256:fixture", run_id: input.runId, workspace_id: input.workspaceId, surface_id: null
+  }));
 }
 
 function insertIncidence(
@@ -346,16 +342,11 @@ function insertIncidence(
     source_version: "v1",
     content_digest
   }, fieldSha256);
-  database.connection.prepare(`
-    INSERT INTO source_records (
-      workspace_id, record_id, source_id, source_version, content_digest,
-      evidence_object_id, recorded_at, event_time, valid_from, valid_to,
-      operator_id, source_body
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    workspaceId, record_id, `${workspaceId}-src`, "v1", content_digest,
-    null, CLOCK, null, null, null, SOURCE_SPAN_IDENTITY_OPERATOR_ID, token
-  );
+  new SqliteFieldSourceRecordRepo(database, fieldSha256).insert({
+    workspace_id: workspaceId, record_id, source_id: `${workspaceId}-src`, source_version: "v1", content_digest,
+    evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
+    operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID, source_body: token, speaker: "user", scope_class: "project"
+  });
   const span_id = hashAddressableSourceSpanId({
     record_id,
     start_offset: 0,
@@ -363,15 +354,10 @@ function insertIncidence(
     purpose: "sentence",
     producer_version: SOURCE_SPAN_IDENTITY_OPERATOR_ID
   }, fieldSha256);
-  database.connection.prepare(`
-    INSERT INTO source_spans (
-      workspace_id, span_id, record_id, start_offset, end_offset,
-      purpose, producer_version, recorded_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    workspaceId, span_id, record_id, 0, token.length,
-    "sentence", SOURCE_SPAN_IDENTITY_OPERATOR_ID, CLOCK
-  );
+  new SqliteFieldSourceSpanRepo(database, fieldSha256).insert({
+    workspace_id: workspaceId, span_id, record_id, start_offset: 0, end_offset: token.length,
+    purpose: "sentence", producer_version: SOURCE_SPAN_IDENTITY_OPERATOR_ID, recorded_at: CLOCK
+  });
   const factor_id = hashFactorId({
     family: "f0",
     canonical_payload: token,

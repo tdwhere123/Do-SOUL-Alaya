@@ -276,6 +276,34 @@ relations; tombstones and revocation cannot be bypassed by continuation.
 
 ## Bounded observation and delivery
 
+Source sketches are partial query interpretations. Unsupported source revisions
+and unresolved alternatives remain explicit holes with bounded recoverable text
+in query identity. A hint is a discovery proposal, never proof of relevance.
+Core matches the predicate and required roles conjunctively inside one candidate
+and source context. Storage performs bounded physical candidate scans before
+Core applies the context-visit cap; every scanned row and fetched byte is charged.
+Proposal pages seek the existing `(workspace_id, created_at, object_id)` index
+with a tuple cursor; the terminating empty probe also consumes native work.
+The text comparison lane hydrates current source bytes before matching phrases,
+using the same temporal, retained-chunk integrity, scope and UTF-8 boundaries as
+exhaustive lookup. Logical prefix size and physical chunk reads are separate.
+
+Hint work reserves native hydration before consuming a matching identity.
+Insufficient reserve retains that identity for continuation. Hint, exhaustive
+source and memory lanes rotate with a persisted cursor under narrow budgets and
+share normal field deduplication; an unavailable hint does not complete source
+membership. Optional `source_lookup_reasons` binds each public proposal reason
+to its exact source target, candidate and context. Protocol owns its schema;
+retention and MCP/CLI encoding account for its bytes and may omit diagnostics
+under resource limits. Reasons do not alter association grades or legal exposure.
+Worker restart invalidates old continuations; interrupted payload expansion
+remains incomplete and repeated delivery uses the existing retry contract.
+
+The additive diagnostic fields are a Protocol minor change under invariant §25.
+Fixed-corpus local canaries measure scans, hydrated contexts, native bytes,
+retained memory and legal exposure separately. They establish mechanism behavior;
+semantic usefulness and the R02 quality gate remain unaccepted.
+
 One request pins its interpretation clock, snapshot and generation. Native
 readers advance cursors within their allowances. Grounding, support, projection
 and previews share request accounting and retain concrete unfinished work.
@@ -409,6 +437,18 @@ formulas are unchanged, but structured product slots are explicitly
 non-equivalent to the old ranked candidate pool. Duplicate product slots are
 not silently deduplicated.
 
+A validated miss without causal evidence remains scorable and is counted as
+`conditional_field_unattributed`. Stage tables and exposure comparisons preserve
+that unknown cause; they cannot infer early absence or write loss from missing
+legacy pool ranks. Such comparisons remain inconclusive.
+
+Membership continuation retains the first memory interruption so an unconsumed
+cursor can resume with a larger budget. A repeated interruption at the same
+effective budget may close an empty page only when all retained phase progress
+is unchanged. The result remains open and partial; consumed-token replay retains
+its original result. Attempted work is not retained progress. Late seed subjects
+reopen adjacency for new pairs, and guard closure waits for those dependencies.
+
 An internal execution receipt captures the actual compiler inputs, query and
 interpretation identities, live source snapshot, and original request budget.
 The worker transports that receipt through the same result boundary. Measurement
@@ -517,6 +557,9 @@ even when the independent source owner can preserve the complete range. Missing
 source clocks leave relative dates unresolved; live and replay preserve a supplied
 fixed offset for every civil-time consumer, including time-concern proposals.
 Absolute calendar years use UTC and need no clock.
+Source observation publication derives temporal fields through the existing Soul
+projection owner using the verified assertion and retained source `event_time`.
+Ingestion or provider timestamps cannot replace a missing source clock.
 Generation response-schema JSON participates in raw cache identity; current
 parser, grounding and formation identities separate newly derived artifacts
 from historical raw or previously qualified generations.

@@ -104,8 +104,20 @@ function buildOfficialSeedDrafts(
   const drafts: SeedInputDraft[] = [];
   for (const signal of signals) {
     if (signal.interpretation_contract !== undefined) {
-      throw new Error("Source interpretation seed materialization is not connected yet");
+      drafts.push({
+        signalKind: signal.signal_kind,
+        distilledFact: signal.raw_payload.source_interpretation.assertion_binding.text,
+        turnContent: input.turnContent,
+        turnMessages: input.context.turn_messages,
+        turnSeedIndex: input.seedIndex,
+        productionSignalId: signal.signal_id,
+        productionRawPayload: signal.raw_payload,
+        extractionProvider: "official_api_compile"
+      });
+      continue;
     }
+    // Live ordinary compile emits interpretation_contract signals only.
+    // matched_text drafts are not produced by OfficialApiGardenProvider.compile.
     const distilled =
       readRawString(signal.raw_payload, "distilled_fact") ??
       readRawString(signal.raw_payload, "matched_text");

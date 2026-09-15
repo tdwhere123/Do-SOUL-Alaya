@@ -53,8 +53,8 @@ export type BenchEvidenceFallbackReason =
 
 export interface BenchSignalSeedInput {
   readonly signalKind: string;
-  readonly objectKind: string;
-  readonly confidence: number;
+  readonly objectKind?: string;
+  readonly confidence?: number;
   readonly distilledFact: string;
   readonly turnContent: string;
   readonly turnMessages?: readonly ConversationMessage[];

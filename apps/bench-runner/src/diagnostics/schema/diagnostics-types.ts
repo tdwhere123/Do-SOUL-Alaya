@@ -1,3 +1,4 @@
+import type { MissTaxonomyDistributionSchema } from "@do-soul/alaya-eval";
 import {
   BenchEmbeddingProviderStateSchema,
   DiagnosticActiveConstraintResultSchema,
@@ -179,7 +180,7 @@ export type LongMemEvalMissTaxonomy = z.infer<
 >;
 
 export type LongMemEvalMissTaxonomySummary = Readonly<
-  Record<LongMemEvalMissTaxonomy, number>
+  z.infer<typeof MissTaxonomyDistributionSchema>
 >;
 
 export type LongMemEvalMissTaxonomyDistribution = LongMemEvalMissTaxonomySummary;

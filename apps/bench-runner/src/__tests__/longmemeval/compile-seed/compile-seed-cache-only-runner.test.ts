@@ -16,7 +16,7 @@ import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
 import {
   buildCompileSeedDaemon,
   OFFLINE_CONFIG,
-  signalsEnvelope
+  interpretationsEnvelope
 } from "./compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 
@@ -40,8 +40,8 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
 
   it("uses official_api_compile from a complete cache without an API secret", async () => {
     writeManifest();
-    writeShard(signalsEnvelope([
-      { distilled: "Alice moved to Berlin.", matched: "Alice moved to Berlin." }
+    writeShard(interpretationsEnvelope([
+      { matched: "Alice moved to Berlin." }
     ]));
     const delegate = vi.fn<BenchSignalExtractor["extract"]>();
     const seeded: BenchSignalSeedInput[] = [];
@@ -84,8 +84,8 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
 
   it("uses the manifest cache with an explicit credentialless config", async () => {
     writeManifest();
-    writeShard(signalsEnvelope([
-      { distilled: "Alice moved to Berlin.", matched: "Alice moved to Berlin." }
+    writeShard(interpretationsEnvelope([
+      { matched: "Alice moved to Berlin." }
     ]));
     const delegate = vi.fn<BenchSignalExtractor["extract"]>();
     const runner = createCompileSeedRunner({
@@ -204,8 +204,8 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
 
   it("does not attribute a miss to the preceding cache hit", async () => {
     writeManifest();
-    writeShard(signalsEnvelope([
-      { distilled: "Alice moved to Berlin.", matched: "Alice moved to Berlin." }
+    writeShard(interpretationsEnvelope([
+      { matched: "Alice moved to Berlin." }
     ]));
     const delegate = vi.fn<BenchSignalExtractor["extract"]>();
     const runner = createCompileSeedRunner({

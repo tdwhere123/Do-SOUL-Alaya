@@ -13,7 +13,7 @@ const REQUEST_PROFILE = "provider-default-v1" as const;
 
 describe("runner raw shard inspector", () => {
   it("shares one verified inspection across primary and supplement phases", async () => {
-    const cacheRoot = await cacheFixture('{"signals":[]}');
+    const cacheRoot = await cacheFixture('{"interpretations":[]}');
     const inspector = createRunnerRawShardInspector();
 
     const primary = inspector.inspect({
@@ -59,8 +59,8 @@ describe("runner raw shard inspector", () => {
   });
 
   it("validates every first access and separates all identity fields", async () => {
-    const cacheRoot = await cacheFixture('{"signals":[]}');
-    const otherRoot = await cacheFixture('{"signals":[]}');
+    const cacheRoot = await cacheFixture('{"interpretations":[]}');
+    const otherRoot = await cacheFixture('{"interpretations":[]}');
     const inspector = createRunnerRawShardInspector();
     const input = {
       phase: "primary" as const,
@@ -79,7 +79,7 @@ describe("runner raw shard inspector", () => {
 
     const missingKey = "b".repeat(64);
     expect(inspector.inspect({ ...input, cacheKey: missingKey }).status).toBe("missing");
-    writeShard(cacheRoot, missingKey, '{"signals":[]}');
+    writeShard(cacheRoot, missingKey, '{"interpretations":[]}');
     const otherKeyResult = inspector.inspect({ ...input, cacheKey: missingKey });
     expect(otherKeyResult.status).toBe("hit");
     expect(otherKeyResult).not.toBe(first);
@@ -116,6 +116,7 @@ function writeShard(root: string, cacheKey: string, rawJson: string): void {
     request_profile: REQUEST_PROFILE,
     cache_key: cacheKey,
     raw_json: rawJson,
+    ...(rawJson === '{"interpretations":[]}' ? { empty_classification: "deterministic_empty" } : {}),
     extracted_at: "2026-08-11T00:00:00.000Z"
   }));
 }

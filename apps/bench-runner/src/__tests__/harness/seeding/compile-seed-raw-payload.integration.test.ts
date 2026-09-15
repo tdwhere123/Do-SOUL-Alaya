@@ -1,10 +1,10 @@
+import { createHistoricalSignalReplayProvider } from "./historical-signal-replay-fixture.js";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SignalEventType } from "@do-soul/alaya-protocol";
-import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
 import {
   initDatabase,
   SqliteEventLogRepo,
@@ -150,7 +150,7 @@ describe("compile-seed raw payload projection", () => {
       role: "user" as const,
       content: source
     }];
-    const provider = new OfficialApiGardenProvider({
+    const provider = createHistoricalSignalReplayProvider({
       apiKey: "sk-test",
       extractor: {
         extract: async () => ({
@@ -161,7 +161,7 @@ describe("compile-seed raw payload projection", () => {
               confidence: 0.9,
               matched_text: source,
               source_locator: {
-                contract_version: 3,
+                contract_version: 4,
                 kind: "assertion_catalog",
                 assertion_id: 1
               },
@@ -232,7 +232,7 @@ describe("compile-seed raw payload projection", () => {
       }
     });
     expect(signal?.raw_payload.source_locator).toEqual({
-      contract_version: 3,
+      contract_version: 4,
       kind: "assertion_catalog",
       assertion_id: 1
     });

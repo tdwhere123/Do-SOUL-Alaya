@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { SemanticEnrichmentWorker } from "../../../conversation/semantic-enrichment-worker.js";
-import { artifactFixture, response } from "./artifact-lifecycle-fixture.js";
+import { artifactFixture, PROFILE, response } from "./artifact-lifecycle-fixture.js";
+import { locateSourceInterpretation } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { MEM, WS } from "./ids.js";
 
 const databases = new Set<StorageDatabase>();
@@ -32,6 +34,73 @@ function attemptRows(database: StorageDatabase, taskId: string): readonly { stat
 }
 
 describe("retained lifecycle and completion admission", () => {
+  it.each(["fresh and cached", "historical"] as const)("completes %s valid-empty artifacts without fabricating candidates", async (mode) => {
+    const f = await fixture();
+    let calls = 0;
+    const worker = f.worker({ execute: async () => { calls++; return '{"interpretations":[]}'; },
+      reconcile: async () => ({ kind: "unknown" as const }) });
+    const firstTask = await f.write(MEM.orion, "Alice owns Orion.");
+    const source = f.repo.source(WS, MEM.orion)!;
+    const work = f.codec.plan(source, PROFILE)[0]!;
+    if (mode === "historical") {
+      const unit = JSON.parse(work.admissionJson).unit;
+      const located = locateSourceInterpretation({ source: unit.sourceCorpus, artifactKey: "admission",
+        sha256: fieldContractSha256,
+        assertion: { assertion_id: unit.assertionId, text: unit.text,
+          source_span: [unit.binding.locator.start, unit.binding.locator.end] },
+        response: { kind: "received", value: { interpretations: [] } } });
+      expect(located.outcome).toBe("empty");
+      const pending = f.repo.task(WS, firstTask)!;
+      await f.audit("claimed", pending, () => f.repo.claim(pending, "historical-recovery", "2026-05-31T12:00:00.000Z"));
+      const claimed = f.repo.task(WS, firstTask)!;
+      await f.audit("admitted", claimed, () => f.repo.put(claimed, { key: work.key,
+        rawJson: '{"interpretations":[]}', payloadJson: JSON.stringify([located]), searchText: "" }));
+    }
+    expect(await worker.run(WS, firstTask, { adoptClaim: mode === "historical" })).toBe("completed");
+    const artifact = f.repo.artifact(WS, work.key)!;
+    const secondTask = await f.write(MEM.channel, "Alice owns Orion.");
+    expect(await worker.run(WS, secondTask)).toBe("completed");
+    expect(calls).toBe(mode === "historical" ? 0 : 1);
+    expect(f.repo.artifact(WS, work.key)).toEqual(artifact);
+    const bindings = f.slice.database.connection.prepare("SELECT binding_json FROM garden_semantic_bindings").all() as { binding_json: string }[];
+    expect(bindings).toHaveLength(2);
+    for (const binding of bindings) {
+      const interpretations = JSON.parse(binding.binding_json).interpretations;
+      expect(interpretations).toHaveLength(1);
+      expect(interpretations[0]).toMatchObject({ outcome: "empty", candidates: [], diagnostics: [] });
+    }
+    expect(f.repo.searchReady(WS, "Alice", 10)).toEqual([]);
+    expect(f.slice.database.connection.prepare("SELECT search_text FROM garden_semantic_projections").all())
+      .toEqual([{ search_text: "" }, { search_text: "" }]);
+  });
+
+  it.each(["malformed", "unknown"] as const)("does not cache %s completion as valid-empty", async (state) => {
+    const f = await fixture();
+    const task = await f.write(MEM.orion, "Alice owns Orion.");
+    const worker = f.worker({ execute: async () => {
+      if (state === "unknown") throw new Error("transport outcome unknown");
+      return "{}";
+    }, reconcile: async () => ({ kind: "unknown" as const }) });
+    expect(await worker.run(WS, task)).toBe(state === "unknown" ? "uncertain" : "admission_rejected");
+    expect(f.slice.database.connection.prepare("SELECT count(*) AS n FROM garden_semantic_artifacts").get()).toEqual({ n: 0 });
+    expect(semanticFts(f.slice.database)).toEqual([]);
+  });
+
+  it("rejects historical nonempty envelopes without candidates instead of upgrading them to empty", async () => {
+    const f = await fixture();
+    const task = await f.write(MEM.orion, "Alice owns Orion.");
+    const work = f.codec.plan(f.repo.source(WS, MEM.orion)!, PROFILE)[0]!;
+    const pending = f.repo.task(WS, task)!;
+    await f.audit("claimed", pending, () => f.repo.claim(pending, "historical-recovery", "2026-05-31T12:00:00.000Z"));
+    const claimed = f.repo.task(WS, task)!;
+    await f.audit("admitted", claimed, () => f.repo.put(claimed, { key: work.key,
+      rawJson: '{"interpretations":[{"assertion_id":1,"relations":[]}]}', payloadJson: "[]", searchText: "" }));
+    const worker = f.worker({ execute: async () => { throw new Error("cached artifact must not dispatch"); },
+      reconcile: async () => ({ kind: "unknown" as const }) });
+    expect(await worker.run(WS, task, { adoptClaim: true })).toBe("binding_rejected");
+    expect(semanticFts(f.slice.database)).toEqual([]);
+  });
+
   it("does not extract or republish after retention tombstone of an enqueued source", async () => {
     const f = await fixture();
     const task = await f.write(MEM.orion, "Alice owns Orion");

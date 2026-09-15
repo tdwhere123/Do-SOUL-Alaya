@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 
 function serviceFor(database: StorageDatabase, now: () => string = () => NOW,
-  worker?: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>) {
+  worker?: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>, memoryBytes?: number) {
   const { dependencies } = createDependencies();
   const readBounded = createBoundedActiveConstraintsReader(database);
   const service = new RecallService({ ...dependencies, now,
@@ -39,7 +39,10 @@ function serviceFor(database: StorageDatabase, now: () => string = () => NOW,
     ...(worker === undefined ? { observerReaders: createConditionalFieldObserverReaders(database) }
       : { readSnapshot: worker.readSnapshot, conditionalFieldPort: worker.conditionalFieldPort }) });
   const recall = service.recall.bind(service);
-  service.recall = (params) => recall({ ...capableRecallConsumerDeclaration(), ...params });
+  service.recall = (params) => recall({ ...capableRecallConsumerDeclaration(), ...params,
+    ...(memoryBytes === undefined ? {} : { budget: { schema_version: 1 as const,
+      work_units: 10_000, memory_bytes: memoryBytes, finalization_reserve: 100, min_envelope: 10,
+      page_budget: params.policyOverride?.fine_assessment.budgets.max_entries ?? 100 } }) });
   return service;
 }
 
@@ -248,7 +251,9 @@ describe("conditional-field lifecycle and verified usage through actual consumer
       const id = `aaaaaaaa-aaaa-4aaa-8aaa-${String(index + 1000).padStart(12, "0")}`;
       ids.push(id); await slice.writeMemory(id, `needle ${index}`, MemoryDimension.FACT);
     }
-    const handler = handlerFor(slice.database);
+    // This test pages a fully observed 120-member field; the default 1 MB
+    // interrupts observation after 32 members with retained binding state.
+    const handler = handlerFor(slice.database, serviceFor(slice.database, () => NOW, undefined, 10_000_000));
     const delivered = new Set<string>();
     const payloads = new Set<string>();
     let continuation: InformationIndex["continuation"] = null;

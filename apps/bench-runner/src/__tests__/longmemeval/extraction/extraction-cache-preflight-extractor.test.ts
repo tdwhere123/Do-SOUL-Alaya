@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildOfficialApiExtractionRequest,
+  buildOfficialApiSourceCorpus,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
@@ -15,7 +16,7 @@ import { writeExtractionCacheManifest } from "../../../runs/extraction/cache/ext
 import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG,
-  signalsEnvelope
+  interpretationsEnvelope
 } from "../compile-seed/compile-seed-fixture.js";
 import {
   providerBackedExtractionResult,
@@ -34,9 +35,8 @@ const TURN_CONTENT = "I moved to Berlin.";
 const TURN_REQUEST = stringifyOfficialApiExtractionRequest(
   buildOfficialApiExtractionRequest(TURN_CONTENT, [])
 );
-const TURN_RESPONSE = signalsEnvelope([{
+const TURN_RESPONSE = interpretationsEnvelope([{
   matched: TURN_CONTENT,
-  distilled: "The user moved to Berlin."
 }]);
 
 describe("cache-only compile seed smoke", () => {
@@ -56,9 +56,8 @@ describe("cache-only compile seed smoke", () => {
       cacheRoot,
       CREDENTIALLED_CONFIG.model,
       turnContent,
-      signalsEnvelope([{
+      interpretationsEnvelope([{
         matched: "I moved to Berlin and started a new job in March 2024.",
-        distilled: "Alice lives in Berlin."
       }])
     );
 
@@ -117,7 +116,7 @@ describe("single-source extraction model", () => {
       config: { ...CONFIG, providerUrl: TEST_EXTRACTION_PROVIDER_URL },
       cacheRoot
     });
-    await extractor.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST });
+    await extractor.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST });
 
     // The cache-key model component and the persisted fixture model both come
     // from the single `model` field — there is no independent re-derivation.
@@ -146,7 +145,7 @@ describe("single-source extraction model", () => {
       config: { ...CONFIG, providerUrl: TEST_EXTRACTION_PROVIDER_URL },
       cacheRoot
     });
-    await writer.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST });
+    await writer.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST });
     expect(delegate.extract).toHaveBeenCalledOnce();
 
     const reader = createCachingSignalExtractor({
@@ -160,7 +159,7 @@ describe("single-source extraction model", () => {
       cacheRoot
     });
     await expect(
-      reader.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST })
+      reader.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST })
     ).rejects.toThrow(/extraction model mismatch/u);
     expect(delegate.extract).toHaveBeenCalledOnce();
   });
@@ -178,7 +177,7 @@ describe("single-source extraction model", () => {
       cacheRoot
     });
 
-    await expect(extractor.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST }))
+    await expect(extractor.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST }))
       .rejects.toThrow(/request profile mismatch/u);
     expect(delegate).not.toHaveBeenCalled();
     expect(readdirSync(cacheRoot).filter((entry) => /^[0-9a-f]{2}$/u.test(entry)))
@@ -196,7 +195,7 @@ describe("single-source extraction model", () => {
       allowLiveExtraction: false
     });
 
-    await expect(extractor.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST }))
+    await expect(extractor.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST }))
       .rejects.toThrow(/cache-only.*missing|missing.*live extraction disabled/u);
     expect(delegate.extract).not.toHaveBeenCalled();
   });
@@ -220,7 +219,7 @@ describe("single-source extraction model", () => {
       allowLiveExtraction: false
     });
 
-    await expect(extractor.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST }))
+    await expect(extractor.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST }))
       .rejects.toThrow(/cache-only.*invalid/u);
     expect(delegate.extract).not.toHaveBeenCalled();
   });

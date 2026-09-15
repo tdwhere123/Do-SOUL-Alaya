@@ -23,6 +23,7 @@ describe("runner facet hold does not trap a truncated-open index", () => {
     // Runner always installs payload_work_per_entry: 5, so hold = min(page_budget, n) * 6.
     // page_budget 800 with 24 spokes zeros cap against this remaining reserve.
     const starved = defaultBudget({
+      memory_bytes: 10_000_000,
       work_units: 64,
       finalization_reserve: 6,
       min_envelope: 0,
@@ -43,6 +44,7 @@ describe("runner facet hold does not trap a truncated-open index", () => {
     }
 
     const ample = defaultBudget({
+      memory_bytes: 10_000_000,
       work_units: 400,
       finalization_reserve: 40,
       min_envelope: 1,

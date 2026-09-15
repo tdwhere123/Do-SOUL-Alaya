@@ -25,6 +25,7 @@ export function encodeIndexResults(
   sourceMetadata: Readonly<Record<string, Readonly<{
     readonly evidence_refs?: readonly string[];
     readonly staged_warnings?: StagedWarningArray;
+    readonly source_lookup_reasons?: RecallCandidate["source_lookup_reasons"];
   }>>> = {}
 ): readonly MemorySearchResult[] {
   const encoded: MemorySearchResult[] = [];
@@ -43,8 +44,13 @@ export function encodeIndexResults(
       target_object_id: objectId
         ?? (entry.target.kind === "source_evidence" ? entry.target.root_id : warning.target_object_id)
     }));
-    const metadataBytes = evidencePointers.length === 0 && (stagedWarnings?.length ?? 0) === 0
-      ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings }), "utf8");
+    const reasons = metadata?.source_lookup_reasons;
+    const withReasonBytes = Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings, source_lookup_reasons: reasons }), "utf8");
+    // This surface budgets one token per UTF-8 byte. Keep a preview byte too;
+    // bounded optional diagnostics may be omitted when the wire budget is tight.
+    const retainedReasons = withReasonBytes < maxTotalTokens - usedTokens ? reasons : undefined;
+    const metadataBytes = evidencePointers.length === 0 && (stagedWarnings?.length ?? 0) === 0 && retainedReasons === undefined
+      ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings, source_lookup_reasons: retainedReasons }), "utf8");
     const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedTokens);
     const omitted = fitted === null;
     const content = omitted ? "[payload omitted]" : fitted.preview;
@@ -59,6 +65,7 @@ export function encodeIndexResults(
       content_preview: content,
       evidence_pointers: evidencePointers,
       ...(stagedWarnings === undefined ? {} : { staged_warnings: stagedWarnings }),
+      ...(retainedReasons === undefined ? {} : { source_lookup_reasons: retainedReasons }),
       ...(entry.hypothesis_id === undefined ? {} : { hypothesis_id: entry.hypothesis_id }),
       ...(entry.program_state === undefined ? {} : { program_state: entry.program_state }),
       ...(entry.time_state === undefined ? {} : { time_state: entry.time_state }),

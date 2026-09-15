@@ -1,8 +1,11 @@
+import { buildSnapshotExtractionSummary } from "../../../runs/snapshot/extraction-authority.js";
+import { assertSemanticSupplementClosure, assertSemanticSupplementRound,
+  createSemanticSupplementEntries } from "../../../runs/snapshot/seed-ledger/semantic-supplement-binding.js";
 import { writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   buildOfficialApiExtractionRequests,
   buildOfficialApiSourceCorpus,
@@ -24,7 +27,9 @@ import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
-import { buildCompileSeedDaemon, makeSeed } from "./compile-seed-fixture.js";
+import { startBenchDaemon } from "../../../harness/daemon.js";
+import { initDatabase, SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
 
 const MODEL = "shared-inspection-model";
 const REQUEST_PROFILE = "provider-default-v1" as const;
@@ -34,12 +39,21 @@ const TURN_MESSAGES = [
   { message_id: "m2", role: "user" as const, content: "I avoid any." }
 ];
 
-it("shares the verified primary shard through the real supplement chain", async () => {
+it.each(["valid", "source-drift", "malformed-primary"] as const)("consumes bound supplemental interpretations and rejects raw drift through native publication (mode=%s)", async (mode) => {
   const root = await mkdtemp(join(tmpdir(), "shared-raw-runtime-"));
   const primaryCacheRoot = join(root, "primary");
   const sourceCacheRoot = join(root, "source");
+  vi.stubEnv("ALAYA_INGEST_RECONCILIATION_ENABLED", "0");
+  vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "");
+  let daemon: Awaited<ReturnType<typeof startBenchDaemon>> | undefined;
+  let db: ReturnType<typeof initDatabase> | undefined;
   try {
+    daemon = await startBenchDaemon({ dataDirRoot: join(root, "consumer"),
+      workspaceId: "supplement-native", runId: "supplement-native-run" });
     const fixture = writeRuntimeFixture(primaryCacheRoot, sourceCacheRoot);
+    if (mode === "source-drift") writeShard(sourceCacheRoot, fixture.cacheKey, envelope([interpretation(99, "invented")]));
+    if (mode === "malformed-primary") writeShard(primaryCacheRoot, fixture.cacheKey,
+      '{"interpretations":[{"assertion_id":2,"relations":[]}]}');
     const runner = createCompileSeedRunner({
       cacheRoot: primaryCacheRoot,
       config: {
@@ -56,24 +70,50 @@ it("shares the verified primary shard through the real supplement chain", async 
       }
     });
 
-    const result = await runner.seedTurn({
-      daemon: buildCompileSeedDaemon((input) => makeSeed(input.distilledFact)),
+    const seedInput = {
+      daemon,
       turnContent: TURN,
       turnMessages: TURN_MESSAGES,
       evidenceRefBase: "q1-s0-t0",
       seedIndex: 0,
-      workspaceId: "ws-test",
-      runId: "run-test"
-    });
+      workspaceId: daemon.workspaceId,
+      runId: daemon.runId,
+      sourceObservedAt: "2026-01-01T00:00:00.000Z"
+    };
+    if (mode !== "valid") {
+      await expect(runner.seedTurn(seedInput)).rejects.toThrow();
+      db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+      expect(db.connection.prepare("SELECT COUNT(*) AS count FROM evidence_capsules").get()).toEqual({ count: 0 });
+      expect(runner.stats.lastSemanticSupplementShards).toHaveLength(0);
+      return;
+    }
+    const result = await runner.seedTurn(seedInput);
 
     expect(result.seeds).toHaveLength(2);
+    db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+    const roots = new SqliteFieldSourceRecordRepo(db, fieldContractSha256).listByWorkspace(daemon.workspaceId);
+    expect(roots.some((record) => record.source_body?.includes("I avoid any."))).toBe(true);
     expect(runner.stats.lastSemanticSupplementShards).toHaveLength(1);
+    const entries = createSemanticSupplementEntries();
+    assertSemanticSupplementRound({ semantic: runner.stats.lastSemanticSupplementShards!,
+      semanticEntries: entries, semanticBinding: runner.semanticSupplementBinding,
+      cacheKeys: [fixture.cacheKey], requests: [requireSingleRequest()] });
+    const primary = requireIdentity(primaryCacheRoot);
+    if (primary.manifest.schema_version !== 3 && primary.manifest.schema_version !== 4) throw new Error("fixture requires profiled manifest");
+    assertSemanticSupplementClosure(buildSnapshotExtractionSummary(primary.manifest, primary.manifestSha256),
+      entries, runner.semanticSupplementBinding);
+
     expect(runner.stats.rawShardInspection).toMatchObject({
       primary: { physicalReads: 1, parseMisses: 1, memoHits: 0 },
       supplement: { physicalReads: 1, parseMisses: 1, memoHits: 1 }
     });
   } finally {
-    await rm(root, { recursive: true, force: true });
+    try { await daemon?.shutdown(); }
+    finally {
+      db?.close();
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
   }
 });
 
@@ -89,10 +129,10 @@ function writeRuntimeFixture(primaryCacheRoot: string, sourceCacheRoot: string) 
     OFFICIAL_API_SYSTEM_PROMPT,
     stringifyOfficialApiExtractionRequest(request)
   );
-  const primaryRawJson = envelope([signal(1, "I use TypeScript.")]);
+  const primaryRawJson = envelope([interpretation(1, "I use TypeScript.")]);
   const sourceRawJson = envelope([
-    signal(1, "I use TypeScript."),
-    signal(2, "I avoid any.")
+    interpretation(1, "I use TypeScript."),
+    interpretation(2, "I avoid any.")
   ]);
   const sourceCorpus = buildOfficialApiSourceCorpus(TURN, TURN_MESSAGES);
   writeShard(primaryCacheRoot, cacheKey, primaryRawJson);
@@ -108,7 +148,7 @@ function writeRuntimeFixture(primaryCacheRoot: string, sourceCacheRoot: string) 
   });
   const receiptPath = join(primaryCacheRoot, "supplement-receipt.json");
   writeFileSync(receiptPath, JSON.stringify(receipt), "utf8");
-  return { receiptPath };
+  return { receiptPath, cacheKey };
 }
 
 function createReceipt(input: {
@@ -121,6 +161,7 @@ function createReceipt(input: {
   sourceCorpus: string;
 }) {
   return createSourceAssertionSupplementReceipt({
+    schemaVersion: 4,
     createdAt: "2026-08-11T00:00:00.000Z",
     primaryIdentity: {
       manifestSha256: input.primaryIdentity.manifestSha256,
@@ -188,42 +229,12 @@ function writeShard(cacheRoot: string, cacheKey: string, rawJson: string): void 
   });
 }
 
-function envelope(signals: readonly ReturnType<typeof signal>[]): string {
-  return JSON.stringify({ signals });
+function envelope(interpretations: readonly ReturnType<typeof interpretation>[]): string {
+  return JSON.stringify({ interpretations });
 }
 
-function signal(assertionId: number, matchedText: string) {
-  return {
-    signal_kind: "potential_claim",
-    object_kind: "fact",
-    confidence: 0.9,
-    matched_text: matchedText,
-    distilled_fact: matchedText,
-    source_locator: {
-      contract_version: 3,
-      kind: "assertion_catalog",
-      assertion_id: assertionId
-    },
-    semantic_factor_graph: {
-      schema_version: 2,
-      source_kind: "evidence",
-      factors: [{
-        factor_id: "f0",
-        surface: matchedText,
-        semantic_identity: matchedText.toLowerCase()
-      }],
-      variables: [],
-      result_variable_ids: [],
-      propositions: [{
-        proposition_id: "p0",
-        predicate_factor_id: "f0",
-        arguments: [{
-          position: 0,
-          binding_identity: `assertion-${assertionId}`,
-          reference_kind: "factor",
-          reference_id: "f0"
-        }]
-      }]
-    }
-  };
+function interpretation(assertionId: number, matchedText: string) {
+  return { assertion_id: assertionId, relations: [{
+    predicate: { text: matchedText }, arguments: [], qualifiers: []
+  }] };
 }

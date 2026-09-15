@@ -13,7 +13,7 @@ import {
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
-  buildGroundedSignalResponse,
+  buildGroundedInterpretationResponse,
   groundedExtractionResult,
   providerBackedExtractionResult
 } from "./fixture.js";
@@ -123,7 +123,7 @@ describe("extraction-fill identity transaction", () => {
             await blocked;
           }
           return providerBackedExtractionResult(
-            buildGroundedSignalResponse(input.userPrompt)
+            buildGroundedInterpretationResponse(input.userPrompt)
           );
         }
       }),

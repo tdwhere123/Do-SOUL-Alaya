@@ -18,7 +18,7 @@ describe("observeField adjacency paging", () => {
     const state = observeField(interpretation(), {
       workspace_id: "workspace-1",
       query_text: "seed",
-      budget: defaultBudget(),
+      budget: defaultBudget({ memory_bytes: 10_000_000 }),
       as_of: AS_OF,
       authorized_scopes: null,
       readers: readers(seedReads)

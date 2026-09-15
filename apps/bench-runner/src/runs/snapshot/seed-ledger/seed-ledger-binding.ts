@@ -46,6 +46,7 @@ export function assertSnapshotSeedLedgerBinding(input: {
   const semanticEntries = createSemanticSupplementEntries();
   const db = new DatabaseSync(input.dbPath, { readOnly: true });
   try {
+    db.exec("BEGIN");
     input.sidecar.questions.forEach((question, index) => {
       const source = input.questions[index];
       if (source === undefined) throw new Error("snapshot seed ledger question order mismatch");

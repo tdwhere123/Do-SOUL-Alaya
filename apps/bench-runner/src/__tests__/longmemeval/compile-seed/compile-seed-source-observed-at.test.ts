@@ -1,146 +1,64 @@
-// @ts-nocheck
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { initDatabase } from "@do-soul/alaya-storage";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import {
-  createCompileSeedRunner,
-  type BenchSignalExtractor,
-  type CompileSeedDaemon
-} from "../../../runs/compile-seed.js";
-import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
-import {
-  CREDENTIALLED_CONFIG,
-  providerBackedResult,
-  withOpenSemanticFactorGraph
-} from "./compile-seed-fixture.js";
+import { startBenchDaemon } from "../../../harness/daemon.js";
+import { createCompileSeedRunner } from "../../../runs/compile-seed.js";
+import { CREDENTIALLED_CONFIG, providerBackedResult } from "./compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 
-describe("compile seed source observation", () => {
-  let cacheRoot: string;
-
-  beforeEach(async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-observed-"));
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-  });
-
-  afterEach(async () => {
-    await rm(cacheRoot, { recursive: true, force: true });
-  });
-
-  it("reuses raw extraction while deriving relative dates per source time", async () => {
-    const seeded: BenchSignalSeedInput[] = [];
-    let extractCalls = 0;
-    const extractor: BenchSignalExtractor = {
-      extract: async () => {
-        extractCalls += 1;
-        return providerBackedResult(relativeSignalEnvelope());
-      }
-    };
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      extractorFactory: () => extractor,
-      allowLiveExtraction: true,
-      skipPreflight: true
-    });
-    const daemon = createDaemon(seeded);
-
-    await seedAt(runner, daemon, "2024-06-15T14:30:00.000Z", 0);
-    await seedAt(runner, daemon, "2024-06-16T14:30:00.000Z", 1);
-
-    expect(extractCalls).toBe(1);
+it("reuses raw interpretations while deriving inclusive memory dates from each retained source clock", async () => {
+  const root = await mkdtemp(join(tmpdir(), "compile-seed-observed-"));
+  let daemon: Awaited<ReturnType<typeof startBenchDaemon>> | undefined;
+  let db: ReturnType<typeof initDatabase> | undefined;
+  vi.stubEnv("ALAYA_INGEST_RECONCILIATION_ENABLED", "0");
+  vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "");
+  try {
+    const cacheRoot = join(root, "cache");
+    writeExtractionCacheTestManifest({ cacheRoot, model: CREDENTIALLED_CONFIG.model,
+      providerUrl: CREDENTIALLED_CONFIG.providerUrl, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT });
+    const extract = vi.fn(async () => providerBackedResult(JSON.stringify({ interpretations: [{
+      assertion_id: 1, relations: [{ predicate: { text: "completed" },
+        arguments: [{ role: "object", phrase: { text: "the review" } }],
+        qualifiers: [{ role: "time", phrase: { text: "today" } }] }]
+    }] })));
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot,
+      extractorFactory: () => ({ extract }), allowLiveExtraction: true, skipPreflight: true });
+    daemon = await startBenchDaemon({ dataDirRoot: join(root, "consumer"), workspaceId: "observed-source", runId: "observed-source-run" });
+    const memoryIds: string[] = [];
+    for (const [index, sourceObservedAt] of ["2024-06-15T14:30:00.000Z", "2024-06-16T14:30:00.000Z"].entries()) {
+      const result = await runner.seedTurn({ daemon, turnContent: "I completed the review today.",
+        turnMessages: [{ message_id: `trusted-user-${index}`, role: "user", content: "I completed the review today." }],
+        evidenceRefBase: `q-s-r-${index}`, seedIndex: index, workspaceId: daemon.workspaceId,
+        runId: daemon.runId, sourceObservedAt });
+      expect(result.seeds).toHaveLength(1);
+      const memoryId = result.seeds[0]!.memoryId;
+      if (memoryId === undefined) throw new Error("expected memory publication");
+      memoryIds.push(memoryId);
+    }
+    expect(extract).toHaveBeenCalledTimes(1);
     expect(runner.stats.cacheHits).toBe(1);
-    expect(seeded.map((signal) => signal.productionRawPayload?.temporal_projection)).toEqual([
-      expect.objectContaining({ event_time_start: "2024-06-15T00:00:00.000Z" }),
-      expect.objectContaining({ event_time_start: "2024-06-16T00:00:00.000Z" })
-    ]);
-    expect(seeded.map((signal) => signal.productionRawPayload?.distilled_fact)).toEqual([
-      "I completed the review today.",
-      "I completed the review today."
-    ]);
-    expect(seeded[0]?.productionRawPayload).toMatchObject({
-      source_locator: {
-        contract_version: 3,
-        kind: "assertion_catalog",
-        assertion_id: 1
-      },
-      source_assertion: "I completed the review today.",
-      proposed_matched_text: "I completed the review today."
-    });
-  });
+    db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+    const rows = memoryIds.map((id) => db!.connection.prepare(
+      "SELECT content, event_time_start, event_time_end, time_precision, time_source FROM memory_entries WHERE object_id = ?"
+    ).get(id));
+    expect(rows).toEqual([15, 16].map((day) => ({
+      content: "User: I completed the review today.",
+      event_time_start: `2024-06-${day}T00:00:00.000Z`,
+      event_time_end: `2024-06-${day}T23:59:59.999Z`,
+      time_precision: "day", time_source: "relative_resolved"
+    })));
+    const unknown = await runner.seedTurn({ daemon, turnContent: "I completed the review today.",
+      evidenceRefBase: "q-s-r-unknown", seedIndex: 2, workspaceId: daemon.workspaceId, runId: daemon.runId });
+    expect(unknown.seeds).toHaveLength(1);
+    expect(db.connection.prepare("SELECT event_time_start, event_time_end, time_precision, time_source FROM memory_entries WHERE object_id = ?")
+      .get(unknown.seeds[0]!.memoryId)).toEqual({ event_time_start: null, event_time_end: null,
+        time_precision: null, time_source: null });
+    expect(extract).toHaveBeenCalledTimes(1);
+  } finally {
+    try { await daemon?.shutdown(); }
+    finally { db?.close(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
+  }
 });
-
-function relativeSignalEnvelope(): string {
-  return JSON.stringify({
-    signals: [withOpenSemanticFactorGraph({
-      signal_kind: "potential_claim",
-      object_kind: "activity",
-      confidence: 0.9,
-      matched_text: "I completed the review today.",
-      distilled_fact: "The operator completed the review on 2025-03-27.",
-      temporal_projection: {
-        projection_schema_version: 1,
-        event_time_start: "2025-03-27",
-        event_time_end: "2025-03-27",
-        time_precision: "day",
-        time_source: "turn_text"
-      },
-      source_locator: {
-        contract_version: 3,
-        kind: "assertion_catalog",
-        assertion_id: 1
-      }
-    })]
-  });
-}
-
-function createDaemon(seeded: BenchSignalSeedInput[]): CompileSeedDaemon {
-  return {
-    proposeMemoriesFromCompileSignals: async (signals) => {
-      seeded.push(...signals);
-      return {
-        seeds: signals.map((_, index) => ({
-          memoryId: `memory-${seeded.length}-${index}`,
-          signalId: `signal-${seeded.length}-${index}`,
-          proposalId: `proposal-${seeded.length}-${index}`,
-          evidenceId: `evidence-${seeded.length}-${index}`,
-          truncated: false,
-          charsClipped: 0
-        })),
-        dropped: []
-      };
-    },
-    proposeMemoryFromSignal: async () => { throw new Error("unexpected fallback"); },
-    proposeSynthesis: async () => ({ synthesisId: null })
-  };
-}
-
-async function seedAt(
-  runner: ReturnType<typeof createCompileSeedRunner>,
-  daemon: CompileSeedDaemon,
-  sourceObservedAt: string,
-  seedIndex: number
-): Promise<void> {
-  const turnContent = "I completed the review today.";
-  await runner.seedTurn({
-    daemon,
-    turnContent,
-    turnMessages: [{
-      message_id: `trusted-user-${seedIndex}`,
-      role: "user",
-      content: turnContent
-    }],
-    evidenceRefBase: `q-s-r-${seedIndex}`,
-    seedIndex,
-    workspaceId: "workspace-1",
-    runId: "run-1",
-    sourceObservedAt
-  });
-}

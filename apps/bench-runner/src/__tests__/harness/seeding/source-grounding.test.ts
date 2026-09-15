@@ -1,8 +1,8 @@
+import { createHistoricalSignalReplayProvider } from "./historical-signal-replay-fixture.js";
 import { describe, expect, it } from "vitest";
 import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
 import {
   buildOfficialApiSourceCorpus,
-  OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
 import { extractSeedInputs } from "../../../runs/compile-seed/compile-seed-extract.js";
 import type {
@@ -131,7 +131,7 @@ describe("compile source grounding revalidation", () => {
       content: turnContent
     }];
     const canonicalCorpus = buildOfficialApiSourceCorpus(turnContent, turnMessages);
-    const provider = new OfficialApiGardenProvider({
+    const provider = createHistoricalSignalReplayProvider({
       apiKey: "sk-test",
       extractor: {
         extract: async () => ({
@@ -436,7 +436,7 @@ function signalInput(turnContent: string, matchedText: string): BenchSignalSeedI
 
 function assertionLocator(assertionId: number) {
   return {
-    contract_version: 3,
+    contract_version: 4,
     kind: "assertion_catalog",
     assertion_id: assertionId
   };

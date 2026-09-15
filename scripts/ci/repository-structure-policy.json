@@ -1138,8 +1138,8 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 2481,
-      "expected_sha256": "bd0005c03066ec6c5c82ac175f6161883813cbbe500f3e50e081a1e49e811ce8"
+      "expected_count": 2494,
+      "expected_sha256": "ec4187c8282d255e9136f6e6e0f8b2f048cf35641688be3e3589ca604f8bbc23"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
@@ -1150,8 +1150,8 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 909,
-      "expected_sha256": "9fa8d6f58490db962a35e3cb1e205308b0edf9ae4e7c4f10fef51f2df98f2c83"
+      "expected_count": 916,
+      "expected_sha256": "fb1e85c20d1236060166ce6f643ded39d0b1cc3373f25789953a81010e884422"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",
@@ -1162,8 +1162,8 @@
     {
       "specifier": "@do-soul/alaya-eval",
       "path": "packages/eval/src/index.ts",
-      "expected_count": 131,
-      "expected_sha256": "f81c92ba4d639ed7a65dbefb5dc19982b53b83774564f0979fad08c8fdda89c9"
+      "expected_count": 132,
+      "expected_sha256": "0dd14484f6df3235d7abff6b7899a3544a670251c61c85ab5969507e98a44a10"
     },
     {
       "specifier": "@do-soul/alaya-eval/authority",
@@ -1180,14 +1180,14 @@
     {
       "specifier": "@do-soul/alaya-soul",
       "path": "packages/soul/src/index.ts",
-      "expected_count": 239,
-      "expected_sha256": "0ec84a7953f9f6be51ba7c864c7983b086dd00690a63ab8f62ee625d3e78e741"
+      "expected_count": 272,
+      "expected_sha256": "f2f38eb6d0039b19aa8f2338eac469b3ae772cf7f8b6a46939fd0cfcd93f51e0"
     },
     {
       "specifier": "@do-soul/alaya-storage",
       "path": "packages/storage/src/index.ts",
-      "expected_count": 319,
-      "expected_sha256": "fae0bbab4a9461ea3e97e4b990275b8f642f70997a3ab1a9fab76f2294a104da"
+      "expected_count": 321,
+      "expected_sha256": "b2087a53aac9eb4299600a5a38f5f8720f758c39c18a99aa52c5682947d47dd7"
     },
     {
       "specifier": "@do-soul/alaya",

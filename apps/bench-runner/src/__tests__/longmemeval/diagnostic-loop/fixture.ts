@@ -200,7 +200,7 @@ function trackingExtractionResult(
     return extractionResultForRoot(context.request, context.request.extractionCacheRoot);
   }
   const cacheRoot = join(context.workRoot, "tracking-extraction-cache");
-  const rawJson = '{"signals":[]}';
+  const rawJson = '{"interpretations":[]}';
   const inspected = inspectExtractionRawJson(rawJson);
   const entries = context.request.requestedKeys.map((cacheKey) => ({
     cacheKey,
@@ -214,6 +214,7 @@ function trackingExtractionResult(
       request_profile: entry.requestProfile,
       cache_key: entry.cacheKey,
       raw_json: rawJson,
+      empty_classification: "deterministic_empty",
       extracted_at: "2026-08-19T00:00:00.000Z"
     });
   }

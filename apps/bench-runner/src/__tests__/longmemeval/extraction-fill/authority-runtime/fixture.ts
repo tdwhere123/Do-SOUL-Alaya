@@ -91,7 +91,7 @@ export function mutateFirstRawShard(cacheRoot: string): void {
   if (file === undefined) throw new Error("expected a cached extraction shard file");
   const path = join(cacheRoot, prefix, file);
   const shard = JSON.parse(readFileSync(path, "utf8")) as { raw_json: string };
-  writeFileSync(path, JSON.stringify({ ...shard, raw_json: '{"signals":[],"mutated":true}' }), "utf8");
+  writeFileSync(path, JSON.stringify({ ...shard, raw_json: `${shard.raw_json} ` }), "utf8");
 }
 
 export function batchedFact(): string {

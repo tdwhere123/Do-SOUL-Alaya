@@ -11,7 +11,7 @@ import {
   type LongMemEvalExtractionTurn
 } from "../../../runs/extraction/turn-contents.js";
 import type { PreparedExtractionFill } from "../../../runs/extraction/fill/fill-preparation.js";
-import { buildExtractionFillQuestion, buildGroundedSignalResponse } from "./fixture.js";
+import { buildExtractionFillQuestion, buildGroundedInterpretationResponse } from "./fixture.js";
 
 const config = {
   model: "gemini-2.5-flash-lite", requestProfile: "provider-default-v1" as const,
@@ -67,7 +67,7 @@ describe("fresh Batch source workset", () => {
     writeCachedExtraction(root, cached.line.key, {
       model: config.model, request_profile: config.requestProfile,
       cache_key: cached.line.key, extracted_at: "2026-09-12T00:00:00.000Z",
-      raw_json: buildGroundedSignalResponse(cached.line.userPrompt)
+      raw_json: buildGroundedInterpretationResponse(cached.line.userPrompt)
     });
     const next = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: prepared(turns) });
     expect(next.lines).toHaveLength(1);

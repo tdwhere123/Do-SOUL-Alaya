@@ -88,7 +88,12 @@ export type {
   ConditionalFieldExecutionReceipt,
   RequestActualCost
 } from "./runtime/conditional-field-execution-receipt.js";
-export { compileConditionalFieldQuery, interpretationIdentity } from "./conditional-field/query/compile-query.js";
+export {
+  compileConditionalFieldQuery,
+  compileQuerySourceSketch,
+  interpretationIdentity,
+  type QuerySourceSketch
+} from "./conditional-field/query/compile-query.js";
 export type {
   KeywordSearchBatchQuery,
   KeywordSearchLaneScope,

@@ -131,7 +131,12 @@ export function toConsumer(
   };
 }
 
-export async function recallThroughCli(slice: SourceSlice, query: string, maxResults: number) {
+export async function recallThroughCli(
+  slice: SourceSlice,
+  query: string,
+  maxResults: number,
+  interpretationProposal?: SoulMemorySearchRequest["interpretation_proposal"]
+) {
   const { dependencies } = createDependencies();
   const service = new RecallService({
     ...dependencies,
@@ -155,7 +160,9 @@ export async function recallThroughCli(slice: SourceSlice, query: string, maxRes
       scope_class: null,
       dimension: null,
       domain_tags: null,
-      max_results: maxResults
+      max_results: maxResults,
+      result_kind_view: "source_only",
+      ...(interpretationProposal === undefined ? {} : { interpretation_proposal: interpretationProposal })
     }),
     "--workspace",
     WS

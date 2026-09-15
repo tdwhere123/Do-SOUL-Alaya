@@ -20,6 +20,7 @@ export function buildCompileSeedDaemon(
   onSignal: (input: BenchSignalSeedInput) => SeededMemoryResult
 ): CompileSeedDaemon {
   return {
+    importSourceRecord: async () => undefined,
     proposeMemoryFromSignal: async (input) => onSignal(input),
     proposeMemoriesFromCompileSignals: async (inputs) => {
       const seeds = inputs.map((input) => seedCompileInput(input, onSignal));
@@ -65,6 +66,21 @@ export const OFFLINE_CONFIG: CompileSeedExtractionConfig = {
   apiKey: null
 };
 
+export function interpretationsEnvelope(
+  facts: readonly { matched: string; assertionId?: number }[]
+): string {
+  return JSON.stringify({
+    interpretations: facts.map((fact) => ({
+      assertion_id: fact.assertionId ?? 1,
+      relations: [{
+        predicate: { text: fact.matched.split(/\s+/u).find((token) => /[A-Za-z]{3,}/u.test(token)) ?? fact.matched },
+        arguments: [],
+        qualifiers: []
+      }]
+    }))
+  });
+}
+
 export function signalsEnvelope(
   facts: readonly { distilled: string; matched: string; assertionId?: number }[]
 ): string {
@@ -76,7 +92,7 @@ export function signalsEnvelope(
       matched_text: fact.matched,
       distilled_fact: fact.distilled,
       source_locator: {
-        contract_version: 3,
+        contract_version: 4,
         kind: "assertion_catalog",
         assertion_id: fact.assertionId ?? 1
       }

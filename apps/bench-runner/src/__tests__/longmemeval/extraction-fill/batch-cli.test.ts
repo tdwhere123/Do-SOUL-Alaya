@@ -1,23 +1,20 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { initDatabase, SqliteSignalRepo, SqliteEvidenceCapsuleRepo,
   SqliteFieldSourceRecordRepo, SqliteFieldProjectionGenerationRepo,
   SqliteFieldFactorRepo, SqliteFieldSourceSpanRepo } from "@do-soul/alaya-storage";
 import { startBenchDaemon } from "../../../harness/daemon.js";
-import { createCachingSignalExtractor } from "../../../runs/compile-seed/compile-seed-cache.js";
+import { createCompileSeedRunner } from "../../../runs/compile-seed.js";
 import { resolveCompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-config.js";
-import { extractSeedInputs } from "../../../runs/compile-seed/compile-seed-extract.js";
-import { newFillStats } from "../../../runs/extraction/fill/fill-stats.js";
 import { inspectTurnContentKeySpace } from "../../../runs/extraction/turn-contents.js";
 import { runCli } from "../../../cli/cli.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
 import { readExtractionCacheManifestIdentity } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import type { GeminiBatchLimits, GeminiBatchPlan } from "../../../runs/extraction/fill/batch/contract.js";
-import { buildAuthorityQuestion, buildGroundedSignalResponse, EXTRACTION_FILL_VARIANT,
+import { buildAuthorityQuestion, buildGroundedInterpretationResponse, EXTRACTION_FILL_VARIANT,
   registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 
 let cacheRoot: string;
@@ -72,7 +69,7 @@ it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens a
     if (path === "/download/v1beta/files/output:download") {
       const plan = JSON.parse(readFileSync(join(cacheRoot, "gemini-batch-plan.json"), "utf8")) as GeminiBatchPlan;
       return new Response(plan.lines.map((line) => JSON.stringify({ key: line.key, response: {
-        candidates: [{ finishReason: "STOP", content: { parts: [{ text: buildGroundedSignalResponse(line.userPrompt) }] } }],
+        candidates: [{ finishReason: "STOP", content: { parts: [{ text: buildGroundedInterpretationResponse(line.userPrompt) }] } }],
         usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 }
       } })).join("\n"));
     }
@@ -98,38 +95,37 @@ it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens a
   const turn = inspectTurnContentKeySpace(questions, sourcePacking).distinctExtractionTurns[0]!;
   const config = resolveCompileSeedExtractionConfig(process.env, readExtractionCacheManifestIdentity(cacheRoot)!.manifest);
   expect(config.sourcePacking).toBe(sourcePacking);
-  const stats = newFillStats();
-  const provider = new OfficialApiGardenProvider({ sourcePacking: config.sourcePacking, diagnosticDir: null, injectedExtractorCapability: "cache_only",
-    extractor: createCachingSignalExtractor({ cacheRoot, stats, allowLiveExtraction: false,
-      config,
-      delegate: { extract: async () => { throw new Error("prepared consumer must stay cache-only"); } } }) });
+  const runner = createCompileSeedRunner({ cacheRoot, sourcePacking: config.sourcePacking,
+    requiredExtractionTurns: inspectTurnContentKeySpace(questions, sourcePacking).distinctExtractionTurns,
+    requiredTurnContents: inspectTurnContentKeySpace(questions, sourcePacking).distinctExtractionTurns.map((item) => item.turnContent),
+    requiredQuestionWindow: { offset: 0, limit: 1 }, diagnosticDir: null,
+    extractorFactory: () => ({ extract: async () => { throw new Error("prepared consumer must stay cache-only"); } }) });
   vi.stubEnv("ALAYA_INGEST_RECONCILIATION_ENABLED", "0");
   vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "");
   const daemon = await startBenchDaemon({ dataDirRoot: join(cacheRoot, "consumer"),
     workspaceId: "batch-consumer", runId: "batch-consumer-run" });
   try {
-    const drafts = await extractSeedInputs({ provider, stats, turnContent: turn.turnContent, seedIndex: 1,
-      context: { workspace_id: daemon.workspaceId, run_id: daemon.runId, surface_id: null,
-        turn_messages: turn.turnMessages } });
-    expect(drafts).toHaveLength(expectedDrafts);
-    const result = await daemon.proposeMemoriesFromCompileSignals(drafts.map((draft) => ({
-      ...draft, evidenceRef: "batch-consumer-evidence"
-    })));
-    expect(result.dropped).toEqual([]);
+    const result = await runner.seedTurn({ daemon, turnContent: turn.turnContent,
+      turnMessages: turn.turnMessages, seedIndex: 1, evidenceRefBase: "batch-consumer-evidence",
+      workspaceId: daemon.workspaceId, runId: daemon.runId, sourceObservedAt: "2026-01-01T00:00:00.000Z" });
     expect(result.seeds).toHaveLength(expectedDrafts);
-    expect(result.createdEvidence).toBe(true);
     const seed = result.seeds[0]!;
     expect(seed.evidenceId).not.toBeNull();
     await daemon.checkpointFieldProjection();
     // initDatabase reuses the daemon's connection; daemon.shutdown owns its close.
     const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
     const signal = await new SqliteSignalRepo(db).getById(seed.signalId);
-    expect(signal?.raw_payload).toMatchObject({ matched_text: "I completed alpha.",
-      source_locator: { assertion_id: 1 } });
+    expect(signal).toMatchObject({ interpretation_contract: "source-interpretation-v1",
+      raw_payload: { source_interpretation: {
+        assertion_binding: { text: "User: I completed alpha." }, outcome: "candidates"
+      } } });
     const evidence = await new SqliteEvidenceCapsuleRepo(db).findById(seed.evidenceId!);
     expect(evidence?.excerpt).toContain("I completed alpha.");
-    const source = new SqliteFieldSourceRecordRepo(db, fieldContractSha256)
-      .listByWorkspace(daemon.workspaceId).find((row) => row.evidence_object_id === seed.evidenceId);
+    const sourceRecords = new SqliteFieldSourceRecordRepo(db, fieldContractSha256)
+      .listByWorkspace(daemon.workspaceId);
+    const originalSource = sourceRecords.find((row) => row.source_id === "compile-seed:batch-consumer:batch-consumer-run:1");
+    expect(originalSource?.source_body).toContain("I completed alpha.");
+    const source = sourceRecords.find((row) => row.evidence_object_id === seed.evidenceId);
     expect(source?.source_body).toContain("I completed alpha.");
     if (source === undefined) throw new Error("materialization must retain its original source record");
     const spans = new SqliteFieldSourceSpanRepo(db, fieldContractSha256)
@@ -144,17 +140,17 @@ it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens a
     for (const result_kind_view of ["source_only", "mixed"] as const) {
       const recalled = await daemon.recall("alpha", { result_kind_view,
         enumeration_policy: "canonical", maxResults: 10 });
-      const delivered = recalled.results.find((row) => row.target.kind === "source_evidence");
+      const delivered = recalled.results.find((row) => row.target.kind === "source_evidence" &&
+        row.target.root_id === originalSource?.record_id);
       expect(delivered).toMatchObject({
-        target: { kind: "source_evidence", root_kind: "source_record", root_id: source.record_id,
-          evidence_object_id: seed.evidenceId },
+        target: { kind: "source_evidence", root_kind: "source_record", root_id: originalSource?.record_id },
         content_preview: expect.stringContaining("alpha")
       });
       expect(delivered).not.toHaveProperty("object_id");
       expect(recalled.provider_calls).toBe(0);
       expect(recalled.garden_enqueue).toBe(0);
     }
-    expect(stats.llmCalls).toBe(0);
+    expect(runner.stats.llmCalls).toBe(0);
     expect(fetchMock).toHaveBeenCalledTimes(calls);
   } finally { await daemon.shutdown(); }
   const reopened = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });

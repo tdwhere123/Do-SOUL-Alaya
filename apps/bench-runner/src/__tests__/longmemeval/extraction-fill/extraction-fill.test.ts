@@ -95,7 +95,7 @@ describe("runExtractionFill authority", () => {
     })).rejects.toThrow(/simulated interruption/u);
 
     expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
-      schema_version: 3,
+      schema_version: 4,
       provider_url: "https://provider-a.invalid/v1",
       model_family: "family-a"
     });

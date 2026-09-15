@@ -3,11 +3,15 @@ import {
   CandidateMemorySignalSchema,
   ScopeClass,
   SignalSource,
+  SourceLocatedInterpretationSchema,
   type CandidateMemorySignal,
   type SoulEmitCandidateSignalResponse,
   type SoulProposeMemoryUpdateResponse
 } from "@do-soul/alaya-protocol";
-import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
+import {
+  buildSourceInterpretationSignal,
+  normalizeSchemaGroundedSignal
+} from "@do-soul/alaya-soul";
 import {
   createUnscoredMaterializedSeedError,
   isUnscoredMaterializedSeedError
@@ -327,12 +331,31 @@ async function seedOneCompileSignal(
     ? buildBenchSourceEvidenceFallback(input, signalInput)
     : null;
   const signalId = `bench_signal_${randomUUID().replace(/-/gu, "")}`;
-  const signal = fallback?.signal ?? buildCompileSignal(
-      input,
-      signalInput,
-      signalId,
-      buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact, signalId)
-    );
+  const signal = fallback?.signal ?? (
+    signalInput.productionRawPayload?.source_interpretation === undefined
+      ? buildCompileSignal(
+        input,
+        signalInput,
+        signalId,
+        buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact, signalId)
+      )
+      : buildSourceInterpretationSignal({
+        located: SourceLocatedInterpretationSchema.parse(
+          signalInput.productionRawPayload.source_interpretation
+        ),
+        workspaceId: input.activeContext.workspaceId,
+        runId: input.activeContext.runId,
+        surfaceId: signalInput.surfaceId ?? null,
+        signalId,
+        createdAt: signalInput.sourceObservedAt ?? new Date().toISOString(),
+        sourceObservation: {
+          observed_at: signalInput.sourceObservedAt ?? new Date().toISOString(),
+          authority: "trusted_host_event",
+          source_event_id: signalInput.evidenceRef
+        },
+        scopeHint: ScopeClass.PROJECT
+      })
+  );
   const received = (await input.activeRuntime.services.signalService.receiveSignal(
     signal
   )) as BenchSignalReceiveResult;

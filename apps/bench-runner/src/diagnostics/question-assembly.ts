@@ -157,7 +157,12 @@ function buildQuestionMissFields(
     return {
       miss_classification: input.isAbstention === true ? "abstention_uncalibrated" as const
         : input.hitAt5 ? "hit_at_5" as const : "diagnostics_unavailable" as const,
-      miss_taxonomy: null,
+      miss_taxonomy: classifyQuestionMissTaxonomy({
+        hitAt5: input.hitAt5, goldMemoryIds: input.goldMemoryIds, goldObjectIds,
+        gold: parts.gold, diagnosticsAvailable: parts.diagnostics !== null,
+        conditionalFieldValidated: true, isAbstention: input.isAbstention === true,
+        seedDropReasons: input.seedDropReasons
+      }),
       ...(hasLongMemEvalSeedDropReasons(input.seedDropReasons) ? { seed_drop_reasons: input.seedDropReasons } : {})
     };
   }

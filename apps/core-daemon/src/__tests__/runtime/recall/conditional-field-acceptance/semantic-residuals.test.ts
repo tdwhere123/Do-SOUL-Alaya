@@ -89,7 +89,12 @@ describe("bounded semantic residual producer-consumer regressions", () => {
 
   it("delivers the independently admitted requested deployment alongside its associated outputs", async () => {
     const slice = await planted();
-    const index = await session(slice)();
+    const native = readersFor(slice);
+    const relation = vi.fn(native.relation!);
+    const index = await session(slice, { ...native, relation })();
+    expect(relation).toHaveBeenCalled();
+    const requests = relation.mock.calls.map(([input]) => JSON.stringify(input));
+    expect(new Set(requests).size).toBe(requests.length);
     const query = compileConditionalFieldQuery({ source: "ordinary", text: "yesterday failed deployment",
       interpretation_clock: INTERPRETATION_CLOCK, snapshot_id: SNAPSHOT_ID, budget: defaultBudget() });
     const observed = observeProgram(slice, query.program, { query_text: "yesterday failed deployment" });
