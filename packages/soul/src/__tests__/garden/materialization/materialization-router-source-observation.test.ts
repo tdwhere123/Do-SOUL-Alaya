@@ -121,4 +121,22 @@ describe("MaterializationRouter source observation routing", () => {
     expect(() => buildMemoryInput(signal, [])).toThrow(/source observation requires its own memory admission/);
     expect(() => buildClaimInput(signal, [], [])).toThrow(/source interpretation cannot create a claim/);
   });
+
+  it("surfaces evidence created_objects when memory write fails after capsule create", async () => {
+    const deps = createDeps();
+    const publish = vi.fn(async () => {
+      const error = new Error("source observation memory write interrupted after evidence creation");
+      (error as Error & { details: { evidence_object_id: string } }).details = {
+        evidence_object_id: "evidence-obs-1"
+      };
+      throw error;
+    });
+    const router = new MaterializationRouter({ ...deps, sourceObservationPublicationPort: { publish } });
+    const result = await router.materializeSignal(interpretationSignal());
+    expect(result.success).toBe(false);
+    expect(result.created_objects).toEqual([
+      { object_kind: "evidence_capsule", object_id: "evidence-obs-1" }
+    ]);
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+  });
 });

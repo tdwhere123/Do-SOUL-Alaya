@@ -18,15 +18,18 @@ export type CoreErrorSubCode =
 
 export interface CoreErrorOptions extends AlayaErrorOptions {
   readonly subCode?: CoreErrorSubCode;
+  readonly details?: Readonly<Record<string, unknown>>;
 }
 
 export class CoreError extends AlayaError {
   declare public readonly code: CoreErrorCode;
   public readonly subCode?: CoreErrorSubCode;
+  public readonly details?: Readonly<Record<string, unknown>>;
 
   public constructor(code: CoreErrorCode, message: string, options?: CoreErrorOptions) {
     super(code, message, options);
     this.name = "CoreError";
     this.subCode = options?.subCode;
+    this.details = options?.details;
   }
 }

@@ -16,7 +16,6 @@ import {
   SignalService,
   createAuditedSourceAdmission,
   createSignalEmissionWriter,
-  createSourceObservationPublication,
   deriveAddressableSpanViews,
   fieldContractSha256
 } from "@do-soul/alaya-core";
@@ -33,6 +32,10 @@ import {
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
 import { createDaemonFieldComposition } from "../../runtime/field/field-composition.js";
+import {
+  createMaterializationRouter,
+  type SignalMaterializationRuntimeInput
+} from "../../runtime/recall-materialization/recall-materialization-router.js";
 import { createSourceGroundingDeferTransitions } from "../../runtime/source-grounding-defer/transitions.js";
 
 const CLOCK = "2026-09-14T12:00:00.000Z";
@@ -80,35 +83,28 @@ describe("source observation publication wiring", () => {
         event_time: null, valid_from: null, valid_to: null, speaker: "user",
         scope_class: "project", spans: deriveAddressableSpanViews(SOURCE)
       }, { workspaceId: "workspace-1" });
-      const publication = createSourceObservationPublication({
-        stores: field.stores, sourceAdmission, evidenceService, memoryService,
-        sha256: fieldContractSha256
-      });
-      const claimCalls: unknown[] = [];
-      const router = new MaterializationRouter({
-        evidenceService, memoryService,
-        sourceObservationPublicationPort: {
-          async publish(input) {
-            const published = await publication.publish({
-              signal: input.signal,
-              sourceEventAnchor: input.context.source_event_anchor
-            });
-            return {
-              bound: published.bound,
-              evidence: { object_kind: published.evidence.object_kind, object_id: published.evidence.object_id },
-              memory: { object_kind: published.memory.object_kind, object_id: published.memory.object_id }
-            };
-          }
+      const router = createMaterializationRouter({
+        wiring: {
+          evidenceService,
+          memoryService,
+          synthesisService: { create: async () => { throw new Error("unexpected synthesis route"); } },
+          claimService: {
+            create: async () => { throw new Error("unexpected claim route"); }
+          },
+          fieldComposition: field,
+          eventLogRepo,
+          enqueueEnrichPending: () => undefined
         },
-        synthesisService: { create: async () => { throw new Error("unexpected synthesis route"); } },
-        claimService: {
-          create: async (input) => {
-            claimCalls.push(input);
-            return { object_kind: "claim_form", object_id: "claim-1" };
-          }
+        pathRelationProposalPort: {
+          submitCandidate: async () => { throw new Error("unexpected path proposal"); }
         },
+        temporalRelationAssertionPort: {
+          admit: async () => { throw new Error("unexpected temporal assertion"); }
+        },
+        conflictDetectionService: null,
+        reconciliationService: null,
         handoffGapHandler: new InMemoryHandoffGapHandler()
-      });
+      } as SignalMaterializationRuntimeInput);
       const signalRepo = new SqliteSignalRepo(database);
       const queueRepo = new SqliteSourceGroundingDeferQueueRepo(database);
       const eventPublisher = new EventPublisher({
@@ -160,7 +156,6 @@ describe("source observation publication wiring", () => {
       const evidenceId = received.materialization?.created_objects.find((object) => object.object_kind === "evidence_capsule")?.object_id;
       expect(memoryId).toBeDefined();
       expect(evidenceId).toBeDefined();
-      expect(claimCalls).toEqual([]);
       const liveMemory = await memoryService.findById(memoryId!);
       expect(liveMemory).toMatchObject({
         dimension: "observation", confidence: null, content: ASSERTION
@@ -180,19 +175,6 @@ describe("source observation publication wiring", () => {
       expect(afterWithdraw.created_objects).toEqual([]);
       expect(withdrawn.materialization?.success).toBe(true);
 
-      const claimSignal = CandidateMemorySignalSchema.parse({
-        signal_id: "claim-1", workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
-        source: "model_tool", signal_kind: "potential_claim", object_kind: "decision",
-        confidence: 0.9, scope_hint: null, domain_tags: ["governance"], evidence_refs: ["msg-1"],
-        source_memory_refs: [], supersedes_refs: [], exception_to_refs: [],
-        contradicts_refs: [], incompatible_with_refs: [],
-        raw_payload: { excerpt: "Ship the decision." },
-        created_at: CLOCK
-      });
-      const claimed = await router.materializeSignal(claimSignal);
-      expect(claimed.success).toBe(true);
-      expect(claimCalls).toHaveLength(1);
-
       database.close();
       database = initDatabase({ filename });
       const reopenedMemory = await new SqliteMemoryEntryRepo(database).findById(memoryId!);
@@ -203,7 +185,169 @@ describe("source observation publication wiring", () => {
       const rebound = BoundSourceInterpretationSchema.parse(JSON.parse(reopenedEvidence!.gist));
       expect(rebound.assertion_binding.context_id).toBe(located.assertion_binding.context_id);
       expect(rebound.source_target.root_id).toBe(admitted.record.identity);
+      expect(rebound.source_target.evidence_object_id).toBe(evidenceId);
       expect(reopenedEvidence?.excerpt).toBe(ASSERTION);
+    } finally {
+      database.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("still materializes an explicit claim through the existing claim entry", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "alaya-source-observation-claim-"));
+    const filename = join(directory, "memory.sqlite");
+    const database = initDatabase({ filename });
+    try {
+      await new SqliteWorkspaceRepo(database).create({
+        workspace_id: "workspace-1", name: "workspace", root_path: directory,
+        workspace_kind: "local_repo", default_engine_binding: null, workspace_state: "active"
+      });
+      await new SqliteRunRepo(database).create({
+        run_id: "run-1", workspace_id: "workspace-1", title: "run", goal: null,
+        run_mode: "chat", engine_binding_id: null, engine_class: null, run_state: "idle",
+        current_surface_id: null
+      });
+      const eventLogRepo = new SqliteEventLogRepo(database);
+      const notifier = { notifyEntry: async () => undefined, notify: async () => undefined };
+      const evidenceService = new EvidenceService({
+        evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), eventLogRepo,
+        runtimeNotifier: notifier, now: () => CLOCK
+      });
+      const memoryService = new MemoryService({
+        memoryEntryRepo: new SqliteMemoryEntryRepo(database), eventLogRepo, evidenceService,
+        runtimeNotifier: notifier, now: () => CLOCK,
+        dynamicsService: new DynamicsService({
+          memoryRepo: new SqliteMemoryEntryRepo(database),
+          karmaEventRepo: new SqliteKarmaEventRepo(database),
+          eventLogRepo, runtimeNotifier: notifier
+        })
+      });
+      const claimCalls: unknown[] = [];
+      const router = new MaterializationRouter({
+        evidenceService, memoryService,
+        synthesisService: { create: async () => { throw new Error("unexpected synthesis route"); } },
+        claimService: {
+          create: async (input) => {
+            claimCalls.push(input);
+            return { object_kind: "claim_form", object_id: "claim-1" };
+          }
+        },
+        handoffGapHandler: new InMemoryHandoffGapHandler()
+      });
+      const claimed = await router.materializeSignal(CandidateMemorySignalSchema.parse({
+        signal_id: "claim-1", workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
+        source: "model_tool", signal_kind: "potential_claim", object_kind: "decision",
+        confidence: 0.9, scope_hint: null, domain_tags: ["governance"], evidence_refs: ["msg-1"],
+        source_memory_refs: [], supersedes_refs: [], exception_to_refs: [],
+        contradicts_refs: [], incompatible_with_refs: [],
+        raw_payload: { excerpt: "Ship the decision." },
+        created_at: CLOCK
+      }));
+      expect(claimed.success).toBe(true);
+      expect(claimCalls).toHaveLength(1);
+      expect(claimed.created_objects.some((object) => object.object_kind === "claim_form")).toBe(true);
+    } finally {
+      database.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a withdrawn newer sqlite revision instead of resurrecting the older body", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "alaya-source-observation-withdrawn-"));
+    const filename = join(directory, "memory.sqlite");
+    const database = initDatabase({ filename });
+    try {
+      await new SqliteWorkspaceRepo(database).create({
+        workspace_id: "workspace-1", name: "workspace", root_path: directory,
+        workspace_kind: "local_repo", default_engine_binding: null, workspace_state: "active"
+      });
+      const eventLogRepo = new SqliteEventLogRepo(database);
+      const field = createDaemonFieldComposition({ database, eventLogRepo });
+      const notifier = { notifyEntry: async () => undefined, notify: async () => undefined };
+      const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
+      const memoryRepo = new SqliteMemoryEntryRepo(database);
+      const evidenceService = new EvidenceService({
+        evidenceCapsuleRepo: evidenceRepo, eventLogRepo, runtimeNotifier: notifier,
+        fieldStores: field.stores, now: () => CLOCK
+      });
+      const memoryService = new MemoryService({
+        memoryEntryRepo: memoryRepo, eventLogRepo, evidenceService, runtimeNotifier: notifier,
+        now: () => CLOCK,
+        dynamicsService: new DynamicsService({
+          memoryRepo, karmaEventRepo: new SqliteKarmaEventRepo(database),
+          eventLogRepo, runtimeNotifier: notifier
+        })
+      });
+      const sourceAdmission = createAuditedSourceAdmission({
+        stores: field.stores, eventLogRepo, sha256: fieldContractSha256
+      });
+      await sourceAdmission.admit({
+        workspace_id: "workspace-1", source_id: "artifact-1", source_version: "1",
+        content_bytes: SOURCE, evidence_object_id: null, recorded_at: CLOCK,
+        event_time: null, valid_from: null, valid_to: null, speaker: "user",
+        scope_class: "project", spans: deriveAddressableSpanViews(SOURCE)
+      }, { workspaceId: "workspace-1" });
+      const v2 = await sourceAdmission.admit({
+        workspace_id: "workspace-1", source_id: "artifact-1", source_version: "2",
+        content_bytes: "User: Alice uses apps.", evidence_object_id: null,
+        recorded_at: "2026-09-15T00:00:00.000Z",
+        event_time: null, valid_from: null, valid_to: null, speaker: "user",
+        scope_class: "project", spans: deriveAddressableSpanViews("User: Alice uses apps.")
+      }, { workspaceId: "workspace-1" });
+      database.connection.prepare(
+        "UPDATE source_records SET source_body = NULL WHERE workspace_id = ? AND record_id = ?"
+      ).run("workspace-1", v2.record.identity);
+      const router = createMaterializationRouter({
+        wiring: {
+          evidenceService, memoryService,
+          synthesisService: { create: async () => { throw new Error("unexpected synthesis route"); } },
+          claimService: { create: async () => { throw new Error("unexpected claim route"); } },
+          fieldComposition: field, eventLogRepo,
+          enqueueEnrichPending: () => undefined
+        },
+        pathRelationProposalPort: {
+          submitCandidate: async () => { throw new Error("unexpected path proposal"); }
+        },
+        temporalRelationAssertionPort: {
+          admit: async () => { throw new Error("unexpected temporal assertion"); }
+        },
+        conflictDetectionService: null, reconciliationService: null,
+        handoffGapHandler: new InMemoryHandoffGapHandler()
+      } as SignalMaterializationRuntimeInput);
+      const located = locateSourceInterpretation({
+        source: SOURCE, artifactKey: "artifact-1", sha256: fieldContractSha256,
+        assertion: {
+          assertion_id: 1, text: ASSERTION,
+          source_span: [SOURCE.indexOf(ASSERTION), SOURCE.indexOf(ASSERTION) + ASSERTION.length]
+        },
+        response: { kind: "received", value: { interpretations: [{ assertion_id: 1, relations: [] }] } }
+      });
+      const signal = CandidateMemorySignalSchema.parse({
+        signal_id: "withdrawn-head", workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
+        source: "garden_compile", signal_kind: "potential_semantic_observation",
+        interpretation_contract: SOURCE_INTERPRETATION_CONTRACT, object_kind: null, confidence: null,
+        scope_hint: "project", domain_tags: [], evidence_refs: [],
+        source_memory_refs: [], supersedes_refs: [], exception_to_refs: [],
+        contradicts_refs: [], incompatible_with_refs: [],
+        raw_payload: { source_interpretation: located },
+        source_observation: {
+          observed_at: CLOCK, authority: "trusted_host_event", source_event_id: "event-1"
+        },
+        created_at: CLOCK
+      });
+      const result = await router.materializeSignal(signal);
+      expect(result.success).toBe(false);
+      expect(result.created_objects).toEqual([]);
+      expect(
+        (database.connection.prepare(
+          "SELECT COUNT(*) AS n FROM memory_entries WHERE dimension = 'observation'"
+        ).get() as { n: number }).n
+      ).toBe(0);
+      expect(
+        (database.connection.prepare(
+          "SELECT COUNT(*) AS n FROM evidence_capsules WHERE gist LIKE '%source-interpretation-v1%'"
+        ).get() as { n: number }).n
+      ).toBe(0);
     } finally {
       database.close();
       await rm(directory, { recursive: true, force: true });

@@ -13,4 +13,11 @@ describe("CoreError", () => {
     expect(error.statusCode).toBe(404);
     expect(error.name).toBe("CoreError");
   });
+
+  it("carries optional details for recovery", () => {
+    const error = new CoreError("CONFLICT", "interrupted", {
+      details: { evidence_object_id: "evidence-1" }
+    });
+    expect(error.details).toEqual({ evidence_object_id: "evidence-1" });
+  });
 });

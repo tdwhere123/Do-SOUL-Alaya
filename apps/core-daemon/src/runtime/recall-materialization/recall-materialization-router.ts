@@ -23,7 +23,7 @@ import type {
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
 import { createSourceGroundingDeferTransitions } from "../source-grounding-defer/transitions.js";
 
-type SignalMaterializationRuntimeInput = Readonly<{
+export type SignalMaterializationRuntimeInput = Readonly<{
   readonly wiring: CreateRecallMaterializationWiringInput;
   readonly pathRelationProposalPort: PathRelationProposalPort;
   readonly temporalRelationAssertionPort: TemporalRelationAssertionPort;
@@ -43,7 +43,7 @@ export function createSignalMaterializationRuntime(
   return Object.freeze({ materializationRouter, signalService });
 }
 
-function createMaterializationRouter(
+export function createMaterializationRouter(
   input: SignalMaterializationRuntimeInput
 ): MaterializationRouter {
   const routerOptions = readMaterializationRouterOptions();

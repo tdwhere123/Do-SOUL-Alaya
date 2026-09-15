@@ -21,6 +21,7 @@ import { createAuditedSourceAdmission } from "../../../memory/evidence-create/au
 import { createInMemoryFieldStores } from "../../../memory/evidence-create/field-stores.js";
 import { createSourceObservationPublication } from "../../../memory/evidence-create/source-observation-publication.js";
 import { deriveAddressableSpanViews } from "../../../memory/evidence-create/source-span-views.js";
+import { CoreError } from "../../../shared/errors.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { evaluateSignalTriage } from "../../../memory/signal-service-helpers.js";
 import {
@@ -190,6 +191,7 @@ describe("source observation publication", () => {
     const rebound = BoundSourceInterpretationSchema.parse(JSON.parse(evidence!.gist));
     expect(rebound.assertion_binding.context_id).toBe(located.assertion_binding.context_id);
     expect(rebound.source_target.root_id).toBe(published.bound.source_target.root_id);
+    expect(rebound.source_target.evidence_object_id).toBe(evidenceId);
   });
 
   it("converts UTF-16 locators to UTF-8 durable spans", async () => {
@@ -213,6 +215,13 @@ describe("source observation publication", () => {
       original_complete: true
     });
     expect(published.bound.source_target.span?.content_end).toBe(source.length + 1);
+    expect(published.bound.assertion_binding.source_span).toEqual([
+      0, Buffer.byteLength(source, "utf8")
+    ]);
+    const sentAt = Buffer.byteLength(source.slice(0, source.indexOf("sent")), "utf8");
+    expect(published.bound.candidates[0]?.predicate.source_span).toEqual([
+      sentAt, sentAt + Buffer.byteLength("sent", "utf8")
+    ]);
   });
 
   it("publishes empty and failed interpretations without minting a certified graph", async () => {
@@ -247,12 +256,38 @@ describe("source observation publication", () => {
       sourceEventAnchor: null
     })).rejects.toThrow(/scope is not current/);
     await expect(fixture.publication.publish({
+      signal: observationSignal(located, { scope_hint: "not-a-scope" }),
+      sourceEventAnchor: null
+    })).rejects.toThrow(/unknown scope_hint/);
+    await expect(fixture.publication.publish({
       signal: observationSignal({
         ...located,
         assertion_binding: { ...located.assertion_binding, text: "not the source text" }
       }),
       sourceEventAnchor: null
     })).rejects.toThrow(/assertion binding does not match/);
+    const mismatchedPhrase = {
+      ...located,
+      candidates: located.candidates.map((candidate, index) => index === 0
+        ? { ...candidate, predicate: { ...candidate.predicate, text: "used" } }
+        : candidate)
+    };
+    await expect(fixture.publication.publish({
+      signal: observationSignal(mismatchedPhrase), sourceEventAnchor: null
+    })).rejects.toThrow(/candidate phrase does not match/);
+    const mismatchedKey = {
+      ...located,
+      candidates: located.candidates.map((candidate, index) => index === 0
+        ? {
+          ...candidate,
+          predicate: { ...candidate.predicate, lookup_key: "not-the-source-key" }
+        }
+        : candidate)
+    };
+    await expect(fixture.publication.publish({
+      signal: observationSignal(mismatchedKey), sourceEventAnchor: null
+    })).rejects.toThrow(/lookup_key does not match/);
+    expectNoPublishedObservation(fixture.database);
     await expect(fixture.publication.publish({
       signal: observationSignal(located, { workspace_id: "workspace-other" }),
       sourceEventAnchor: null
@@ -261,6 +296,7 @@ describe("source observation publication", () => {
     await expect(fixture.publication.publish({
       signal: observationSignal(located), sourceEventAnchor: null
     })).rejects.toThrow(/digest is not current/);
+    expectNoPublishedObservation(fixture.database);
     const other = await openFixture();
     await other.sourceAdmission.admit({
       workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
@@ -276,6 +312,7 @@ describe("source observation publication", () => {
     await expect(other.publication.publish({
       signal: observationSignal(located), sourceEventAnchor: null
     })).rejects.toThrow(/not currently admitted/);
+    expectNoPublishedObservation(other.database);
   });
 
   it("ignores model confidence, policy labels, and participant guesses", async () => {
@@ -323,20 +360,123 @@ describe("source observation publication", () => {
           }
           return await create(input);
         },
-        findByIdScoped: interrupted.memoryService.findByIdScoped.bind(interrupted.memoryService),
-        findByDimensionAll: interrupted.memoryService.findByDimensionAll.bind(interrupted.memoryService)
+        findByIdScoped: interrupted.memoryService.findByIdScoped.bind(interrupted.memoryService)
       },
       sha256: fieldContractSha256
     });
     const retrySignal = observationSignal(located, { signal_id: "signal-retry" });
-    await expect(publication.publish({ signal: retrySignal, sourceEventAnchor: null }))
-      .rejects.toThrow(/interrupted after evidence creation/);
+    const interruptedError = await publication.publish({
+      signal: retrySignal, sourceEventAnchor: null
+    }).then(() => null, (error: unknown) => error);
+    expect(interruptedError).toBeInstanceOf(CoreError);
+    expect((interruptedError as CoreError).code).toBe("CONFLICT");
+    expect((interruptedError as CoreError).message).toMatch(/interrupted after evidence creation/);
     const capsules = await interrupted.evidenceService.findByWorkspaceId(REAL_SQLITE_TEST_WORKSPACE_ID);
     expect(capsules).toHaveLength(1);
+    expect((interruptedError as CoreError).details).toEqual({
+      evidence_object_id: capsules[0]!.object_id
+    });
     expect(await interrupted.memoryService.findByDimensionAll(REAL_SQLITE_TEST_WORKSPACE_ID, "observation")).toEqual([]);
     const recovered = await publication.publish({ signal: retrySignal, sourceEventAnchor: null });
     expect(recovered.evidence.object_id).toBe(capsules[0]!.object_id);
     expect(recovered.memory.dimension).toBe("observation");
     expect(await interrupted.evidenceService.findByWorkspaceId(REAL_SQLITE_TEST_WORKSPACE_ID)).toHaveLength(1);
   });
+
+  it("reserves one identity for concurrent overlapping publish and after dormancy", async () => {
+    const fixture = await openFixture();
+    await admitSource(fixture);
+    const located = locatedInterpretation();
+    const [first, second] = await Promise.all([
+      fixture.publication.publish({
+        signal: observationSignal(located, { signal_id: "signal-a" }), sourceEventAnchor: null
+      }),
+      fixture.publication.publish({
+        signal: observationSignal(located, { signal_id: "signal-b" }), sourceEventAnchor: null
+      })
+    ]);
+    expect(second.memory.object_id).toBe(first.memory.object_id);
+    expect(second.evidence.object_id).toBe(first.evidence.object_id);
+    expect(countRows(fixture.database, "SELECT COUNT(*) AS n FROM memory_entries WHERE dimension = 'observation'")).toBe(1);
+    expect(countRows(fixture.database, "SELECT COUNT(*) AS n FROM evidence_capsules")).toBe(1);
+    fixture.database.connection.prepare(
+      "UPDATE memory_entries SET lifecycle_state = 'dormant', storage_tier = 'cold' WHERE object_id = ?"
+    ).run(first.memory.object_id);
+    expect(await fixture.memoryService.findByDimensionAll(REAL_SQLITE_TEST_WORKSPACE_ID, "observation")).toEqual([]);
+    const afterDormant = await fixture.publication.publish({
+      signal: observationSignal(located, { signal_id: "signal-dormant" }), sourceEventAnchor: null
+    });
+    expect(afterDormant.memory.object_id).toBe(first.memory.object_id);
+    expect(afterDormant.evidence.object_id).toBe(first.evidence.object_id);
+    expect(countRows(fixture.database, "SELECT COUNT(*) AS n FROM memory_entries WHERE dimension = 'observation'")).toBe(1);
+  });
+
+  it("does not extra-audit source admission on duplicate publish", async () => {
+    const fixture = await openFixture();
+    await admitSource(fixture);
+    const located = locatedInterpretation();
+    await fixture.publication.publish({
+      signal: observationSignal(located), sourceEventAnchor: null
+    });
+    const afterFirst = countRows(
+      fixture.database,
+      "SELECT COUNT(*) AS n FROM event_log WHERE event_type = 'soul.field.source_record.admitted'"
+    );
+    await fixture.publication.publish({
+      signal: observationSignal(located, { signal_id: "signal-dup" }), sourceEventAnchor: null
+    });
+    expect(countRows(
+      fixture.database,
+      "SELECT COUNT(*) AS n FROM event_log WHERE event_type = 'soul.field.source_record.admitted'"
+    )).toBe(afterFirst);
+  });
+
+  it("rejects a withdrawn newer revision instead of resurrecting an older body", async () => {
+    const fixture = await openFixture();
+    await admitSource(fixture);
+    const withdrawn = await admitSource(
+      fixture, "User: Alice uses apps.", "2", "2026-09-15T00:00:00.000Z"
+    );
+    const stores = {
+      ...fixture.stores,
+      getStoredRecord: (workspaceId: string, recordId: string) =>
+        recordId === withdrawn.record.identity
+          ? null
+          : fixture.stores.getStoredRecord(workspaceId, recordId),
+      listStoredRecords: (workspaceId: string) => fixture.stores.listStoredRecords(workspaceId)
+        .filter((row) => row.record.identity !== withdrawn.record.identity)
+    };
+    const publication = createSourceObservationPublication({
+      stores,
+      sourceAdmission: fixture.sourceAdmission,
+      evidenceService: fixture.evidenceService,
+      memoryService: fixture.memoryService,
+      sha256: fieldContractSha256
+    });
+    await expect(publication.publish({
+      signal: observationSignal(locatedInterpretation()), sourceEventAnchor: null
+    })).rejects.toThrow(/current source body is not available/);
+    expectNoPublishedObservation(fixture.database);
+  });
+
+  it("rejects observation confidence mutation at the memory update owner", async () => {
+    const fixture = await openFixture();
+    await admitSource(fixture);
+    const published = await fixture.publication.publish({
+      signal: observationSignal(locatedInterpretation()), sourceEventAnchor: null
+    });
+    await expect(fixture.memoryService.update(
+      published.memory.object_id, { confidence: 0.9 }, "model score"
+    )).rejects.toThrow(/observation confidence cannot be mutated/);
+    expect((await fixture.memoryService.findById(published.memory.object_id))?.confidence).toBeNull();
+  });
 });
+
+function expectNoPublishedObservation(database: StorageDatabase): void {
+  expect(countRows(database, "SELECT COUNT(*) AS n FROM memory_entries WHERE dimension = 'observation'")).toBe(0);
+  expect(countRows(database, "SELECT COUNT(*) AS n FROM evidence_capsules WHERE gist LIKE '%source-interpretation-v1%'")).toBe(0);
+}
+
+function countRows(database: StorageDatabase, sql: string): number {
+  return (database.connection.prepare(sql).get() as { n: number }).n;
+}

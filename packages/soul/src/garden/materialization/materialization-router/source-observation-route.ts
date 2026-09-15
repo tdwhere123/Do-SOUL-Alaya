@@ -1,11 +1,16 @@
 import type { SourceInterpretationSignal } from "@do-soul/alaya-protocol";
 import type {
   MaterializationContext,
+  MaterializationCreatedObject,
   MaterializationResult,
   MaterializationRouterDeps,
   MaterializationTarget
 } from "./contracts.js";
-import { materializationFailure, materializationSuccess } from "./materialization-results.js";
+import {
+  materializationFailure,
+  materializationSuccess,
+  readPartialFailureCreatedObjects
+} from "./materialization-results.js";
 
 export function sourceObservationTarget(portWired: boolean): MaterializationTarget {
   if (!portWired) {
@@ -51,15 +56,37 @@ export async function materializeSourceObservation(
       ]
     });
   } catch (error) {
+    const partial = partialCreatedObjects(error);
     return materializationFailure(
       {
         signal_id: signal.signal_id,
         target_kind: "evidence_only",
         route_target: "memory_entry_only",
         routing_reason: target.routing_reason,
-        created_objects: []
+        created_objects: partial
       },
       error
     );
   }
+}
+
+function partialCreatedObjects(error: unknown): readonly MaterializationCreatedObject[] {
+  const fromPartial = readPartialFailureCreatedObjects(error);
+  if (fromPartial.length > 0) return fromPartial;
+  const evidenceObjectId = readEvidenceObjectId(error);
+  return evidenceObjectId === null
+    ? []
+    : [{ object_kind: "evidence_capsule", object_id: evidenceObjectId }];
+}
+
+function readEvidenceObjectId(error: unknown): string | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== null && typeof current === "object"; depth += 1) {
+    const details = (current as { readonly details?: { readonly evidence_object_id?: unknown } }).details;
+    if (typeof details?.evidence_object_id === "string" && details.evidence_object_id.length > 0) {
+      return details.evidence_object_id;
+    }
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return null;
 }
