@@ -1,20 +1,4 @@
 export {
-  catalogEligibilityOfAssertionCount,
-  catalogEligibilityOfRequest,
-  classifyOfficialApiRequestResult,
-  createOfficialApiGardenCompileReceipt,
-  officialApiRequestCoverageLayers,
-  receiveOfficialApiRequestSignals,
-  OFFICIAL_API_GARDEN_COMPILE_CONTRACT_VERSION,
-  OFFICIAL_API_GARDEN_COMPILE_PRODUCER,
-  OFFICIAL_API_SEMANTIC_PRESERVATION_CLAIM,
-  type OfficialApiCatalogEligibility,
-  type OfficialApiGardenCompilePendingBatch,
-  type OfficialApiGardenCompileReceipt,
-  type OfficialApiRequestEntryRejection,
-  type OfficialApiRequestReceiveReceipt
-} from "./ingestion/official-api/request-result.js";
-export {
   AUDITOR_CONSTANTS,
   Auditor,
   type AuditorDependencies,
@@ -82,7 +66,6 @@ export {
   officialApiSemanticWorksetFromUnits,
   planOfficialApiSemanticWorkset,
   planOfficialApiTransport,
-  parseOfficialApiRequestSignals,
   materializeOfficialApiTransportResponse,
   type GardenCompileContext,
   type GardenComputeProvider,
@@ -106,6 +89,7 @@ export {
   type OfficialApiSemanticFactorGraphProjectionReason,
   type OfficialApiSignalDraft
 } from "./ingestion/compute-provider.js";
+export { parseOfficialApiRequestSignals } from "./ingestion/official-api/request-result.js";
 export { transportPackIdentity } from "./ingestion/official-api/transport-pack.js";
 export {
   EXTRACTION_CAPABILITY_CATALOG_VERSION,

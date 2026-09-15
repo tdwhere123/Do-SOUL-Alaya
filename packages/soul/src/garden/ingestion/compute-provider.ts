@@ -124,18 +124,6 @@ export {
   type TransportPack,
   type TransportPackPlan
 } from "./official-api/semantic-workset.js";
-export {
-  createOfficialApiGardenCompileReceipt,
-  parseOfficialApiRequestSignals,
-  receiveOfficialApiRequestSignals,
-  OFFICIAL_API_GARDEN_COMPILE_CONTRACT_VERSION,
-  OFFICIAL_API_GARDEN_COMPILE_PRODUCER,
-  type OfficialApiGardenCompilePendingBatch,
-  type OfficialApiGardenCompileReceipt,
-  type OfficialApiRequestEntryRejection,
-  type OfficialApiRequestReceiveReceipt
-} from "./official-api/request-result.js";
-
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;
 

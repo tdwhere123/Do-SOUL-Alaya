@@ -1,5 +1,4 @@
 import {
-  FORMATION_CONFIDENCE_MAP,
   StorageTier,
   parseKarmaEvent as parseProtocolKarmaEvent,
   type EventLogEntry,
@@ -254,10 +253,6 @@ export function parseFormationKind(value: MemoryEntry["formation_kind"]): Memory
   }
 
   throw new CoreError("VALIDATION", "Invalid formation kind");
-}
-
-export function confidenceByFormationKind(kind: MemoryEntry["formation_kind"]): number {
-  return FORMATION_CONFIDENCE_MAP[kind];
 }
 
 export function assertActivationWeightsSumToOne(
