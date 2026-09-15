@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { groundAssociativeFactFrame } from "@do-soul/alaya-protocol";
-import { RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID, RuleBasedEvidenceFactFrameNormalizer } from "@do-soul/alaya-protocol/node/source-frame";
+import { groundAssociativeFactFrame } from "../../../evidence/associative-fact-frame.js";
+import {
+  RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID,
+  RuleBasedEvidenceFactFrameNormalizer
+} from "../../../node/source-frame.js";
 
 const normalizer = new RuleBasedEvidenceFactFrameNormalizer();
 
