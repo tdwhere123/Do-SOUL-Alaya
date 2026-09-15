@@ -38,6 +38,11 @@ re-export it. This restores invariant 1 (protocol depends only on `zod`).
 Inspector SPA does not depend on the helper. Workspace-internal; not a §25
 MCP/EventLog/config change.
 
+TypeScript 7.0.2 is the workspace `tsc` (native compiler). The repository
+structure guard keeps the TypeScript 6 Compiler API via `@typescript/typescript6`
+because 7.0 has no programmatic API. Compile-time performance is not claimed
+from this change; measure `tsc` on a representative host. Vitest 5 stays deferred.
+
 Protocol 4.11.0 preserved source temporal meaning across extraction and
 replay and added the internal source-interpretation signal variant.
 Garden MCP emit still rejects `interpretation_contract`; interpretation

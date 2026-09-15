@@ -14,6 +14,7 @@ import {
   isZodValidationError,
   unwrapStandardResponseData
 } from "@do-soul/alaya-protocol";
+import { unrefTimeout } from "./unref-timeout";
 
 let inspectorToken: string | null = null;
 let currentWorkspaceId: string | null = null;
@@ -109,8 +110,7 @@ const RETRYABLE_METHODS = new Set(["GET", "HEAD"]);
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer?.unref?.();
+    unrefTimeout(setTimeout(resolve, ms));
   });
 }
 

@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import path from "node:path";
-import ts from "typescript";
+// TypeScript 7.0 ships no Compiler API; AST walks stay on the 6.x JS package.
+import ts from "@typescript/typescript6";
 
 const TYPE_BINDING = 1;
 const VALUE_BINDING = 2;
