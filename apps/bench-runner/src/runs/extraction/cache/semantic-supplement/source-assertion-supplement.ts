@@ -1,3 +1,4 @@
+import { bindSourceInterpretationAnchors, SourceInterpretationAnchorBindingSchema } from "./source-interpretation-anchor-binding.js";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
@@ -65,7 +66,11 @@ const EntrySchema = z.object({
   selected_draft_count: PositiveCountSchema,
   selected_raw_json_sha256: Sha256Schema
 }).strict().readonly();
-const ReceiptSchema = z.object({
+const InterpretationEntrySchema = EntrySchema.unwrap().omit({ source_draft_bindings: true }).extend({
+  source_interpretation_bindings: z.array(SourceInterpretationAnchorBindingSchema).nonempty().readonly()
+}).strict().readonly();
+type HistoricalEntry = z.infer<typeof EntrySchema>;
+const HistoricalReceiptSchema = z.object({
   schema_version: z.literal(3),
   kind: z.literal("longmemeval-source-assertion-semantic-supplement"),
   mapping_basis: z.literal("source-draft-to-current-anchor-v3"),
@@ -81,7 +86,15 @@ const ReceiptSchema = z.object({
   entries: z.array(EntrySchema).nonempty().readonly(),
   receipt_sha256: Sha256Schema
 }).strict().readonly();
-export const SourceAssertionSupplementBindingSchema = z.object({
+const ReceiptSchema = z.union([
+  HistoricalReceiptSchema,
+  HistoricalReceiptSchema.unwrap().extend({
+    schema_version: z.literal(4),
+    entries: z.array(InterpretationEntrySchema).nonempty().readonly(),
+    mapping_basis: z.literal("source-interpretation-to-current-anchor-v1")
+  }).strict().readonly()
+]);
+const HistoricalBindingSchema = z.object({
   kind: z.literal("longmemeval-source-assertion-semantic-supplement"),
   receipt_schema_version: z.literal(3),
   mapping_basis: z.literal("source-draft-to-current-anchor-v3"),
@@ -95,6 +108,14 @@ export const SourceAssertionSupplementBindingSchema = z.object({
   parser_semantics: z.string().trim().min(1),
   grounding_semantics: z.string().trim().min(1)
 }).strict().readonly();
+
+export const SourceAssertionSupplementBindingSchema = z.union([
+  HistoricalBindingSchema,
+  HistoricalBindingSchema.unwrap().extend({
+    receipt_schema_version: z.literal(4),
+    mapping_basis: z.literal("source-interpretation-to-current-anchor-v1")
+  }).strict().readonly()
+]);
 
 export interface SourceAssertionSupplementPrimaryIdentity {
   readonly manifestSha256: string;
@@ -150,6 +171,7 @@ interface CreateEntryInput {
 }
 
 export function createSourceAssertionSupplementReceipt(input: {
+  readonly schemaVersion?: 3 | 4;
   readonly createdAt: string;
   readonly primaryIdentity: SourceAssertionSupplementPrimaryIdentity;
   readonly sourceIdentity: SourceAssertionSupplementSourceIdentity;
@@ -157,13 +179,14 @@ export function createSourceAssertionSupplementReceipt(input: {
   readonly groundingAuditSha256: string;
   readonly entries: readonly CreateEntryInput[];
 }): SourceAssertionSupplementReceipt {
-  const entries = input.entries.map(buildEntry).sort((left, right) =>
+  const entries = input.entries.map((entry) => buildEntry(entry, input.schemaVersion ?? 3)).sort((left, right) =>
     bytewiseCompare(left.primary_cache_key, right.primary_cache_key)
   );
   const unsigned = {
-    schema_version: 3 as const,
+    schema_version: input.schemaVersion ?? 3,
     kind: "longmemeval-source-assertion-semantic-supplement" as const,
-    mapping_basis: "source-draft-to-current-anchor-v3" as const,
+    mapping_basis: input.schemaVersion === 4
+      ? "source-interpretation-to-current-anchor-v1" : "source-draft-to-current-anchor-v3",
     created_at: input.createdAt,
     primary_identity: encodePrimaryIdentity(input.primaryIdentity),
     source_identity: encodeSourceIdentity(input.sourceIdentity),
@@ -264,7 +287,9 @@ function readBatch(
   readonly receipt: SourceAssertionSupplementBatchReceipt | null;
 }> {
   const entry = byPrimaryKey.get(input.primaryCacheKey);
-  if (entry === undefined) return Object.freeze({ rawJson: '{"signals":[]}', receipt: null });
+  if (entry === undefined) return Object.freeze({
+    rawJson: receipt.schema_version === 4 ? '{"interpretations":[]}' : '{"signals":[]}', receipt: null
+  });
   assertRequestBinding(entry, input.request);
   if (computeOfficialApiSourceCorpusIdentity(input.sourceCorpus) !==
       entry.source_corpus_identity) {
@@ -273,17 +298,26 @@ function readBatch(
   if (digest(input.primaryRawJson) !== entry.primary_raw_json_sha256) {
     throw new Error("source assertion supplement primary raw bytes drifted");
   }
-  assertGroundedPrimaryGap({
-    bindings: entry.source_draft_bindings,
-    primaryRawJson: input.primaryRawJson,
-    sourceCorpus: input.sourceCorpus
-  });
   const sourceRawJson = readSourceRawJson(entry.source_cache_key);
   if (digest(sourceRawJson) !== entry.source_raw_json_sha256) {
     throw new Error("source assertion supplement source raw bytes drifted");
   }
-  const selected = selectBoundSourceDrafts(entry, sourceRawJson, input);
-  const rawJson = JSON.stringify({ signals: selected });
+  let selected: readonly unknown[];
+  if ("source_interpretation_bindings" in entry) {
+    const bound = bindSourceInterpretationAnchors({
+      ...input, sourceRawJson, assertionIds: entry.anchor_assertion_ids
+    });
+    if (!isDeepStrictEqual(bound.bindings, entry.source_interpretation_bindings)) {
+      throw new Error("source assertion supplement interpretation binding drifted");
+    }
+    selected = bound.selected;
+  } else {
+    assertGroundedPrimaryGap({ bindings: entry.source_draft_bindings,
+      primaryRawJson: input.primaryRawJson, sourceCorpus: input.sourceCorpus });
+    selected = selectBoundSourceDrafts(entry, sourceRawJson, input);
+  }
+  const rawJson = JSON.stringify(receipt.schema_version === 4
+    ? { interpretations: selected } : { signals: selected });
   if (selected.length !== entry.selected_draft_count ||
       digest(rawJson) !== entry.selected_raw_json_sha256) {
     throw new Error("source assertion supplement selected projection drifted");
@@ -299,7 +333,7 @@ function readBatch(
 }
 
 function selectBoundSourceDrafts(
-  entry: SourceAssertionSupplementReceipt["entries"][number],
+  entry: HistoricalEntry,
   sourceRawJson: string,
   input: SourceAssertionSupplementBatchInput
 ): ReturnType<typeof selectSourceDraftsByAnchorBindings> {
@@ -321,36 +355,36 @@ function selectBoundSourceDrafts(
   }
 }
 
-function buildEntry(input: CreateEntryInput): SourceAssertionSupplementReceipt["entries"][number] {
+function buildEntry(input: CreateEntryInput, schemaVersion: 3 | 4): SourceAssertionSupplementReceipt["entries"][number] {
   const request = parseOfficialApiExtractionRequest(input.request);
   const anchorAssertionIds = [...input.anchorAssertionIds].sort((left, right) => left - right);
   assertAssertionIdsBound(request, anchorAssertionIds);
-  const bindings = buildSourceDraftAnchorBindings({
-    sourceRawJson: input.sourceRawJson,
-    sourceCorpus: input.sourceCorpus,
-    request,
-    assertionIds: anchorAssertionIds,
-    ...(input.sourceDraftBindings === undefined
-      ? {}
-      : { explicit: input.sourceDraftBindings })
-  });
-  assertGroundedPrimaryGap({
-    bindings,
-    primaryRawJson: input.primaryRawJson,
-    sourceCorpus: input.sourceCorpus
-  });
-  const selected = selectSourceDraftsByAnchorBindings(
-    input.sourceRawJson,
-    bindings,
-    request,
-    input.sourceCorpus
-  );
-  if (selected.length === 0) {
-    throw new Error("source assertion supplement entry selects no valid drafts");
+  let selected: readonly unknown[];
+  let bindingFields: Readonly<Record<string, unknown>>;
+  let observationSha256s: readonly string[];
+  if (schemaVersion === 4) {
+    if (input.sourceDraftBindings !== undefined) {
+      throw new Error("current interpretation mapping does not accept historical draft anchors");
+    }
+    const current = bindSourceInterpretationAnchors({ ...input, request, assertionIds: anchorAssertionIds });
+    selected = current.selected;
+    bindingFields = { source_interpretation_bindings: current.bindings };
+    observationSha256s = [...new Set(current.bindings.map((binding) => binding.source_assertion_sha256))].sort();
+  } else {
+    const bindings = buildSourceDraftAnchorBindings({
+      sourceRawJson: input.sourceRawJson, sourceCorpus: input.sourceCorpus,
+      request, assertionIds: anchorAssertionIds,
+      ...(input.sourceDraftBindings === undefined ? {} : { explicit: input.sourceDraftBindings })
+    });
+    assertGroundedPrimaryGap({ bindings, primaryRawJson: input.primaryRawJson, sourceCorpus: input.sourceCorpus });
+    selected = selectSourceDraftsByAnchorBindings(input.sourceRawJson, bindings, request, input.sourceCorpus);
+    bindingFields = { source_draft_bindings: bindings };
+    observationSha256s = sourceObservationSha256s(bindings);
   }
-  const observationSha256s = sourceObservationSha256s(bindings);
-  const selectedRawJson = JSON.stringify({ signals: selected });
-  return EntrySchema.parse({
+  if (selected.length === 0) throw new Error("source assertion supplement entry selects no valid drafts");
+  const selectedRawJson = JSON.stringify(schemaVersion === 4
+    ? { interpretations: selected } : { signals: selected });
+  return (schemaVersion === 4 ? InterpretationEntrySchema : EntrySchema).parse({
     primary_cache_key: input.primaryCacheKey,
     primary_request_sha256: digest(stringifyOfficialApiExtractionRequest(request)),
     source_corpus_identity: request.source_corpus_identity,
@@ -359,7 +393,7 @@ function buildEntry(input: CreateEntryInput): SourceAssertionSupplementReceipt["
     primary_raw_json_sha256: digest(input.primaryRawJson),
     anchor_assertion_ids: anchorAssertionIds,
     source_observation_sha256s: observationSha256s,
-    source_draft_bindings: bindings,
+    ...bindingFields,
     occurrence_count: input.occurrenceCount,
     selected_draft_count: selected.length,
     selected_raw_json_sha256: digest(selectedRawJson)
@@ -419,6 +453,12 @@ function assertReceiptDerivedFields(
 function hasValidDerivedBindings(
   entry: SourceAssertionSupplementReceipt["entries"][number]
 ): boolean {
+  if ("source_interpretation_bindings" in entry) {
+    const bindings = entry.source_interpretation_bindings;
+    return new Set(bindings.map((binding) => binding.interpretation_index)).size === bindings.length &&
+      isDeepStrictEqual([...new Set(bindings.map((binding) => binding.source_assertion_id))].sort((a, b) => a - b), entry.anchor_assertion_ids) &&
+      isDeepStrictEqual([...new Set(bindings.map((binding) => binding.source_assertion_sha256))].sort(), entry.source_observation_sha256s);
+  }
   return hasValidAnchorBindingShape(
     entry.source_draft_bindings,
     entry.anchor_assertion_ids,

@@ -10,6 +10,7 @@ export interface SourceAssertionSupplementSidecarProjection {
   readonly anchorAssertionIds: readonly number[];
   readonly sourceObservationSha256s: readonly string[];
   readonly occurrenceCount: number;
+  // Version 3 counts signal drafts; version 4 counts complete interpretation entries.
   readonly rawSignalCount: number;
   readonly draftCount: number;
 }
@@ -60,9 +61,9 @@ export function computeSourceAssertionSupplementEntrySetSha256(
   return digest(JSON.stringify(sorted));
 }
 
-export function computeSourceAssertionSupplementReceiptEntrySetSha256<
-  Entry extends ReceiptEntryProjectionSource
->(entries: readonly Entry[]): string {
+export function computeSourceAssertionSupplementReceiptEntrySetSha256(
+  entries: readonly ReceiptEntryProjectionSource[]
+): string {
   return computeSourceAssertionSupplementEntrySetSha256(entries.map((entry) => ({
     primaryCacheKey: entry.primary_cache_key,
     receiptEntrySha256: computeSourceAssertionSupplementReceiptEntrySha256(entry),
