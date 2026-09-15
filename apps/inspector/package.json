@@ -25,8 +25,8 @@
   "dependencies": {
     "@do-soul/alaya-eval": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
-    "@hono/node-server": "^1.19.17",
-    "hono": "^4.13.7",
-    "zod": "^4.6.2"
+    "@hono/node-server": "catalog:",
+    "hono": "catalog:",
+    "zod": "catalog:"
   }
 }

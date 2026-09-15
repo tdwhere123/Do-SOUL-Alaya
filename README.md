@@ -75,23 +75,30 @@ then `mv "$ALAYA_HOME.bak" "$ALAYA_HOME"` if you also need the previous
 binary. `scripts/uninstall.sh` keeps `.bak` unless `--remove-bak` is
 passed.
 
+`better-sqlite3` 13 loads bundled native prebuilds for Linux glibc/musl,
+macOS, and Windows on x64 or arm64. Its install path has no automatic
+source-build fallback, so other operating-system or architecture combinations
+are not supported by the default Alaya install.
+
 ## Optional local ONNX embeddings
 
-Default `pnpm install` does not install `@huggingface/transformers` or
+Default `pnpm install` intentionally does not install
+`@huggingface/transformers` or
 ONNX Runtime (~640MiB, including a web `-dev` runtime the Node embedding
 path does not use). The extra is not a package.json peer: this workspace
 auto-installs peers, which would pull the runtimes on every default
 install. Local `local_onnx` recall is an explicit add:
 
 ```bash
-pnpm add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core --no-frozen-lockfile
+pnpm add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core
 node scripts/fetch-local-embedding-model.mjs
 ```
 
-`--no-frozen-lockfile` is required for that `pnpm add` because it
-rewrites the workspace lockfile. After the add, `pnpm install
---frozen-lockfile` succeeds. `pnpm-workspace.yaml` overrides
-`onnxruntime-web` away; the Node embedding path does not use it.
+`pnpm add` rewrites the workspace lockfile. After the add, `pnpm install
+--frozen-lockfile` succeeds. Release installs print the same command with
+`--dir "$ALAYA_HOME"` so the filter resolves against the installed workspace.
+`pnpm-workspace.yaml` overrides `onnxruntime-web` away; the Node embedding path
+does not use it.
 
 CI and default developer installs stay on the slim path. Install the
 extra only when you want on-device embeddings.

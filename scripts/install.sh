@@ -38,8 +38,8 @@
 #
 # Local ONNX embeddings are an optional extra (~640MiB). Default pnpm install
 # does not pull @huggingface/transformers. After install:
-#   pnpm add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core --no-frozen-lockfile
-#   node scripts/fetch-local-embedding-model.mjs
+#   pnpm --dir "$ALAYA_HOME" add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core
+#   node "$ALAYA_HOME/scripts/fetch-local-embedding-model.mjs"
 # Inspector SPA is compiled by `pnpm build` unless ALAYA_BUILD_INSPECTOR_WEB=0
 # and apps/inspector/web/dist/index.html already exists.
 set -euo pipefail
@@ -292,7 +292,7 @@ info ""
 info "This install came from GitHub Releases, not git HEAD."
 info "Local ONNX embeddings are optional; default install skips @huggingface/transformers."
 info "To enable local_onnx after this install (rewrites the install lockfile):"
-info "  pnpm add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core --no-frozen-lockfile"
+info "  pnpm --dir \"${ALAYA_HOME}\" add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core"
 info "  node ${ALAYA_HOME}/scripts/fetch-local-embedding-model.mjs"
 if [ -n "$DB_BACKUP_PATH" ]; then
   info ""
