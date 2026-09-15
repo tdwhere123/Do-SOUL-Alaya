@@ -42,10 +42,7 @@ type ObjectKindDeliveryState = NonNullable<
 
 export interface QualityMetricsState {
   readonly missDistribution: Record<string, number>;
-  readonly missTaxonomyDistribution: Record<
-    keyof LongMemEvalMissTaxonomyDistribution,
-    number
-  >;
+  readonly missTaxonomyDistribution: { -readonly [K in keyof LongMemEvalMissTaxonomyDistribution]: LongMemEvalMissTaxonomyDistribution[K] };
   readonly unscorableReasonDistribution: Record<string, number>;
   readonly measurementCohortCounts: NonNullable<QualityMetrics["measurement_cohort_counts"]>;
   readonly budgetDropCounts: Map<string, number>;
@@ -242,7 +239,7 @@ function recordScorableMissTaxonomy(
 ): void {
   if (question.hit_at_5) return;
   const taxonomy = readQuestionMissTaxonomy(question);
-  if (taxonomy !== null) state.missTaxonomyDistribution[taxonomy]++;
+  if (taxonomy !== null) state.missTaxonomyDistribution[taxonomy] = (state.missTaxonomyDistribution[taxonomy] ?? 0) + 1;
 }
 
 function recordUnscorableReason(
