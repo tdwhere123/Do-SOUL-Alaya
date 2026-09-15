@@ -1,6 +1,15 @@
-import type { classifyOfficialApiRequestResult } from "@do-soul/alaya-soul";
+import {
+  catalogEligibilityOfAssertionCount,
+  OFFICIAL_API_SEMANTIC_PRESERVATION_CLAIM,
+  type OfficialApiCatalogEligibility,
+  type classifyOfficialApiRequestResult
+} from "@do-soul/alaya-soul";
 
 export type ExtractionRequestCompletion = ReturnType<typeof classifyOfficialApiRequestResult>["status"];
+export type ExtractionCatalogEligibility = OfficialApiCatalogEligibility;
+export const EXTRACTION_SEMANTIC_PRESERVATION_FROM_REQUEST =
+  OFFICIAL_API_SEMANTIC_PRESERVATION_CLAIM;
+export { catalogEligibilityOfAssertionCount };
 export const EXTRACTION_REQUEST_COMPLETION_VERSION = 1;
 export interface PersistedExtractionRequestCompletion {
   readonly version: typeof EXTRACTION_REQUEST_COMPLETION_VERSION;
@@ -23,8 +32,10 @@ export const EMPTY_SIGNALS_ENVELOPE = '{"signals":[]}' as const;
 export const PLAN_SKIPPED_EXTRACTION_ENVELOPE =
   '{"extraction_skip":"plan_skipped"}' as const;
 
+/** Request-processing classification. It does not claim source semantic exhaustion. */
 export function classifyExtractionEnvelope(input: {
   readonly rawSignalCount: number;
+  /** Eligible catalog assertions in this request window, not source information. */
   readonly sourceAssertionCount: number;
   readonly planMembership: "in_plan" | "skipped";
   readonly requestCompletion?: ExtractionRequestCompletion;

@@ -23,7 +23,7 @@ it.each([
   const request = buildOfficialApiExtractionRequest(source, []);
   expect(request.source_assertions).toEqual([{ assertion_id: 1, text: `User: ${source}` }]);
   expect(resolveOfficialApiSourceLocatorQuote(corpus,
-    { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 }, fragment))
+    { contract_version: 4, kind: "assertion_catalog", assertion_id: 1 }, fragment))
     .toEqual({ status: "grounded", assertion: source });
 });
 
@@ -39,7 +39,7 @@ it.each([
   const corpus = buildOfficialApiSourceCorpus(source, []);
   expect(buildOfficialApiSourceAssertions(corpus)).toEqual([{ assertion_id: 1, text: `User: ${source}` }]);
   expect(resolveOfficialApiSourceLocatorQuote(corpus,
-    { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 }, fragment))
+    { contract_version: 4, kind: "assertion_catalog", assertion_id: 1 }, fragment))
     .toEqual({ status: "grounded", assertion: source });
 });
 
@@ -50,7 +50,7 @@ it("does not evade unresolved possessive reference by deleting the coordinated a
   const corpus = buildOfficialApiSourceCorpus(source, []);
   expect(buildOfficialApiSourceAssertions(corpus)).toEqual([]);
   expect(resolveOfficialApiSourceLocatorQuote(corpus,
-    { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 }, fragment).status).toBe("rejected");
+    { contract_version: 4, kind: "assertion_catalog", assertion_id: 1 }, fragment).status).toBe("rejected");
 });
 
 it.each([" ", "\n"])("keeps a dependent continuation attached across punctuation and whitespace %j", (separator) => {
@@ -74,7 +74,7 @@ it("does not recover a partial conditional quote through the conversational fall
   const source = "User: I can enter the lab and use the equipment only if they permit it.";
   const fragment = "I can enter the lab";
   expect(resolveOfficialApiSourceLocatorQuote(source,
-    { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 }, fragment).status).toBe("rejected");
+    { contract_version: 4, kind: "assertion_catalog", assertion_id: 1 }, fragment).status).toBe("rejected");
 });
 
 it("keeps dependent scope through atomic wrapper removal and relative-clause admission", () => {
@@ -97,12 +97,15 @@ it("preserves independent simple clauses and quoted conditional vocabulary", () 
 
 it("rejects historical locator and request identities instead of reinterpreting their catalog ids", () => {
   const locator = { contract_version: 2 as const, kind: "assertion_catalog" as const, assertion_id: 1 };
+  const historicalV3 = { contract_version: 3 as const, kind: "assertion_catalog" as const, assertion_id: 1 };
   expect(parseOfficialApiSourceLocator(locator)).toBeNull();
+  expect(parseOfficialApiSourceLocator(historicalV3)).toBeNull();
   expect(resolveOfficialApiSourceLocatorQuote("User: I enjoy tea.", locator as never, "I enjoy tea.").status)
     .toBe("rejected");
   expect(verifyOfficialApiSourceLocatorBinding({ sourceCorpus: "User: I enjoy tea.",
     sourceAssertion: "I enjoy tea.", sourceLocator: locator })).toBe(false);
   const request = buildOfficialApiExtractionRequest("I enjoy tea.", []);
-  expect(request.source_locator_contract_version).toBe(3);
+  expect(request.source_locator_contract_version).toBe(4);
   expect(() => parseOfficialApiExtractionRequest({ ...request, source_locator_contract_version: 2 })).toThrow();
+  expect(() => parseOfficialApiExtractionRequest({ ...request, source_locator_contract_version: 3 })).toThrow();
 });

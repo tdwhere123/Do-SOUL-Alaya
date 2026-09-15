@@ -42,7 +42,7 @@ describe("official API source role trust", () => {
     const [signal] = await providerFor({
       matched_text: source,
       source_locator: {
-        contract_version: 3,
+        contract_version: 4,
         kind: "assertion_catalog",
         assertion_id: 1
       }

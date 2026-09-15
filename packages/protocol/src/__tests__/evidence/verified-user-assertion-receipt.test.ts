@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  VERIFIED_USER_ASSERTION_CATALOG_CONTRACT_VERSION,
   VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX,
   VERIFIED_USER_ASSERTION_SOURCE_HASH_V2_PREFIX,
   buildVerifiedUserAssertionReceiptPreimage,
@@ -53,14 +54,23 @@ function receiptV2(input: VerifiedUserAssertionReceiptV2Input = V2_INPUT): strin
 
 describe("verified user assertion receipt compatibility", () => {
   it("retains historical catalog bytes while binding new receipts to the current catalog version", () => {
-    const current: VerifiedUserAssertionReceiptV2Input = { ...V2_INPUT,
+    const historicalV3: VerifiedUserAssertionReceiptV2Input = { ...V2_INPUT,
       source_locator: { ...V2_INPUT.source_locator, contract_version: 3 } };
+    const current: VerifiedUserAssertionReceiptV2Input = { ...V2_INPUT,
+      source_locator: {
+        ...V2_INPUT.source_locator,
+        contract_version: VERIFIED_USER_ASSERTION_CATALOG_CONTRACT_VERSION
+      } };
+    expect(VERIFIED_USER_ASSERTION_CATALOG_CONTRACT_VERSION).toBe(4);
     expect(parseVerifiedUserAssertionCatalogLocator(V2_INPUT.source_locator)).toEqual(V2_INPUT.source_locator);
+    expect(parseVerifiedUserAssertionCatalogLocator(historicalV3.source_locator)).toEqual(historicalV3.source_locator);
     expect(parseVerifiedUserAssertionCatalogLocator(current.source_locator)).toEqual(current.source_locator);
     expect(receiptV2(current)).not.toBe(receiptV2(V2_INPUT));
+    expect(receiptV2(current)).not.toBe(receiptV2(historicalV3));
     expect(verifyVerifiedUserAssertionSourceHash(receiptV2(V2_INPUT), V2_INPUT, sha256)).toBe(true);
+    expect(verifyVerifiedUserAssertionSourceHash(receiptV2(historicalV3), historicalV3, sha256)).toBe(true);
     expect(verifyVerifiedUserAssertionSourceHash(receiptV2(current), current, sha256)).toBe(true);
-    expect(verifyVerifiedUserAssertionSourceHash(receiptV2(V2_INPUT), current, sha256)).toBe(false);
+    expect(verifyVerifiedUserAssertionSourceHash(receiptV2(historicalV3), current, sha256)).toBe(false);
   });
 
   it("preserves the v1 prefix, preimage, formatter, and digest reader", () => {

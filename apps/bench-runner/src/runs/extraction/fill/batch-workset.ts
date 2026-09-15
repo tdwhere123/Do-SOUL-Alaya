@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
-  buildOfficialApiExtractionRequests,
+  collectOfficialApiExtractionCoverage,
   planOfficialApiSemanticWorkset,
   stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest
@@ -107,7 +107,7 @@ function collectBatchRequests(
       turn.turnContent, turn.turnMessages, prepared.datasetRevision
     );
     const byAssertion = new Map(workset.units.map((unit) => [unit.assertionId, unit]));
-    for (const request of buildOfficialApiExtractionRequests(turn.turnContent, turn.turnMessages, prepared.config.sourcePacking)) {
+    for (const request of collectOfficialApiExtractionCoverage(turn.turnContent, turn.turnMessages, prepared.config.sourcePacking).requests) {
       const userPrompt = stringifyOfficialApiExtractionRequest(request);
       const key = computeCacheKey(prepared.config.model, prepared.config.requestProfile,
         OFFICIAL_API_SYSTEM_PROMPT, userPrompt);

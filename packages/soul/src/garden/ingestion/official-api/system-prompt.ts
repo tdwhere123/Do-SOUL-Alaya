@@ -10,16 +10,16 @@ import { OFFICIAL_API_OBJECT_KINDS } from "./object-kind-contract.js";
 import { OFFICIAL_API_GROUNDED_EXAMPLES } from "./source-examples.js";
 import { OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION } from "../../triage/grounding/source-locator.js";
 
-export const OFFICIAL_API_SIGNAL_CONTRACT_VERSION = 1;
+export const OFFICIAL_API_SIGNAL_CONTRACT_VERSION = 2;
 
 const ENVELOPE_PROMPT_PARTS = Object.freeze([
   "You extract candidate durable memory signals from one bounded source assertion batch.",
   `The response signal contract version is ${OFFICIAL_API_SIGNAL_CONTRACT_VERSION}.`,
   'Return strict JSON only with shape {"signals":[...]} and no markdown.',
   "Do not output analysis or reasoning. Emit the JSON object immediately and keep it compact.",
-  "Do not repeat source text outside matched_text or semantic_factor_graph surfaces.",
-  'Each non-empty signal must include "object_kind", "confidence", "matched_text", "source_locator", and "semantic_factor_graph".',
-  'A signal without semantic_factor_graph is invalid. object_kind is bounded routing metadata only; it is not a semantic role or an ontology.'
+  "Do not repeat source text outside matched_text or identity_observation surfaces.",
+  'Each non-empty signal must include "object_kind", "confidence", "matched_text", "source_locator", and "identity_observation".',
+  "object_kind is bounded routing metadata only; it is not a semantic role or an ontology."
 ]);
 
 const CURRENT_CONFIDENCE_PROMPT_PARTS = Object.freeze([
@@ -45,7 +45,7 @@ const GROUNDED_SIGNAL_PROMPT_PARTS = Object.freeze([
   "The server-derived source_assertions catalog contains only User assertions the runtime can ground without unresolved references; no other conversation content is available or authoritative.",
   "For each signal, work quote-first, then distill.",
   "First copy the shortest contiguous exact substring that contains the complete atomic assertion and every explicit local antecedent needed to resolve its references into matched_text; preserve capitalization, punctuation, spacing, and wording.",
-  "Then represent only what that quote entails in semantic_factor_graph.",
+  "Then record independently grounded mentions from that quote in identity_observation.",
   "Do not use surrounding text to add facts or guess unresolved references.",
   "Do not return an empty signals array merely because a durable assertion uses narrative, list, template, or conversational wording.",
   "Before returning an empty signals array for a non-empty source_assertions catalog, inspect every catalog entry once more and emit any durable personal fact, preference, relationship, possession, past event, or ongoing condition that satisfies the same grounding and durability rules.",
@@ -75,29 +75,27 @@ export const OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS = Object.freeze([
   "Do not force facts into subject/relation/value/qualifier/time slots and do not invent entity, event, attribute, or answer-family categories."
 ]);
 
-const KIND_PROJECTION_PROMPT_PARTS = Object.freeze([
-  'Optional independent sibling only: when a source-named instance has a conventional category that is not already a factor surface, you may include "kind_projection":{"factor_id":FACTOR_ID,"kind_values":[KIND]}.',
-  "At most two unique kind values. Omit the field when no kind is justified.",
-  "Never put kind into semantic_factor_graph. kind_projection is rebuildable routing, not durable truth.",
-  "A missing or invalid kind_projection must not change the base graph."
-]);
-
-const OPEN_SEMANTIC_FACTOR_PROMPT_PARTS = Object.freeze([
-  'Use "semantic_factor_graph":{"schema_version":2,"source_kind":"evidence","factors":[...],"variables":[],"result_variable_ids":[],"propositions":[...]}.',
-  'For a single atomic assertion, a valid graph has one predicate factor, every explicit relation participant as an argument, and at least one proposition; never omit the graph or replace it with fact_frame.',
-  "Represent every explicit, source-grounded participant of a relation as its own factor argument, preserving the relation's stated arity and semantic order; never collapse a multi-participant relation into a unary proposition.",
-  "Do not emit variables in evidence graphs.",
-  ...OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS
+const IDENTITY_OBSERVATION_PROMPT_PARTS = Object.freeze([
+  'Use "identity_observation":{"contract_version":1,"producer":"official-api-identity-observation-v1","mentions":[...]} with optional "unresolved_spans".',
+  'Each mention is {"surface":EXACT_SUBSTRING}; add "source_occurrence":N only when selecting a repeated surface after its first occurrence.',
+  "Do not emit factor_id, proposition_id, binding_identity, hashes, or a canonical graph; the runtime already owns those.",
+  "Keep faithfulness: copy exact source wording, capitalization, punctuation, and spacing in every surface.",
+  "Preserve role: do not invent an agent, speaker, promiser, or intention actor that the quote does not state.",
+  "Do not assign a product, object, or theme as promiser or speaker.",
+  "Preserve scope: keep not, only, if, unless, and promise markers as mentions or unresolved_spans; never drop them to make a simpler claim.",
+  "Do not invent time or negation.",
+  "When a nested or conditional span cannot be independently grounded, put it in unresolved_spans instead of forcing a typed claim.",
+  "Do not force facts into subject/relation/value/qualifier/time slots."
 ]);
 
 const FINAL_PROMPT_PARTS = Object.freeze([
   "Inspect each source_assertions entry independently; the batch contains no hidden context and every assertion_id keeps its original catalog identity.",
   "Keep pronouns unresolved unless their antecedent is explicit inside the selected catalog assertion.",
-  'Unresolved does not mean omitted: an explicit "I" remains a participant factor with surface "I" and semantic_identity "i"; do not rename it to an inferred person or silently drop it.',
-  "Preserve relative-date meaning as source-supported factors; never infer an absolute date absent from the assertion.",
+  'Unresolved does not mean omitted: an explicit "I" remains a mention with surface "I"; do not rename it to an inferred person or silently drop it.',
+  "Preserve relative-date meaning as source-supported mentions; never infer an absolute date absent from the assertion.",
   "Preserve every concrete detail (names, numbers, dates, places) that appears in the selected catalog assertion.",
-  "Do not invent facts or summarize away detail. Split independent durable assertions into separate signals, but keep dependent propositions together in one graph.",
-  "Preserve each selected relation's participants, modality, time, and conditions in the graph.",
+  "Do not invent facts or summarize away detail. Split independent durable assertions into separate signals.",
+  "Preserve each selected relation's participants, modality, time, and conditions as mentions or unresolved spans.",
   'Return {"signals":[]} when the catalog does not contain durable memory candidates.'
 ]);
 
@@ -106,8 +104,7 @@ export const OFFICIAL_API_SYSTEM_PROMPT = joinPrompt([
   ...CURRENT_CONFIDENCE_PROMPT_PARTS,
   ...GROUNDED_SIGNAL_PROMPT_PARTS,
   ...DURABLE_PROJECTION_PROMPT_PARTS,
-  ...OPEN_SEMANTIC_FACTOR_PROMPT_PARTS,
-  ...KIND_PROJECTION_PROMPT_PARTS,
+  ...IDENTITY_OBSERVATION_PROMPT_PARTS,
   "The following fictional examples demonstrate the format and grounding rules; extract only from the actual request, never from these examples.",
   ...OFFICIAL_API_GROUNDED_EXAMPLES.map((example) =>
     `<example>${JSON.stringify(example)}</example>`),

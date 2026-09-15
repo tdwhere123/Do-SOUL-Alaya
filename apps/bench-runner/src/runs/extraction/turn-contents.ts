@@ -1,7 +1,7 @@
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import {
-  buildOfficialApiExtractionRequests,
+  collectOfficialApiExtractionCoverage,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
@@ -54,7 +54,7 @@ export function inspectTurnContentKeySpace(
           round,
           `${question.question_id}-fill-s${sessionIndex}-r${roundIndex}`
         );
-        const requests = buildOfficialApiExtractionRequests(normalized, turnMessages, sourcePacking);
+        const requests = collectOfficialApiExtractionCoverage(normalized, turnMessages, sourcePacking).requests;
         turnOccurrences += 1;
         const occurrence = Object.freeze({ turnContent: normalized, turnMessages });
         occurrences.push(occurrence);

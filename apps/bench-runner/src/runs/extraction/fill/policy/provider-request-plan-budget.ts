@@ -8,8 +8,6 @@ import {
   createExtractionPlanDeadlineError
 } from "../../../compile-seed/http/extraction-plan-deadline.js";
 
-const MAX_EXTRACTION_ASSERTIONS = 64;
-
 type ExtractInput = Parameters<BenchSignalExtractor["extract"]>[0];
 
 export interface ExtractionRequestPlanBudget {
@@ -22,12 +20,8 @@ export function resolveExtractionRequestPlanBudget(
   requests: readonly OfficialApiExtractionRequest[],
   maxOutputTokens: number
 ): ExtractionRequestPlanBudget {
-  const assertionCount = requests.reduce(
-    (count, request) => count + request.source_assertions.length,
-    0
-  );
-  if (requests.length < 1 || assertionCount > MAX_EXTRACTION_ASSERTIONS) {
-    throw new Error("extraction request plan exceeds the bounded assertion authority");
+  if (requests.length < 1) {
+    throw new Error("extraction request plan is empty");
   }
   const perBatch = resolveExtractionFillProviderTimeBudget(maxOutputTokens);
   return Object.freeze({

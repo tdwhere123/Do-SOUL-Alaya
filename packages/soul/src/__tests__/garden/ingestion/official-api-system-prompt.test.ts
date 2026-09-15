@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { groundOpenSemanticFactorGraph } from "@do-soul/alaya-protocol";
+import { IDENTITY_OBSERVATION_PRODUCER } from "@do-soul/alaya-protocol";
 import { buildOfficialApiExtractionRequests, parseOfficialApiExtractionRequest } from
   "../../../garden/ingestion/official-api/extraction-request.js";
 import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
@@ -41,25 +41,20 @@ describe("official API system prompt", () => {
       expect(classified.drafts).toHaveLength(1);
       const grounded = groundOfficialApiDraft(classified.drafts[0]!, corpus);
       expect(grounded.status).toBe("grounded");
-      expect(grounded.draft.semantic_factor_graph_projection).toBeUndefined();
+      expect(grounded.draft.semantic_factor_graph).toBeUndefined();
       expect(grounded.draft.matched_text).toBe(source);
-      const graph = groundOpenSemanticFactorGraph(grounded.draft.semantic_factor_graph, source);
-      expect(graph).not.toBeNull();
-      expect(graph!.propositions).toHaveLength(index === 0 ? 2 : 1);
+      expect(grounded.draft.identity_observation?.producer).toBe(IDENTITY_OBSERVATION_PRODUCER);
+      const mentionSurfaces = grounded.draft.identity_observation?.mentions.map((mention) => mention.surface) ?? [];
       if (index === 0) {
         expect(grounded.draft.object_kind).toBe("episode");
-        expect(graph!.factors.map((factor) => factor.surface).sort()).toEqual([
-          "I", "opened", "a workshop", "2020", "promised", "to lend tools"
-        ].sort());
+        expect(mentionSurfaces).toEqual(["I", "opened", "a workshop", "2020", "promised", "to lend tools"]);
+        expect(mentionSurfaces).not.toContain("tools");
         expect(grounded.draft.temporal_projection).toMatchObject({ time_source: "explicit", time_precision: "year",
           event_time_start: "2020-01-01T00:00:00.000Z", event_time_end: "2020-12-31T23:59:59.999Z" });
-        expect(graph!.propositions.map((proposition) => proposition.arguments.at(-1)?.reference_id)).toEqual(["year", "year"]);
       } else if (index === 1) {
-        expect(graph!.factors.map((factor) => factor.surface).sort()).toEqual([
-          "I", "can", "borrow", "tools", "in the workshop", "only on Saturdays"
-        ].sort());
-        expect(graph!.propositions[0]!.arguments.map((argument) => argument.binding_identity))
-          .toEqual(["borrower", "modality", "resource", "location", "condition"]);
+        expect(mentionSurfaces).toEqual(["I", "can", "borrow", "tools", "in the workshop"]);
+        expect(grounded.draft.identity_observation?.unresolved_spans?.map((span) => span.surface))
+          .toEqual(["only on Saturdays"]);
         expect(grounded.draft.temporal_projection).toBeUndefined();
       }
     });
@@ -74,24 +69,13 @@ describe("official API system prompt", () => {
     const draft = classified.drafts[0]!;
     expect(draft.object_kind).toBe("episode");
     expect(draft.matched_text).toBe(source);
-    expect(draft.source_locator).toEqual({ contract_version: 3, kind: "assertion_catalog", assertion_id: 1 });
-    const graph = groundOpenSemanticFactorGraph(draft.semantic_factor_graph, source)!;
-    expect(graph).not.toBeNull();
-    expect(graph.factors.map(({ surface, semantic_identity }) => [surface, semantic_identity])).toEqual([
-      ["The exhibit", "the exhibit"], ["opened", "open"], ["2019", "2019"],
-      ["with the aim of helping visitors learn ceramics", "with the aim of helping visitors learn ceramics"]
+    expect(draft.source_locator).toEqual({ contract_version: 4, kind: "assertion_catalog", assertion_id: 1 });
+    expect(draft.semantic_factor_graph).toBeUndefined();
+    expect(draft.identity_observation?.mentions.map((mention) => mention.surface)).toEqual([
+      "The exhibit", "opened", "2019", "with the aim of helping visitors learn ceramics"
     ]);
-    expect(graph.factors.map((factor) => factor.source_span)).toEqual([[0, 11], [12, 18], [22, 26], [27, 74]]);
-    expect(graph.variables).toEqual([]);
-    expect(graph.result_variable_ids).toEqual([]);
-    expect(graph.propositions).toHaveLength(1);
-    const opening = graph.propositions[0]!;
-    expect(graph.factors.find((factor) => factor.factor_id === opening.predicate_factor_id)?.surface).toBe("opened");
-    expect(opening.arguments.map((argument) => [argument.position, argument.binding_identity,
-      argument.reference_kind, graph.factors.find((factor) => factor.factor_id === argument.reference_id)?.surface])).toEqual([
-      [0, "theme", "factor", "The exhibit"], [1, "time", "factor", "2019"],
-      [2, "accompanying_aim", "factor", "with the aim of helping visitors learn ceramics"]
-    ]);
+    expect(draft.identity_observation?.mentions.map((mention) => mention.surface))
+      .not.toEqual(expect.arrayContaining(["visitors", "learn"]));
     const year = { projection_schema_version: 1, time_precision: "year", time_source: "explicit",
       event_time_start: "2019-01-01T00:00:00.000Z", event_time_end: "2019-12-31T23:59:59.999Z" };
     expect(draft.temporal_projection).toEqual(year);
@@ -99,33 +83,35 @@ describe("official API system prompt", () => {
       turn_content: source, turn_messages: [{ message_id: "exhibit-source", role: "user", content: source }],
       workspace_id: "example-workspace", run_id: "example-run", surface_id: null,
       created_at: "2024-06-01T10:00:00.000Z", source_observed_at: "2024-05-01T10:00:00.000Z",
-      require_semantic_factor_graph: true, signal_id_for: () => "exhibit-opening" });
+      signal_id_for: () => "exhibit-opening" });
     expect(formed.mode).toBe("strict");
     expect(formed.entries).toHaveLength(1);
     expect(formed.entries[0]).toMatchObject({ disposition: "admitted", reason: "formed",
       temporal_projection_audit: { status: "formed", reason: "event_time_source_verified" } });
     expect(formed.entries[0]!.signal?.raw_payload.temporal_projection).toEqual(year);
-    const formedGraph = groundOpenSemanticFactorGraph(
-      formed.entries[0]!.signal?.raw_payload.semantic_factor_graph, source);
-    expect(formedGraph).toEqual(graph);
+    expect(formed.entries[0]!.signal?.raw_payload.identity_observation).toEqual(draft.identity_observation);
   });
 
-  it("adds only the accompanying-aim example to the archived primary and repair prompts", () => {
+  it("archives the previous identities-and-topology prompt under its content hash", () => {
     const primary = resolveOfficialApiSystemPrompt(
-      "f18b2d40f913326786018e38f23b12a26e87c0867e7bdbedd6f329a6e31a7d20");
+      "6b262e173dfc580d8751046e2d48cd773c91a26f203394dcff05906d6abed5dc");
     const repair = resolveOfficialApiSystemPrompt(
-      "eb2c3e15aee70b3ec7441a8e5d8173a478826fa9c8b2998a7e36cb55b33e0619");
-    const added = ` <example>${JSON.stringify(examples[2])}</example>`;
-    expect(OFFICIAL_API_SYSTEM_PROMPT.split(added)).toHaveLength(2);
-    expect(OFFICIAL_API_SYSTEM_PROMPT.replace(added, "")).toBe(primary);
-    expect(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT.replace(added, "")).toBe(repair);
-    expect(sha256(primary!)).toBe("f18b2d40f913326786018e38f23b12a26e87c0867e7bdbedd6f329a6e31a7d20");
-    expect(sha256(repair!)).toBe("eb2c3e15aee70b3ec7441a8e5d8173a478826fa9c8b2998a7e36cb55b33e0619");
+      "23e54c4f6ce1a86d93d3aa07d683cd0e838f0b57d5c3b07f39f2b48a7ca75aa5");
+    expect(primary).toBeDefined();
+    expect(repair).toBeDefined();
+    expect(primary).not.toBe(OFFICIAL_API_SYSTEM_PROMPT);
+    expect(repair).not.toBe(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT);
+    expect(primary).toContain('"semantic_factor_graph"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain(
+      "an unreferenced factor or variable makes the entire graph invalid"
+    );
+    expect(sha256(primary!)).toBe("6b262e173dfc580d8751046e2d48cd773c91a26f203394dcff05906d6abed5dc");
+    expect(sha256(repair!)).toBe("23e54c4f6ce1a86d93d3aa07d683cd0e838f0b57d5c3b07f39f2b48a7ca75aa5");
   });
 
   it("requires quote-first evidence before distillation", () => {
     const quoteFirst = "For each signal, work quote-first, then distill.";
-    const distill = "Then represent only what that quote entails in semantic_factor_graph.";
+    const distill = "Then record independently grounded mentions from that quote in identity_observation.";
 
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(quoteFirst);
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
@@ -155,7 +141,7 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Do not invent facts");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"source_locator"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      'Use "source_locator":{"contract_version":3,"kind":"assertion_catalog","assertion_id":N} for every signal.'
+      'Use "source_locator":{"contract_version":4,"kind":"assertion_catalog","assertion_id":N} for every signal.'
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('Prefer "source_locator"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
@@ -166,42 +152,24 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
       "one bounded source assertion batch"
     );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain(
       "an unreferenced factor or variable makes the entire graph invalid"
     );
   });
 
-  it("keeps open semantic factors while freezing bounded durable projections", () => {
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"semantic_factor_graph"');
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"binding_identity":OPEN_NAME');
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Do not emit character spans");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("not a fixed role list");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "preserve the predicate's semantic argument order"
-    );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("or a cross-graph identity");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "same name for repeated parallel values"
-    );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "every explicit, source-grounded participant of a relation"
-    );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "preserving the relation's stated arity and semantic order"
-    );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "never collapse a multi-participant relation into a unary proposition"
-    );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "Each factor or variable surface must own a non-overlapping exact source span"
-    );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+  it("asks for identities-only mentions while freezing bounded durable projections", () => {
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"identity_observation"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"producer":"official-api-identity-observation-v1"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Do not emit factor_id, proposition_id, binding_identity, hashes, or a canonical graph");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("do not invent an agent, speaker, promiser, or intention actor");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Do not assign a product, object, or theme as promiser or speaker.");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("keep not, only, if, unless, and promise markers");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Do not invent time or negation.");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"binding_identity":OPEN_NAME');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain(
       '"schema_version":2,"source_kind":"evidence"'
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain("Example structure only");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain(
-      '"arguments":[{"position":0,"binding_identity":"argument","reference_kind":"factor","reference_id":"f1"}]'
-    );
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"fact_frame"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
       `response signal contract version is ${OFFICIAL_API_SIGNAL_CONTRACT_VERSION}`
@@ -220,20 +188,9 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"preference_subject"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"preference_polarity"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"evidence_polarity"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"kind_projection"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      'When the argument is a duration measure, binding_identity must be "duration"'
-    );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "When it is a location or place participant, binding_identity must be \"location\""
-    );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Other open role names remain allowed");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"kind_projection"');
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Never put kind into semantic_factor_graph");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "do not invent entity, event, attribute, or answer-family categories"
-    );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "Names other than the structural tokens duration and location stay open text"
+      "Do not force facts into subject/relation/value/qualifier/time slots."
     );
   });
 
@@ -251,7 +208,7 @@ describe("official API system prompt", () => {
       "Do not output analysis or reasoning. Emit the JSON object immediately"
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "Do not repeat source text outside matched_text or semantic_factor_graph surfaces."
+      "Do not repeat source text outside matched_text or identity_observation surfaces."
     );
   });
 
@@ -262,7 +219,7 @@ describe("official API system prompt", () => {
     const g8Sha256 =
       "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
     const currentSha256Expected =
-      "6b262e173dfc580d8751046e2d48cd773c91a26f203394dcff05906d6abed5dc";
+      "8789e33fec393cd3729a2f66ebfa224418060de4075dab4e493e68be36a06533";
     const previousCatalogPrompt = resolveOfficialApiSystemPrompt(
       "1775799d80bebde5797ded3a5fdddf209c96839489cde4a947518822110a76fd"
     );
@@ -294,7 +251,7 @@ describe("official API system prompt", () => {
     expect(g8).toBeDefined();
     expect(sha256(g8!)).toBe(g8Sha256);
     expect(g8).not.toContain("kind_projection");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("kind_projection");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain("kind_projection");
     expect(resolveOfficialApiSystemPrompt("0".repeat(64))).toBeUndefined();
   });
 

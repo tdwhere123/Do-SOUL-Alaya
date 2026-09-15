@@ -96,6 +96,9 @@ function buildOfficialRawPayload(
     ...(draft.semantic_factor_graph_projection === undefined
       ? {}
       : { semantic_factor_graph_projection: draft.semantic_factor_graph_projection }),
+    ...(draft.identity_observation === undefined
+      ? {}
+      : { identity_observation: draft.identity_observation }),
     ...(draft.kind_projection === undefined
       ? {}
       : { kind_projection: draft.kind_projection }),

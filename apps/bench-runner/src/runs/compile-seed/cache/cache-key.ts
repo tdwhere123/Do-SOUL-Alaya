@@ -1,7 +1,7 @@
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import {
-  buildOfficialApiExtractionRequests,
+  collectOfficialApiExtractionCoverage,
   officialApiExtractionResponseSchema,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
@@ -15,7 +15,7 @@ export const EXTRACTION_CACHE_KEY_GOLDEN_VECTOR = Object.freeze({
   model: "alaya-cache-key-golden-model",
   requestProfile: "provider-default-v1" as CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: "alaya-cache-key-golden-system-prompt",
-  extractionRequest: '{"schema_version":2,"source_locator_contract_version":3,"batch_contract_version":1,"source_corpus_identity":"4f59a38bf6928c41ab6efd0c80fb480d2336a8ce210459597d2a816eb88066cd","batch_index":0,"batch_count":1,"source_assertions":[{"assertion_id":1,"text":"User: I enjoy coffee."}]}'
+  extractionRequest: '{"schema_version":2,"source_locator_contract_version":4,"batch_contract_version":1,"source_corpus_identity":"5cfbac30da538a52d242938adeb5c71ff1b3dc07bc4ce8330878da4318a01a2b","batch_index":0,"batch_count":1,"source_assertions":[{"assertion_id":1,"text":"User: I enjoy coffee."}]}'
 });
 
 export function computeCacheKey(
@@ -80,10 +80,10 @@ export function computeSourceTurnCacheKeys(
     Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>,
   sourcePacking?: ExtractionSourcePacking
 ): readonly string[] {
-  return Object.freeze(buildOfficialApiExtractionRequests(
+  return Object.freeze(collectOfficialApiExtractionCoverage(
     input.turnContent,
     input.turnMessages ?? [], sourcePacking
-  ).map((request) => computeCacheKey(
+  ).requests.map((request) => computeCacheKey(
     model,
     requestProfile,
     systemPrompt,

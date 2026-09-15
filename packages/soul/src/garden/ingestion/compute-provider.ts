@@ -26,7 +26,6 @@ import {
   clampConfidence,
   normalizeOptionalString,
   normalizePositiveTimeoutMs,
-  parseOfficialApiSignals,
   type OfficialApiSignalDraft
 } from "./official-api-signal-parser.js";
 import {
@@ -36,14 +35,23 @@ import {
 import { buildOfficialCandidateSignal } from "./official-api/signal-payload.js";
 import {
   groundOfficialApiDraft,
-  assertOfficialApiRequestGrounding,
   rejectOfficialApiDraftGrounding
 } from "./official-api/source-grounding.js";
+import {
+  createOfficialApiGardenCompileReceipt,
+  receiveOfficialApiRequestSignals,
+  type OfficialApiGardenCompileReceipt,
+  type OfficialApiRequestEntryRejection,
+  type OfficialApiRequestReceiveReceipt
+} from "./official-api/request-result.js";
 import { buildOfficialApiSourceCorpus } from "../triage/grounding/source-locator.js";
 import {
-  buildOfficialApiExtractionRequests,
+  computeOfficialApiSourceCorpusIdentity,
+  planOfficialApiExtractionWindow,
   stringifyOfficialApiExtractionRequest,
-  type OfficialApiExtractionRequest
+  type OfficialApiExtractionRequest,
+  type SourceAssertionCatalogCursor,
+  type SourceAssertionCatalogPage
 } from "./official-api/extraction-request.js";
 import {
   dumpOfficialApiRequestDiagnostic,
@@ -55,10 +63,7 @@ import {
   createOpenSemanticFactorQueryCompiler,
   type OpenSemanticFactorQueryCompiler
 } from "../extraction/semantic-factors/query-compiler.js";
-import {
-  SELECTED_SOURCE_BOUND_F3_CAPABILITY,
-  type SourceBoundF3Capability
-} from "../extraction/semantic-factors/source-bound-seal.js";
+
 
 export {
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
@@ -95,11 +100,17 @@ export {
   OFFICIAL_API_EXTRACTION_REQUEST_SCHEMA_VERSION,
   buildOfficialApiExtractionRequest,
   buildOfficialApiExtractionRequests,
+  collectOfficialApiExtractionCoverage,
   computeOfficialApiSourceCorpusIdentity,
   parseOfficialApiExtractionRequest,
+  planOfficialApiExtractionWindow,
   officialApiExtractionRequestTemplatePreimage,
   stringifyOfficialApiExtractionRequest,
-  type OfficialApiExtractionRequest
+  type OfficialApiExtractionCoverage,
+  type OfficialApiExtractionRequest,
+  type OfficialApiExtractionWindowPlan,
+  type SourceAssertionCatalogCursor,
+  type SourceAssertionCatalogPage
 } from "./official-api/extraction-request.js";
 export {
   OFFICIAL_API_SEMANTIC_WORKSET_CONTRACT_VERSION,
@@ -113,6 +124,17 @@ export {
   type TransportPack,
   type TransportPackPlan
 } from "./official-api/semantic-workset.js";
+export {
+  createOfficialApiGardenCompileReceipt,
+  parseOfficialApiRequestSignals,
+  receiveOfficialApiRequestSignals,
+  OFFICIAL_API_GARDEN_COMPILE_CONTRACT_VERSION,
+  OFFICIAL_API_GARDEN_COMPILE_PRODUCER,
+  type OfficialApiGardenCompilePendingBatch,
+  type OfficialApiGardenCompileReceipt,
+  type OfficialApiRequestEntryRejection,
+  type OfficialApiRequestReceiveReceipt
+} from "./official-api/request-result.js";
 
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;
@@ -194,6 +216,28 @@ export class GardenProviderError extends AlayaError {
     super(kind, message, options);
     this.name = "GardenProviderError";
     this.kind = kind;
+  }
+}
+
+export class OfficialApiGardenCompileIncompleteError extends GardenProviderError {
+  public readonly receipt: OfficialApiGardenCompileReceipt;
+  public readonly signals: readonly CandidateMemorySignal[];
+
+  public constructor(
+    receipt: OfficialApiGardenCompileReceipt,
+    options?: {
+      readonly cause?: unknown;
+      readonly signals?: readonly CandidateMemorySignal[];
+    }
+  ) {
+    super(
+      "Official garden compile is incomplete.",
+      "invalid_response",
+      options?.cause === undefined ? undefined : { cause: options.cause }
+    );
+    this.name = "OfficialApiGardenCompileIncompleteError";
+    this.receipt = receipt;
+    this.signals = Object.freeze([...(options?.signals ?? [])]);
   }
 }
 const DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS = 10_000;
@@ -282,26 +326,36 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     }
 
     const sourceCorpus = buildOfficialApiSourceCorpus(normalizedTurnContent, context.turn_messages);
-    const drafts = await this.requestSignals(normalizedTurnContent, context);
     const createdAt = this.now();
     const sourceObservedAtRaw = resolveGardenCompileSourceObservedAtRaw(context);
-
-    const signals: CandidateMemorySignal[] = [];
-    for (const draft of drafts) {
-      const signal = this.buildSignalFromDraft(
-        draft,
-        context,
-        normalizedTurnContent,
-        sourceCorpus,
-        createdAt,
-        sourceObservedAtRaw
-      );
-      if (signal !== null) {
-        signals.push(signal);
+    const materialize = (drafts: readonly OfficialApiSignalDraft[]) => {
+      const signals: CandidateMemorySignal[] = [];
+      for (const draft of drafts) {
+        const signal = this.buildSignalFromDraft(
+          draft,
+          context,
+          normalizedTurnContent,
+          sourceCorpus,
+          createdAt,
+          sourceObservedAtRaw
+        );
+        if (signal !== null) {
+          signals.push(signal);
+        }
       }
+      return Object.freeze(signals);
+    };
+    try {
+      return materialize(await this.requestSignals(normalizedTurnContent, context));
+    } catch (error) {
+      if (!(error instanceof OfficialApiGardenCompileIncompleteError)) {
+        throw error;
+      }
+      throw new OfficialApiGardenCompileIncompleteError(error.receipt, {
+        cause: error,
+        signals: materialize(error.receipt.drafts)
+      });
     }
-
-    return Object.freeze(signals);
   }
 
   public async extractOpenSemanticFactors(
@@ -383,24 +437,95 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
 
-    const requests = buildOfficialApiExtractionRequests(turnContent, context.turn_messages, this.sourcePacking);
+    const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, context.turn_messages);
     const drafts: OfficialApiSignalDraft[] = [];
-    for (const request of requests) {
-      drafts.push(...await this.requestSignalBatch(request, context));
+    const rejections: OfficialApiRequestEntryRejection[] = [];
+    const unsent: OfficialApiExtractionRequest[] = [];
+    let failedRequest: OfficialApiExtractionRequest | null = null;
+    let incompleteError: unknown = null;
+    let partialReceive = false;
+    let cursor: SourceAssertionCatalogCursor | null | undefined;
+    let catalog: SourceAssertionCatalogPage | undefined;
+    let stopped = false;
+    let previousCursorId: number | undefined;
+
+    do {
+      if (cursor != null) {
+        if (cursor.after_assertion_id === previousCursorId) {
+          throw new TypeError("catalog cursor did not advance");
+        }
+        previousCursorId = cursor.after_assertion_id;
+      }
+      const window = planOfficialApiExtractionWindow(
+        turnContent, context.turn_messages, this.sourcePacking, cursor
+      );
+      if (!stopped) catalog = window.catalog;
+      for (const request of window.requests) {
+        if (stopped) {
+          unsent.push(request);
+          continue;
+        }
+        try {
+          const received = await this.requestSignalBatch(request, context, sourceCorpus);
+          drafts.push(...received.drafts);
+          rejections.push(...received.rejections);
+          // Parser isolation of malformed siblings is not a compile abort.
+          // Locator/grounding rejections and empty partials stay incomplete.
+          if (received.status !== "complete" &&
+              (received.rejections.length > 0 || received.drafts.length === 0)) {
+            partialReceive = true;
+            stopped = true;
+            catalog = window.catalog;
+          }
+        } catch (error) {
+          if (error instanceof GardenProviderError && error.kind === "auth") {
+            throw error;
+          }
+          incompleteError = error;
+          failedRequest = request;
+          stopped = true;
+          catalog = window.catalog;
+        }
+      }
+      cursor = window.catalog.next_cursor;
+    } while (cursor !== null);
+
+    if (catalog === undefined) {
+      throw new TypeError("official API compile produced no catalog page");
+    }
+    if (incompleteError !== null && drafts.length === 0 && !partialReceive && unsent.length === 0) {
+      throw incompleteError;
+    }
+    if (partialReceive || incompleteError !== null) {
+      throw new OfficialApiGardenCompileIncompleteError(
+        createOfficialApiGardenCompileReceipt({
+          drafts,
+          rejections,
+          pending: [
+            ...(failedRequest === null ? [] : [failedRequest]),
+            ...unsent
+          ],
+          catalog
+        }),
+        incompleteError === null ? undefined : { cause: incompleteError }
+      );
     }
     return Object.freeze(drafts);
   }
 
   private async requestSignalBatch(
     request: OfficialApiExtractionRequest,
-    context: GardenCompileContext
-  ): Promise<readonly OfficialApiSignalDraft[]> {
+    context: GardenCompileContext,
+    sourceCorpus: string
+  ): Promise<OfficialApiRequestReceiveReceipt> {
     if (this.extractor === null) {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
     let rawJson: string | null = null;
     let extractorMeta: OfficialApiExtractorMeta | null = null;
     const userPrompt = stringifyOfficialApiExtractionRequest(request);
+    const receiveCorpus = computeOfficialApiSourceCorpusIdentity(sourceCorpus)
+      === request.source_corpus_identity ? undefined : sourceCorpus;
     try {
       const extractor = this.extractor;
       const requestTimeoutMs = this.requestTimeoutMs;
@@ -412,14 +537,17 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
             timeoutMs: requestTimeoutMs,
             abortSignal: signal,
             validateRawJson: (value: string) => {
-              parseOfficialApiRequestSignals(value, request);
+              const received = receiveOfficialApiRequestSignals(value, request, receiveCorpus);
+              if (received.status !== "complete" && received.drafts.length === 0) {
+                throw new Error("official API request receive is incomplete");
+              }
             }
           }),
         { budgetMs: this.wallClockBudgetMs }
       );
       rawJson = response.rawJson;
       extractorMeta = response.extractorMeta ?? null;
-      return parseOfficialApiRequestSignals(rawJson, request);
+      return receiveOfficialApiRequestSignals(rawJson, request, receiveCorpus);
     } catch (error) {
       return this.handleRequestFailure(error, { rawJson, userPrompt, context, extractorMeta });
     }
@@ -457,36 +585,6 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       cause: error
     });
   }
-}
-
-const REQUIRE_GRAPH_FOR_MEMBERSHIP: Readonly<Record<SourceBoundF3Capability, boolean>> = {
-  f0_f2_only: false,
-  identities_only: false,
-  identities_and_topology: true
-};
-
-export function parseOfficialApiRequestSignals(
-  rawJson: string,
-  request: OfficialApiExtractionRequest,
-  sourceCorpus?: string
-): readonly OfficialApiSignalDraft[] {
-  // Membership is identities-only: keep grounded surfaces even when the
-  // prompt-asked topology is missing or rejected. Topology is required only
-  // if the sealed capability is identities_and_topology.
-  const drafts = parseOfficialApiSignals(rawJson, {
-    requireSemanticFactorGraph:
-      REQUIRE_GRAPH_FOR_MEMBERSHIP[SELECTED_SOURCE_BOUND_F3_CAPABILITY]
-  });
-  const allowedIds = new Set(request.source_assertions.map(({ assertion_id }) => assertion_id));
-  if (drafts.some(({ source_locator }) =>
-    source_locator !== undefined && !allowedIds.has(source_locator.assertion_id)
-  )) {
-    throw new Error("official API signal locator is outside its bounded assertion batch");
-  }
-  if (sourceCorpus !== undefined) {
-    assertOfficialApiRequestGrounding(request, drafts, sourceCorpus);
-  }
-  return drafts;
 }
 
 function groundDraftForContext(

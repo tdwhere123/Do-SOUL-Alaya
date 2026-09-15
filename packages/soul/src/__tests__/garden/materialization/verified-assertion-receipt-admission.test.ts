@@ -23,7 +23,7 @@ describe("verified assertion receipt admission", () => {
         verified_user_assertion_source_hash:
           `sha256:garden-verified-user-assertion-v1:${"0".repeat(64)}`,
         source_locator: {
-          contract_version: 3,
+          contract_version: 4,
           kind: "assertion_catalog",
           assertion_id: 1
         },
@@ -68,7 +68,7 @@ describe("verified assertion receipt admission", () => {
       corpus,
       assertion: ASSERTION,
       sourceLocator: {
-        contract_version: 3,
+        contract_version: 4,
         kind: "assertion_catalog",
         assertion_id: "1"
       }
@@ -128,7 +128,7 @@ function verifiedReceipt(assertion: string, corpus: string): string {
 
 function assertionLocator(assertionId: number) {
   return {
-    contract_version: 3,
+    contract_version: 4,
     kind: "assertion_catalog",
     assertion_id: assertionId
   };

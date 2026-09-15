@@ -1,6 +1,6 @@
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
-  buildOfficialApiExtractionRequests,
+  collectOfficialApiExtractionCoverage,
   GardenProviderError,
   OfficialApiGardenProvider,
   stringifyOfficialApiExtractionRequest
@@ -211,10 +211,10 @@ function createExtractionTurnRuntime(
   sourcePacking?: ExtractionSourcePacking
 ) {
   const timeBudget = resolveExtractionFillProviderTimeBudget(transport?.maxOutputTokens);
-  const requests = buildOfficialApiExtractionRequests(
+  const requests = collectOfficialApiExtractionCoverage(
     turn.turnContent,
     turn.turnMessages, sourcePacking
-  );
+  ).requests;
   const inputBound = transport?.maximumInputTokensPerAttempt;
   if (inputBound !== undefined) {
     for (const request of requests) {

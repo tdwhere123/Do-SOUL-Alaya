@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, statfsSync } from "node:fs";
 import { join } from "node:path";
-import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiExtractionRequests } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, collectOfficialApiExtractionCoverage } from "@do-soul/alaya-soul";
 import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
 import {
   assertRequiredRequestProfile,
@@ -234,7 +234,7 @@ function collectShardStatus(
     const keys = computeExtractionTurnCacheKeys(
       config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn, config.sourcePacking
     );
-    const requests = buildOfficialApiExtractionRequests(turn.turnContent, turn.turnMessages, config.sourcePacking);
+    const requests = collectOfficialApiExtractionCoverage(turn.turnContent, turn.turnMessages, config.sourcePacking).requests;
     for (const [index, key] of keys.entries()) {
       if (requests[index]!.source_assertions.length > 0) nonemptyKeys.push(key);
       const shard = inspectCachedExtraction(

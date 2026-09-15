@@ -100,12 +100,11 @@ describe("native Gemini interactive extraction", () => {
     expectedSchema.properties.signals.items.additionalProperties = true;
     expect(expectedSchema.properties.signals.maxItems).toBe(64);
     delete expectedSchema.properties.signals.maxItems;
-    const graphProperties = expectedSchema.properties.signals.items.properties.semantic_factor_graph.properties;
-    for (const name of ["factors", "variables", "propositions", "result_variable_ids"]) {
-      expect(graphProperties[name].maxItems).toBeGreaterThan(0);
-      delete graphProperties[name].maxItems;
+    const observationProperties = expectedSchema.properties.signals.items.properties.identity_observation.properties;
+    for (const name of ["mentions", "unresolved_spans"]) {
+      expect(observationProperties[name].maxItems).toBeGreaterThan(0);
+      delete observationProperties[name].maxItems;
     }
-    delete graphProperties.propositions.items.properties.arguments.maxItems;
     let observed = false;
     await withServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -118,10 +117,10 @@ describe("native Gemini interactive extraction", () => {
         expect(schema.additionalProperties).toBe(false);
         expect(schema.required).toEqual(["signals"]);
         expect(schema.properties.signals.items.required).toEqual([
-          "object_kind", "confidence", "matched_text", "source_locator", "semantic_factor_graph"
+          "object_kind", "confidence", "matched_text", "source_locator", "identity_observation"
         ]);
-        expect(schema.properties.signals.items.properties.semantic_factor_graph.properties)
-          .toHaveProperty("propositions");
+        expect(schema.properties.signals.items.properties.identity_observation.properties)
+          .toHaveProperty("mentions");
         expect(schema.properties.signals.items.properties.temporal_projection).toMatchObject({
           type: "object", required: ["projection_schema_version", "time_precision", "time_source"],
           properties: {
@@ -185,7 +184,7 @@ describe("native Gemini interactive extraction", () => {
     const source = "I collect vintage postcards.";
     const request = buildOfficialApiExtractionRequest(source, []);
     const signal = { object_kind: "user_preference", confidence: 0.9, matched_text: source,
-      source_locator: { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 } };
+      source_locator: { contract_version: 4, kind: "assertion_catalog", assertion_id: 1 } };
     expect(() => soul.classifyOfficialApiRequestResult(JSON.stringify({
       signals: Array.from({ length: 65 }, () => signal)
     }), request)).toThrow("rejected signal entries");

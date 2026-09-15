@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { OpenSemanticFactorGraphProposalSchema } from "@do-soul/alaya-protocol";
+import { IdentityObservationSchema } from "@do-soul/alaya-protocol";
 import { OfficialApiSourceLocatorSchema } from "../../triage/grounding/source-locator.js";
 import { OFFICIAL_API_SIGNAL_LIMIT } from "../official-api-signal-parser.js";
 import { OFFICIAL_API_OBJECT_KINDS } from "./object-kind-contract.js";
@@ -15,7 +15,7 @@ const responseSchema = z.toJSONSchema(z.object({
     confidence: z.number().min(0).max(1),
     matched_text: z.string(),
     source_locator: OfficialApiSourceLocatorSchema,
-    semantic_factor_graph: OpenSemanticFactorGraphProposalSchema,
+    identity_observation: IdentityObservationSchema,
     temporal_projection: OfficialApiTemporalProjectionDraftSchema.optional()
   })).max(OFFICIAL_API_SIGNAL_LIMIT)
 }).strict(), {

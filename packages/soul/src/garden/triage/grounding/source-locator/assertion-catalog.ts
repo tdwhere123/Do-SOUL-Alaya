@@ -22,7 +22,9 @@ import {
 } from "../source-role/marker.js";
 
 export const OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION = VERIFIED_USER_ASSERTION_CATALOG_CONTRACT_VERSION;
-export const MAX_SOURCE_ASSERTIONS = 64;
+export const SOURCE_ASSERTION_CATALOG_PRODUCER = "official-api-source-assertion-catalog-v4" as const;
+export const SOURCE_ASSERTION_CATALOG_PAGE_SIZE = 64;
+export const MAX_SOURCE_ASSERTIONS = SOURCE_ASSERTION_CATALOG_PAGE_SIZE;
 
 export interface OfficialApiSourceAssertion {
   readonly assertion_id: number;
@@ -36,6 +38,28 @@ export interface IndexedSourceAssertion extends OfficialApiSourceAssertion {
   readonly atomic: boolean;
 }
 
+export interface SourceAssertionCatalogCursor {
+  readonly after_assertion_id: number;
+}
+
+export type SourceAssertionCatalogCoverage = "source_range_complete" | "budget_complete";
+
+export interface SourceAssertionCatalogResidualMember {
+  readonly assertion_id: number;
+  readonly start: number;
+  readonly end: number;
+}
+
+export interface SourceAssertionCatalogPage {
+  readonly contract_version: typeof OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION;
+  readonly producer: typeof SOURCE_ASSERTION_CATALOG_PRODUCER;
+  readonly inventory_count: number;
+  readonly window: readonly IndexedSourceAssertion[];
+  readonly residual: readonly SourceAssertionCatalogResidualMember[];
+  readonly next_cursor: SourceAssertionCatalogCursor | null;
+  readonly coverage: SourceAssertionCatalogCoverage;
+}
+
 export function isDirectQuestionSourceText(text: string): boolean {
   const content = stripSourceRoleMarker(text);
   if (!/[?？]$/u.test(content)) return false;
@@ -43,22 +67,63 @@ export function isDirectQuestionSourceText(text: string): boolean {
 }
 
 export function indexSourceAssertions(sourceText: string): readonly IndexedSourceAssertion[] {
-  const legacy = indexLegacySourceAssertions(sourceText);
-  const output = [...selectBoundedAssertions(legacy)];
-  if (output.length >= MAX_SOURCE_ASSERTIONS) return output;
-
+  const output = [...indexLegacySourceAssertions(sourceText)];
   const roleMarkers = collectSourceRoleMarkers(sourceText);
-  const seen = new Set(legacy.map((assertion) => `${assertion.start}:${assertion.end}`));
+  const seen = new Set(output.map((assertion) => `${assertion.start}:${assertion.end}`));
   for (const sentence of sentenceSpans(sourceText)) {
     if (roleAt(roleMarkers, sentence.start) !== "user") continue;
     for (const atom of atomicAssertionSpans(sourceText, sentence)) {
-      if (output.length >= MAX_SOURCE_ASSERTIONS) return output;
       if (isCoveredByCatalogAssertion(output, atom)) continue;
       appendAssertion(output, seen, sourceText, atom, sentence, true);
     }
-    if (output.length >= MAX_SOURCE_ASSERTIONS) break;
   }
   return output;
+}
+
+export function pageSourceAssertionCatalog(
+  sourceText: string,
+  cursor?: SourceAssertionCatalogCursor | null,
+  pageSize = SOURCE_ASSERTION_CATALOG_PAGE_SIZE
+): SourceAssertionCatalogPage {
+  return pageSourceAssertionInventory(indexSourceAssertions(sourceText), cursor, pageSize);
+}
+
+export function pageSourceAssertionInventory(
+  inventory: readonly IndexedSourceAssertion[],
+  cursor?: SourceAssertionCatalogCursor | null,
+  pageSize = SOURCE_ASSERTION_CATALOG_PAGE_SIZE
+): SourceAssertionCatalogPage {
+  if (!Number.isInteger(pageSize) || pageSize < 1) {
+    throw new TypeError("catalog page size must be a positive integer");
+  }
+  if (cursor !== undefined && cursor !== null) {
+    if (!Number.isInteger(cursor.after_assertion_id) || cursor.after_assertion_id < 1) {
+      throw new TypeError("catalog cursor after_assertion_id must be a positive integer");
+    }
+  }
+  const startIndex = cursor === undefined || cursor === null
+    ? 0
+    : inventory.findIndex((item) => item.assertion_id > cursor.after_assertion_id);
+  const from = startIndex < 0 ? inventory.length : startIndex;
+  const window = inventory.slice(from, from + pageSize);
+  const rest = inventory.slice(from + window.length);
+  const residual = rest.map((item) => Object.freeze({
+    assertion_id: item.assertion_id,
+    start: item.start,
+    end: item.end
+  }));
+  const nextCursor = residual.length === 0 || window.length === 0
+    ? null
+    : { after_assertion_id: window[window.length - 1]!.assertion_id };
+  return Object.freeze({
+    contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+    producer: SOURCE_ASSERTION_CATALOG_PRODUCER,
+    inventory_count: inventory.length,
+    window: Object.freeze([...window]),
+    residual: Object.freeze(residual),
+    next_cursor: nextCursor,
+    coverage: residual.length === 0 ? "source_range_complete" as const : "budget_complete" as const
+  });
 }
 
 function indexLegacySourceAssertions(
@@ -174,18 +239,6 @@ function isCoveredByCatalogAssertion(
   span: AssertionSpan
 ): boolean {
   return assertions.some((assertion) => assertion.start <= span.start && assertion.end >= span.end);
-}
-
-function selectBoundedAssertions(
-  assertions: readonly IndexedSourceAssertion[]
-): readonly IndexedSourceAssertion[] {
-  if (assertions.length <= MAX_SOURCE_ASSERTIONS) return assertions;
-  const lastIndex = assertions.length - 1;
-  return Array.from({ length: MAX_SOURCE_ASSERTIONS }, (_, outputIndex) => {
-    const sourceIndex = Math.round(outputIndex * lastIndex / (MAX_SOURCE_ASSERTIONS - 1));
-    const selected = assertions[sourceIndex]!;
-    return { ...selected, assertion_id: outputIndex + 1 };
-  });
 }
 
 function roleAt(

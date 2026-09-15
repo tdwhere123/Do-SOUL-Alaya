@@ -10,7 +10,8 @@ import { buildOfficialApiSourceCorpus } from
 
 const EXAMPLE_SOURCES = [
   "In 2020, I opened a workshop and promised to lend tools.",
-  "I can borrow tools in the workshop only on Saturdays."
+  "I can borrow tools in the workshop only on Saturdays.",
+  "The exhibit opened in 2019 with the aim of helping visitors learn ceramics."
 ] as const;
 
 describe("official API grounded examples", () => {

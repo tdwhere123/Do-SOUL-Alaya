@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { identityObservationEqualityKey } from "@do-soul/alaya-protocol";
 import { parseOfficialApiSignals } from "../../../garden/ingestion/compute-provider.js";
 import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
@@ -95,5 +96,81 @@ describe("parseOfficialApiSignals invalid envelope rejection", () => {
         kind_values: ["music streaming service"]
       }
     }]);
+  });
+
+  it("keeps independently grounded mentions when topology has an unrelated illegal factor", () => {
+    const source = "I used Atlas for research.";
+    const legal = withOpenSemanticFactorGraph({
+      object_kind: "activity",
+      confidence: 0.9,
+      matched_text: source
+    }).semantic_factor_graph;
+    const [draft] = parseOfficialApiSignals(JSON.stringify({
+      signals: [{
+        object_kind: "activity",
+        confidence: 0.9,
+        matched_text: source,
+        semantic_factor_graph: {
+          ...legal,
+          factors: [
+            { factor_id: "actor", surface: "I", semantic_identity: "i" },
+            { factor_id: "predicate", surface: "used", semantic_identity: "use" },
+            { factor_id: "object", surface: "Atlas", semantic_identity: "atlas" },
+            { factor_id: "bad", surface: "research", semantic_identity: "NOT-CANONICAL" }
+          ]
+        }
+      }]
+    }));
+    expect(draft?.semantic_factor_graph).toBeUndefined();
+    expect(draft?.semantic_factor_graph_projection).toMatchObject({ status: "rejected" });
+    expect(draft?.identity_observation?.producer).toBe("official-api-identity-observation-v1");
+    expect(draft?.identity_observation?.mentions.map((mention) => mention.surface))
+      .toEqual(["I", "used", "Atlas", "research"]);
+    expect(draft?.identity_observation?.mentions.find((mention) => mention.surface === "research")
+      ?.proposed_semantic_identity).toBeUndefined();
+  });
+
+  it("does not treat a matching quote with the wrong lemma as semantic equality", () => {
+    const [draft] = parseOfficialApiSignals(JSON.stringify({
+      signals: [{
+        object_kind: "activity",
+        confidence: 1,
+        matched_text: "I use MySQL.",
+        identity_observation: {
+          contract_version: 1,
+          producer: "official-api-identity-observation-v1",
+          mentions: [{ surface: "MySQL", proposed_semantic_identity: "postgresql" }]
+        }
+      }]
+    }));
+    const mention = draft?.identity_observation?.mentions[0];
+    expect(mention).toMatchObject({ surface: "MySQL", proposed_semantic_identity: "postgresql" });
+    expect(mention?.proposed_semantic_identity).not.toBe("mysql");
+    expect(mention?.surface).not.toBe(mention?.proposed_semantic_identity);
+    expect(identityObservationEqualityKey(mention!))
+      .not.toBe(identityObservationEqualityKey({ surface: "postgresql" }));
+  });
+
+  it("does not treat NFKC lemma success as object equality", () => {
+    const [draft] = parseOfficialApiSignals(JSON.stringify({
+      signals: [{
+        object_kind: "activity",
+        confidence: 1,
+        matched_text: "I use MySQL.",
+        identity_observation: {
+          contract_version: 1,
+          producer: "official-api-identity-observation-v1",
+          mentions: [{ surface: "MySQL", proposed_semantic_identity: "mysql" }]
+        }
+      }]
+    }));
+    const mention = draft?.identity_observation?.mentions[0];
+    expect(mention).toMatchObject({ surface: "MySQL", proposed_semantic_identity: "mysql" });
+    expect("mysql".normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase()).toBe("mysql");
+    expect(mention?.surface).not.toBe(mention?.proposed_semantic_identity);
+    expect(identityObservationEqualityKey(mention!))
+      .not.toBe(identityObservationEqualityKey({ surface: "mysql" }));
+    expect(identityObservationEqualityKey(mention!))
+      .toBe(identityObservationEqualityKey({ surface: "MySQL", source_occurrence: 0 }));
   });
 });

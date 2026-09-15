@@ -148,9 +148,9 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
   });
 
 
-  it("instructs the model to emit one open semantic graph per signal", () => {
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("semantic_factor_graph");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("dependent propositions together in one graph");
+  it("instructs the model to emit independently grounded mentions per signal", () => {
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("identity_observation");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Do not emit factor_id, proposition_id, binding_identity, hashes, or a canonical graph");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("evidence_refs");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("source_memory_refs");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Preserve relative-date meaning");

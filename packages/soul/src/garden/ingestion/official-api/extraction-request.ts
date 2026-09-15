@@ -8,9 +8,15 @@ import {
 import {
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
+  indexOfficialApiSourceAssertions,
   OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
 } from "../../triage/grounding/source-locator.js";
-import { indexSourceAssertions } from "../../triage/grounding/source-locator/assertion-catalog.js";
+import {
+  indexSourceAssertions,
+  pageSourceAssertionInventory,
+  type SourceAssertionCatalogCursor,
+  type SourceAssertionCatalogPage
+} from "../../triage/grounding/source-locator/assertion-catalog.js";
 import { collectSourceRoleMarkers } from
   "../../triage/grounding/source-role/marker.js";
 import { planTurnTransportPacks } from "./transport-pack.js";
@@ -52,6 +58,13 @@ const OfficialApiExtractionRequestSchema = z.object({
 
 export type OfficialApiExtractionRequest = z.infer<typeof OfficialApiExtractionRequestSchema>;
 
+export type { SourceAssertionCatalogCursor, SourceAssertionCatalogPage };
+
+export interface OfficialApiExtractionWindowPlan {
+  readonly catalog: SourceAssertionCatalogPage;
+  readonly requests: readonly OfficialApiExtractionRequest[];
+}
+
 export function buildOfficialApiExtractionRequest(
   turnContent: string,
   messages: readonly Pick<ConversationMessage, "role" | "content">[],
@@ -67,13 +80,73 @@ export function buildOfficialApiExtractionRequest(
 export function buildOfficialApiExtractionRequests(
   turnContent: string,
   messages: readonly Pick<ConversationMessage, "role" | "content">[],
-  sourcePacking: ExtractionSourcePacking = DEFAULT_EXTRACTION_SOURCE_PACKING
+  sourcePacking: ExtractionSourcePacking = DEFAULT_EXTRACTION_SOURCE_PACKING,
+  catalogCursor?: SourceAssertionCatalogCursor | null
 ): readonly OfficialApiExtractionRequest[] {
+  return planOfficialApiExtractionWindow(
+    turnContent, messages, sourcePacking, catalogCursor
+  ).requests;
+}
+
+export interface OfficialApiExtractionCoverage {
+  readonly catalog: SourceAssertionCatalogPage;
+  readonly requests: readonly OfficialApiExtractionRequest[];
+}
+
+/** Follows catalog cursors until source_range_complete. One-window callers use the planner. */
+export function collectOfficialApiExtractionCoverage(
+  turnContent: string,
+  messages: readonly Pick<ConversationMessage, "role" | "content">[],
+  sourcePacking: ExtractionSourcePacking = DEFAULT_EXTRACTION_SOURCE_PACKING
+): OfficialApiExtractionCoverage {
+  const windows: OfficialApiExtractionWindowPlan[] = [];
+  let cursor: SourceAssertionCatalogCursor | null | undefined;
+  let previousCursorId: number | undefined;
+  do {
+    if (cursor != null) {
+      if (cursor.after_assertion_id === previousCursorId) {
+        throw new TypeError("catalog cursor did not advance");
+      }
+      previousCursorId = cursor.after_assertion_id;
+    }
+    const window = planOfficialApiExtractionWindow(
+      turnContent, messages, sourcePacking, cursor
+    );
+    windows.push(window);
+    cursor = window.catalog.next_cursor;
+  } while (cursor !== null);
+
+  const last = windows[windows.length - 1]!;
+  return Object.freeze({
+    catalog: Object.freeze({
+      ...last.catalog,
+      window: Object.freeze(windows.flatMap((item) => item.catalog.window))
+    }),
+    requests: Object.freeze(windows.flatMap((item) =>
+      item.catalog.window.length > 0 || windows.length === 1 ? [...item.requests] : []
+    ))
+  });
+}
+
+export function planOfficialApiExtractionWindow(
+  turnContent: string,
+  messages: readonly Pick<ConversationMessage, "role" | "content">[],
+  sourcePacking: ExtractionSourcePacking = DEFAULT_EXTRACTION_SOURCE_PACKING,
+  catalogCursor?: SourceAssertionCatalogCursor | null
+): OfficialApiExtractionWindowPlan {
   const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
-  const assertions = buildOfficialApiSourceAssertions(sourceCorpus);
+  const catalog = pageSourceAssertionInventory(
+    indexOfficialApiSourceAssertions(sourceCorpus),
+    catalogCursor
+  );
+  const assertions = Object.freeze(catalog.window.map(({ assertion_id, text }) =>
+    Object.freeze({ assertion_id, text })
+  ));
   const sourceCorpusIdentity = computeOfficialApiSourceCorpusIdentity(sourceCorpus);
   const byId = new Map(assertions.map((assertion) => [assertion.assertion_id, assertion]));
-  const workset = mintOfficialApiAssertionBindings(turnContent, messages);
+  const pageIds = new Set(byId.keys());
+  const workset = mintOfficialApiAssertionBindings(turnContent, messages)
+    .filter((binding) => pageIds.has(binding.locator.assertion_id));
   const plan = planTurnTransportPacks(
     workset.map((binding) => {
       const assertion = byId.get(binding.locator.assertion_id);
@@ -89,21 +162,21 @@ export function buildOfficialApiExtractionRequests(
     { kind: "reference_batch", assertionsPerPack: extractionSourcePackingSize(sourcePacking) }
   );
   const packs = plan.packs.filter((pack) => pack.assertion_ids.length > 0);
-  if (packs.length === 0) {
-    return Object.freeze([buildRequest([], sourceCorpusIdentity, 0, 1)]);
-  }
-  return Object.freeze(packs.map((pack, batchIndex) => buildRequest(
-    pack.assertion_ids.map((assertionId) => {
-      const assertion = byId.get(assertionId);
-      if (assertion === undefined) {
-        throw new TypeError("transport pack referenced a missing assertion");
-      }
-      return assertion;
-    }),
-    sourceCorpusIdentity,
-    batchIndex,
-    packs.length
-  )));
+  const requests = packs.length === 0
+    ? Object.freeze([buildRequest([], sourceCorpusIdentity, 0, 1)])
+    : Object.freeze(packs.map((pack, batchIndex) => buildRequest(
+      pack.assertion_ids.map((assertionId) => {
+        const assertion = byId.get(assertionId);
+        if (assertion === undefined) {
+          throw new TypeError("transport pack referenced a missing assertion");
+        }
+        return assertion;
+      }),
+      sourceCorpusIdentity,
+      batchIndex,
+      packs.length
+    )));
+  return Object.freeze({ catalog, requests });
 }
 
 export interface MintedOfficialApiAssertionBinding {

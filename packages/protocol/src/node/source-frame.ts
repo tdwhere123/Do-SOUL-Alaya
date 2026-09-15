@@ -1,4 +1,4 @@
-export { RuleBasedEvidenceFactFrameNormalizer, RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID, RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER, factFramePreservesSourceObligations, type EvidenceFactFrameProposalNormalizer } from "../evidence/formation/source-grammar/declarative-normalizer.js";
+export { RuleBasedEvidenceFactFrameNormalizer, RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID, RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER, classifyFactFrameCertifierSupportDomain, factFramePreservesSourceObligations, type EvidenceFactFrameProposalNormalizer, type FactFrameCertifierSupportDomain } from "../evidence/formation/source-grammar/declarative-normalizer.js";
 export { tokenizeFactFrameSource, tokenizeFactFrameWordPieces, sliceFactFrameTokens, type FactFrameSourceToken } from "../evidence/formation/source-grammar/source-text.js";
 export { skipLeadingAdjunctSpan } from "../evidence/formation/source-grammar/leading-adjunct.js";
 export { compileSourceFrameSemanticGraph } from "../evidence/formation/source-grammar/semantic-graph.js";

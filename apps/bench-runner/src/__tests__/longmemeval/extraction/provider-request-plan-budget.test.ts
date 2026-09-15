@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  buildOfficialApiExtractionRequests
+  collectOfficialApiExtractionCoverage
 } from "@do-soul/alaya-soul";
 import {
   createExtractionRequestPlanDeadline,
@@ -17,12 +17,13 @@ afterEach(() => vi.useRealTimers());
 describe("extraction provider request-plan authority", () => {
   it.each([
     [17, 3],
-    [64, 8]
+    [64, 8],
+    [65, 9]
   ])("budgets all bounded batches for %i assertions", (assertionCount, batchCount) => {
-    const requests = buildOfficialApiExtractionRequests(
+    const requests = collectOfficialApiExtractionCoverage(
       assertionSource(assertionCount),
       []
-    );
+    ).requests;
     const perBatch = resolveExtractionFillProviderTimeBudget(2_048);
     const plan = resolveExtractionRequestPlanBudget(requests, 2_048);
 

@@ -419,7 +419,7 @@ describe("official Garden source grounding", () => {
     expect(signal?.raw_payload.full_turn_content).toContain(assertion);
     expect(String(signal?.raw_payload.full_turn_content).length).toBeLessThanOrEqual(2_048);
     expect(signal?.raw_payload).toMatchObject({
-      source_locator: { contract_version: 3, kind: "assertion_catalog" },
+      source_locator: { contract_version: 4, kind: "assertion_catalog" },
       verified_user_assertion_source_hash: expect.any(String)
     });
   });

@@ -18,8 +18,10 @@ import { cacheFilePath, inspectCachedRawExtraction, writeCachedExtraction } from
 import { inspectExtractionFillCompletion } from
   "../../../runs/extraction/fill/fill-completion.js";
 import {
+  catalogEligibilityOfAssertionCount,
   classifyExtractionEnvelope,
   EMPTY_SIGNALS_ENVELOPE,
+  EXTRACTION_SEMANTIC_PRESERVATION_FROM_REQUEST,
   isPlanSkippedExtraction,
   PLAN_SKIPPED_EXTRACTION_ENVELOPE
 } from "../../../runs/extraction/empty-classification.js";
@@ -69,6 +71,43 @@ describe("extraction empty envelope classification", () => {
     expect(classifyExtractionEnvelope({
       rawSignalCount: 1, sourceAssertionCount: 2, planMembership: "in_plan"
     })).toBe("completed_signals");
+  });
+
+  it("does not treat request completion or an empty catalog as source semantic exhaustion", async () => {
+    expect(catalogEligibilityOfAssertionCount(2)).toBe("eligible_assertions_present");
+    expect(catalogEligibilityOfAssertionCount(0)).toBe("catalog_produced_no_eligible_assertion");
+    expect(EXTRACTION_SEMANTIC_PRESERVATION_FROM_REQUEST).toBe("not_claimed_by_request_completion");
+    expect(classifyExtractionEnvelope({
+      rawSignalCount: 0, sourceAssertionCount: 2, planMembership: "in_plan",
+      requestCompletion: "completed_empty"
+    })).toBe("completed_empty");
+    expect(classifyExtractionEnvelope({
+      rawSignalCount: 0, sourceAssertionCount: 0, planMembership: "in_plan"
+    })).toBe("deterministic_empty");
+    const { inspectExtractionRawEnvelope, assertCoverageValidExtractionEnvelope } =
+      await import("../../../runs/extraction/content-closure.js");
+    const witnessedEmpty = inspectExtractionRawEnvelope(EMPTY_SIGNALS_ENVELOPE, {
+      sourceAssertionCount: 2,
+      planMembership: "in_plan",
+      requestCompletion: "completed_empty"
+    });
+    expect(witnessedEmpty).toMatchObject({
+      emptyClassification: "completed_empty",
+      catalogEligibility: "eligible_assertions_present",
+      semanticPreservation: "not_claimed_by_request_completion"
+    });
+    expect(assertCoverageValidExtractionEnvelope(witnessedEmpty)).toBe("completed_empty");
+    const noEligible = inspectExtractionRawEnvelope(EMPTY_SIGNALS_ENVELOPE, {
+      sourceAssertionCount: 0,
+      planMembership: "in_plan"
+    });
+    expect(noEligible).toMatchObject({
+      emptyClassification: "deterministic_empty",
+      catalogEligibility: "catalog_produced_no_eligible_assertion",
+      semanticPreservation: "not_claimed_by_request_completion"
+    });
+    expect(() => inspectExtractionRawEnvelope('{"signals":[')).toThrow(/not strict JSON/u);
+    expect(() => inspectExtractionRawEnvelope("{}")).toThrow(/signals array missing/u);
   });
 
   it("classifies empty raw envelopes in content-closure when assertions are present", async () => {

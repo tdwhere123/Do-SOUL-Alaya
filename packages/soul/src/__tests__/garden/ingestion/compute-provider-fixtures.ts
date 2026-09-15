@@ -66,7 +66,7 @@ export function openSignal<T extends Readonly<{ readonly matched_text: string }>
   return {
     ...withOpenSemanticFactorGraph(signal),
     source_locator: {
-      contract_version: 3,
+      contract_version: 4,
       kind: "assertion_catalog",
       assertion_id: assertionId
     }

@@ -5,7 +5,10 @@ import {
   GardenRole,
   GardenTaskKind,
 } from "@do-soul/alaya-protocol";
-import type { GardenComputeProvider } from "@do-soul/alaya-soul";
+import {
+  OfficialApiGardenCompileIncompleteError,
+  type GardenComputeProvider
+} from "@do-soul/alaya-soul";
 
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 
@@ -408,6 +411,46 @@ describe("post-turn extract Garden task", () => {
     await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 1))).resolves.toMatchObject({
       signal_id: gardenTaskSignalId("post-turn-task-1", 1),
       workspace_id: "workspace-1"
+    });
+  });
+
+  it("admits independently grounded candidates when official compile is incomplete", async () => {
+    const compile = vi.fn<GardenComputeProvider["compile"]>(async () => {
+      throw new OfficialApiGardenCompileIncompleteError({
+        contract_version: 1,
+        producer: "official-api-garden-compile-v1",
+        status: "partial",
+        drafts: [],
+        rejections: [],
+        pending_batches: [{
+          source_corpus_identity: "corpus",
+          batch_index: 1,
+          batch_count: 2,
+          assertion_ids: [9]
+        }],
+        catalog: {
+          inventory_count: 9,
+          coverage: "budget_complete",
+          residual: [],
+          next_cursor: null
+        }
+      }, { signals: [createSignal()] });
+    });
+    const harness = await createRoutingHarness({
+      provider_kind: "official_api",
+      officialCompile: compile
+    });
+    harness.enqueuePostTurnTask();
+
+    await harness.runScheduler();
+
+    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.toMatchObject({
+      signal_id: gardenTaskSignalId("post-turn-task-1", 0),
+      workspace_id: "workspace-1"
+    });
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "completed",
+      claimed_by: "in-process"
     });
   });
 

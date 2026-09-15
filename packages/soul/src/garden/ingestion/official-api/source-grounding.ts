@@ -12,6 +12,7 @@ import {
   resolvePreferenceAwareSourceGrounding
 } from "../../triage/grounding/preference-profile.js";
 import { projectOfficialApiSemanticFactorGraph } from "./semantic-factor-projection.js";
+import { receiveOfficialApiIdentityObservation } from "./identity-observation.js";
 import type { OfficialApiSourceTrustRejection } from "./source-trust.js";
 import { buildOfficialApiSourceAssertions } from "../../triage/grounding/source-locator.js";
 import { computeOfficialApiSourceCorpusIdentity, type OfficialApiExtractionRequest } from "./extraction-request.js";
@@ -88,6 +89,11 @@ export function groundOfficialApiDraft(
   const semanticFactorGraph = projected.semantic_factor_graph;
   const semanticFactorGraphProjection = draft.semantic_factor_graph_projection ??
     projected.semantic_factor_graph_projection;
+  const identityObservation = receiveOfficialApiIdentityObservation({
+    identityObservation: draft.identity_observation,
+    semanticFactorGraph: draft.semantic_factor_graph,
+    sourceText: assertion
+  }).observation;
   const reasons = groundingReasons(draft, assertion, canonicalEntities,
     preferenceProfile, factFrame, semanticFactorGraph);
   return {
@@ -99,7 +105,8 @@ export function groundOfficialApiDraft(
       preferenceProfile,
       factFrame,
       semanticFactorGraph,
-      semanticFactorGraphProjection
+      semanticFactorGraphProjection,
+      identityObservation
     }),
     audit: buildGroundedAudit(draft, assertion, reasons)
   };
@@ -114,6 +121,7 @@ function buildGroundedDraft(input: {
   readonly semanticFactorGraph: OfficialApiSignalDraft["semantic_factor_graph"];
   readonly semanticFactorGraphProjection:
     OfficialApiSignalDraft["semantic_factor_graph_projection"];
+  readonly identityObservation: OfficialApiSignalDraft["identity_observation"] | null;
 }): OfficialApiSignalDraft {
   const { draft } = input;
   const {
@@ -124,6 +132,7 @@ function buildGroundedDraft(input: {
     fact_frame: _factFrame,
     semantic_factor_graph: _semanticFactorGraph,
     semantic_factor_graph_projection: _semanticFactorGraphProjection,
+    identity_observation: _identityObservation,
     ...rest
   } = draft;
   return Object.freeze({
@@ -142,7 +151,10 @@ function buildGroundedDraft(input: {
       : { semantic_factor_graph: input.semanticFactorGraph }),
     ...(input.semanticFactorGraphProjection === undefined
       ? {}
-      : { semantic_factor_graph_projection: input.semanticFactorGraphProjection })
+      : { semantic_factor_graph_projection: input.semanticFactorGraphProjection }),
+    ...(input.identityObservation === undefined || input.identityObservation === null
+      ? {}
+      : { identity_observation: input.identityObservation })
   });
 }
 

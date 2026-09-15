@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { buildOfficialApiExtractionRequests } from "@do-soul/alaya-soul";
+import { collectOfficialApiExtractionCoverage } from "@do-soul/alaya-soul";
 import { computeExtractionTurnCacheKeys } from "../../compile-seed/compile-seed-cache.js";
 import {
   buildLongMemEvalRoundMessages,
@@ -110,7 +110,7 @@ function assertRoundIdentity(
     semanticEntries,
     semanticBinding,
     cacheKeys,
-    requests: buildOfficialApiExtractionRequests(content, turnMessages, extraction.source_packing)
+    requests: collectOfficialApiExtractionCoverage(content, turnMessages, extraction.source_packing).requests
   });
   const rawSignalCount = sumExtractionShardCount(shards, semantic, "rawSignalCount");
   const draftCount = sumExtractionShardCount(shards, semantic, "draftCount");

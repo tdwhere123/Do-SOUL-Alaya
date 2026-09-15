@@ -1,8 +1,23 @@
+import { IDENTITY_OBSERVATION_PRODUCER } from "@do-soul/alaya-protocol";
 import { buildOfficialApiExtractionRequest, computeOfficialApiSourceCorpusIdentity } from "./extraction-request.js";
 import { buildOfficialApiSourceCorpus, OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION } from "../../triage/grounding/source-locator.js";
 
 function exampleSourceCorpusIdentity(source: string): string {
   return computeOfficialApiSourceCorpusIdentity(buildOfficialApiSourceCorpus(source, []));
+}
+
+function identityObservation(
+  mentions: readonly string[],
+  unresolved: readonly string[] = []
+) {
+  return {
+    contract_version: 1 as const,
+    producer: IDENTITY_OBSERVATION_PRODUCER,
+    mentions: mentions.map((surface) => ({ surface })),
+    ...(unresolved.length === 0 ? {} : {
+      unresolved_spans: unresolved.map((surface) => ({ surface }))
+    })
+  };
 }
 
 /** Fictional source-grounded examples; never an extraction source or runtime policy. */
@@ -35,98 +50,10 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
             "kind": "assertion_catalog",
             "assertion_id": 1
           },
-          "canonical_entities": [
-            "workshop",
-            "tools"
-          ],
-          "semantic_factor_graph": {
-            "schema_version": 2,
-            "source_kind": "evidence",
-            "factors": [
-              {
-                "factor_id": "speaker",
-                "surface": "I",
-                "semantic_identity": "i"
-              },
-              {
-                "factor_id": "open",
-                "surface": "opened",
-                "semantic_identity": "open"
-              },
-              {
-                "factor_id": "workshop",
-                "surface": "a workshop",
-                "semantic_identity": "workshop"
-              },
-              {
-                "factor_id": "year",
-                "surface": "2020",
-                "semantic_identity": "2020"
-              },
-              {
-                "factor_id": "promise",
-                "surface": "promised",
-                "semantic_identity": "promise"
-              },
-              {
-                "factor_id": "content",
-                "surface": "to lend tools",
-                "semantic_identity": "to lend tools"
-              }
-            ],
-            "variables": [],
-            "result_variable_ids": [],
-            "propositions": [
-              {
-                "proposition_id": "opening",
-                "predicate_factor_id": "open",
-                "arguments": [
-                  {
-                    "position": 0,
-                    "binding_identity": "opener",
-                    "reference_kind": "factor",
-                    "reference_id": "speaker"
-                  },
-                  {
-                    "position": 1,
-                    "binding_identity": "facility",
-                    "reference_kind": "factor",
-                    "reference_id": "workshop"
-                  },
-                  {
-                    "position": 2,
-                    "binding_identity": "time",
-                    "reference_kind": "factor",
-                    "reference_id": "year"
-                  }
-                ]
-              },
-              {
-                "proposition_id": "commitment",
-                "predicate_factor_id": "promise",
-                "arguments": [
-                  {
-                    "position": 0,
-                    "binding_identity": "promiser",
-                    "reference_kind": "factor",
-                    "reference_id": "speaker"
-                  },
-                  {
-                    "position": 1,
-                    "binding_identity": "content",
-                    "reference_kind": "factor",
-                    "reference_id": "content"
-                  },
-                  {
-                    "position": 2,
-                    "binding_identity": "time",
-                    "reference_kind": "factor",
-                    "reference_id": "year"
-                  }
-                ]
-              }
-            ]
-          },
+          "canonical_entities": ["workshop", "tools"],
+          "identity_observation": identityObservation([
+            "I", "opened", "a workshop", "2020", "promised", "to lend tools"
+          ]),
           "temporal_projection": {
             "projection_schema_version": 1,
             "time_precision": "year",
@@ -166,86 +93,11 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
             "kind": "assertion_catalog",
             "assertion_id": 1
           },
-          "canonical_entities": [
-            "workshop",
-            "tools"
-          ],
-          "semantic_factor_graph": {
-            "schema_version": 2,
-            "source_kind": "evidence",
-            "factors": [
-              {
-                "factor_id": "speaker",
-                "surface": "I",
-                "semantic_identity": "i"
-              },
-              {
-                "factor_id": "modality",
-                "surface": "can",
-                "semantic_identity": "can"
-              },
-              {
-                "factor_id": "borrow",
-                "surface": "borrow",
-                "semantic_identity": "borrow"
-              },
-              {
-                "factor_id": "tools",
-                "surface": "tools",
-                "semantic_identity": "tools"
-              },
-              {
-                "factor_id": "place",
-                "surface": "in the workshop",
-                "semantic_identity": "in the workshop"
-              },
-              {
-                "factor_id": "condition",
-                "surface": "only on Saturdays",
-                "semantic_identity": "only on saturdays"
-              }
-            ],
-            "variables": [],
-            "result_variable_ids": [],
-            "propositions": [
-              {
-                "proposition_id": "access",
-                "predicate_factor_id": "borrow",
-                "arguments": [
-                  {
-                    "position": 0,
-                    "binding_identity": "borrower",
-                    "reference_kind": "factor",
-                    "reference_id": "speaker"
-                  },
-                  {
-                    "position": 1,
-                    "binding_identity": "modality",
-                    "reference_kind": "factor",
-                    "reference_id": "modality"
-                  },
-                  {
-                    "position": 2,
-                    "binding_identity": "resource",
-                    "reference_kind": "factor",
-                    "reference_id": "tools"
-                  },
-                  {
-                    "position": 3,
-                    "binding_identity": "location",
-                    "reference_kind": "factor",
-                    "reference_id": "place"
-                  },
-                  {
-                    "position": 4,
-                    "binding_identity": "condition",
-                    "reference_kind": "factor",
-                    "reference_id": "condition"
-                  }
-                ]
-              }
-            ]
-          }
+          "canonical_entities": ["workshop", "tools"],
+          "identity_observation": identityObservation(
+            ["I", "can", "borrow", "tools", "in the workshop"],
+            ["only on Saturdays"]
+          )
         }
       ]
     }
@@ -266,60 +118,12 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
             "assertion_id": 1
           },
           "canonical_entities": ["exhibit", "ceramics"],
-          "semantic_factor_graph": {
-            "schema_version": 2,
-            "source_kind": "evidence",
-            "factors": [
-              {
-                "factor_id": "exhibit",
-                "surface": "The exhibit",
-                "semantic_identity": "the exhibit"
-              },
-              {
-                "factor_id": "open",
-                "surface": "opened",
-                "semantic_identity": "open"
-              },
-              {
-                "factor_id": "year",
-                "surface": "2019",
-                "semantic_identity": "2019"
-              },
-              {
-                "factor_id": "aim",
-                "surface": "with the aim of helping visitors learn ceramics",
-                "semantic_identity": "with the aim of helping visitors learn ceramics"
-              }
-            ],
-            "variables": [],
-            "result_variable_ids": [],
-            "propositions": [
-              {
-                "proposition_id": "opening",
-                "predicate_factor_id": "open",
-                "arguments": [
-                  {
-                    "position": 0,
-                    "binding_identity": "theme",
-                    "reference_kind": "factor",
-                    "reference_id": "exhibit"
-                  },
-                  {
-                    "position": 1,
-                    "binding_identity": "time",
-                    "reference_kind": "factor",
-                    "reference_id": "year"
-                  },
-                  {
-                    "position": 2,
-                    "binding_identity": "accompanying_aim",
-                    "reference_kind": "factor",
-                    "reference_id": "aim"
-                  }
-                ]
-              }
-            ]
-          },
+          "identity_observation": identityObservation([
+            "The exhibit",
+            "opened",
+            "2019",
+            "with the aim of helping visitors learn ceramics"
+          ]),
           "temporal_projection": {
             "projection_schema_version": 1,
             "time_precision": "year",

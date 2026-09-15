@@ -11,6 +11,7 @@ import {
 import type { EventPublisher } from "@do-soul/alaya-core";
 import {
   normalizeSchemaGroundedSignal,
+  OfficialApiGardenCompileIncompleteError,
   type GardenCompileContext,
   type GardenComputeProvider
 } from "@do-soul/alaya-soul";
@@ -375,9 +376,18 @@ async function compilePostTurnExtractTask(
     turn_messages: buildPostTurnConversationMessages(payload),
     ...(sourceObservation === null ? {} : { source_observed_at: sourceObservation.observed_at })
   };
-  const signals = await provider.compile(buildPostTurnContent(payload), context);
+  let compiled: readonly CandidateMemorySignal[];
+  try {
+    compiled = await provider.compile(buildPostTurnContent(payload), context);
+  } catch (error) {
+    if (!(error instanceof OfficialApiGardenCompileIncompleteError) ||
+        error.signals.length === 0) {
+      throw error;
+    }
+    compiled = error.signals;
+  }
   return Object.freeze(
-    signals.map((signal) => {
+    compiled.map((signal) => {
       const parsed = CandidateMemorySignalSchema.parse(signal);
       if (parsed.workspace_id !== payload.workspace_id || parsed.run_id !== payload.run_id) {
         throw new Error("Post-turn extract candidate signal escaped the task workspace or run.");

@@ -107,6 +107,35 @@ Readonly<EvidenceFactFrameProposalNormalizer> = Object.freeze(
   new RuleBasedEvidenceFactFrameNormalizer()
 );
 
+export type FactFrameCertifierSupportDomain =
+  | "supported"
+  | "unsupported"
+  | "uninterpreted";
+
+/** Declared fact-frame domain, not a claim that remaining text is understood. */
+export function classifyFactFrameCertifierSupportDomain(
+  source: string
+): FactFrameCertifierSupportDomain {
+  const assertion = source.trim();
+  if (assertion.length === 0) return "uninterpreted";
+  if (RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER.propose(assertion) !== undefined) {
+    return "supported";
+  }
+  const tokens = tokenizeFactFrameSource(assertion);
+  const located = readInitialSubject(assertion, tokens);
+  if (located === undefined) return "unsupported";
+  if (hasUnquotedSourceDependentScope(assertion)) return "unsupported";
+  if (located === null) {
+    const first = tokens[0];
+    return first !== undefined && first.start === 0 && !SUBJECT_PRONOUNS.has(first.normalized)
+      ? "unsupported"
+      : "uninterpreted";
+  }
+  const relationIndex = located.nextIndex;
+  if (valueCrossesUnsupportedScope(assertion, tokens, relationIndex)) return "unsupported";
+  return "uninterpreted";
+}
+
 /** All formation paths retain the obligations recognized by the source grammar. */
 export function factFramePreservesSourceObligations(source: string, frame: Readonly<AssociativeFactFrame>): boolean {
   const assertion = source.trim();

@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  OfficialApiGardenCompileIncompleteError,
   OfficialApiGardenProvider,
   type GardenCompileContext
 } from "../../../garden/ingestion/compute-provider.js";
 import { resolveGardenSignalGrounding } from "../../../garden/triage/grounding/signal-source-grounding.js";
 import { buildOfficialApiSourceAssertions, buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
+import {
+  collectOfficialApiExtractionCoverage,
+  planOfficialApiExtractionWindow
+} from "../../../garden/ingestion/official-api/extraction-request.js";
 import { createSignal } from "../materialization/materialization-router-fixture.js";
 import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
@@ -238,7 +243,7 @@ describe("official API assertion catalog locator", () => {
     ]);
   });
 
-  it("bounds the catalog while retaining a fact beyond the former 2048-char head", async () => {
+  it("leaves a tail fact in residual instead of silently sampling it into the first window", async () => {
     const fillers = Array.from(
       { length: 80 },
       (_, index) => `I recorded ordinary placeholder detail number ${index}.`
@@ -246,6 +251,10 @@ describe("official API assertion catalog locator", () => {
     const tailFact = "I moved to Reykjavik at the very end.";
     const source = [...fillers, tailFact].join(" ");
     expect(source.indexOf(tailFact)).toBeGreaterThan(2_048);
+    const first = planOfficialApiExtractionWindow(source, []);
+    expect(first.catalog.coverage).toBe("budget_complete");
+    expect(first.catalog.window.some((assertion) => assertion.text.includes(tailFact))).toBe(false);
+    expect(first.catalog.residual.length).toBeGreaterThan(0);
 
     const batches: number[][] = [];
     const extract = vi.fn(async ({ userPrompt }) => {
@@ -254,34 +263,31 @@ describe("official API assertion catalog locator", () => {
       };
       expect(prompt.source_assertions.length).toBeLessThanOrEqual(8);
       batches.push(prompt.source_assertions.map(({ assertion_id }) => assertion_id));
-      const selected = prompt.source_assertions.find(({ text }) => text.includes(tailFact));
-      if (selected === undefined) return { rawJson: '{"signals":[]}' };
-      return {
-        rawJson: JSON.stringify({ signals: [withOpenSemanticFactorGraph({
-          ...signalJson(),
-          source_locator: assertionLocator(selected.assertion_id),
-          matched_text: tailFact
-        })] })
-      };
+      return { rawJson: '{"signals":[]}' };
     });
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
       extractor: { extract },
       generateSignalId: () => "signal-tail-catalog"
     });
-
-    const [signal] = await provider.compile(source, contextForUser(source));
-    expect(batches).toHaveLength(8);
-    expect(batches.flat()).toHaveLength(64);
-    expect(signal?.raw_payload.distilled_fact).toBe(tailFact);
+    const context = contextForUser(source);
+    expect(await provider.compile(source, context)).toEqual([]);
+    const coverage = collectOfficialApiExtractionCoverage(source, context.turn_messages);
+    expect(coverage.catalog.coverage).toBe("source_range_complete");
+    expect(coverage.catalog.residual).toHaveLength(0);
+    expect(coverage.catalog.window.some((assertion) => assertion.text.includes(tailFact))).toBe(true);
+    expect(batches.flat()).toEqual(
+      coverage.requests.flatMap((request) => request.source_assertions.map(({ assertion_id }) => assertion_id))
+    );
+    expect(batches.flat().length).toBeGreaterThan(64);
   });
 
-  it("fails closed for an out-of-range assertion_id", async () => {
+  it("does not admit an out-of-range assertion_id", async () => {
     const provider = providerFor({ source_locator: assertionLocator(99) });
     await expect(provider.compile(
       "I moved to Berlin.",
       contextForUser("I moved to Berlin.")
-    )).rejects.toMatchObject({ kind: "invalid_response" });
+    )).rejects.toBeInstanceOf(OfficialApiGardenCompileIncompleteError);
   });
 
   it("rebuilds the catalog when the persisted assertion matches live full_turn_content", () => {
@@ -373,7 +379,7 @@ function signalJson(): Record<string, unknown> {
 
 function assertionLocator(assertionId: number) {
   return {
-    contract_version: 3 as const,
+    contract_version: 4 as const,
     kind: "assertion_catalog" as const,
     assertion_id: assertionId
   };

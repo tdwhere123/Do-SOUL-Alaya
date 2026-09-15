@@ -36,7 +36,8 @@ export const EvidenceOsfSemanticCompletenessReceiptSchema = z.object({
   semantic_formation_capture_digest: Digest,
   predicate: Slot.nullable(), arguments: z.array(Slot).readonly(),
   arity: z.number().int().nonnegative().nullable(), receipt_digest: Digest,
-  upstream_semantic_formation: OpenSemanticFactorFormationCaptureSchema.optional()
+  upstream_semantic_formation: OpenSemanticFactorFormationCaptureSchema.optional(),
+  support_domain: z.enum(["supported", "unsupported", "uninterpreted"]).optional()
 }).strict().superRefine((receipt, context) => {
   if ((receipt.operator_id === EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID) !==
       (receipt.upstream_semantic_formation !== undefined)) {
@@ -46,6 +47,10 @@ export const EvidenceOsfSemanticCompletenessReceiptSchema = z.object({
       (receipt.status === "certified" && (receipt.predicate === null ||
         receipt.arity !== receipt.arguments.length))) {
     context.addIssue({ code: "custom", message: "invalid semantic completeness state" });
+  }
+  if (receipt.status === "certified" && receipt.support_domain !== undefined &&
+      receipt.support_domain !== "supported") {
+    context.addIssue({ code: "custom", message: "certified receipt requires a supported domain" });
   }
 }).readonly();
 

@@ -4,6 +4,7 @@ import {
   OpenSemanticFactorGraphProposalSchema,
   type AssociativeFactFrame,
   type CandidateMemorySignal,
+  type IdentityObservation,
   type OpenSemanticFactorGraphProposal
 } from "@do-soul/alaya-protocol";
 import { DISTILLED_FACT_MAX_CHARS } from "../materialization/materialization-router.js";
@@ -17,9 +18,9 @@ import {
   type OfficialApiSourceLocator
 } from "../triage/grounding/source-locator.js";
 import {
-  inspectOfficialApiSemanticFactorGraphProjection,
   type OfficialApiSemanticFactorGraphProjectionAudit
 } from "./official-api/semantic-factor-projection.js";
+import { receiveOfficialApiIdentityObservation } from "./official-api/identity-observation.js";
 import { inspectRawOfficialApiSignalElements } from "./official-api/raw-signal-envelope.js";
 import {
   projectOfficialApiObjectKind,
@@ -35,7 +36,7 @@ export {
   OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND
 } from "./official-api/object-kind-contract.js";
 // Raw cache identity and parser projection identity evolve independently.
-export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v11";
+export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v12";
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
 const CANONICAL_CONFIDENCE_PATTERN = /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/u;
@@ -217,6 +218,7 @@ export interface OfficialApiSignalDraft {
   readonly semantic_factor_graph?: OpenSemanticFactorGraphProposal;
   readonly semantic_factor_graph_projection?:
     OfficialApiSemanticFactorGraphProjectionAudit;
+  readonly identity_observation?: IdentityObservation;
   readonly kind_projection?: OfficialApiKindProjectionDraft;
 }
 
@@ -374,19 +376,22 @@ function inspectOfficialApiSignalEntry(
   if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
     return { draft: null, rejection: "signal_entry_invalid" };
   }
-  const semanticProjection = inspectOfficialApiSemanticFactorGraphProjection(
-    (candidate as Record<string, unknown>).semantic_factor_graph
-  );
+  const raw = candidate as Record<string, unknown>;
+  const identityReceive = receiveOfficialApiIdentityObservation({
+    identityObservation: raw.identity_observation,
+    semanticFactorGraph: raw.semantic_factor_graph,
+    sourceText: null
+  });
+  const semanticProjection = identityReceive.topology;
   if (options.requireSemanticFactorGraph === true && semanticProjection.graph === undefined) {
     return { draft: null, rejection: "semantic_factor_graph_required" };
   }
-  const temporalProjection = inspectOfficialApiTemporalProjection(
-    (candidate as Record<string, unknown>).temporal_projection
-  );
+  const temporalProjection = inspectOfficialApiTemporalProjection(raw.temporal_projection);
   const parsed = OpenOfficialApiSignalEntrySchema.safeParse({
-    ...(candidate as Record<string, unknown>),
+    ...raw,
     temporal_projection: temporalProjection.projection,
-    semantic_factor_graph: semanticProjection.graph
+    semantic_factor_graph: semanticProjection.graph,
+    identity_observation: undefined
   });
   if (!parsed.success) {
     return { draft: null, rejection: "signal_entry_invalid" };
@@ -398,9 +403,8 @@ function inspectOfficialApiSignalEntry(
       signal_kind: objectKindProjection.signalKind,
       object_kind: objectKindProjection.objectKind
     }), semanticProjection.audit, temporalProjection.audit, objectKindProjection.audit,
-    readOfficialApiKindProjectionDraft(
-      (candidate as Record<string, unknown>).kind_projection
-    )),
+    readOfficialApiKindProjectionDraft(raw.kind_projection),
+    identityReceive.observation),
     rejection: null
   };
 }
@@ -413,7 +417,8 @@ function buildOfficialApiSignalDraft(
   semanticFactorGraphProjection: OfficialApiSemanticFactorGraphProjectionAudit | undefined,
   temporalProjectionAudit: OfficialApiTemporalProjectionAudit,
   objectKindProjection: OfficialApiObjectKindProjection | undefined,
-  kindProjection: OfficialApiKindProjectionDraft | undefined
+  kindProjection: OfficialApiKindProjectionDraft | undefined,
+  identityObservation: IdentityObservation | null
 ): OfficialApiSignalDraft {
   const clampedMatchedText = record.matched_text.slice(0, MAX_OFFICIAL_API_MATCHED_TEXT_CHARS);
   // Absence delegates to the materialization rule distiller; matched_text is not a substitute.
@@ -444,6 +449,7 @@ function buildOfficialApiSignalDraft(
     ...(semanticFactorGraphProjection === undefined
       ? {}
       : { semantic_factor_graph_projection: semanticFactorGraphProjection }),
+    ...(identityObservation === null ? {} : { identity_observation: identityObservation }),
     ...(kindProjection === undefined ? {} : { kind_projection: kindProjection })
   });
 }

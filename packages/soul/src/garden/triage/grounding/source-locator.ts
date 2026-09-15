@@ -20,6 +20,7 @@ import {
   indexSourceAssertions,
   isDirectQuestionSourceText,
   OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+  type IndexedSourceAssertion,
   type OfficialApiSourceAssertion
 } from "./source-locator/assertion-catalog.js";
 
@@ -59,12 +60,18 @@ export function buildOfficialApiSourceCorpus(
     .join("\n");
 }
 
+export function indexOfficialApiSourceAssertions(
+  sourceText: string
+): readonly IndexedSourceAssertion[] {
+  const assertions = indexSourceAssertions(sourceText);
+  if (assertions.length === 1 && isAmbiguousBareStandaloneAssertion(assertions[0]!.text)) return [];
+  return assertions;
+}
+
 export function buildOfficialApiSourceAssertions(
   sourceText: string
 ): readonly OfficialApiSourceAssertion[] {
-  const assertions = indexSourceAssertions(sourceText);
-  if (assertions.length === 1 && isAmbiguousBareStandaloneAssertion(assertions[0]!.text)) return [];
-  return Object.freeze(assertions.map(({ assertion_id, text }) =>
+  return Object.freeze(indexOfficialApiSourceAssertions(sourceText).map(({ assertion_id, text }) =>
     Object.freeze({ assertion_id, text })
   ));
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { OpenSemanticFactorGraphProposal } from "@do-soul/alaya-protocol";
 import { materializeEvidenceFactFrameFormation } from
   "../../../memory/evidence-fact-frame-formation.js";
 import {
@@ -130,6 +131,137 @@ describe("evidence semantic completeness", () => {
       semanticFormation: { status: "unavailable", graph: null }
     });
   });
+
+  it("compiles the same canonical graph whether the model graph is missing, legal, or carries an unrelated illegal factor", () => {
+    const source = "I like tea.";
+    const frame = factFrame(source, [["subject", "I"], ["relation", "like"], ["value", "tea"]]);
+    const legal = legalLikeGraph();
+    const missing = certifyEvidenceSemanticCompleteness({
+      sourceText: source, factFrame: frame,
+      semanticFormation: materializeOpenSemanticFactorFormation({ source_kind: "evidence", source_text: source })
+    });
+    const present = certifyEvidenceSemanticCompleteness({
+      sourceText: source, factFrame: frame, semanticFormation: formation(source, legal)
+    });
+    const illegal = certifyEvidenceSemanticCompleteness({
+      sourceText: source, factFrame: frame,
+      semanticFormation: materializeOpenSemanticFactorFormation({
+        source_kind: "evidence", source_text: source,
+        proposal: {
+          schema_version: 1, producer_operator_id: GARDEN_PRODUCER, source_text: source,
+          graph: {
+            ...legal,
+            factors: [...legal.factors, {
+              factor_id: "ghost", surface: "tea", semantic_identity: "NOT-CANONICAL", source_occurrence: 0
+            }]
+          }
+        }
+      })
+    });
+    expect(missing.semanticFormation.graph).toEqual(present.semanticFormation.graph);
+    expect(illegal.semanticFormation.graph).toEqual(present.semanticFormation.graph);
+    expect(present.semanticFormation.producer_operator_id).toBe(FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID);
+    expect(illegal.receipt.upstream_semantic_formation?.status).not.toBe("formed");
+    expect(present.receipt.upstream_semantic_formation).not.toEqual(illegal.receipt.upstream_semantic_formation);
+    expect(present.receipt.support_domain).toBe("supported");
+  });
+
+  it("does not mint a certified graph from verbatim mentions when no frame formed", () => {
+    const source = "PostgreSQL and MySQL.";
+    const certified = certifyEvidenceSemanticCompleteness({
+      sourceText: source,
+      factFrame: unavailableFrame(source),
+      semanticFormation: materializeOpenSemanticFactorFormation({ source_kind: "evidence", source_text: source })
+    });
+    expect(certified.receipt.status).not.toBe("certified");
+    expect(certified.semanticFormation.graph).toBeNull();
+    expect(certified.receipt.support_domain).not.toBe("supported");
+  });
+
+  it("refuses a typed claim that drops not, only, unless, or promise markers", () => {
+    const cases = [
+      { source: "I am not a doctor.", slots: [["subject", "I"], ["relation", "am"], ["value", "a doctor"]] as const },
+      { source: "I like tea only on Sundays.", slots: [["subject", "I"], ["relation", "like"], ["value", "tea"]] as const },
+      { source: "I enter the lab unless I lose my badge.", slots: [["subject", "I"], ["relation", "enter"], ["value", "the lab"]] as const },
+      { source: "I promised to lend tools.", slots: [["subject", "I"], ["relation", "to lend"], ["value", "tools"]] as const }
+    ] as const;
+    for (const entry of cases) {
+      const certified = certifyEvidenceSemanticCompleteness({
+        sourceText: entry.source,
+        factFrame: factFrame(entry.source, entry.slots),
+        semanticFormation: materializeOpenSemanticFactorFormation({
+          source_kind: "evidence", source_text: entry.source
+        })
+      });
+      expect(certified.receipt.status, entry.source).not.toBe("certified");
+      expect(certified.semanticFormation.graph, entry.source).toBeNull();
+    }
+  });
+
+  it("does not force a product into the promiser role", () => {
+    const source = "I promised to lend tools.";
+    const certified = certifyEvidenceSemanticCompleteness({
+      sourceText: source,
+      factFrame: factFrame(source, [["subject", "I"], ["relation", "promised"], ["value", "to lend tools"]]),
+      semanticFormation: formation(source, {
+        schema_version: 2, source_kind: "evidence",
+        factors: [
+          factor("promise", "promised", "promise"),
+          factor("product", "tools", "tools")
+        ],
+        variables: [], result_variable_ids: [],
+        propositions: [{
+          proposition_id: "p", predicate_factor_id: "promise",
+          arguments: [{ position: 0, binding_identity: "promiser", reference_kind: "factor", reference_id: "product" }]
+        }]
+      })
+    });
+    expect(certified.receipt.status).toBe("certified");
+    expect(certified.semanticFormation.graph?.factors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ surface: "I", semantic_identity: "i" }),
+      expect.objectContaining({ surface: "promised" }),
+      expect.objectContaining({ surface: "to lend tools" })
+    ]));
+    expect(certified.semanticFormation.graph?.propositions[0]?.arguments
+      .some((argument) => argument.binding_identity === "promiser" && argument.reference_id === "product")).toBe(false);
+  });
+
+  it("does not treat a matching quote with the wrong lemma as semantic equality", () => {
+    const source = "I use MySQL.";
+    const certified = certifyEvidenceSemanticCompleteness({
+      sourceText: source,
+      factFrame: factFrame(source, [["subject", "I"], ["relation", "use"], ["value", "MySQL"]]),
+      semanticFormation: formation(source, {
+        schema_version: 2, source_kind: "evidence",
+        factors: [
+          factor("predicate", "use", "use"),
+          factor("product", "MySQL", "postgresql")
+        ],
+        variables: [], result_variable_ids: [],
+        propositions: [{
+          proposition_id: "p", predicate_factor_id: "predicate",
+          arguments: [{ position: 0, binding_identity: "object", reference_kind: "factor", reference_id: "product" }]
+        }]
+      })
+    });
+    expect(certified.receipt.status).toBe("certified");
+    expect(certified.semanticFormation.graph?.factors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ surface: "MySQL", semantic_identity: "mysql" })
+    ]));
+    expect(certified.semanticFormation.graph?.factors.some((item) => item.semantic_identity === "postgresql")).toBe(false);
+  });
+
+  it("records an out-of-domain sample as unsupported instead of certifying a single proposition", () => {
+    const source = "Alice Smith likes tea.";
+    const certified = certifyEvidenceSemanticCompleteness({
+      sourceText: source,
+      factFrame: unavailableFrame(source),
+      semanticFormation: materializeOpenSemanticFactorFormation({ source_kind: "evidence", source_text: source })
+    });
+    expect(certified.receipt.status).not.toBe("certified");
+    expect(certified.receipt.support_domain).toBe("unsupported");
+    expect(certified.semanticFormation.graph).toBeNull();
+  });
 });
 
 function unavailableFrame(source: string) {
@@ -158,7 +290,30 @@ function factFrame(
   }).capture;
 }
 
-function formation(source: string, graph: ReturnType<typeof graduationGraph>) {
+function legalLikeGraph() {
+  return {
+    schema_version: 2 as const,
+    source_kind: "evidence" as const,
+    factors: [
+      factor("predicate", "like", "like"),
+      factor("object", "tea", "tea")
+    ],
+    variables: [],
+    result_variable_ids: [],
+    propositions: [{
+      proposition_id: "p",
+      predicate_factor_id: "predicate",
+      arguments: [{
+        position: 0,
+        binding_identity: "object",
+        reference_kind: "factor" as const,
+        reference_id: "object"
+      }]
+    }]
+  };
+}
+
+function formation(source: string, graph: OpenSemanticFactorGraphProposal) {
   return materializeOpenSemanticFactorFormation({
     source_kind: "evidence",
     source_text: source,

@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
 import {
+  IDENTITY_OBSERVATION_PRODUCER,
   OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION
 } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "../../ingestion/official-api/system-prompt.js";
 import { officialApiExtractionRequestTemplatePreimage } from
   "../../ingestion/official-api/extraction-request.js";
-import { GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID } from
-  "../../triage/grounding/semantic-factors/formation-eligibility.js";
 import {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,
@@ -22,7 +21,7 @@ export const SOURCE_BOUND_F3_CAPABILITIES = [
 export type SourceBoundF3Capability = (typeof SOURCE_BOUND_F3_CAPABILITIES)[number];
 
 export const SELECTED_SOURCE_BOUND_F3_CAPABILITY = "identities_only" as const;
-export const SOURCE_BOUND_F3_PROMPT_ASKS = "identities_and_topology" as const;
+export const SOURCE_BOUND_F3_PROMPT_ASKS = SELECTED_SOURCE_BOUND_F3_CAPABILITY;
 
 export const SOURCE_BOUND_F3_FORBIDDEN_WRITES = [
   "RelationAssertion",
@@ -45,12 +44,12 @@ export const SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256 = sha256Utf8(
 );
 
 export interface SourceBoundF3Seal {
-  readonly schema_version: 1;
+  readonly schema_version: 2;
   readonly selected_capability: typeof SELECTED_SOURCE_BOUND_F3_CAPABILITY;
   readonly membership_capability: typeof SELECTED_SOURCE_BOUND_F3_CAPABILITY;
   readonly prompt_asks: typeof SOURCE_BOUND_F3_PROMPT_ASKS;
   readonly graph_schema_version: typeof OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION;
-  readonly evidence_operator_id: typeof GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID;
+  readonly evidence_operator_id: typeof IDENTITY_OBSERVATION_PRODUCER;
   readonly query_operator_id: typeof OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID;
   readonly evidence_prompt_sha256: string;
   readonly query_prompt_sha256: string;
@@ -61,12 +60,12 @@ export interface SourceBoundF3Seal {
 
 export function sourceBoundF3Seal(): SourceBoundF3Seal {
   return {
-    schema_version: 1,
+    schema_version: 2,
     selected_capability: SELECTED_SOURCE_BOUND_F3_CAPABILITY,
     membership_capability: SELECTED_SOURCE_BOUND_F3_CAPABILITY,
     prompt_asks: SOURCE_BOUND_F3_PROMPT_ASKS,
     graph_schema_version: OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION,
-    evidence_operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
+    evidence_operator_id: IDENTITY_OBSERVATION_PRODUCER,
     query_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
     evidence_prompt_sha256: SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256,
     query_prompt_sha256: SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,

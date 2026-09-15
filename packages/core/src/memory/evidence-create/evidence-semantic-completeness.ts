@@ -9,7 +9,10 @@ import {
   type OpenSemanticFactorFormationCapture,
   type EvidenceOsfSemanticCompletenessReceipt
 } from "@do-soul/alaya-protocol";
-import { compileSourceFrameSemanticGraph } from "@do-soul/alaya-protocol/node/source-frame";
+import {
+  classifyFactFrameCertifierSupportDomain,
+  compileSourceFrameSemanticGraph
+} from "@do-soul/alaya-protocol/node/source-frame";
 import { materializeOpenSemanticFactorFormation } from "../../semantic/open-semantic-factor-formation.js";
 
 export { EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID } from "@do-soul/alaya-protocol";
@@ -29,17 +32,25 @@ export function certifyEvidenceSemanticCompleteness(input: CompletenessInput): R
   semanticFormation: Readonly<OpenSemanticFactorFormationCapture>;
   receipt: EvidenceOsfSemanticCompletenessReceipt;
 }> {
+  const supportDomain = classifyFactFrameCertifierSupportDomain(input.sourceText);
   const frame = input.factFrame.fact_frame;
   if (input.factFrame.status !== "formed" || frame === null) {
     const upstream = input.semanticFormation;
     const formation = upstream.status === "formed"
       ? materializeOpenSemanticFactorFormation({ source_kind: "evidence", source_text: input.sourceText })
       : upstream;
-    return result(input, formation, "not_applicable", "upstream_not_formed", null);
+    return result(input, formation, "not_applicable", "upstream_not_formed", null, supportDomain);
   }
   const graph = compileSourceFrameSemanticGraph(input.sourceText, frame);
   if (graph === null) {
-    return result(input, rejectedFormation(input.sourceText), "rejected", "invalid_fact_frame_obligation", null);
+    return result(
+      input,
+      rejectedFormation(input.sourceText),
+      "rejected",
+      "invalid_fact_frame_obligation",
+      null,
+      supportDomain === "supported" ? "uninterpreted" : supportDomain
+    );
   }
   const obligation = groundEvidenceFactFrameObligation(input.sourceText, frame);
   const formation = materializeOpenSemanticFactorFormation({
@@ -53,9 +64,9 @@ export function certifyEvidenceSemanticCompleteness(input: CompletenessInput): R
     }
   });
   if (formation.status !== "formed") {
-    return result(input, rejectedFormation(input.sourceText), "rejected", "semantic_graph_incomplete", obligation);
+    return result(input, rejectedFormation(input.sourceText), "rejected", "semantic_graph_incomplete", obligation, supportDomain);
   }
-  return result(input, formation, "certified", "complete", obligation);
+  return result(input, formation, "certified", "complete", obligation, "supported");
 }
 
 function rejectedFormation(source: string): OpenSemanticFactorFormationCapture {
@@ -69,7 +80,8 @@ function result(
   formation: OpenSemanticFactorFormationCapture,
   status: EvidenceOsfSemanticCompletenessReceipt["status"],
   reason: EvidenceOsfSemanticCompletenessReceipt["reason_code"],
-  obligation: ReturnType<typeof groundEvidenceFactFrameObligation>
+  obligation: ReturnType<typeof groundEvidenceFactFrameObligation>,
+  supportDomain: NonNullable<EvidenceOsfSemanticCompletenessReceipt["support_domain"]>
 ) {
   const body = {
     schema_version: 1 as const,
@@ -81,7 +93,8 @@ function result(
     predicate: obligation?.predicate ?? null,
     arguments: obligation?.arguments ?? [],
     arity: obligation?.arguments.length ?? null,
-    upstream_semantic_formation: input.semanticFormation
+    upstream_semantic_formation: input.semanticFormation,
+    support_domain: supportDomain
   };
   const receipt = EvidenceOsfSemanticCompletenessReceiptSchema.parse({
     ...body,

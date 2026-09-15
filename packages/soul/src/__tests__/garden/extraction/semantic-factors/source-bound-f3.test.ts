@@ -9,10 +9,10 @@ import { traceSourceBoundF3Proposal } from "../../../../garden/extraction/semant
 const SOURCE = "I learned to cook pasta.";
 
 const LOCKED_SOURCE_BOUND_F3_SEAL = {
-  evidence_prompt_sha256: "cdb968269d0585f9144509c9ae6a237ec7caeedb3d176fcea0abbcc29be56da8",
+  evidence_prompt_sha256: "8789e33fec393cd3729a2f66ebfa224418060de4075dab4e493e68be36a06533",
   query_prompt_sha256: "747e5bac75b445dc0b6ec2a1441684ef103bf9903270f8153b4846e67c4da66d",
   evidence_request_template_sha256:
-    "7bf6b3c9f0d0c758fd16a475a529d21b57c7f243c986299fbe7d07059c432306",
+    "29e7757ea3ff0ac1f4c3211df9932f6e1911f5880067f26b066dde65e4220bc9",
   query_request_template_sha256:
     "649ea5aca1bcfc427433e708afe5428d44f070ab315deed1a9f614177de7db00"
 } as const;
@@ -22,7 +22,8 @@ describe("source-bound F3 seal", () => {
     const seal = sourceBoundF3Seal();
     expect(seal.selected_capability).toBe("identities_only");
     expect(seal.membership_capability).toBe("identities_only");
-    expect(seal.prompt_asks).toBe("identities_and_topology");
+    expect(seal.prompt_asks).toBe("identities_only");
+    expect(seal.schema_version).toBe(2);
     expect(SELECTED_SOURCE_BOUND_F3_CAPABILITY).toBe("identities_only");
     expect(
       seal.evidence_prompt_sha256,
@@ -41,7 +42,7 @@ describe("source-bound F3 seal", () => {
       "source-bound F3 query request template changed; bump this lock after reviewing the extraction contract"
     ).toBe(LOCKED_SOURCE_BOUND_F3_SEAL.query_request_template_sha256);
     expect(seal.evidence_operator_id)
-      .toBe("garden_source_bound_open_semantic_factor_v3");
+      .toBe("official-api-identity-observation-v1");
     expect(seal.query_operator_id).toBe("open_semantic_factor_query_compiler_v9");
     expect(seal.forbidden_writes).toContain("RelationAssertion");
     expect(seal.forbidden_writes).toContain("PathRelation");
@@ -104,6 +105,63 @@ describe("source-bound F3 tracer", () => {
     expect(forbidden.rejected).toContain("PathRelation");
     expect(forbidden.membership_identities).toEqual([]);
   });
+
+  it("treats overlapping surface occurrence 1 as invented", () => {
+    const overlapping = traceSourceBoundF3Proposal({
+      sourceText: "aaa",
+      capability: "identities_only",
+      proposal: identitiesProposal([
+        { factor_id: "f0", surface: "aa", semantic_identity: "aa", source_occurrence: 1 }
+      ])
+    });
+    expect(overlapping.rejected).toContain("invented_surface:aa");
+    expect(overlapping.membership_identities).toEqual([]);
+
+    const first = traceSourceBoundF3Proposal({
+      sourceText: "aaa",
+      capability: "identities_only",
+      proposal: identitiesProposal([
+        { factor_id: "f0", surface: "aa", semantic_identity: "aa", source_occurrence: 0 }
+      ])
+    });
+    expect(first.membership_identities).toEqual(["aa"]);
+    expect(first.invented_surface_rate).toBe(0);
+  });
+
+  it("accepts ordinary repeated words at later non-overlapping occurrences", () => {
+    const source = "I cook and I cook pasta.";
+    const second = traceSourceBoundF3Proposal({
+      sourceText: source,
+      capability: "identities_only",
+      proposal: identitiesProposal([
+        { factor_id: "f0", surface: "cook", semantic_identity: "cook", source_occurrence: 1 }
+      ])
+    });
+    expect(second.membership_identities).toEqual(["cook"]);
+    expect(second.invented_surface_rate).toBe(0);
+
+    const missing = traceSourceBoundF3Proposal({
+      sourceText: source,
+      capability: "identities_only",
+      proposal: identitiesProposal([
+        { factor_id: "f0", surface: "cook", semantic_identity: "cook", source_occurrence: 2 }
+      ])
+    });
+    expect(missing.rejected).toContain("invented_surface:cook");
+    expect(missing.membership_identities).toEqual([]);
+  });
+
+  it("accepts a CJK surface at its UTF-16 occurrence", () => {
+    const cjk = traceSourceBoundF3Proposal({
+      sourceText: "我学了烹饪。",
+      capability: "identities_only",
+      proposal: identitiesProposal([
+        { factor_id: "f0", surface: "烹饪", semantic_identity: "cook", source_occurrence: 0 }
+      ])
+    });
+    expect(cjk.membership_identities).toEqual(["cook"]);
+    expect(cjk.invented_surface_rate).toBe(0);
+  });
 });
 
 function groundedProposal(): OpenSemanticFactorGraphProposal {
@@ -132,6 +190,19 @@ function groundedProposal(): OpenSemanticFactorGraphProposal {
 function identitiesOnlyProposal(): OpenSemanticFactorGraphProposal {
   return {
     ...groundedProposal(),
+    propositions: []
+  };
+}
+
+function identitiesProposal(
+  factors: OpenSemanticFactorGraphProposal["factors"]
+): OpenSemanticFactorGraphProposal {
+  return {
+    schema_version: 2,
+    source_kind: "evidence",
+    factors,
+    variables: [],
+    result_variable_ids: [],
     propositions: []
   };
 }

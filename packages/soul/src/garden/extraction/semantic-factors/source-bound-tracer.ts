@@ -1,4 +1,5 @@
 import {
+  findSourceTextOccurrence,
   groundOpenSemanticFactorGraph,
   type OpenSemanticFactorGraphProposal
 } from "@do-soul/alaya-protocol";
@@ -44,7 +45,11 @@ function traceProposal(
   proposal: OpenSemanticFactorGraphProposal
 ): SourceBoundF3Trace {
   const invented = proposal.factors.filter((factor) =>
-    !surfaceOccurs(sourceText, factor.surface, factor.source_occurrence ?? 0)
+    findSourceTextOccurrence(
+      sourceText,
+      factor.surface,
+      factor.source_occurrence ?? 0
+    ) === null
   );
   const accepted = proposal.factors
     .filter((factor) => !invented.includes(factor))
@@ -96,16 +101,6 @@ function finished(
     used_topology: usedTopology,
     physical_calls: 0
   };
-}
-
-function surfaceOccurs(sourceText: string, surface: string, occurrence: number): boolean {
-  let from = 0;
-  for (let index = 0; index <= occurrence; index += 1) {
-    const found = sourceText.indexOf(surface, from);
-    if (found < 0) return false;
-    from = found + 1;
-  }
-  return true;
 }
 
 function forbiddenWrites(value: unknown): readonly string[] {

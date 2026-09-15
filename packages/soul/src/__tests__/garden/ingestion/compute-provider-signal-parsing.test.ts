@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   GardenProviderError,
+  OfficialApiGardenCompileIncompleteError,
   OfficialApiGardenProvider,
   parseOfficialApiSignals
 } from "../../../garden/ingestion/compute-provider.js";
@@ -151,7 +152,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
 
     expect(JSON.parse(vi.mocked(extractor.extract).mock.calls[0]![0].userPrompt)).toEqual({
       schema_version: 2,
-      source_locator_contract_version: 3,
+      source_locator_contract_version: 4,
       batch_contract_version: 1,
       source_corpus_identity: expect.stringMatching(/^[a-f0-9]{64}$/u),
       batch_index: 0,
@@ -260,7 +261,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
         confidence: 0.8,
         matched_text: "The build is green.",
         source_locator: {
-          contract_version: 3,
+          contract_version: 4,
           kind: "assertion_catalog",
           assertion_id: 1
         }
@@ -296,7 +297,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
           confidence: 0.8,
           matched_text: "The build is green.",
           source_locator: {
-            contract_version: 3,
+            contract_version: 4,
             kind: "assertion_catalog",
             assertion_id: 1
           },
@@ -341,29 +342,97 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
     });
   });
 
-  it("rejects a locator outside the current bounded assertion batch", async () => {
-    let requestIndex = 0;
+  it("keeps an in-batch locator beside an external-batch sibling", async () => {
+    const turn = "I own a blue bicycle. I prefer coffee in the morning.";
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
       extractor: {
         extract: vi.fn(async () => ({
-          rawJson: requestIndex++ === 0
-            ? '{"signals":[]}'
-            : JSON.stringify({ signals: [openSignal({
-              matched_text: "I recorded durable detail number 1.",
-              confidence: 0.8
-            })] })
+          rawJson: JSON.stringify({
+            signals: [
+              openSignal({
+                matched_text: "I own a blue bicycle.",
+                confidence: 0.8
+              }, 1),
+              openSignal({
+                matched_text: "I prefer coffee in the morning.",
+                confidence: 0.8
+              }, 9)
+            ]
+          })
         }))
-      }
+      },
+      generateSignalId: () => "signal-partial"
     });
+
+    await expect(provider.compile(turn, createContext())).rejects.toMatchObject({
+      name: "OfficialApiGardenCompileIncompleteError",
+      signals: [expect.objectContaining({
+        raw_payload: expect.objectContaining({
+          matched_text: expect.stringContaining("blue bicycle")
+        })
+      })],
+      receipt: expect.objectContaining({
+        status: "partial",
+        producer: "official-api-garden-compile-v1",
+        drafts: [expect.objectContaining({
+          matched_text: expect.stringContaining("blue bicycle")
+        })],
+        rejections: [expect.objectContaining({ reason: "locator_outside_batch", assertion_id: 9 })]
+      })
+    } satisfies Partial<OfficialApiGardenCompileIncompleteError>);
+  });
+
+  it.each([
+    ["transport_failure", "Signal extractor request failed."],
+    ["timeout", "Signal extractor request timed out after 321ms."]
+  ] as const)("keeps earlier-batch drafts when a later batch fails with %s", async (kind, message) => {
     const source = Array.from(
       { length: 9 },
       (_, index) => `I recorded durable detail number ${index + 1}.`
     ).join(" ");
+    const extractor = {
+      extract: vi.fn(async (input: { readonly userPrompt: string }) => {
+        const request = JSON.parse(input.userPrompt) as { readonly batch_index: number };
+        if (request.batch_index === 0) {
+          return {
+            rawJson: JSON.stringify({
+              signals: [openSignal({
+                matched_text: "I recorded durable detail number 1.",
+                confidence: 0.8
+              }, 1)]
+            })
+          };
+        }
+        throw new SignalExtractorError(kind, message);
+      })
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor,
+      generateSignalId: () => "signal-batch-0"
+    });
 
     await expect(provider.compile(source, createContext())).rejects.toMatchObject({
-      kind: "invalid_response"
-    });
+      name: "OfficialApiGardenCompileIncompleteError",
+      signals: [expect.objectContaining({
+        raw_payload: expect.objectContaining({
+          matched_text: expect.stringContaining("number 1")
+        })
+      })],
+      receipt: expect.objectContaining({
+        status: "partial",
+        producer: "official-api-garden-compile-v1",
+        drafts: [expect.objectContaining({
+          matched_text: expect.stringContaining("number 1")
+        })],
+        pending_batches: [expect.objectContaining({
+          batch_index: 1,
+          assertion_ids: expect.arrayContaining([expect.any(Number)])
+        })]
+      })
+    } satisfies Partial<OfficialApiGardenCompileIncompleteError>);
+    expect(extractor.extract).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a valid signal beside an invalid sibling", () => {

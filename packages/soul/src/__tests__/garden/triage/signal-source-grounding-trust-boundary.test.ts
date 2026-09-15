@@ -39,7 +39,7 @@ describe("resolveGardenSignalGrounding product trust boundary", () => {
       raw_payload: {
         full_turn_content: `User: ${assertion}\nAssistant: Congratulations.`,
         source_locator: {
-          contract_version: 3,
+          contract_version: 4,
           kind: "assertion_catalog",
           assertion_id: 1
         },

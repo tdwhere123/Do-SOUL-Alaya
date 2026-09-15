@@ -3,8 +3,11 @@ import { parseOfficialApiSignals } from "@do-soul/alaya-soul";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
 import {
+  catalogEligibilityOfAssertionCount,
   classifyExtractionEnvelope,
   extractionEnvelopeCountsTowardCoverage,
+  EXTRACTION_SEMANTIC_PRESERVATION_FROM_REQUEST,
+  type ExtractionCatalogEligibility,
   type ExtractionRequestCompletion,
   type ExtractionEmptyClassification
 } from "./empty-classification.js";
@@ -20,6 +23,8 @@ export type ExtractionRawEnvelopeInspection = Readonly<{
   readonly rawJsonSha256: string;
   readonly rawSignalCount: number;
   readonly emptyClassification?: ExtractionEmptyClassification;
+  readonly catalogEligibility?: ExtractionCatalogEligibility;
+  readonly semanticPreservation?: typeof EXTRACTION_SEMANTIC_PRESERVATION_FROM_REQUEST;
 }>;
 
 export type ExtractionEnvelopeClassificationContext = Readonly<{
@@ -107,7 +112,11 @@ function classifiedEnvelope(
       sourceAssertionCount: classificationContext.sourceAssertionCount,
       planMembership: classificationContext.planMembership,
       requestCompletion: classificationContext.requestCompletion
-    })
+    }),
+    catalogEligibility: catalogEligibilityOfAssertionCount(
+      classificationContext.sourceAssertionCount
+    ),
+    semanticPreservation: EXTRACTION_SEMANTIC_PRESERVATION_FROM_REQUEST
   };
 }
 
