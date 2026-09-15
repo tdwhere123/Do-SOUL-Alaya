@@ -2,8 +2,8 @@ import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import {
   collectOfficialApiExtractionCoverage,
-  OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE,
-  officialApiExtractionResponseSchemaPreimage,
+  officialApiExtractionResponseSchema,
+  parseOfficialApiExtractionRequest,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import { ExtractionCacheInvariantError } from
@@ -19,6 +19,8 @@ export const EXTRACTION_CACHE_KEY_GOLDEN_VECTOR = Object.freeze({
   extractionRequest: '{"schema_version":2,"source_locator_contract_version":4,"batch_contract_version":1,"source_corpus_identity":"5cfbac30da538a52d242938adeb5c71ff1b3dc07bc4ce8330878da4318a01a2b","batch_index":0,"batch_count":1,"source_assertions":[{"assertion_id":1,"text":"User: I enjoy coffee."}]}'
 });
 
+const GENERATION_SCHEMA_CACHE_MATERIAL = generationSchemaJson();
+
 export function computeCacheKey(
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
@@ -30,7 +32,7 @@ export function computeCacheKey(
     requestProfile,
     systemPrompt,
     extractionRequest,
-    officialApiExtractionResponseSchemaPreimage(extractionRequest)
+    generationSchemaCacheMaterial(extractionRequest)
   );
 }
 
@@ -45,8 +47,29 @@ export function computeOfficialApiRequestCacheKey(
     requestProfile,
     systemPrompt,
     extractionRequest,
-    OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE
+    GENERATION_SCHEMA_CACHE_MATERIAL
   );
+}
+
+function generationSchemaCacheMaterial(extractionRequest: string): string {
+  try {
+    parseOfficialApiExtractionRequest(JSON.parse(extractionRequest));
+  } catch {
+    return "null";
+  }
+  return GENERATION_SCHEMA_CACHE_MATERIAL;
+}
+
+function generationSchemaJson(): string {
+  const schema = officialApiExtractionResponseSchema(
+    EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.extractionRequest
+  );
+  if (schema === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "golden extraction request must bind the generation schema"
+    );
+  }
+  return JSON.stringify(schema);
 }
 
 export function computeExtractionTurnCacheKey(
