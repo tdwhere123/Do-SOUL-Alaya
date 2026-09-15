@@ -14,6 +14,7 @@ import {
   type ObserverReaders,
   type SourceRootObserverRow
 } from "../../../../recall/conditional-field/observers/observe.js";
+import { compileConditionalFieldQuery } from "../../../../recall/conditional-field/query/compile-query.js";
 import { compileQuerySourceSketch } from "../../../../recall/conditional-field/query/query-source-sketch.js";
 import {
   INTERPRETATION_CLOCK,
@@ -64,8 +65,23 @@ describe("source discovery canary", () => {
     });
     expect(polarity.status).toBe("partial");
     expect(polarity.holes.some((hole) => hole.hole_id.startsWith("hole.query.alternative"))).toBe(true);
+    expect(polarity.interpretation_proposal?.holes?.some((hole) => hole.hole_id.startsWith("hole.query.alternative"))).toBe(true);
     expect(measurePage(polarity, planted.proposalReaders, 1).firstId).toBeUndefined();
     expect(measurePage(polarity, planted.proposalReaders, 1).reasons).toEqual([]);
+    expect(measurePage(polarity, planted.textReaders, 1).firstId).toBeUndefined();
+    const compiled = compileConditionalFieldQuery({
+      source: "ordinary",
+      text: `${canary.original_query} unless it was withdrawn`,
+      interpretation_clock: INTERPRETATION_CLOCK,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      view: sourceOnlyView(),
+      interpretation_proposal: polarity.interpretation_proposal
+    });
+    expect(compiled.holes.some((hole) => hole.hole_id.startsWith("hole.query.alternative"))).toBe(true);
+    expect(measurePage(compiled, planted.proposalReaders, 1).firstId).toBeUndefined();
+    expect(measurePage(compiled, planted.proposalReaders, 1).reasons).toEqual([]);
+    expect(measurePage(compiled, planted.textReaders, 1).firstId).toBeUndefined();
   });
 });
 

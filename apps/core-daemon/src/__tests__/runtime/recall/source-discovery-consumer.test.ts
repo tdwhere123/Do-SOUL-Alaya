@@ -44,7 +44,7 @@ afterEach(() => {
 describe("source discovery consumer surfaces", () => {
   it("expands an omitted MCP payload into the exact authorized source slice through the worker", async () => {
     const canary = SOURCE_DISCOVERY_CANARY[1]!;
-    const body = `${canary.intended} ${"x".repeat(3000)}`;
+    const body = `${canary.intended} ${"x".repeat(8000)}`;
     const directory = await mkdtemp(join(tmpdir(), "alaya-source-discovery-"));
     const filename = join(directory, "alaya.db");
     const slice = await openSourceSlice(() => {}, filename);
@@ -95,52 +95,27 @@ describe("source discovery consumer surfaces", () => {
       expect(row?.target?.kind).toBe("source_evidence");
       if (row?.target?.kind !== "source_evidence") throw new Error("source target missing");
       const span = row.target.span;
-      if (row.content_preview === "[payload omitted]") {
-        const start = span?.content_end ?? 0;
-        const expanded = await handler({
-          ...request,
-          continuation: first.index!.continuation!,
-          payload_continuation: {
-            schema_version: 1,
-            purpose: "payload_expansion",
-            target: sourceEvidenceRootTarget(row.target),
-            start_offset: start,
-            byte_budget: 4096
-          }
-        }, context);
-        expect(expanded.page_purpose).toBe("payload");
-        const preview = expanded.results[0]!.content_preview;
-        expect(preview).toBe(body.slice(start, start + preview.length));
-        expect(expanded.results[0]?.target).toMatchObject({
-          root_id: record.record_id,
-          span: { content_start: start, content_end: start + preview.length }
-        });
-      } else {
-        const start = span?.content_start ?? 0;
-        const end = span?.content_end ?? row.content_preview.length;
-        expect(row.content_preview).toBe(body.slice(start, end));
-        expect(span).toMatchObject({ content_start: start, content_end: end });
-        if (span?.content_complete === false) {
-          const expanded = await handler({
-            ...request,
-            continuation: first.index!.continuation!,
-            payload_continuation: {
-              schema_version: 1,
-              purpose: "payload_expansion",
-              target: sourceEvidenceRootTarget(row.target),
-              start_offset: end,
-              byte_budget: 4096
-            }
-          }, context);
-          expect(expanded.page_purpose).toBe("payload");
-          const preview = expanded.results[0]!.content_preview;
-          expect(preview).toBe(body.slice(end, end + preview.length));
-          expect(expanded.results[0]?.target).toMatchObject({
-            root_id: record.record_id,
-            span: { content_start: end, content_end: end + preview.length }
-          });
+      expect(row.content_preview === "[payload omitted]" || span?.content_complete === false).toBe(true);
+      const start = span?.content_end ?? 0;
+      const expanded = await handler({
+        ...request,
+        continuation: first.index!.continuation!,
+        payload_continuation: {
+          schema_version: 1,
+          purpose: "payload_expansion",
+          target: sourceEvidenceRootTarget(row.target),
+          start_offset: start,
+          byte_budget: 4096
         }
-      }
+      }, context);
+      expect(expanded.page_purpose).toBe("payload");
+      const preview = expanded.results[0]!.content_preview;
+      expect(preview).not.toBe("[payload omitted]");
+      expect(preview).toBe(body.slice(start, start + preview.length));
+      expect(expanded.results[0]?.target).toMatchObject({
+        root_id: record.record_id,
+        span: { content_start: start, content_end: start + preview.length }
+      });
     } finally {
       await client.close();
       slice.database.close();

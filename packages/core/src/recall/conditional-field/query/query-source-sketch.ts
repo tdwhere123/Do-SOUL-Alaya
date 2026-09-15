@@ -86,12 +86,14 @@ function sourceSketchProposal(sketch: QuerySourceSketch): QueryInterpretationPro
     ...relationConditions(sketch)
   ];
   if (conditions.length === 0) return undefined;
+  const holes = alternativeHoles(sketch.unresolved_alternatives ?? []);
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     original_query_digest: digestOriginalQuery(sketch.original_query),
     producer_id: QUERY_PROPOSAL_CORE_PRODUCER_ID,
     producer_version: "1",
-    conditions
+    conditions,
+    ...(holes.length === 0 ? {} : { holes })
   };
 }
 

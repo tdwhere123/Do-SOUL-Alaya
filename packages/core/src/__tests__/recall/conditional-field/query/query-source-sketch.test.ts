@@ -34,6 +34,7 @@ describe("query source sketch adapter", () => {
     expect(interpretation.program.kind).toBe("epsilon");
     expect(interpretation.holes.some((hole) => hole.hole_id === UNINTERPRETED_HOLE_ID)).toBe(true);
     expect(interpretation.holes.some((hole) => hole.hole_id === "hole.query.alternative.1")).toBe(true);
+    expect(interpretation.interpretation_proposal?.holes?.some((hole) => hole.hole_id === "hole.query.alternative.1")).toBe(true);
     const adopted = decodeSourceProposalPredicate(
       interpretation.interpretation_proposal?.conditions?.[0]?.predicate_name
     );

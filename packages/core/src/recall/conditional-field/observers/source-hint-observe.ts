@@ -143,10 +143,11 @@ function takeTextHintPage(
   const observations: TypedObservation[] = [];
   const rows: SourceRootObserverRow[] = [];
   let committed = page.committedThrough ?? afterCursor;
+  const scopeUnsupported = proposalScopeUnsupported(input.query);
   for (const nativeRow of page.rows) {
     committed = nativeRow.root_id;
     if (!sourceRootEligible(input, nativeRow)) continue;
-    if (!sourceTextContainsPhrases(nativeRow.content, phrases)) continue;
+    if (scopeUnsupported || !sourceTextContainsPhrases(nativeRow.content, phrases)) continue;
     const observation = observationFromRoot(input, nativeRow);
     if (observation === null) continue;
     observations.push(observation);
@@ -176,7 +177,7 @@ function hydrateHintTarget(
   readonly bytes: number;
 }> {
   const hydrate = input.readers.sourceRoot;
-  if (hydrate === undefined) return { workUnits: 0, bytes: 0 };
+  if (hydrate === undefined) return { workUnits: 1, bytes: 0 };
   const page = hydrate({
     workspaceId: input.workspace_id,
     rootKind,
@@ -186,7 +187,7 @@ function hydrateHintTarget(
     evidenceObjectId,
     byteLimit: input.source_byte_limit ?? DEFAULT_SOURCE_BYTE_LIMIT
   });
-  const workUnits = page.nativeWork ?? page.rowsRead;
+  const workUnits = Math.max(1, page.nativeWork ?? page.rowsRead);
   const bytes = page.bytesRead + (page.metadataBytes ?? 0);
   if (page.unavailable || page.row === null) return { workUnits, bytes };
   if (page.row.revision !== revision || page.row.digest !== digest) return { workUnits, bytes };
