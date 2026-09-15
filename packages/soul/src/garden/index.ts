@@ -1,31 +1,7 @@
 export {
-  catalogEligibilityOfAssertionCount,
-  catalogEligibilityOfRequest,
-  classifyOfficialApiRequestResult,
-  createOfficialApiGardenCompileReceipt,
-  officialApiRequestCoverageLayers,
-  receiveOfficialApiRequestSignals,
-  OFFICIAL_API_GARDEN_COMPILE_CONTRACT_VERSION,
-  OFFICIAL_API_GARDEN_COMPILE_PRODUCER,
-  OFFICIAL_API_SEMANTIC_PRESERVATION_CLAIM,
-  type OfficialApiCatalogEligibility,
-  type OfficialApiGardenCompilePendingBatch,
-  type OfficialApiGardenCompileReceipt,
-  type OfficialApiRequestEntryRejection,
-  type OfficialApiRequestReceiveReceipt
+  classifyOfficialApiRequestResult
 } from "./ingestion/official-api/request-result.js";
-export {
-  classifyOfficialApiExtractionResult,
-  classifyOfficialApiInterpretationResult,
-  receiveOfficialApiSourceInterpretations,
-  OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION,
-  OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER,
-  type OfficialApiInterpretationReceiveReceipt
-} from "./ingestion/official-api/source-interpretation-receive.js";
-export {
-  buildSourceInterpretationSignal,
-  emitLocatedInterpretationSignals
-} from "./ingestion/official-api/source-interpretation-signal.js";
+
 export {
   AUDITOR_CONSTANTS,
   Auditor,
@@ -69,7 +45,6 @@ export {
   OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH,
   OFFICIAL_API_EXTRACTION_BATCH_CONTRACT_VERSION,
   OFFICIAL_API_EXTRACTION_REQUEST_SCHEMA_VERSION,
-  OFFICIAL_API_SIGNAL_CONTRACT_VERSION,
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
   OFFICIAL_API_SOURCE_GROUNDING_SEMANTICS_VERSION,
   OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,

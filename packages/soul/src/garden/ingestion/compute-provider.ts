@@ -22,7 +22,6 @@ export {
   type OfficialApiSignalFormationAuditResult
 } from "./official-api/formation-audit.js";
 export {
-  OFFICIAL_API_SIGNAL_CONTRACT_VERSION,
   OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,
   OFFICIAL_API_SYSTEM_PROMPT,
   resolveOfficialApiSystemPrompt
@@ -60,24 +59,9 @@ export {
   type TransportPackPlan
 } from "./official-api/semantic-workset.js";
 export {
-  createOfficialApiGardenCompileReceipt,
-  parseOfficialApiRequestSignals,
-  receiveOfficialApiRequestSignals,
-  OFFICIAL_API_GARDEN_COMPILE_CONTRACT_VERSION,
-  OFFICIAL_API_GARDEN_COMPILE_PRODUCER,
-  type OfficialApiGardenCompilePendingBatch,
-  type OfficialApiGardenCompileReceipt,
-  type OfficialApiRequestEntryRejection,
-  type OfficialApiRequestReceiveReceipt
+  parseOfficialApiRequestSignals
 } from "./official-api/request-result.js";
-export {
-  classifyOfficialApiExtractionResult,
-  classifyOfficialApiInterpretationResult,
-  receiveOfficialApiSourceInterpretations,
-  OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION,
-  OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER,
-  type OfficialApiInterpretationReceiveReceipt
-} from "./official-api/source-interpretation-receive.js";
+
 export {
   GardenProviderKind,
   GardenProviderError,

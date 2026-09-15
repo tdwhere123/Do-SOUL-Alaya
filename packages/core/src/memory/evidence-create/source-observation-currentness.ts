@@ -69,7 +69,7 @@ export function verifyAssertionAndScope(
   return scope;
 }
 
-export function resolvePublishedScope(
+function resolvePublishedScope(
   stored: StoredSourceRecord,
   scopeHint: string | null
 ): SourceScopeClass {

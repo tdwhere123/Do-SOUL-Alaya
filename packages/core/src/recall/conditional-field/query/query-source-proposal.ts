@@ -6,7 +6,7 @@ import {
   type QueryInterpretationProposal
 } from "@do-soul/alaya-protocol";
 
-export const SOURCE_PROPOSAL_LOOKUP_PREFIX = "source.proposal.v1";
+const SOURCE_PROPOSAL_LOOKUP_PREFIX = "source.proposal.v1";
 
 export type QuerySourceRolePhrase = Readonly<{
   readonly role: string;

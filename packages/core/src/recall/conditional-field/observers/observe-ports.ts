@@ -93,13 +93,13 @@ export type SourceRootObserverPage = Readonly<{
   readonly unavailable?: boolean;
 }>;
 
-export type BoundInterpretationHintRow = Readonly<{
+type BoundInterpretationHintRow = Readonly<{
   readonly object_id: string;
   readonly gist: string;
   readonly cursor?: string;
 }>;
 
-export type BoundInterpretationHintPage = Readonly<{
+type BoundInterpretationHintPage = Readonly<{
   readonly rows: readonly BoundInterpretationHintRow[];
   readonly nativeVisits: number;
   readonly nativeBytes: number;

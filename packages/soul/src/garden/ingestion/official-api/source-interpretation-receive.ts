@@ -18,9 +18,9 @@ export const OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION = 1 as const;
 export const OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER =
   "official-api-source-interpretation-receive-v1" as const;
 
-export type OfficialApiInterpretationReceiveStatus = "complete" | "partial";
+type OfficialApiInterpretationReceiveStatus = "complete" | "partial";
 
-export type OfficialApiInterpretationEntryRejectionReason =
+type OfficialApiInterpretationEntryRejectionReason =
   | "source_generation_mismatch"
   | "source_assertion_mismatch"
   | "candidate_rejected"
@@ -44,7 +44,7 @@ export interface OfficialApiInterpretationReceiveReceipt {
   readonly rejections: readonly OfficialApiInterpretationEntryRejection[];
 }
 
-export function sha256Utf8(value: string): string {
+function sha256Utf8(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 

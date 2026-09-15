@@ -15,18 +15,18 @@ import {
   type OfficialApiSemanticFactorGraphProjection
 } from "./semantic-factor-projection.js";
 
-export const OFFICIAL_API_IDENTITY_OBSERVATION_RECEIVE_CONTRACT_VERSION = 1 as const;
-export const OFFICIAL_API_IDENTITY_OBSERVATION_RECEIVE_PRODUCER =
+const OFFICIAL_API_IDENTITY_OBSERVATION_RECEIVE_CONTRACT_VERSION = 1 as const;
+const OFFICIAL_API_IDENTITY_OBSERVATION_RECEIVE_PRODUCER =
   "official-api-identity-observation-receive-v1" as const;
 
-export type OfficialApiIdentityObservationReceiveStatus = "complete" | "partial" | "empty";
+type OfficialApiIdentityObservationReceiveStatus = "complete" | "partial" | "empty";
 
-export type OfficialApiIdentityObservationReceiveRejectionReason =
+type OfficialApiIdentityObservationReceiveRejectionReason =
   | "identity_observation_invalid"
   | "mention_not_source_grounded"
   | "topology_rejected";
 
-export interface OfficialApiIdentityObservationReceiveRejection {
+interface OfficialApiIdentityObservationReceiveRejection {
   readonly reason: OfficialApiIdentityObservationReceiveRejectionReason;
 }
 

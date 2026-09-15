@@ -9,8 +9,6 @@ import {
 } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_GROUNDED_EXAMPLES } from "./source-examples.js";
 
-export const OFFICIAL_API_SIGNAL_CONTRACT_VERSION = 2;
-
 const ENVELOPE_PROMPT_PARTS = Object.freeze([
   "You extract source-supported interpretation candidates from one bounded source assertion batch.",
   `The response interpretation contract is ${SOURCE_INTERPRETATION_CONTRACT}.`,

@@ -4,7 +4,7 @@ import type { SourceRootPage, SourceRootRow } from "./bounded-source-root-reader
 const PAGE_MAX = 512;
 const GIST_BYTE_MAX = 65_536;
 
-export type BoundInterpretationHintRow = Readonly<{ object_id: string; gist: string; cursor: string }>;
+type BoundInterpretationHintRow = Readonly<{ object_id: string; gist: string; cursor: string }>;
 export type BoundInterpretationHintPage = Readonly<{
   rows: readonly BoundInterpretationHintRow[];
   nativeVisits: number;

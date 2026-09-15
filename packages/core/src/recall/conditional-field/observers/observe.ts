@@ -35,8 +35,6 @@ export type {
 } from "./measure-stored.js";
 export { hasMeasurementProducer, queryDigestOf } from "./measure-stored.js";
 export type {
-  BoundInterpretationHintPage,
-  BoundInterpretationHintRow,
   EmbeddingObserverPage,
   LexicalObserverPage,
   ObserveConditionalFieldInput,

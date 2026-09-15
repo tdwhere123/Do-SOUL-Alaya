@@ -5,7 +5,7 @@ import { normalizeTemporalIsoString } from "../temporal-date.js";
 const dateFields = ["event_time_start", "event_time_end", "valid_from", "valid_to"] as const;
 
 /** Canonical generation shape; legacy date strings are normalized before admission. */
-export const OfficialApiTemporalProjectionDraftSchema = z.object({
+const OfficialApiTemporalProjectionDraftSchema = z.object({
   projection_schema_version: z.literal(1),
   event_time_start: z.iso.datetime().optional().describe("Inclusive event window start; requires event_time_end."),
   event_time_end: z.iso.datetime().optional().describe("Inclusive event window end, including the final millisecond; requires event_time_start."),

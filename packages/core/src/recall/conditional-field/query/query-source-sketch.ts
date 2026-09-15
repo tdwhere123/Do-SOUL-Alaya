@@ -19,19 +19,7 @@ import {
   type QuerySourceRolePhrase
 } from "./query-source-proposal.js";
 
-export type {
-  AdoptedSourceProposal,
-  QuerySourceLookupMode,
-  QuerySourceRolePhrase
-} from "./query-source-proposal.js";
-export {
-  SOURCE_PROPOSAL_LOOKUP_PREFIX,
-  adoptedSourceProposal,
-  decodeSourceProposalPredicate,
-  sourceProposalPhrases
-} from "./query-source-proposal.js";
-
-export type QuerySourceRelationSketch = Readonly<{
+type QuerySourceRelationSketch = Readonly<{
   readonly predicate: string;
   readonly arguments?: readonly QuerySourceRolePhrase[];
   readonly qualifiers?: readonly QuerySourceRolePhrase[];

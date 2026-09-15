@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { CONDITIONAL_FIELD_SCHEMA_VERSION } from "@do-soul/alaya-protocol";
 import {
-  compileQuerySourceSketch,
-  decodeSourceProposalPredicate
+  compileQuerySourceSketch
 } from "../../../../recall/conditional-field/query/query-source-sketch.js";
+import { decodeSourceProposalPredicate } from "../../../../recall/conditional-field/query/query-source-proposal.js";
 import { UNINTERPRETED_HOLE_ID } from "../../../../recall/conditional-field/query/ordinary-language.js";
 import {
   INTERPRETATION_CLOCK,
