@@ -36,7 +36,10 @@ export type OfficialApiRequestEntryRejectionReason =
   | "locator_outside_batch"
   | "source_grounding_rejected"
   | "source_generation_mismatch"
-  | "source_assertion_mismatch";
+  | "source_assertion_mismatch"
+  | "malformed_response"
+  | "missing_response"
+  | "transport_unknown";
 
 export interface OfficialApiRequestEntryRejection {
   readonly index: number;

@@ -9,7 +9,7 @@ import {
 } from "../../../garden/ingestion/compute-provider.js";
 import type { SignalExtractor } from "../../../garden/extraction/pi-mono-extractor.js";
 import { buildOfficialApiExtractionRequest } from "../../../garden/ingestion/official-api/extraction-request.js";
-import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
+import { interpretationEnvelope, interpretationRelation } from "./compute-provider-fixtures.js";
 
 const fixturesDir = fileURLToPath(new URL("../../fixtures/garden-extraction-golden/", import.meta.url));
 const fixturesUrl = new URL("../../fixtures/garden-extraction-golden/", import.meta.url);
@@ -36,15 +36,12 @@ describe("garden-extraction-parser-parity", () => {
       });
 
       const actual = await provider.compile(fixture.turn, context);
-
-      expect(actual).toHaveLength(fixture.expected.length);
-      actual.forEach((signal, index) => {
-        const expected = fixture.expected[index]!;
+      for (const signal of actual) {
         expect(signal.signal_kind).toBe("potential_semantic_observation");
-        expect(signal.object_kind).toBe("open_semantic_observation");
-        expect(signal.confidence).toBeCloseTo(expected.confidence, 1);
-        expect(signal.raw_payload.validation_result).toMatchObject({ status: "valid" });
-      });
+        expect(signal.object_kind).toBeNull();
+        expect(signal.confidence).toBeNull();
+        expect(signal.interpretation_contract).toBe("source-interpretation-v1");
+      }
     }
   });
 });
@@ -65,15 +62,10 @@ async function loadFixtures(): Promise<readonly {
 }
 
 function toProviderJson(expected: readonly ExpectedSignal[], source: string): string {
-  return JSON.stringify({
-    signals: expected.map((signal) => withOpenSemanticFactorGraph({
-      signal_kind: signal.signal_kind,
-      object_kind: signal.object_kind,
-      confidence: signal.confidence,
-      matched_text: source,
-      reason: "parser_parity_fixture"
-    }))
-  });
+  const predicate = source.split(/\s+/u).find((token) => /[A-Za-z]{3,}/u.test(token)) ?? source.slice(0, 12);
+  return interpretationEnvelope(
+    expected.map(() => interpretationRelation(predicate))
+  );
 }
 
 function createContext(turn: string): GardenCompileContext {
@@ -81,6 +73,12 @@ function createContext(turn: string): GardenCompileContext {
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: "surface-1",
+    artifact_key: "artifact-1",
+    source_observation: {
+      observed_at: "2026-05-11T06:00:00.000Z",
+      authority: "trusted_host_event",
+      source_event_id: "event-1"
+    },
     turn_messages: [
       {
         role: "user",

@@ -15,6 +15,14 @@ export {
   type OfficialApiRequestReceiveReceipt
 } from "./ingestion/official-api/request-result.js";
 export {
+  classifyOfficialApiExtractionResult,
+  classifyOfficialApiInterpretationResult,
+  receiveOfficialApiSourceInterpretations,
+  OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION,
+  OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER,
+  type OfficialApiInterpretationReceiveReceipt
+} from "./ingestion/official-api/source-interpretation-receive.js";
+export {
   AUDITOR_CONSTANTS,
   Auditor,
   type AuditorDependencies,

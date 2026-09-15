@@ -5,7 +5,7 @@ import { resolveTemporalProjection } from "../../../garden/extraction/time-conce
 import { OfficialApiGardenProvider } from "../../../garden/ingestion/compute-provider.js";
 import { LocalHeuristics } from "../../../garden/triage/local-heuristics.js";
 import { buildMemoryInput } from "../../../garden/materialization/materialization-router/inputs.js";
-import { createContext, createOpenSemanticExtractor } from "./compute-provider-fixtures.js";
+import { createContext, createExtractor } from "./compute-provider-fixtures.js";
 import { resolveSourceTemporalCandidates } from "../../../garden/extraction/temporal/source-time.js";
 
 const year = {
@@ -379,12 +379,11 @@ describe("source calendar windows and temporal roles", () => {
   it("uses the source role owner in both official and local extraction", async () => {
     for (const source of ["I released the product in 2016.", "I worked before 2016.", "This policy is valid from May 2023."]) {
       const context = { ...createContext(), turn_messages: [], allow_legacy_single_user_source: true };
-      const [signal] = await new OfficialApiGardenProvider({ apiKey: "test", extractor: createOpenSemanticExtractor(JSON.stringify({ signals: [{
-        object_kind: "fact", confidence: 0.9, matched_text: source, distilled_fact: source
-      }] })) }).compile(source, context);
-      expect(signal).toBeDefined();
-      const expected = inspectObservedTemporalProjection(source, undefined, undefined).projection;
-      expect(signal?.raw_payload.temporal_projection).toEqual(expected);
+      const [signal] = await new OfficialApiGardenProvider({ apiKey: "test", extractor: createExtractor(JSON.stringify({
+        interpretations: [{ assertion_id: 1, relations: [{ predicate: { text: "released" }, arguments: [], qualifiers: [] }] }]
+      })) }).compile(source, context);
+      expect(signal?.interpretation_contract).toBe("source-interpretation-v1");
+      expect(signal?.raw_payload).not.toHaveProperty("temporal_projection");
       const local = await new LocalHeuristics().compile(source, context);
       const temporal = local.filter((candidate) => candidate.raw_payload.time_concern !== undefined);
       expect(temporal).toHaveLength(1);

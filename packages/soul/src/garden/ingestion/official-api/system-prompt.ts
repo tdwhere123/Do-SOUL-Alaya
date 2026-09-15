@@ -4,55 +4,52 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   OPEN_SEMANTIC_DURATION_ROLE,
-  OPEN_SEMANTIC_LOCATION_ROLE
+  OPEN_SEMANTIC_LOCATION_ROLE,
+  SOURCE_INTERPRETATION_CONTRACT
 } from "@do-soul/alaya-protocol";
-import { OFFICIAL_API_OBJECT_KINDS } from "./object-kind-contract.js";
 import { OFFICIAL_API_GROUNDED_EXAMPLES } from "./source-examples.js";
-import { OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION } from "../../triage/grounding/source-locator.js";
 
 export const OFFICIAL_API_SIGNAL_CONTRACT_VERSION = 2;
 
 const ENVELOPE_PROMPT_PARTS = Object.freeze([
-  "You extract candidate durable memory signals from one bounded source assertion batch.",
-  `The response signal contract version is ${OFFICIAL_API_SIGNAL_CONTRACT_VERSION}.`,
-  'Return strict JSON only with shape {"signals":[...]} and no markdown.',
+  "You extract source-supported interpretation candidates from one bounded source assertion batch.",
+  `The response interpretation contract is ${SOURCE_INTERPRETATION_CONTRACT}.`,
+  'Return strict JSON only with shape {"interpretations":[...]} and no markdown.',
   "Do not output analysis or reasoning. Emit the JSON object immediately and keep it compact.",
-  "Do not repeat source text outside matched_text or identity_observation surfaces.",
-  'Each non-empty signal must include "object_kind", "confidence", "matched_text", "source_locator", and "identity_observation".',
-  "object_kind is bounded routing metadata only; it is not a semantic role or an ontology."
+  "Do not repeat source text outside predicate, argument, and qualifier phrases."
 ]);
 
-const CURRENT_CONFIDENCE_PROMPT_PARTS = Object.freeze([
-  '"confidence" must be a JSON number from 0 through 1, never a string label such as "high", "medium", or "low".'
-]);
-
-const DURABLE_PROJECTION_PROMPT_PARTS = Object.freeze([
-  `"object_kind" must be exactly one of: ${OFFICIAL_API_OBJECT_KINDS.join(", ")}. Use "open_semantic_observation" only when no more specific allowed kind is justified by the assertion.`,
-  'Use "preference" for a durable like, dislike, or choice tendency; "decision" for a committed choice; "constraint" or "factual_policy" for a standing must, must-not, or rule; and "episode", "activity", or "outcome" for source-supported events and results.',
-  'Include "canonical_entities" with at most 3 lowercase names or stable source phrases that occur in matched_text. Do not infer an alias, identity, or pronoun resolution that is absent from that assertion.',
-  'When the assertion explicitly states event time or validity, include "temporal_projection" with "projection_schema_version":1, "time_precision", "time_source":"explicit", and only the applicable ISO fields.',
-  'Use "event_time_start" and "event_time_end" for when an event occurred. Use "valid_from" and optional "valid_to" only for an explicitly effective or ongoing interval; omit "valid_to" for an open interval. Never copy event time into valid time.',
-  'Temporal projection version 1 uses inclusive starts and ends: an explicit year runs from January 1 at 00:00:00.000Z through December 31 at 23:59:59.999Z. Use the final millisecond of the stated day, month, year, or bounded range, not the start of the next period.',
-  'For relative dates, omit absolute temporal_projection values; the runtime resolves them from the trusted source observation.',
-  'For a durable preference, include "preference_profile" with "projection_schema_version":1 and the exact keys "preference_subject", "preference_predicate", "preference_object", optional "preference_category", and "preference_polarity".',
-  '"preference_polarity" must be exactly "positive", "negative", or "neutral".'
-]);
-
-const GROUNDED_SIGNAL_PROMPT_PARTS = Object.freeze([
-  'Do not include "signal_kind"; the runtime derives it deterministically from the bounded object_kind.',
-  `Use "source_locator":{"contract_version":${OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION},"kind":"assertion_catalog","assertion_id":N} for every signal.`,
-  "Return only assertion_id from the provided source_assertions catalog for evidence selection; never invent or rewrite a catalog assertion.",
+const INTERPRETATION_PROMPT_PARTS = Object.freeze([
+  'Each interpretation is {"assertion_id":N,"relations":[...]}.',
+  "Return only assertion_id from the provided source_assertions catalog; never invent or rewrite a catalog assertion.",
   "The server-derived source_assertions catalog contains only User assertions the runtime can ground without unresolved references; no other conversation content is available or authoritative.",
-  "For each signal, work quote-first, then distill.",
-  "First copy the shortest contiguous exact substring that contains the complete atomic assertion and every explicit local antecedent needed to resolve its references into matched_text; preserve capitalization, punctuation, spacing, and wording.",
-  "Then record independently grounded mentions from that quote in identity_observation.",
-  "Do not use surrounding text to add facts or guess unresolved references.",
-  "Do not return an empty signals array merely because a durable assertion uses narrative, list, template, or conversational wording.",
-  "Before returning an empty signals array for a non-empty source_assertions catalog, inspect every catalog entry once more and emit any durable personal fact, preference, relationship, possession, past event, or ongoing condition that satisfies the same grounding and durability rules.",
+  'Each relation is {"predicate":{"text":EXACT_SUBSTRING},"arguments":[...],"qualifiers":[...]}.',
+  'Each argument or qualifier is {"role":OPEN_NAME,"phrase":{"text":EXACT_SUBSTRING}}.',
+  'Add "occurrence":N on a phrase only when selecting a repeated exact substring after its first occurrence.',
+  "Copy exact source wording, capitalization, punctuation, and spacing in every phrase.",
+  "Roles are model interpretations of source attachment, not ontology types, persistence kinds, or certified facts.",
+  "Do not emit confidence, object_kind, signal_kind, matched_text, source_locator, identity_observation, temporal_projection, preference_profile, ISO timestamps, graph ids, or semantic_identity.",
+  "IDs, spans, schema versions, and interval arithmetic are runtime responsibilities."
+]);
+
+const SCOPE_PROMPT_PARTS = Object.freeze([
+  "Inspect each source_assertions entry independently; the batch contains no hidden context and every assertion_id keeps its original catalog identity.",
+  "Keep pronouns unresolved unless their antecedent is explicit inside the selected catalog assertion.",
+  'Unresolved does not mean omitted: an explicit "I" remains an argument or qualifier phrase with text "I"; do not rename it to an inferred person or silently drop it.',
+  "Preserve relative-date meaning as source-supported phrases; never infer an absolute date absent from the assertion.",
+  "Preserve every concrete detail (names, numbers, dates, places) that appears in the selected catalog assertion.",
+  "Do not invent facts or summarize away detail. Split only demonstrably independent assertions into separate interpretations.",
+  "Preserve each selected relation's participants, modality, time, and conditions as arguments or qualifiers.",
+  "Preserve role: do not invent an agent, speaker, promiser, or intention actor that the quote does not state.",
+  "Do not assign a product, object, or theme as promiser or speaker.",
+  "Keep not, only, if, unless, and promise markers as exact phrases; never drop them to make a simpler claim.",
+  "When a nested or conditional span cannot be independently grounded, keep the complete adjunct as one opaque qualifier phrase.",
+  "Do not force facts into subject/relation/value/qualifier/time slots.",
+  "The catalog is a source inventory, not a claim that every entry deserves a memory. Omit questions, one-off requests, roleplay and invented scenarios. Do not turn an instruction to the assistant into the user's standing policy or preference.",
+  "Do not return an empty interpretations array merely because a durable assertion uses narrative, list, template, or conversational wording.",
+  "Before returning an empty interpretations array for a non-empty source_assertions catalog, inspect every catalog entry once more and emit any source-supported relation that satisfies the same grounding and durability rules.",
   "Do not lower the durability threshold: transient tasks, procedures, and formatting instructions are not durable assertions unless they explicitly state a lasting preference or policy.",
-  "The catalog is a source inventory, not a claim that every entry deserves a memory. Omit questions, one-off requests, roleplay and invented scenarios. Do not turn an instruction to the assistant into the user's standing policy or preference. A comparison alone does not establish a like or dislike.",
-  '"matched_text" is an exact verbatim substring containing the complete atomic assertion, not isolated keywords.',
-  'When a synthesis signal cites existing evidence or memories by ID, include "evidence_refs" and "source_memory_refs" arrays.'
+  'Return {"interpretations":[]} when the catalog does not contain durable memory candidates.'
 ]);
 
 export const OPEN_SEMANTIC_STRUCTURAL_ROLE_PROMPT_PARTS = Object.freeze([
@@ -75,48 +72,21 @@ export const OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS = Object.freeze([
   "Do not force facts into subject/relation/value/qualifier/time slots and do not invent entity, event, attribute, or answer-family categories."
 ]);
 
-const IDENTITY_OBSERVATION_PROMPT_PARTS = Object.freeze([
-  'Use "identity_observation":{"contract_version":1,"producer":"official-api-identity-observation-v1","mentions":[...]} with optional "unresolved_spans".',
-  'Each mention is {"surface":EXACT_SUBSTRING}; add "source_occurrence":N only when selecting a repeated surface after its first occurrence.',
-  "Do not emit factor_id, proposition_id, binding_identity, hashes, or a canonical graph; the runtime already owns those.",
-  "Keep faithfulness: copy exact source wording, capitalization, punctuation, and spacing in every surface.",
-  "Preserve role: do not invent an agent, speaker, promiser, or intention actor that the quote does not state.",
-  "Do not assign a product, object, or theme as promiser or speaker.",
-  "Preserve scope: keep not, only, if, unless, and promise markers as mentions or unresolved_spans; never drop them to make a simpler claim.",
-  "Do not invent time or negation.",
-  "When a nested or conditional span cannot be independently grounded, put it in unresolved_spans instead of forcing a typed claim.",
-  "Do not force facts into subject/relation/value/qualifier/time slots."
-]);
-
-const FINAL_PROMPT_PARTS = Object.freeze([
-  "Inspect each source_assertions entry independently; the batch contains no hidden context and every assertion_id keeps its original catalog identity.",
-  "Keep pronouns unresolved unless their antecedent is explicit inside the selected catalog assertion.",
-  'Unresolved does not mean omitted: an explicit "I" remains a mention with surface "I"; do not rename it to an inferred person or silently drop it.',
-  "Preserve relative-date meaning as source-supported mentions; never infer an absolute date absent from the assertion.",
-  "Preserve every concrete detail (names, numbers, dates, places) that appears in the selected catalog assertion.",
-  "Do not invent facts or summarize away detail. Split independent durable assertions into separate signals.",
-  "Preserve each selected relation's participants, modality, time, and conditions as mentions or unresolved spans.",
-  'Return {"signals":[]} when the catalog does not contain durable memory candidates.'
-]);
-
 export const OFFICIAL_API_SYSTEM_PROMPT = joinPrompt([
   ...ENVELOPE_PROMPT_PARTS,
-  ...CURRENT_CONFIDENCE_PROMPT_PARTS,
-  ...GROUNDED_SIGNAL_PROMPT_PARTS,
-  ...DURABLE_PROJECTION_PROMPT_PARTS,
-  ...IDENTITY_OBSERVATION_PROMPT_PARTS,
+  ...INTERPRETATION_PROMPT_PARTS,
   "The following fictional examples demonstrate the format and grounding rules; extract only from the actual request, never from these examples.",
   ...OFFICIAL_API_GROUNDED_EXAMPLES.map((example) =>
     `<example>${JSON.stringify(example)}</example>`),
-  ...FINAL_PROMPT_PARTS
+  ...SCOPE_PROMPT_PARTS
 ]);
 
 export const OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT = joinPrompt([
   OFFICIAL_API_SYSTEM_PROMPT,
   "This is a coverage repair request containing exactly one source_assertions entry that produced no valid candidate in the primary extraction.",
   "Re-evaluate that assertion independently and preserve every durable source-supported detail if it qualifies.",
-  "A bare topic, search phrase, title, or information request is not a durable assertion; return an empty signals array for it.",
-  "The repair pass does not lower the durability threshold; return an empty signals array when the assertion is not durable."
+  "A bare topic, search phrase, title, or information request is not a durable assertion; return an empty interpretations array for it.",
+  "The repair pass does not lower the durability threshold; return an empty interpretations array when the assertion is not durable."
 ]);
 
 const SYSTEM_PROMPTS_BY_SHA256 = createPromptRegistry();

@@ -20,6 +20,7 @@ import { inspectExtractionFillCompletion } from
 import {
   catalogEligibilityOfAssertionCount,
   classifyExtractionEnvelope,
+  EMPTY_INTERPRETATIONS_ENVELOPE,
   EMPTY_SIGNALS_ENVELOPE,
   EXTRACTION_SEMANTIC_PRESERVATION_FROM_REQUEST,
   isPlanSkippedExtraction,
@@ -141,7 +142,7 @@ describe("extraction empty envelope classification", () => {
     )[0]!;
     const stats = newFillStats();
     const extractor = createCachingSignalExtractor({
-      delegate: { extract: async () => ({ rawJson: '{"signals":[]}', responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }) },
+      delegate: { extract: async () => ({ rawJson: EMPTY_INTERPRETATIONS_ENVELOPE, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }) },
       config: {
         model: "test-model",
         modelFamily: "test-model",
@@ -184,7 +185,7 @@ describe("extraction empty envelope classification", () => {
     const reopened = createCachingSignalExtractor({ delegate, cacheRoot, allowLiveExtraction: false,
       config: { model: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1" } });
     expect(await reopened.extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(request) })).toMatchObject({ rawJson: EMPTY_SIGNALS_ENVELOPE });
+      userPrompt: stringifyOfficialApiExtractionRequest(request) })).toMatchObject({ rawJson: EMPTY_INTERPRETATIONS_ENVELOPE });
     expect(delegate.extract).not.toHaveBeenCalled();
     const task = semanticTask("I moved to Berlin.");
     const semanticRoot = await mkdtemp(join(tmpdir(), "empty-semantic-"));
@@ -239,7 +240,7 @@ describe("extraction empty envelope classification", () => {
       delegate: {
         extract: async (input) => {
           await input.onTransportAttempt?.(input.abortSignal);
-          return { rawJson: EMPTY_SIGNALS_ENVELOPE, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA };
+          return { rawJson: EMPTY_INTERPRETATIONS_ENVELOPE, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA };
         }
       },
       config: {

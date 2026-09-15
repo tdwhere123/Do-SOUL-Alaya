@@ -65,6 +65,21 @@ export const OFFLINE_CONFIG: CompileSeedExtractionConfig = {
   apiKey: null
 };
 
+export function interpretationsEnvelope(
+  facts: readonly { matched: string; assertionId?: number }[]
+): string {
+  return JSON.stringify({
+    interpretations: facts.map((fact) => ({
+      assertion_id: fact.assertionId ?? 1,
+      relations: [{
+        predicate: { text: fact.matched.split(/\s+/u).find((token) => /[A-Za-z]{3,}/u.test(token)) ?? fact.matched },
+        arguments: [],
+        qualifiers: []
+      }]
+    }))
+  });
+}
+
 export function signalsEnvelope(
   facts: readonly { distilled: string; matched: string; assertionId?: number }[]
 ): string {

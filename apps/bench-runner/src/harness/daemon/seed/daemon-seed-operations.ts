@@ -327,12 +327,41 @@ async function seedOneCompileSignal(
     ? buildBenchSourceEvidenceFallback(input, signalInput)
     : null;
   const signalId = `bench_signal_${randomUUID().replace(/-/gu, "")}`;
-  const signal = fallback?.signal ?? buildCompileSignal(
-      input,
-      signalInput,
-      signalId,
-      buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact, signalId)
-    );
+  const signal = fallback?.signal ?? (
+    signalInput.productionRawPayload?.source_interpretation === undefined
+      ? buildCompileSignal(
+        input,
+        signalInput,
+        signalId,
+        buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact, signalId)
+      )
+      : CandidateMemorySignalSchema.parse({
+        signal_id: signalId,
+        workspace_id: input.activeContext.workspaceId,
+        run_id: input.activeContext.runId,
+        surface_id: signalInput.surfaceId ?? null,
+        source: SignalSource.GARDEN_COMPILE,
+        signal_kind: "potential_semantic_observation",
+        interpretation_contract: "source-interpretation-v1",
+        object_kind: null,
+        confidence: null,
+        scope_hint: ScopeClass.PROJECT,
+        domain_tags: [],
+        evidence_refs: [],
+        source_memory_refs: [],
+        supersedes_refs: [],
+        exception_to_refs: [],
+        contradicts_refs: [],
+        incompatible_with_refs: [],
+        raw_payload: signalInput.productionRawPayload,
+        source_observation: {
+          observed_at: signalInput.sourceObservedAt ?? new Date().toISOString(),
+          authority: "trusted_host_event",
+          source_event_id: signalInput.evidenceRef
+        },
+        created_at: signalInput.sourceObservedAt ?? new Date().toISOString()
+      })
+  );
   const received = (await input.activeRuntime.services.signalService.receiveSignal(
     signal
   )) as BenchSignalReceiveResult;

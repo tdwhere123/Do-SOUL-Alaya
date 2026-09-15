@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { retainedSourceSpeaker } from "@do-soul/alaya-core";
 import { isDuplicateKeyError } from "@do-soul/alaya-storage";
+import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import {
   admitPostTurnSourceRoot,
   joinAdmittedTurnExcerpts
@@ -135,7 +136,10 @@ function persistAdmittedTurnRoot(
     admission,
     workspaceId: input.workspaceId,
     sourceId: `post-turn:${input.taskId}`,
-    content: joinAdmittedTurnExcerpts(input.lastMessages),
+    content: buildOfficialApiSourceCorpus("", input.lastMessages.map((message) => ({
+      role: message.role as "user" | "assistant",
+      content: message.content_excerpt
+    }))) || joinAdmittedTurnExcerpts(input.lastMessages),
     recordedAt: input.createdAt,
     eventTime: input.eventTime,
     ...(speaker === undefined ? {} : { speaker }),

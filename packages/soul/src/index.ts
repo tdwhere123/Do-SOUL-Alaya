@@ -15,6 +15,14 @@ export {
   type OfficialApiRequestReceiveReceipt
 } from "./garden/ingestion/official-api/request-result.js";
 export {
+  classifyOfficialApiExtractionResult,
+  classifyOfficialApiInterpretationResult,
+  receiveOfficialApiSourceInterpretations,
+  OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION,
+  OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER,
+  type OfficialApiInterpretationReceiveReceipt
+} from "./garden/ingestion/official-api/source-interpretation-receive.js";
+export {
   DEFAULT_SOUL_GRAPH_DEPTH,
   DEFAULT_SOUL_GRAPH_LIMIT,
   MAX_SOUL_GRAPH_DEPTH,

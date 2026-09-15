@@ -30,7 +30,7 @@ import {
 } from "./policy/provider-request-plan-budget.js";
 import { inspectExtractionRawJson } from "../content-closure.js";
 import {
-  EMPTY_SIGNALS_ENVELOPE,
+  EMPTY_INTERPRETATIONS_ENVELOPE,
   isPlanSkippedExtraction
 } from "../empty-classification.js";
 import type { ExtractionOutputTokenField } from "../authority/receipt-limits.js";
@@ -270,7 +270,7 @@ function createPlanBoundExtractor(
       if (isPlanSkippedExtraction(result)) {
         // Sibling keys outside a probe/repair plan must not persist or count as
         // empty extraction; compile still needs a parseable envelope.
-        return { rawJson: EMPTY_SIGNALS_ENVELOPE, extractionSkip: "plan_skipped" };
+        return { rawJson: EMPTY_INTERPRETATIONS_ENVELOPE, extractionSkip: "plan_skipped" };
       }
       state.rateLimitRetries = result.taskRateLimitRetries ??
         result.extractorMeta?.rateLimitRetries ?? 0;

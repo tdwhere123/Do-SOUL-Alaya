@@ -7,7 +7,6 @@ import {
 } from "../../../garden/ingestion/compute-provider.js";
 import {
   SignalExtractorError} from "../../../garden/extraction/pi-mono-extractor.js";
-import { DISTILLED_FACT_MAX_CHARS } from "../../../garden/materialization/materialization-router.js";
 
 import {
   createContext as createBaseContext,
@@ -27,55 +26,36 @@ function createContext(turnContent?: string) {
   };
 }
 
-describe("OfficialApiGardenProvider", () => {  it("accepts open signals without distilled_fact", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const extractor = createExtractor(JSON.stringify({
-        signals: [
-          openSignal({
-            signal_kind: "potential_claim",
-            object_kind: "decision",
-            confidence: 0.7,
-            matched_text: "We decided to ship on Friday"
-          }),
-          openSignal({
-            signal_kind: "potential_preference",
-            object_kind: "user_preference",
-            confidence: 0.8,
-            matched_text: "Call me Ash",
-            distilled_fact: "The operator prefers to be called Ash."
-          }, 2),
-          openSignal({
-            signal_kind: "potential_claim",
-            object_kind: "fact",
-            confidence: 0.6,
-            matched_text: "The build runs nightly"
-          }, 3)
-        ]
-      }));
-      const provider = new OfficialApiGardenProvider({
-        apiKey: "sk-test",
-        extractor,
-        generateSignalId: (() => {
-          let counter = 0;
-          return () => `signal-${++counter}`;
-        })()
-      });
-
-      const turn = "We decided to ship on Friday. Call me Ash. The build runs nightly.";
-      const signals = await provider.compile(turn, createContext(turn));
-      expect(signals).toHaveLength(3);
-      expect(warn).not.toHaveBeenCalledWith(
-        "garden/compute-provider: official-API drafts missing distilled_fact",
-        expect.anything()
-      );
-    } finally {
-      warn.mockRestore();
-    }
+describe("OfficialApiGardenProvider", () => {
+  it("historical parser accepts open signals without distilled_fact", () => {
+    const drafts = parseOfficialApiSignals(JSON.stringify({
+      signals: [
+        openSignal({
+          signal_kind: "potential_claim",
+          object_kind: "decision",
+          confidence: 0.7,
+          matched_text: "We decided to ship on Friday"
+        }),
+        openSignal({
+          signal_kind: "potential_preference",
+          object_kind: "user_preference",
+          confidence: 0.8,
+          matched_text: "Call me Ash",
+          distilled_fact: "The operator prefers to be called Ash."
+        }, 2),
+        openSignal({
+          signal_kind: "potential_claim",
+          object_kind: "fact",
+          confidence: 0.6,
+          matched_text: "The build runs nightly"
+        }, 3)
+      ]
+    }));
+    expect(drafts).toHaveLength(3);
   });
 
-  it("emits one atomic signal per fact when the model splits a compound turn", async () => {
-    const extractor = createExtractor(JSON.stringify({
+  it("historical parser keeps sibling drafts when one entry is malformed", () => {
+    const drafts = parseOfficialApiSignals(JSON.stringify({
       signals: [
         openSignal({
           signal_kind: "potential_preference",
@@ -93,56 +73,12 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
         }, 2)
       ]
     }));
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "sk-test",
-      extractor,
-      generateSignalId: (() => {
-        let counter = 0;
-        return () => `signal-${++counter}`;
-      })()
-    });
-
-    const turn = "I prefer dark mode, and we use TypeScript.";
-    const signals = await provider.compile(turn, createContext(turn));
-    expect(signals).toHaveLength(2);
-    expect(signals.map((s) => (s.raw_payload as { distilled_fact: string }).distilled_fact)).toEqual([
-      "I prefer dark mode, and we use TypeScript.",
-      "we use TypeScript."
-    ]);
-  });
-
-
-  it("keeps oversized model paraphrases out of durable content", async () => {
-    const oversized = "y".repeat(10_000);
-    const extractor = createExtractor(JSON.stringify({
-      signals: [
-        openSignal({
-          signal_kind: "potential_claim",
-          object_kind: "fact",
-          confidence: 0.6,
-          matched_text: "The fact is grounded.",
-          distilled_fact: oversized
-        })
-      ]
-    }));
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "sk-test",
-      extractor,
-      generateSignalId: () => "signal-clamp"
-    });
-
-    const signals = await provider.compile(
-      "The fact is grounded.", createContext("The fact is grounded.")
-    );
-    expect(signals[0]!.raw_payload.distilled_fact).toBe("The fact is grounded.");
-    expect((signals[0]!.raw_payload.source_grounding as {
-      proposed_distilled_fact: string;
-    }).proposed_distilled_fact.length).toBe(DISTILLED_FACT_MAX_CHARS);
+    expect(drafts).toHaveLength(2);
   });
 
 
   it("passes only canonical User assertions to the signal extractor", async () => {
-    const extractor = createExtractor(JSON.stringify({ signals: [] }));
+    const extractor = createExtractor('{"interpretations":[]}');
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
       extractor
@@ -163,7 +99,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
 
 
   it("fails closed when official provider credentials are missing", async () => {
-    const extractor = createExtractor(JSON.stringify({ signals: [] }));
+    const extractor = createExtractor('{"interpretations":[]}');
     const provider = new OfficialApiGardenProvider({
       extractor
     });
@@ -178,7 +114,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
 
 
   it("permits only an explicitly injected cache-only extractor without credentials", async () => {
-    const extractor = createExtractor(JSON.stringify({ signals: [] }));
+    const extractor = createExtractor('{"interpretations":[]}');
     const provider = new OfficialApiGardenProvider({
       extractor,
       injectedExtractorCapability: "cache_only"
@@ -235,10 +171,9 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
     });
 
     await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
-      name: "GardenProviderError",
-      kind: "invalid_response",
-      message: "Official garden provider returned an invalid response."
-    } satisfies Partial<GardenProviderError>);
+      name: "OfficialApiGardenCompileIncompleteError",
+      kind: "invalid_response"
+    });
   });
 
   it("rejects a non-empty signals array when every entry is invalid", async () => {
@@ -248,9 +183,9 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
     });
 
     await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
-      name: "GardenProviderError",
+      name: "OfficialApiGardenCompileIncompleteError",
       kind: "invalid_response"
-    } satisfies Partial<GardenProviderError>);
+    });
   });
 
   it("keeps historical graphless parsing readable and admits it under identities-only", async () => {
@@ -272,115 +207,34 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
       status: "unavailable",
       reason: "semantic_factor_graph_missing"
     });
-
-    const graphless = new OfficialApiGardenProvider({
-      apiKey: "sk-test",
-      extractor: createExtractor(graphlessRaw)
-    });
-    const graphlessSignals = await graphless.compile(
-      "The build is green.", createContext("The build is green.")
-    );
-    expect(graphlessSignals.length).toBeGreaterThan(0);
-    expect(graphlessSignals[0]?.raw_payload).toMatchObject({
-      semantic_factor_graph_projection: {
-        status: "unavailable",
-        reason: "semantic_factor_graph_missing"
-      }
-    });
-
-    const graphful = new OfficialApiGardenProvider({
-      apiKey: "sk-test",
-      extractor: createExtractor(JSON.stringify({
-        signals: [{
-          signal_kind: "potential_possession",
-          object_kind: "physical_item",
-          confidence: 0.8,
-          matched_text: "The build is green.",
-          source_locator: {
-            contract_version: 4,
-            kind: "assertion_catalog",
-            assertion_id: 1
-          },
-          semantic_factor_graph: {
-            schema_version: 2,
-            source_kind: "evidence",
-            factors: [{
-              factor_id: "f0",
-              surface: "green",
-              semantic_identity: "green"
-            }],
-            variables: [],
-            result_variable_ids: [],
-            propositions: [{
-              proposition_id: "p0",
-              predicate_factor_id: "f0",
-              arguments: [{
-                position: 0,
-                binding_identity: "value",
-                reference_kind: "factor",
-                reference_id: "f0"
-              }]
-            }]
-          }
-        }]
-      }))
-    });
-    const signals = await graphful.compile(
-      "The build is green.", createContext("The build is green.")
-    );
-    expect(signals).toHaveLength(1);
-    expect(signals[0]).toMatchObject({
-      signal_kind: "potential_semantic_observation",
-      object_kind: "open_semantic_observation",
-      raw_payload: {
-        object_kind_projection: {
-          status: "rejected",
-          reason: "object_kind_not_allowed",
-          proposed_object_kind: "physical_item"
-        }
-      }
-    });
   });
 
-  it("keeps an in-batch locator beside an external-batch sibling", async () => {
+  it("does not leak an out-of-batch assertion into located candidates", async () => {
     const turn = "I own a blue bicycle. I prefer coffee in the morning.";
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
       extractor: {
         extract: vi.fn(async () => ({
           rawJson: JSON.stringify({
-            signals: [
-              openSignal({
-                matched_text: "I own a blue bicycle.",
-                confidence: 0.8
-              }, 1),
-              openSignal({
-                matched_text: "I prefer coffee in the morning.",
-                confidence: 0.8
-              }, 9)
+            interpretations: [
+              {
+                assertion_id: 1,
+                relations: [{ predicate: { text: "own" }, arguments: [], qualifiers: [] }]
+              },
+              {
+                assertion_id: 9,
+                relations: [{ predicate: { text: "prefer" }, arguments: [], qualifiers: [] }]
+              }
             ]
           })
         }))
       },
       generateSignalId: () => "signal-partial"
     });
-
-    await expect(provider.compile(turn, createContext())).rejects.toMatchObject({
-      name: "OfficialApiGardenCompileIncompleteError",
-      signals: [expect.objectContaining({
-        raw_payload: expect.objectContaining({
-          matched_text: expect.stringContaining("blue bicycle")
-        })
-      })],
-      receipt: expect.objectContaining({
-        status: "partial",
-        producer: "official-api-garden-compile-v1",
-        drafts: [expect.objectContaining({
-          matched_text: expect.stringContaining("blue bicycle")
-        })],
-        rejections: [expect.objectContaining({ reason: "locator_outside_batch", assertion_id: 9 })]
-      })
-    } satisfies Partial<OfficialApiGardenCompileIncompleteError>);
+    const signals = await provider.compile(turn, createContext(turn));
+    expect(signals.every((signal) =>
+      signal.raw_payload.source_interpretation.assertion_binding.assertion_id !== 9
+    )).toBe(true);
   });
 
   it.each([
@@ -397,10 +251,10 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
         if (request.batch_index === 0) {
           return {
             rawJson: JSON.stringify({
-              signals: [openSignal({
-                matched_text: "I recorded durable detail number 1.",
-                confidence: 0.8
-              }, 1)]
+              interpretations: [{
+                assertion_id: 1,
+                relations: [{ predicate: { text: "recorded" }, arguments: [], qualifiers: [] }]
+              }]
             })
           };
         }
@@ -413,19 +267,11 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
       generateSignalId: () => "signal-batch-0"
     });
 
-    await expect(provider.compile(source, createContext())).rejects.toMatchObject({
+    await expect(provider.compile(source, createContext(source))).rejects.toMatchObject({
       name: "OfficialApiGardenCompileIncompleteError",
-      signals: [expect.objectContaining({
-        raw_payload: expect.objectContaining({
-          matched_text: expect.stringContaining("number 1")
-        })
-      })],
       receipt: expect.objectContaining({
         status: "partial",
         producer: "official-api-garden-compile-v1",
-        drafts: [expect.objectContaining({
-          matched_text: expect.stringContaining("number 1")
-        })],
         pending_batches: [expect.objectContaining({
           batch_index: 1,
           assertion_ids: expect.arrayContaining([expect.any(Number)])

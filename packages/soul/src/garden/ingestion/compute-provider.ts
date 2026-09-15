@@ -1,16 +1,14 @@
 import { ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
-  diagnosticWarn,
   AlayaError,
-  CandidateMemorySignalSchema,
   GardenProviderKind as GardenProviderKinds,
   type GardenProviderKind as GardenProviderKindValue,
   type CertifiedQueryOsfGraph,
   type OpenSemanticFactorGraphProposal,
   type QueryFactFrameOsfObligation,
-  readErrorMessage,
   type CandidateMemorySignal,
-  type ConversationMessage
+  type ConversationMessage,
+  type SourceLocatedInterpretation
 } from "@do-soul/alaya-protocol";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -23,30 +21,20 @@ import {
   withWallClockTimeout
 } from "../scheduling/wall-clock-timeout.js";
 import {
-  clampConfidence,
   normalizeOptionalString,
-  normalizePositiveTimeoutMs,
-  type OfficialApiSignalDraft
+  normalizePositiveTimeoutMs
 } from "./official-api-signal-parser.js";
 import {
-  inspectObservedTemporalProjection,
-  normalizeSourceObservedAt
-} from "../extraction/temporal/observed-projection.js";
-import { buildOfficialCandidateSignal } from "./official-api/signal-payload.js";
-import {
-  groundOfficialApiDraft,
-  rejectOfficialApiDraftGrounding
-} from "./official-api/source-grounding.js";
-import {
   createOfficialApiGardenCompileReceipt,
-  receiveOfficialApiRequestSignals,
   type OfficialApiGardenCompileReceipt,
-  type OfficialApiRequestEntryRejection,
-  type OfficialApiRequestReceiveReceipt
+  type OfficialApiRequestEntryRejection
 } from "./official-api/request-result.js";
+import {
+  receiveOfficialApiSourceInterpretations
+} from "./official-api/source-interpretation-receive.js";
+import { emitLocatedInterpretationSignals } from "./official-api/source-interpretation-signal.js";
 import { buildOfficialApiSourceCorpus } from "../triage/grounding/source-locator.js";
 import {
-  computeOfficialApiSourceCorpusIdentity,
   planOfficialApiExtractionWindow,
   stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest,
@@ -57,7 +45,6 @@ import {
   dumpOfficialApiRequestDiagnostic,
   type OfficialApiExtractorMeta
 } from "./official-api/request-diagnostic.js";
-import { assessOfficialApiSourceTrust } from "./official-api/source-trust.js";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "./official-api/system-prompt.js";
 import {
   createOpenSemanticFactorQueryCompiler,
@@ -135,6 +122,14 @@ export {
   type OfficialApiRequestEntryRejection,
   type OfficialApiRequestReceiveReceipt
 } from "./official-api/request-result.js";
+export {
+  classifyOfficialApiExtractionResult,
+  classifyOfficialApiInterpretationResult,
+  receiveOfficialApiSourceInterpretations,
+  OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION,
+  OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER,
+  type OfficialApiInterpretationReceiveReceipt
+} from "./official-api/source-interpretation-receive.js";
 
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;
@@ -146,19 +141,9 @@ export interface GardenCompileContext {
   readonly turn_messages: readonly ConversationMessage[];
   readonly allow_legacy_single_user_source?: boolean;
   readonly source_observed_at?: string;
-}
-
-function resolveGardenCompileSourceObservedAtRaw(
-  context: GardenCompileContext
-): string | undefined {
-  const fromContext = context.source_observed_at?.trim();
-  if (fromContext) return fromContext;
-  for (const message of context.turn_messages) {
-    if (message.role !== "user") continue;
-    const fromMessage = message.created_at?.trim();
-    if (fromMessage) return fromMessage;
-  }
-  return undefined;
+  /** Source-id used by Core publication; must match the admitted retained source. */
+  readonly artifact_key?: string;
+  readonly source_observation?: NonNullable<CandidateMemorySignal["source_observation"]>;
 }
 
 export interface GardenComputeProvider {
@@ -222,12 +207,14 @@ export class GardenProviderError extends AlayaError {
 export class OfficialApiGardenCompileIncompleteError extends GardenProviderError {
   public readonly receipt: OfficialApiGardenCompileReceipt;
   public readonly signals: readonly CandidateMemorySignal[];
+  public readonly located: readonly SourceLocatedInterpretation[];
 
   public constructor(
     receipt: OfficialApiGardenCompileReceipt,
     options?: {
       readonly cause?: unknown;
       readonly signals?: readonly CandidateMemorySignal[];
+      readonly located?: readonly SourceLocatedInterpretation[];
     }
   ) {
     super(
@@ -238,6 +225,7 @@ export class OfficialApiGardenCompileIncompleteError extends GardenProviderError
     this.name = "OfficialApiGardenCompileIncompleteError";
     this.receipt = receipt;
     this.signals = Object.freeze([...(options?.signals ?? [])]);
+    this.located = Object.freeze([...(options?.located ?? [])]);
   }
 }
 const DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS = 10_000;
@@ -325,35 +313,18 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
 
-    const sourceCorpus = buildOfficialApiSourceCorpus(normalizedTurnContent, context.turn_messages);
     const createdAt = this.now();
-    const sourceObservedAtRaw = resolveGardenCompileSourceObservedAtRaw(context);
-    const materialize = (drafts: readonly OfficialApiSignalDraft[]) => {
-      const signals: CandidateMemorySignal[] = [];
-      for (const draft of drafts) {
-        const signal = this.buildSignalFromDraft(
-          draft,
-          context,
-          normalizedTurnContent,
-          sourceCorpus,
-          createdAt,
-          sourceObservedAtRaw
-        );
-        if (signal !== null) {
-          signals.push(signal);
-        }
-      }
-      return Object.freeze(signals);
-    };
+    const materialize = (located: readonly SourceLocatedInterpretation[]) =>
+      this.emitLocatedSignals(located, context, createdAt);
     try {
-      return materialize(await this.requestSignals(normalizedTurnContent, context));
+      return materialize(await this.requestInterpretations(normalizedTurnContent, context));
     } catch (error) {
       if (!(error instanceof OfficialApiGardenCompileIncompleteError)) {
         throw error;
       }
       throw new OfficialApiGardenCompileIncompleteError(error.receipt, {
         cause: error,
-        signals: materialize(error.receipt.drafts)
+        signals: materialize(error.located)
       });
     }
   }
@@ -375,70 +346,35 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     return await this.queryCompiler.compile(sourceText, obligation);
   }
 
-  private buildSignalFromDraft(
-    draft: OfficialApiSignalDraft,
+  private emitLocatedSignals(
+    located: readonly SourceLocatedInterpretation[],
     context: GardenCompileContext,
-    normalizedTurnContent: string,
-    sourceCorpus: string,
-    createdAt: string,
-    sourceObservedAtRaw: string | undefined
-  ): CandidateMemorySignal | null {
-    const { groundingSourceText, grounding } = groundDraftForContext(
-      draft, context, normalizedTurnContent, sourceCorpus
-    );
-    const groundedDraft = grounding.draft;
-    const confidence = clampConfidence(groundedDraft.confidence);
-    const sourceObservedAt = normalizeSourceObservedAt(sourceObservedAtRaw) === undefined
-      ? undefined : sourceObservedAtRaw?.trim();
-    const temporalSelection = grounding.status === "grounded"
-      ? inspectObservedTemporalProjection(
-          groundedDraft.matched_text,
-          groundedDraft.temporal_projection,
-          sourceObservedAt,
-          groundedDraft.temporal_projection_audit
-        )
-      : undefined;
-    try {
-      return CandidateMemorySignalSchema.parse(buildOfficialCandidateSignal({
-        draft: groundedDraft,
-        workspaceId: context.workspace_id,
-        runId: context.run_id,
-        surfaceId: context.surface_id,
-        normalizedTurnContent,
-        turnMessages: context.turn_messages,
-        groundingSourceText,
-        confidence,
-        temporalProjection: temporalSelection?.projection,
-        temporalProjectionAudit: temporalSelection?.audit,
-        distilledFact: groundedDraft.distilled_fact,
-        providerKind: this.provider_kind,
-        signalId: this.generateSignalId(),
-        createdAt,
-        sourceObservedAt,
-        sourceGrounding: grounding.audit
-      }));
-    } catch (error) {
-      diagnosticWarn("garden/compute-provider: dropped one official-API signal", {
-        runId: context.run_id,
-        signalKind: draft.signal_kind,
-        matchedTextChars: draft.matched_text.length,
-        distilledFactChars: draft.distilled_fact?.length ?? 0,
-        error: readErrorMessage(error, "unknown error")
-      });
-      return null;
-    }
+    createdAt: string
+  ): readonly CandidateMemorySignal[] {
+    const sourceObservation = context.source_observation;
+    if (sourceObservation === undefined) return Object.freeze([]);
+    return emitLocatedInterpretationSignals({
+      located,
+      workspaceId: context.workspace_id,
+      runId: context.run_id,
+      surfaceId: context.surface_id,
+      createdAt,
+      sourceObservation,
+      generateSignalId: this.generateSignalId,
+      scopeHint: "project"
+    });
   }
 
-  private async requestSignals(
+  private async requestInterpretations(
     turnContent: string,
     context: GardenCompileContext
-  ): Promise<readonly OfficialApiSignalDraft[]> {
+  ): Promise<readonly SourceLocatedInterpretation[]> {
     if (this.extractor === null) {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
 
     const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, context.turn_messages);
-    const drafts: OfficialApiSignalDraft[] = [];
+    const located: SourceLocatedInterpretation[] = [];
     const rejections: OfficialApiRequestEntryRejection[] = [];
     const unsent: OfficialApiExtractionRequest[] = [];
     let failedRequest: OfficialApiExtractionRequest | null = null;
@@ -466,13 +402,13 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
           continue;
         }
         try {
-          const received = await this.requestSignalBatch(request, context, sourceCorpus);
-          drafts.push(...received.drafts);
+          const received = await this.requestInterpretationBatch(request, context, sourceCorpus);
+          located.push(...received.located);
           rejections.push(...received.rejections);
           // Parser isolation of malformed siblings is not a compile abort.
-          // Locator/grounding rejections and empty partials stay incomplete.
+          // Request-bound mismatches and empty partials stay incomplete.
           if (received.status !== "complete" &&
-              (received.rejections.length > 0 || received.drafts.length === 0)) {
+              (received.rejections.length > 0 || received.located.length === 0)) {
             partialReceive = true;
             stopped = true;
             catalog = window.catalog;
@@ -493,13 +429,13 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     if (catalog === undefined) {
       throw new TypeError("official API compile produced no catalog page");
     }
-    if (incompleteError !== null && drafts.length === 0 && !partialReceive && unsent.length === 0) {
+    if (incompleteError !== null && located.length === 0 && !partialReceive && unsent.length === 0) {
       throw incompleteError;
     }
     if (partialReceive || incompleteError !== null) {
       throw new OfficialApiGardenCompileIncompleteError(
         createOfficialApiGardenCompileReceipt({
-          drafts,
+          drafts: [],
           rejections,
           pending: [
             ...(failedRequest === null ? [] : [failedRequest]),
@@ -507,25 +443,32 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
           ],
           catalog
         }),
-        incompleteError === null ? undefined : { cause: incompleteError }
+        {
+          ...(incompleteError === null ? {} : { cause: incompleteError }),
+          located
+        }
       );
     }
-    return Object.freeze(drafts);
+    return Object.freeze(located);
   }
 
-  private async requestSignalBatch(
+  private async requestInterpretationBatch(
     request: OfficialApiExtractionRequest,
     context: GardenCompileContext,
     sourceCorpus: string
-  ): Promise<OfficialApiRequestReceiveReceipt> {
+  ) {
     if (this.extractor === null) {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
     let rawJson: string | null = null;
     let extractorMeta: OfficialApiExtractorMeta | null = null;
     const userPrompt = stringifyOfficialApiExtractionRequest(request);
-    const receiveCorpus = computeOfficialApiSourceCorpusIdentity(sourceCorpus)
-      === request.source_corpus_identity ? undefined : sourceCorpus;
+    const artifactKey = context.artifact_key ??
+      `garden-compile:${context.workspace_id}:${context.run_id}`;
+    const receive = (value: string) => receiveOfficialApiSourceInterpretations(value, request, {
+      sourceCorpus,
+      artifactKey
+    });
     try {
       const extractor = this.extractor;
       const requestTimeoutMs = this.requestTimeoutMs;
@@ -537,8 +480,8 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
             timeoutMs: requestTimeoutMs,
             abortSignal: signal,
             validateRawJson: (value: string) => {
-              const received = receiveOfficialApiRequestSignals(value, request, receiveCorpus);
-              if (received.status !== "complete" && received.drafts.length === 0) {
+              const received = receive(value);
+              if (received.status !== "complete" && received.located.length === 0) {
                 throw new Error("official API request receive is incomplete");
               }
             }
@@ -547,7 +490,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       );
       rawJson = response.rawJson;
       extractorMeta = response.extractorMeta ?? null;
-      return receiveOfficialApiRequestSignals(rawJson, request, receiveCorpus);
+      return receive(rawJson);
     } catch (error) {
       return this.handleRequestFailure(error, { rawJson, userPrompt, context, extractorMeta });
     }
@@ -585,36 +528,4 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       cause: error
     });
   }
-}
-
-function groundDraftForContext(
-  draft: OfficialApiSignalDraft,
-  context: GardenCompileContext,
-  normalizedTurnContent: string,
-  sourceCorpus: string
-): Readonly<{
-  groundingSourceText: string;
-  grounding: ReturnType<typeof groundOfficialApiDraft>;
-}> {
-  const groundingSourceText = draft.source_locator === undefined
-    ? normalizedTurnContent
-    : sourceCorpus;
-  const trustRejection = assessOfficialApiSourceTrust({
-    hasSourceLocator: draft.source_locator !== undefined,
-    turnContent: normalizedTurnContent,
-    turnMessages: context.turn_messages,
-    ...(context.allow_legacy_single_user_source === undefined ? {} : {
-      allowLegacySingleUserSource: context.allow_legacy_single_user_source
-    })
-  });
-  const grounding = trustRejection === null
-    ? groundOfficialApiDraft(draft, groundingSourceText, sourceCorpus)
-    : rejectOfficialApiDraftGrounding(draft, trustRejection);
-  if (grounding.status === "rejected") {
-    diagnosticWarn("garden/compute-provider: rejected ungrounded official-API signal", {
-      runId: context.run_id,
-      reasons: grounding.audit.reasons
-    });
-  }
-  return { groundingSourceText, grounding };
 }

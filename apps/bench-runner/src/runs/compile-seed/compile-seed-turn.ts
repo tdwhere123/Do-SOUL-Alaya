@@ -60,6 +60,12 @@ async function buildTurnSignalInputs(
       run_id: input.runId,
       surface_id: input.surfaceId ?? null,
       turn_messages: input.turnMessages ?? [],
+      artifact_key: `compile-seed:${input.workspaceId}:${input.runId}`,
+      source_observation: {
+        observed_at: input.sourceObservedAt ?? "1970-01-01T00:00:00.000Z",
+        authority: "trusted_host_event",
+        source_event_id: `compile-seed:${input.runId}`
+      },
       ...(input.sourceObservedAt === undefined
         ? {}
         : { source_observed_at: input.sourceObservedAt })

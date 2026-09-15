@@ -104,7 +104,19 @@ function buildOfficialSeedDrafts(
   const drafts: SeedInputDraft[] = [];
   for (const signal of signals) {
     if (signal.interpretation_contract !== undefined) {
-      throw new Error("Source interpretation seed materialization is not connected yet");
+      drafts.push({
+        signalKind: signal.signal_kind,
+        objectKind: "observation",
+        confidence: 0,
+        distilledFact: signal.raw_payload.source_interpretation.assertion_binding.text,
+        turnContent: input.turnContent,
+        turnMessages: input.context.turn_messages,
+        turnSeedIndex: input.seedIndex,
+        productionSignalId: signal.signal_id,
+        productionRawPayload: signal.raw_payload,
+        extractionProvider: "official_api_compile"
+      });
+      continue;
     }
     const distilled =
       readRawString(signal.raw_payload, "distilled_fact") ??

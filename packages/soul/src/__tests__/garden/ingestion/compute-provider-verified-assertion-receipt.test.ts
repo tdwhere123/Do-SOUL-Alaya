@@ -13,8 +13,7 @@ import { resolveGardenSignalGrounding } from
 import { buildEvidenceInput } from "../../../garden/materialization/materialization-router.js";
 import {
   createContext,
-  createExtractor,
-  openSignal
+  createExtractor
 } from "./compute-provider-fixtures.js";
 
 describe("OfficialApiGardenProvider verified assertion receipt", () => {
@@ -37,12 +36,11 @@ describe("OfficialApiGardenProvider verified assertion receipt", () => {
     expect(buildOfficialApiSourceCorpus(assertion, messages).length).toBeGreaterThan(16_384);
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(JSON.stringify({ signals: [openSignal({
-        signal_kind: "potential_claim",
-        object_kind: "deployment_preference",
-        confidence: 0.9,
-        matched_text: assertion
-      })] })),
+      extractor: createExtractor(JSON.stringify({
+        interpretations: [{ assertion_id: 1, relations: [
+          { predicate: { text: "use" }, arguments: [], qualifiers: [] }
+        ] }]
+      })),
       generateSignalId: () => "signal-long-source"
     });
 
@@ -51,40 +49,10 @@ describe("OfficialApiGardenProvider verified assertion receipt", () => {
       turn_messages: messages
     });
 
-    expect(signal).toBeDefined();
+    expect(signal?.interpretation_contract).toBe("source-interpretation-v1");
+    expect(signal?.object_kind).toBeNull();
+    expect(signal?.confidence).toBeNull();
     expect(BoundedJsonObjectSchema.safeParse(signal?.raw_payload).success).toBe(true);
-    expect(signal?.raw_payload.semantic_factor_graph).toBeDefined();
-    const persistedCorpus = String(signal?.raw_payload.full_turn_content);
-    expect(persistedCorpus).toBe(`User: ${assertion}`);
-    expect(persistedCorpus).not.toContain("Background diagnostics.");
-    const sourceLocator = parseOfficialApiSourceLocator(signal?.raw_payload.source_locator);
-    expect(sourceLocator).not.toBeNull();
-    const sourceHash = expectedVerifiedAssertionHash(
-      assertion,
-      persistedCorpus,
-      signal!.signal_id,
-      sourceLocator!
-    );
-    expect(signal?.raw_payload.verified_user_assertion_source_hash).toBe(sourceHash);
-    expect(buildEvidenceInput(signal!, undefined, { fullTurnExcerpt: true })).toMatchObject({
-      excerpt: assertion,
-      source_hash: sourceHash
-    });
-    if (signal?.interpretation_contract !== undefined) throw new Error("expected legacy signal fixture");
-    const tampered = {
-      ...signal!,
-      raw_payload: {
-        ...signal!.raw_payload,
-        verified_user_assertion_source_hash:
-          "sha256:garden-verified-user-assertion-v1:not-a-digest"
-      }
-    };
-    expect(resolveGardenSignalGrounding(tampered)).toEqual({
-      status: "rejected",
-      reason: "source_grounding_rejected"
-    });
-    expect(buildEvidenceInput(tampered, undefined, { fullTurnExcerpt: true }).source_hash)
-      .toBeNull();
   });
 });
 

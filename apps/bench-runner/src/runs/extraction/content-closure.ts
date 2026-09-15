@@ -64,8 +64,7 @@ export function inspectExtractionRawJson(
   classificationContext?: ExtractionEnvelopeClassificationContext
 ): ExtractionRawJsonInspection {
   const envelope = inspectExtractionRawEnvelope(rawJson, classificationContext);
-  const parsedDraftCount = parseOfficialApiSignals(rawJson).length;
-  return { ...envelope, parsedDraftCount };
+  return { ...envelope, parsedDraftCount: countParsedDrafts(rawJson) };
 }
 
 export function inspectExtractionRawEnvelope(
@@ -227,8 +226,16 @@ function uniqueEntriesByKey<T extends { readonly cacheKey: string }>(
 
 function countRawEnvelopeSignals(parsed: unknown): number | null {
   if (typeof parsed !== "object" || parsed === null) return null;
+  const interpretations = (parsed as { readonly interpretations?: unknown }).interpretations;
+  if (Array.isArray(interpretations)) return interpretations.length;
   const signals = (parsed as { readonly signals?: unknown }).signals;
   return Array.isArray(signals) ? signals.length : null;
+}
+
+function countParsedDrafts(rawJson: string): number {
+  const parsed = JSON.parse(rawJson) as { readonly interpretations?: unknown; readonly signals?: unknown };
+  if (Array.isArray(parsed.interpretations)) return parsed.interpretations.length;
+  return parseOfficialApiSignals(rawJson).length;
 }
 
 function isPlanSkippedRawEnvelope(parsed: unknown): boolean {
