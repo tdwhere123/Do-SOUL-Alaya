@@ -25,7 +25,9 @@ export function prepareOrphanRadarStatements(db: StorageDatabase): OrphanRadarSt
     findByTargetMemoryStatement: db.connection.prepare(
       selectOrphanRadarSql("byTargetMemory", "listRecent")
     ),
-    deleteExpiredStatement: db.connection.prepare("DELETE FROM orphan_radar WHERE expires_at <= ?")
+    deleteExpiredStatement: db.connection.prepare(
+      "DELETE FROM orphan_radar WHERE alaya_utc_compare(expires_at, ?) <= 0"
+    )
   };
 }
 
@@ -34,7 +36,8 @@ type OrphanRadarSuffixKey = "limitOne" | "listRecent";
 
 const ORPHAN_RADAR_WHERE_CLAUSES: Readonly<Record<OrphanRadarWhereKey, string>> = Object.freeze({
   byId: "radar_id = ? AND target_event_id IS NULL",
-  activeByWorkspace: "workspace_id = ? AND expires_at > ? AND target_event_id IS NULL",
+  activeByWorkspace:
+    "workspace_id = ? AND alaya_utc_compare(expires_at, ?) > 0 AND target_event_id IS NULL",
   byTargetMemory: "target_memory_id = ? AND workspace_id = ?"
 });
 

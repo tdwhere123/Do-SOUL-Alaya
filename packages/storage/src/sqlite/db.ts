@@ -31,6 +31,7 @@ import { restrictSqliteFileModes } from "./sqlite-file-modes.js";
 import { openSqliteConnection } from "./open-sqlite-connection.js";
 import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 import { registerRetainedSourceChunkDigest } from "./retained-source-chunk-digest.js";
+import { registerUtcInstantComparison } from "./utc-instant-comparison.js";
 import { migrateRetainedSourceChunks } from "./retained-source-migration.js";
 import { migrateEmbeddingVectorValidity } from "./embedding-vector-validity-migration.js";
 import { parseRows, type RowParser } from "../repos/shared/parse-row.js";
@@ -95,6 +96,7 @@ export class StorageDatabase {
     this.filename = filename;
     this.connection = connection;
     registerRetainedSourceChunkDigest(connection);
+    registerUtcInstantComparison(connection);
     this.reopenTemporalMode = reopenTemporalMode;
   }
 
@@ -131,6 +133,7 @@ export class StorageDatabase {
     bindEmbeddingOverlayIfPresent(database, this.filename);
     this.connection = database;
     registerRetainedSourceChunkDigest(database);
+    registerUtcInstantComparison(database);
     this.connectionVersion += 1;
     this.closed = false;
     if (this.filename !== ":memory:") {
@@ -270,6 +273,7 @@ function initializeUncachedDatabase(
   try {
     configureDatabaseConnection(database, busyTimeoutMs);
     registerRetainedSourceChunkDigest(database);
+    registerUtcInstantComparison(database);
     restrictSqliteFileModes(filename);
     runMigrations(database, temporalMode, busyTimeoutMs);
     bindEmbeddingOverlayIfPresent(database, filename);

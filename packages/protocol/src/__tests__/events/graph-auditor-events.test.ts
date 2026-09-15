@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   ControlPlaneObjectKind,
   ControlPlaneObjectKindSchema,
+  EventLogOrphanRadarRecordSchema,
   EventTypeSchema,
   GARDEN_ROLE_PERMISSIONS,
   GardenRole,
   GardenTaskKindSchema,
   ObjectKind,
-  ObjectKindSchema
+  ObjectKindSchema,
+  OrphanRadarSchema
 } from "../../index.js";
 
 const validTimestamp = "2026-03-28T00:00:00.000Z";
@@ -69,6 +71,37 @@ describe("Phase 4B protocol schemas", () => {
     expect(MemoryGraphEdgeSchema.parse(edge)).toEqual(edge);
     expect(GraphNeighborSchema.parse(neighbor)).toEqual(neighbor);
     expect(OrphanRadarSchema.parse(radar)).toEqual(radar);
+  });
+
+  it("orders orphan radar expiry by instant across datetime precisions", () => {
+    const radar = {
+      radar_id: "radar-mixed-precision",
+      target_memory_id: "memory-3",
+      workspace_id: "workspace-1",
+      suspected_surface_gaps: ["surface-a"],
+      suggested_action: "re_anchor_candidate",
+      confidence: 0.6,
+      detected_at: "2026-03-28T12:34:30Z",
+      expires_at: "2026-03-28T12:34Z",
+      requires_review: true
+    } as const;
+
+    expect(OrphanRadarSchema.safeParse(radar).success).toBe(false);
+    expect(OrphanRadarSchema.safeParse({
+      ...radar,
+      detected_at: "2026-03-28T12:34Z",
+      expires_at: "2026-03-28T12:34:00.0001Z"
+    }).success).toBe(true);
+    expect(EventLogOrphanRadarRecordSchema.safeParse({
+      radar_id: "radar-event-mixed-precision",
+      audit_event_id: "event-1",
+      event_type: "memory.delivered",
+      expected_table: "trust_context_delivery",
+      workspace_id: "workspace-1",
+      detected_at: radar.detected_at,
+      expires_at: radar.expires_at,
+      requires_review: true
+    }).success).toBe(false);
   });
 
   it("parses all graph-auditor payloads and adds them to the global event union", async () => {

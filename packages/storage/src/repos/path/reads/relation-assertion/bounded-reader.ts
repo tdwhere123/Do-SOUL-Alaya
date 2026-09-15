@@ -1,4 +1,4 @@
-import { compareUtcInstants, RelationValiditySchema, type RelationValidity } from "@do-soul/alaya-protocol";
+import { RelationValiditySchema, type RelationValidity } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../../sqlite/db.js";
 
 export interface RecallAssertionObservation {
@@ -38,16 +38,8 @@ WHERE a.workspace_id = ? AND lower(json_extract(a.anchors_json, '$.source_anchor
 ORDER BY a.assertion_id, e.evidence_id
 LIMIT ?`;
 
-const UTC_COMPARISON_CONNECTIONS = new WeakSet<StorageDatabase["connection"]>();
-
 export class SqliteRelationRecallReader {
-  public constructor(private readonly db: StorageDatabase) {
-    if (!UTC_COMPARISON_CONNECTIONS.has(db.connection)) {
-      db.connection.function("alaya_utc_compare", { deterministic: true }, (left: unknown, right: unknown) =>
-        typeof left === "string" && typeof right === "string" ? compareUtcInstants(left, right) ?? null : null);
-      UTC_COMPARISON_CONNECTIONS.add(db.connection);
-    }
-  }
+  public constructor(private readonly db: StorageDatabase) {}
 
   public prepareIndex(): void {
     this.db.connection.exec(RELATION_RECALL_INDEX_SQL);

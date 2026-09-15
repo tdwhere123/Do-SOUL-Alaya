@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { EventLogOrphanExpectedTableSchema } from "../events/event-log-orphan.js";
 import { type EventLogEntry } from "../events/event-log.js";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import {
+  compareUtcInstants,
+  IsoDatetimeStringSchema,
+  NonEmptyStringSchema
+} from "../shared/schema-primitives.js";
 import { type GardenTaskResult } from "../garden/garden-tier.js";
 import { MemoryDimensionSchema } from "../memory/memory-entry.js";
 import { type OrphanRadar } from "../lifecycle/orphan-radar.js";
@@ -59,7 +63,7 @@ export const EventLogOrphanRadarRecordSchema = z
   })
   .strict()
   .readonly()
-  .refine((data) => data.expires_at > data.detected_at, {
+  .refine((data) => compareUtcInstants(data.expires_at, data.detected_at) === 1, {
     message: "expires_at must be after detected_at"
   });
 
