@@ -137,7 +137,8 @@ export function stepFieldGraph(state: PreparedFieldGraph, availableBytes: number
     const current = { ...state, changedProduct: undefined };
     const admitted = state.deferred === undefined ? current : { ...current, deferred: undefined,
       pending: state.pending.append(state.deferred), allocatedPendingSlots: state.allocatedPendingSlots + 1 };
-    return { ...prepareRow(admitted, atom), retainedBytes: Math.max(state.retainedBytes, atom.bytes), next: "relax" };
+    // Live version includes every admitted atom; a peak-atom stamp hides the rest of the tree.
+    return { ...prepareRow(admitted, atom), retainedBytes: state.retainedBytes + atom.bytes, next: "relax" };
   }
   const result = solveMaxMinField({ nodeIds: [], seeds: new Map(), transitions: [], bottom: 0, top: 1000,
     preparedGraph: state.graph, priorValues: state.numericValues, workQueue: state.queue, workLimit: 1 });
@@ -149,7 +150,7 @@ export function stepFieldGraph(state: PreparedFieldGraph, availableBytes: number
     changedProduct = node.product;
   }
   return { ...state, numericValues: result.values, queue: result.workQueue, values,
-    retainedBytes: Math.max(state.retainedBytes, atom.bytes), changedProduct, next: "prepare" };
+    retainedBytes: state.retainedBytes + atom.bytes, changedProduct, next: "prepare" };
 }
 
 function prepareRow(state: PreparedFieldGraph, atom: FieldGraphAtom): PreparedFieldGraph {
