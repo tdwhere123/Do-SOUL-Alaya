@@ -1,3 +1,4 @@
+import { SourceInterpretationResponseEnvelopeSchema } from "@do-soul/alaya-protocol";
 import {
   parseOfficialApiExtractionRequest,
   stringifyOfficialApiExtractionRequest,
@@ -84,31 +85,11 @@ function withPartitionValidation(
 }
 
 function assertPartitionLocators(rawJson: string, allowedIds: ReadonlySet<number>): void {
-  const parsed = JSON.parse(rawJson) as { readonly signals?: unknown };
-  if (!Array.isArray(parsed.signals)) {
-    throw new Error("official API signals array missing from assertion partition response");
-  }
-  for (const signal of parsed.signals) {
-    const assertionId = readSignalAssertionId(signal);
-    if (!allowedIds.has(assertionId)) {
-      throw new Error("official API signal locator is outside its assertion partition");
+  for (const interpretation of readInterpretations(rawJson)) {
+    if (!allowedIds.has(interpretation.assertion_id)) {
+      throw new Error("official API interpretation is outside its assertion partition");
     }
   }
-}
-
-function readSignalAssertionId(signal: unknown): number {
-  if (typeof signal !== "object" || signal === null) {
-    throw new Error("official API partition signal requires a source locator");
-  }
-  const locator = (signal as { readonly source_locator?: unknown }).source_locator;
-  if (typeof locator !== "object" || locator === null) {
-    throw new Error("official API partition signal requires a source locator");
-  }
-  const assertionId = (locator as { readonly assertion_id?: unknown }).assertion_id;
-  if (!Number.isSafeInteger(assertionId) || Number(assertionId) < 1) {
-    throw new Error("official API partition signal locator is invalid");
-  }
-  return Number(assertionId);
 }
 
 function readPartitionableRequest(input: ExtractInput): OfficialApiExtractionRequest | null {
@@ -149,7 +130,7 @@ function buildPartitionSuccess(
   ]);
   let rawJson: string;
   try {
-    rawJson = JSON.stringify({ signals: orderedPartitionSignals(request, results) });
+    rawJson = JSON.stringify({ interpretations: orderedPartitionInterpretations(request, results) });
     input.validateRawJson?.(rawJson);
   } catch (cause) {
     throw buildPostComposeFailure(aggregate, cause);
@@ -299,33 +280,31 @@ function aggregateTransport(summaries: readonly TransportSummary[]): TransportSu
   };
 }
 
-function readSignals(rawJson: string): readonly unknown[] {
-  const parsed = JSON.parse(rawJson) as { readonly signals?: unknown };
-  if (!Array.isArray(parsed.signals)) throw new TypeError("partition response is not a signals envelope");
-  return parsed.signals;
+function readInterpretations(rawJson: string) {
+  return SourceInterpretationResponseEnvelopeSchema.parse(JSON.parse(rawJson)).interpretations;
 }
 
-function orderedPartitionSignals(
+function orderedPartitionInterpretations(
   request: OfficialApiExtractionRequest,
   results: readonly ExtractResult[]
-): readonly unknown[] {
+) {
   const order = new Map(request.source_assertions.map(
     ({ assertion_id }, index) => [assertion_id, index] as const
   ));
   return results
-    .flatMap(({ rawJson }) => readSignals(rawJson))
-    .map((signal, providerOrder) => ({
-      signal,
+    .flatMap(({ rawJson }) => readInterpretations(rawJson))
+    .map((interpretation, providerOrder) => ({
+      interpretation,
       providerOrder,
-      assertionOrder: order.get(readSignalAssertionId(signal))
+      assertionOrder: order.get(interpretation.assertion_id)
     }))
     .sort((left, right) => {
       if (left.assertionOrder === undefined || right.assertionOrder === undefined) {
-        throw new Error("official API signal locator is outside its source catalog");
+        throw new Error("official API interpretation is outside its source catalog");
       }
       return left.assertionOrder - right.assertionOrder || left.providerOrder - right.providerOrder;
     })
-    .map(({ signal }) => signal);
+    .map(({ interpretation }) => interpretation);
 }
 
 function addUsage(
