@@ -9,13 +9,17 @@ catalog:
   "@types/better-sqlite3": ^9.6.0
   better-sqlite3: 13.0.3
   hono: ^4.13.7
+  # Vitest 5 and TypeScript 6/7 are separate migrations from this pin set.
   typescript: 5.9.3
   vitest: 4.1.11
+  # 4.6.5 was incompatible with this tree; keep the last accepted 4.6 patch.
   zod: ^4.6.2
 
 overrides:
   "@hono/node-server": 2.1.1
+  # Match engines.node >=24; @types/node 26 tracks Node 26.
   "@types/node": 24.13.4
+  # Optional ONNX extra only. onnxruntime-node declares adm-zip ^0.5.16; 0.6.1 is the advisory-clean line.
   adm-zip: 0.6.1
   body-parser: 2.3.0
   browserslist: 4.28.9
@@ -28,8 +32,10 @@ overrides:
   postcss: 8.5.28
   postcss-selector-parser: 6.1.4
   qs: 6.16.0
+  # Inspector loopback SPA; v7 is a breaking upgrade. See scripts/ci/audit-exemptions.json.
   react-router: 6.30.6
   react-router-dom: 6.30.6
+  # Optional ONNX extra only. transformers 4.2.0 declares sharp ^0.34.5; 0.35.4 is the advisory-clean line.
   sharp: 0.35.4
   ws: 8.21.3
   zod: 4.6.2
