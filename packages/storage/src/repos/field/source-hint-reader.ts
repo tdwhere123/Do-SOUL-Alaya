@@ -12,6 +12,7 @@ export type BoundInterpretationHintPage = Readonly<{
   readonly rows: readonly BoundInterpretationHintRow[];
   readonly nativeVisits: number;
   readonly nativeBytes: number;
+  readonly nativeWork?: number;
   readonly rowsRead: number;
   readonly bytesRead: number;
   readonly truncated: boolean;
@@ -48,6 +49,7 @@ export class SqliteSourceHintReader {
       rows: page,
       nativeVisits: page.length,
       nativeBytes: bytes,
+      nativeWork: page.length,
       rowsRead: page.length,
       bytesRead: bytes,
       truncated,
@@ -138,7 +140,7 @@ function boundedLimit(limit: number, nativeLimit: number): number {
 
 function emptyBoundPage(truncated: boolean, after: string | null): BoundInterpretationHintPage {
   return {
-    rows: [], nativeVisits: 0, nativeBytes: 0, rowsRead: 0, bytesRead: 0,
+    rows: [], nativeVisits: 0, nativeBytes: 0, nativeWork: 0, rowsRead: 0, bytesRead: 0,
     truncated, committedThrough: after, unavailable: false
   };
 }

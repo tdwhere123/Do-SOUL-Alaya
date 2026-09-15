@@ -8,7 +8,8 @@ import { buildTypedObservation, sourceRootEligible } from "./observation-admissi
 import {
   matchBoundInterpretation,
   parseBoundInterpretationGist,
-  sourceTextContainsPhrases
+  sourceTextContainsPhrases,
+  type ProposalMatchReason
 } from "./source-proposal-match.js";
 import {
   DEFAULT_SOURCE_BYTE_LIMIT,
@@ -19,6 +20,7 @@ import {
 export type SourceHintLaneResult = Readonly<{
   readonly observations: readonly TypedObservation[];
   readonly rows: readonly SourceRootObserverRow[];
+  readonly reasons: readonly ProposalMatchReason[];
   readonly workUnits: number;
   readonly bytes: number;
   readonly truncated: boolean;
@@ -69,30 +71,44 @@ function takeProposalHintPage(
     afterCursor
   });
   if (page.unavailable === true) {
-    return { ...emptyHint(afterCursor, false, true), hydrationUnavailable: true,
-      resourceLimited: page.resourceLimited === true, workUnits: page.nativeVisits, bytes: page.bytesRead };
+    return {
+      ...emptyHint(afterCursor, true, false),
+      hydrationUnavailable: true,
+      resourceLimited: page.resourceLimited === true,
+      workUnits: page.nativeWork ?? page.nativeVisits,
+      bytes: page.bytesRead
+    };
   }
   const observations: TypedObservation[] = [];
   const rows: SourceRootObserverRow[] = [];
+  const reasons: ProposalMatchReason[] = [];
   let committed = page.committedThrough ?? afterCursor;
+  let hydrateWork = 0;
+  let hydrateBytes = 0;
+  const scopeUnsupported = proposalScopeUnsupported(input.query);
   for (const item of page.rows) {
     committed = item.object_id;
     const bound = parseBoundInterpretationGist(item.gist);
     if (bound === null) continue;
-    if (matchBoundInterpretation(bound, sketch) === undefined) continue;
+    const reason = scopeUnsupported ? undefined : matchBoundInterpretation(bound, sketch);
+    if (reason === undefined) continue;
     const hydrated = hydrateHintTarget(input, bound.source_target.root_kind, bound.source_target.root_id,
       bound.source_target.source_version, bound.source_target.content_digest,
       bound.source_target.evidence_object_id);
-    if (hydrated === undefined) continue;
+    hydrateWork += hydrated.workUnits;
+    hydrateBytes += hydrated.bytes;
+    if (hydrated.observation === undefined || hydrated.row === undefined) continue;
     observations.push(hydrated.observation);
     rows.push(hydrated.row);
+    reasons.push(reason);
     if (observations.length >= limit) break;
   }
   return {
-    observations, rows,
-    workUnits: page.nativeVisits, bytes: page.bytesRead + (page.nativeBytes ?? 0),
+    observations, rows, reasons,
+    workUnits: (page.nativeWork ?? page.nativeVisits) + hydrateWork,
+    bytes: page.bytesRead + (page.nativeBytes ?? 0) + hydrateBytes,
     truncated: page.truncated, hintCommitted: committed,
-    hintsDone: !page.truncated && page.rows.length === 0,
+    hintsDone: !page.truncated,
     hydrationUnavailable: false, resourceLimited: page.resourceLimited === true
   };
 }
@@ -116,8 +132,13 @@ function takeTextHintPage(
     byteLimit: input.source_byte_limit ?? DEFAULT_SOURCE_BYTE_LIMIT
   });
   if (page.unavailable === true) {
-    return { ...emptyHint(afterCursor, false, true), hydrationUnavailable: true,
-      resourceLimited: page.resourceLimited === true, workUnits: page.nativeVisits, bytes: page.bytesRead };
+    return {
+      ...emptyHint(afterCursor, true, false),
+      hydrationUnavailable: true,
+      resourceLimited: page.resourceLimited === true,
+      workUnits: page.nativeWork ?? page.nativeVisits,
+      bytes: page.bytesRead
+    };
   }
   const observations: TypedObservation[] = [];
   const rows: SourceRootObserverRow[] = [];
@@ -133,10 +154,10 @@ function takeTextHintPage(
     if (observations.length >= limit) break;
   }
   return {
-    observations, rows,
+    observations, rows, reasons: [],
     workUnits: page.nativeWork ?? page.nativeVisits, bytes: page.bytesRead,
     truncated: page.truncated, hintCommitted: committed,
-    hintsDone: !page.truncated && page.rows.length === 0,
+    hintsDone: !page.truncated,
     hydrationUnavailable: false, resourceLimited: page.resourceLimited === true
   };
 }
@@ -148,9 +169,14 @@ function hydrateHintTarget(
   revision: string,
   digest: string,
   evidenceObjectId: string | null
-): Readonly<{ observation: TypedObservation; row: SourceRootObserverRow }> | undefined {
+): Readonly<{
+  readonly observation?: TypedObservation;
+  readonly row?: SourceRootObserverRow;
+  readonly workUnits: number;
+  readonly bytes: number;
+}> {
   const hydrate = input.readers.sourceRoot;
-  if (hydrate === undefined) return undefined;
+  if (hydrate === undefined) return { workUnits: 0, bytes: 0 };
   const page = hydrate({
     workspaceId: input.workspace_id,
     rootKind,
@@ -160,11 +186,13 @@ function hydrateHintTarget(
     evidenceObjectId,
     byteLimit: input.source_byte_limit ?? DEFAULT_SOURCE_BYTE_LIMIT
   });
-  if (page.unavailable || page.row === null) return undefined;
-  if (page.row.revision !== revision || page.row.digest !== digest) return undefined;
-  if (!sourceRootEligible(input, page.row)) return undefined;
+  const workUnits = page.nativeWork ?? page.rowsRead;
+  const bytes = page.bytesRead + (page.metadataBytes ?? 0);
+  if (page.unavailable || page.row === null) return { workUnits, bytes };
+  if (page.row.revision !== revision || page.row.digest !== digest) return { workUnits, bytes };
+  if (!sourceRootEligible(input, page.row)) return { workUnits, bytes };
   const observation = observationFromRoot(input, page.row);
-  return observation === null ? undefined : { observation, row: page.row };
+  return observation === null ? { workUnits, bytes } : { observation, row: page.row, workUnits, bytes };
 }
 
 function observationFromRoot(
@@ -189,13 +217,18 @@ function observationFromRoot(
   });
 }
 
+function proposalScopeUnsupported(query: ObserveConditionalFieldInput["query"]): boolean {
+  return query.holes.some((hole) =>
+    hole.status === "unresolved" && hole.hole_id.startsWith("hole.query.alternative"));
+}
+
 function emptyHint(
   afterCursor: string | null,
   hintsDone: boolean,
   truncated: boolean
 ): SourceHintLaneResult {
   return {
-    observations: [], rows: [], workUnits: 0, bytes: 0, truncated,
+    observations: [], rows: [], reasons: [], workUnits: 0, bytes: 0, truncated,
     hintCommitted: afterCursor, hintsDone, hydrationUnavailable: false, resourceLimited: false
   };
 }

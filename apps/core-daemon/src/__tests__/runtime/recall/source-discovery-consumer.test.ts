@@ -50,7 +50,7 @@ describe("source discovery consumer surfaces", () => {
     const slice = await openSourceSlice(() => {}, filename);
     const record = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256)
       .insert(hashedRecord(WS, body, "intended"));
-    insertBoundGist(slice.database, "ev-intended", canary.intended, record.record_id, record.content_digest, canary.sketch);
+    insertBoundGist(slice.database, "a-intended", canary.intended, record.record_id, record.content_digest, record.evidence_object_id, canary.sketch);
     const filler = `${canary.intended} filler ${"y".repeat(3000)}`;
     new SqliteFieldSourceRecordRepo(slice.database, fieldSha256).insert(hashedRecord(WS, filler, "filler"));
     const proposal = compileQuerySourceSketch({
@@ -90,31 +90,57 @@ describe("source discovery consumer surfaces", () => {
       });
       const context = { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" };
       const first = await handler(request, context);
-      const omitted = first.results.find((result) => result.content_preview === "[payload omitted]")
-        ?? first.results.find((result) => result.content_preview !== undefined
-          && result.target?.kind === "source_evidence"
-          && result.target.span?.content_complete === false);
-      expect(omitted?.target?.kind).toBe("source_evidence");
-      if (omitted?.target?.kind !== "source_evidence") throw new Error("source target missing");
-      const start = omitted.target.span?.content_end ?? 0;
-      const expanded = await handler({
-        ...request,
-        continuation: first.index!.continuation!,
-        payload_continuation: {
-          schema_version: 1,
-          purpose: "payload_expansion",
-          target: sourceEvidenceRootTarget(omitted.target),
-          start_offset: start,
-          byte_budget: 4096
+      const row = first.results.find((result) => result.target?.kind === "source_evidence"
+        && result.target.root_id === record.record_id);
+      expect(row?.target?.kind).toBe("source_evidence");
+      if (row?.target?.kind !== "source_evidence") throw new Error("source target missing");
+      const span = row.target.span;
+      if (row.content_preview === "[payload omitted]") {
+        const start = span?.content_end ?? 0;
+        const expanded = await handler({
+          ...request,
+          continuation: first.index!.continuation!,
+          payload_continuation: {
+            schema_version: 1,
+            purpose: "payload_expansion",
+            target: sourceEvidenceRootTarget(row.target),
+            start_offset: start,
+            byte_budget: 4096
+          }
+        }, context);
+        expect(expanded.page_purpose).toBe("payload");
+        const preview = expanded.results[0]!.content_preview;
+        expect(preview).toBe(body.slice(start, start + preview.length));
+        expect(expanded.results[0]?.target).toMatchObject({
+          root_id: record.record_id,
+          span: { content_start: start, content_end: start + preview.length }
+        });
+      } else {
+        const start = span?.content_start ?? 0;
+        const end = span?.content_end ?? row.content_preview.length;
+        expect(row.content_preview).toBe(body.slice(start, end));
+        expect(span).toMatchObject({ content_start: start, content_end: end });
+        if (span?.content_complete === false) {
+          const expanded = await handler({
+            ...request,
+            continuation: first.index!.continuation!,
+            payload_continuation: {
+              schema_version: 1,
+              purpose: "payload_expansion",
+              target: sourceEvidenceRootTarget(row.target),
+              start_offset: end,
+              byte_budget: 4096
+            }
+          }, context);
+          expect(expanded.page_purpose).toBe("payload");
+          const preview = expanded.results[0]!.content_preview;
+          expect(preview).toBe(body.slice(end, end + preview.length));
+          expect(expanded.results[0]?.target).toMatchObject({
+            root_id: record.record_id,
+            span: { content_start: end, content_end: end + preview.length }
+          });
         }
-      }, context);
-      expect(expanded.page_purpose).toBe("payload");
-      expect(expanded.results[0]?.content_preview).toBeDefined();
-      const combined = start === 0
-        ? expanded.results[0]!.content_preview
-        : `${omitted.content_preview}${expanded.results[0]!.content_preview}`;
-      expect(combined.startsWith(canary.intended) || expanded.results[0]!.content_preview!.includes(canary.intended)
-        || omitted.content_preview.includes(canary.intended)).toBe(true);
+      }
     } finally {
       await client.close();
       slice.database.close();
@@ -128,9 +154,17 @@ describe("source discovery consumer surfaces", () => {
     const slice = await openSourceSlice((database) => databases.push(database));
     const record = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256)
       .insert(hashedRecord(WS, canary.intended, "intended"));
-    insertBoundGist(slice.database, "ev-cli", canary.intended, record.record_id, record.content_digest, canary.sketch);
-    const result = await recallThroughCli(slice, canary.original_query, 8);
-    expect(result.index).toBeDefined();
+    insertBoundGist(slice.database, "a-cli", canary.intended, record.record_id, record.content_digest, record.evidence_object_id, canary.sketch);
+    const proposal = compileQuerySourceSketch({
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      interpretation_clock: INTERPRETATION_CLOCK,
+      view: { ...defaultView(), result_kind_view: "source_only" },
+      sketch: { original_query: canary.original_query, relation: canary.sketch }
+    }).interpretation_proposal;
+    const result = await recallThroughCli(slice, canary.original_query, 8, proposal);
+    const preview = (result as { readonly results?: readonly { readonly content_preview?: string }[] }).results?.[0]?.content_preview;
+    expect(preview).toBe(canary.intended);
   });
 
   it("reopens a file-backed sqlite membership after the worker restarts", async () => {
@@ -141,7 +175,7 @@ describe("source discovery consumer surfaces", () => {
     const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
     const intended = records.insert(hashedRecord(WS, canary.intended, "intended"));
     records.insert(hashedRecord(WS, canary.distractor, "distractor"));
-    insertBoundGist(slice.database, "ev-reopen", canary.intended, intended.record_id, intended.content_digest, canary.sketch);
+    insertBoundGist(slice.database, "a-reopen", canary.intended, intended.record_id, intended.content_digest, intended.evidence_object_id, canary.sketch);
     slice.database.close();
     closeCachedDatabase(filename);
     const first = createRecallReadWorkerClient({
@@ -201,6 +235,7 @@ function insertBoundGist(
   source: string,
   rootId: string,
   digest: string,
+  evidenceObjectId: string | null,
   relation: NonNullable<(typeof SOURCE_DISCOVERY_CANARY)[number]["sketch"]>
 ): void {
   const located = locateSourceInterpretation({
@@ -233,7 +268,7 @@ function insertBoundGist(
       root_id: rootId,
       source_version: "v1",
       content_digest: digest,
-      evidence_object_id: objectId
+      evidence_object_id: evidenceObjectId
     })
   };
   database.connection.prepare(`

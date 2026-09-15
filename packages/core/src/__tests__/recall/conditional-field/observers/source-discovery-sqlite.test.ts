@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  CONDITIONAL_FIELD_SCHEMA_VERSION,
   locateSourceInterpretation,
   sourceRecallTarget
 } from "@do-soul/alaya-protocol";
@@ -14,6 +15,11 @@ import { fieldContractSha256 } from "../../../../shared/field-hash.js";
 import { compileQuerySourceSketch } from "../../../../recall/conditional-field/query/query-source-sketch.js";
 import { matchBoundInterpretation, parseBoundInterpretationGist } from "../../../../recall/conditional-field/observers/source-proposal-match.js";
 import { adoptedSourceProposal } from "../../../../recall/conditional-field/query/query-source-proposal.js";
+import {
+  observeConditionalField,
+  startObserverCursor,
+  toSourceRootObserverRow
+} from "../../../../recall/conditional-field/observers/observe.js";
 import {
   INTERPRETATION_CLOCK,
   SNAPSHOT_ID,
@@ -41,8 +47,8 @@ describe("source discovery sqlite lookup", () => {
     const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
     const intended = records.insert(hashedRecord("workspace-1", canary.intended, "intended"));
     const distractor = records.insert(hashedRecord("workspace-1", canary.distractor, "distractor"));
-    insertBoundGist(database, "ev-intended", canary.intended, intended.record_id, intended.content_digest, canary.sketch);
-    insertBoundGist(database, "ev-distractor", canary.distractor, distractor.record_id, distractor.content_digest, {
+    insertBoundGist(database, "a-intended", canary.intended, intended.record_id, intended.content_digest, intended.evidence_object_id, canary.sketch);
+    insertBoundGist(database, "z-distractor", canary.distractor, distractor.record_id, distractor.content_digest, distractor.evidence_object_id, {
       predicate: "access",
       arguments: [
         { role: "capability", phrase: "full PC" },
@@ -70,7 +76,7 @@ describe("source discovery sqlite lookup", () => {
     expect(matched).toEqual([intended.record_id]);
     const text = new SqliteSourceHintReader(database.connection).pageSourceTextHints({
       workspaceId: "workspace-1",
-      phrases: ["access", "full pc", "all owned devices", "instantly"],
+      phrases: ["access", "full pc", "all the devices you own", "instantly"],
       limit: 8,
       nativeLimit: 8,
       afterCursor: null
@@ -78,8 +84,77 @@ describe("source discovery sqlite lookup", () => {
     expect(text.rows.map((row) => row.root_id).sort()).toEqual(
       [intended.record_id, distractor.record_id].sort()
     );
-    expect(new SqliteSourceRootRecallReader(records, new SqliteEvidenceCapsuleRepo(database))
-      .page({ workspaceId: "workspace-1", limit: 8, nativeLimit: 8, afterCursor: null }).rows.length).toBeGreaterThan(0);
+    const roots = new SqliteSourceRootRecallReader(records, new SqliteEvidenceCapsuleRepo(database));
+    expect(roots.page({ workspaceId: "workspace-1", limit: 8, nativeLimit: 8, afterCursor: null }).rows.length).toBeGreaterThan(0);
+    const observed = observeConditionalField({
+      lease: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        lease_id: "lease-1",
+        snapshot_id: SNAPSHOT_ID,
+        query_id: interpretation.query_id,
+        status: "active"
+      },
+      action: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        action: "seed",
+        region_id: "seed",
+        work_limit: 1
+      },
+      cursor: startObserverCursor({
+        cursor_id: "seed",
+        snapshot_id: SNAPSHOT_ID,
+        query_id: interpretation.query_id,
+        region_id: "seed"
+      }),
+      query: interpretation,
+      workspace_id: "workspace-1",
+      authorized_scopes: null,
+      readers: {
+        sourceRoots: (input) => {
+          const page = roots.page({
+            workspaceId: input.workspaceId,
+            limit: input.limit,
+            nativeLimit: input.nativeLimit,
+            afterCursor: input.afterCursor,
+            byteLimit: input.byteLimit
+          });
+          return {
+            rows: page.rows.map(toSourceRootObserverRow),
+            nativeVisits: page.nativeVisits,
+            nativeBytes: page.nativeBytes,
+            rowsRead: page.rowsRead,
+            bytesRead: page.bytesRead,
+            truncated: page.truncated,
+            committedThrough: page.committedThrough,
+            unavailable: page.unavailable
+          };
+        },
+        boundInterpretations: (input) => new SqliteSourceHintReader(database.connection).pageBoundInterpretations(input),
+        sourceRoot: (input) => {
+          if (input.revision === undefined || input.digest === undefined) {
+            return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
+          }
+          const page = roots.load(input.workspaceId, sourceRecallTarget({
+            workspace_id: input.workspaceId,
+            root_kind: input.rootKind,
+            root_id: input.rootId,
+            source_version: input.revision,
+            content_digest: input.digest,
+            evidence_object_id: input.evidenceObjectId ?? null
+          }));
+          return {
+            row: page.row === null ? null : toSourceRootObserverRow(page.row),
+            rowsRead: page.rowsRead,
+            bytesRead: page.bytesRead,
+            nativeWork: page.nativeWork,
+            unavailable: page.unavailable,
+            resourceLimited: page.resourceLimited
+          };
+        }
+      }
+    });
+    expect(observed.page.observations[0]?.object_id).toBe(intended.record_id);
+    expect(observed.lookup_reasons?.[0]?.kind).toBe("proposal");
   });
 });
 
@@ -89,6 +164,7 @@ function insertBoundGist(
   source: string,
   rootId: string,
   digest: string,
+  evidenceObjectId: string | null,
   relation: NonNullable<(typeof SOURCE_DISCOVERY_CANARY)[number]["sketch"]>
 ): void {
   const located = locateSourceInterpretation({
@@ -121,7 +197,7 @@ function insertBoundGist(
       root_id: rootId,
       source_version: "v1",
       content_digest: digest,
-      evidence_object_id: objectId
+      evidence_object_id: evidenceObjectId
     })
   };
   database.connection.prepare(`

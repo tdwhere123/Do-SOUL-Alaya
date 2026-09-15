@@ -33,10 +33,16 @@ describe("source discovery canary", () => {
       expect(proposal.firstId).not.toBe(planted.distractor.root_id);
       expect(proposal.wording).toBe(canary.intended);
       expect(proposal.ids).toEqual([planted.intended.root_id]);
+      expect(proposal.reasons[0]?.kind).toBe("proposal");
+      expect(proposal.reasons[0]?.predicate_key).toBe(canary.sketch!.predicate);
+      if (canary.group === "release") {
+        expect(proposal.eventTime?.startsWith("2016")).toBe(true);
+        expect(JSON.stringify(proposal.reasons)).not.toContain("2016");
+      }
       const text = measurePage(planted.textQuery, planted.textReaders, 1);
       expect(text.firstId).toBe(planted.distractor.root_id);
       expect(text.visits).toBeGreaterThan(0);
-      expect(proposal.visits).toBeGreaterThan(0);
+      expect(proposal.visits).toBeGreaterThan(1);
       expect(proposal.bytes).toBeGreaterThan(0);
       expect(text.bytes).toBeGreaterThan(0);
     }
@@ -58,7 +64,8 @@ describe("source discovery canary", () => {
     });
     expect(polarity.status).toBe("partial");
     expect(polarity.holes.some((hole) => hole.hole_id.startsWith("hole.query.alternative"))).toBe(true);
-    expect(measurePage(polarity, planted.proposalReaders, 1).firstId).toBe(planted.intended.root_id);
+    expect(measurePage(polarity, planted.proposalReaders, 1).firstId).toBeUndefined();
+    expect(measurePage(polarity, planted.proposalReaders, 1).reasons).toEqual([]);
   });
 });
 
@@ -98,12 +105,13 @@ function measurePage(
     wording: observed.source_roots?.[0]?.content,
     visits: observed.work.native_visits,
     bytes: observed.work.bytes_read,
-    exposed: observed.page.observations.length
+    reasons: observed.lookup_reasons ?? [],
+    eventTime: observed.source_roots?.[0]?.event_time
   };
 }
 
 function plantCanary(canary: CanaryCase) {
-  const intended = sourceRoot("intended", canary.intended);
+  const intended = sourceRoot("intended", canary.intended, canary.event_time);
   const distractor = sourceRoot("distractor", canary.distractor);
   const intendedBound = boundOf(canary, canary.intended, intended, intendedRoles(canary));
   const distractorBound = boundOf(canary, canary.distractor, distractor, distractorRoles(canary));
@@ -156,8 +164,8 @@ function readers(
     sourceRoot: (input) => {
       const row = roots.find((item) => item.root_id === input.rootId);
       return row === undefined
-        ? { row: null, rowsRead: 1, bytesRead: 0, unavailable: true }
-        : { row, rowsRead: 1, bytesRead: Buffer.byteLength(row.content ?? "", "utf8"), unavailable: false };
+        ? { row: null, rowsRead: 1, bytesRead: 0, nativeWork: 5, unavailable: true }
+        : { row, rowsRead: 1, bytesRead: Buffer.byteLength(row.content ?? "", "utf8"), nativeWork: 5, unavailable: false };
     },
     boundInterpretations: ({ afterCursor, limit }) => {
       const start = afterCursor === null ? 0 : bounds.findIndex((row) =>
@@ -232,9 +240,12 @@ function intendedRoles(canary: CanaryCase) {
 function distractorRoles(canary: CanaryCase) {
   if (canary.group === "aspiration") {
     return received({
-      predicate: "corporate aspiration",
-      arguments: [{ role: "content", phrase: "human potential" }],
-      qualifiers: [{ role: "audience", phrase: "Investors" }]
+      predicate: "strives",
+      arguments: [{ role: "aim", phrase: "definitive cloud platform" }],
+      qualifiers: [
+        { role: "audience", phrase: "Investors" },
+        { role: "scope", phrase: "potential to bring technological freedom to all" }
+      ]
     });
   }
   if (canary.group === "capability") {
@@ -252,8 +263,7 @@ function distractorRoles(canary: CanaryCase) {
     arguments: [
       { role: "theme", phrase: "2016 memo" },
       { role: "promise", phrase: "promise of allowing all individuals to enjoy the power of a high-end PC from the cloud" }
-    ],
-    qualifiers: [{ role: "year", phrase: "2016" }]
+    ]
   });
 }
 
@@ -277,7 +287,7 @@ function received(relation: NonNullable<CanaryCase["sketch"]>) {
   };
 }
 
-function sourceRoot(rootId: string, content: string): SourceRootObserverRow {
+function sourceRoot(rootId: string, content: string, eventTime?: string): SourceRootObserverRow {
   return {
     kind: "source_record",
     workspace_id: "ws",
@@ -286,7 +296,8 @@ function sourceRoot(rootId: string, content: string): SourceRootObserverRow {
     digest: hashContentDigest(content, fieldContractSha256),
     evidence_object_id: `evidence-${rootId}`,
     content,
-    content_complete: true
+    content_complete: true,
+    ...(eventTime === undefined ? {} : { event_time: eventTime })
   };
 }
 

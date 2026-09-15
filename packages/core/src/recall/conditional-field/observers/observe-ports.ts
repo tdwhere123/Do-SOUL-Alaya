@@ -16,6 +16,7 @@ import type {
   StoredPairMeasurement,
   StoredPairsMeasurement
 } from "./measure-stored.js";
+import type { ProposalMatchReason } from "./source-proposal-match.js";
 
 export type LexicalObserverPage = Readonly<{
   readonly ids: readonly string[];
@@ -100,6 +101,7 @@ export type BoundInterpretationHintPage = Readonly<{
   readonly rows: readonly BoundInterpretationHintRow[];
   readonly nativeVisits: number;
   readonly nativeBytes: number;
+  readonly nativeWork?: number;
   readonly rowsRead: number;
   readonly bytesRead: number;
   readonly truncated: boolean;
@@ -283,6 +285,7 @@ export type ObserverActionResult = Readonly<{
   readonly work: ObserverWorkReceipt;
   readonly measurements?: readonly ObservationMeasurement[];
   readonly source_roots?: readonly SourceRootObserverRow[];
+  readonly lookup_reasons?: readonly ProposalMatchReason[];
 }>;
 
 export type {

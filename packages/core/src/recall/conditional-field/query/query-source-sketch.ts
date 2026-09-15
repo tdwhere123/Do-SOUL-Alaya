@@ -60,12 +60,7 @@ export function compileQuerySourceSketch(input: Readonly<{
   readonly authorized_scopes?: readonly string[] | null;
 }>): QueryInterpretation {
   const sketch = input.sketch;
-  let proposal: QueryInterpretationProposal | undefined;
-  try {
-    proposal = sourceSketchProposal(sketch);
-  } catch {
-    proposal = undefined;
-  }
+  const proposal = sourceSketchProposal(sketch);
   const interpretation = compileConditionalFieldQuery({
     source: "ordinary",
     text: sketch.original_query,

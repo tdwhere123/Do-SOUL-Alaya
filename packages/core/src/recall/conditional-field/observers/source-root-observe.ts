@@ -1,6 +1,7 @@
 import { sourceRecallTarget, type TypedObservation } from "@do-soul/alaya-protocol";
 import { buildTypedObservation, sourceRootEligible } from "./observation-admission.js";
 import { sourceHintSketch, takeSourceHintPage } from "./source-hint-observe.js";
+import type { ProposalMatchReason } from "./source-proposal-match.js";
 import { scanSourceLiterals } from "./source-literal-stream.js";
 import {
   DEFAULT_SOURCE_BYTE_LIMIT,
@@ -47,29 +48,35 @@ export function observeSourceAwareSeed(
   const share = seedFamilyShare(input, wantMemory, cursor.sourcesDone);
   const lanes = hintSourceShare(share.sourceWork, share.sourceLimit, sketch !== undefined && !hintsDone);
   let exhaustiveWork = lanes.sourceWork;
+  let exhaustiveLimit = lanes.sourceLimit;
   let pagedHints = false;
+  const lookupReasons: ProposalMatchReason[] = [];
   if (sketch !== undefined && !hintsDone && lanes.hintWork > 0) {
     pagedHints = true;
     const hinted = takeSourceHintPage(input, sketch, lanes.hintLimit, lanes.hintWork, hintCommitted);
     observations.push(...hinted.observations);
     sourceRows.push(...hinted.rows);
+    lookupReasons.push(...hinted.reasons);
     workUnits += hinted.workUnits;
     bytes += hinted.bytes;
     truncated = hinted.truncated;
     hintCommitted = hinted.hintCommitted;
-    hintsDone = hinted.hintsDone;
-    if (hinted.hydrationUnavailable) hydrationUnavailable = true;
+    hintsDone = hinted.hintsDone || hinted.hydrationUnavailable;
     if (hinted.resourceLimited) resourceLimited = true;
-    if (hinted.hintsDone) exhaustiveWork += Math.max(0, lanes.hintWork - hinted.workUnits);
+    if (hintsDone) {
+      exhaustiveWork += Math.max(0, lanes.hintWork - hinted.workUnits);
+      exhaustiveLimit += Math.max(0, lanes.hintLimit - hinted.observations.length);
+    }
   }
   let pagedSources = false;
-  if (!cursor.sourcesDone && lanes.sourceLimit > 0 && exhaustiveWork > 0) {
+  if (!cursor.sourcesDone && exhaustiveLimit > 0 && exhaustiveWork > 0) {
     const sourced = takeSourcePage(
-      input, sourceRoots, lanes.sourceLimit, exhaustiveWork, sourceCommitted, cursor.source
+      input, sourceRoots, exhaustiveLimit, exhaustiveWork, sourceCommitted, cursor.source
     );
     pagedSources = true;
-    observations.push(...sourced.observations);
-    sourceRows.push(...sourced.rows);
+    const seen = new Set(observations.map((row) => row.object_id));
+    observations.push(...sourced.observations.filter((row) => !seen.has(row.object_id)));
+    sourceRows.push(...sourced.rows.filter((row) => !seen.has(row.root_id)));
     workUnits += sourced.workUnits;
     bytes += sourced.bytes;
     sourcesTruncated = sourced.sourcesTruncated;
@@ -100,8 +107,9 @@ export function observeSourceAwareSeed(
       input, sourceRoots, pageLimit(input), Math.max(0, input.action.work_limit - workUnits), sourceCommitted, cursor.source
     );
     pagedSources = true;
-    observations.push(...sourced.observations);
-    sourceRows.push(...sourced.rows);
+    const seen = new Set(observations.map((row) => row.object_id));
+    observations.push(...sourced.observations.filter((row) => !seen.has(row.object_id)));
+    sourceRows.push(...sourced.rows.filter((row) => !seen.has(row.root_id)));
     workUnits += sourced.workUnits;
     bytes += sourced.bytes;
     sourcesTruncated = sourced.sourcesTruncated;
@@ -138,7 +146,8 @@ export function observeSourceAwareSeed(
         ? { status: "interrupted" as const }
         : {}),
     work: workReceipt(workUnits, workUnits, bytes, truncated || hydrationUnavailable || resourceLimited)
-  }), source_roots: sourceRows };
+  }), source_roots: sourceRows,
+  ...(lookupReasons.length === 0 ? {} : { lookup_reasons: lookupReasons }) };
 }
 
 function takeSourcePage(
