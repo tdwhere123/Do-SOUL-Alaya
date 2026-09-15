@@ -2,7 +2,7 @@ import { SignalKind, type CandidateMemorySignal } from "@do-soul/alaya-protocol"
 
 export const OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND = "open_semantic_observation";
 
-export const OFFICIAL_API_OBJECT_KINDS = Object.freeze([
+const OFFICIAL_API_OBJECT_KINDS = Object.freeze([
   "preference",
   "decision",
   "constraint",

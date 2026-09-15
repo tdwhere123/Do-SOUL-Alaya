@@ -1,5 +1,6 @@
 /** Near-top opportunity is an attribution stage, not a mechanism. */
 export type AttributionStage =
+  | "unattributed"
   | "write_or_unevaluable"
   | "raw_pool_absent"
   | "pre_waist_prune"
@@ -99,6 +100,7 @@ export interface StageAttributionTables {
 }
 
 export const STAGE_COUNT_KEYS: readonly StageCountKey[] = [
+  "unattributed",
   "write_or_unevaluable",
   "raw_pool_absent",
   "pre_waist_prune",
@@ -110,6 +112,7 @@ export const STAGE_COUNT_KEYS: readonly StageCountKey[] = [
 
 export function emptyStageCounts(): Record<StageCountKey, number> {
   return {
+    unattributed: 0,
     write_or_unevaluable: 0,
     raw_pool_absent: 0,
     pre_waist_prune: 0,

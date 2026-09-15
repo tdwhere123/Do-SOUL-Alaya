@@ -28,8 +28,7 @@ import {
   CREDENTIALLED_CONFIG,
   OFFLINE_CONFIG,
   providerBackedResult,
-  signalsEnvelope,
-  withOpenSemanticFactorGraph
+  interpretationsEnvelope
 } from "./compile-seed-fixture.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
@@ -85,10 +84,9 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       extractorFactory: () => ({
         extract: async () => ({
           ...providerBackedResult(""),
-          rawJson: signalsEnvelope([
-            { distilled: "Alice moved to Berlin.", matched: "Alice moved to Berlin." },
+          rawJson: interpretationsEnvelope([
+            { matched: "Alice moved to Berlin." },
             {
-              distilled: "Alice started a job on 2024-03-01.",
               matched: "Alice started a job on 2024-03-01.", assertionId: 2
             }
           ])
@@ -113,7 +111,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     // Each extracted fact remains self-contained while the full turn is the
     // evidence boundary.
     expect(seeded.map((input) => input.distilledFact)).toEqual([
-      "Alice moved to Berlin.",
+      "User: Alice moved to Berlin.",
       "Alice started a job on 2024-03-01."
     ]);
     expect(seeded.every((input) => input.turnContent.includes("Berlin"))).toBe(
@@ -144,18 +142,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       extractorFactory: () => ({
         extract: async (input) => {
           userPrompt = JSON.parse(input.userPrompt) as Record<string, unknown>;
-          return providerBackedResult(JSON.stringify({ signals: [withOpenSemanticFactorGraph({
-            signal_kind: "potential_claim",
-            object_kind: "memory_entry",
-            confidence: 0.9,
-            matched_text: "I moved to Berlin.",
-            distilled_fact: "I moved to Berlin.",
-            source_locator: {
-              contract_version: 4,
-              kind: "assertion_catalog",
-              assertion_id: 1
-            }
-          })] }));
+          return providerBackedResult(interpretationsEnvelope([{ matched: "I moved to Berlin." }]));
         }
       })
     });
@@ -179,15 +166,12 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       { assertion_id: 1, text: "User: I moved to Berlin." }
     ]);
     expect(result.seeds).toHaveLength(1);
-    expect(seeded[0]?.distilledFact).toBe("I moved to Berlin.");
+    expect(seeded[0]?.distilledFact).toBe("User: I moved to Berlin.");
     expect(seeded[0]?.productionRawPayload).toMatchObject({
-      source_locator: {
-        contract_version: 4,
-        kind: "assertion_catalog",
-        assertion_id: 1
-      },
-      source_assertion: "I moved to Berlin.",
-      proposed_matched_text: "I moved to Berlin."
+      source_interpretation: {
+        assertion_binding: { assertion_id: 1, text: "User: I moved to Berlin." },
+        outcome: "candidates"
+      }
     });
   });
 
@@ -411,7 +395,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(firstRunner.stats.liveExtractionFailures).toBe(1);
 
     const delegate = vi.fn<BenchSignalExtractor["extract"]>(
-      async () => providerBackedResult(signalsEnvelope([]))
+      async () => providerBackedResult(interpretationsEnvelope([]))
     );
     const seeded: BenchSignalSeedInput[] = [];
     const secondDaemon = buildCompileSeedDaemon((input) => {
@@ -464,10 +448,10 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       extractorFactory: () => ({
         extract: async () => ({
           ...providerBackedResult(""),
-          rawJson: signalsEnvelope([
-            { distilled: "I like apples.", matched: "I like apples." },
-            { distilled: "I enjoy coffee.", matched: "I enjoy coffee.", assertionId: 2 },
-            { distilled: "I read novels.", matched: "I read novels.", assertionId: 3 }
+          rawJson: interpretationsEnvelope([
+            { matched: "I like apples." },
+            { matched: "I enjoy coffee.", assertionId: 2 },
+            { matched: "I read novels.", assertionId: 3 }
           ])
         })
       })

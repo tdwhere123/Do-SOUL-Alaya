@@ -1,4 +1,4 @@
-import type { TypedObservation } from "@do-soul/alaya-protocol";
+import { SourceLookupReasonsSchema, sameSourceEvidenceRoot, type TypedObservation } from "@do-soul/alaya-protocol";
 import type { ObserverReaders, SourceRootObserverRow } from "../conditional-field/observers/observe.js";
 import { sourceFactKey, type BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
@@ -10,6 +10,9 @@ export class ObservedSourceFacts {
   public has(id: string): boolean { return this.snapshot.has(id); }
   public set(id: string, facts: BoundSourceFacts): this {
     const before = this.snapshot.get(id);
+    if (facts.source_lookup_reasons === undefined && before?.source_lookup_reasons !== undefined) {
+      facts = { ...facts, source_lookup_reasons: before.source_lookup_reasons };
+    }
     this.bytes += Buffer.byteLength(JSON.stringify([id, facts]), "utf8")
       - (before === undefined ? 0 : Buffer.byteLength(JSON.stringify([id, before]), "utf8"));
     this.snapshot = this.snapshot.with(id, facts);
@@ -64,11 +67,16 @@ export function recordSourceRootFacts(
     if (target === undefined || target.kind !== "source_evidence") continue;
     const row = rows.find((candidate) => candidate.kind === target.root_kind && candidate.root_id === target.root_id
       && candidate.revision === target.source_version && candidate.digest === target.content_digest);
+    const parsedReasons = SourceLookupReasonsSchema.safeParse(row?.source_lookup_reasons);
+    const reasons = parsedReasons.success ? [...new Map(parsedReasons.data
+      .filter((reason) => sameSourceEvidenceRoot(reason.source_target, target))
+      .map((reason) => [JSON.stringify(reason), reason])).values()] : [];
     sourceFacts.set(sourceFactKey(target), {
       object_id: target.root_id,
       workspace_id: target.workspace_id,
       root_kind: target.root_kind,
       source_revision: target.source_version,
+      ...(reasons.length === 0 ? {} : { source_lookup_reasons: reasons }),
       evidence_object_id: target.evidence_object_id,
       ...(row?.evidence_verified === true ? { evidence_verified: true } : {}),
       ...(observation.observed_at === undefined ? {} : {

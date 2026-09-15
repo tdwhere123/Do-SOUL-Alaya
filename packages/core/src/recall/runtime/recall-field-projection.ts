@@ -225,10 +225,14 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
 
 function closeIdlePage(state: FieldEngineState, index: InformationIndex,
   input: ConditionalFieldRecallRequest, restored: FieldEngineState | undefined): boolean {
-  if (index.entries.length !== 0) return false;
+  if (index.entries.length !== 0 || (index.product_updates?.length ?? 0) !== 0) return false;
   if (input.budget.work_units <= 1) return true;
-  return restored !== undefined && fieldProgressFingerprint(state) === fieldProgressFingerprint(restored)
-    && observationSettled(state) && !facetIndexStillOpen(state);
+  if (restored === undefined || fieldProgressFingerprint(state) !== fieldProgressFingerprint(restored)) return false;
+  // Keep the first resource interruption recoverable. A consumed continuation
+  // that cannot advance under the same budget ends with its residual intact.
+  const repeatedMemoryBlock = state.memory_exhausted && restored.memory_exhausted
+    && stableCanonicalStringify(state.budget) === stableCanonicalStringify(restored.budget);
+  return repeatedMemoryBlock || (observationSettled(state) && !facetIndexStillOpen(state));
 }
 
 export function annotatePublicIndex(

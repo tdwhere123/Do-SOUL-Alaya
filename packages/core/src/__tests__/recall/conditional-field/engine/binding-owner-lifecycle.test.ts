@@ -45,6 +45,7 @@ describe("execution-owned binding recovery", () => {
     }, 100, owner);
     const first = cursor.advance(0, 4, 3_000);
     expect(first.effects.map((effect) => effect.observation_id)).toEqual(["committed"]);
+    expect(first.progress_position).toBe(3);
     const committed = applyObserverPage(initial, { page, effects: first.effects });
     expect(committed.seeds).toHaveLength(1);
     const prior = owner.snapshot();
@@ -59,11 +60,13 @@ describe("execution-owned binding recovery", () => {
     expect(failedAgain.status).toBe("memory_exhausted");
     expect(failedAgain.retained_bytes).toBe(failed.retained_bytes);
     expect(failedAgain.completed_work).toBeGreaterThan(failed.completed_work);
+    expect(failedAgain.progress_position).toBe(failed.progress_position);
     const recovered = cursor.advance(first.offset, 20, 20_000);
     expect(recovered.status).toBe("complete");
     expect(recovered.effects.map((effect) => effect.observation_id)).toEqual(["prepared", "after-binding"]);
     expect(builds).toBe(3);
     expect(recovered.completed_work - failedAgain.completed_work).toBe(8);
+    expect(recovered.progress_position).toBeGreaterThan(failedAgain.progress_position);
     expect(recovered.retained_bytes).toBe(100 + 100 + 3 * (64 + 300) + owner.bytes);
     expect(prior.bytes).toBe(0);
     const applied = applyObserverPage(committed, { page, effects: recovered.effects, binding_contexts: owner });
@@ -196,8 +199,10 @@ describe("execution-owned binding recovery", () => {
     expect(baseline.remaining_memory_bytes - field.remaining_memory_bytes).toBeGreaterThanOrEqual(owner.bytes);
     expect(field.binding_context_bytes).toBe(owner.bytes);
     expect(retainedFieldLevels(field, budget.memory_bytes).retained_bytes_current).toBeGreaterThanOrEqual(owner.bytes);
-    expect(snapshotRestoredEngineWork(field, budget.memory_bytes).remaining_memory_bytes)
-      .toBe(budget.memory_bytes - owner.bytes - (field.solver_retained_bytes ?? 0));
+    const restored = snapshotRestoredEngineWork(field, budget.memory_bytes);
+    expect(restored.remaining_memory_bytes).toBeLessThan(budget.memory_bytes - owner.bytes);
+    expect(field.solver_retained_bytes).toBeGreaterThan(0);
+    expect(restored.remaining_memory_bytes).toBe(budget.memory_bytes - owner.bytes - field.solver_retained_bytes!);
     expect(() => encodeBindingContext(env("mutate"), field.binding_contexts)).toThrow(BindingContextResourceError);
     const prepared = field.binding_contexts!.fork(field.remaining_memory_bytes);
     const added = encodeBindingContext(env("prepared"), prepared);

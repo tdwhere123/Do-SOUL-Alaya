@@ -1,3 +1,4 @@
+import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -27,7 +28,7 @@ import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG,
   OFFLINE_CONFIG,
-  signalsEnvelope
+  interpretationsEnvelope
 } from "./compile-seed-fixture.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {
@@ -49,8 +50,7 @@ afterEach(async () => {
 describe("createCachingSignalExtractor provider execution", () => {
   it("delegates to the real extractor on a cache miss", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
-    const rawJson = signalsEnvelope([{
-      distilled: "The user has a dog.",
+    const rawJson = interpretationsEnvelope([{
       matched: "I have a dog."
     }]);
     const delegate: BenchSignalExtractor = {
@@ -87,7 +87,7 @@ describe("createCachingSignalExtractor provider execution", () => {
 
     const result = await extractor.extract({
       systemPrompt: "sys",
-      userPrompt: canonicalExtractionUserPrompt("I have a dog.")
+      userPrompt: canonicalExtractionUserPrompt("I have a dog."), sourceCorpus: buildOfficialApiSourceCorpus("I have a dog.", [])
     });
 
     expect(result.rawJson).toBe(rawJson);
@@ -103,7 +103,7 @@ describe("createCachingSignalExtractor provider execution", () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => ({
-        rawJson: signalsEnvelope([{ distilled: "I have a dog.", matched: "I have a dog." }])
+        rawJson: interpretationsEnvelope([{ matched: "I have a dog." }])
       }))
     };
     const extractor = createCachingSignalExtractor({
@@ -119,7 +119,7 @@ describe("createCachingSignalExtractor provider execution", () => {
 
     await expect(extractor.extract({
       systemPrompt: "sys",
-      userPrompt: canonicalExtractionUserPrompt("I have a dog.")
+      userPrompt: canonicalExtractionUserPrompt("I have a dog."), sourceCorpus: buildOfficialApiSourceCorpus("I have a dog.", [])
     })).rejects.toThrow("failed to persist extraction cache shard");
     expect(readdirSync(cacheRoot)).toEqual(["manifest.json"]);
   });
@@ -157,7 +157,7 @@ describe("createCachingSignalExtractor provider execution", () => {
 describe("createCachingSignalExtractor replay", () => {
   it("serves a second extraction from the on-disk fixture with zero LLM calls", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
-    const rawJson = signalsEnvelope([{ distilled: "I have a dog.", matched: "I have a dog." }]);
+    const rawJson = interpretationsEnvelope([{ matched: "I have a dog." }]);
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => providerBackedExtractionResult(rawJson))
     };
@@ -189,7 +189,7 @@ describe("createCachingSignalExtractor replay", () => {
       cacheRoot,
       stats: firstStats
     });
-    await firstRun.extract({ systemPrompt: "sys", userPrompt: canonicalExtractionUserPrompt("I have a dog.") });
+    await firstRun.extract({ systemPrompt: "sys", userPrompt: canonicalExtractionUserPrompt("I have a dog."), sourceCorpus: buildOfficialApiSourceCorpus("I have a dog.", []) });
     expect(delegate.extract).toHaveBeenCalledTimes(1);
 
     // A fresh extractor sharing the same fixture must not call the delegate.
@@ -223,7 +223,7 @@ describe("createCachingSignalExtractor replay", () => {
     });
     const cached = await secondRun.extract({
       systemPrompt: "sys",
-      userPrompt: canonicalExtractionUserPrompt("I have a dog.")
+      userPrompt: canonicalExtractionUserPrompt("I have a dog."), sourceCorpus: buildOfficialApiSourceCorpus("I have a dog.", [])
     });
 
     expect(delegate.extract).toHaveBeenCalledTimes(1);
@@ -239,8 +239,8 @@ describe("createCachingSignalExtractor replay", () => {
 describe("createCachingSignalExtractor identity", () => {
   it("keys the cache on the prompt: a different user prompt is a fresh miss", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "s" });
-    const firstRaw = signalsEnvelope([{ distilled: "I have a dog.", matched: "I have a dog." }]);
-    const secondRaw = signalsEnvelope([{ distilled: "I have a cat.", matched: "I have a cat." }]);
+    const firstRaw = interpretationsEnvelope([{ matched: "I have a dog." }]);
+    const secondRaw = interpretationsEnvelope([{ matched: "I have a cat." }]);
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
@@ -258,8 +258,8 @@ describe("createCachingSignalExtractor identity", () => {
       cacheRoot
     });
 
-    const first = await extractor.extract({ systemPrompt: "s", userPrompt: canonicalExtractionUserPrompt("I have a dog.") });
-    const second = await extractor.extract({ systemPrompt: "s", userPrompt: canonicalExtractionUserPrompt("I have a cat.") });
+    const first = await extractor.extract({ systemPrompt: "s", userPrompt: canonicalExtractionUserPrompt("I have a dog."), sourceCorpus: buildOfficialApiSourceCorpus("I have a dog.", []) });
+    const second = await extractor.extract({ systemPrompt: "s", userPrompt: canonicalExtractionUserPrompt("I have a cat."), sourceCorpus: buildOfficialApiSourceCorpus("I have a cat.", []) });
 
     expect(first.rawJson).toBe(firstRaw);
     expect(second.rawJson).toBe(secondRaw);

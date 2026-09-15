@@ -98,11 +98,11 @@ describe("createGardenHttpExtractor output-token retries", () => {
     expect(requestTokenCaps(fetchMock)).toEqual([2_048, 32_768]);
   });
 
-  it("partitions a truncated assertion batch and merges locator-ordered signals", async () => {
+  it("partitions a truncated assertion batch and merges locator-ordered interpretations", async () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(truncatedResponse())
-      .mockResolvedValueOnce(signalResponse(1, "alpha"))
-      .mockResolvedValueOnce(signalResponse(2, "beta"));
+      .mockResolvedValueOnce(interpretationResponse(1, "alpha"))
+      .mockResolvedValueOnce(interpretationResponse(2, "beta"));
     const onTransportAttempt = vi.fn(async () => undefined);
 
     const result = await createExtractor(fetchMock).extract({
@@ -114,7 +114,7 @@ describe("createGardenHttpExtractor output-token retries", () => {
     expect(requestTokenCaps(fetchMock)).toEqual([2_048, 2_048, 2_048]);
     expect(requestAssertionIds(fetchMock)).toEqual([[1, 2], [1], [2]]);
     expect(JSON.parse(result.rawJson)).toEqual({
-      signals: [signal(1, "alpha"), signal(2, "beta")]
+      interpretations: [interpretation(1, "alpha"), interpretation(2, "beta")]
     });
     expect(result.extractorMeta).toMatchObject({
       retryCount: 1,
@@ -128,9 +128,9 @@ describe("createGardenHttpExtractor output-token retries", () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(truncatedResponse())
       .mockResolvedValueOnce(truncatedResponse())
-      .mockResolvedValueOnce(signalResponse(1, "alpha"))
-      .mockResolvedValueOnce(signalResponse(2, "beta"))
-      .mockResolvedValueOnce(signalResponse(3, "gamma"));
+      .mockResolvedValueOnce(interpretationResponse(1, "alpha"))
+      .mockResolvedValueOnce(interpretationResponse(2, "beta"))
+      .mockResolvedValueOnce(interpretationResponse(3, "gamma"));
 
     const result = await createExtractor(fetchMock).extract({
       ...extractionInput(32_768),
@@ -140,7 +140,7 @@ describe("createGardenHttpExtractor output-token retries", () => {
     expect(requestTokenCaps(fetchMock)).toEqual([2_048, 2_048, 2_048, 2_048, 2_048]);
     expect(requestAssertionIds(fetchMock)).toEqual([[1, 2, 3], [1, 2], [1], [2], [3]]);
     expect(JSON.parse(result.rawJson)).toEqual({
-      signals: [signal(1, "alpha"), signal(2, "beta"), signal(3, "gamma")]
+      interpretations: [interpretation(1, "alpha"), interpretation(2, "beta"), interpretation(3, "gamma")]
     });
     expect(result.responseMetadata).toEqual({
       finishReason: null,
@@ -154,14 +154,42 @@ describe("createGardenHttpExtractor output-token retries", () => {
     });
   });
 
+  it("composes valid-empty children without fabricating interpretations", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(truncatedResponse())
+      .mockResolvedValueOnce(interpretationsResponse([]))
+      .mockResolvedValueOnce(interpretationsResponse([]));
+    const result = await createExtractor(fetchMock).extract({
+      ...extractionInput(32_768), userPrompt: assertionBatchPrompt([1, 2])
+    });
+    expect(JSON.parse(result.rawJson)).toEqual({ interpretations: [] });
+    expect(result.extractorMeta).toMatchObject({ retryCount: 1, successfulRequestCount: 2 });
+    expect(requestAssertionIds(fetchMock)).toEqual([[1, 2], [1], [2]]);
+  });
+
+  it("retains malformed relation siblings for downstream partial admission", async () => {
+    const partial = { assertion_id: 1, relations: [
+      interpretation(1, "alpha").relations[0], { predicate: null }
+    ] };
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(truncatedResponse())
+      .mockResolvedValueOnce(interpretationsResponse([partial]))
+      .mockResolvedValueOnce(interpretationsResponse([]));
+    const result = await createExtractor(fetchMock).extract({
+      ...extractionInput(32_768), userPrompt: assertionBatchPrompt([1, 2])
+    });
+    expect(JSON.parse(result.rawJson)).toEqual({ interpretations: [partial] });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("restores original assertion order when a child returns reversed locators", async () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(truncatedResponse())
-      .mockResolvedValueOnce(signalsResponse([
-        signal(2, "beta"), signal(1, "alpha")
+      .mockResolvedValueOnce(interpretationsResponse([
+        interpretation(2, "beta"), interpretation(1, "alpha")
       ]))
-      .mockResolvedValueOnce(signalsResponse([
-        signal(4, "delta"), signal(3, "gamma")
+      .mockResolvedValueOnce(interpretationsResponse([
+        interpretation(4, "delta"), interpretation(3, "gamma")
       ]));
 
     const result = await createExtractor(fetchMock).extract({
@@ -170,22 +198,22 @@ describe("createGardenHttpExtractor output-token retries", () => {
     });
 
     expect(JSON.parse(result.rawJson)).toEqual({
-      signals: [
-        signal(1, "alpha"), signal(2, "beta"),
-        signal(3, "gamma"), signal(4, "delta")
+      interpretations: [
+        interpretation(1, "alpha"), interpretation(2, "beta"),
+        interpretation(3, "gamma"), interpretation(4, "delta")
       ]
     });
   });
 
   it.each([
     ["missing", { value: "missing locator" }],
-    ["malformed", { source_locator: { assertion_id: "1" }, value: "bad locator" }]
+    ["malformed", { assertion_id: "1", relations: [] }]
   ])("retries a child response with a %s source locator", async (_label, invalidSignal) => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(truncatedResponse())
-      .mockResolvedValueOnce(signalsResponse([invalidSignal]))
-      .mockResolvedValueOnce(signalResponse(1, "alpha"))
-      .mockResolvedValueOnce(signalResponse(2, "beta"));
+      .mockResolvedValueOnce(interpretationsResponse([invalidSignal]))
+      .mockResolvedValueOnce(interpretationResponse(1, "alpha"))
+      .mockResolvedValueOnce(interpretationResponse(2, "beta"));
 
     const result = await createExtractor(fetchMock).extract({
       ...extractionInput(32_768),
@@ -194,16 +222,16 @@ describe("createGardenHttpExtractor output-token retries", () => {
 
     expect(requestAssertionIds(fetchMock)).toEqual([[1, 2], [1], [1], [2]]);
     expect(JSON.parse(result.rawJson)).toEqual({
-      signals: [signal(1, "alpha"), signal(2, "beta")]
+      interpretations: [interpretation(1, "alpha"), interpretation(2, "beta")]
     });
   });
 
-  it("retries a partition response whose signals envelope is missing", async () => {
+  it("retries a partition response whose interpretations envelope is missing", async () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(truncatedResponse())
       .mockResolvedValueOnce(contentResponse({}))
-      .mockResolvedValueOnce(signalResponse(1, "alpha"))
-      .mockResolvedValueOnce(signalResponse(2, "beta"));
+      .mockResolvedValueOnce(interpretationResponse(1, "alpha"))
+      .mockResolvedValueOnce(interpretationResponse(2, "beta"));
 
     const result = await createExtractor(fetchMock).extract({
       ...extractionInput(32_768),
@@ -212,7 +240,7 @@ describe("createGardenHttpExtractor output-token retries", () => {
 
     expect(requestAssertionIds(fetchMock)).toEqual([[1, 2], [1], [1], [2]]);
     expect(JSON.parse(result.rawJson)).toEqual({
-      signals: [signal(1, "alpha"), signal(2, "beta")]
+      interpretations: [interpretation(1, "alpha"), interpretation(2, "beta")]
     });
   });
 
@@ -235,9 +263,9 @@ describe("createGardenHttpExtractor output-token retries", () => {
   it("retries a child response whose locator belongs to its sibling partition", async () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(truncatedResponse())
-      .mockResolvedValueOnce(signalResponse(2, "wrong partition"))
-      .mockResolvedValueOnce(signalResponse(1, "alpha"))
-      .mockResolvedValueOnce(signalResponse(2, "beta"));
+      .mockResolvedValueOnce(interpretationResponse(2, "wrong partition"))
+      .mockResolvedValueOnce(interpretationResponse(1, "alpha"))
+      .mockResolvedValueOnce(interpretationResponse(2, "beta"));
 
     const result = await createExtractor(fetchMock).extract({
       ...extractionInput(32_768),
@@ -247,7 +275,7 @@ describe("createGardenHttpExtractor output-token retries", () => {
     expect(requestTokenCaps(fetchMock)).toEqual([2_048, 2_048, 2_048, 2_048]);
     expect(requestAssertionIds(fetchMock)).toEqual([[1, 2], [1], [1], [2]]);
     expect(JSON.parse(result.rawJson)).toEqual({
-      signals: [signal(1, "alpha"), signal(2, "beta")]
+      interpretations: [interpretation(1, "alpha"), interpretation(2, "beta")]
     });
     expect(result.extractorMeta).toMatchObject({
       retryCount: 2,
@@ -259,7 +287,7 @@ describe("createGardenHttpExtractor output-token retries", () => {
   it("rebases failures around a successful partition before a terminal sibling", async () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(truncatedResponse())
-      .mockResolvedValueOnce(signalResponse(1, "alpha"))
+      .mockResolvedValueOnce(interpretationResponse(1, "alpha"))
       .mockResolvedValueOnce(truncatedResponse())
       .mockResolvedValueOnce(truncatedResponse());
 
@@ -347,23 +375,18 @@ function assertionBatchPrompt(assertionIds: readonly number[]): string {
   });
 }
 
-function signal(assertionId: number, value: string) {
-  return {
-    source_locator: {
-      contract_version: 4,
-      kind: "assertion_catalog",
-      assertion_id: assertionId
-    },
-    value
-  };
+function interpretation(assertionId: number, value: string) {
+  return { assertion_id: assertionId, relations: [{
+    predicate: { text: value }, arguments: [], qualifiers: []
+  }] };
 }
 
-function signalResponse(assertionId: number, value: string): Response {
-  return signalsResponse([signal(assertionId, value)]);
+function interpretationResponse(assertionId: number, value: string): Response {
+  return interpretationsResponse([interpretation(assertionId, value)]);
 }
 
-function signalsResponse(signals: readonly unknown[]): Response {
-  return contentResponse({ signals });
+function interpretationsResponse(interpretations: readonly unknown[]): Response {
+  return contentResponse({ interpretations });
 }
 
 function contentResponse(content: unknown): Response {
@@ -378,7 +401,7 @@ function contentResponse(content: unknown): Response {
 
 function truncatedResponse(usage?: UsageFixture): Response {
   return sseResponse(
-    'data: {"choices":[{"delta":{"content":"{\\"signals\\":[]}"}}]}\n\n' +
+    'data: {"choices":[{"delta":{"content":"{\\"interpretations\\":[]}"}}]}\n\n' +
     terminalFrame("length", usage) +
     "data: [DONE]\n\n"
   );
@@ -386,7 +409,7 @@ function truncatedResponse(usage?: UsageFixture): Response {
 
 function successResponse(usage?: UsageFixture): Response {
   return sseResponse(
-    'data: {"choices":[{"delta":{"content":"{\\"signals\\":[]}"}}]}\n\n' +
+    'data: {"choices":[{"delta":{"content":"{\\"interpretations\\":[]}"}}]}\n\n' +
     terminalFrame("stop", usage) +
     "data: [DONE]\n\n"
   );

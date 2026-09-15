@@ -29,7 +29,7 @@ import { requireProviderBinding } from "../../../runs/provider/catalog.js";
 
 import {
   buildAuthorityQuestion,
-  buildGroundedSignalResponse,
+  buildGroundedInterpretationResponse,
   buildExtractionFillQuestion as buildQuestion,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
@@ -135,7 +135,7 @@ describe("runExtractionFill", () => {
     const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
       const body = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({ choices: [{ message: {
-        content: buildGroundedSignalResponse(body.messages.at(-1).content)
+        content: buildGroundedInterpretationResponse(body.messages.at(-1).content)
       } }] }), { status: 200, headers: { "content-type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -198,7 +198,7 @@ describe("runExtractionFill", () => {
       buildAuthorityQuestion("q002", "shared fact", "decoy two")
     ]);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
-      providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt))
+      providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt))
     );
     const result = await runExtractionFill({
       variant: VARIANT,

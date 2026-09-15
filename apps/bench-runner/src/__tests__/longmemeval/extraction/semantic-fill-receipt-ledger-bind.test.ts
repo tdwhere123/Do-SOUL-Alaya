@@ -149,17 +149,10 @@ async function persistFailedReceipt(root: string): Promise<LazySemanticRunReceip
   return report.lazyRunReceipt;
 }
 
-function admittedSignal(task: ReturnType<typeof semanticTask>) {
-  return {
-    object_kind: "fact",
-    confidence: 0.9,
-    matched_text: task.text.replace(/^(?:User|Assistant): /u, ""),
-    source_locator: {
-      contract_version: 4,
-      kind: "assertion_catalog",
-      assertion_id: task.assertionId
-    }
-  };
+function admittedInterpretation(task: ReturnType<typeof semanticTask>) {
+  return { assertion_id: task.assertionId, relations: [{
+    predicate: { text: task.text.replace(/^(?:User|Assistant): /u, "") }, arguments: [], qualifiers: []
+  }] };
 }
 
 async function persistAdmittedReceipt(root: string): Promise<LazySemanticRunReceipt> {
@@ -173,7 +166,7 @@ async function persistAdmittedReceipt(root: string): Promise<LazySemanticRunRece
     transport: createOfflineSemanticReplayForTasks({
       tasks: [task],
       transportPolicy: TOKEN_AWARE_POLICY,
-      result: { kind: "raw", rawJson: JSON.stringify({ signals: [admittedSignal(task)] }) }
+      result: { kind: "raw", rawJson: JSON.stringify({ interpretations: [admittedInterpretation(task)] }) }
     })
   });
   return report.lazyRunReceipt;
@@ -196,7 +189,7 @@ async function persistTwoAdmittedReceipt(root: string): Promise<LazySemanticRunR
       transportPolicy: TOKEN_AWARE_POLICY,
       result: {
         kind: "raw",
-        rawJson: JSON.stringify({ signals: tasks.map(admittedSignal) })
+        rawJson: JSON.stringify({ interpretations: tasks.map(admittedInterpretation) })
       }
     })
   });

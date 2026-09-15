@@ -428,6 +428,7 @@ function resignReceiptBinding(
   field: "current_anchor_assertion_sha256" | "grounded_source_assertion_sha256",
   replaceObservation: boolean
 ) {
+  if (receipt.schema_version !== 3) throw new Error("historical fixture requires receipt v3");
   const forgedSha256 = "0".repeat(64);
   const entry = receipt.entries[0]!;
   const binding = entry.source_draft_bindings[0]!;

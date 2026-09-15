@@ -17,9 +17,11 @@ export const PROFILE: SemanticExtractionProfile = Object.freeze({ capability: 'o
   promptRevision: 'fixture-prompt-v1', outputSchema: 'official-api-signals-v1' });
 
 export function response(logicalRequestJson: string): string {
-  const unit = JSON.parse(logicalRequestJson) as { text: string };
-  return JSON.stringify({ signals: [{ object_kind: 'decision', confidence: 0.8,
-    matched_text: unit.text, distilled_fact: unit.text }] });
+  const request = JSON.parse(logicalRequestJson) as { source_assertions: { assertion_id: number; text: string }[] };
+  return JSON.stringify({ interpretations: request.source_assertions.map((assertion) => ({
+    assertion_id: assertion.assertion_id,
+    relations: [{ predicate: { text: assertion.text }, arguments: [], qualifiers: [] }]
+  })) });
 }
 
 export function wireArtifacts(database: StorageDatabase) {

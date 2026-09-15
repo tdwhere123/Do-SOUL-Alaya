@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { EventPublisher, EvidenceService, MemoryService, SignalService, createSignalEmissionWriter } from "@do-soul/alaya-core";
-import { InMemoryHandoffGapHandler, LocalHeuristics, MaterializationRouter, OfficialApiGardenProvider,
+import { InMemoryHandoffGapHandler, LocalHeuristics, MaterializationRouter,
   auditOfficialApiSignalFormation, buildOfficialApiExtractionRequests } from "@do-soul/alaya-soul";
 import {
   initDatabase, SqliteEvidenceCapsuleRepo, SqliteEventLogRepo,
@@ -151,9 +151,11 @@ describe("source temporal projection persistence", () => {
           ...(assertion === undefined ? {} : { source_locator: { contract_version: 4, kind: "assertion_catalog", assertion_id: assertion.assertion_id } }),
           ...(fixture.nomination === undefined ? {} : { temporal_projection: fixture.nomination }) }] });
         const extractor = createOpenSemanticExtractor(raw);
+        const historical = await extractor.extract({ systemPrompt: "historical", userPrompt: "historical" });
         const signal = fixture.localMatch === undefined
-          ? (await new OfficialApiGardenProvider({ apiKey: "local-test", extractor,
-              generateSignalId: () => signalId, now: () => CREATED_AT }).compile(fixture.source, context))[0]
+          ? auditOfficialApiSignalFormation({ raw_json: historical.rawJson,
+              turn_content: fixture.source, ...context, created_at: CREATED_AT,
+              signal_id_for: () => signalId }).entries[0]?.signal
           : (await new LocalHeuristics().compile(fixture.source, context))
               .find((candidate) => candidate.raw_payload.matched_text === fixture.localMatch);
         expect(signal).toBeDefined();

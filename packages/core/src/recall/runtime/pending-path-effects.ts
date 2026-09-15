@@ -20,7 +20,8 @@ function advancePathEffects(state: FieldEngineState): FieldEngineState {
   if (cursor === undefined) return interrupted(state, true);
   const advanced = cursor.advance(pending.offset, Math.max(0, Math.floor(state.remaining_exploration / 2)),
     state.remaining_memory_bytes + pending.retained_bytes);
-  const retained = { ...pending, cursor, retained_bytes: advanced.retained_bytes, completed_work: advanced.completed_work };
+  const retained = { ...pending, cursor, retained_bytes: advanced.retained_bytes,
+    completed_work: advanced.completed_work, progress_position: advanced.progress_position };
   const prepared = { ...state, pending_path_effects: retained,
     binding_contexts: cursor.bindingContexts?.snapshot() ?? state.binding_contexts,
     remaining_exploration: state.remaining_exploration - advanced.work,

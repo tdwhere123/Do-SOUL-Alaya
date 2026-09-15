@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,6 +26,31 @@ function count(db: StorageDatabase, table: string): number {
 }
 
 describe('durable semantic artifact lifecycle', () => {
+  it('keeps first raw and request provenance when an equivalent occurrence is independently admitted', async () => {
+    const f = await fixture();
+    const firstTask = await f.write(MEM.orion, 'Alice owns Orion.');
+    expect(await f.worker(transport()).run(WS, firstTask)).toBe('completed');
+    const firstSource = f.repo.source(WS, MEM.orion)!;
+    const firstWork = f.codec.plan(firstSource, PROFILE)[0]!;
+    const first = f.repo.artifact(WS, firstWork.key)!;
+    const secondTask = await f.write(MEM.channel, 'Alice owns Orion. Bob likes dogs.');
+    const secondSource = f.repo.source(WS, MEM.channel)!;
+    const secondWork = f.codec.plan(secondSource, PROFILE)[0]!;
+    const second = f.codec.admit(secondSource, secondWork, ` ${response(secondWork.requestJson)} `);
+    expect(second.key).toBe(first.key);
+    expect(second.payloadJson).toBe(first.payloadJson);
+    expect(second.requestJson).not.toBe(first.requestJson);
+    expect(second.rawJson).not.toBe(first.rawJson);
+    const pending = f.repo.task(WS, secondTask)!;
+    await f.audit('claimed', pending, () => f.repo.claim(pending, 'independent-admission', '2026-05-31T12:00:00.000Z'));
+    const claimed = f.repo.task(WS, secondTask)!;
+    await f.audit('admitted', claimed, () => f.repo.put(claimed, second));
+    expect(f.repo.artifact(WS, first.key)).toEqual(first);
+    expect(await f.worker(transport()).run(WS, secondTask, { adoptClaim: true })).toBe('completed');
+    expect(count(f.slice.database, 'garden_semantic_artifacts')).toBe(2);
+    expect(f.repo.artifact(WS, first.key)).toEqual(first);
+  });
+
   it('reuses unchanged semantic work across distinct source occurrences and repeated reads', async () => {
     const f = await fixture();
     const t = transport();
@@ -270,7 +296,7 @@ describe('durable semantic artifact lifecycle', () => {
     const workerStartedAt = performance.now();
     expect(await f.worker(t).run(WS, task)).toBe('completed');
     const publishedAt = performance.now();
-    const readyArtifacts = f.repo.searchReadyObserved(WS, 'decision', 10);
+    const readyArtifacts = f.repo.searchReadyObserved(WS, 'owns', 10);
     expect(JSON.stringify(readyArtifacts)).toContain(MEM.orion);
     const artifactKind = await f.slice.runRecall({ text: 'decision' });
     expect(artifactKind.membership).not.toContain(MEM.orion);
@@ -418,18 +444,18 @@ describe('durable semantic artifact lifecycle', () => {
     await worker.run(WS, first);
     await worker.run(WS, second);
     await f.memory.updateScoped(MEM.orion, WS, { content: 'Bob owns Orion' }, 'source changed');
-    const capped = f.repo.searchReadyObserved(WS, 'decision', 1);
+    const capped = f.repo.searchReadyObserved(WS, 'owns', 1);
     expect(capped.rows).toEqual([]);
     expect(capped).toMatchObject({ candidateRowsRead: 1, candidateRowsReturned: 0, nativeVisits: 1, projectionRowsRead: 0,
       sourceRowsRead: 0, intentRowsRead: 0, sourceRevisionRowsRead: 0, rowsRead: 1, truncated: true });
     expect(capped.bytesRead).toBe(0);
     expect(capped.nativeBytes).toBeGreaterThan(0);
-    const expanded = f.repo.searchReadyObserved(WS, 'decision', 3);
+    const expanded = f.repo.searchReadyObserved(WS, 'owns', 3);
     expect(expanded.rows.map((row) => row.objectId)).toEqual([MEM.channel]);
     expect(expanded.rowsRead).toBe(10);
     expect(expanded).toMatchObject({ nativeVisits: 2, candidateRowsReturned: 2, sourceRevisionRowsRead: 2, truncated: false });
-    expect(f.repo.searchReadyObserved('other-workspace', 'decision', 2).rowsRead).toBe(0);
-    expect(f.repo.searchReady(WS, 'decision', 3)).toEqual(expanded.rows);
+    expect(f.repo.searchReadyObserved('other-workspace', 'owns', 2).rowsRead).toBe(0);
+    expect(f.repo.searchReady(WS, 'owns', 3)).toEqual(expanded.rows);
   });
 
   it('accepts A to B to A at one timestamp with fresh source revisions and reused artifacts', async () => {
@@ -475,11 +501,11 @@ describe('durable semantic artifact lifecycle', () => {
     const again = f.enqueue(MEM.orion, PROFILE);
     expect(again).toBe(first);
     expect(f.repo.task(WS, again)?.status).toBe('pending');
-    expect(f.repo.searchReady(WS, 'decision', 10)).toEqual([]);
+    expect(f.repo.searchReady(WS, 'owns', 10)).toEqual([]);
     expect(await worker.run(WS, again)).toBe('completed');
     expect(t.calls).toHaveLength(2);
     expect(f.slice.database.connection.prepare('SELECT publication_key FROM garden_semantic_projections').get()).toEqual(firstPublication);
-    expect(f.repo.searchReady(WS, 'decision', 10)).toHaveLength(1);
+    expect(f.repo.searchReady(WS, 'owns', 10)).toHaveLength(1);
     expect(f.enqueue(MEM.orion, PROFILE)).toBe(first);
     expect(f.repo.task(WS, first)?.status).toBe('completed');
   });
@@ -491,8 +517,8 @@ describe('durable semantic artifact lifecycle', () => {
       const tasks = [await f.write(MEM.orion, 'Alice owns Orion'), await f.write(MEM.channel, 'Bob owns Orion')];
       const worker = f.worker(transport());
       for (const task of reverse ? tasks.reverse() : tasks) expect(await worker.run(WS, task)).toBe('completed');
-      const capped = f.repo.searchReadyObserved(WS, 'decision', 1);
-      const complete = f.repo.searchReadyObserved(WS, 'decision', 3);
+      const capped = f.repo.searchReadyObserved(WS, 'owns', 1);
+      const complete = f.repo.searchReadyObserved(WS, 'owns', 3);
       expect(capped).toMatchObject({ rows: [], truncated: true, nativeVisits: 1, candidateRowsReturned: 0 });
       expect(complete.rows.map(row => row.objectId)).toEqual([MEM.orion, MEM.channel].sort());
       expect(complete).toMatchObject({ nativeVisits: 2, candidateRowsReturned: 2, rowsRead: 10, truncated: false });
@@ -506,7 +532,7 @@ describe('durable semantic artifact lifecycle', () => {
     const task = await f.write(MEM.orion, 'Alice owns Orion');
     expect(await f.worker(transport()).run(WS, task)).toBe('completed');
     await f.memory.updateScoped(MEM.orion, WS, { content: 'Alice owns Orion' }, 'accepted new revision');
-    expect(f.repo.searchReady(WS, 'decision', 10)).toEqual([]);
+    expect(f.repo.searchReady(WS, 'owns', 10)).toEqual([]);
   });
 
   it('upgrades additive candidate schema 4 to the current indexed-projection revision', async () => {
@@ -518,7 +544,45 @@ describe('durable semantic artifact lifecycle', () => {
     db.close();
     db.reopenIfClosed();
     initializeSemanticArtifactCandidateSchema(db.connection);
-    expect(db.connection.prepare('SELECT revision FROM garden_semantic_schema').all()).toEqual([{ revision: 6 }]);
+    expect(db.connection.prepare('SELECT revision FROM garden_semantic_schema').all()).toEqual([{ revision: 7 }]);
+  });
+
+  it('upgrades request provenance without rewriting historical artifact bytes on reopen', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'semantic-provenance-upgrade-'));
+    directories.push(directory);
+    const f = await fixture(join(directory, 'source.sqlite'));
+    const task = await f.write(MEM.orion, 'Alice owns Orion');
+    expect(await f.worker(transport()).run(WS, task)).toBe('completed');
+    const db = f.slice.database;
+    // Emulate the recorded six-column schema, including its old integrity preimage.
+    db.connection.exec('DROP TRIGGER garden_semantic_artifact_immutable');
+    const stored = db.connection.prepare('SELECT * FROM garden_semantic_artifacts').get() as {
+      artifact_key: string; raw_json: string; payload_json: string; search_text: string;
+    };
+    const source = f.repo.source(WS, MEM.orion)!;
+    const work = f.codec.plan(source, PROFILE)[0]!;
+    stored.payload_json = JSON.stringify(JSON.parse(f.codec.bind(source, work,
+      f.repo.artifact(WS, stored.artifact_key)!).bindingJson).interpretations);
+    const integrity = createHash('sha256').update(JSON.stringify([
+      stored.artifact_key, stored.raw_json, stored.payload_json, stored.search_text
+    ])).digest('hex');
+    db.connection.prepare('UPDATE garden_semantic_artifacts SET payload_json=?, integrity=?').run(stored.payload_json, integrity);
+    db.connection.exec('ALTER TABLE garden_semantic_artifacts DROP COLUMN request_json');
+    db.connection.prepare('UPDATE garden_semantic_schema SET revision=6').run();
+    const before = db.connection.prepare('SELECT * FROM garden_semantic_artifacts').get() as Record<string, unknown>;
+    db.close(); db.reopenIfClosed();
+    expect(() => wireArtifacts(db)).toThrow(/incompatible semantic artifact candidate schema/);
+    initializeSemanticArtifactCandidateSchema(db.connection);
+    expect(db.connection.prepare('SELECT * FROM garden_semantic_artifacts').get()).toEqual({ ...before!, request_json: null });
+    const artifact = wireArtifacts(db).repo.artifact(WS, stored.artifact_key)!;
+    expect(artifact.requestJson).toBeUndefined();
+    expect(artifact.rawJson).toBe(stored.raw_json);
+    expect(JSON.parse(f.codec.bind(source, work, artifact).bindingJson).interpretations).toEqual(JSON.parse(stored.payload_json));
+    expect(() => f.codec.bind(source, work, { ...artifact, rawJson: JSON.stringify({ interpretations: [
+      { assertion_id: 1, relations: [] }, { assertion_id: 2, relations: [] }
+    ] }) })).toThrow(/ambiguous request provenance/);
+    db.close(); db.reopenIfClosed();
+    expect(wireArtifacts(db).repo.artifact(WS, stored.artifact_key)).toEqual(artifact);
   });
 
   it.each([1, 2, 3])('rejects old candidate schema %i after file reopen without silently reusing its FTS layout', async (revision) => {

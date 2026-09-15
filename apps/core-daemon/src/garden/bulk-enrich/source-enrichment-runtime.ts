@@ -31,7 +31,7 @@ export type SemanticProviderExtractPort = Readonly<{
 
 export type SourceEnrichmentCapability = Readonly<{
   readonly configured: boolean;
-  readonly observationFamily: "official_api_signals" | "none";
+  readonly observationFamily: "source_interpretation" | "none";
   readonly requestBytes: "reserved";
   readonly completionTokens: "unsupported";
   readonly spend: "unsupported";
@@ -123,7 +123,7 @@ function describeCapability(input: Readonly<{
     (input.transport !== undefined && transport.capabilities?.configured !== false);
   return {
     configured,
-    observationFamily: configured ? "official_api_signals" : "none",
+    observationFamily: configured ? "source_interpretation" : "none",
     requestBytes: "reserved",
     completionTokens: "unsupported",
     spend: "unsupported"

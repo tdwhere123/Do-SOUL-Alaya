@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  CandidateMemorySignalSchema,
   SignalEventType,
   SignalState,
   SoulSignalMaterializedPayloadSchema,
@@ -11,7 +12,7 @@ import {
 import {
   buildEvidenceInput,
   buildOfficialApiSourceCorpus,
-  OfficialApiGardenProvider,
+  buildOfficialApiVerifiedUserAssertionSource,
   verifyOfficialApiSourceLocatorBinding
 } from "@do-soul/alaya-soul";
 import { afterEach, describe, expect, it } from "vitest";
@@ -35,7 +36,7 @@ describe("official API verified assertion receipt integration", () => {
   it("qualifies the exact persisted corpus used by an oversized receipt", async () => {
     const messages = oversizedUserMessages();
     const sourceCorpus = buildOfficialApiSourceCorpus(ASSERTION, messages);
-    const signal = await compileSignal(messages, "signal-corpus-identity");
+    const signal = retainedAssertionSignal(messages, "signal-corpus-identity");
 
     const persisted = buildEvidenceInput(signal, undefined, { fullTurnExcerpt: true });
     expect(messages[0]!.content.length).toBeGreaterThan(2_048);
@@ -77,7 +78,7 @@ describe("official API verified assertion receipt integration", () => {
   });
 
   it("rejects a self-consistent v2 receipt with an unresolved locator", async () => {
-    const signal = await compileSignal([{
+    const signal = retainedAssertionSignal([{
       message_id: "user-1",
       role: "user" as const,
       content: ASSERTION
@@ -85,12 +86,12 @@ describe("official API verified assertion receipt integration", () => {
     const raw = signal.raw_payload as Readonly<Record<string, unknown>>;
     const corpus = String(raw.full_turn_content);
     const invalidLocator = {
-      contract_version: 4 as const,
+      contract_version: 3 as const,
       kind: "assertion_catalog" as const,
       assertion_id: 2
     };
     const validLocator = raw.source_locator as {
-      readonly contract_version: 4;
+      readonly contract_version: 3;
       readonly kind: "assertion_catalog";
       readonly assertion_id: number;
     };
@@ -147,30 +148,56 @@ describe("official API verified assertion receipt integration", () => {
   });
 });
 
-async function compileSignal(
+function retainedAssertionSignal(
   messages: ReturnType<typeof oversizedUserMessages>,
   signalId: string
-): Promise<Readonly<LegacyCandidateMemorySignal>> {
-  const provider = new OfficialApiGardenProvider({
-    apiKey: "sk-test",
-    extractor: { extract: async ({ userPrompt }) => {
-      const request = JSON.parse(userPrompt) as {
-        readonly source_assertions: readonly { readonly assertion_id: number; readonly text: string }[];
-      };
-      const source = request.source_assertions.find(({ text }) => text.includes(ASSERTION));
-      return source === undefined
-        ? { rawJson: '{"signals":[]}' }
-        : { rawJson: JSON.stringify({ signals: [openSignal(source.assertion_id)] }) };
-    } },
-    generateSignalId: () => signalId
-  });
-  const [signal] = await provider.compile(ASSERTION, {
+): Readonly<LegacyCandidateMemorySignal> {
+  // Exercise retained v2 receipts through today's reader, without asking the
+  // current interpretation-only provider to manufacture a historical envelope.
+  const verified = buildOfficialApiVerifiedUserAssertionSource(
+    ASSERTION, messages, undefined, ASSERTION
+  );
+  if (verified === null) throw new Error("expected a bound historical source");
+  const sourceHash = formatVerifiedUserAssertionV2SourceHash(sha256(
+    buildVerifiedUserAssertionReceiptV2Preimage({
+      signal_id: signalId,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      surface_id: null,
+      source_locator: verified.source_locator,
+      source_assertion: ASSERTION,
+      source_corpus: verified.source_corpus
+    })
+  ));
+  const signal = CandidateMemorySignalSchema.parse({
+    signal_id: signalId,
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,
-    turn_messages: messages
+    source: "garden_compile",
+    signal_kind: "potential_claim",
+    object_kind: "deployment_preference",
+    scope_hint: null,
+    domain_tags: [],
+    evidence_refs: [],
+    confidence: 0.9,
+    raw_payload: {
+      matched_text: ASSERTION,
+      distilled_fact: ASSERTION,
+      source_assertion: ASSERTION,
+      source_locator: verified.source_locator,
+      full_turn_content: verified.source_corpus,
+      turn_content_excerpt: ASSERTION,
+      provider_kind: "official_api",
+      verified_user_assertion_source_hash: sourceHash,
+      source_grounding: {
+        version: 1, status: "grounded", content_basis: "source_assertion",
+        source_assertion: ASSERTION, proposed_matched_text: ASSERTION, reasons: []
+      }
+    },
+    created_at: "2026-08-12T00:00:00.000Z"
   });
-  if (signal === undefined || signal.interpretation_contract !== undefined) throw new Error("expected one legacy grounded assertion signal");
+  if (signal.interpretation_contract !== undefined) throw new Error("expected retained legacy signal");
   return signal;
 }
 
@@ -225,39 +252,4 @@ function insertMaterializationEvent(
     JSON.stringify(payload),
     signal.created_at
   );
-}
-
-function openSignal(assertionId: number) {
-  return {
-    signal_kind: "potential_claim",
-    object_kind: "deployment_preference",
-    confidence: 0.9,
-    matched_text: ASSERTION,
-    source_locator: {
-      contract_version: 4,
-      kind: "assertion_catalog",
-      assertion_id: assertionId
-    },
-    semantic_factor_graph: {
-      schema_version: 2,
-      source_kind: "evidence",
-      factors: [{
-        factor_id: "f0",
-        surface: ASSERTION.slice(0, 64),
-        semantic_identity: ASSERTION.slice(0, 64).toLowerCase()
-      }],
-      variables: [],
-      result_variable_ids: [],
-      propositions: [{
-        proposition_id: "p0",
-        predicate_factor_id: "f0",
-        arguments: [{
-          position: 0,
-          binding_identity: "assertion",
-          reference_kind: "factor",
-          reference_id: "f0"
-        }]
-      }]
-    }
-  };
 }

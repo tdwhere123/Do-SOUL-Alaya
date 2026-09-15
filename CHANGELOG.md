@@ -16,10 +16,19 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol 4.12.0 can move
 independently of the app semver.
 
-Protocol 4.12.0 is an additive minor under invariant §25: MCP-reachable
-`MemoryDimensionSchema` admits `observation`. Request and response field
-names are unchanged; constraint and search schemas pick up the new enum
-value through that shared dimension type.
+Protocol 4.12.0 is an additive minor under handbook invariant §25.
+MCP-reachable `MemoryDimensionSchema` admits `observation`. Optional
+`QueryHole.description` preserves unresolved query text, and optional
+`source_lookup_reasons` exposes bounded proposal diagnostics on Recall
+candidates and MCP/CLI search results. Request and response field names
+are otherwise unchanged; these fields do not change source eligibility,
+association grades, or delivery ordering. Ordinary extraction retains its
+exact per-turn source before compilation, publishes through
+transaction-current Core admission, and uses source interpretations
+across live cache and enrichment paths. Native hint lookup meters scans,
+hydration, and bytes and preserves unfinished work across continuation.
+Local mechanism checks do not establish semantic usefulness; the R02
+quality gate remains on hold.
 
 Protocol 4.11.0 preserved source temporal meaning across extraction and
 replay and added the internal source-interpretation signal variant.

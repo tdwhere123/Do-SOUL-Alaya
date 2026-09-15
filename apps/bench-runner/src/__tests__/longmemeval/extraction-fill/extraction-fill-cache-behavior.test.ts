@@ -19,7 +19,7 @@ import { cacheFilePath, computeSourceTurnCacheKey } from "../../../runs/compile-
 
 import {
   buildExtractionFillQuestion as buildQuestion,
-  buildGroundedSignalResponse,
+  buildGroundedInterpretationResponse,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
   groundedExtractionResult,
@@ -47,7 +47,7 @@ describe("runExtractionFill", () => {
       buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
-      providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt))
+      providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt))
     );
     const factory = (): BenchSignalExtractor => ({ extract });
 
@@ -156,7 +156,7 @@ describe("runExtractionFill", () => {
       buildQuestion("q003", "I remember three.", "I prefer decoy three.")
     ]);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
-      providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt))
+      providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt))
     );
     const result = await runExtractionFill({
       variant: VARIANT,

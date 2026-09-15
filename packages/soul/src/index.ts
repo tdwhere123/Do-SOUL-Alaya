@@ -1,3 +1,4 @@
+export { selectObservedTemporalProjection } from "./garden/extraction/temporal/observed-projection.js";
 export {
   catalogEligibilityOfAssertionCount,
   catalogEligibilityOfRequest,
@@ -14,6 +15,18 @@ export {
   type OfficialApiRequestEntryRejection,
   type OfficialApiRequestReceiveReceipt
 } from "./garden/ingestion/official-api/request-result.js";
+export {
+  classifyOfficialApiExtractionResult,
+  classifyOfficialApiInterpretationResult,
+  receiveOfficialApiSourceInterpretations,
+  OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION,
+  OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER,
+  type OfficialApiInterpretationReceiveReceipt
+} from "./garden/ingestion/official-api/source-interpretation-receive.js";
+export {
+  buildSourceInterpretationSignal,
+  emitLocatedInterpretationSignals
+} from "./garden/ingestion/official-api/source-interpretation-signal.js";
 export {
   DEFAULT_SOUL_GRAPH_DEPTH,
   DEFAULT_SOUL_GRAPH_LIMIT,
@@ -114,10 +127,12 @@ export {
   planOfficialApiExtractionWindow,
   buildOfficialApiExtractionRequest,
   buildOfficialApiExtractionRequests,
+  buildOfficialApiSourceRequest,
   collectOfficialApiExtractionCoverage,
   stringifyOfficialApiExtractionRequest,
   officialApiSemanticWorksetFromUnits,
   planOfficialApiSemanticWorkset,
+  officialApiSemanticWorksetFromSourceCorpus,
   planOfficialApiTransport,
   materializeOfficialApiTransportResponse,
   transportPackIdentity,
@@ -233,6 +248,8 @@ export {
   type MaterializationTarget,
   type PathRelationProposalPayload,
   type PathRelationProposalPort,
+  type SourceObservationPublicationPort,
+  type SourceObservationPublicationResult,
   type TemporalRelationAssertionPort,
   type PathCandidateSinkPort,
   type PathCandidateMintOutcome,

@@ -1,4 +1,5 @@
 import {
+  type BoundSourceInterpretation,
   type ClaimForm,
   type EdgeProposalTriggerSourceValue,
   type EvidenceCapsule,
@@ -11,6 +12,7 @@ import {
   type PathRelation,
   type RelationValidity,
   type SourceGroundingDeferReason,
+  type SourceInterpretationSignal,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { type HandoffGapHandler } from "../../maintenance/handoff-gap-handler.js";
@@ -209,6 +211,19 @@ export interface PathRelationProposalPort {
     readonly proposedPathRelation: PathRelationProposalPayload;
   }): Promise<MaterializationCreatedObject>;
 }
+
+export interface SourceObservationPublicationPort {
+  publish(input: {
+    readonly signal: SourceInterpretationSignal;
+    readonly context: MaterializationContext;
+  }): Promise<SourceObservationPublicationResult>;
+}
+
+export type SourceObservationPublicationResult = Readonly<{
+  readonly bound: BoundSourceInterpretation;
+  readonly evidence: MaterializationCreatedObject;
+  readonly memory: MemoryMaterializationCreatedObject;
+}>;
 
 // A Garden signal may nominate a relation, but only the core truth boundary
 // can admit it. The evidence id and immutable EventLog/source-time receipt are
@@ -433,6 +448,9 @@ export interface MaterializationRouterDeps {
   // to the BULK_ENRICH worker. see also: materializeConflictEvaluation.
   readonly conflictDetectionPort?: ConflictDetectionPort;
   readonly reconciliationPort?: ReconciliationPort;
+  // Core owns source-bound observation admission. Garden only calls this port;
+  // it must not write MemoryEntry for interpretation signals itself.
+  readonly sourceObservationPublicationPort?: SourceObservationPublicationPort;
   // When true, a high-confidence potential_claim/potential_preference whose
   // free-form object_kind is outside routeByObjectKind is kept as a recallable
   // memory_entry (memory_entry_only — no draft claim) instead of dropped to

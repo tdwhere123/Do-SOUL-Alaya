@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
-  OfficialApiGardenProvider
+  auditOfficialApiSignalFormation
 } from "@do-soul/alaya-soul";
 import { EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID } from
   "@do-soul/alaya-protocol";
@@ -42,22 +42,18 @@ const INDEPENDENT_NOMINATION_CASES = [
 ] as const;
 
 describe("formation eligibility live producer to consumer path", () => {
-  it("forms a cached Official API graph without a provider fact frame", async () => {
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "test-key",
-      extractor: { extract: async () => ({ rawJson: JSON.stringify({ signals: [{
+  it("forms a retained Official API graph without a provider fact frame", async () => {
+    const signal = auditOfficialApiSignalFormation({
+      raw_json: JSON.stringify({ signals: [{
         signal_kind: "potential_claim", object_kind: "review_scope", confidence: 0.9,
         matched_text: ASSERTION, evidence_refs: [], source_memory_refs: [],
         source_locator: { contract_version: 4, kind: "assertion_catalog", assertion_id: 1 },
         semantic_factor_graph: binaryUseEvidenceSemanticGraph()
-      }] }) }) },
-      generateSignalId: () => "signal-provider-formed"
-    });
-    const [signal] = await provider.compile(ASSERTION, {
-      workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
-      turn_messages: [{ role: "user", content: ASSERTION,
-        message_id: "message-provider" }]
-    });
+      }] }),
+      turn_content: ASSERTION, workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
+      turn_messages: [{ role: "user", content: ASSERTION, message_id: "message-provider" }],
+      created_at: "2026-09-01T00:00:00.000Z", source_observed_at: "2026-09-01T00:00:00.000Z", signal_id_for: () => "signal-provider-formed"
+    }).entries[0]?.signal;
     if (signal === undefined) throw new Error("provider fixture must compile one signal");
     const runtime = await openEligibilityRuntime();
     const received = await runtime.signalService.receiveSignal(signal);

@@ -10,7 +10,7 @@ const CountDistributionEntrySchema = z
   })
   .strict();
 
-const MissTaxonomyDistributionSchema = z
+export const MissTaxonomyDistributionSchema = z
   .object({
     candidate_absent: z.number().int().nonnegative(),
     materialization_drop: z.number().int().nonnegative(),
@@ -18,7 +18,8 @@ const MissTaxonomyDistributionSchema = z
     budget_drop: z.number().int().nonnegative(),
     delivery_order_drop: z.number().int().nonnegative(),
     answer_set_coverage_drop: z.number().int().nonnegative(),
-    evaluation_or_gold_issue: z.number().int().nonnegative()
+    evaluation_or_gold_issue: z.number().int().nonnegative(),
+    conditional_field_unattributed: z.number().int().nonnegative().optional()
   })
   .strict();
 

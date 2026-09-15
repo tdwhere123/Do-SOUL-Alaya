@@ -302,13 +302,12 @@ describe("post-turn extract Garden task", () => {
     expect(enqueued).toHaveLength(1);
     const taskId = enqueued[0]!.id;
     const payload = enqueued[0]!.payload as PostTurnPayload;
-    expect(payload.turn_digest.last_messages[0]!.content_excerpt).toHaveLength(800);
-    expect(payload.turn_digest.last_messages[0]!.content_excerpt.includes(tail)).toBe(false);
+    expect(payload.turn_digest.last_messages[0]!.content_excerpt).toBe(excerpt);
     expect(payload.admitted_source_root_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
 
     await expect(harness.runScheduler()).resolves.toBeUndefined();
     expect(compile).toHaveBeenCalledTimes(1);
-    expect(String(compile.mock.calls.at(0)?.at(0) ?? "")).not.toContain(tail);
+    expect(String(compile.mock.calls.at(0)?.at(0) ?? "")).toContain(tail);
     expect(harness.gardenTaskRepo.findById(taskId)).toMatchObject({
       status: "failed",
       last_error_text: expect.stringContaining("provider blew up")

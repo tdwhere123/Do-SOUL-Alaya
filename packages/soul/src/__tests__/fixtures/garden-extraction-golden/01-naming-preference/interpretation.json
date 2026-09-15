@@ -1,0 +1,16 @@
+{
+  "interpretations": [
+    {
+      "assertion_id": 1,
+      "relations": [
+        {
+          "predicate": { "text": "call" },
+          "arguments": [
+            { "role": "object", "phrase": { "text": "Mina" } }
+          ],
+          "qualifiers": []
+        }
+      ]
+    }
+  ]
+}

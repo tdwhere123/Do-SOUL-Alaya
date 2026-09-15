@@ -10,8 +10,7 @@ import {
   observeConditionalField,
   startObserverCursor,
   type ObserverReaders,
-  type RelationObserverRow,
-  type SourceObserverPage
+  type RelationObserverRow
 } from "../conditional-field/observers/observe.js";
 import { sourceFamilySettled } from "../conditional-field/observers/source-root-observe.js";
 import { hasMeasurementProducer, requiresStoredMeasurement } from "../conditional-field/observers/measure-stored.js";
@@ -89,6 +88,11 @@ export function runObservationRounds(session: ObservationSession): FieldEngineSt
       } else if (action.action === "measurement") {
         if (phaseTime(session, "measurement", () => consumeMeasurementPage(session, action))) return session.state;
       } else if (action.action === "relation") {
+        // Later seed and adjacency pages can still introduce unresolved guards.
+        // Their absence is conclusive only after those producers have settled.
+        if (session.state.pending_path_effects !== undefined || session.state.residuals.some((region) =>
+          (region.kind === "seed" || region.kind === "adjacency" || region.kind === "binding") &&
+          (region.status === "open" || region.status === "interrupted"))) continue;
         session.state = closeRegion(session.state, interpretation, action, session.cursors,
           session.unresolvedGuard || session.missingMeasurement || (session.state.unresolved_seed_count ?? 0) > 0
             ? "unknown" : "exhausted");
@@ -134,6 +138,9 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   subjects.snapshot = session.state.resume_subjects;
   session.state = retainObservedContext(before, session.state, sourceFacts, session.relationRows, subjects, pairProgress);
   if (session.state.memory_exhausted) return true;
+  if (hasOpenPairs(subjects, session.predicates, pairProgress, [], pairProgress.completed)) {
+    session.state = reopenAdjacency(session.state);
+  }
   if (refreshPathFrontier(session)) return true;
   if (observed.page.outcome.status !== "interrupted") return false;
   if (observed.page.cursor.committed_through === (before.resume_cursors[action.region_id] ?? null)) return true;
@@ -420,56 +427,6 @@ function rejectBindingResource(session: ObservationSession, error: unknown): tru
   return true;
 }
 
-export function meterReaders(
-  readers: ObserverReaders,
-  memory: { remaining: number; cachedBytes: number },
-  cache: Map<string, SourceObserverPage>
-): ObserverReaders {
-  const source = readers.source;
-  return {
-    ...readers,
-    ...(readers.embeddingIds === undefined ? {} : {
-      embeddingIds: (args: Parameters<NonNullable<ObserverReaders["embeddingIds"]>>[0]) => {
-        const page = readers.embeddingIds!({ ...args, byteLimit: memory.remaining });
-        memory.remaining = Math.max(0, memory.remaining - page.metadataUtf8Bytes);
-        return page;
-      }
-    }),
-    ...(readers.measureStoredPair === undefined ? {} : {
-      measureStoredPair: (args: Parameters<NonNullable<ObserverReaders["measureStoredPair"]>>[0]) => {
-        const page = readers.measureStoredPair!({ ...args, byteLimit: Math.min(args.byteLimit ?? 137472, memory.remaining) });
-        memory.remaining = Math.max(0, memory.remaining - page.bytesRead);
-        return page;
-      }
-    }),
-    ...(source === undefined ? {} : { source: (args: Parameters<NonNullable<ObserverReaders["source"]>>[0]) => {
-      const hit = cache.get(args.objectId);
-      if (hit !== undefined) return { ...hit, rowsRead: 0, bytesRead: 0 };
-      const byteLimit = Math.min(args.byteLimit ?? 65536, 65536, memory.remaining);
-      if (byteLimit < 1) return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
-      const page = source({ ...args, byteLimit });
-      memory.remaining = Math.max(0, memory.remaining - page.bytesRead);
-      memory.cachedBytes += page.bytesRead;
-      cache.set(args.objectId, page);
-      return page;
-    } }),
-    ...(readers.sourceRoots === undefined ? {} : {
-      sourceRoots: (args: Parameters<NonNullable<ObserverReaders["sourceRoots"]>>[0]) => {
-        const byteLimit = Math.min(args.byteLimit ?? 65536, 65536,
-          memory.remaining - (readers.sourceRootMetadataByteLimit ?? 0));
-        if (byteLimit < 1) return { rows: [], nativeVisits: 0, nativeBytes: 0, rowsRead: 0, bytesRead: 0,
-          truncated: true, committedThrough: args.afterCursor, resourceLimited: true };
-        const physicalBytes = readers.sourceRootChunkByteLimit ?? byteLimit;
-        const limit = Math.min(args.limit, Math.floor(memory.remaining / (physicalBytes + (readers.sourceRootMetadataByteLimit ?? 0))));
-        const page = readers.sourceRoots!({ ...args, byteLimit, nativeByteLimit: memory.remaining,
-          limit, nativeLimit: Math.min(args.nativeLimit, limit) });
-        const bytes = page.bytesRead + (page.metadataBytes ?? 0);
-        memory.remaining = Math.max(0, memory.remaining - bytes);
-        return page;
-      }
-    })
-  };
-}
 
 function capturingReaders(
   readers: ObserverReaders,

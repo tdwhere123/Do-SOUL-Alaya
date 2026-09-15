@@ -185,6 +185,7 @@ export function buildMockDaemon(overrides: {
     attachWorkspace: vi.fn(async (input: { workspaceId: string; runId: string }) => ({
       workspaceId: input.workspaceId,
       runId: input.runId,
+      importSourceRecord: vi.fn(async () => undefined),
       proposeMemory,
       proposeMemoryFromSignal,
       proposeMemoriesFromCompileSignals,

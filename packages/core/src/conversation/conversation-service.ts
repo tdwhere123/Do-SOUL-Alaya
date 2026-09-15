@@ -50,6 +50,7 @@ export class ConversationService {
         ? {}
         : { eventPublisher: dependencies.eventPublisher }),
       gardenComputeProvider: dependencies.gardenComputeProvider,
+      ...(dependencies.retainCompileSource === undefined ? {} : { retainCompileSource: dependencies.retainCompileSource }),
       resolveGardenComputeProvider: dependencies.resolveGardenComputeProvider,
       signalReceiver: dependencies.signalReceiver,
       sessionOverridePromotion: dependencies.sessionOverridePromotion,

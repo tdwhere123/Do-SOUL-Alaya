@@ -16,7 +16,7 @@ import {
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { buildExtractionContentClosureIndex } from "../../../runs/extraction/content-closure.js";
 
-const DEFAULT_RAW_JSON = '{"signals":[]}';
+const DEFAULT_RAW_JSON = '{"interpretations":[]}';
 
 export function writeCompletedExtractionCacheFixture(input: {
   readonly cacheRoot: string;
@@ -84,7 +84,9 @@ function writeShard(
     request_profile: "provider-default-v1",
     cache_key: cacheKey,
     raw_json: rawJson,
-    extracted_at: "2026-07-16T00:00:00.000Z",
-    ...(rawJson === DEFAULT_RAW_JSON ? { empty_classification: "deterministic_empty" } : {})
+    ...(rawJson === DEFAULT_RAW_JSON ? {
+      empty_classification: "deterministic_empty"
+    } : {}),
+    extracted_at: "2026-07-16T00:00:00.000Z"
   })}\n`, "utf8");
 }

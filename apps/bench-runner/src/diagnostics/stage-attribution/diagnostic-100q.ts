@@ -17,6 +17,7 @@ import {
 } from "./exposure/canary-polarity-matrix.js";
 
 export const DIAGNOSTIC_100Q_STAGES = [
+  "unattributed",
   "eval_or_write_loss",
   "early_absent",
   "formation_rejected",
@@ -58,6 +59,7 @@ export function mapQuestionToDiagnosticStage(
   row: Pick<QuestionStageRow, "stage" | "hit_at_5" | "proof" | "miss_taxonomy">
 ): Diagnostic100QStage {
   if (row.hit_at_5 || row.stage === "delivered_top5") return "delivered_top5";
+  if (row.stage === "unattributed" || row.miss_taxonomy === "conditional_field_unattributed") return "unattributed";
   if (row.stage === "write_or_unevaluable") {
     if (row.miss_taxonomy === "evaluation_or_gold_issue" ||
         row.proof.includes("empty_gold") ||
@@ -94,7 +96,7 @@ export function compareF0F2VsCachedF3(input: {
     five_hundred_q_closed: DIAGNOSTIC_500Q_CLOSED,
     ...classification,
     treatment_exposure_receipts: receipts,
-    causal_comparison_status: deriveCausalStatus(polarityMatrix, exposureSli),
+    causal_comparison_status: deriveCausalStatus(polarityMatrix, exposureSli, receipts),
     exposure_sli: exposureSli,
     canary_polarity_matrix: polarityMatrix,
     diagnostic_100q_unlock: unlock
@@ -103,8 +105,11 @@ export function compareF0F2VsCachedF3(input: {
 
 export function deriveCausalStatus(
   matrix: CanaryPolarityMatrixVerdict,
-  sli: CachedF3ExposureSli
+  sli: CachedF3ExposureSli,
+  receipts: readonly TreatmentExposureReceipt[]
 ): "eligible" | "inconclusive" {
+  if (receipts.some((receipt) => receipt.outcome.control.stage === "unattributed" ||
+      receipt.outcome.treatment.stage === "unattributed")) return "inconclusive";
   if (matrix.applicable) return matrix.passed ? "eligible" : "inconclusive";
   return sli.denominator_count > 0 ? "eligible" : "inconclusive";
 }
@@ -188,5 +193,5 @@ function assertSameQuestionSet(
 }
 
 function emptyCounts(): Record<Diagnostic100QStage, number> {
-  return { eval_or_write_loss: 0, early_absent: 0, formation_rejected: 0, pre_waist: 0, waist_or_later: 0, delivered_top5: 0 };
+  return { unattributed: 0, eval_or_write_loss: 0, early_absent: 0, formation_rejected: 0, pre_waist: 0, waist_or_later: 0, delivered_top5: 0 };
 }

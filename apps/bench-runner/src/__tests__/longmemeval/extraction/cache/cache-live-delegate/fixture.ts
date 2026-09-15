@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { expect, vi } from "vitest";
 import {
   buildOfficialApiExtractionRequest,
+  buildOfficialApiSourceCorpus,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import { createGardenHttpExtractor } from
@@ -11,8 +12,7 @@ import { cacheFilePath, computeSourceTurnCacheKey } from
 import {
   TEST_EXTRACTION_PROVIDER_URL
 } from "../../extraction-cache-test-fixture.js";
-import { withOpenSemanticFactorGraph } from
-  "../../../compile-seed/compile-seed-fixture.js";
+
 
 export const MODEL = "test-model";
 export const SYSTEM_PROMPT = "test-system-prompt";
@@ -81,40 +81,30 @@ export function createHttpExtractor(fetchMock: ReturnType<typeof vi.fn<typeof fe
   });
 }
 
-export function assertionBatchPrompt(assertionIds: readonly number[]): string {
-  return JSON.stringify({
-    schema_version: 2,
-    source_locator_contract_version: 4,
-    batch_contract_version: 1,
-    source_corpus_identity: "a".repeat(64),
-    batch_index: 0,
-    batch_count: 1,
-    source_assertions: assertionIds.map((assertion_id) => ({
-      assertion_id,
-      text: `I completed assertion ${assertion_id}.`
-    }))
-  });
+export function assertionBatchCorpus(assertionIds: readonly number[]): string {
+  return buildOfficialApiSourceCorpus(assertionBatchText(assertionIds), []);
 }
 
-export function cacheSignalResponse(assertionId: number): Response {
-  const matchedText = `I completed assertion ${assertionId}.`;
-  const signal = withOpenSemanticFactorGraph({
-    signal_kind: "potential_claim",
-    object_kind: "open_semantic_observation",
-    confidence: 0.9,
-    matched_text: matchedText,
-    distilled_fact: `assertion ${assertionId}`,
-    source_locator: {
-      contract_version: 4,
-      kind: "assertion_catalog",
-      assertion_id: assertionId
-    }
-  });
-  return sseResponse(JSON.stringify({ signals: [signal] }), "stop");
+function assertionBatchText(assertionIds: readonly number[]): string {
+  return assertionIds.map((id) => `I completed assertion ${id}.`).join(" ");
+}
+
+export function assertionBatchPrompt(assertionIds: readonly number[]): string {
+  return stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(assertionBatchText(assertionIds), []));
+}
+
+export function sourceCorpusWithAssertions(): string {
+  return buildOfficialApiSourceCorpus("I completed the review today.", []);
+}
+
+export function cacheInterpretationResponse(assertionId: number): Response {
+  return sseResponse(JSON.stringify({ interpretations: [{ assertion_id: assertionId,
+    relations: [{ predicate: { text: `I completed assertion ${assertionId}.` }, arguments: [], qualifiers: [] }]
+  }] }), "stop");
 }
 
 export function truncatedSseResponse(): Response {
-  return sseResponse('{"signals":[]}', "length");
+  return sseResponse('{"interpretations":[]}', "length");
 }
 
 export function sseResponse(content: string, finishReason: string): Response {

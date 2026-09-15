@@ -5,6 +5,7 @@ import {
   SoulMemoryCreatedPayloadSchema,
   SoulMemoryUpdatedPayloadSchema,
   StorageTier,
+  resolveMemoryDynamicsPolicy,
   type EventLogEntry,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
@@ -70,7 +71,9 @@ export class MemoryWriteService {
   }
 
   public async create(input: MemoryEntryInput): Promise<Readonly<MemoryEntry>> {
-    const { enqueueEnrichment: enrichmentIntent, ...memoryEntryInput } = input;
+    const {
+      enqueueEnrichment: enrichmentIntent, object_id: reservedObjectId, assertSourceCurrent, ...memoryEntryInput
+    } = input;
     const enqueueEnrichment = freezeEnrichmentIntent(enrichmentIntent);
     const timestamp = this.now();
     const dynamics =
@@ -90,7 +93,7 @@ export class MemoryWriteService {
       };
     const memoryEntry = parseMemoryEntry({
       ...memoryEntryInput,
-      object_id: this.generateObjectId(),
+      object_id: reservedObjectId ?? this.generateObjectId(),
       object_kind: "memory_entry",
       schema_version: 1,
       lifecycle_state: "active",
@@ -129,7 +132,8 @@ export class MemoryWriteService {
     const { created, event } = await this.createRowMaybeAtomicallyEnqueued(
       memoryEntry,
       enqueueEnrichment,
-      eventInput
+      eventInput,
+      assertSourceCurrent
     );
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     this.persistObjectKeys(created);
@@ -170,7 +174,8 @@ export class MemoryWriteService {
   private async createRowMaybeAtomicallyEnqueued(
     memoryEntry: Readonly<MemoryEntry>,
     enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"],
-    createdEventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+    createdEventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">,
+    assertSourceCurrent?: () => void
   ): Promise<{
     readonly created: Readonly<MemoryEntry>;
     readonly event: EventLogEntry;
@@ -187,6 +192,7 @@ export class MemoryWriteService {
     let event: EventLogEntry | undefined;
     const created = createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, {
       beforeCreate: () => {
+        assertSourceCurrent?.();
         event = this.appendCreatedEventSynchronously(createdEventInput);
       },
       afterCreate: () => {
@@ -248,6 +254,7 @@ export class MemoryWriteService {
     if (existing.lifecycle_state === "archived") {
       throw new CoreError("VALIDATION", "Memory entry is archived and cannot be updated");
     }
+    rejectFrozenObservationConfidence(existing, parsedFields);
   }
 
   private async updateInternal(input: {
@@ -277,6 +284,7 @@ export class MemoryWriteService {
     if (existing.lifecycle_state === "archived") {
       throw new CoreError("VALIDATION", "Memory entry is archived and cannot be updated");
     }
+    rejectFrozenObservationConfidence(existing, parsedFields);
 
     const updatedFields = toUpdatedFieldNames(parsedFields);
     const occurredAt = this.now();
@@ -468,6 +476,17 @@ export class MemoryWriteService {
       sourceSignalId: enqueueEnrichment.sourceSignalId
     });
   }
+}
+
+function rejectFrozenObservationConfidence(
+  existing: MemoryEntry,
+  fields: MemoryEntryUpdateFields
+): void {
+  if (fields.confidence === undefined) return;
+  if (resolveMemoryDynamicsPolicy(existing.dimension, existing.formation_kind).confidence !== null) {
+    return;
+  }
+  throw new CoreError("VALIDATION", "observation confidence cannot be mutated");
 }
 
 function freezeEnrichmentIntent(

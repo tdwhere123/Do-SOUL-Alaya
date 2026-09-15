@@ -1,9 +1,9 @@
 import {
   officialApiSemanticWorksetFromUnits,
-  parseOfficialApiSignals,
   planOfficialApiTransport,
   type TransportPack
 } from "@do-soul/alaya-soul";
+import { SourceInterpretationResponseEnvelopeSchema } from "@do-soul/alaya-protocol";
 import {
   admitProviderRaw,
   semanticPackRequestSha256,
@@ -203,7 +203,7 @@ function settleSealedResponse(
     return;
   }
   try {
-    parseOfficialApiSignals(response.rawUtf8);
+    SourceInterpretationResponseEnvelopeSchema.parse(JSON.parse(response.rawUtf8));
   } catch (cause) {
     const reason = `parser drop: ${errorMessage(cause)}`;
     input.attemptLedger.markMalformedRaw(attempt.ordinal, reason);

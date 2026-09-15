@@ -72,7 +72,7 @@ describe("indexed Recall isolated migration and rollback", () => {
     const projection = new SqliteIndexedRecallProjection(candidate.connection);
     const pin = projection.observablePin("workspace");
     expect(truth(candidate)).toBe(originalTruth);
-    expect(candidate.connection.prepare("SELECT revision FROM garden_semantic_schema").all()).toEqual([{ revision: 6 }]);
+    expect(candidate.connection.prepare("SELECT revision FROM garden_semantic_schema").all()).toEqual([{ revision: 7 }]);
     candidate.close();
     const restarted = open(candidateFilename);
     assertSemanticArtifactCandidateSchema(restarted.connection);
@@ -109,7 +109,7 @@ describe("indexed Recall isolated migration and rollback", () => {
     database.connection.exec("INSERT INTO garden_semantic_schema VALUES (4)");
     expect(() => prepareIndexedRecallProjection(database)).toThrow();
     expect(database.connection.prepare("SELECT revision FROM garden_semantic_schema ORDER BY revision").all())
-      .toEqual([{ revision: 4 }, { revision: 6 }]);
+      .toEqual([{ revision: 4 }, { revision: 7 }]);
     database.connection.exec("DELETE FROM garden_semantic_schema WHERE revision=4");
     database.connection.exec("UPDATE memory_entries SET lifecycle_state='tombstone' WHERE object_id='memory'");
     prepareIndexedRecallProjection(database);

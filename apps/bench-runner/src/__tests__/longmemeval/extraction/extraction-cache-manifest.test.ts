@@ -95,7 +95,7 @@ describe("extraction-cache-manifest", () => {
     );
     expect(computeExtractionCacheKeyAlgoDigest()).toBe(EXTRACTION_CACHE_KEY_ALGO);
     expect(computeExtractionCacheKeyAlgoDigest()).toBe(
-      "7c24d01c579438b7752143596233d9269650afa73e4856bc3518b83b6332c08e"
+      "027798b93a459e90825bb0486be43525a83ed9a146846c5fe6feb6599640f08e"
     );
     expect(computeCacheKey(
       EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.model,

@@ -13,6 +13,8 @@ import type {
   LongMemEvalSnapshotSeedRound
 } from "../materialize.js";
 
+import { readSourceObservationProof } from "./source-observation-proof.js";
+
 interface StoredMemoryRow {
   readonly object_id: string;
   readonly evidence_refs: string;
@@ -77,15 +79,21 @@ export function assertSeedLedgerMaterializationProof(input: {
     const bindings = requireRoundBindings(round);
     bindings.forEach((binding) => {
       assertBindingOrder(binding, round, signalIds, evidenceIds);
+      const current = binding.evidenceId === null ? null : readSourceObservationProof(input.db, binding.evidenceId, input.question, input.source);
+      if (current !== null && (current.signal.signal_id !== binding.signalId ||
+          current.identity.memoryObjectId !== binding.objectId ||
+          current.round.sessionIndex !== round.sessionIndex || current.round.roundIndex !== round.roundIndex)) {
+        throw new Error("snapshot source observation materialization binding mismatch");
+      }
       const signal = assertSignalSource(
-        input.db, binding, round, input.question, input.source
+        input.db, binding, round, input.question, input.source, current !== null
       );
       assertSignalMaterializationEvent(input.db, binding, input.question);
       addMemorySource(sourcesByMemory, binding.objectId, round);
       if (binding.evidenceId === null) {
         assertReconciliationNoop(input.db, binding, input.question, signal);
       } else {
-        assertEvidenceBinding(binding.evidenceId, round, input.question, input.source, evidence);
+        if (current === null) assertEvidenceBinding(binding.evidenceId, round, input.question, input.source, evidence);
         addEvidenceBinding(evidenceByMemory, binding.objectId, binding.evidenceId);
       }
     });
@@ -141,18 +149,18 @@ function assertSignalSource(
   binding: LongMemEvalSnapshotSeedBinding,
   round: LongMemEvalSnapshotSeedRound,
   question: LongMemEvalSnapshotQuestion,
-  source: LongMemEvalQuestion
+  source: LongMemEvalQuestion,
+  current: boolean
 ): StoredSignalRow {
   const row = db.prepare(`
     SELECT signal_id, workspace_id, run_id, source, evidence_refs_json, raw_payload_json
       FROM signals WHERE signal_id = ?
   `).get(binding.signalId) as unknown as StoredSignalRow | undefined;
-  const refs = parseStringArray(row?.evidence_refs_json, `signal ${binding.signalId} evidence refs`);
+  const refs = current ? [] : parseStringArray(row?.evidence_refs_json, `signal ${binding.signalId} evidence refs`);
   if (row === undefined || row.signal_id !== binding.signalId ||
       row.workspace_id !== question.workspaceId ||
       row.run_id !== question.runId || row.source !== "garden_compile" ||
-      refs.length === 0 ||
-      refs.some((ref) => !matchesRound(ref, round, source))) {
+      (!current && (refs.length === 0 || refs.some((ref) => !matchesRound(ref, round, source))))) {
     throw new Error(`snapshot seed signal source mismatch for ${binding.signalId}`);
   }
   return row;

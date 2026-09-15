@@ -278,11 +278,11 @@ function writeSealedCache(
   datasetRevision: string,
   keys: readonly string[], sourcePacking: string
 ): { readonly manifestSha256: string; readonly contentClosureSha256: string } {
-  const rawJson = '{"signals":[]}';
+  const rawJson = '{"interpretations":[]}';
   const inspected = inspectExtractionRawJson(rawJson);
   for (const key of keys) {
     writeCachedExtraction(cacheRoot, key, {
-      model: MODEL, request_profile: PROFILE, cache_key: key, raw_json: rawJson,
+      model: MODEL, request_profile: PROFILE, cache_key: key, raw_json: rawJson, empty_classification: "deterministic_empty",
       extracted_at: "2026-08-19T00:00:00.000Z",
       empty_classification: "deterministic_empty",
       response_metadata: { finish_reason: "stop" }

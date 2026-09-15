@@ -1,3 +1,4 @@
+import { buildLongMemEvalQualityMetrics } from "../../../diagnostics/diagnostics.js";
 import { FirstExposureSession } from "../../../runs/measurement/first-exposure-session.js";
 import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
@@ -113,6 +114,21 @@ function measureWithReceipt(extra: {
 }
 
 describe("conditional target measurement evidence", () => {
+  it("counts an unattributed validated miss exactly once while preserving hit and scorable totals", () => {
+    const miss = diagnostic(fixture(["decoy"]), false);
+    const hit = diagnostic();
+    expect(miss.conditional_field_measurement?.status).toBe("validated");
+    expect(classifyQuestionMeasurementStatus(miss)).toBe("scorable");
+    expect(miss.miss_taxonomy).toBe("conditional_field_unattributed");
+    expect(hit.miss_taxonomy).toBeNull();
+    const metrics = buildLongMemEvalQualityMetrics([miss, hit]);
+    expect(metrics.measurement_cohort_counts).toMatchObject({ scorable_answerable: 2, hit_at_5: 1, miss_at_5: 1 });
+    expect(metrics.miss_taxonomy_distribution.conditional_field_unattributed).toBe(1);
+    expect(Object.values(metrics.miss_taxonomy_distribution).reduce((sum, count) => sum + count, 0)).toBe(1);
+    const archived = LongMemEvalQuestionDiagnosticSchema.parse(JSON.parse(JSON.stringify(miss)));
+    expect(reclassifyQuestionDiagnostic(archived).miss_taxonomy).toBe("conditional_field_unattributed");
+  });
+
   it("preserves source-only identity through diagnostics, archived admission and reclassification", () => {
     const base = fixture();
     const target = { kind: "source_evidence" as const, workspace_id: "workspace", root_kind: "source_record" as const,
@@ -277,7 +293,7 @@ describe("conditional target measurement evidence", () => {
   it("keeps misses in the fixed evaluator universe without calling an unseen index entry candidate-absent", () => {
     const row = diagnostic(fixture(["other"]), false);
     expect(classifyQuestionMeasurementStatus(row)).toBe("scorable");
-    expect(row.miss_taxonomy).toBeNull();
+    expect(row.miss_taxonomy).toBe("conditional_field_unattributed");
     expect(row.gold[0]?.candidate_status).toBe("unknown");
     expect(reclassifyQuestionDiagnostic(row)).toEqual(row);
   });

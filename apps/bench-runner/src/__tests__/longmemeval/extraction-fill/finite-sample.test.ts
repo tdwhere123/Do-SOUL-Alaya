@@ -21,7 +21,7 @@ import { inspectTurnContentKeySpace } from "../../../runs/extraction/turn-conten
 import { computeExtractionKeySetSha256 } from "../../../runs/extraction/content-closure.js";
 import { createGeminiBatchHttp } from "../../../runs/extraction/fill/batch/http.js";
 import type { GeminiBatchLimits, GeminiBatchOperation } from "../../../runs/extraction/fill/batch/contract.js";
-import { buildExtractionFillQuestion, buildGroundedSignalResponse,
+import { buildExtractionFillQuestion, buildGroundedInterpretationResponse,
   registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 
 let roots: { cacheRoot: string; dataDir: string; pinnedMetaRoot: string };
@@ -115,8 +115,8 @@ async function startProvider() {
     } else if (req.url === "/download/v1beta/files/output:download?alt=media") {
       res.end(state.uploads[0]!.trim().split("\n").reverse().map((line) => {
         const input = JSON.parse(line);
-        const raw = state.quarantine ? '{"signals":[{}]}' : state.empty ? '{"signals":[]}'
-          : buildGroundedSignalResponse(input.request.contents[0].parts[0].text);
+        const raw = state.quarantine ? '{"signals":[{}]}' : state.empty ? '{"interpretations":[]}'
+          : buildGroundedInterpretationResponse(input.request.contents[0].parts[0].text);
         return JSON.stringify({ key: input.key, response: {
           candidates: [{ finishReason: "STOP", content: { parts: [{ text: raw }] } }],
           usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 }
@@ -200,7 +200,7 @@ it("reopens singleton manifests, submits once through HTTP, and keeps sample res
     const request = JSON.parse(line.request.contents[0].parts[0].text);
     expect(request.batch_count).toBe(18);
     expect(request.source_assertions).toHaveLength(1);
-    expect(line.request.generationConfig.responseJsonSchema.properties.signals).not.toHaveProperty("maxItems");
+    expect(line.request.generationConfig.responseJsonSchema.properties.interpretations).not.toHaveProperty("maxItems");
   }
   fixture.provider.state.finished = true;
   const imported = await fixture.run("resume");
@@ -275,7 +275,7 @@ it("imports witnessed empty Batch responses, reopens their completion and never 
   expect(imported.manifest).toMatchObject({ fill_status: "in_progress", cached_turns: 8, expected_turns: 20 });
   for (const key of fixture.selected) {
     const persisted = JSON.parse(readFileSync(cacheFilePath(roots.cacheRoot, key), "utf8"));
-    expect(persisted).toMatchObject({ raw_json: '{"signals":[]}', empty_classification: "completed_empty",
+    expect(persisted).toMatchObject({ raw_json: '{"interpretations":[]}', empty_classification: "completed_empty",
       request_completion: { version: 1, status: "completed_empty" },
       transport_provenance: { model: "gemini-3.1-flash-lite" }, response_metadata: {
         finish_reason: "STOP", completion_contract_version: 1, completion_witness: "finish_reason" } });

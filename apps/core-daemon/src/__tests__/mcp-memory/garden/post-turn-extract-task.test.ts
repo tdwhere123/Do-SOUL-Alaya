@@ -77,7 +77,7 @@ describe("post-turn extract Garden task", () => {
       "memory-a",
       "memory-b"
     ]);
-    expect(payload.turn_digest.last_messages[0]!.content_excerpt).toHaveLength(800);
+    expect(payload.turn_digest.last_messages[0]!.content_excerpt).toHaveLength(900);
     expect(payload.admitted_source_root_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(pageWorkspaceSourceRoots(harness.database).rows.some((row) =>
       row.kind === "source_record"
@@ -452,6 +452,37 @@ describe("post-turn extract Garden task", () => {
       status: "completed",
       claimed_by: "in-process"
     });
+  });
+
+  it("fails post-turn extract when incomplete compile has no candidate signals", async () => {
+    const compile = vi.fn<GardenComputeProvider["compile"]>(async () => {
+      throw new OfficialApiGardenCompileIncompleteError({
+        contract_version: 1,
+        producer: "official-api-garden-compile-v1",
+        status: "partial",
+        drafts: [],
+        rejections: [{ index: 0, reason: "malformed_response" }],
+        pending_batches: [],
+        catalog: {
+          inventory_count: 1,
+          coverage: "budget_complete",
+          residual: [],
+          next_cursor: null
+        }
+      }, { signals: [] });
+    });
+    const harness = await createRoutingHarness({
+      provider_kind: "official_api",
+      officialCompile: compile
+    });
+    harness.enqueuePostTurnTask();
+
+    await harness.runScheduler();
+
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "failed"
+    });
+    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.toBeNull();
   });
 
   it("sets null source observation when a host-worker task has no persisted delivery proof", async () => {

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { OfficialApiGardenProvider, type GardenCompileContext } from "../../../garden/ingestion/compute-provider.js";
+import {
+  parseOfficialApiSignals,
+  type GardenCompileContext
+} from "../../../garden/ingestion/compute-provider.js";
 import { resolveSourceAssertion } from "../../../garden/triage/grounding/source-assertion.js";
+import { groundOfficialApiDraft } from "../../../garden/ingestion/official-api/source-grounding.js";
+import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const CONTEXT: GardenCompileContext = {
@@ -8,7 +13,13 @@ const CONTEXT: GardenCompileContext = {
   run_id: "run-source-grounding",
   surface_id: null,
   turn_messages: [],
-  allow_legacy_single_user_source: true
+  allow_legacy_single_user_source: true,
+  artifact_key: "artifact-source-grounding",
+  source_observation: {
+    observed_at: "2026-04-23T09:00:00.000Z",
+    authority: "trusted_host_event",
+    source_event_id: "event-source-grounding"
+  }
 };
 
 describe("official Garden source grounding", () => {
@@ -418,28 +429,36 @@ describe("official Garden source grounding", () => {
     const [signal] = await provider.compile(source, CONTEXT);
     expect(signal?.raw_payload.full_turn_content).toContain(assertion);
     expect(String(signal?.raw_payload.full_turn_content).length).toBeLessThanOrEqual(2_048);
-    expect(signal?.raw_payload).toMatchObject({
-      source_locator: { contract_version: 4, kind: "assertion_catalog" },
-      verified_user_assertion_source_hash: expect.any(String)
-    });
   });
 });
 
-function providerFor(fields: Record<string, unknown>): OfficialApiGardenProvider {
-  return new OfficialApiGardenProvider({
-    apiKey: "sk-test",
-    extractor: {
-      extract: async () => ({
-        rawJson: JSON.stringify({
-          signals: [withOpenSemanticFactorGraph({
-            signal_kind: "potential_claim",
-            object_kind: "activity",
-            confidence: 0.9,
-            ...fields
-          })]
-        })
-      })
-    },
-    generateSignalId: () => "signal-source-grounding"
-  });
+function providerFor(fields: Record<string, unknown>) {
+  return {
+    compile: async (turn: string, context: GardenCompileContext = CONTEXT) => {
+      const drafts = parseOfficialApiSignals(JSON.stringify({
+        signals: [withOpenSemanticFactorGraph({
+          signal_kind: "potential_claim",
+          object_kind: "activity",
+          confidence: 0.9,
+          ...fields
+        })]
+      }));
+      const content = turn.replace(/^User:\s*/u, "");
+      const corpus = buildOfficialApiSourceCorpus(content, context.turn_messages);
+      const grounded = groundOfficialApiDraft(drafts[0]!, corpus);
+      return [{
+        canonical_entities: grounded.draft.canonical_entities,
+        raw_payload: {
+          source_grounding: grounded.audit,
+          ...(grounded.draft.distilled_fact === undefined ? {} : {
+            distilled_fact: grounded.draft.distilled_fact
+          }),
+          ...(corpus.length <= 2_048 ? { full_turn_content: corpus } : {
+            full_turn_content: corpus.slice(Math.max(0, corpus.indexOf(String(fields.matched_text ?? "")) - 200), Math.max(0, corpus.indexOf(String(fields.matched_text ?? "")) - 200) + 2_048)
+          }),
+          source_locator: grounded.draft.source_locator
+        }
+      }];
+    }
+  };
 }

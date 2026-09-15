@@ -79,7 +79,7 @@ export const EXTRACTION_CACHE_KEY_ALGO_DOCUMENTATION =
  * Run-start recomputes the golden vector; a derivation change is a mismatch.
  */
 export const EXTRACTION_CACHE_KEY_ALGO =
-  "7c24d01c579438b7752143596233d9269650afa73e4856bc3518b83b6332c08e";
+  "027798b93a459e90825bb0486be43525a83ed9a146846c5fe6feb6599640f08e";
 
 export function computeExtractionCacheKeyAlgoDigest(): string {
   return computeCacheKey(

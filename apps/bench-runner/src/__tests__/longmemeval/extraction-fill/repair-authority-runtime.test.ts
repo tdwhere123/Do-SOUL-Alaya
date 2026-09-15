@@ -18,7 +18,7 @@ import {
 import { runExtractionFill } from
   "../../../runs/extraction/extraction-fill.js";
 import {
-  buildGroundedSignalResponse,
+  buildGroundedInterpretationResponse,
   buildAuthorityQuestion as buildExtractionFillQuestion,
   EXTRACTION_FILL_VARIANT,
   groundedExtractionResult,
@@ -55,7 +55,7 @@ describe("strict JSON repair authority runtime", () => {
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
       return providerBackedExtractionResult(
-        buildGroundedSignalResponse(input.userPrompt),
+        buildGroundedInterpretationResponse(input.userPrompt),
         { responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 } }
       );
     });
@@ -103,7 +103,7 @@ describe("strict JSON repair authority runtime", () => {
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
       return providerBackedExtractionResult(
-        buildGroundedSignalResponse(input.userPrompt),
+        buildGroundedInterpretationResponse(input.userPrompt),
         { responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 } }
       );
     });
@@ -167,7 +167,7 @@ describe("strict JSON repair authority runtime", () => {
     const [invalidPath, preservedPath] = shardPaths();
     mutateRawJson(invalidPath!, '{"signals":[{"signal_kind":"potential_preference"}');
     const receiptPath = await writeRepairReceipt();
-    mutateRawJson(preservedPath!, '{"signals":[ ]}');
+    mutateRawJson(preservedPath!, `${JSON.parse(readFileSync(preservedPath!, "utf8")).raw_json} `);
     const extract = vi.fn<BenchSignalExtractor["extract"]>();
 
     await expect(runExtractionFill({

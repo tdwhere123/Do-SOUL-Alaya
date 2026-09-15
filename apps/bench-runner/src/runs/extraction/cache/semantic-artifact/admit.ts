@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { parseOfficialApiSignals, transportPackIdentity } from "@do-soul/alaya-soul";
+import { parseOfficialApiSignals, transportPackIdentity, buildOfficialApiSourceRequest, officialApiSemanticWorksetFromSourceCorpus,
+  receiveOfficialApiSourceInterpretations } from "@do-soul/alaya-soul";
 import {
   capabilitiesAreCompatible,
   resolveExtractionCapability
@@ -83,8 +84,6 @@ export function admitProviderRaw(input: {
   readonly replayAuthority: VerifiedSemanticReplayAuthority;
   readonly rawBinding: RawEvidenceAdmissionBinding;
 }): readonly RawAdmission[] {
-  const replayIdentity = unwrapSemanticReplayAuthority(input.replayAuthority);
-  const replayIdentityDigest = semanticReplayIdentityDigest(replayIdentity);
   const identityFailure = validateAdmissionTasks(input.tasks, input.rawBinding);
   if (identityFailure !== undefined) {
     return input.tasks.map((task) => ({
@@ -102,30 +101,43 @@ export function admitProviderRaw(input: {
     }));
   }
   persistRawArtifact(input.root, input.rawJson);
-  let drafts: ReturnType<typeof parseOfficialApiSignals>;
-  try {
-    drafts = parseOfficialApiSignals(input.rawJson);
-  } catch (cause) {
-    const reason = cause instanceof Error ? cause.message : String(cause);
-    return input.tasks.map((task) => ({
-      kind: "unresolved",
-      reason: `parser drop: ${reason}`,
-      semanticKey: task.semanticKey
-    }));
-  }
-  if (drafts.length === 0) {
-    return input.tasks.map((task) => emptyBatchQuarantine(
-      task, replayIdentity, replayIdentityDigest, digest.sha256
-    ));
-  }
-  return admitParsedProviderDrafts({
-    root: input.root,
-    tasks: input.tasks,
-    drafts,
-    rawDigest: digest.sha256,
-    rawBinding: input.rawBinding,
-    replayAuthority: input.replayAuthority
+  return admitProviderInterpretations({ ...input, rawDigest: digest.sha256 });
+}
+
+function admitProviderInterpretations(input: {
+  readonly root: string; readonly rawJson: string; readonly tasks: readonly AdmissionTask[];
+  readonly rawDigest: string; readonly rawBinding: RawEvidenceAdmissionBinding;
+  readonly replayAuthority: VerifiedSemanticReplayAuthority;
+  readonly requestAssertionIds?: readonly number[];
+}): readonly RawAdmission[] {
+  const first = input.tasks[0];
+  if (first === undefined) return [];
+  const requestedIds = input.requestAssertionIds ?? input.tasks.map((task) => task.assertionId);
+  const request = buildOfficialApiSourceRequest(first.sourceCorpus, requestedIds);
+  const received = receiveOfficialApiSourceInterpretations(input.rawJson, request, {
+    sourceCorpus: first.sourceCorpus, artifactKey: input.rawBinding.packIdentity
   });
+  const claimed = new Map<number, number>();
+  const accepted = new Set<string>();
+  const groundingFailures = new Map<number, string>();
+  const envelopeRejected = received.rejections.some((entry) =>
+    !requestedIds.includes(entry.assertion_id ?? -1));
+  for (const task of input.tasks) {
+    const located = received.located.find((entry) => entry.assertion_binding.assertion_id === task.assertionId);
+    const rejected = received.rejections.filter((entry) => entry.assertion_id === task.assertionId);
+    if (!envelopeRejected && rejected.length === 0 && located?.outcome === "candidates") {
+      claimed.set(task.assertionId, 1);
+      accepted.add(task.semanticKey);
+    } else {
+      groundingFailures.set(task.assertionId, envelopeRejected ? "out-of-request interpretation" :
+        rejected.length > 0 ? JSON.stringify(rejected) : "no located candidate");
+    }
+  }
+  if (received.status === "complete" && received.located.every((entry) => entry.outcome === "empty")) {
+    const replay = unwrapSemanticReplayAuthority(input.replayAuthority);
+    return input.tasks.map((task) => emptyBatchQuarantine(task, replay, semanticReplayIdentityDigest(replay), input.rawDigest));
+  }
+  return input.tasks.map((task) => admitParsedTask({ ...input, task, claimed, accepted, groundingFailures }));
 }
 
 export function admitDerivedReplayFromRaw(input: {
@@ -161,6 +173,24 @@ export function admitDerivedReplayFromRaw(input: {
     };
   }
   const replayIdentity = unwrapSemanticReplayAuthority(input.replayAuthority);
+  const savedBinding = input.existing.raw_evidence_binding;
+  if (Array.isArray((JSON.parse(rawJson) as { interpretations?: unknown }).interpretations)) {
+    if (savedBinding === undefined || !savedBinding.member_semantic_keys.includes(input.task.semanticKey)) {
+      return { kind: "unresolved", semanticKey: input.task.semanticKey, reason: "derived replay requires persisted pack membership" };
+    }
+    const catalog = officialApiSemanticWorksetFromSourceCorpus(input.task.sourceCorpus, input.task.binding.datasetRevision);
+    const requestMembers = savedBinding.member_semantic_keys.map((key) => catalog.units.find((unit) => unit.semanticKey === key));
+    if (requestMembers.some((unit) => unit === undefined)) {
+      return { kind: "unresolved", semanticKey: input.task.semanticKey, reason: "persisted pack cannot be reconstructed from current source" };
+    }
+    return admitProviderInterpretations({ root: input.root, rawJson, tasks: [input.task],
+      requestAssertionIds: requestMembers.map((unit) => unit!.assertionId),
+      rawDigest, replayAuthority: input.replayAuthority,
+      rawBinding: { packIdentity: savedBinding.pack_identity, requestSha256: savedBinding.request_sha256,
+        sourceCorpusIdentity: savedBinding.source_corpus_identity, policyKind: savedBinding.policy_kind,
+        memberSemanticKeys: savedBinding.member_semantic_keys }
+    })[0]!;
+  }
   let drafts: ReturnType<typeof parseOfficialApiSignals>;
   try {
     drafts = parseOfficialApiSignals(rawJson);
@@ -367,10 +397,7 @@ function digestCanonicalRaw(
     return { kind: "unresolved", reason: "raw artifact UTF-8 bytes are not canonical" };
   }
   try {
-    const parsed = JSON.parse(rawJson) as { signals?: unknown };
-    if (!Array.isArray(parsed.signals)) {
-      return { kind: "unresolved", reason: "raw artifact signals array missing" };
-    }
+    JSON.parse(rawJson);
   } catch {
     return { kind: "unresolved", reason: "raw artifact is not strict JSON" };
   }

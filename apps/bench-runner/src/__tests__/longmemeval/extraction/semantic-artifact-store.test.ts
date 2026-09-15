@@ -1,3 +1,4 @@
+import { semanticInterpretation } from "./semantic-artifact-fixture.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import * as fs from "node:fs";
@@ -64,15 +65,7 @@ import { acquireExtractionCacheWriteLease } from
 const CAP_B = "temporal_validity:v1";
 
 async function admitTask(root: string, task = semanticTask()): Promise<void> {
-  const rawJson = JSON.stringify({ signals: [{
-    object_kind: "fact", confidence: 0.9,
-    matched_text: task.text.replace(/^(?:User|Assistant): /u, ""),
-    source_locator: {
-      contract_version: task.binding.locator.contract_version,
-      kind: "assertion_catalog",
-      assertion_id: task.assertionId
-    }
-  }] });
+  const rawJson = JSON.stringify({ interpretations: [semanticInterpretation(task)] });
   const report = await runSemanticFill({
     root, tasks: [task],
     envelope: createOfflineSemanticEnvelope({

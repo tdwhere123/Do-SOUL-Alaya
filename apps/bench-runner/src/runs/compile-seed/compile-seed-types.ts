@@ -405,6 +405,7 @@ export interface SeedExtractionPathKpi {
 
 /** Minimal daemon surface the compile seed path needs — test-stubbable. */
 export interface CompileSeedDaemon {
+  importSourceRecord(input: Omit<import("@do-soul/alaya-protocol").SourceAdmissionRequest, "workspace_id" | "evidence_object_id">): Promise<unknown>;
   /**
    * Seeds the production-extracted signals of ONE round through the daemon's
    * in-process signalService.receiveSignal — the same seam production

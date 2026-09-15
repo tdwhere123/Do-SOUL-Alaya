@@ -15,7 +15,7 @@ import type { SeededObjectResult } from
 import {
   CREDENTIALLED_CONFIG,
   providerBackedResult,
-  signalsEnvelope
+  interpretationsEnvelope
 } from "./compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from
   "../extraction/extraction-cache-test-fixture.js";
@@ -47,6 +47,7 @@ describe("compile seed source evidence fallback", () => {
       charsClipped: 0
     };
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
         throw new Error("degraded fallback must not run");
       },
@@ -61,7 +62,7 @@ describe("compile seed source evidence fallback", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => providerBackedResult("{\"signals\":[]}")
+        extract: async () => providerBackedResult("{\"interpretations\":[]}")
       })
     });
     const turnMessages = structuredTurnMessages();
@@ -99,6 +100,7 @@ describe("compile seed source evidence fallback", () => {
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
         throw new Error("degraded fallback must not run");
       },
@@ -117,7 +119,7 @@ describe("compile seed source evidence fallback", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => providerBackedResult("{\"signals\":[]}")
+        extract: async () => providerBackedResult("{\"interpretations\":[]}")
       })
     });
 
@@ -142,6 +144,7 @@ describe("compile seed source evidence fallback", () => {
     });
     const received: BenchSignalSeedInput[] = [];
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
         throw new Error("degraded fallback must not run");
       },
@@ -170,8 +173,7 @@ describe("compile seed source evidence fallback", () => {
       extractorFactory: () => ({
         extract: async () => ({
           ...providerBackedResult(""),
-          rawJson: signalsEnvelope([{
-            distilled: "The user takes the 7:15 train.",
+          rawJson: interpretationsEnvelope([{
             matched: "I take the 7:15 train."
           }])
         })
@@ -204,6 +206,7 @@ describe("compile seed source evidence fallback", () => {
     });
     const received: BenchSignalSeedInput[][] = [];
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
         throw new Error("degraded fallback must not run");
       },
@@ -265,6 +268,7 @@ describe("compile seed source evidence fallback", () => {
     });
     let calls = 0;
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
         throw new Error("degraded fallback must not run");
       },
@@ -304,6 +308,7 @@ describe("compile seed source evidence fallback", () => {
     });
     let calls = 0;
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
         throw new Error("degraded fallback must not run");
       },
@@ -339,6 +344,7 @@ describe("compile seed source evidence fallback", () => {
     });
     let compileSeedCalls = 0;
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
         throw new Error("degraded fallback must not run");
       },
@@ -353,7 +359,7 @@ describe("compile seed source evidence fallback", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => providerBackedResult("{\"signals\":[]}")
+        extract: async () => providerBackedResult("{\"interpretations\":[]}")
       })
     });
 
@@ -376,6 +382,7 @@ describe("compile seed source evidence fallback", () => {
     });
     let compileSeedCalls = 0;
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
         throw new Error("degraded fallback must not run");
       },
@@ -390,7 +397,7 @@ describe("compile seed source evidence fallback", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => providerBackedResult("{\"signals\":[]}")
+        extract: async () => providerBackedResult("{\"interpretations\":[]}")
       })
     });
     const result = await runner.seedTurn({
@@ -411,7 +418,7 @@ function createRunnerWithOneClaim(cacheRoot: string) {
   return createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot, allowLiveExtraction: true,
     extractorFactory: () => ({ extract: async ({ userPrompt }) => {
       const assertion = JSON.parse(userPrompt).source_assertions[0];
-      return providerBackedResult(signalsEnvelope([{ distilled: assertion.text, matched: assertion.text,
+      return providerBackedResult(interpretationsEnvelope([{ matched: assertion.text,
         assertionId: assertion.assertion_id }]));
     } })
   });

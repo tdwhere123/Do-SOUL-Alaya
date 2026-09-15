@@ -69,7 +69,7 @@ export interface RecallEvidenceSemanticActivationReceipt {
 
 export type RecallSourceMetadata = Readonly<
   Partial<Pick<MemoryEntry, "evidence_refs" | "dimension" | "scope_class">>
-  & Pick<RecallCandidate, "staged_warnings">
+  & Pick<RecallCandidate, "staged_warnings" | "source_lookup_reasons">
 >;
 
 export interface RecallResult {

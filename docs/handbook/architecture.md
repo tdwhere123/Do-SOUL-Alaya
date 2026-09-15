@@ -384,6 +384,31 @@ Signal ingestion is dual-track:
 Both produce candidates that flow through the Promotion Gate before
 becoming durable.
 
+Ordinary official-API extraction uses `source-interpretation-v1`. Protocol owns
+phrase location and Core owns source admission and observation publication;
+model predicate/role proposals do not certify their meaning. Interactive turns,
+post-turn tasks, and bench compile seeds retain the exact canonical extraction
+corpus before calling the provider or replaying its cache. Interactive artifact
+identity includes both message IDs. The extraction window planner alone limits
+provider input and records residual text; adapters must not independently clip
+the retained corpus. Valid empty responses remain distinct from missing or
+failed responses. Rejected relation candidates and out-of-request assertion IDs
+make receive receipts partial and cannot certify a completed cache response.
+
+Publication verifies the bound source again inside the evidence and memory write
+transactions, including reuse and duplicate recovery. Evidence can remain after
+a later memory write loses source currentness; retries reuse that evidence only
+while the same source is current. Audit precedes notification. Live semantic
+enrichment and fill consumers share interpretation admission; retained historical
+signal artifacts keep their explicit archive readers and original bytes.
+Reusable semantic artifacts contain occurrence-free relation proposals. Soul
+re-locates every proposal against the current work unit before Core publishes,
+including cache hits; Storage persists the resulting current binding. Original
+raw response and optional request provenance remain immutable and separate from
+the proposal. Candidate schema 7 adds nullable request provenance through the
+explicit initializer; legacy rows remain unchanged and ambiguous historical
+responses fail binding rather than inventing provenance.
+
 ## Low-Trust Draft and Typed-Resolution Chain
 
 Garden's deterministic `SignalService.evaluateTriage` +
@@ -493,6 +518,16 @@ scoring pressure; `staged_warnings[]` → recall-time warning;
 inline typed resolution.
 
 ## Control Plane Discipline
+
+Offline extraction receives reusable interpretation proposals through the Soul
+proposal entry; source binding and durable publication remain Core operations.
+Snapshot verification is read-only and uses the same Core source currentness,
+span and publication identity rules. Bench joins that proof to the canonical
+dataset round in one SQLite read transaction. Current source-bound evidence does
+not acquire fabricated legacy artifact paths; recorded legacy receipts retain
+their own validation contract. The additive read-only Core verifier, Storage
+signal-row parser, Soul temporal projection export and Eval miss-distribution
+schema are minor API additions under invariant §25 for these named consumers.
 
 Runtime control objects can guide execution, request review, and shape
 projection, but they must not silently become durable memory.

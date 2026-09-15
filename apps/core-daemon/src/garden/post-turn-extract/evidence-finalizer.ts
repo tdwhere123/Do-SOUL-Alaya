@@ -81,9 +81,13 @@ function bindSourceObservation(
   signal: CandidateMemorySignal,
   sourceObservation: CandidateMemorySignal["source_observation"]
 ): CandidateMemorySignal {
-  return sourceObservation === null
-    ? signal
-    : CandidateMemorySignalSchema.parse({ ...signal, source_observation: sourceObservation });
+  if (sourceObservation !== null) {
+    return CandidateMemorySignalSchema.parse({ ...signal, source_observation: sourceObservation });
+  }
+  if (signal.interpretation_contract !== undefined) {
+    return signal;
+  }
+  return CandidateMemorySignalSchema.parse({ ...signal, source_observation: null });
 }
 
 async function receiveEvidenceFallback(

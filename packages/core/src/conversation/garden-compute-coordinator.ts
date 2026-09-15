@@ -49,6 +49,7 @@ interface CompletedProviderCallEvent {
 }
 
 export interface GardenComputeCoordinatorDependencies {
+  readonly retainCompileSource?: (turnContent: string, context: Parameters<ConversationGardenComputeProviderPort["compile"]>[1]) => Promise<void>;
   readonly eventLogRepo: ConversationEventLogRepoPort;
   readonly eventPublisher?: EventPublisher;
   readonly gardenComputeProvider: ConversationGardenComputeProviderPort;
@@ -101,13 +102,24 @@ export class GardenComputeCoordinator {
     readonly sourceObservation: TrustedGardenSourceObservation | null;
   }>> {
     const sourceObservedAt = input.userMessage.created_at;
+    const artifactKey = `garden-compile:${input.workspace.workspace_id}:${input.run.run_id}:${input.userMessage.message_id}:${input.assistantMessage.message_id}`;
+    const compileObservation = providerCall === null || sourceObservedAt === undefined
+      ? undefined
+      : {
+        observed_at: sourceObservedAt,
+        authority: "trusted_host_event" as const,
+        source_event_id: providerCall.startedEventId
+      };
     const compileContext = {
       workspace_id: input.workspace.workspace_id,
       run_id: input.run.run_id,
       surface_id: input.run.current_surface_id ?? null,
       turn_messages: [input.userMessage, input.assistantMessage],
-      ...(sourceObservedAt === undefined ? {} : { source_observed_at: sourceObservedAt })
+      artifact_key: artifactKey,
+      ...(sourceObservedAt === undefined ? {} : { source_observed_at: sourceObservedAt }),
+      ...(compileObservation === undefined ? {} : { source_observation: compileObservation })
     };
+    await this.deps.retainCompileSource?.(input.userMessage.content, compileContext);
     const signals = await provider.compile(input.userMessage.content, compileContext);
     const sourceObservation = await this.recordProviderCallCompleted(
       input,
@@ -200,7 +212,7 @@ export class GardenComputeCoordinator {
     const modelId = resolveGardenProviderModelId(gardenComputeProvider.provider_kind, input.modelRef);
 
     try {
-      await this.appendGardenEvent({
+      const started = await this.appendGardenEvent({
         event_type: ComputeRecallGardenEventType.COMPUTE_PROVIDER_CALL_STARTED,
         entity_type: "compute_provider_call",
         entity_id: callId,
@@ -217,6 +229,13 @@ export class GardenComputeCoordinator {
           started_at: startedAt
         })
       });
+      return {
+        callId,
+        startedAt,
+        startedAtEpochMs,
+        modelId,
+        startedEventId: started.event_id
+      };
     } catch (error) {
       if (isMissingGardenEventPublisher(error)) {
         throw error;
@@ -229,13 +248,6 @@ export class GardenComputeCoordinator {
       });
       return null;
     }
-
-    return {
-      callId,
-      startedAt,
-      startedAtEpochMs,
-      modelId
-    };
   }
 
   private async recordProviderCallCompleted(

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildOfficialApiExtractionRequests,
+  buildOfficialApiSourceCorpus,
   OFFICIAL_API_SYSTEM_PROMPT,
   stringifyOfficialApiExtractionRequest,
   transportPackIdentity
@@ -20,6 +21,7 @@ import { inspectExtractionFillCompletion } from
 import {
   catalogEligibilityOfAssertionCount,
   classifyExtractionEnvelope,
+  EMPTY_INTERPRETATIONS_ENVELOPE,
   EMPTY_SIGNALS_ENVELOPE,
   EXTRACTION_SEMANTIC_PRESERVATION_FROM_REQUEST,
   isPlanSkippedExtraction,
@@ -141,7 +143,7 @@ describe("extraction empty envelope classification", () => {
     )[0]!;
     const stats = newFillStats();
     const extractor = createCachingSignalExtractor({
-      delegate: { extract: async () => ({ rawJson: '{"signals":[]}', responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }) },
+      delegate: { extract: async () => ({ rawJson: EMPTY_INTERPRETATIONS_ENVELOPE, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }) },
       config: {
         model: "test-model",
         modelFamily: "test-model",
@@ -153,7 +155,8 @@ describe("extraction empty envelope classification", () => {
     });
     await extractor.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(request)
+      userPrompt: stringifyOfficialApiExtractionRequest(request),
+      sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", [])
     });
     const cacheKey = stats.lastCacheKey!;
     expect(inspectMaterialization(cacheRoot, cacheKey).descriptors).toHaveLength(1);
@@ -184,7 +187,7 @@ describe("extraction empty envelope classification", () => {
     const reopened = createCachingSignalExtractor({ delegate, cacheRoot, allowLiveExtraction: false,
       config: { model: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1" } });
     expect(await reopened.extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(request) })).toMatchObject({ rawJson: EMPTY_SIGNALS_ENVELOPE });
+      userPrompt: stringifyOfficialApiExtractionRequest(request) })).toMatchObject({ rawJson: EMPTY_INTERPRETATIONS_ENVELOPE });
     expect(delegate.extract).not.toHaveBeenCalled();
     const task = semanticTask("I moved to Berlin.");
     const semanticRoot = await mkdtemp(join(tmpdir(), "empty-semantic-"));
@@ -192,7 +195,7 @@ describe("extraction empty envelope classification", () => {
     const packIdentity = transportPackIdentity("token_aware", [task.semanticKey]);
     const [admission] = admitProviderRaw({
       root: semanticRoot,
-      rawJson: EMPTY_SIGNALS_ENVELOPE,
+      rawJson: EMPTY_INTERPRETATIONS_ENVELOPE,
       tasks: [task],
       replayAuthority: currentSemanticReplayAuthority(),
       rawBinding: {
@@ -212,7 +215,7 @@ describe("extraction empty envelope classification", () => {
         memberSemanticKeys: [task.semanticKey]
       }
     });
-    expect(admission?.kind).toBe("quarantined");
+    expect(admission, JSON.stringify(admission)).toMatchObject({ kind: "quarantined" });
     expect(admission && "admission" in admission ? admission.admission.state : undefined)
       .toBe("quarantined");
   });
@@ -239,7 +242,7 @@ describe("extraction empty envelope classification", () => {
       delegate: {
         extract: async (input) => {
           await input.onTransportAttempt?.(input.abortSignal);
-          return { rawJson: EMPTY_SIGNALS_ENVELOPE, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA };
+          return { rawJson: EMPTY_INTERPRETATIONS_ENVELOPE, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA };
         }
       },
       config: {
@@ -256,7 +259,8 @@ describe("extraction empty envelope classification", () => {
     });
     await extractor.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(request)
+      userPrompt: stringifyOfficialApiExtractionRequest(request),
+      sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", [])
     });
     expect(ledger.snapshot()).toMatchObject({
       attempts: 1,

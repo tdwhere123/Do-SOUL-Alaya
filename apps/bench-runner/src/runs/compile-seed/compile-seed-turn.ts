@@ -3,6 +3,8 @@ import type {
   CompileSeedBatchResult,
   SeededMemoryResult
 } from "../../harness/daemon.js";
+import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
+import { deriveAddressableSpanViews, retainedSourceSpeaker } from "@do-soul/alaya-core";
 import type { SeededObjectResult } from
   "../../harness/daemon/seed/daemon-seed-types.js";
 import { isUnscoredMaterializedSeedError } from "../../harness/seeding/seed-errors.js";
@@ -49,6 +51,14 @@ async function buildTurnSignalInputs(
   input: CompileSeedTurnInput,
   normalized: string
 ): Promise<BenchSignalSeedInput[]> {
+  const artifactKey = `compile-seed:${input.workspaceId}:${input.runId}:${input.seedIndex}`;
+  const corpus = buildOfficialApiSourceCorpus(normalized, input.turnMessages ?? []);
+  const speaker = retainedSourceSpeaker((input.turnMessages ?? [{ role: "user" }]).map((message) => message.role));
+  await input.daemon.importSourceRecord({ source_id: artifactKey, source_version: "1",
+    content_bytes: corpus, recorded_at: input.sourceObservedAt ?? new Date().toISOString(),
+    event_time: input.sourceObservedAt ?? null, valid_from: null, valid_to: null,
+    scope_class: "project", ...(speaker === undefined ? {} : { speaker }),
+    spans: deriveAddressableSpanViews(corpus) });
   const seedInputs = await extractSeedInputs({
     provider: context.provider,
     semanticSupplement: context.semanticSupplement,
@@ -60,6 +70,12 @@ async function buildTurnSignalInputs(
       run_id: input.runId,
       surface_id: input.surfaceId ?? null,
       turn_messages: input.turnMessages ?? [],
+      artifact_key: artifactKey,
+      source_observation: {
+        observed_at: input.sourceObservedAt ?? "1970-01-01T00:00:00.000Z",
+        authority: "trusted_host_event",
+        source_event_id: `compile-seed:${input.runId}`
+      },
       ...(input.sourceObservedAt === undefined
         ? {}
         : { source_observed_at: input.sourceObservedAt })

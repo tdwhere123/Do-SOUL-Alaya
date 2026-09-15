@@ -35,10 +35,13 @@ import {
 } from "../source-write-garden-intent.js";
 
 export async function createEvidenceCapsule(input: Readonly<{
+  readonly assertSourceCurrent?: () => void;
   readonly capsuleInput: Omit<
     EvidenceCapsule,
     "object_id" | "object_kind" | "schema_version" | "lifecycle_state" | "created_at" | "updated_at"
-  >;
+  > & {
+    readonly object_id?: string;
+  };
   readonly searchProjections: readonly Readonly<EvidenceSearchProjection>[];
   readonly factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>;
   readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>;
@@ -102,15 +105,18 @@ function parseCreatedCapsule(
     readonly capsuleInput: Omit<
       EvidenceCapsule,
       "object_id" | "object_kind" | "schema_version" | "lifecycle_state" | "created_at" | "updated_at"
-    >;
+    > & {
+      readonly object_id?: string;
+    };
     readonly generateObjectId: () => string;
   }>,
   timestamp: string
 ): EvidenceCapsule {
+  const { object_id: reservedObjectId, ...capsuleInput } = input.capsuleInput;
   try {
     return EvidenceCapsuleSchema.parse({
-      ...input.capsuleInput,
-      object_id: input.generateObjectId(),
+      ...capsuleInput,
+      object_id: reservedObjectId ?? input.generateObjectId(),
       object_kind: "evidence_capsule",
       schema_version: 1,
       lifecycle_state: "active",
@@ -196,6 +202,7 @@ async function admitOptionalFieldFormation(
 
 function persistCreatedEvidence(
   input: Readonly<{
+    readonly assertSourceCurrent?: () => void;
     readonly evidenceCapsuleRepo: {
       createInCurrentTransaction?(
         capsule: EvidenceCapsule,
@@ -228,6 +235,7 @@ function persistCreatedEvidence(
   return runEventLogTransaction(
     input.eventLogRepo,
     () => {
+      input.assertSourceCurrent?.();
       const event = appendCreatedSynchronously(input.eventLogRepo, evidence);
       const created = createInCurrentTransaction.call(
         input.evidenceCapsuleRepo,

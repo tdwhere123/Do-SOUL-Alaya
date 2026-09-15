@@ -3,16 +3,15 @@ import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
-  POST_TURN_EXTRACT_EXCERPT_MAX_CHARS,
   type ContextDeliveryRecord,
   type SoulReportContextUsageRequest,
   type SourceAdmissionPort
 } from "@do-soul/alaya-protocol";
 import { retainedSourceSpeaker } from "@do-soul/alaya-core";
 import { isDuplicateKeyError } from "@do-soul/alaya-storage";
+import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import {
-  admitPostTurnSourceRoot,
-  joinAdmittedTurnExcerpts
+  admitPostTurnSourceRoot
 } from "../../garden/post-turn-extract/admitted-source-root.js";
 import {
   createVerifiedDeliverySourceObservation,
@@ -24,7 +23,7 @@ import type {
 } from "../recall/recall-usage-handlers.js";
 
 export function enqueuePostTurnExtractTask(
-  params: Readonly<{ readonly deps: RecallUsageHandlerDependencies; readonly now: () => string }>,
+  params: Readonly<{ readonly deps: Pick<RecallUsageHandlerDependencies, "gardenTaskRepo" | "sourceAdmission">; readonly now: () => string }>,
   request: SoulReportContextUsageRequest,
   context: RecallUsageToolCallContext,
   linkedDelivery: Readonly<ContextDeliveryRecord> | null
@@ -73,7 +72,7 @@ export function enqueuePostTurnExtractTask(
         createdAt,
         sourceObservation,
         turnIndex,
-        lastMessages: sliceExtractDigestMessages(lastMessages),
+        lastMessages,
         admittedSourceRootId
       }),
       created_at: createdAt
@@ -135,7 +134,10 @@ function persistAdmittedTurnRoot(
     admission,
     workspaceId: input.workspaceId,
     sourceId: `post-turn:${input.taskId}`,
-    content: joinAdmittedTurnExcerpts(input.lastMessages),
+    content: buildOfficialApiSourceCorpus("", input.lastMessages.map((message) => ({
+      role: message.role as "user" | "assistant",
+      content: message.content_excerpt
+    }))),
     recordedAt: input.createdAt,
     eventTime: input.eventTime,
     ...(speaker === undefined ? {} : { speaker }),
@@ -152,19 +154,6 @@ function normalizeTurnDigestMessages(
       Object.freeze({
         role: message.role,
         content_excerpt: message.content_excerpt
-      })
-    )
-  );
-}
-
-function sliceExtractDigestMessages(
-  messages: readonly { readonly role: string; readonly content_excerpt: string }[]
-): readonly { readonly role: string; readonly content_excerpt: string }[] {
-  return Object.freeze(
-    messages.map((message) =>
-      Object.freeze({
-        role: message.role,
-        content_excerpt: message.content_excerpt.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)
       })
     )
   );

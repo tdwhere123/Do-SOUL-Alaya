@@ -15,6 +15,7 @@ import { ClaimLifecycleStateSchema } from "../memory/claim-form.js";
 import { PathGovernanceClassSchema } from "../relations/path-relation.js";
 import {
   RecallBudgetStateSchema,
+  SourceLookupReasonsSchema,
   RecallScoreFactorsSchema
 } from "../recall/recall-candidate.js";
 import { StagedWarningArraySchema } from "../governance/staged-warning.js";
@@ -63,6 +64,7 @@ export const MemorySearchResultSchema = z
     program_state: NonEmptyStringSchema.optional(),
     time_state: NonEmptyStringSchema.optional(),
     output_binding: NonEmptyStringSchema.optional(),
+    source_lookup_reasons: SourceLookupReasonsSchema.optional(),
     // Diagnostic-only prose. Agents must not branch on its wording or use it
     // as a ranking key. The information index owns association and ordering.
     selection_reason: BoundedReasonSchema,

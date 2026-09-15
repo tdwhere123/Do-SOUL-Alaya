@@ -50,7 +50,7 @@ function reportUsed(slice: Awaited<ReturnType<typeof fixture>>, target: SourceEv
 }
 
 describe("current canonical source usage identity", () => {
-  it("accepts later formation aliases and rejects the old alias after capsule retirement", async () => {
+  it("preserves native source identity across formation and rejects retired capsule aliases", async () => {
     const slice = await fixture();
     const record = plantSourceRecord(slice.database, "needle 😀 original");
     const before = recalledTarget(slice.database);
@@ -60,9 +60,9 @@ describe("current canonical source usage identity", () => {
     const delivered = recalledTarget(slice.database);
     expect(delivered.evidence_object_id).toBe(CAPSULE);
     await expect(reportUsed(slice, delivered)).resolves.toBeUndefined();
-    await expect(reportUsed(slice, before)).rejects.toThrow(/current retained source/);
+    await expect(reportUsed(slice, before)).resolves.toBeUndefined();
     slice.database.connection.prepare("UPDATE evidence_capsules SET lifecycle_state = 'archived' WHERE object_id = ?").run(CAPSULE);
-    await expect(reportUsed(slice, delivered)).rejects.toThrow(/current retained source/);
+    await expect(reportUsed(slice, delivered)).rejects.toThrow(/not active and verified/);
   });
 
   it("validates capsule revision and retained-text digest against the exact delivered target", async () => {

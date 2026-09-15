@@ -16,6 +16,7 @@ import type {
   StoredPairMeasurement,
   StoredPairsMeasurement
 } from "./measure-stored.js";
+import type { ProposalMatchReason } from "./source-proposal-match.js";
 
 export type LexicalObserverPage = Readonly<{
   readonly ids: readonly string[];
@@ -55,6 +56,7 @@ export type SourceObserverPage = Readonly<{
 }>;
 
 export type SourceRootObserverRow = Readonly<{
+  readonly source_lookup_reasons?: readonly ProposalMatchReason[];
   readonly kind: SourceEvidenceRootKind;
   readonly workspace_id: string;
   readonly root_id: string;
@@ -89,6 +91,25 @@ export type SourceRootObserverPage = Readonly<{
   readonly truncated: boolean;
   readonly committedThrough?: string | null;
   readonly unavailable?: boolean;
+}>;
+
+type BoundInterpretationHintRow = Readonly<{
+  readonly object_id: string;
+  readonly gist: string;
+  readonly cursor?: string;
+}>;
+
+type BoundInterpretationHintPage = Readonly<{
+  readonly rows: readonly BoundInterpretationHintRow[];
+  readonly nativeVisits: number;
+  readonly nativeBytes: number;
+  readonly nativeWork?: number;
+  readonly rowsRead: number;
+  readonly bytesRead: number;
+  readonly truncated: boolean;
+  readonly committedThrough?: string | null;
+  readonly unavailable?: boolean;
+  readonly resourceLimited?: boolean;
 }>;
 
 export type SourceRootHydrateObserverPage = Readonly<{
@@ -175,6 +196,23 @@ export type ObserverReaders = Readonly<{
     readonly nativeByteLimit?: number;
     readonly offset?: number;
   }>) => SourceRootHydrateObserverPage;
+  readonly boundInterpretations?: (input: Readonly<{
+    readonly matches?: (gist: string) => boolean;
+    readonly nativeByteLimit?: number;
+    readonly workspaceId: string;
+    readonly limit: number;
+    readonly nativeLimit: number;
+    readonly afterCursor: string | null;
+  }>) => BoundInterpretationHintPage;
+  readonly sourceTextHints?: (input: Readonly<{
+    readonly nativeByteLimit?: number;
+    readonly workspaceId: string;
+    readonly phrases: readonly string[];
+    readonly limit: number;
+    readonly nativeLimit: number;
+    readonly afterCursor: string | null;
+    readonly byteLimit?: number;
+  }>) => SourceRootObserverPage;
   readonly relation?: (input: Readonly<{
     readonly workspaceId: string;
     readonly subject: string | null;
@@ -252,6 +290,7 @@ export type ObserverActionResult = Readonly<{
   readonly work: ObserverWorkReceipt;
   readonly measurements?: readonly ObservationMeasurement[];
   readonly source_roots?: readonly SourceRootObserverRow[];
+  readonly lookup_reasons?: readonly ProposalMatchReason[];
 }>;
 
 export type {

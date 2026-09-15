@@ -121,9 +121,9 @@ describe("extraction cache-key allowlist continuation", () => {
       model: config.model,
       request_profile: config.requestProfile,
       cache_key: firstKey,
-      raw_json: '{"signals":[]}',
-      extracted_at: "2026-08-09T00:00:00.000Z",
-      empty_classification: "deterministic_empty"
+      raw_json: '{"interpretations":[]}',
+      empty_classification: "deterministic_empty",
+      extracted_at: "2026-08-09T00:00:00.000Z"
     });
 
     const selected = resolveContinuationMissingTurns({
@@ -149,9 +149,9 @@ describe("extraction cache-key allowlist continuation", () => {
       model: config.model,
       request_profile: config.requestProfile,
       cache_key: firstKey,
-      raw_json: '{"signals":[]}',
-      extracted_at: "2026-08-09T00:00:00.000Z",
-      empty_classification: "deterministic_empty"
+      raw_json: '{"interpretations":[]}',
+      empty_classification: "deterministic_empty",
+      extracted_at: "2026-08-09T00:00:00.000Z"
     });
 
     const selected = resolveContinuationMissingTurns({
@@ -178,9 +178,9 @@ describe("extraction cache-key allowlist continuation", () => {
       model: config.model,
       request_profile: config.requestProfile,
       cache_key: firstKey,
-      raw_json: '{"signals":[]}',
-      extracted_at: "2026-08-09T00:00:00.000Z",
-      empty_classification: "deterministic_empty"
+      raw_json: '{"interpretations":[]}',
+      empty_classification: "deterministic_empty",
+      extracted_at: "2026-08-09T00:00:00.000Z"
     });
 
     const selected = resolveContinuationMissingTurns({
@@ -270,9 +270,9 @@ describe("extraction cache-key allowlist production window", () => {
         model: config.model,
         request_profile: config.requestProfile,
         cache_key: key,
-        raw_json: status === "hit" ? '{"signals":[]}' : "not-json",
-        extracted_at: "2026-07-22T00:00:00.000Z",
-        ...(status === "hit" ? { empty_classification: "deterministic_empty" as const } : {})
+        raw_json: status === "hit" ? '{"interpretations":[]}' : "not-json",
+        ...(status === "hit" ? { empty_classification: "deterministic_empty" as const } : {}),
+        extracted_at: "2026-07-22T00:00:00.000Z"
       });
 
       expect(() => resolveCacheKeyAllowlistedTurns({

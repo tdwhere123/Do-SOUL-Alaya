@@ -20,7 +20,7 @@ import {
 import { initDatabase } from "@do-soul/alaya-storage";
 import {
   buildEvidenceInput,
-  OfficialApiGardenProvider
+  auditOfficialApiSignalFormation
 } from "@do-soul/alaya-soul";
 import { createKnowledgeFoundation } from
   "../../../runtime/daemon/wiring/daemon-knowledge-foundation.js";
@@ -28,7 +28,7 @@ import { createDaemonRepositories } from
   "../../../runtime/daemon/wiring/daemon-repositories.js";
 
 describe("daemon knowledge foundation", () => {
-  it("forms Fact Keys for verified user assertions without a model proposal", async () => {
+  it("forms Fact Keys from retained verified assertion receipts without a model fact frame", async () => {
     const harness = await createHarness();
     try {
       const signal = await compileVerifiedAssertionSignal("I have a dog.");
@@ -111,28 +111,14 @@ function testWarnLogger(warn: ReturnType<typeof vi.fn>) {
 async function compileVerifiedAssertionSignal(
   assertion: string
 ): Promise<Readonly<CandidateMemorySignal>> {
-  const provider = new OfficialApiGardenProvider({
-    apiKey: "sk-test",
-    generateSignalId: () => "signal-verified-assertion",
-    extractor: { extract: async ({ userPrompt }) => {
-      const request = JSON.parse(userPrompt) as {
-        readonly source_assertions: readonly {
-          readonly assertion_id: number;
-          readonly text: string;
-        }[];
-      };
-      const source = request.source_assertions.find(({ text }) => text.includes(assertion));
-      if (source === undefined) throw new Error("verified assertion source missing");
-      return { rawJson: JSON.stringify({ signals: [openSignal(assertion, source.assertion_id)] }) };
-    } }
-  });
-  const [signal] = await provider.compile(assertion, {
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
-    turn_messages: [{ message_id: "user-1", role: "user", content: assertion }]
-  });
-  if (signal === undefined) throw new Error("verified assertion signal missing");
+  const signal = auditOfficialApiSignalFormation({
+    raw_json: JSON.stringify({ signals: [openSignal(assertion, 1)] }),
+    turn_content: assertion, workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
+    turn_messages: [{ message_id: "user-1", role: "user", content: assertion }],
+    created_at: "2026-09-01T00:00:00.000Z", source_observed_at: "2026-09-01T00:00:00.000Z",
+    signal_id_for: () => "signal-verified-assertion"
+  }).entries[0]?.signal;
+  if (signal === undefined) throw new Error("historical verified assertion signal missing");
   return signal;
 }
 

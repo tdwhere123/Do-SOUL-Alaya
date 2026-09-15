@@ -170,7 +170,7 @@ function sourceTemporalRole(before: string, after: string, bounded: boolean): So
   // window. A validity cue cannot override an unresolved inequality either.
   if (/\b(?:before|after|by)\s+(?:the\s+year\s+)?$/iu.test(before) || /^(?:之前|之后|以前|以后|前|后)/u.test(after)) return "unknown";
   if (!bounded && /\b(?:until|through)\s*$|(?:截至|直到)$/iu.test(before)) return "unknown";
-  if (hasValidityConstruction(before) || hasValidityConstructionAfter(after)) return "validity";
+  if (hasValidityConstruction(before) || hasTrailingValidityConstruction(after)) return "validity";
   if (!bounded && /\b(?:from|to)\s+(?:the\s+year\s+)?$|(?:自|从|到|至)$/iu.test(before)) return "unknown";
   return "event";
 }
@@ -182,9 +182,9 @@ function hasValidityConstruction(before: string): boolean {
     /(?:有效期|生效|有效|适用)\s*(?:自|从|起)?\s*$/u.test(before);
 }
 
-function hasValidityConstructionAfter(after: string): boolean {
-  // Copular "DATE was the effective date" names validity; a later adjective
-  // in another clause cannot travel backward onto this date.
+function hasTrailingValidityConstruction(after: string): boolean {
+  // Copula after the date names that date as the validity bound. A later
+  // clause or a descriptive adjective must not supply the role.
   return /^\s+(?:was|is|became)\s+the\s+(?:effective|valid)\s+date\b/iu.test(after);
 }
 

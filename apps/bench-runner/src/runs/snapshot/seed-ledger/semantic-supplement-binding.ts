@@ -4,9 +4,10 @@ import {
   OFFICIAL_API_SOURCE_GROUNDING_SEMANTICS_VERSION,
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
-import type {
-  SourceAssertionSupplementBatchReceipt,
-  SourceAssertionSupplementBinding
+import {
+  SourceAssertionSupplementBindingSchema,
+  type SourceAssertionSupplementBatchReceipt,
+  type SourceAssertionSupplementBinding
 } from "../../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import {
   computeSourceAssertionSupplementEntrySetSha256,
@@ -104,8 +105,7 @@ export function assertSemanticSupplementClosure(
   const occurrenceCount = values.reduce(
     (total, entry) => total + entry.observedOccurrences, 0
   );
-  if (binding.receipt_schema_version !== 3 ||
-      binding.mapping_basis !== "source-draft-to-current-anchor-v3" ||
+  if (!SourceAssertionSupplementBindingSchema.safeParse(binding).success ||
       binding.primary_manifest_sha256 !== extraction.manifest_sha256 ||
       binding.parser_semantics !== OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION ||
       binding.grounding_semantics !== OFFICIAL_API_SOURCE_GROUNDING_SEMANTICS_VERSION ||

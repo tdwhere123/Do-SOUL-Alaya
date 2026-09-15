@@ -73,6 +73,9 @@ export function createSourceAssertionSupplementRuntime(input: {
   const primary = requireManifest(input.primaryCacheRoot, "primary");
   const source = requireManifest(input.sourceCacheRoot, "source");
   const reader = createReader(input, primary, source);
+  if (reader.receipt.schema_version !== 4) {
+    throw new Error("current source assertion supplement runtime requires interpretation receipt version 4");
+  }
   const binding = sourceAssertionSupplementBinding(reader.receipt);
   const turnReceipts: SourceAssertionSupplementBatchReceipt[] = [];
   const sourceCorpusState: { current: string | null } = { current: null };

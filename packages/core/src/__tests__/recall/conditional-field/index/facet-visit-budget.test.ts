@@ -11,13 +11,28 @@ import {
   continueAcceptingIndex,
   projectAcceptingIndex
 } from "../../../../recall/conditional-field/index/project-accepting-index.js";
-import type { FacetVisitIndex } from "../../../../recall/conditional-field/index/facet-visit-accounting.js";
+import { fieldProgressFingerprint, type FacetVisitIndex } from "../../../../recall/conditional-field/index/facet-visit-accounting.js";
 import { startRequestCost } from "../../../../recall/runtime/request-cost-ledger.js";
 import { defaultBudget, defaultView, facetObligation, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
 const EXPIRES_AT = "2099-01-01T00:00:00.000Z";
 
 describe("facet collection visits against the request allowance", () => {
+  it("keeps internal solver, explanation, support and pending computation visible as progress", () => {
+    const state = { observations: [], seeds: [], transitions: [], seen_identities: [],
+      resume_cursors: {}, pair_progress: {}, last_observer_status: "interrupted",
+      pending_path_effects: { offset: 0, progress_position: 0 } };
+    const before = fieldProgressFingerprint(state);
+    for (const next of [
+      { ...state, solver_completed_work: 1 },
+      { ...state, explanation_completed_work: 1 },
+      { ...state, support_scan_offset: 1 },
+      { ...state, pending_path_effects: { offset: 0, progress_position: 1 } }
+    ]) expect(fieldProgressFingerprint(next)).not.toBe(before);
+    expect(fieldProgressFingerprint({ ...state, ...{ support_completed_work: 100 },
+      pending_path_effects: { ...state.pending_path_effects, ...{ completed_work: 100 } } })).toBe(before);
+  });
+
   it("charges inspected facet rows, not candidate count or snapshot.facets.length", () => {
     const snapshot = facetSnapshot(20);
     const cost = startRequestCost();

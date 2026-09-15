@@ -15,7 +15,7 @@ import {
   type BatchCampaignState
 } from "../../../runs/extraction/fill/batch-campaign.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
-import { buildAuthorityQuestion, buildGroundedSignalResponse, EXTRACTION_FILL_VARIANT,
+import { buildAuthorityQuestion, buildGroundedInterpretationResponse, EXTRACTION_FILL_VARIANT,
   registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 
 let cacheRoot: string;
@@ -75,9 +75,9 @@ async function setup(options: { unknown?: boolean; usageMissing?: boolean; maxUs
         const item = JSON.parse(line);
         return JSON.stringify({ key: item.key, response: {
           candidates: [{ finishReason: "STOP", content: { parts: [{
-            text: options.foreignQuote ? buildGroundedSignalResponse(JSON.stringify({
+            text: options.foreignQuote ? buildGroundedInterpretationResponse(JSON.stringify({
               source_assertions: [{ assertion_id: 1, text: "I completed a different task." }]
-            })) : buildGroundedSignalResponse(item.request.contents[0].parts[0].text)
+            })) : buildGroundedInterpretationResponse(item.request.contents[0].parts[0].text)
           }] } }], ...(options.usageMissing ? {} : {
             usageMetadata: { promptTokenCount: options.expensiveUsage ? 1_000_000 : 10,
               candidatesTokenCount: 20, totalTokenCount: options.expensiveUsage ? 1_000_020 : 30 }

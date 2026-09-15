@@ -1,3 +1,4 @@
+import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -31,7 +32,7 @@ import {
   OFFLINE_CONFIG,
   providerBackedResult,
   makeSeed,
-  signalsEnvelope
+  interpretationsEnvelope
 } from "./compile-seed-fixture.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
@@ -58,10 +59,9 @@ describe("extraction cache key — load-bearing inputs only", () => {
 
   it("hits the cache for the same turn under a different run_id", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
-    const rawJson = signalsEnvelope([{
+    const rawJson = interpretationsEnvelope([{
       matched: "I moved to Berlin.",
-      distilled: "The user moved to Berlin."
-    }]);
+      }]);
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => providerBackedResult(rawJson))
     };
@@ -94,7 +94,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
     });
     await firstRun.extract({
       systemPrompt: "sys",
-      userPrompt: userPromptFor("I moved to Berlin.", "run-cq-abc-1700000000000")
+      userPrompt: userPromptFor("I moved to Berlin.", "run-cq-abc-1700000000000"), sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", [])
     });
     expect(delegate.extract).toHaveBeenCalledTimes(1);
     expect(firstStats.llmCalls).toBe(1);
@@ -133,7 +133,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
     });
     const cached = await secondRun.extract({
       systemPrompt: "sys",
-      userPrompt: userPromptFor("I moved to Berlin.", "run-cq-abc-1799999999999")
+      userPrompt: userPromptFor("I moved to Berlin.", "run-cq-abc-1799999999999"), sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", [])
     });
 
     expect(delegate.extract).toHaveBeenCalledTimes(1);
@@ -145,8 +145,8 @@ describe("extraction cache key — load-bearing inputs only", () => {
 
   it("still misses when the turn_content itself changes", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
-    const firstRaw = signalsEnvelope([{ distilled: "Turn one.", matched: "Turn one." }]);
-    const secondRaw = signalsEnvelope([{ distilled: "Turn two.", matched: "Turn two." }]);
+    const firstRaw = interpretationsEnvelope([{ matched: "Turn one." }]);
+    const secondRaw = interpretationsEnvelope([{ matched: "Turn two." }]);
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
@@ -164,11 +164,11 @@ describe("extraction cache key — load-bearing inputs only", () => {
     });
     await extractor.extract({
       systemPrompt: "sys",
-      userPrompt: userPromptFor("Turn one.", "run-1")
+      userPrompt: userPromptFor("Turn one.", "run-1"), sourceCorpus: buildOfficialApiSourceCorpus("Turn one.", [])
     });
     await extractor.extract({
       systemPrompt: "sys",
-      userPrompt: userPromptFor("Turn two.", "run-1")
+      userPrompt: userPromptFor("Turn two.", "run-1"), sourceCorpus: buildOfficialApiSourceCorpus("Turn two.", [])
     });
     expect(delegate.extract).toHaveBeenCalledTimes(2);
   });
@@ -200,7 +200,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
 
     await expect(extractor.extract({
       systemPrompt: "sys",
-      userPrompt: userPromptFor("Stopped before a request.", "run-abort")
+      userPrompt: userPromptFor("Stopped before a request.", "run-abort"), sourceCorpus: buildOfficialApiSourceCorpus("Stopped before a request.", [])
     })).rejects.toBe(stopped);
 
     expect(onLiveExtractionOutcome).not.toHaveBeenCalled();
@@ -225,7 +225,7 @@ describe("bench evidence capsule — production-faithful span", () => {
     await rm(cacheRoot, { recursive: true, force: true });
   });
 
-  it("seeds the matched_text span as evidence, not the full turn", async () => {
+  it("seeds the located assertion and retains the full turn as source evidence", async () => {
     const seeded: BenchSignalSeedInput[] = [];
     const daemon = buildCompileSeedDaemon((input) => {
       seeded.push(input);
@@ -245,10 +245,9 @@ describe("bench evidence capsule — production-faithful span", () => {
       extractorFactory: () => ({
         extract: async () => ({
           ...providerBackedResult(""),
-          rawJson: signalsEnvelope([{
+          rawJson: interpretationsEnvelope([{
             matched: "I moved to Berlin",
-            distilled: "Alice lives in Berlin."
-          }])
+            }])
         })
       })
     });
@@ -268,28 +267,13 @@ describe("bench evidence capsule — production-faithful span", () => {
     expect(seeded).toHaveLength(1);
     const raw = seeded[0]?.productionRawPayload;
     expect(raw).toBeDefined();
-    // The bench forwards compile()'s source-assertion raw_payload but strips
-    // the schema-grounding block (it pins detected_object.object_kind to the
-    // pre-canonicalization extracted kind — see stripSchemaGrounding). The
-    // The complete source assertion survives and is narrower than the turn.
-    expect(raw?.matched_text).toBe("Yesterday I moved to Berlin.");
-    expect(raw?.matched_text).not.toBe(fullTurn);
-    expect(raw).toMatchObject({
-      source_locator: {
-        contract_version: 4,
-        kind: "assertion_catalog",
-        assertion_id: 1
-      },
-      source_assertion: "Yesterday I moved to Berlin.",
-      proposed_matched_text: "I moved to Berlin"
-    });
-    // The pre-strip schema-grounding keys are gone; the original
-    // The canonical parser owns the open semantic object kind.
-    expect(raw?.schema_grounding).toBeUndefined();
-    expect(raw?.detected_object).toBeUndefined();
-    expect(raw?.field_candidates).toBeUndefined();
-    expect(raw?.validation_result).toBeUndefined();
-    expect(raw?.extracted_object_kind).toBe("open_semantic_observation");
+    expect(raw).toMatchObject({ source_interpretation: {
+      assertion_binding: { assertion_id: 1, text: "User: Yesterday I moved to Berlin." },
+      outcome: "candidates"
+    } });
+    expect(raw).not.toHaveProperty("matched_text");
+    expect(seeded[0]?.distilledFact).toBe("User: Yesterday I moved to Berlin.");
+    expect(seeded[0]?.turnContent).toBe(fullTurn);
   });
 
   it("carries the full turn only on the no-credentials fallback", async () => {

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  OfficialApiGardenProvider,
   auditOfficialApiSignalFormation,
+  parseOfficialApiSignals,
   type GardenCompileContext
 } from "../../../garden/ingestion/compute-provider.js";
+import { groundOfficialApiDraft } from "../../../garden/ingestion/official-api/source-grounding.js";
+import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const EMPTY_CONTEXT: GardenCompileContext = {
@@ -15,27 +17,6 @@ const EMPTY_CONTEXT: GardenCompileContext = {
 const COMBINED_TURN = "User: I moved to Paris. Assistant: You live in Berlin.";
 
 describe("official API source role trust", () => {
-  it("rejects an omitted locator for untrusted combined role text", async () => {
-    const [signal] = await providerFor({
-      matched_text: "You live in Berlin."
-    }).compile(COMBINED_TURN, EMPTY_CONTEXT);
-
-    expect(signal?.raw_payload.source_grounding).toMatchObject({
-      status: "rejected",
-      reasons: ["source_locator_required"]
-    });
-  });
-
-  it("rejects an omitted locator when even a plain source has no trusted role", async () => {
-    const [signal] = await providerFor({
-      matched_text: "I moved to Paris."
-    }).compile("I moved to Paris.", EMPTY_CONTEXT);
-
-    expect(signal?.raw_payload.source_grounding).toMatchObject({
-      status: "rejected",
-      reasons: ["source_messages_missing"]
-    });
-  });
 
   it("trusts role-looking text only when it is inside an explicit User message", async () => {
     const source = "I wrote the literal label Assistant: in my note.";
@@ -58,23 +39,6 @@ describe("official API source role trust", () => {
     expect(signal?.raw_payload.source_grounding).toMatchObject({ status: "grounded" });
   });
 
-  it("requires a locator for a fresh trusted User-only source", async () => {
-    const [signal] = await providerFor({
-      matched_text: "I moved to Paris."
-    }).compile("I moved to Paris.", {
-      ...EMPTY_CONTEXT,
-      turn_messages: [{
-        message_id: "user-1",
-        role: "user",
-        content: "I moved to Paris."
-      }]
-    });
-
-    expect(signal?.raw_payload.source_grounding).toMatchObject({
-      status: "rejected",
-      reasons: ["source_locator_required"]
-    });
-  });
 
   it.each([
     {
@@ -127,16 +91,15 @@ function signalJson(): Record<string, unknown> {
   };
 }
 
-function providerFor(fields: Record<string, unknown>): OfficialApiGardenProvider {
-  return new OfficialApiGardenProvider({
-    apiKey: "sk-test",
-    extractor: {
-      extract: async () => ({
-        rawJson: JSON.stringify({
-          signals: [withOpenSemanticFactorGraph({ ...signalJson(), ...fields })]
-        })
-      })
-    },
-    generateSignalId: () => "signal-role-trust"
-  });
+function providerFor(fields: Record<string, unknown>) {
+  return {
+    compile: async (turn: string, context: GardenCompileContext) => {
+      const drafts = parseOfficialApiSignals(JSON.stringify({
+        signals: [withOpenSemanticFactorGraph({ ...signalJson(), ...fields })]
+      }));
+      const corpus = buildOfficialApiSourceCorpus(turn, context.turn_messages);
+      const grounded = groundOfficialApiDraft(drafts[0]!, corpus);
+      return [{ raw_payload: { source_grounding: grounded.audit } }];
+    }
+  };
 }

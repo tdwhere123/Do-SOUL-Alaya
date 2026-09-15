@@ -54,6 +54,13 @@ export {
   retainedSourceSpeaker
 } from "./memory/evidence-create/source-admission.js";
 export { createAuditedSourceAdmission, type AuditedSourceAdmission } from "./memory/evidence-create/audited-source-admission.js";
+export {
+  createSourceObservationPublication,
+  verifySourceObservationPublication,
+  type SourceObservationPublication,
+  type SourceObservationPublicationInput,
+  type SourceObservationPublicationResult
+} from "./memory/evidence-create/source-observation-publication.js";
 export { deriveAddressableSpanViews } from "./memory/evidence-create/source-span-views.js";
 export { createProjectionGenerationReceipt } from
   "./recall/field/retrieval/projection/generation-identity.js";

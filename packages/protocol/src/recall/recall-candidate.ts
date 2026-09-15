@@ -10,7 +10,17 @@ import { ManifestationStateSchema, MemoryDimensionSchema } from "../memory/memor
 import { ScopeClassSchema } from "../memory/object-kind.js";
 import { ActivationWeightsSchema } from "./recall-policy.js";
 import { StagedWarningArraySchema } from "../governance/staged-warning.js";
-import { RecallTargetRefSchema } from "./conditional-field/product-identity.js";
+import { RecallTargetRefSchema, SourceEvidenceTargetSchema } from "./conditional-field/product-identity.js";
+
+const SourceLookupRoleSchema = z.object({ role: BoundedLabelSchema, phrase: z.string().min(1).max(4096) }).strict().readonly();
+const SourceLookupReasonSchema = z.object({
+  kind: z.literal("proposal"), predicate_key: z.string().min(1).max(4096),
+  arguments: z.array(SourceLookupRoleSchema).max(8).readonly(),
+  qualifiers: z.array(SourceLookupRoleSchema).max(8).readonly(),
+  candidate_id: z.string().min(1).max(512), context_id: z.string().min(1).max(512),
+  source_target: SourceEvidenceTargetSchema
+}).strict().readonly();
+export const SourceLookupReasonsSchema = z.array(SourceLookupReasonSchema).max(8).readonly();
 
 const recallOriginPlaneValues = ["workspace_local", "global"] as const;
 
@@ -103,6 +113,7 @@ export const RecallCandidateSchema = z
     origin_plane: RecallOriginPlaneSchema.default("workspace_local"),
     is_advisory: z.boolean().optional(),
     selection_reason: BoundedReasonSchema.optional(),
+    source_lookup_reasons: SourceLookupReasonsSchema.optional(),
     source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     score_factors: RecallScoreFactorsSchema.optional(),
     budget_state: RecallBudgetStateSchema.optional(),

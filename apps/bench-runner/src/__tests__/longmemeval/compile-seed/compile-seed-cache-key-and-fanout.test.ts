@@ -23,13 +23,13 @@ import {
   providerBackedResult,
   OFFLINE_CONFIG,
   makeSeed,
-  signalsEnvelope
+  interpretationsEnvelope
 } from "./compile-seed-fixture.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
-import { buildGroundedSignalResponse } from "../extraction-fill/fixture.js";
+import { buildGroundedInterpretationResponse } from "../extraction-fill/fixture.js";
 import {
   computeExtractionTurnCacheKeys,
   computeExtractionTurnCacheKey,
@@ -98,7 +98,7 @@ describe("canonical extraction request cache identity", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: vi.fn(async () => providerBackedResult('{"signals":[]}'))
+        extract: vi.fn(async () => providerBackedResult('{"interpretations":[]}'))
       })
     });
     const source = Array.from(
@@ -133,7 +133,7 @@ describe("canonical extraction request cache identity", () => {
     const capturingExtractor: BenchSignalExtractor = {
       extract: async (input) => {
         capturedUserPrompt = input.userPrompt;
-        return providerBackedResult('{"signals":[]}');
+        return providerBackedResult('{"interpretations":[]}');
       }
     };
     const provider = new OfficialApiGardenProvider({
@@ -142,7 +142,7 @@ describe("canonical extraction request cache identity", () => {
       extractor: capturingExtractor
     });
 
-    await provider.compile("I moved to Berlin last spring.", {
+    await provider.extractSourceInterpretations("I moved to Berlin last spring.", {
       workspace_id: "ws-1",
       run_id: "run-cq-abc-1700000000000",
       surface_id: null,
@@ -175,7 +175,7 @@ describe("canonical extraction request cache identity", () => {
     // change a cache identity.
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async (input) =>
-        providerBackedResult(buildGroundedSignalResponse(input.userPrompt)))
+        providerBackedResult(buildGroundedInterpretationResponse(input.userPrompt)))
     };
     const cachingExtractor = createCachingSignalExtractor({
       delegate,
@@ -192,7 +192,7 @@ describe("canonical extraction request cache identity", () => {
       extractor: cachingExtractor
     });
 
-    await provider.compile("I moved to Berlin last spring.", {
+    await provider.extractSourceInterpretations("I moved to Berlin last spring.", {
       workspace_id: "ws-1",
       run_id: "run-cq-abc-1700000000000",
       surface_id: null,
@@ -200,7 +200,7 @@ describe("canonical extraction request cache identity", () => {
     });
     expect(delegate.extract).toHaveBeenCalledOnce();
 
-    await provider.compile("I moved to Berlin last spring.", {
+    await provider.extractSourceInterpretations("I moved to Berlin last spring.", {
       workspace_id: "ws-1",
       run_id: "run-cq-abc-1799999999999",
       surface_id: null,
@@ -218,7 +218,7 @@ describe("canonical extraction request cache identity", () => {
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async (input) => {
         input.validateRawJson?.('{"signals":[42]}');
-        return providerBackedResult('{"signals":[]}');
+        return providerBackedResult('{"interpretations":[]}');
       })
     };
     const provider = new OfficialApiGardenProvider({
@@ -231,7 +231,7 @@ describe("canonical extraction request cache identity", () => {
       })
     });
 
-    await expect(provider.compile("I moved to Berlin.", {
+    await expect(provider.extractSourceInterpretations("I moved to Berlin.", {
       workspace_id: "ws-1", run_id: "run-validator", surface_id: null,
       turn_messages: []
     })).rejects.toMatchObject({ kind: "invalid_response" });
@@ -246,7 +246,7 @@ describe("canonical extraction request cache identity", () => {
     });
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async (input) =>
-        providerBackedResult(buildGroundedSignalResponse(input.userPrompt)))
+        providerBackedResult(buildGroundedInterpretationResponse(input.userPrompt)))
     };
     const provider = new OfficialApiGardenProvider({
       apiKey: "test-key",
@@ -263,14 +263,14 @@ describe("canonical extraction request cache identity", () => {
     });
     const turnContent = "User: I chose A.\nAssistant: You chose B.";
 
-    await provider.compile(turnContent, {
+    await provider.extractSourceInterpretations(turnContent, {
       workspace_id: "ws-1", run_id: "run-1", surface_id: null,
       turn_messages: [
         { message_id: "m1", role: "user", content: "I chose A." },
         { message_id: "m2", role: "assistant", content: "You chose B." }
       ]
     });
-    await provider.compile(turnContent, {
+    await provider.extractSourceInterpretations(turnContent, {
       workspace_id: "ws-1", run_id: "run-2", surface_id: null,
       turn_messages: [
         { message_id: "m3", role: "assistant", content: "I chose A." },
@@ -299,47 +299,11 @@ describe("canonical extraction request cache identity", () => {
       model: "test-model",
       request_profile: "provider-default-v1",
       cache_key: canonicalKey,
-      raw_json: JSON.stringify({ signals: [{
-        signal_kind: "potential_claim",
-        object_kind: "activity",
-        confidence: 0.9,
-        source_locator: {
-          contract_version: 4,
-          kind: "assertion_catalog",
-          assertion_id: 3
-        },
-        matched_text: "I avoid any.",
-        distilled_fact: "I avoid any.",
-        semantic_factor_graph: {
-          schema_version: 2,
-          source_kind: "evidence",
-          factors: [{
-            factor_id: "f0",
-            surface: "avoid",
-            semantic_identity: "avoid"
-          }, {
-            factor_id: "f1",
-            surface: "any",
-            semantic_identity: "any"
-          }],
-          variables: [],
-          result_variable_ids: [],
-          propositions: [{
-            proposition_id: "p0",
-            predicate_factor_id: "f0",
-            arguments: [{
-              position: 0,
-              binding_identity: "object",
-              reference_kind: "factor",
-              reference_id: "f1"
-            }]
-          }]
-        }
-      }] }),
+      raw_json: interpretationsEnvelope([{ assertionId: 3, matched: "I avoid any." }]),
       extracted_at: "2026-07-22T00:00:00.000Z"
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedResult('{"signals":[]}'))
+      extract: vi.fn(async () => providerBackedResult('{"interpretations":[]}'))
     };
     const provider = new OfficialApiGardenProvider({
       apiKey: "test-key",
@@ -347,16 +311,13 @@ describe("canonical extraction request cache identity", () => {
       extractor: createCachingSignalExtractor({ delegate, config: testCacheConfig(), cacheRoot })
     });
 
-    const [signal] = await provider.compile(source, {
+    const located = await provider.extractSourceInterpretations(source, {
       workspace_id: "ws-1", run_id: "run-legacy-id", surface_id: null,
       turn_messages: messages
     });
 
     expect(delegate.extract).not.toHaveBeenCalled();
-    expect(signal?.raw_payload.source_grounding).toMatchObject({
-      status: "grounded",
-      source_assertion: "I avoid any."
-    });
+    expect(located.find((item) => item.assertion_binding.assertion_id === 3)).toMatchObject({ outcome: "candidates", assertion_binding: { text: "I avoid any." } });
   });
 
   it("uses the same changed-catalog key in preflight and the live provider", async () => {
@@ -377,12 +338,12 @@ describe("canonical extraction request cache identity", () => {
       model: "test-model",
       request_profile: "provider-default-v1",
       cache_key: cacheKey,
-      raw_json: '{"signals":[]}',
-      extracted_at: "2026-07-22T00:00:00.000Z",
-      empty_classification: "deterministic_empty"
+      raw_json: '{"interpretations":[]}',
+      empty_classification: "deterministic_empty",
+      extracted_at: "2026-07-22T00:00:00.000Z"
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedResult('{"signals":[]}'))
+      extract: vi.fn(async () => providerBackedResult('{"interpretations":[]}'))
     };
     const provider = new OfficialApiGardenProvider({
       apiKey: "test-key",
@@ -394,7 +355,7 @@ describe("canonical extraction request cache identity", () => {
       })
     });
 
-    await provider.compile(source, {
+    await provider.extractSourceInterpretations(source, {
       workspace_id: "ws-1", run_id: "run-catalog-preflight", surface_id: null,
       turn_messages: messages
     });
@@ -419,12 +380,12 @@ describe("canonical extraction request cache identity", () => {
       model: "test-model",
       request_profile: "provider-default-v1",
       cache_key: cacheKey,
-      raw_json: '{"signals":[]}',
-      extracted_at: "2026-07-22T00:00:00.000Z",
-      empty_classification: "deterministic_empty"
+      raw_json: '{"interpretations":[]}',
+      empty_classification: "deterministic_empty",
+      extracted_at: "2026-07-22T00:00:00.000Z"
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedResult('{"signals":[]}'))
+      extract: vi.fn(async () => providerBackedResult('{"interpretations":[]}'))
     };
     const provider = new OfficialApiGardenProvider({
       apiKey: "test-key",
@@ -436,7 +397,7 @@ describe("canonical extraction request cache identity", () => {
       })
     });
 
-    await provider.compile(source, {
+    await provider.extractSourceInterpretations(source, {
       workspace_id: "ws-1", run_id: "run-catalog-text-only", surface_id: null,
       turn_messages: []
     });

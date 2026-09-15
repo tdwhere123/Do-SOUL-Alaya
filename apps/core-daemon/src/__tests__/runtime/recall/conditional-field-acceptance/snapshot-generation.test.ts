@@ -130,7 +130,7 @@ describe("workspace observable source generation", () => {
     expect(rebuilt.source_revision).not.toBe(uninitialized.source_revision);
     expect(projection.observablePin(WS)).toEqual(rebuilt);
     expect(rebuilt.applied_at).toBe(before.applied_at);
-    expect(reopened.connection.prepare("SELECT revision FROM garden_semantic_schema").all()).toEqual([{ revision: 6 }]);
+    expect(reopened.connection.prepare("SELECT revision FROM garden_semantic_schema").all()).toEqual([{ revision: 7 }]);
   });
 
   it("observes same-time embedding model and semantic publication changes", async () => {
@@ -168,7 +168,7 @@ describe("workspace observable source generation", () => {
       ALTER TABLE garden_projection_cursor DROP COLUMN observable_epoch;
       UPDATE garden_semantic_schema SET revision=5;`);
     initializeSemanticArtifactCandidateSchema(slice.database.connection);
-    expect(slice.database.connection.prepare("SELECT revision FROM garden_semantic_schema").all()).toEqual([{ revision: 6 }]);
+    expect(slice.database.connection.prepare("SELECT revision FROM garden_semantic_schema").all()).toEqual([{ revision: 7 }]);
     expect(slice.database.connection.prepare("SELECT applied_event_revision FROM garden_projection_cursor WHERE workspace_id=?").get(WS)).toEqual(cursor);
     const projection = new SqliteIndexedRecallProjection(slice.database.connection);
     const before = projection.observablePin(WS);

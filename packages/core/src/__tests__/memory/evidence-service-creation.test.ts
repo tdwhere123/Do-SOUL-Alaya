@@ -58,7 +58,9 @@ describe("EvidenceService creation", () => {
         producer_operator_id: FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID,
         graph: expect.objectContaining({ source_kind: "evidence" })
       }),
-      expect.objectContaining({ status: "certified" })
+      expect.objectContaining({ status: "certified", upstream_semantic_formation: expect.objectContaining({
+        producer_operator_id: "structured_open_semantic_factor_v1", status: "formed"
+      }) })
     );
     expect(create.mock.calls[0]?.[1]).toHaveLength(5);
   });

@@ -9,7 +9,6 @@ import {
   writeExtractionAuthorityReceipt
 } from "../../../runs/extraction/authority/receipt.js";
 import {
-  EXTRACTION_CACHE_MANIFEST_VERSION,
   readExtractionCacheManifest,
   writeExtractionCacheManifest
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
@@ -24,7 +23,6 @@ import {
 import {
   buildExtractionFillQuestion,
   EXTRACTION_FILL_VARIANT,
-  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -97,16 +95,14 @@ async function seedFirstQuestion(): Promise<void> {
     cacheRoot,
     dataDir,
     pinnedMetaRoot,
-    extractorFactory: () => ({
-      extract: async () => providerBackedExtractionResult('{"signals":[]}')
-    }),
+    extractorFactory: () => ({ extract: async () => ({ rawJson: '{"interpretations":[]}' }) }),
     log: () => undefined
   });
 }
 
 function attachSupplementalSource(): void {
   const manifest = readExtractionCacheManifest(cacheRoot);
-  if (manifest === undefined || manifest.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION) {
+  if (manifest === undefined || manifest.schema_version !== 4) {
     throw new Error("expected current extraction manifest");
   }
   writeExtractionCacheManifest(cacheRoot, {

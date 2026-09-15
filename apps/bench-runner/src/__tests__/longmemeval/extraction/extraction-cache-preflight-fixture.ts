@@ -102,6 +102,8 @@ export function writeCacheShard(
     request_profile: EXTRACTION_CONFIG.requestProfile,
     cache_key: cacheKey,
     raw_json: rawJson,
+    ...(['{"signals":[]}', '{"interpretations":[]}'].includes(rawJson)
+      ? { empty_classification: "deterministic_empty" as const } : {}),
     extracted_at: "2026-07-01T00:00:00Z",
     ...(rawJson === '{"signals":[]}' ? { empty_classification: "deterministic_empty" } : {}),
     ...(responseMetadata === undefined ? {} : {

@@ -1,9 +1,12 @@
+import { computeCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
+import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 // @ts-nocheck
 import { inspectExtractionRawJson } from "../../../runs/extraction/content-closure.js";
 import { readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildOfficialApiExtractionRequest,
@@ -24,7 +27,6 @@ import {
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
 } from "../../../runs/compile-seed.js";
-import { computeCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
 import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {
@@ -33,7 +35,7 @@ import {
   OFFLINE_CONFIG,
   makeSeed,
   providerBackedResult,
-  signalsEnvelope,
+  interpretationsEnvelope,
   withOpenSemanticFactorGraph
 } from "./compile-seed-fixture.js";
 import {
@@ -59,9 +61,9 @@ describe("compile() signal-drop count is observable", () => {
   });
 
   it("keeps malformed-sibling salvage diagnostic without completing or caching the response", async () => {
-    const raw = JSON.stringify({ signals: [
-      ...JSON.parse(signalsEnvelope([{ distilled: "I have a dog.", matched: "I have a dog." }])).signals,
-      { confidence: "invalid" }
+    const raw = JSON.stringify({ interpretations: [
+      ...JSON.parse(interpretationsEnvelope([{ matched: "I have a dog." }])).interpretations,
+      { assertion_id: 1, relations: [{ predicate: null }] }
     ] });
     expect(inspectExtractionRawJson(raw)).toMatchObject({ rawSignalCount: 2, parsedDraftCount: 1 });
     const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot, allowLiveExtraction: true,
@@ -76,6 +78,7 @@ describe("compile() signal-drop count is observable", () => {
     // Each failed signal is attributed by reason without suppressing healthy
     // siblings from the same turn.
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => ({
         memoryId: "memory-fallback",
         signalId: "signal-fallback",
@@ -86,6 +89,7 @@ describe("compile() signal-drop count is observable", () => {
       }),
       // The daemon returns one seeded signal plus two independent reason-coded drops.
       proposeMemoriesFromCompileSignals: async () => ({
+        createdEvidence: true,
         seeds: [
           {
             memoryId: "memory-1",
@@ -110,10 +114,10 @@ describe("compile() signal-drop count is observable", () => {
       extractorFactory: () => ({
         extract: async () => ({
           ...providerBackedResult(""),
-          rawJson: signalsEnvelope([
-            { distilled: "Survivor.", matched: "Intro span" },
-            { distilled: "Absent.", matched: "Middle span", assertionId: 2 },
-            { distilled: "Threw.", matched: "Closing span", assertionId: 3 }
+          rawJson: interpretationsEnvelope([
+            { matched: "Intro span" },
+            { matched: "Middle span", assertionId: 2 },
+            { matched: "Closing span", assertionId: 3 }
           ])
         })
       })
@@ -152,6 +156,7 @@ describe("compile() signal-drop count is observable", () => {
 
   it("fails closed when a compile seed memory materializes but accept fails", async () => {
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
         throw new Error("fallback path should not run");
       },
@@ -171,7 +176,7 @@ describe("compile() signal-drop count is observable", () => {
       extractorFactory: () => ({
         extract: async () => ({
           ...providerBackedResult(""),
-          rawJson: signalsEnvelope([{ distilled: "Created but unaccepted.", matched: "Intro span" }])
+          rawJson: interpretationsEnvelope([{ matched: "Intro span" }])
         })
       })
     });
@@ -197,6 +202,7 @@ describe("compile() signal-drop count is observable", () => {
   it("fails closed in no-credentials fallback when a seed memory materializes but accept fails", async () => {
     await rm(join(cacheRoot, "manifest.json"), { force: true });
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
         throw createUnscoredMaterializedSeedError({
           memoryId: "fallback-memory-created-before-accept-failed",
@@ -249,24 +255,19 @@ describe("extraction cache write is atomic", () => {
     // A delegate whose response is large enough that a torn write would be
     // visibly partial. The write-tmp-then-rename discipline means the final
     // shard is always whole, parseable JSON with the complete raw_json.
-    const bigRawJson = JSON.stringify({
-      signals: Array.from({ length: 64 }, (_, i) => withOpenSemanticFactorGraph({
-        signal_kind: "potential_preference",
-        object_kind: "user_preference",
-        confidence: 0.9,
-        matched_text: "Atomic turn persists a complete shard.",
-        source_locator: { contract_version: 4, kind: "assertion_catalog", assertion_id: 1 },
-        distilled_fact: `Fact number ${i}.`
-      }))
-    });
+    const bigRawJson = JSON.stringify({ interpretations: [{ assertion_id: 1,
+      relations: Array.from({ length: 32 }, () => ({
+        predicate: { text: "persists" },
+        arguments: [{ role: "agent", phrase: { text: "Atomic turn" } }], qualifiers: []
+      })) }] });
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => ({
         rawJson: bigRawJson,
         responseMetadata: {
           finishReason: "stop",
           maxOutputTokens: 2048,
-          completionContractVersion: 1,
-          completionWitness: "message"
+          completionContractVersion: 1 as const,
+          completionWitness: "message" as const
         },
         usage: { inputTokens: 17, outputTokens: 23, totalTokens: 40 }
       }))
@@ -283,14 +284,9 @@ describe("extraction cache write is atomic", () => {
     const userPrompt = stringifyOfficialApiExtractionRequest(
       buildOfficialApiExtractionRequest("Atomic turn persists a complete shard.", [])
     );
-    await extractor.extract({ systemPrompt: "sys", userPrompt });
+    await extractor.extract({ systemPrompt: "sys", userPrompt, sourceCorpus: buildOfficialApiSourceCorpus("Atomic turn persists a complete shard.", []) });
 
-    const cacheKey = computeCacheKey(
-      "test-model",
-      "provider-default-v1",
-      "sys",
-      userPrompt
-    );
+    const cacheKey = computeCacheKey("test-model", "provider-default-v1", "sys", userPrompt);
     const shardPath = join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
     const onDisk = JSON.parse(readFileSync(shardPath, "utf8")) as {
       raw_json: string;

@@ -3,6 +3,7 @@ import {
   type OfficialApiSignalDraft,
   type OfficialApiSignalParseOptions
 } from "../official-api-signal-parser.js";
+import type { OfficialApiInterpretationEntryRejection } from "./source-interpretation-receive.js";
 import {
   computeOfficialApiSourceCorpusIdentity,
   type OfficialApiExtractionRequest
@@ -36,7 +37,10 @@ type OfficialApiRequestEntryRejectionReason =
   | "locator_outside_batch"
   | "source_grounding_rejected"
   | "source_generation_mismatch"
-  | "source_assertion_mismatch";
+  | "source_assertion_mismatch"
+  | "malformed_response"
+  | "missing_response"
+  | "transport_unknown";
 
 export interface OfficialApiRequestEntryRejection {
   readonly index: number;
@@ -64,7 +68,7 @@ export interface OfficialApiGardenCompileReceipt {
   readonly producer: typeof OFFICIAL_API_GARDEN_COMPILE_PRODUCER;
   readonly status: "partial";
   readonly drafts: readonly OfficialApiSignalDraft[];
-  readonly rejections: readonly OfficialApiRequestEntryRejection[];
+  readonly rejections: readonly (OfficialApiRequestEntryRejection | OfficialApiInterpretationEntryRejection)[];
   readonly pending_batches: readonly OfficialApiGardenCompilePendingBatch[];
   readonly catalog: Pick<
     SourceAssertionCatalogPage,
@@ -167,7 +171,7 @@ export function parseOfficialApiRequestSignals(
 
 export function createOfficialApiGardenCompileReceipt(input: {
   readonly drafts: readonly OfficialApiSignalDraft[];
-  readonly rejections: readonly OfficialApiRequestEntryRejection[];
+  readonly rejections: OfficialApiGardenCompileReceipt["rejections"];
   readonly pending: readonly OfficialApiExtractionRequest[];
   readonly catalog: Pick<
     SourceAssertionCatalogPage,

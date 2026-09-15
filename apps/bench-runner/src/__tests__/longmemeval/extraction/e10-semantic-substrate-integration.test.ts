@@ -51,7 +51,7 @@ describe("E10 semantic substrate integration", () => {
       }),
       transport: createOfflineSemanticReplayForTasks({
         tasks: [task], transportPolicy: TOKEN_AWARE_POLICY,
-        result: { kind: "raw", rawJson: '{"signals":[]}' }
+        result: { kind: "raw", rawJson: '{"interpretations":[]}' }
       })
     });
     expect(fulfilled.state).toBe("unavailable");

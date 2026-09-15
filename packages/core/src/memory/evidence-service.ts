@@ -47,7 +47,9 @@ const evidenceHealthTransitions: Readonly<Record<EvidenceHealthState, readonly E
 export type EvidenceCapsuleInput = Omit<
   EvidenceCapsule,
   "object_id" | "object_kind" | "schema_version" | "lifecycle_state" | "created_at" | "updated_at"
->;
+> & {
+  readonly object_id?: string;
+};
 
 export interface EvidenceServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
@@ -187,10 +189,12 @@ export class EvidenceService {
     enqueueEnrichment?: {
       readonly runId: string | null;
       readonly sourceSignalId: string | null;
-    }
+    },
+    assertSourceCurrent?: () => void
   ): Promise<Readonly<EvidenceCapsule>> {
     return await createEvidenceCapsule({
       capsuleInput: input,
+      ...(assertSourceCurrent === undefined ? {} : { assertSourceCurrent }),
       searchProjections,
       factFrameProposal,
       semanticFactorProposal,

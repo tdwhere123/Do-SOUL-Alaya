@@ -22,6 +22,7 @@ const directories: string[] = [];
 const databases: Array<ReturnType<typeof initDatabase>> = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   mockedOpen.mockClear();
   while (databases.length > 0) {
     databases.pop()?.close();
@@ -84,6 +85,9 @@ describe("isUninitializedDatabaseFile probe errors", () => {
 
 describe("initDatabase uninitialized-file probe retry", () => {
   it("retries a probe SQLITE_BUSY and then bootstraps", () => {
+    // This case checks retry routing; scheduler delay must not exhaust its budget.
+    // Real competing-writer deadlines are covered by db-busy-timeout.test.ts.
+    vi.spyOn(Date, "now").mockReturnValue(1_000);
     const filename = createFilename();
     new BetterSqlite3(filename).close();
     mockedOpen

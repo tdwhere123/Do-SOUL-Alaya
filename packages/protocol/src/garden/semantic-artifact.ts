@@ -1,3 +1,12 @@
+import { z } from "zod";
+import { SourceInterpretationRelationSchema } from "./source-interpretation.js";
+
+/** Reusable assertion proposal; occurrence identity belongs to the current binding. */
+export const SemanticInterpretationProposalSchema = z.object({
+  contract: z.literal("semantic-interpretation-proposal-v1"),
+  relations: z.array(SourceInterpretationRelationSchema).max(32).readonly()
+}).strict().readonly();
+
 /** Internal candidate contracts. Daemon composition may run the worker; this is not a public API. */
 export interface SemanticExtractionProfile {
   readonly capability: string;
@@ -31,11 +40,13 @@ export interface AdmittedSemanticArtifact {
   readonly rawJson: string;
   readonly payloadJson: string;
   readonly searchText: string;
+  readonly requestJson?: string;
 }
 
 export interface SemanticArtifactCodec {
   plan(source: SemanticSourceSnapshot, profile: SemanticExtractionProfile): readonly SemanticArtifactWork[];
   admit(source: SemanticSourceSnapshot, work: SemanticArtifactWork, rawJson: string): AdmittedSemanticArtifact;
+  bind(source: SemanticSourceSnapshot, work: SemanticArtifactWork, artifact: AdmittedSemanticArtifact): SemanticArtifactWork;
 }
 
 export interface SemanticEnrichmentTask {

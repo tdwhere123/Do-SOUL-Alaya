@@ -57,7 +57,7 @@ describe("lazy F3 fulfillment shadow", () => {
     expect(coldMiss).toMatchObject({ state: "unavailable", calls: 0 });
     const replay = createOfflineSemanticReplayForTasks({
       tasks: [task], transportPolicy: TOKEN_AWARE_POLICY,
-      result: { kind: "raw", rawJson: '{"signals":[]}' }
+      result: { kind: "raw", rawJson: '{"interpretations":[]}' }
     });
     const empty = await fulfillAssertionCapability({
       root, task, envelope: ENVELOPE, transport: replay
@@ -121,15 +121,9 @@ describe("lazy F3 fulfillment shadow", () => {
       transportPolicy: TOKEN_AWARE_POLICY,
       result: {
         kind: "raw",
-        rawJson: JSON.stringify({ signals: [{
-          object_kind: "fact",
-          confidence: 0.9,
-          matched_text: task.text.replace(/^(?:User|Assistant): /u, ""),
-          source_locator: {
-            contract_version: task.binding.locator.contract_version,
-            kind: "assertion_catalog",
-            assertion_id: task.assertionId
-          }
+        rawJson: JSON.stringify({ interpretations: [{ assertion_id: task.assertionId,
+          relations: [{ predicate: { text: task.text.replace(/^(?:User|Assistant): /u, "") },
+            arguments: [], qualifiers: [] }]
         }] })
       }
     });

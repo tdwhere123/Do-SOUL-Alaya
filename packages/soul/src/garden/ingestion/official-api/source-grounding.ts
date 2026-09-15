@@ -166,13 +166,6 @@ function buildGroundedAudit(
   });
 }
 
-export function rejectOfficialApiDraftGrounding(
-  draft: OfficialApiSignalDraft,
-  reason: SourceAssertionRejectionReason | OfficialApiSourceTrustRejection
-): OfficialApiGroundingResult {
-  return rejectedGrounding(draft, reason);
-}
-
 function rejectedGrounding(
   draft: OfficialApiSignalDraft,
   reason: SourceAssertionRejectionReason | OfficialApiSourceTrustRejection

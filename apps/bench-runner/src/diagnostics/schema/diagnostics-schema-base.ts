@@ -1,3 +1,4 @@
+import { MissTaxonomyDistributionSchema } from "@do-soul/alaya-eval";
 import { z } from "zod";
 import {
   RecallCandidateAnswerFeaturesSchema,
@@ -130,12 +131,4 @@ export const DiagnosticQueryProbesSchema = z
 export const DiagnosticCandidateAnswerFeaturesSchema =
   RecallCandidateAnswerFeaturesSchema;
 
-export const LongMemEvalMissTaxonomySchema = z.enum([
-  "candidate_absent",
-  "materialization_drop",
-  "fine_assessment_drop",
-  "budget_drop",
-  "delivery_order_drop",
-  "answer_set_coverage_drop",
-  "evaluation_or_gold_issue"
-]);
+export const LongMemEvalMissTaxonomySchema = MissTaxonomyDistributionSchema.keyof();

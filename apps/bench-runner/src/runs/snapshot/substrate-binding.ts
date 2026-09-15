@@ -29,6 +29,8 @@ import type {
 import { assertDirectSourceEvidenceClosure } from
   "./seed-ledger/direct-source-evidence-proof.js";
 
+import { readSourceObservationProof } from "./seed-ledger/source-observation-proof.js";
+
 interface StoredObjectRow {
   readonly object_id: string;
   readonly object_kind: string;
@@ -40,6 +42,7 @@ interface StoredObjectRow {
 }
 
 interface StoredEvidenceRow {
+  readonly sourceBoundRound?: LongMemEvalSeedRoundIdentity;
   readonly object_id: string;
   readonly object_kind: string;
   readonly workspace_id: string;
@@ -69,6 +72,7 @@ export function assertSnapshotDatasetSubstrateIdentity(input: {
   }
   const db = new DatabaseSync(input.dbPath, { readOnly: true });
   try {
+    db.exec("BEGIN");
     const substrate = readStoredSubstrateIndex(
       db,
       new Set(input.sidecar.questions.map((question) => question.workspaceId))
@@ -82,7 +86,11 @@ export function assertSnapshotDatasetSubstrateIdentity(input: {
         source,
         input.duplicateObjectLabel ?? "snapshot sidecar object",
         substrate.objectsByWorkspace.get(sidecar.workspaceId) ?? EMPTY_STORED_OBJECTS,
-        substrate.evidenceByWorkspace.get(sidecar.workspaceId) ?? EMPTY_STORED_EVIDENCE
+        new Map([...(substrate.evidenceByWorkspace.get(sidecar.workspaceId) ?? EMPTY_STORED_EVIDENCE)]
+          .map(([id, row]) => {
+            const proof = readSourceObservationProof(db, id, sidecar, source);
+            return [id, proof === null ? row : { ...row, sourceBoundRound: proof.round }];
+          }))
       );
       assertDirectSourceEvidenceClosure({
         db,
@@ -371,6 +379,7 @@ function resolveEvidenceRound(
       row.workspace_id !== question.workspaceId || row.run_id !== question.runId) {
     throw new Error(`snapshot sidecar evidence identity mismatch for ${evidenceId}`);
   }
+  if (row.sourceBoundRound !== undefined) return row.sourceBoundRound;
   const anchor = parseRecord(row.physical_anchor, `physical anchor ${evidenceId}`);
   const artifactRef = typeof anchor.artifact_ref === "string"
     ? anchor.artifact_ref

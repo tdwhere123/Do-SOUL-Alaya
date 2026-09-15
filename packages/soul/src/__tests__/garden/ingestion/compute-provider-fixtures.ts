@@ -6,6 +6,12 @@ export function createContext() {
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: "surface-1",
+    artifact_key: "artifact-1",
+    source_observation: {
+      observed_at: "2026-04-23T09:00:00.000Z",
+      authority: "trusted_host_event" as const,
+      source_event_id: "event-1"
+    },
     turn_messages: [
       {
         role: "user" as const,
@@ -14,6 +20,29 @@ export function createContext() {
         created_at: "2026-04-23T09:00:00.000Z"
       }
     ]
+  };
+}
+
+export const EMPTY_INTERPRETATIONS_JSON = '{"interpretations":[]}' as const;
+
+export function interpretationEnvelope(
+  relations: readonly unknown[],
+  assertionId = 1
+): string {
+  return JSON.stringify({
+    interpretations: [{ assertion_id: assertionId, relations }]
+  });
+}
+
+export function interpretationRelation(
+  predicate: string,
+  args: readonly { readonly role: string; readonly text: string }[] = [],
+  qualifiers: readonly { readonly role: string; readonly text: string }[] = []
+) {
+  return {
+    predicate: { text: predicate },
+    arguments: args.map((item) => ({ role: item.role, phrase: { text: item.text } })),
+    qualifiers: qualifiers.map((item) => ({ role: item.role, phrase: { text: item.text } }))
   };
 }
 

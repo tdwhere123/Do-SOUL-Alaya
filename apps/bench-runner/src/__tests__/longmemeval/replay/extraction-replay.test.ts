@@ -391,15 +391,8 @@ function cacheRoot(): string {
 function writeShard(root: string, cacheKey: string, rawJson: string): void {
   const path = cacheFilePath(root, cacheKey);
   mkdirSync(join(path, ".."), { recursive: true });
-  writeFileSync(path, JSON.stringify({
-    cache_key: cacheKey,
-    model,
-    request_profile: requestProfile,
-    raw_json: rawJson,
-    ...(rawJson === JSON.stringify({ signals: [] })
-      ? { empty_classification: "deterministic_empty" }
-      : {})
-  }), "utf8");
+  writeFileSync(path, JSON.stringify({ cache_key: cacheKey, model, request_profile: requestProfile, raw_json: rawJson,
+    ...(rawJson === '{"signals":[]}' ? { empty_classification: "deterministic_empty" } : {}) }), "utf8");
 }
 
 function validRaw(): string {

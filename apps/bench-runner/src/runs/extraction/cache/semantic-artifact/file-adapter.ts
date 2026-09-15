@@ -41,7 +41,8 @@ export class FileSemanticArtifactRepository implements SemanticArtifactRepositor
         throw new Error("semantic artifact persisted shape mismatch");
       }
       return Object.freeze({
-        key: parsed.key, rawJson: parsed.rawJson, payloadJson: parsed.payloadJson, searchText: parsed.searchText
+        key: parsed.key, rawJson: parsed.rawJson, payloadJson: parsed.payloadJson, searchText: parsed.searchText,
+        ...(parsed.requestJson === undefined ? {} : { requestJson: parsed.requestJson })
       });
     } catch (error) {
       if ((error as { readonly code?: string }).code === "ENOENT") return null;
@@ -89,7 +90,8 @@ export class FileSemanticArtifactRepository implements SemanticArtifactRepositor
     const path = this.artifactPath(task.workspaceId, artifact.key);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify({
-      key: artifact.key, rawJson: artifact.rawJson, payloadJson: artifact.payloadJson, searchText: artifact.searchText
+      key: artifact.key, rawJson: artifact.rawJson, payloadJson: artifact.payloadJson, searchText: artifact.searchText,
+      ...(artifact.requestJson === undefined ? {} : { requestJson: artifact.requestJson })
     })}\n`);
   }
 

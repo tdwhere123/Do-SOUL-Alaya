@@ -154,7 +154,7 @@ export function assertionSignal(
       ...payload
     },
     created_at: CLOCK,
-    source_observation: null
+    source_observation: { observed_at: CLOCK, authority: "trusted_host_event", source_event_id: "eligibility-source" }
   });
 }
 
@@ -163,6 +163,7 @@ export function assertionSignal(
 export function withoutVerifiedAssertionHash(
   signal: LegacyCandidateMemorySignal
 ): LegacyCandidateMemorySignal {
+  if (signal.interpretation_contract === "source-interpretation-v1") return signal;
   const { verified_user_assertion_source_hash: _, ...raw_payload } = signal.raw_payload;
   return LegacyCandidateMemorySignalSchema.parse({ ...signal, raw_payload });
 }

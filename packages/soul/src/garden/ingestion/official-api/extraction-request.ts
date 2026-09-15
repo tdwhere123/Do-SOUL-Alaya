@@ -191,6 +191,14 @@ export function mintOfficialApiAssertionWork(
   datasetRevision?: string
 ): readonly MintedOfficialApiAssertionBinding[] {
   const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
+  return mintOfficialApiAssertionWorkFromCorpus(sourceCorpus, messages.map((message) => message.message_id ?? null), datasetRevision);
+}
+
+export function mintOfficialApiAssertionWorkFromCorpus(
+  sourceCorpus: string,
+  messageIds: readonly (string | null)[],
+  datasetRevision?: string
+): readonly MintedOfficialApiAssertionBinding[] {
   const catalog = buildOfficialApiSourceAssertions(sourceCorpus);
   const indexed = new Map(
     indexSourceAssertions(sourceCorpus).map((assertion) => [assertion.assertion_id, assertion])
@@ -229,7 +237,7 @@ export function mintOfficialApiAssertionWork(
       assertionId: indexedAssertion.assertion_id,
       start: indexedAssertion.start,
       end: indexedAssertion.end,
-      messageIds: messages.map((message) => message.message_id ?? null)
+      messageIds
     });
     return Object.freeze({
       semanticIdentity,
@@ -279,6 +287,21 @@ function buildRequest(
     batch_count: batchCount,
     source_assertions: sourceAssertions
   });
+}
+
+/** Bind a selected semantic work pack to the existing full-corpus catalog. */
+export function buildOfficialApiSourceRequest(
+  sourceCorpus: string,
+  assertionIds: readonly number[]
+): OfficialApiExtractionRequest {
+  const catalog = new Map(buildOfficialApiSourceAssertions(sourceCorpus).map((row) => [row.assertion_id, row]));
+  const assertions = assertionIds.map((id) => {
+    const row = catalog.get(id);
+    if (row === undefined) throw new Error("requested assertion is outside source corpus");
+    return row;
+  });
+  if (new Set(assertionIds).size !== assertionIds.length) throw new Error("duplicate requested assertion");
+  return buildRequest(assertions, computeOfficialApiSourceCorpusIdentity(sourceCorpus), 0, 1);
 }
 
 export function computeOfficialApiSourceCorpusIdentity(sourceCorpus: string): string {
