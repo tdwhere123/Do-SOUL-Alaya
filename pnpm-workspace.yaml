@@ -34,6 +34,8 @@ overrides:
   ws: 8.21.3
   zod: 4.6.2
 
-# Supported targets load bundled prebuilds; implicit node-gyp fallback is not part of the install contract.
 allowBuilds:
+  # Supported targets load bundled prebuilds; implicit node-gyp fallback is not part of the install contract.
   better-sqlite3: false
+  # CPU binaries ship in the package; the postinstall only fetches optional GPU execution providers.
+  onnxruntime-node: false
