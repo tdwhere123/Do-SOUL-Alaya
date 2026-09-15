@@ -13,6 +13,7 @@ import {
   seedWorkspaceFixture,
   trackedDatabases
 } from "./memory-embedding-repo-fixture.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 const databases = trackedDatabases;
 
@@ -36,7 +37,7 @@ describe("Memory embedding storage repo", () => {
       .all() as ReadonlyArray<{ readonly version: number }>;
     const columns = getColumnNames(database, "memory_embeddings");
 
-    expect(versions.map((entry) => entry.version)).toEqual([15]);
+    expect(versions.map((entry) => entry.version)).toEqual([currentSchemaVersion()]);
     expect(columns).toEqual([
       "object_id",
       "workspace_id",

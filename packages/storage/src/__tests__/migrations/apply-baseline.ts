@@ -6,6 +6,13 @@ import BetterSqlite3Ctor from "better-sqlite3";
 
 const MIGRATIONS_DIR = fileURLToPath(new URL("../../migrations", import.meta.url));
 
+export function currentSchemaVersion(): number {
+  return fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((name) => /^\d+-.+\.sql$/u.test(name))
+    .reduce((max, name) => Math.max(max, Number.parseInt(name, 10)), 0);
+}
+
 export function applyBaselineSql(
   database: BetterSqlite3.Database,
   maxVersion = 6

@@ -3,6 +3,7 @@ import type { StorageDatabase } from "../../../sqlite/db.js";
 import { prepareQualifiedEvidenceStatements } from "../statements/qualification/qualified-evidence-statements.js";
 import { readStoredFactFrameFormation } from "./qualification/fact-frame-formation-read.js";
 import { readStoredSemanticFactorFormation } from "./qualification/semantic-factor-formation-read.js";
+import { parseRows } from "../../shared/parse-row.js";
 import type { EvidenceQualificationRow } from "./qualification/recall-qualified-evidence-types.js";
 import { readCurrentStoredFactKeyContents, readQualifiedProjectionIndex,
   type StoredProjectionRow } from "./qualification/qualified-evidence-projection.js";
@@ -22,8 +23,16 @@ export function readObjectKeyEvidenceSources(
   const ids = [...new Set(evidenceIds.filter((id) => id.trim().length > 0))];
   if (ids.length === 0) return Object.freeze([]);
   const statements = prepareQualifiedEvidenceStatements(db);
-  const rows = statements.findEvidenceRows.all(workspaceId, JSON.stringify(ids)) as EvidenceQualificationRow[];
-  const projections = statements.findProjectionRows.all(workspaceId, JSON.stringify(ids)) as StoredProjectionRow[];
+  const rows = parseRows(
+    statements.findEvidenceRows.all(workspaceId, JSON.stringify(ids)),
+    { parse: (value: unknown) => value as EvidenceQualificationRow },
+    "evidence qualification row"
+  );
+  const projections = parseRows(
+    statements.findProjectionRows.all(workspaceId, JSON.stringify(ids)),
+    { parse: (value: unknown) => value as StoredProjectionRow },
+    "stored projection row"
+  );
   const byId = new Map(rows.map((row) => [row.object_id, row]));
   return Object.freeze(ids.flatMap((id) => {
     const row = byId.get(id);
