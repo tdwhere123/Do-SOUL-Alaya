@@ -88,6 +88,11 @@ export function runObservationRounds(session: ObservationSession): FieldEngineSt
       } else if (action.action === "measurement") {
         if (phaseTime(session, "measurement", () => consumeMeasurementPage(session, action))) return session.state;
       } else if (action.action === "relation") {
+        // Later seed and adjacency pages can still introduce unresolved guards.
+        // Their absence is conclusive only after those producers have settled.
+        if (session.state.pending_path_effects !== undefined || session.state.residuals.some((region) =>
+          (region.kind === "seed" || region.kind === "adjacency" || region.kind === "binding") &&
+          (region.status === "open" || region.status === "interrupted"))) continue;
         session.state = closeRegion(session.state, interpretation, action, session.cursors,
           session.unresolvedGuard || session.missingMeasurement || (session.state.unresolved_seed_count ?? 0) > 0
             ? "unknown" : "exhausted");
@@ -133,6 +138,9 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   subjects.snapshot = session.state.resume_subjects;
   session.state = retainObservedContext(before, session.state, sourceFacts, session.relationRows, subjects, pairProgress);
   if (session.state.memory_exhausted) return true;
+  if (hasOpenPairs(subjects, session.predicates, pairProgress, [], pairProgress.completed)) {
+    session.state = reopenAdjacency(session.state);
+  }
   if (refreshPathFrontier(session)) return true;
   if (observed.page.outcome.status !== "interrupted") return false;
   if (observed.page.cursor.committed_through === (before.resume_cursors[action.region_id] ?? null)) return true;
