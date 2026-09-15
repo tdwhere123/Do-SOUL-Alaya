@@ -80,11 +80,19 @@
       "allowed_workspace_packages": []
     },
     {
+      "root": "packages/cjk-segmentation",
+      "package": "@do-soul/alaya-cjk-segmentation",
+      "allowed_workspace_packages": [
+        "@do-soul/alaya-protocol"
+      ]
+    },
+    {
       "root": "packages/core",
       "package": "@do-soul/alaya-core",
       "allowed_workspace_packages": [
         "@do-soul/alaya-protocol",
-        "@do-soul/alaya-graph-algorithms"
+        "@do-soul/alaya-graph-algorithms",
+        "@do-soul/alaya-cjk-segmentation"
       ]
     },
     {
@@ -113,7 +121,8 @@
       "root": "packages/storage",
       "package": "@do-soul/alaya-storage",
       "allowed_workspace_packages": [
-        "@do-soul/alaya-protocol"
+        "@do-soul/alaya-protocol",
+        "@do-soul/alaya-cjk-segmentation"
       ]
     },
     {
@@ -122,6 +131,7 @@
       "allowed_workspace_packages": [
         "@do-soul/alaya-protocol",
         "@do-soul/alaya-graph-algorithms",
+        "@do-soul/alaya-cjk-segmentation",
         "@do-soul/alaya-core",
         "@do-soul/alaya-engine-gateway",
         "@do-soul/alaya-eval",
@@ -136,6 +146,7 @@
       "allowed_workspace_packages": [
         "@do-soul/alaya-protocol",
         "@do-soul/alaya-graph-algorithms",
+        "@do-soul/alaya-cjk-segmentation",
         "@do-soul/alaya-core",
         "@do-soul/alaya-engine-gateway",
         "@do-soul/alaya-eval",
@@ -164,6 +175,7 @@
   "runtime_artifact_roots": [
     "packages/protocol/src",
     "packages/graph-algorithms/src",
+    "packages/cjk-segmentation/src",
     "packages/core/src",
     "packages/engine-gateway/src",
     "packages/soul/src",
@@ -190,7 +202,7 @@
     }
   },
   "retired_import_paths": [
-    "apps/inspector/web/src/utils/parse-search-query",
+    "packages/protocol/src/shared/cjk-segmentation",
     "packages/core/src/recall/shadow",
     "packages/core/src/recall/decision/prefix-capture/envelope",
     "packages/core/src/recall/decision/prefix-capture/compare",
@@ -1138,8 +1150,8 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 2494,
-      "expected_sha256": "ec4187c8282d255e9136f6e6e0f8b2f048cf35641688be3e3589ca604f8bbc23"
+      "expected_count": 2497,
+      "expected_sha256": "a429fdfdace469b1fe87790828159cc4c3a158700ae011992a00e6d29a5b18c2"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
@@ -1148,10 +1160,16 @@
       "expected_sha256": "2071fa670bb187a02b08fad6fd1767bfc1a9ca35ee70be89f0ccea0c02113157"
     },
     {
+      "specifier": "@do-soul/alaya-cjk-segmentation",
+      "path": "packages/cjk-segmentation/src/index.ts",
+      "expected_count": 8,
+      "expected_sha256": "acc54f60edbeedb1809cfa954617a626f9ccabb2790fa0d49e410e36de7750e0"
+    },
+    {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 916,
-      "expected_sha256": "fb1e85c20d1236060166ce6f643ded39d0b1cc3373f25789953a81010e884422"
+      "expected_count": 910,
+      "expected_sha256": "782758781bb6aa7c3a68ae09ec280cfea84b0dee1a183e6afa7d48b94e564e7c"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",
@@ -1186,8 +1204,8 @@
     {
       "specifier": "@do-soul/alaya-storage",
       "path": "packages/storage/src/index.ts",
-      "expected_count": 321,
-      "expected_sha256": "b2087a53aac9eb4299600a5a38f5f8720f758c39c18a99aa52c5682947d47dd7"
+      "expected_count": 315,
+      "expected_sha256": "0c7ca18f302038163f76654c593f7797fd84d417fc6197974c581fd20dd91e39"
     },
     {
       "specifier": "@do-soul/alaya",

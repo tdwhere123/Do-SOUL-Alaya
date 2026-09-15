@@ -36,6 +36,10 @@
       "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
       "project": ["src/**/*.ts", "tsconfig.json"]
     },
+    "packages/cjk-segmentation": {
+      "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tsconfig.json"]
+    },
     "packages/storage": {
       "entry": [
         "src/index.ts",

@@ -241,3 +241,8 @@ export { KeyedMutex } from "./shared/keyed-mutex.js";
 export {
   CJK_INTERROGATIVE_FALLBACK_ATOMS
 } from "./shared/cjk-interrogative-fallback-atoms.js";
+export {
+  bindCjkRunSegmenter,
+  fallbackCjkRunPieces,
+  isCjkSegmentationCandidate
+} from "./shared/cjk-run-policy.js";

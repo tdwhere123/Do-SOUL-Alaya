@@ -30,6 +30,14 @@ hydration, and bytes and preserves unfinished work across continuation.
 Local mechanism checks do not establish semantic usefulness; the R02
 quality gate remains on hold.
 
+Native CJK segmentation (`@node-rs/jieba`) moves off `@do-soul/alaya-protocol`
+onto Node-only `@do-soul/alaya-cjk-segmentation`. Protocol keeps interrogative
+fallback atoms, the CJK-candidate predicate, and a bind seam for
+`node/source-frame`. Core and storage consume the helper directly and no longer
+re-export it. This restores invariant 1 (protocol depends only on `zod`).
+Inspector SPA does not depend on the helper. Workspace-internal; not a §25
+MCP/EventLog/config change.
+
 Protocol 4.11.0 preserved source temporal meaning across extraction and
 replay and added the internal source-interpretation signal variant.
 Garden MCP emit still rejects `interpretation_contract`; interpretation

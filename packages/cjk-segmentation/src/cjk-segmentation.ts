@@ -1,5 +1,11 @@
-import { readErrorMessage } from "./read-error-message.js";
-import { CJK_INTERROGATIVE_FALLBACK_ATOMS } from "./cjk-interrogative-fallback-atoms.js";
+import {
+  bindCjkRunSegmenter,
+  fallbackCjkRunPieces,
+  isCjkSegmentationCandidate,
+  readErrorMessage
+} from "@do-soul/alaya-protocol";
+
+export { isCjkSegmentationCandidate };
 
 /**
  * CJK-aware lazy word segmenter backed by @node-rs/jieba.
@@ -13,9 +19,9 @@ import { CJK_INTERROGATIVE_FALLBACK_ATOMS } from "./cjk-interrogative-fallback-a
  * Fail-soft contract: if the @node-rs/jieba native binding cannot load on
  * this host (missing platform binary, jieba ESM import error, dict read
  * error, …) the segmenter emits a structured process warning and splits
- * only the interrogative atoms owned by cjk-interrogative-fallback-atoms so
- * WH-final/medial queries still tokenize. Other CJK runs stay a single
- * surface piece. Recall paths therefore never throw on a missing jieba.
+ * only the interrogative atoms owned by protocol so WH-final/medial
+ * queries still tokenize. Other CJK runs stay a single surface piece.
+ * Recall paths therefore never throw on a missing jieba.
  *
  * Lifecycle: the jieba instance + dict are loaded exactly once on the
  * first successful `segmentCjkRun` call, then cached for the process. A
@@ -42,16 +48,6 @@ let jiebaState:
 let loadJiebaOverrideForTests: CjkSegmenterLoader | null = null;
 let emittedColdFallbackWarning = false;
 
-// Han + Hiragana + Katakana are the scripts jieba actually segments at
-// word level; Hangul / Arabic / other scripts fall back to per-codepoint
-// splits inside jieba, so routing them through here would fragment words.
-const CJK_WORD_SEGMENTER_SCRIPTS =
-  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
-
-export function isCjkSegmentationCandidate(token: string): boolean {
-  return CJK_WORD_SEGMENTER_SCRIPTS.test(token);
-}
-
 async function loadJieba(): Promise<CjkSegmenter | null> {
   try {
     if (loadJiebaOverrideForTests !== null) {
@@ -73,7 +69,7 @@ function emitCjkSegmentationFallbackWarning(error: unknown): void {
   process.emitWarning(CJK_SEGMENTATION_FALLBACK_WARNING_MESSAGE, {
     code: CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
     detail: JSON.stringify({
-      layer: "protocol",
+      layer: "cjk-segmentation",
       error: readErrorMessage(error, "Unknown jieba load failure")
     })
   });
@@ -87,7 +83,7 @@ function emitCjkSegmentationColdFallbackWarning(): void {
   process.emitWarning(CJK_SEGMENTATION_COLD_FALLBACK_WARNING_MESSAGE, {
     code: CJK_SEGMENTATION_COLD_FALLBACK_WARNING_CODE,
     detail: JSON.stringify({
-      layer: "protocol",
+      layer: "cjk-segmentation",
       state: jiebaState.kind
     })
   });
@@ -128,8 +124,8 @@ export function readCjkSegmentationStatus(): CjkSegmentationStatus {
 /**
  * Synchronously segment a CJK-bearing run into word-level pieces. Warm
  * jieba returns cut pieces. The cold path is an atom-split fallback via
- * `CJK_INTERROGATIVE_FALLBACK_ATOMS`; other CJK stays one surface piece
- * so sync tokenizers never block or invent a full lexicon.
+ * protocol interrogative atoms; other CJK stays one surface piece so
+ * sync tokenizers never block or invent a full lexicon.
  */
 export function segmentCjkRun(text: string): readonly string[] {
   if (text.length === 0) {
@@ -150,39 +146,6 @@ export function segmentCjkRun(text: string): readonly string[] {
   return fallbackCjkRunPieces(text);
 }
 
-function fallbackCjkRunPieces(text: string): readonly string[] {
-  const pieces: string[] = [];
-  let index = 0;
-  while (index < text.length) {
-    const lexeme = lexemeAt(text, index);
-    if (lexeme !== null) {
-      pieces.push(lexeme);
-      index += lexeme.length;
-      continue;
-    }
-    const next = nextLexemeIndex(text, index);
-    pieces.push(text.slice(index, next));
-    index = next;
-  }
-  return pieces.length === 0 ? [text] : pieces;
-}
-
-function lexemeAt(text: string, index: number): string | null {
-  for (const lexeme of CJK_INTERROGATIVE_FALLBACK_ATOMS) {
-    if (text.startsWith(lexeme, index)) return lexeme;
-  }
-  return null;
-}
-
-function nextLexemeIndex(text: string, start: number): number {
-  let next = text.length;
-  for (const lexeme of CJK_INTERROGATIVE_FALLBACK_ATOMS) {
-    const found = text.indexOf(lexeme, start);
-    if (found >= 0 && found < next) next = found;
-  }
-  return next;
-}
-
 /** Internal-only: reset cached jieba state between test scenarios. */
 export function __resetCjkSegmentationStateForTests(): void {
   jiebaState = { kind: "uninitialized" };
@@ -195,3 +158,6 @@ export function __setCjkSegmentationLoaderForTests(loader: CjkSegmenterLoader): 
   jiebaState = { kind: "uninitialized" };
   emittedColdFallbackWarning = false;
 }
+
+bindCjkRunSegmenter(segmentCjkRun);
+

@@ -1,9 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   isCjkSegmentationCandidate,
   segmentCjkRun,
   warmCjkSegmentation
-} from "@do-soul/alaya-protocol/cjk-segmentation";
+} from "@do-soul/alaya-cjk-segmentation";
 
 const CJK_FIXTURES: readonly string[] = [
   "我喜欢咖啡",
@@ -16,7 +19,16 @@ const CJK_FIXTURES: readonly string[] = [
   "ひらがな"
 ];
 
-describe("cjk-segmentation protocol owner", () => {
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../../");
+
+function readPackageDependencies(relativePath: string): Record<string, string> {
+  const pkg = JSON.parse(readFileSync(path.join(repoRoot, relativePath), "utf8")) as {
+    dependencies?: Record<string, string>;
+  };
+  return pkg.dependencies ?? {};
+}
+
+describe("cjk-segmentation owner", () => {
   beforeAll(async () => {
     const ready = await warmCjkSegmentation();
     if (!ready) {
@@ -31,5 +43,17 @@ describe("cjk-segmentation protocol owner", () => {
 
   it("empty input yields empty output", () => {
     expect(Array.from(segmentCjkRun(""))).toEqual([]);
+  });
+
+  it("keeps protocol zod-only and jieba on the Node helper", () => {
+    expect(Object.keys(readPackageDependencies("packages/protocol/package.json"))).toEqual(["zod"]);
+    expect(readPackageDependencies("packages/cjk-segmentation/package.json")["@node-rs/jieba"]).toBe(
+      "2.0.3"
+    );
+    expect(readPackageDependencies("packages/core/package.json")["@node-rs/jieba"]).toBeUndefined();
+    expect(readPackageDependencies("packages/storage/package.json")["@node-rs/jieba"]).toBeUndefined();
+    expect(
+      readPackageDependencies("apps/inspector/web/package.json")["@do-soul/alaya-cjk-segmentation"]
+    ).toBeUndefined();
   });
 });

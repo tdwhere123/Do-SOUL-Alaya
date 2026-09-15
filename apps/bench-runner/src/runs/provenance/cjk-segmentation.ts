@@ -1,7 +1,7 @@
 import {
   CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
   readCjkSegmentationStatus
-} from "@do-soul/alaya-protocol/cjk-segmentation";
+} from "@do-soul/alaya-cjk-segmentation";
 
 export function collectCjkSegmentationProvenance(): {
   core_status: ReturnType<typeof readCjkSegmentationStatus>;

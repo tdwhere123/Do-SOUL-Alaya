@@ -13,7 +13,7 @@ import {
   __setCjkSegmentationLoaderForTests,
   segmentCjkRun,
   warmCjkSegmentation
-} from "@do-soul/alaya-protocol/cjk-segmentation";
+} from "@do-soul/alaya-cjk-segmentation";
 
 describe("buildObjectIdFilterSql", () => {
   it("builds parameterized filters for allowlisted object id columns", () => {
@@ -276,7 +276,7 @@ describe("tokenizeFtsQuery CJK segmentation fail-soft", () => {
       expect.objectContaining({
         code: "ALAYA_CJK_SEGMENTATION_FALLBACK",
         detail: JSON.stringify({
-          layer: "protocol",
+          layer: "cjk-segmentation",
           error: "mock jieba load failure"
         })
       })

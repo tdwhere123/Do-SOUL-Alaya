@@ -426,14 +426,4 @@ export { SqliteRelationRecallReader, type RecallAssertionObservation, RELATION_R
 export { SqliteMemoryRecallReader } from "./repos/memory-entry/reads/bounded-recall-reader.js";
 export { readBoundedActiveConstraints, type BoundedGovernancePathReader } from "./repos/governance/reads/bounded-active-constraints.js";
 
-export {
-  CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
-  readCjkSegmentationStatus,
-  isCjkSegmentationCandidate,
-  segmentCjkRun,
-  warmCjkSegmentation
-} from "@do-soul/alaya-protocol/cjk-segmentation";
-export type { CjkSegmentationStatus } from "@do-soul/alaya-protocol/cjk-segmentation";
-
-
 export { parseStoredCandidateMemorySignal } from "./repos/signal/signal-repo.js";

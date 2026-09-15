@@ -7,7 +7,7 @@ import type {
 } from
   "./query-fact-frame-extraction-port.js";
 import { FACT_FRAME_AUXILIARIES as AUXILIARIES, FACT_FRAME_BE_AUXILIARIES as BE_AUXILIARIES, FACT_FRAME_CLAUSE_BOUNDARIES as CLAUSE_BOUNDARIES, FACT_FRAME_WH_WORDS as WH_WORDS } from "@do-soul/alaya-protocol/node/source-frame";
-import { isCjkSegmentationCandidate, warmCjkSegmentation } from "@do-soul/alaya-protocol/cjk-segmentation";
+import { isCjkSegmentationCandidate, warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
 import { parseCjkInterrogativeFactFrame } from
   "./fact-frame-grammar/cjk-interrogative.js";
 import {

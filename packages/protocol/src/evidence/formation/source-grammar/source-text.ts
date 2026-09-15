@@ -1,4 +1,7 @@
-import { isCjkSegmentationCandidate, segmentCjkRun } from "../../../shared/cjk-segmentation.js";
+import {
+  applyBoundCjkRunSegmenter,
+  isCjkSegmentationCandidate
+} from "../../../shared/cjk-run-policy.js";
 
 export type FactFrameSourceToken = Readonly<{
   readonly text: string;
@@ -31,7 +34,7 @@ function expandCjkFactFrameToken(
   raw: string,
   start: number
 ): readonly FactFrameSourceToken[] {
-  const pieces = segmentCjkRun(raw);
+  const pieces = applyBoundCjkRunSegmenter(raw);
   const tokens: FactFrameSourceToken[] = [];
   let offset = 0;
   for (const piece of pieces) {

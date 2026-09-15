@@ -12,6 +12,7 @@ function testIncludeGlob(testDir) {
 const sharedAlias = {
   "@do-soul/alaya-protocol/node/source-frame": path.resolve(rootDir, "packages/protocol/src/node/source-frame.ts"),
   "@do-soul/alaya-protocol": path.resolve(rootDir, "packages/protocol/src/index.ts"),
+  "@do-soul/alaya-cjk-segmentation": path.resolve(rootDir, "packages/cjk-segmentation/src/index.ts"),
   "@do-soul/alaya-graph-algorithms": path.resolve(rootDir, "packages/graph-algorithms/src/index.ts"),
   "@do-soul/alaya-storage": path.resolve(rootDir, "packages/storage/src/index.ts"),
   "@do-soul/alaya-core": path.resolve(rootDir, "packages/core/src/index.ts"),
@@ -116,6 +117,7 @@ function appProject(name, appDir) {
 export default [
   packageProject("@do-soul/alaya-protocol", "packages/protocol"),
   packageProject("@do-soul/alaya-graph-algorithms", "packages/graph-algorithms"),
+  packageProject("@do-soul/alaya-cjk-segmentation", "packages/cjk-segmentation"),
   packageProject("@do-soul/alaya-storage", "packages/storage", {
     ...(process.platform === "win32" ? windowsSqliteTimeouts : { testTimeout: 5_000 })
   }),

@@ -13,7 +13,7 @@ import {
   __setCjkSegmentationLoaderForTests,
   segmentCjkRun,
   warmCjkSegmentation
-} from "@do-soul/alaya-protocol/cjk-segmentation";
+} from "@do-soul/alaya-cjk-segmentation";
 
 describe("compileRecallQueryProbes", () => {
   it("extracts multilingual structural probes without a provider", () => {
@@ -243,7 +243,7 @@ describe("splitLexicalTokens CJK segmentation fail-soft", () => {
       expect.objectContaining({
         code: "ALAYA_CJK_SEGMENTATION_FALLBACK",
         detail: JSON.stringify({
-          layer: "protocol",
+          layer: "cjk-segmentation",
           error: "mock jieba load failure"
         })
       })
