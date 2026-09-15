@@ -23,6 +23,10 @@ export {
   type OfficialApiInterpretationReceiveReceipt
 } from "./garden/ingestion/official-api/source-interpretation-receive.js";
 export {
+  buildSourceInterpretationSignal,
+  emitLocatedInterpretationSignals
+} from "./garden/ingestion/official-api/source-interpretation-signal.js";
+export {
   DEFAULT_SOUL_GRAPH_DEPTH,
   DEFAULT_SOUL_GRAPH_LIMIT,
   MAX_SOUL_GRAPH_DEPTH,

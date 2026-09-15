@@ -53,7 +53,7 @@ export function emitLocatedInterpretationSignals(input: Readonly<{
   readonly scopeHint?: string | null;
 }>): readonly CandidateMemorySignal[] {
   return Object.freeze(input.located.flatMap((located) => {
-    if (located.outcome === "empty") return [];
+    if (located.outcome !== "candidates") return [];
     return [buildSourceInterpretationSignal({
       located,
       workspaceId: input.workspaceId,

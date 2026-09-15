@@ -9,15 +9,27 @@ import {
 } from "../../../garden/ingestion/compute-provider.js";
 import type { SignalExtractor } from "../../../garden/extraction/pi-mono-extractor.js";
 import { buildOfficialApiExtractionRequest } from "../../../garden/ingestion/official-api/extraction-request.js";
-import { interpretationEnvelope, interpretationRelation } from "./compute-provider-fixtures.js";
 
 const fixturesDir = fileURLToPath(new URL("../../fixtures/garden-extraction-golden/", import.meta.url));
 const fixturesUrl = new URL("../../fixtures/garden-extraction-golden/", import.meta.url);
 
 describe("garden-extraction-parser-parity", () => {
-  it("parses golden provider JSON into the expected signal kind, object kind, and confidence", async () => {
-    for (const fixture of await loadFixtures()) {
-      const rawJson = toProviderJson(fixture.expected, fixture.turn.trim());
+  it("skips historical signals-shaped goldens that are not live interpretation fixtures", async () => {
+    const historical = (await loadFixtures()).filter((fixture) => fixture.kind === "historical_signals");
+    expect(historical.length).toBeGreaterThan(0);
+    for (const fixture of historical) {
+      expect(fixture.expectedSignals[0], fixture.name).toEqual(expect.objectContaining({
+        object_kind: expect.any(String),
+        confidence: expect.any(Number)
+      }));
+    }
+  });
+
+  it("emits the expected located interpretation count and assertion text", async () => {
+    const live = (await loadFixtures()).filter((fixture) => fixture.kind === "interpretation");
+    expect(live.some((fixture) => fixture.expectedCount > 0)).toBe(true);
+    for (const fixture of live) {
+      const source = fixture.turn.trim();
       const context = createContext(fixture.turn);
       const extractor: SignalExtractor = {
         extract: async (input) => {
@@ -25,7 +37,7 @@ describe("garden-extraction-parser-parity", () => {
           expect(JSON.parse(input.userPrompt)).toEqual(
             buildOfficialApiExtractionRequest(fixture.turn, context.turn_messages)
           );
-          return { rawJson };
+          return { rawJson: fixture.responseJson };
         }
       };
       const provider = new OfficialApiGardenProvider({
@@ -36,36 +48,58 @@ describe("garden-extraction-parser-parity", () => {
       });
 
       const actual = await provider.compile(fixture.turn, context);
+      expect(actual, fixture.name).toHaveLength(fixture.expectedCount);
       for (const signal of actual) {
         expect(signal.signal_kind).toBe("potential_semantic_observation");
         expect(signal.object_kind).toBeNull();
         expect(signal.confidence).toBeNull();
         expect(signal.interpretation_contract).toBe("source-interpretation-v1");
+        expect(signal.raw_payload.source_interpretation.outcome).toBe("candidates");
+        expect(signal.raw_payload.source_interpretation.assertion_binding.text).toContain(source);
       }
     }
   });
 });
 
-async function loadFixtures(): Promise<readonly {
-  readonly name: string;
-  readonly turn: string;
-  readonly expected: readonly ExpectedSignal[];
-}[]> {
+async function loadFixtures(): Promise<readonly GoldenFixture[]> {
   const names = (await readdir(fixturesDir)).sort();
-  return await Promise.all(
-    names.map(async (name) => ({
+  return await Promise.all(names.map(async (name) => {
+    const turn = await readFile(new URL(`${name}/turn.txt`, fixturesUrl), "utf8");
+    const expected = JSON.parse(
+      await readFile(new URL(`${name}/expected.json`, fixturesUrl), "utf8")
+    ) as unknown;
+    let responseJson: string | null = null;
+    try {
+      responseJson = await readFile(new URL(`${name}/interpretation.json`, fixturesUrl), "utf8");
+    } catch {
+      responseJson = null;
+    }
+    if (responseJson !== null) {
+      const parsed = JSON.parse(responseJson) as { readonly interpretations?: unknown };
+      if (!Array.isArray(parsed.interpretations)) {
+        throw new Error(`${name} interpretation.json must contain an interpretations array`);
+      }
+      return {
+        kind: "interpretation" as const,
+        name,
+        turn,
+        responseJson,
+        expectedCount: parsed.interpretations.length === 0 ? 0 : 1,
+        expectedSignals: []
+      };
+    }
+    if (!Array.isArray(expected)) {
+      throw new Error(`${name} expected.json must be an array`);
+    }
+    return {
+      kind: "historical_signals" as const,
       name,
-      turn: await readFile(new URL(`${name}/turn.txt`, fixturesUrl), "utf8"),
-      expected: JSON.parse(await readFile(new URL(`${name}/expected.json`, fixturesUrl), "utf8")) as ExpectedSignal[]
-    }))
-  );
-}
-
-function toProviderJson(expected: readonly ExpectedSignal[], source: string): string {
-  const predicate = source.split(/\s+/u).find((token) => /[A-Za-z]{3,}/u.test(token)) ?? source.slice(0, 12);
-  return interpretationEnvelope(
-    expected.map(() => interpretationRelation(predicate))
-  );
+      turn,
+      responseJson: "",
+      expectedCount: expected.length,
+      expectedSignals: expected as readonly ExpectedSignal[]
+    };
+  }));
 }
 
 function createContext(turn: string): GardenCompileContext {
@@ -95,3 +129,12 @@ interface ExpectedSignal {
   readonly object_kind: string;
   readonly confidence: number;
 }
+
+type GoldenFixture = Readonly<{
+  readonly kind: "interpretation" | "historical_signals";
+  readonly name: string;
+  readonly turn: string;
+  readonly responseJson: string;
+  readonly expectedCount: number;
+  readonly expectedSignals: readonly ExpectedSignal[];
+}>;

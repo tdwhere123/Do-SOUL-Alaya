@@ -23,6 +23,10 @@ export {
   type OfficialApiInterpretationReceiveReceipt
 } from "./ingestion/official-api/source-interpretation-receive.js";
 export {
+  buildSourceInterpretationSignal,
+  emitLocatedInterpretationSignals
+} from "./ingestion/official-api/source-interpretation-signal.js";
+export {
   AUDITOR_CONSTANTS,
   Auditor,
   type AuditorDependencies,

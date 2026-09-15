@@ -12,6 +12,8 @@ export interface SignalExtractor {
     readonly userPrompt: string;
     readonly abortSignal?: AbortSignal;
     readonly timeoutMs?: number;
+    /** Trusted source corpus for live interpretation classify/validate. */
+    readonly sourceCorpus?: string;
     /** Lets a caller reject semantically unusable JSON at the consumer boundary. */
     readonly validateRawJson?: (rawJson: string) => void;
     /** Caller-owned correction when its response schema is not a signals envelope. */

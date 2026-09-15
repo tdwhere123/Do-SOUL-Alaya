@@ -84,12 +84,26 @@ describe("official API source interpretation receive", () => {
     expect(mismatch.located).toEqual([]);
     expect(mismatch.rejections.every((item) => item.reason === "source_generation_mismatch")).toBe(true);
 
-    const ignored = classifyOfficialApiInterpretationResult(
+    expect(() => classifyOfficialApiInterpretationResult(
       interpretationRaw([usesRelation], 9),
       request,
       corpus
-    );
-    expect(ignored.status).toBe("completed_empty");
-    expect(ignored.located.every((item) => item.candidates.length === 0)).toBe(true);
+    )).toThrow(/rejected interpretation entries/);
+
+    expect(() => classifyOfficialApiInterpretationResult(
+      JSON.stringify({
+        interpretations: [
+          { assertion_id: 1, relations: [usesRelation] },
+          { assertion_id: 9, relations: [usesRelation] }
+        ]
+      }),
+      request,
+      corpus
+    )).toThrow(/rejected interpretation entries/);
+
+    expect(() => classifyOfficialApiInterpretationResult(
+      interpretationRaw([usesRelation]),
+      request
+    )).toThrow(/requires the source corpus/);
   });
 });

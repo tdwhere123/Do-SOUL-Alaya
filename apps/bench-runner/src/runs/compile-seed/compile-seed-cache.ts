@@ -343,7 +343,11 @@ async function extractLiveWithLease(
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
   const request = extractCacheInputIdentity(input.userPrompt).request;
-  const completion = classifyOfficialApiExtractionResult(result.rawJson, request).status;
+  const completion = classifyOfficialApiExtractionResult(
+    result.rawJson,
+    request,
+    requireExtractSourceCorpus(input)
+  ).status;
   const persisted = persistExtraction(options, cacheRoot, cacheKey, result, true, request, completion);
   recordLiveExtractionSuccess(options, cacheKey, stats, persisted);
   return result;
@@ -355,10 +359,25 @@ function withSemanticValidation(
   return {
     ...input,
     validateRawJson: (rawJson) => {
-      classifyOfficialApiExtractionResult(rawJson, extractCacheInputIdentity(input.userPrompt).request);
+      classifyOfficialApiExtractionResult(
+        rawJson,
+        extractCacheInputIdentity(input.userPrompt).request,
+        requireExtractSourceCorpus(input)
+      );
       input.validateRawJson?.(rawJson);
     }
   };
+}
+
+function requireExtractSourceCorpus(
+  input: Parameters<BenchSignalExtractor["extract"]>[0]
+): string {
+  if (input.sourceCorpus === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "live extraction classify requires the source corpus"
+    );
+  }
+  return input.sourceCorpus;
 }
 
 function markLiveExtractionStarted(
@@ -395,6 +414,11 @@ function persistExtraction(
     });
   if (providerBacked && requestCompletion === undefined) {
     throw new ExtractionCacheInvariantError("provider result lacks shared request completion");
+  }
+  if (emptyClassification === "completed_empty" && inspection.rawSignalCount !== 0) {
+    throw new ExtractionCacheInvariantError(
+      "completed_empty contradicts a non-empty interpretations envelope"
+    );
   }
   try {
     writeCachedExtraction(cacheRoot, cacheKey, {

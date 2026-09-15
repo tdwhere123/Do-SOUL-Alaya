@@ -62,4 +62,25 @@ describe("official API ordinary extraction compile", () => {
       turn_messages: [{ role: "user", content: turn, message_id: "user-1" }]
     })).resolves.toEqual([]);
   });
+
+  it("fails compile loudly when source observation is missing after the extractor ran", async () => {
+    const turn = "Alice uses tools.";
+    const { source_observation: _sourceObservation, ...withoutObservation } = createContext();
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: createExtractor(interpretationEnvelope(1, "uses", [
+        { role: "agent", text: "Alice" },
+        { role: "object", text: "tools" }
+      ])),
+      generateSignalId: () => "signal-missing-observation"
+    });
+    await expect(provider.compile(turn, {
+      ...withoutObservation,
+      turn_messages: [{ role: "user", content: turn, message_id: "user-1" }]
+    })).rejects.toMatchObject({
+      name: "GardenProviderError",
+      kind: "invalid_response",
+      message: "Official garden compile requires admitted source observation."
+    });
+  });
 });

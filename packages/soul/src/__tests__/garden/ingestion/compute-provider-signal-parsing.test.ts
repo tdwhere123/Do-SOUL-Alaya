@@ -172,7 +172,8 @@ describe("OfficialApiGardenProvider", () => {
 
     await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
       name: "OfficialApiGardenCompileIncompleteError",
-      kind: "invalid_response"
+      kind: "invalid_response",
+      signals: []
     });
   });
 
@@ -184,7 +185,8 @@ describe("OfficialApiGardenProvider", () => {
 
     await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
       name: "OfficialApiGardenCompileIncompleteError",
-      kind: "invalid_response"
+      kind: "invalid_response",
+      signals: []
     });
   });
 
@@ -232,9 +234,38 @@ describe("OfficialApiGardenProvider", () => {
       generateSignalId: () => "signal-partial"
     });
     const signals = await provider.compile(turn, createContext(turn));
+    expect(signals).toHaveLength(1);
     expect(signals.every((signal) =>
       signal.raw_payload.source_interpretation.assertion_binding.assertion_id !== 9
     )).toBe(true);
+  });
+
+  it("emits only candidate siblings when a later assertion fails to locate", async () => {
+    const turn = "Alice uses tools. Bob invented widgets.";
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: {
+        extract: vi.fn(async () => ({
+          rawJson: JSON.stringify({
+            interpretations: [
+              {
+                assertion_id: 1,
+                relations: [{ predicate: { text: "uses" }, arguments: [], qualifiers: [] }]
+              },
+              {
+                assertion_id: 2,
+                relations: [{ predicate: { text: "missing-phrase" }, arguments: [], qualifiers: [] }]
+              }
+            ]
+          })
+        }))
+      },
+      generateSignalId: () => "signal-mixed"
+    });
+    const signals = await provider.compile(turn, createContext(turn));
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.raw_payload.source_interpretation.outcome).toBe("candidates");
+    expect(signals[0]?.raw_payload.source_interpretation.assertion_binding.assertion_id).toBe(1);
   });
 
   it.each([
@@ -269,6 +300,15 @@ describe("OfficialApiGardenProvider", () => {
 
     await expect(provider.compile(source, createContext(source))).rejects.toMatchObject({
       name: "OfficialApiGardenCompileIncompleteError",
+      signals: [expect.objectContaining({
+        interpretation_contract: "source-interpretation-v1",
+        raw_payload: expect.objectContaining({
+          source_interpretation: expect.objectContaining({
+            outcome: "candidates",
+            assertion_binding: expect.objectContaining({ assertion_id: 1 })
+          })
+        })
+      })],
       receipt: expect.objectContaining({
         status: "partial",
         producer: "official-api-garden-compile-v1",

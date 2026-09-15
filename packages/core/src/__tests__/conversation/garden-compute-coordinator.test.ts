@@ -62,4 +62,54 @@ describe("GardenComputeCoordinator", () => {
       process.off("unhandledRejection", unhandled);
     }
   });
+
+  it("passes admitted artifact key and source observation into compile", async () => {
+    const compile = vi.fn(async () => []);
+    const coordinator = new GardenComputeCoordinator({
+      eventLogRepo: {
+        queryConversationMessageEventsByRun: vi.fn(async () => []),
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+          event_id: "event-started",
+          created_at: "2026-04-29T00:00:00.000Z",
+          revision: 0,
+          ...entry
+        }))
+      },
+      gardenComputeProvider: {
+        provider_kind: "official_api",
+        compile
+      },
+      signalReceiver: {
+        receiveSignal: vi.fn(async () => ({
+          signal: null,
+          triage_result: "dropped" as const,
+          materialization: null
+        }))
+      },
+      warn: vi.fn(),
+      releaseGovernanceLeaseSafely: vi.fn(async () => undefined)
+    });
+
+    coordinator.triggerCompile({
+      run: createRun(),
+      workspace: createWorkspace(),
+      modelRef: null,
+      userMessage: createMessage("msg-user", "user", "remember this"),
+      assistantMessage: createMessage("msg-assistant", "assistant", "noted")
+    });
+    await flushBackgroundTasks();
+    await flushBackgroundTasks();
+
+    expect(compile).toHaveBeenCalledWith(
+      "remember this",
+      expect.objectContaining({
+        artifact_key: "garden-compile:workspace-1:run-1",
+        source_observation: {
+          observed_at: "2026-04-29T00:00:00.000Z",
+          authority: "trusted_host_event",
+          source_event_id: "event-started"
+        }
+      })
+    );
+  });
 });

@@ -129,8 +129,10 @@ export function classifyOfficialApiInterpretationResult(
   request: OfficialApiExtractionRequest,
   sourceCorpus?: string
 ) {
-  if (sourceCorpus !== undefined &&
-      computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
+  if (sourceCorpus === undefined) {
+    throw new Error("official API completed result requires the source corpus");
+  }
+  if (computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
     throw new Error("official API completed result source corpus differs from its request");
   }
   let parsed: unknown;
@@ -143,8 +145,14 @@ export function classifyOfficialApiInterpretationResult(
   if (!envelope.success) {
     throw new Error("official API completed result requires an interpretations array");
   }
+  const catalogIds = new Set(
+    request.source_assertions.map((assertion) => assertion.assertion_id)
+  );
+  if (envelope.data.interpretations.some((entry) => !catalogIds.has(entry.assertion_id))) {
+    throw new Error("official API completed result contains rejected interpretation entries");
+  }
   const received = receiveOfficialApiSourceInterpretations(rawJson, request, {
-    sourceCorpus: sourceCorpus ?? requestBoundCorpus(request),
+    sourceCorpus,
     artifactKey: "admission",
     responseKind: "received"
   });
@@ -155,16 +163,20 @@ export function classifyOfficialApiInterpretationResult(
   if (failed) {
     throw new Error("official API completed result contains rejected interpretation entries");
   }
+  const hasCandidates = received.located.some((item) => item.outcome === "candidates");
+  if (envelope.data.interpretations.length === 0) {
+    return Object.freeze({
+      status: "completed_empty" as const,
+      located: received.located
+    });
+  }
+  if (!hasCandidates) {
+    throw new Error("official API completed result contains rejected interpretation entries");
+  }
   return Object.freeze({
-    status: received.located.some((item) => item.outcome === "candidates")
-      ? "completed_signals" as const
-      : "completed_empty" as const,
+    status: "completed_signals" as const,
     located: received.located
   });
-}
-
-function requestBoundCorpus(request: OfficialApiExtractionRequest): string {
-  return request.source_assertions.map((assertion) => assertion.text).join("\n");
 }
 
 function requestBoundRejections(

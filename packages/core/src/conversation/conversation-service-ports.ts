@@ -64,6 +64,9 @@ export interface ConversationGardenComputeProviderPort {
       readonly run_id: string;
       readonly surface_id: string | null;
       readonly turn_messages: readonly ConversationMessage[];
+      readonly artifact_key?: string;
+      readonly source_observed_at?: string;
+      readonly source_observation?: NonNullable<CandidateMemorySignal["source_observation"]>;
     }
   ): Promise<readonly CandidateMemorySignal[]>;
 }
@@ -167,6 +170,7 @@ export interface GardenProviderCallTelemetry {
   readonly startedAt: string;
   readonly startedAtEpochMs: number;
   readonly modelId: string;
+  readonly startedEventId: string;
 }
 
 export const MAX_RECALLED_CONTEXT_CHARS = 4_000;

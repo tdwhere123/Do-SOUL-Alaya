@@ -106,8 +106,6 @@ function buildOfficialSeedDrafts(
     if (signal.interpretation_contract !== undefined) {
       drafts.push({
         signalKind: signal.signal_kind,
-        objectKind: "observation",
-        confidence: 0,
         distilledFact: signal.raw_payload.source_interpretation.assertion_binding.text,
         turnContent: input.turnContent,
         turnMessages: input.context.turn_messages,
@@ -118,6 +116,8 @@ function buildOfficialSeedDrafts(
       });
       continue;
     }
+    // Live ordinary compile emits interpretation_contract signals only.
+    // matched_text drafts are not produced by OfficialApiGardenProvider.compile.
     const distilled =
       readRawString(signal.raw_payload, "distilled_fact") ??
       readRawString(signal.raw_payload, "matched_text");

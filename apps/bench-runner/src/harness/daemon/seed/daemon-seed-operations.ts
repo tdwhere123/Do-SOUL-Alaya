@@ -3,11 +3,15 @@ import {
   CandidateMemorySignalSchema,
   ScopeClass,
   SignalSource,
+  SourceLocatedInterpretationSchema,
   type CandidateMemorySignal,
   type SoulEmitCandidateSignalResponse,
   type SoulProposeMemoryUpdateResponse
 } from "@do-soul/alaya-protocol";
-import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
+import {
+  buildSourceInterpretationSignal,
+  normalizeSchemaGroundedSignal
+} from "@do-soul/alaya-soul";
 import {
   createUnscoredMaterializedSeedError,
   isUnscoredMaterializedSeedError
@@ -335,31 +339,21 @@ async function seedOneCompileSignal(
         signalId,
         buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact, signalId)
       )
-      : CandidateMemorySignalSchema.parse({
-        signal_id: signalId,
-        workspace_id: input.activeContext.workspaceId,
-        run_id: input.activeContext.runId,
-        surface_id: signalInput.surfaceId ?? null,
-        source: SignalSource.GARDEN_COMPILE,
-        signal_kind: "potential_semantic_observation",
-        interpretation_contract: "source-interpretation-v1",
-        object_kind: null,
-        confidence: null,
-        scope_hint: ScopeClass.PROJECT,
-        domain_tags: [],
-        evidence_refs: [],
-        source_memory_refs: [],
-        supersedes_refs: [],
-        exception_to_refs: [],
-        contradicts_refs: [],
-        incompatible_with_refs: [],
-        raw_payload: signalInput.productionRawPayload,
-        source_observation: {
+      : buildSourceInterpretationSignal({
+        located: SourceLocatedInterpretationSchema.parse(
+          signalInput.productionRawPayload.source_interpretation
+        ),
+        workspaceId: input.activeContext.workspaceId,
+        runId: input.activeContext.runId,
+        surfaceId: signalInput.surfaceId ?? null,
+        signalId,
+        createdAt: signalInput.sourceObservedAt ?? new Date().toISOString(),
+        sourceObservation: {
           observed_at: signalInput.sourceObservedAt ?? new Date().toISOString(),
           authority: "trusted_host_event",
           source_event_id: signalInput.evidenceRef
         },
-        created_at: signalInput.sourceObservedAt ?? new Date().toISOString()
+        scopeHint: ScopeClass.PROJECT
       })
   );
   const received = (await input.activeRuntime.services.signalService.receiveSignal(

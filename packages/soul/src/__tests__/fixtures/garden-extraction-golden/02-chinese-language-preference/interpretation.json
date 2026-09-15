@@ -1,0 +1,16 @@
+{
+  "interpretations": [
+    {
+      "assertion_id": 1,
+      "relations": [
+        {
+          "predicate": { "text": "总结" },
+          "arguments": [
+            { "role": "object", "phrase": { "text": "中文" } }
+          ],
+          "qualifiers": []
+        }
+      ]
+    }
+  ]
+}
