@@ -1,6 +1,7 @@
 import {
   classifyFieldValidTime,
   compareCodeUnits,
+  compareUtcInstants,
   type FieldValidTimeClass
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
@@ -42,7 +43,7 @@ export function groundDualTime(input: Readonly<{
     throw new CoreError("VALIDATION", "valid_to requires a source-grounded valid_from");
   }
   const valid_to = valid_from === null ? null : parseOptionalTime(input.valid_to, "valid_to");
-  if (valid_from !== null && valid_to !== null && valid_to <= valid_from) {
+  if (valid_from !== null && valid_to !== null && compareUtcInstants(valid_to, valid_from) !== 1) {
     throw new CoreError("VALIDATION", "valid interval must be half-open");
   }
   return Object.freeze({ recorded_at, event_time, valid_from, valid_to });
@@ -103,5 +104,5 @@ function compareOptionalIso(left: string | null, right: string | null): number {
   if (left === right) return 0;
   if (left === null) return 1;
   if (right === null) return -1;
-  return compareCodeUnits(left, right);
+  return compareUtcInstants(left, right) ?? compareCodeUnits(left, right);
 }

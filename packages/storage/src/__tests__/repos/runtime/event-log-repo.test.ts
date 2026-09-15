@@ -223,6 +223,36 @@ it("answers Green open-correction and security-hit predicates from SQL", async (
   ).resolves.toBe(true);
 });
 
+it("treats a minute-precision session override expiry as closed once millisecond now is later", async () => {
+  const { eventLogRepo } = await createEventLogRepos();
+  await eventLogRepo.append({
+    event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
+    entity_type: "session_override",
+    entity_id: "override-minute",
+    workspace_id: "ws_events",
+    run_id: "run-1",
+    caused_by: "user_action",
+    payload_json: {
+      override_id: "override-minute",
+      target_object: "memory:build-style",
+      correction: "Use pnpm instead of npm.",
+      priority: 2,
+      run_id: "run-1",
+      expires_at: "2026-03-24T00:30Z",
+      derived_from: null,
+      occurred_at: "2026-03-24T00:00:00.000Z"
+    }
+  });
+
+  await expect(
+    eventLogRepo.hasOpenSessionOverrideCorrection({
+      workspaceId: "ws_events",
+      targetObjectId: "memory:build-style",
+      nowIso: "2026-03-24T00:30:15.000Z"
+    })
+  ).resolves.toBe(false);
+});
+
 it("queryByEntity returns only matching entity events", async () => {
   const { eventLogRepo } = await createEventLogRepos();
   await appendWorkspaceLifecycleEvent(eventLogRepo, {

@@ -410,7 +410,7 @@ function prepareClaimStatements(connection: StorageDatabase["connection"]) {
     SET claim_token = NULL, claim_token_fingerprint = NULL, claim_expires_at = NULL
     WHERE workspace_id = ? AND signal_id = ? AND claim_token = ?
       AND claim_expires_at = ?
-      AND claim_expires_at <= ?
+      AND alaya_utc_compare(claim_expires_at, ?) <= 0
   `);
   const deleteClaimed = connection.prepare(`
     DELETE FROM source_grounding_defer_queue

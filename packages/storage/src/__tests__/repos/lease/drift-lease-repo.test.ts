@@ -61,23 +61,17 @@ describe("SqliteDriftLeaseRepo", () => {
           EXPLAIN QUERY PLAN
           SELECT lease_id
           FROM drift_leases
-          WHERE workspace_id = ? AND expires_at > ?
+          WHERE workspace_id = ? AND alaya_utc_compare(expires_at, ?) > 0
           ORDER BY granted_at ASC, lease_id ASC
         `
       )
       .all("workspace-1", "2026-04-20T08:00:00.000Z") as Array<{ readonly detail: string }>;
-    const cleanupPlan = database.connection
-      .prepare(
-        `
-          EXPLAIN QUERY PLAN
-          DELETE FROM drift_leases
-          WHERE expires_at <= ?
-        `
-      )
-      .all("2026-04-20T08:00:00.000Z") as Array<{ readonly detail: string }>;
 
-    expect(activeLookupPlan.some((row) => row.detail.includes("idx_drift_leases_workspace_expires"))).toBe(true);
-    expect(cleanupPlan.some((row) => row.detail.includes("idx_drift_leases_expires"))).toBe(true);
+    expect(
+      activeLookupPlan.some((row) =>
+        row.detail.includes("SEARCH drift_leases USING INDEX idx_drift_leases_workspace_operation")
+      )
+    ).toBe(true);
   });
 
   it("creates and lists active leases for a workspace", async () => {
@@ -166,6 +160,35 @@ describe("SqliteDriftLeaseRepo", () => {
 
     const remaining = await repo.findActive("workspace-1");
     expect(remaining.map((lease) => lease.lease_id)).toEqual(["lease-fresh"]);
+  });
+
+  it("treats a minute-precision expiry as elapsed once millisecond now is later", async () => {
+    const { repo } = await createRepo({
+      now: () => "2026-04-20T08:00:30.000Z"
+    });
+
+    await repo.create(
+      createLease({
+        lease_id: "lease-minute-expired",
+        expires_at: "2026-04-20T08:00Z"
+      })
+    );
+    await repo.create(
+      createLease({
+        lease_id: "lease-minute-live",
+        operation_type: "surface.rename_object",
+        expires_at: "2026-04-20T08:01Z"
+      })
+    );
+
+    await expect(repo.findActive("workspace-1")).resolves.toEqual([
+      expect.objectContaining({ lease_id: "lease-minute-live" })
+    ]);
+    await expect(repo.findActiveById("workspace-1", "lease-minute-expired")).resolves.toBeNull();
+    expect(await repo.deleteExpired("2026-04-20T08:00:30.000Z")).toBe(1);
+    await expect(repo.findActive("workspace-1")).resolves.toEqual([
+      expect.objectContaining({ lease_id: "lease-minute-live" })
+    ]);
   });
 
   it("rejects concurrent active leases for the same workspace and operation", async () => {

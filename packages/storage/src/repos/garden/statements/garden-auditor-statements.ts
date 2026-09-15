@@ -144,7 +144,7 @@ const EXPIRING_GREEN_SQL = `
     WHERE g.workspace_id = ?
       AND g.green_state IN ('eligible', 'grace')
       AND g.valid_until IS NOT NULL
-      AND g.valid_until <= ?
+      AND alaya_utc_compare(g.valid_until, ?) <= 0
     ORDER BY g.valid_until ASC, g.object_id ASC
     LIMIT ${EXPIRING_GREEN_LIMIT}
   `;
@@ -169,7 +169,7 @@ const GREEN_REQUEST_ACTIVE_SQL = `
         verified_by = 'auditor',
         verified_at = ?,
         valid_until = CASE
-          WHEN valid_until IS NULL OR valid_until < ? THEN ?
+          WHEN valid_until IS NULL OR alaya_utc_compare(valid_until, ?) < 0 THEN ?
           ELSE valid_until
         END,
         revoke_reason = 'none',

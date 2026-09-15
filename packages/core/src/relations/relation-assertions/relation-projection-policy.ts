@@ -1,6 +1,7 @@
 import {
   PathRelationSchema,
   TEMPORAL_RELATION_PROJECTION_PROFILES,
+  compareUtcInstants,
   isRelationValidityActiveAt,
   type PathRelation,
   type RelationAssertion,
@@ -74,6 +75,8 @@ function hasResolutionAtOrBefore(
   resolutions: readonly Readonly<RelationAssertionResolution>[],
   asOf: string
 ): boolean {
-  const instant = Date.parse(asOf);
-  return resolutions.some((resolution) => Date.parse(resolution.resolved_at) <= instant);
+  return resolutions.some((resolution) => {
+    const order = compareUtcInstants(resolution.resolved_at, asOf);
+    return order !== undefined && order !== 1;
+  });
 }

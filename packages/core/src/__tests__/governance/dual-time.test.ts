@@ -85,4 +85,38 @@ describe("dual-time grounding", () => {
     expect(ordered[2]?.fallback_recorded_at).toBe(true);
     expect(ordered[0]?.fallback_recorded_at).toBe(false);
   });
+
+  it("rejects a half-open interval whose ends are the same instant in mixed precision", () => {
+    expect(() => groundDualTime({
+      recorded_at: RECORDED,
+      event_time: EARLIER,
+      valid_from: "2026-08-15T00:00Z",
+      valid_to: "2026-08-15T00:00:00.000Z",
+      event_time_source: "source",
+      valid_time_source: "source"
+    })).toThrow(/valid interval must be half-open/u);
+  });
+
+  it("orders mixed-precision valid_from stamps by instant, not by string spelling", () => {
+    const ordered = orderCompetingStates([
+      {
+        id: "minute-later",
+        recorded_at: RECORDED,
+        event_time: null,
+        valid_from: "2026-08-16T00:01Z",
+        valid_to: null
+      },
+      {
+        id: "millisecond-earlier",
+        recorded_at: RECORDED,
+        event_time: null,
+        valid_from: "2026-08-16T00:00:30.000Z",
+        valid_to: null
+      }
+    ]);
+    expect(ordered.map((state) => state.id)).toEqual([
+      "millisecond-earlier",
+      "minute-later"
+    ]);
+  });
 });

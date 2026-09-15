@@ -1,3 +1,4 @@
+import { compareUtcInstants } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
 
 export type NowProvider = () => string;
@@ -57,16 +58,14 @@ export function isExpired(expiresAt: string | null, referenceTime: string): bool
     return false;
   }
 
-  const expiryEpoch = Date.parse(expiresAt);
-  const referenceEpoch = Date.parse(referenceTime);
-
-  if (!Number.isFinite(referenceEpoch)) {
+  if (compareUtcInstants(referenceTime, referenceTime) === undefined) {
     throw new CoreError("VALIDATION", "referenceTime must be a valid ISO timestamp");
   }
 
-  if (!Number.isFinite(expiryEpoch)) {
+  const order = compareUtcInstants(expiresAt, referenceTime);
+  if (order === undefined) {
     return true;
   }
 
-  return expiryEpoch <= referenceEpoch;
+  return order !== 1;
 }

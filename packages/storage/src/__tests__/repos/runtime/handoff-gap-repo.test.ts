@@ -326,6 +326,23 @@ describe("SqliteHandoffGapRepo — TTL cleanup", () => {
     expect(repo.findHandoffById("cccccccc-cccc-4ccc-8ccc-cccccccccccc")).not.toBeNull();
   });
 
+  it("deletes a minute-precision expiry once millisecond now is later", () => {
+    const { repo } = createRepo();
+    repo.createHandoff(makeHandoffRecord({
+      runtime_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      expires_at: "2025-01-01T00:00Z"
+    }));
+    repo.createHandoff(makeHandoffRecord({
+      runtime_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      source_run_id: "run-source-2",
+      expires_at: "2025-01-01T00:01Z"
+    }));
+
+    expect(repo.deleteExpired("2025-01-01T00:00:30.000Z")).toBe(1);
+    expect(repo.findHandoffById("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).toBeNull();
+    expect(repo.findHandoffById("cccccccc-cccc-4ccc-8ccc-cccccccccccc")).not.toBeNull();
+  });
+
   it("deleteExpired returns 0 when nothing is expired", () => {
     const { repo } = createRepo();
     repo.createHandoff(makeHandoffRecord({ expires_at: "2099-01-01T00:00:00.000Z" }));
