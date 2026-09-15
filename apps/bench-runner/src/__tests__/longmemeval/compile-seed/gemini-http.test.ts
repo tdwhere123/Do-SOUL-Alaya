@@ -49,9 +49,8 @@ describe("native Gemini interactive extraction", () => {
   it("binds the actual shared response shape into raw cache identity", () => {
     const request = stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest("I enjoy coffee.", []));
     const original = computeCacheKey(config.model, config.requestProfile, input.systemPrompt, request);
-    const changed = structuredClone(soul.officialApiExtractionResponseSchema(request)) as { title?: string };
-    changed.title = "Changed generation contract";
-    const schema = vi.spyOn(soul, "officialApiExtractionResponseSchema").mockReturnValue(changed);
+    const schema = vi.spyOn(soul, "officialApiExtractionResponseSchemaPreimage")
+      .mockReturnValue('{"title":"Changed generation contract"}');
     try {
       expect(computeCacheKey(config.model, config.requestProfile, input.systemPrompt, request)).not.toBe(original);
     } finally { schema.mockRestore(); }

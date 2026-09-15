@@ -13,7 +13,10 @@ import {
 } from "../../../garden/ingestion/official-api/request-result.js";
 import { OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION } from
   "../../../garden/triage/grounding/source-locator.js";
-import { officialApiExtractionResponseSchema } from "../../../garden/ingestion/official-api/response-schema.js";
+import {
+  officialApiExtractionResponseSchema,
+  officialApiExtractionResponseSchemaPreimage
+} from "../../../garden/ingestion/official-api/response-schema.js";
 import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 
 const source = "I own a blue bicycle. I prefer coffee in the morning.";
@@ -86,6 +89,13 @@ it("isolates nested generation schema mutations between callers", () => {
   changed.properties.interpretations.items.properties.assertion_id = { type: "string" };
   expect(officialApiExtractionResponseSchema(prompt)).toEqual(original);
   expect(changed).not.toEqual(original);
+});
+
+it("hashes the shared generation schema without cloning it", () => {
+  const prompt = JSON.stringify(request);
+  expect(officialApiExtractionResponseSchemaPreimage(prompt))
+    .toBe(JSON.stringify(officialApiExtractionResponseSchema(prompt)));
+  expect(officialApiExtractionResponseSchemaPreimage("not a request")).toBe("null");
 });
 
 it("describes the live interpretation envelope without kind or confidence", () => {

@@ -7,7 +7,7 @@ import {
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
-  computeCacheKey,
+  computeOfficialApiRequestCacheKey,
   computeExtractionTurnCacheKeys,
   inspectCachedExtraction
 } from "../../compile-seed/compile-seed-cache.js";
@@ -109,7 +109,7 @@ function collectBatchRequests(
     const byAssertion = new Map(workset.units.map((unit) => [unit.assertionId, unit]));
     for (const request of collectOfficialApiExtractionCoverage(turn.turnContent, turn.turnMessages, prepared.config.sourcePacking).requests) {
       const userPrompt = stringifyOfficialApiExtractionRequest(request);
-      const key = computeCacheKey(prepared.config.model, prepared.config.requestProfile,
+      const key = computeOfficialApiRequestCacheKey(prepared.config.model, prepared.config.requestProfile,
         OFFICIAL_API_SYSTEM_PROMPT, userPrompt);
       if (!selectedKeys.has(key)) continue;
       const item = collected.get(key) ?? {

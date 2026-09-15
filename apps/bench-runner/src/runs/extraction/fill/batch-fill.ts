@@ -64,6 +64,7 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
     throw new Error("Batch campaign requires successful, fully accounted predecessor jobs");
   }
   assertSampleExecutionOptions(authority.receipt, input.options);
+  refuseConflictingSampleWindow(input);
   const selected = authority.receipt.action === "sample"
     ? new Set(authority.receipt.sample_scope!.keys)
     : authority.receipt.action === "probe" ? new Set([authority.receipt.probe_key!])
@@ -133,6 +134,17 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
   return { requestedTurns: input.prepared.requestedTurns, cacheHits: workset.cachedRequests.length,
     newlyExtracted: 0, coverage: completion.coverage, manifest, batchState: state,
     ...readFillRetryTelemetry(newFillStats()), authorityTelemetry: authority.snapshot() };
+}
+
+function refuseConflictingSampleWindow(input: BatchFillInput): void {
+  if (input.authority?.receipt.sample_scope === undefined) return;
+  const window = input.options.batch!.window ?? "initial";
+  if (!/^[a-zA-Z0-9_-]{1,64}$/u.test(window)) throw new Error("invalid Batch window name");
+  const path = join(input.writeLease.stableRootPath,
+    window === "initial" ? "gemini-batch-plan.json" : `gemini-batch-plan-${window}.json`);
+  if (existsSync(path)) return;
+  if (readRootBatchRuns(input.writeLease).length === 0) return;
+  throw new Error("sample authority already has its sole Batch job in this cache root");
 }
 
 function assertBatchExpenseScope(limits: NonNullable<ExtractionFillOptions["batch"]>["limits"],

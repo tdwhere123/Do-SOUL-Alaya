@@ -2,7 +2,8 @@ import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import {
   collectOfficialApiExtractionCoverage,
-  officialApiExtractionResponseSchema,
+  OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE,
+  officialApiExtractionResponseSchemaPreimage,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import { ExtractionCacheInvariantError } from
@@ -24,17 +25,28 @@ export function computeCacheKey(
   systemPrompt: string,
   extractionRequest: string
 ): string {
-  return createHash("sha256")
-    .update(model, "utf8")
-    .update("\u0000", "utf8")
-    .update(requestProfile, "utf8")
-    .update("\u0000", "utf8")
-    .update(systemPrompt, "utf8")
-    .update("\u0000", "utf8")
-    .update(extractionRequest, "utf8")
-    .update("\u0000", "utf8")
-    .update(JSON.stringify(officialApiExtractionResponseSchema(extractionRequest) ?? null), "utf8")
-    .digest("hex");
+  return hashCacheIdentity(
+    model,
+    requestProfile,
+    systemPrompt,
+    extractionRequest,
+    officialApiExtractionResponseSchemaPreimage(extractionRequest)
+  );
+}
+
+export function computeOfficialApiRequestCacheKey(
+  model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"],
+  systemPrompt: string,
+  extractionRequest: string
+): string {
+  return hashCacheIdentity(
+    model,
+    requestProfile,
+    systemPrompt,
+    extractionRequest,
+    OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE
+  );
 }
 
 export function computeExtractionTurnCacheKey(
@@ -83,12 +95,32 @@ export function computeSourceTurnCacheKeys(
   return Object.freeze(collectOfficialApiExtractionCoverage(
     input.turnContent,
     input.turnMessages ?? [], sourcePacking
-  ).requests.map((request) => computeCacheKey(
+  ).requests.map((request) => computeOfficialApiRequestCacheKey(
     model,
     requestProfile,
     systemPrompt,
     stringifyOfficialApiExtractionRequest(request)
   )));
+}
+
+function hashCacheIdentity(
+  model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"],
+  systemPrompt: string,
+  extractionRequest: string,
+  responseSchemaJson: string
+): string {
+  return createHash("sha256")
+    .update(model, "utf8")
+    .update("\u0000", "utf8")
+    .update(requestProfile, "utf8")
+    .update("\u0000", "utf8")
+    .update(systemPrompt, "utf8")
+    .update("\u0000", "utf8")
+    .update(extractionRequest, "utf8")
+    .update("\u0000", "utf8")
+    .update(responseSchemaJson, "utf8")
+    .digest("hex");
 }
 
 function requireSingleCacheKey(keys: readonly string[]): string {

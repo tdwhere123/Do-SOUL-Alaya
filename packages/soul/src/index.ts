@@ -294,4 +294,8 @@ export {
   defaultSourceEnrichmentProfile,
   semanticExtractionProfilesEqual
 } from "./garden/ingestion/official-api/semantic-artifact-identity.js";
-export { officialApiExtractionResponseSchema } from "./garden/ingestion/official-api/response-schema.js";
+export {
+  OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE,
+  officialApiExtractionResponseSchema,
+  officialApiExtractionResponseSchemaPreimage
+} from "./garden/ingestion/official-api/response-schema.js";

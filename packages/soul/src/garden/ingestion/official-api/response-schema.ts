@@ -18,9 +18,24 @@ const responseSchema = z.toJSONSchema(SourceInterpretationResponseSchema, {
 
 export const OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE = JSON.stringify(responseSchema);
 
+function isOfficialApiExtractionRequestPrompt(userPrompt: string): boolean {
+  try {
+    parseOfficialApiExtractionRequest(JSON.parse(userPrompt));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Stable cache-key bytes; cloning the live schema object per shard is not required. */
+export function officialApiExtractionResponseSchemaPreimage(userPrompt: string): string {
+  return isOfficialApiExtractionRequestPrompt(userPrompt)
+    ? OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE
+    : "null";
+}
+
 /** Query/protocol probes have different envelopes and must not inherit this schema. */
 export function officialApiExtractionResponseSchema(userPrompt: string): object | undefined {
-  try { parseOfficialApiExtractionRequest(JSON.parse(userPrompt)); }
-  catch { return undefined; }
+  if (!isOfficialApiExtractionRequestPrompt(userPrompt)) return undefined;
   return structuredClone(responseSchema);
 }
