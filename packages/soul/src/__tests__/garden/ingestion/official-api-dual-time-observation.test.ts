@@ -109,8 +109,12 @@ describe("official Garden dual-time observation", () => {
     );
 
     expect(inspection.audit).toEqual({
-      status: "rejected",
-      reason: "valid_time_role_not_source_grounded"
+      status: "formed",
+      reason: "dual_time_source_verified"
+    });
+    expect(inspection.projection).toMatchObject({
+      event_time_start: "2024-02-01T00:00:00.000Z",
+      valid_from: "2024-01-01T00:00:00.000Z"
     });
   });
 });

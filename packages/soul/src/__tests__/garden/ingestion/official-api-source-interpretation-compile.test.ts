@@ -48,6 +48,7 @@ describe("official API ordinary extraction compile", () => {
       outcome: "candidates",
       assertion_binding: { text: "User: Alice uses tools." }
     });
+    expect(signals[0]!.raw_payload).not.toHaveProperty("matched_text");
   });
 
   it("returns no signal for a valid empty interpretation envelope", async () => {

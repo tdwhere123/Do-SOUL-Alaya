@@ -12,7 +12,7 @@ import {
   planOfficialApiExtractionWindow
 } from "../../../garden/ingestion/official-api/extraction-request.js";
 import { createSignal } from "../materialization/materialization-router-fixture.js";
-import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
+import { createContext, withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const EMPTY_CONTEXT: GardenCompileContext = {
   workspace_id: "workspace-locator",
@@ -220,8 +220,11 @@ describe("official API assertion catalog locator", () => {
     const extract = vi.fn(async (_input: { readonly userPrompt: string }) =>
       ({ rawJson: JSON.stringify({ interpretations: [] }) }));
     const provider = new OfficialApiGardenProvider({ apiKey: "sk-test", extractor: { extract } });
+    const admitted = createContext();
     await provider.compile("I moved to Berlin.", {
       ...EMPTY_CONTEXT,
+      artifact_key: admitted.artifact_key,
+      source_observation: admitted.source_observation,
       turn_messages: [
         { message_id: "u1", role: "user", content: "I use TypeScript, but I avoid any." },
         { message_id: "a1", role: "assistant", content: "You should use JavaScript." }
@@ -267,7 +270,12 @@ describe("official API assertion catalog locator", () => {
       extractor: { extract },
       generateSignalId: () => "signal-tail-catalog"
     });
-    const context = contextForUser(source);
+    const admitted = createContext();
+    const context = {
+      ...contextForUser(source),
+      artifact_key: admitted.artifact_key,
+      source_observation: admitted.source_observation
+    };
     expect(await provider.compile(source, context)).toEqual([]);
     const coverage = collectOfficialApiExtractionCoverage(source, context.turn_messages);
     expect(coverage.catalog.coverage).toBe("source_range_complete");
