@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readDiagnostic100QComparisonArtifact } from "../../../../diagnostics/stage-attribution/exposure/comparison-artifact.js";
 import { buildTreatmentExposureReceipts } from
   "../../../../diagnostics/stage-attribution/exposure/build-receipts.js";
 import {
@@ -9,6 +13,8 @@ import { OpenSemanticFactorCandidateActivationsSchema } from
   "../../../../diagnostics/schema/field/open-semantic-candidate-activation-schema.js";
 import { compareF0F2VsCachedF3 } from
   "../../../../diagnostics/stage-attribution/diagnostic-100q.js";
+import { classifyQuestionStage } from "../../../../diagnostics/stage-attribution/classify-question.js";
+import { buildStageAttributionTables } from "../../../../diagnostics/stage-attribution/build-tables.js";
 import {
   candidateAttribution,
   diagnostic,
@@ -18,6 +24,42 @@ import {
 } from "./exposure-receipt-fixture.js";
 
 describe("treatment exposure receipt authority", () => {
+  it("keeps a validated miss without stage evidence inconclusive through tables and exposure comparison", async () => {
+    const current = {
+      ...diagnostic("current-unattributed", ["candidate:f3"], true),
+      question_id: "current-unattributed", hit_at_5: false,
+      gold_memory_ids: ["retained-gold"], gold: [],
+      miss_taxonomy: "conditional_field_unattributed",
+      conditional_field_measurement: { status: "validated" }
+    } as never;
+    const stage = classifyQuestionStage(current);
+    expect(stage).toMatchObject({ stage: "unattributed", mechanism: null });
+    const tables = buildStageAttributionTables({ cell: "current", sourceDiagnostics: "injected", questions: [current] });
+    expect(tables.summary.question_stage_counts.unattributed).toBe(1);
+    expect(tables.summary.question_stage_counts.write_or_unevaluable).toBe(0);
+    const receipts = buildTreatmentExposureReceipts({
+      control: [current], treatment: [current], controlStages: [stage], treatmentStages: [stage]
+    });
+    expect(receipts[0]).toMatchObject({
+      exposure_status: "inconclusive", outcome: {
+        control: { stage: "unattributed" }, treatment: { stage: "unattributed" }
+      }
+    });
+    assertTreatmentExposureReceipt(receipts[0]);
+    const comparison = compareF0F2VsCachedF3({ control: [stage], treatment: [stage], treatmentExposure: receipts });
+    expect(comparison.inconclusive).toEqual(["current-unattributed"]);
+    expect(comparison.control_misses).toMatchObject({ unattributed: 1, early_absent: 0, eval_or_write_loss: 0 });
+    expect(comparison.causal_comparison_status).toBe("inconclusive");
+    const directory = await mkdtemp(join(tmpdir(), "unattributed-comparison-"));
+    try {
+      const path = join(directory, "comparison.json");
+      await writeFile(path, JSON.stringify(comparison));
+      expect(await readDiagnostic100QComparisonArtifact(path)).toEqual(comparison);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("requires formation through activation and records membership delta", () => {
     const receipts = buildTreatmentExposureReceipts({
       control: [diagnostic("q1", [])],
