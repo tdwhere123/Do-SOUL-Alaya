@@ -5,11 +5,13 @@ import {
   GardenTaskKind,
   RunMode,
   RunState,
+  LegacyCandidateMemorySignalSchema,
   SignalSource,
   WorkspaceKind,
   WorkspaceState,
   type CandidateMemorySignal,
   type ContextDeliveryRecord,
+  type LegacyCandidateMemorySignal,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import {
@@ -438,9 +440,11 @@ export function createPostTurnPayload(overrides: Partial<PostTurnPayload> = {}):
   return { ...payload, ...overrides };
 }
 
-export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+export function createSignal(
+  overrides: Partial<LegacyCandidateMemorySignal> = {}
+): LegacyCandidateMemorySignal {
   const { source_observation = null, ...signalOverrides } = overrides;
-  return {
+  return LegacyCandidateMemorySignalSchema.parse({
     signal_id: "signal-post-turn",
     workspace_id: "workspace-1",
     run_id: "run-1",
@@ -473,7 +477,7 @@ export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Ca
     created_at: "2026-05-07T00:11:00.000Z",
     ...signalOverrides,
     source_observation
-  };
+  });
 }
 
 function getService(runtime: ReturnType<typeof createGardenRuntime>, name: string): BackgroundServiceConfig {

@@ -18,10 +18,10 @@ import {
   readGardenSourceTurnFallbackV2SourceHashDigest,
   verifyGardenSourceTurnFallbackReceipt
 } from "../../index.js";
-import { CandidateMemorySignalSchema } from "../../signals/candidate-memory-signal.js";
+import { LegacyCandidateMemorySignalSchema } from "../../signals/candidate-memory-signal.js";
 import type {
-  CandidateMemorySignal,
-  GardenSourceTurnFallbackRoleSpan
+  GardenSourceTurnFallbackRoleSpan,
+  LegacyCandidateMemorySignal
 } from "../../index.js";
 
 const DIGEST = "a".repeat(64);
@@ -266,8 +266,8 @@ const V2_SPANS = Object.freeze([
   Object.freeze({ role: "assistant" as const, start: 28, end: 33 })
 ]);
 
-function createSignal() {
-  return CandidateMemorySignalSchema.parse({
+function createSignal(): LegacyCandidateMemorySignal {
+  return LegacyCandidateMemorySignalSchema.parse({
     signal_id: "signal-1",
     workspace_id: "workspace-1",
     run_id: "run-1",
@@ -303,7 +303,7 @@ function createSignal() {
 function createV2Signal(
   sourceCorpus = V2_CORPUS,
   sourceRoleSpans: readonly GardenSourceTurnFallbackRoleSpan[] = V2_SPANS
-): CandidateMemorySignal {
+): LegacyCandidateMemorySignal {
   const input = {
     signal_id: "signal-v2",
     workspace_id: "workspace-1",
@@ -324,7 +324,7 @@ function createV2Signal(
   const sourceReceiptSha256 = digest(
     buildGardenSourceTurnFallbackV2ReceiptPreimage(input)
   );
-  return CandidateMemorySignalSchema.parse({
+  return LegacyCandidateMemorySignalSchema.parse({
     signal_id: input.signal_id,
     workspace_id: input.workspace_id,
     run_id: input.run_id,

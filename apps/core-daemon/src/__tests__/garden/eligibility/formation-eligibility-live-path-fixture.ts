@@ -4,7 +4,8 @@ import {
   buildVerifiedUserAssertionReceiptV2Preimage,
   formatVerifiedUserAssertionV2SourceHash,
   hashDerivationJobId,
-  type CandidateMemorySignal,
+  LegacyCandidateMemorySignalSchema,
+  type LegacyCandidateMemorySignal,
   type OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
 import {
@@ -19,6 +20,7 @@ import {
 import {
   InMemoryHandoffGapHandler,
   MaterializationRouter,
+  OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
   verifyOfficialApiSourceLocatorBinding
 } from "@do-soul/alaya-soul";
 import {
@@ -105,7 +107,7 @@ function stubMaterializationCreate(object_kind: string, object_id: string) {
 }
 
 const SOURCE_LOCATOR = Object.freeze({
-  contract_version: 3 as const,
+  contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
   kind: "assertion_catalog" as const,
   assertion_id: 1
 });
@@ -122,8 +124,8 @@ const GROUNDED_SOURCE_AUDIT = Object.freeze({
 export function assertionSignal(
   signalId: string,
   payload: Readonly<Record<string, unknown>>
-): CandidateMemorySignal {
-  return {
+): LegacyCandidateMemorySignal {
+  return LegacyCandidateMemorySignalSchema.parse({
     signal_id: signalId,
     workspace_id: WORKSPACE_ID,
     run_id: "run-1",
@@ -153,16 +155,16 @@ export function assertionSignal(
     },
     created_at: CLOCK,
     source_observation: null
-  };
+  });
 }
 
 // invariant: a present hash that cannot rebuild is router source-grounding
 // defer, not eligibility. Drop the key to reach createSignalEvidence.
 export function withoutVerifiedAssertionHash(
-  signal: CandidateMemorySignal
-): CandidateMemorySignal {
+  signal: LegacyCandidateMemorySignal
+): LegacyCandidateMemorySignal {
   const { verified_user_assertion_source_hash: _, ...raw_payload } = signal.raw_payload;
-  return { ...signal, raw_payload };
+  return LegacyCandidateMemorySignalSchema.parse({ ...signal, raw_payload });
 }
 
 function verifiedAssertionHash(signalId: string): string {

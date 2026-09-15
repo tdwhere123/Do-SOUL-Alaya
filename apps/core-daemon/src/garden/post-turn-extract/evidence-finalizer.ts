@@ -1,6 +1,7 @@
-import type {
-  CandidateMemorySignal,
-  ConversationMessage
+import {
+  CandidateMemorySignalSchema,
+  type CandidateMemorySignal,
+  type ConversationMessage
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "@do-soul/alaya-core";
 import { buildGardenTurnEvidenceFallback } from "@do-soul/alaya-soul";
@@ -82,7 +83,7 @@ function bindSourceObservation(
 ): CandidateMemorySignal {
   return sourceObservation === null
     ? signal
-    : { ...signal, source_observation: sourceObservation };
+    : CandidateMemorySignalSchema.parse({ ...signal, source_observation: sourceObservation });
 }
 
 async function receiveEvidenceFallback(
