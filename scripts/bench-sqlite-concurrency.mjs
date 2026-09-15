@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { measureSqliteBlockingOnEventLoop } from "../packages/storage/dist/diagnostics/sqlite-blocking-probe.js";
 
+const require = createRequire(import.meta.url);
+const sqlitePackage = require("better-sqlite3/package.json");
 const outDir = join(process.cwd(), ".do-it/bench-runs");
 mkdirSync(outDir, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/gu, "-");
@@ -37,7 +40,7 @@ db.close();
 const payload = {
   captured_at: new Date().toISOString(),
   driver: "scripts/bench-sqlite-concurrency.mjs",
-  sqlite_driver: "better-sqlite3@12.9.0 (sync, main-thread)",
+  sqlite_driver: `better-sqlite3@${sqlitePackage.version} (sync, main-thread)`,
   recommendation:
     "Defer async SQLite wrapper until worker-thread queue design preserves EventLog-first transaction semantics.",
   research_gap:

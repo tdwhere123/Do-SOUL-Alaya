@@ -62,6 +62,7 @@ import { buildExtractionTransportProvenance } from
   "../extraction/transport-route.js";
 export {
   computeCacheKey,
+  computeOfficialApiRequestCacheKey,
   computeExtractionTurnCacheKey,
   computeExtractionTurnCacheKeys,
   computeSourceTurnCacheKey,

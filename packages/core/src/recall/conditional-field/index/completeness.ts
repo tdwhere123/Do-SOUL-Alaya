@@ -1,5 +1,6 @@
 import {
   ASSOCIATION_DOMAIN_ID,
+  compareUtcInstants,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   type ClosureCertificate,
   type ClosureComparison,
@@ -155,7 +156,7 @@ export function continuationInvalidated(input: Readonly<{
   readonly prior_continuation?: Continuation | null;
 }>): boolean {
   const now = input.lifetime_now ?? input.as_of;
-  if (now !== undefined && input.expires_at !== undefined && input.expires_at <= now) {
+  if (now !== undefined && input.expires_at !== undefined && utcInstantAtOrBefore(input.expires_at, now)) {
     return true;
   }
   const prior = input.prior_continuation;
@@ -164,7 +165,12 @@ export function continuationInvalidated(input: Readonly<{
   if (prior.snapshot_id !== input.snapshot_id) return true;
   if (prior.result_version !== input.result_version) return true;
   if (prior.interpretation_id !== input.interpretation_id) return true;
-  return now !== undefined && prior.expires_at <= now;
+  return now !== undefined && utcInstantAtOrBefore(prior.expires_at, now);
+}
+
+function utcInstantAtOrBefore(left: string, right: string): boolean {
+  const order = compareUtcInstants(left, right);
+  return order !== undefined && order <= 0;
 }
 
 export function upperExcludesPredicate(input: Readonly<{

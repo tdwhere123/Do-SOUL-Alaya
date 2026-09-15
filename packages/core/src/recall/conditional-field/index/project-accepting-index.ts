@@ -455,7 +455,7 @@ function indexCompleteness(
   extra: Parameters<typeof composeCompleteness>[0], scannedConflict?: boolean
 ): ReturnType<typeof composeCompleteness> {
   const residuals = withCapContractConflict(extra.residuals ?? input.observer?.open_regions ?? [],
-    (scannedConflict ?? input.snapshot.has_incomparable_activations) !== false);
+    (scannedConflict ?? input.snapshot.has_incomparable_activations) === true);
   return composeCompleteness({
     ...extra,
     observer: extra.observer ?? input.observer,

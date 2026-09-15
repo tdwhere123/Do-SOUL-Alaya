@@ -64,10 +64,11 @@ export function createRunnerRawShardInspector(): RunnerRawShardInspector {
         }
       );
       phase.inspectionMs += performance.now() - startedAt;
-      if (inspected.status !== "hit") return inspected;
-      const verified = Object.freeze({ ...inspected });
-      memo.set(identity, verified);
-      return verified;
+      // Missing can become a hit after a later write; freeze only durable results.
+      if (inspected.status === "missing") return inspected;
+      const stored = inspected.status === "hit" ? Object.freeze({ ...inspected }) : inspected;
+      memo.set(identity, stored);
+      return stored;
     }
   });
 }

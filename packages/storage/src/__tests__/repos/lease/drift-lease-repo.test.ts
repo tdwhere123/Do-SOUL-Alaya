@@ -3,6 +3,7 @@ import { WorkspaceKind, WorkspaceState, type GovernanceDriftLease } from "@do-so
 import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteDriftLeaseRepo } from "../../../repos/lease/drift-lease-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -35,7 +36,7 @@ describe("SqliteDriftLeaseRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .all() as Array<{ readonly version: number }>;
 
-    expect(versions.map((row) => row.version)).toEqual([17]);
+    expect(versions.map((row) => row.version)).toEqual([currentSchemaVersion()]);
   });
 
   it("creates indexes for active lookup and expiry cleanup query shapes", async () => {

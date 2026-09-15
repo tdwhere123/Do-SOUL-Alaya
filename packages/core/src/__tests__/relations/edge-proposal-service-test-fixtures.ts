@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import { requireAt } from "../helpers/defined.js";
-import { EdgeProposalStatus, type EdgeProposal } from "@do-soul/alaya-protocol";
+import { EdgeProposalStatus, compareUtcInstants, type EdgeProposal } from "@do-soul/alaya-protocol";
 import { EdgeProposalService, type EdgeProposalRepoPort } from "../../relations/edge-proposals/edge-proposal-service.js";
 import type { EventPublisher } from "../../runtime/event-publisher.js";
 import type { PathCandidateSink } from "../../relations/producers/path-candidate-sink.js";
@@ -81,7 +81,7 @@ export function createProposalRepo(options: {
             proposal.workspace_id === workspaceId &&
             proposal.status === EdgeProposalStatus.PENDING &&
             proposal.expires_at !== null &&
-            proposal.expires_at < nowIso
+            compareUtcInstants(proposal.expires_at, nowIso) === -1
         )
         .slice(0, limit);
     },

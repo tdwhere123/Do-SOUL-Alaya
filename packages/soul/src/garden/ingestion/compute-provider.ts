@@ -58,9 +58,6 @@ export {
   type TransportPack,
   type TransportPackPlan
 } from "./official-api/semantic-workset.js";
-export {
-  parseOfficialApiRequestSignals
-} from "./official-api/request-result.js";
 
 export {
   GardenProviderKind,

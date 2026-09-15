@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ObligationTrustNarrativeEventType, type DeferredObligation, type EventLogEntry } from "@do-soul/alaya-protocol";
+import { compareUtcInstants, ObligationTrustNarrativeEventType, type DeferredObligation, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import {
   DeferredObligationService,
@@ -163,6 +163,32 @@ describe("DeferredObligationService", () => {
     expect(harness.events).toHaveLength(0);
   });
 
+  it("expires a minute-precision timestamp that is the same instant as now", async () => {
+    const harness = createHarness([
+      createObligation({
+        obligation_id: "obligation-1",
+        expires_at: "2026-04-15T12:00Z"
+      })
+    ]);
+
+    await expect(harness.service.expire("obligation-1")).resolves.toMatchObject({
+      state: "expired"
+    });
+  });
+
+  it("expires a minute-precision timestamp that is earlier than millisecond now", async () => {
+    const harness = createHarness([
+      createObligation({
+        obligation_id: "obligation-1",
+        expires_at: "2026-04-15T11:59Z"
+      })
+    ]);
+
+    await expect(harness.service.expire("obligation-1")).resolves.toMatchObject({
+      state: "expired"
+    });
+  });
+
   it("returns active pending obligations for the run", async () => {
     const harness = createHarness([
       createObligation({ obligation_id: "pending-1", state: "pending", source_run_id: "run-1" }),
@@ -235,7 +261,7 @@ function createHarness(seed: readonly DeferredObligation[] = []): Harness {
     ),
     findExpired: vi.fn(async (now: string) =>
       [...store.values()].filter((obligation) => {
-        return obligation.state === "pending" && obligation.expires_at < now;
+        return obligation.state === "pending" && compareUtcInstants(obligation.expires_at, now) === -1;
       })
     )
   } satisfies DeferredObligationRepoPort;

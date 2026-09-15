@@ -91,7 +91,7 @@ export type FieldGraphAtom = Readonly<{ seed?: SeedActivation; transition?: Tran
 /** Accounted retained representation, not a JavaScript RSS estimate. A cell is
  * 32 accounted bytes; AVL/heap path copies are bounded by twice log2(n+2),
  * including rotation/merge slack. Strings include worst-case nested JSON escaping.
- * Charges deliberately retain old versions while issued continuations may own them. */
+ * A request charges the live version; issued continuations keep prior retained bytes. */
 export function nextFieldGraphAtom(state: PreparedFieldGraph, auxiliaryNodes = 0): FieldGraphAtom {
   let seed: SeedActivation | undefined;
   let transition: Transition | undefined;
@@ -137,6 +137,7 @@ export function stepFieldGraph(state: PreparedFieldGraph, availableBytes: number
     const current = { ...state, changedProduct: undefined };
     const admitted = state.deferred === undefined ? current : { ...current, deferred: undefined,
       pending: state.pending.append(state.deferred), allocatedPendingSlots: state.allocatedPendingSlots + 1 };
+    // Live version includes every admitted atom; a peak-atom stamp hides the rest of the tree.
     return { ...prepareRow(admitted, atom), retainedBytes: state.retainedBytes + atom.bytes, next: "relax" };
   }
   const result = solveMaxMinField({ nodeIds: [], seeds: new Map(), transitions: [], bottom: 0, top: 1000,

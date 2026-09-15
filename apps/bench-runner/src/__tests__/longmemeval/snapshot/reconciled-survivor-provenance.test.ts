@@ -329,7 +329,8 @@ function createDatabase(
     CREATE TABLE evidence_capsules (
       object_id TEXT PRIMARY KEY, object_kind TEXT NOT NULL,
       workspace_id TEXT NOT NULL, run_id TEXT NOT NULL,
-      surface_id TEXT, physical_anchor TEXT
+      surface_id TEXT, physical_anchor TEXT,
+      gist TEXT NOT NULL, event_anchor TEXT, source_hash TEXT, excerpt TEXT
     );
     CREATE TABLE synthesis_capsules (
       object_id TEXT PRIMARY KEY, object_kind TEXT NOT NULL,
@@ -349,13 +350,17 @@ function createDatabase(
     );
   `);
   db.prepare(
-    "INSERT INTO evidence_capsules VALUES (?, 'evidence_capsule', ?, ?, ?, ?)"
+    `INSERT INTO evidence_capsules (
+      object_id, object_kind, workspace_id, run_id, surface_id, physical_anchor,
+      gist, event_anchor, source_hash, excerpt
+    ) VALUES (?, 'evidence_capsule', ?, ?, ?, ?, ?, NULL, NULL, NULL)`
   ).run(
     "evidence-first",
     runtime.workspaceId,
     runtime.runId,
     "session-first",
-    JSON.stringify({ artifact_ref: "q-reconciled-s0-r0" })
+    JSON.stringify({ artifact_ref: "q-reconciled-s0-r0" }),
+    DISTILLED_FACT
   );
   db.prepare(
     "INSERT INTO memory_entries VALUES (?, 'memory_entry', ?, ?, ?, ?)"

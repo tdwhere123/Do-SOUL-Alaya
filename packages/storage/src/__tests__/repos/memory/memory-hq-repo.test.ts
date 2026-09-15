@@ -4,6 +4,7 @@ import { SqliteEvidenceCapsuleRepo } from "../../../repos/capsules/evidence-caps
 import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
 import { SqliteRelationAssertionRepo } from "../../../repos/path/relation-assertion-repo.js";
 import { createEvidenceCapsule } from "../capsules/evidence-capsule-repo-fixture.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 import {
   createEmbeddingRecord,
   createRepoContext,
@@ -87,7 +88,7 @@ describe("Memory HQ storage repo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .all() as ReadonlyArray<{ readonly version: number }>;
 
-    expect(versions.map((entry) => entry.version)).toEqual([17]);
+    expect(versions.map((entry) => entry.version)).toEqual([currentSchemaVersion()]);
     expect(getColumnNames(database, "memory_hq")).toEqual([
       "object_id",
       "workspace_id",

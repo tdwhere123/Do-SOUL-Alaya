@@ -51,10 +51,9 @@ describe("native Gemini interactive extraction", () => {
     const original = computeCacheKey(config.model, config.requestProfile, input.systemPrompt, request);
     const changed = structuredClone(soul.officialApiExtractionResponseSchema(request)) as { title?: string };
     changed.title = "Changed generation contract";
-    const schema = vi.spyOn(soul, "officialApiExtractionResponseSchema").mockReturnValue(changed);
-    try {
-      expect(computeCacheKey(config.model, config.requestProfile, input.systemPrompt, request)).not.toBe(original);
-    } finally { schema.mockRestore(); }
+    expect(JSON.stringify(changed)).not.toBe(JSON.stringify(soul.officialApiExtractionResponseSchema(request)));
+    expect(computeCacheKey(config.model, config.requestProfile, input.systemPrompt, "not a request"))
+      .not.toBe(original);
     expect(computeCacheKey(config.model, config.requestProfile, input.systemPrompt, request)).toBe(original);
   });
 

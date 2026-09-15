@@ -26,6 +26,15 @@ function locateLiveDb(env) {
   return { configDir: line.slice(0, tab), dbPath: line.slice(tab + 1) };
 }
 
+test("install.sh prints a pnpm 12-compatible optional embedding command", () => {
+  const source = readFileSync(installScript, "utf8");
+  assert.doesNotMatch(source, /pnpm add .*--no-frozen-lockfile/);
+  assert.match(
+    source,
+    /pnpm --dir \\"\$\{ALAYA_HOME\}\\" add @huggingface\/transformers@4\.2\.0 --filter @do-soul\/alaya-core/
+  );
+});
+
 test("install.sh rejects a tarball whose package.json version does not match the tag", () => {
   const work = mkdtempSync(path.join(tmpdir(), "alaya-install-version-"));
   try {

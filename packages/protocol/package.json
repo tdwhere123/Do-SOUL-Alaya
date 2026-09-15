@@ -40,6 +40,6 @@
   },
   "dependencies": {
     "@node-rs/jieba": "2.0.3",
-    "zod": "^4.6.2"
+    "zod": "catalog:"
   }
 }

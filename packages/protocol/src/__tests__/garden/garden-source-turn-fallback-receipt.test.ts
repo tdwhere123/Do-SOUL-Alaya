@@ -20,8 +20,8 @@ import {
 } from "../../index.js";
 import { LegacyCandidateMemorySignalSchema } from "../../signals/candidate-memory-signal.js";
 import type {
-  LegacyCandidateMemorySignal,
-  GardenSourceTurnFallbackRoleSpan
+  GardenSourceTurnFallbackRoleSpan,
+  LegacyCandidateMemorySignal
 } from "../../index.js";
 
 const DIGEST = "a".repeat(64);
@@ -266,7 +266,7 @@ const V2_SPANS = Object.freeze([
   Object.freeze({ role: "assistant" as const, start: 28, end: 33 })
 ]);
 
-function createSignal() {
+function createSignal(): LegacyCandidateMemorySignal {
   return LegacyCandidateMemorySignalSchema.parse({
     signal_id: "signal-1",
     workspace_id: "workspace-1",

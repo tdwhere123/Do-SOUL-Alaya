@@ -45,8 +45,7 @@ export function resolveSourceTemporalCandidates(
       /^(?:\s+(?:or|and|to|through|until)\s+(?:the\s+year\s+)?\d|\s*(?:或|和|至|到)\s*\d)/iu.test(source.slice(candidate.end)) ||
       (opensRange && /^\s*(?:to\b|through\b|until\b|至|到)/iu.test(source.slice(candidate.end))))
       ? "unknown"
-      : sourceTemporalRole(before,
-        source.slice(candidate.end, candidate.end + 96), bounded);
+      : sourceTemporalRole(before, sourceRoleSuffix(source, candidate), bounded);
     return Object.freeze({ ...candidate, role, bounded });
   });
   return candidates.some((candidate) => candidate.role === "unknown") ? [] : candidates;
@@ -186,7 +185,7 @@ function hasValidityConstruction(before: string): boolean {
 function hasTrailingValidityConstruction(after: string): boolean {
   // Copula after the date names that date as the validity bound. A later
   // clause or a descriptive adjective must not supply the role.
-  return /^\s+(?:was|is)\s+the\s+(?:effective|valid)\s+date\b/iu.test(after);
+  return /^\s+(?:was|is|became)\s+the\s+(?:effective|valid)\s+date\b/iu.test(after);
 }
 
 function hasUnresolvedEndpointExclusion(source: string, candidate: TemporalMatch): boolean {
@@ -202,6 +201,12 @@ function sourceRolePrefix(source: string, candidate: TemporalMatch, matches: rea
   const earliest = previous?.end ?? 0;
   const start = clauseStartAfter(source, earliest, candidate.start);
   return source.slice(start, candidate.start);
+}
+
+function sourceRoleSuffix(source: string, candidate: TemporalMatch): string {
+  const rest = source.slice(candidate.end);
+  const separator = [...rest.matchAll(ROLE_CLAUSE_SEPARATOR)][0];
+  return separator === undefined ? rest : rest.slice(0, separator.index);
 }
 
 function clauseStartAfter(source: string, start: number, end: number): number {

@@ -16,16 +16,24 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol 4.12.0 can move
 independently of the app semver.
 
-Protocol 4.12.0 is an additive minor change under handbook invariant §25:
-optional `QueryHole.description` preserves unresolved query text, and optional
-`source_lookup_reasons` exposes bounded proposal diagnostics on Recall candidates
-and MCP/CLI search results. These fields do not change source eligibility,
-association grades, or delivery ordering. Ordinary extraction retains its exact
-per-turn source before compilation, publishes through transaction-current Core
-admission, and uses source interpretations across live cache and enrichment paths.
-Native hint lookup meters scans, hydration, and bytes and preserves unfinished
-work across continuation. Local mechanism checks do not establish semantic
-usefulness; the R02 quality gate remains on hold.
+Protocol 4.12.0 is an additive minor under handbook invariant §25.
+MCP-reachable `MemoryDimensionSchema` admits `observation`. Optional
+`QueryHole.description` preserves unresolved query text, and optional
+`source_lookup_reasons` exposes bounded proposal diagnostics on Recall
+candidates and MCP/CLI search results. Request and response field names
+are otherwise unchanged; these fields do not change source eligibility,
+association grades, or delivery ordering. Ordinary extraction retains its
+exact per-turn source before compilation, publishes through
+transaction-current Core admission, and uses source interpretations
+across live cache and enrichment paths. Native hint lookup meters scans,
+hydration, and bytes and preserves unfinished work across continuation.
+Local mechanism checks do not establish semantic usefulness; the R02
+quality gate remains on hold.
+
+Protocol 4.11.0 preserved source temporal meaning across extraction and
+replay and added the internal source-interpretation signal variant.
+Garden MCP emit still rejects `interpretation_contract`; interpretation
+signals are not a public MCP write shape.
 
 Bench adds provider-free `source-snapshot prepare` and `inspect` operations.
 Original messages enter native source records through mandatory atomic Core
@@ -51,7 +59,7 @@ modality, trailing source tokens, and unsupported dependent scope. Extraction
 catalog version 3 requires demonstrated fragment independence, including
 adjacent dependent continuations. MCP, EventLog and config schemas are unchanged.
 
-Source `@do-soul/alaya-protocol` is **4.10.0** (`packages/protocol/package.json`).
+Source `@do-soul/alaya-protocol` is **4.12.0** (`packages/protocol/package.json`).
 `AlayaStatusSchema.mcp.catalog_health` is an additive optional field.
 GitHub `releases/latest` is a published tarball and is **not** this source tree;
 pin `ALAYA_VERSION` or install from a checkout. Local ONNX embeddings

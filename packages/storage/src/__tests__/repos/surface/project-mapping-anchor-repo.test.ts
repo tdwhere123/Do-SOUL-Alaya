@@ -7,6 +7,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 type AcceptedByValue = "user" | "review" | "deterministic_rule";
 type ProjectMappingStateValue = (typeof ProjectMappingState)[keyof typeof ProjectMappingState];
@@ -60,7 +61,7 @@ describe("SqliteProjectMappingAnchorRepo", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'project_mapping_anchors'")
       .all() as ReadonlyArray<{ readonly name: string }>;
 
-    expect(versions.map((entry) => entry.version)).toEqual([17]);
+    expect(versions.map((entry) => entry.version)).toEqual([currentSchemaVersion()]);
     expect(indexes.map((entry) => entry.name)).toContain("idx_pma_unique");
     expect(indexes.map((entry) => entry.name)).toContain("idx_pma_workspace");
     expect(indexes.map((entry) => entry.name)).not.toContain("idx_pma_global_obj");

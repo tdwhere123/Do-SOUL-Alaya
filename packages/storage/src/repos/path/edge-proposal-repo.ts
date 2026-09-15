@@ -175,7 +175,7 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
            WHERE workspace_id = ?
              AND status = 'pending'
              AND expires_at IS NOT NULL
-             AND expires_at < ?
+             AND alaya_utc_compare(expires_at, ?) < 0
            ORDER BY expires_at ASC, proposal_id ASC
            LIMIT ?`
           )

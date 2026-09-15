@@ -2,7 +2,7 @@
   "name": "@do-soul/alaya-storage",
   "version": "0.3.11",
   "private": true,
-  "description": "SQLite storage layer for Do-SOUL Alaya \u2014 repos, migrations, EventLog.",
+  "description": "SQLite storage layer for Do-SOUL Alaya — repos, migrations, EventLog.",
   "license": "AGPL-3.0-only",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
   "repository": {
@@ -26,11 +26,11 @@
   },
   "dependencies": {
     "@do-soul/alaya-protocol": "workspace:*",
-    "better-sqlite3": "13.0.3"
+    "better-sqlite3": "catalog:"
   },
   "devDependencies": {
     "@do-soul/alaya-soul": "workspace:*",
-    "@types/better-sqlite3": "^9.6.0"
+    "@types/better-sqlite3": "catalog:"
   },
   "exports": {
     ".": {

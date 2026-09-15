@@ -128,6 +128,30 @@ describe("field generation protocol events", () => {
     )).toThrow();
   });
 
+  it("rejects mixed-precision admitted intervals that are not half-open by instant", () => {
+    const admitted = {
+      workspace_id: "workspace-1",
+      record_id: digest,
+      source_id: "src-1",
+      source_version: "v1",
+      content_digest: digest,
+      evidence_object_id: null,
+      recorded_at: occurredAt,
+      event_time: null,
+      operator_id: "source_span_identity_v1"
+    } as const;
+    expect(SoulFieldSourceRecordAdmittedPayloadSchema.safeParse({
+      ...admitted,
+      valid_from: "2026-08-16T12:34:30Z",
+      valid_to: "2026-08-16T12:34Z"
+    }).success).toBe(false);
+    expect(SoulFieldSourceRecordAdmittedPayloadSchema.safeParse({
+      ...admitted,
+      valid_from: "2026-08-16T12:34Z",
+      valid_to: "2026-08-16T12:34:00.0001Z"
+    }).success).toBe(true);
+  });
+
   it("accepts the event log envelope for field generation events", () => {
     const entry = {
       event_id: "event-log-entry-1",

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   BoundedIdSchema,
+  compareUtcInstants,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema
 } from "../../shared/schema-primitives.js";
@@ -45,7 +46,7 @@ export const SourceRecordIdentitySchema = FieldReceiptContractFieldsSchema.exten
     context.addIssue({ code: "custom", message: "valid_to requires valid_from" });
   }
   if (record.valid_from !== null && record.valid_to !== null &&
-      record.valid_to <= record.valid_from) {
+      compareUtcInstants(record.valid_to, record.valid_from) !== 1) {
     context.addIssue({ code: "custom", message: "valid interval must be half-open" });
   }
 }).readonly();

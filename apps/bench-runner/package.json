@@ -27,11 +27,11 @@
     "@do-soul/alaya-protocol": "workspace:*",
     "@do-soul/alaya-soul": "workspace:*",
     "@do-soul/alaya-storage": "workspace:*",
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "better-sqlite3": "13.0.3",
-    "zod": "^4.6.2"
+    "@modelcontextprotocol/sdk": "catalog:",
+    "better-sqlite3": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0"
+    "@types/better-sqlite3": "catalog:"
   }
 }

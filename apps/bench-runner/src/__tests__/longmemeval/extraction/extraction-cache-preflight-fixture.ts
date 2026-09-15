@@ -105,6 +105,7 @@ export function writeCacheShard(
     ...(['{"signals":[]}', '{"interpretations":[]}'].includes(rawJson)
       ? { empty_classification: "deterministic_empty" as const } : {}),
     extracted_at: "2026-07-01T00:00:00Z",
+    ...(rawJson === '{"signals":[]}' ? { empty_classification: "deterministic_empty" } : {}),
     ...(responseMetadata === undefined ? {} : {
       response_metadata: responseMetadata
     })

@@ -1,7 +1,8 @@
-import type {
-  FieldContractSha256,
-  ProjectionGenerationPort,
-  ProjectionGenerationStatus
+import {
+  compareUtcInstants,
+  type FieldContractSha256,
+  type ProjectionGenerationPort,
+  type ProjectionGenerationStatus
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
@@ -100,7 +101,7 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
     this.renewPinStatement = database.connection.prepare(`
       UPDATE projection_pins SET expires_at = ?
       WHERE workspace_id = ? AND generation_id = ? AND reader_id = ?
-        AND released_at IS NULL AND expires_at > ? AND expires_at < ?
+        AND released_at IS NULL AND alaya_utc_compare(expires_at, ?) > 0 AND alaya_utc_compare(expires_at, ?) < 0
     `);
     this.selectCollectableRetiredStatement = database.connection.prepare(`
       SELECT generation_id FROM projection_generations AS generation
@@ -114,7 +115,7 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
           SELECT 1 FROM projection_pins AS pin
           WHERE pin.workspace_id = generation.workspace_id
             AND pin.generation_id = generation.generation_id
-            AND pin.released_at IS NULL AND pin.expires_at > ?
+            AND pin.released_at IS NULL AND alaya_utc_compare(pin.expires_at, ?) > 0
         )
       ORDER BY generation_id
     `);
@@ -128,7 +129,7 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
         AND NOT EXISTS (
           SELECT 1 FROM projection_pins
           WHERE workspace_id = ? AND generation_id = ?
-            AND released_at IS NULL AND expires_at > ?
+            AND released_at IS NULL AND alaya_utc_compare(expires_at, ?) > 0
         )
     `);
     this.insertArtifactsStatement = database.connection.prepare(`
@@ -261,7 +262,7 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
         input.expires_at
       );
       const row = this.readPin(input.workspace_id, input.generation_id, input.reader_id);
-      if (row === null || row.released_at !== null || row.expires_at <= input.renewed_at) {
+      if (row === null || row.released_at !== null || utcInstantAtOrBefore(row.expires_at, input.renewed_at)) {
         throw new StorageError("NOT_FOUND", "projection pin is missing, released, or expired");
       }
       return row;
@@ -384,6 +385,11 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
       "projection generation pointer"
     );
   }
+}
+
+function utcInstantAtOrBefore(left: string, right: string): boolean {
+  const order = compareUtcInstants(left, right);
+  return order !== undefined && order <= 0;
 }
 
 function samePin(existing: FieldProjectionPinRow, incoming: FieldProjectionPinRow): boolean {

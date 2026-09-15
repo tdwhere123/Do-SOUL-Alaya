@@ -93,6 +93,30 @@ describe("SqliteDeferredObligationRepo", () => {
       })
     ]);
   });
+
+  it("treats mixed-precision expiry as earlier than millisecond now", async () => {
+    const { repo } = await createRepos();
+    await repo.create(
+      createObligation({
+        obligation_id: "pending-minute",
+        expires_at: "2026-04-15T11:59Z"
+      })
+    );
+    await repo.create(
+      createObligation({
+        obligation_id: "pending-future-minute",
+        source_run_id: "run-2",
+        expires_at: "2026-04-15T12:00Z"
+      })
+    );
+
+    await expect(repo.findExpired("2026-04-15T11:59:00.001Z")).resolves.toEqual([
+      createObligation({
+        obligation_id: "pending-minute",
+        expires_at: "2026-04-15T11:59Z"
+      })
+    ]);
+  });
 });
 
 async function createRepos(): Promise<{

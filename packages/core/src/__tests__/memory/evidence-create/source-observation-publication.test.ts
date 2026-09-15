@@ -464,6 +464,16 @@ describe("source observation publication", () => {
     expectNoPublishedObservation(fixture.database);
   });
 
+  it("selects the later UTC instant when recorded_at spellings differ", async () => {
+    const fixture = await openFixture();
+    await admitSource(fixture, SOURCE, "1", "2026-09-15T12:00:00.001Z");
+    await admitSource(fixture, "User: Alice uses apps.", "2", "2026-09-15T12:00Z");
+    const published = await fixture.publication.publish({
+      signal: observationSignal(locatedInterpretation()), sourceEventAnchor: null
+    });
+    expect(published.memory.content).toBe(ASSERTION);
+  });
+
   it("rejects observation confidence mutation at the memory update owner", async () => {
     const fixture = await openFixture();
     await admitSource(fixture);

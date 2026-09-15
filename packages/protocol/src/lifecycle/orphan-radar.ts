@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
+import {
+  compareUtcInstants,
+  IsoDatetimeStringSchema,
+  NonEmptyStringSchema
+} from "../shared/schema-primitives.js";
 
 const orphanRadarSuggestedActionValues = [
   "re_anchor_candidate",
@@ -29,7 +33,7 @@ export const OrphanRadarSchema = z
   })
   .strict()
   .readonly()
-  .refine((data) => data.expires_at > data.detected_at, {
+  .refine((data) => compareUtcInstants(data.expires_at, data.detected_at) === 1, {
     message: "expires_at must be after detected_at"
   });
 

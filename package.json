@@ -7,7 +7,7 @@
   "packageManager": "pnpm@12.3.4",
   "engines": {
     "node": ">=24.0.0",
-    "pnpm": ">=12.3.4"
+    "pnpm": ">=12.3.4 <13"
   },
   "bin": {
     "alaya": "./bin/alaya.mjs"
@@ -19,7 +19,6 @@
     "test:parallel": "vitest run --config vitest.config.mjs",
     "ci:content-contracts": "node ./scripts/ci/check-content-contracts.mjs",
     "ci:audit": "node ./scripts/ci/check-audit.mjs",
-    "ci:audit-high": "pnpm audit --audit-level=high --registry=https://registry.npmjs.org/",
     "ci:test-as-any": "node ./scripts/ci/check-test-as-any.mjs",
     "ci:env-docs": "node ./scripts/ci/check-env-docs.mjs",
     "ci:doc-links": "node ./scripts/ci/check-doc-links.mjs",
@@ -42,9 +41,9 @@
   "devDependencies": {
     "@types/node": "^24.13.4",
     "@vitest/coverage-v8": "4.1.11",
-    "better-sqlite3": "13.0.3",
+    "better-sqlite3": "catalog:",
     "knip": "6.35.1",
-    "typescript": "5.9.3",
-    "vitest": "4.1.11"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

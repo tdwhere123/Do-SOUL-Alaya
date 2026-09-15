@@ -1,8 +1,4 @@
 export {
-  classifyOfficialApiRequestResult
-} from "./ingestion/official-api/request-result.js";
-
-export {
   AUDITOR_CONSTANTS,
   Auditor,
   type AuditorDependencies,
@@ -71,7 +67,6 @@ export {
   planOfficialApiSemanticWorkset,
   officialApiSemanticWorksetFromSourceCorpus,
   planOfficialApiTransport,
-  parseOfficialApiRequestSignals,
   materializeOfficialApiTransportResponse,
   type GardenCompileContext,
   type GardenComputeProvider,
@@ -95,6 +90,7 @@ export {
   type OfficialApiSemanticFactorGraphProjectionReason,
   type OfficialApiSignalDraft
 } from "./ingestion/compute-provider.js";
+export { parseOfficialApiRequestSignals } from "./ingestion/official-api/request-result.js";
 export { transportPackIdentity } from "./ingestion/official-api/transport-pack.js";
 export {
   EXTRACTION_CAPABILITY_CATALOG_VERSION,

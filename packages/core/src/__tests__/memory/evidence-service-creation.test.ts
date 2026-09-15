@@ -5,6 +5,8 @@ import {
   formatVerifiedUserAssertionSourceHash
 } from "@do-soul/alaya-protocol";
 import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from "@do-soul/alaya-protocol/node/source-frame";
+import { FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID } from
+  "../../memory/evidence-create/evidence-semantic-completeness.js";
 import {
   createCreationHarness,
   createEvidenceInput
@@ -53,7 +55,7 @@ describe("EvidenceService creation", () => {
       }),
       expect.objectContaining({
         status: "formed",
-        producer_operator_id: "core_fact_frame_canonical_open_semantic_factor_v2",
+        producer_operator_id: FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID,
         graph: expect.objectContaining({ source_kind: "evidence" })
       }),
       expect.objectContaining({ status: "certified", upstream_semantic_formation: expect.objectContaining({

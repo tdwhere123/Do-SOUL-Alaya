@@ -24,6 +24,7 @@ import { createCompileSeedRunnerContext } from "../../../runs/compile-seed/compi
 import { assertExtractionCacheIdentity } from "../../../runs/extraction/cache/cache-identity.js";
 import {
   computeCacheKey,
+  computeOfficialApiRequestCacheKey,
   EXTRACTION_CACHE_KEY_GOLDEN_VECTOR
 } from "../../../runs/compile-seed/cache/cache-key.js";
 import {
@@ -97,6 +98,12 @@ describe("extraction-cache-manifest", () => {
     expect(computeExtractionCacheKeyAlgoDigest()).toBe(
       "027798b93a459e90825bb0486be43525a83ed9a146846c5fe6feb6599640f08e"
     );
+    expect(computeOfficialApiRequestCacheKey(
+      EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.model,
+      EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.requestProfile,
+      EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.systemPrompt,
+      EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.extractionRequest
+    )).toBe(EXTRACTION_CACHE_KEY_ALGO);
     expect(computeCacheKey(
       EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.model,
       EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.requestProfile,

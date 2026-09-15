@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  CandidateMemorySignalSchema,
   ControlPlaneObjectKind,
+  LegacyCandidateMemorySignalSchema,
   RetentionPolicy,
   SignalKind,
   SignalSource,
-  type CandidateMemorySignal
+  type LegacyCandidateMemorySignal
 } from "@do-soul/alaya-protocol";
 import { SqliteHandoffGapAdapter, buildHandoffGapCleanupPort } from "../../handoff/gap-adapter.js";
 
-function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
-  return CandidateMemorySignalSchema.parse({
+function createSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): LegacyCandidateMemorySignal {
+  return LegacyCandidateMemorySignalSchema.parse({
     signal_id: "signal-1",
     workspace_id: "ws-1",
     run_id: "run-1",

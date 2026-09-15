@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   BoundedIdSchema,
+  compareUtcInstants,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeFiniteNumberSchema
@@ -46,7 +47,7 @@ export const SoulFieldSourceRecordAdmittedPayloadSchema = z.object({
     context.addIssue({ code: "custom", message: "valid_to requires valid_from" });
   }
   if (payload.valid_from !== null && payload.valid_to !== null &&
-      payload.valid_to <= payload.valid_from) {
+      compareUtcInstants(payload.valid_to, payload.valid_from) !== 1) {
     context.addIssue({ code: "custom", message: "valid interval must be half-open" });
   }
 }).readonly();

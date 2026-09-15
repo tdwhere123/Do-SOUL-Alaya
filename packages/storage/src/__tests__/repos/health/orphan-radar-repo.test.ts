@@ -124,6 +124,43 @@ describe("SqliteOrphanRadarRepo", () => {
     ]);
   });
 
+  it("classifies legacy mixed-precision expiry by instant at the SQL boundary", async () => {
+    const { database, memoryRepo } = await createRepo();
+    const repo = new SqliteOrphanRadarRepo(database);
+    const targetMemoryId = createMemoryId(3);
+    await createMemory(memoryRepo, targetMemoryId);
+
+    database.connection.prepare(`
+      INSERT INTO orphan_radar (
+        radar_id,
+        target_memory_id,
+        workspace_id,
+        suspected_surface_gaps_json,
+        suggested_action,
+        confidence,
+        detected_at,
+        expires_at,
+        requires_review
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "radar-legacy-mixed-precision",
+      targetMemoryId,
+      "workspace-1",
+      JSON.stringify(["surface-a"]),
+      "re_anchor_candidate",
+      0.7,
+      "2026-03-28T12:34:30Z",
+      "2026-03-28T12:34Z",
+      1
+    );
+
+    await expect(
+      repo.findActiveByWorkspaceId("workspace-1", "2026-03-28T12:34:15Z")
+    ).resolves.toEqual([]);
+    await expect(repo.deleteExpired("2026-03-28T12:34:15Z")).resolves.toBe(1);
+    await expect(repo.findById("radar-legacy-mixed-precision")).resolves.toBeNull();
+  });
+
   it("stores EventLog orphan radar rows without requiring a memory parent", async () => {
     const { database } = await createRepo();
     const repo = new SqliteOrphanRadarRepo(database);

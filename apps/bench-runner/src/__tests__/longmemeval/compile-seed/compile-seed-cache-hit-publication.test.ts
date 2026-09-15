@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import {
   SqliteSignalRepo
 } from "@do-soul/alaya-storage";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
+import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import {
   createCompileSeedRunner,
   type BenchSignalExtractor
@@ -30,6 +31,7 @@ const CLOCK = "2026-09-14T12:00:00.000Z";
 
 describe("compile-seed cache-hit seedTurn publication", () => {
   let cacheRoot: string;
+  let dataDirRoot: string | undefined;
   let daemon: BenchDaemonHandle | undefined;
 
   beforeEach(async () => {
@@ -42,7 +44,11 @@ describe("compile-seed cache-hit seedTurn publication", () => {
     await daemon?.shutdown().catch(() => undefined);
     daemon = undefined;
     vi.unstubAllEnvs();
-    await rm(cacheRoot, { recursive: true, force: true });
+    await Promise.all([
+      removeTempDirectory(cacheRoot, []),
+      dataDirRoot === undefined ? Promise.resolve() : removeTempDirectory(dataDirRoot)
+    ]);
+    dataDirRoot = undefined;
   });
 
   it("publishes a cache-hit seedTurn observation through SQLite and reopens it", async () => {
@@ -60,7 +66,7 @@ describe("compile-seed cache-hit seedTurn publication", () => {
         }]
       }]
     }));
-    const dataDirRoot = await mkdtemp(join(tmpdir(), "compile-seed-hit-daemon-"));
+    dataDirRoot = await mkdtemp(join(tmpdir(), "compile-seed-hit-daemon-"));
     daemon = await startBenchDaemon({
       dataDirRoot,
       workspaceId: "ws-cache-hit",
@@ -122,8 +128,7 @@ describe("compile-seed cache-hit seedTurn publication", () => {
         confidence: null
       });
     } finally {
-      database.close();
-      await rm(dataDirRoot, { recursive: true, force: true });
+      if (!database.isClosed()) database.close();
     }
   });
 

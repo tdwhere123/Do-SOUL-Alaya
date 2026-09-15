@@ -7,12 +7,15 @@ import {
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
-  computeCacheKey,
+  computeOfficialApiRequestCacheKey,
   computeExtractionTurnCacheKeys,
   inspectCachedExtraction
 } from "../../compile-seed/compile-seed-cache.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
-import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
+import {
+  extractionRequestCoverageMemoKey,
+  type LongMemEvalExtractionTurn
+} from "../turn-contents.js";
 import type { GeminiBatchLine } from "./batch/contract.js";
 import type { PreparedExtractionFill } from "./fill-preparation.js";
 
@@ -101,16 +104,20 @@ function collectBatchRequests(
     userPrompt: string;
     units: Map<string, BatchExtractionSourceUnit>;
   }>();
+  const coverageMemo = new Map<string, readonly {
+    request: OfficialApiExtractionRequest;
+    userPrompt: string;
+    key: string;
+  }[]>();
   const occurrences = prepared.occurrenceExtractionTurns ?? turns;
   for (const turn of occurrences) {
+    const prompts = coveragePrompts(prepared, turn, coverageMemo);
+    if (!prompts.some((item) => selectedKeys.has(item.key))) continue;
     const workset = planOfficialApiSemanticWorkset(
       turn.turnContent, turn.turnMessages, prepared.datasetRevision
     );
     const byAssertion = new Map(workset.units.map((unit) => [unit.assertionId, unit]));
-    for (const request of collectOfficialApiExtractionCoverage(turn.turnContent, turn.turnMessages, prepared.config.sourcePacking).requests) {
-      const userPrompt = stringifyOfficialApiExtractionRequest(request);
-      const key = computeCacheKey(prepared.config.model, prepared.config.requestProfile,
-        OFFICIAL_API_SYSTEM_PROMPT, userPrompt);
+    for (const { request, userPrompt, key } of prompts) {
       if (!selectedKeys.has(key)) continue;
       const item = collected.get(key) ?? {
         request, sourceTurn: structuredClone(turn), userPrompt,
@@ -142,4 +149,38 @@ function collectBatchRequests(
       });
       return Object.freeze({ line, request: item.request, sourceTurn: item.sourceTurn, units });
     }));
+}
+
+function coveragePrompts(
+  prepared: BatchPreparedSources,
+  turn: LongMemEvalExtractionTurn,
+  memo: Map<string, readonly {
+    request: OfficialApiExtractionRequest;
+    userPrompt: string;
+    key: string;
+  }[]>
+): readonly {
+  request: OfficialApiExtractionRequest;
+  userPrompt: string;
+  key: string;
+}[] {
+  const memoKey = extractionRequestCoverageMemoKey(
+    turn.turnContent, turn.turnMessages, prepared.config.sourcePacking
+  );
+  const cached = memo.get(memoKey);
+  if (cached !== undefined) return cached;
+  const prompts = Object.freeze(collectOfficialApiExtractionCoverage(
+    turn.turnContent, turn.turnMessages, prepared.config.sourcePacking
+  ).requests.map((request) => {
+    const userPrompt = stringifyOfficialApiExtractionRequest(request);
+    return Object.freeze({
+      request,
+      userPrompt,
+      key: computeOfficialApiRequestCacheKey(
+        prepared.config.model, prepared.config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, userPrompt
+      )
+    });
+  }));
+  memo.set(memoKey, prompts);
+  return prompts;
 }

@@ -45,6 +45,7 @@ export function bindChargedField(charged: BindableState, remainingWork: Remainin
       if (usePossible) possibleBlocked = true; else guaranteedBlocked = true;
       continue;
     }
+    const liveBefore = possibleGraph.retainedBytes + guaranteedGraph.retainedBytes;
     if (usePossible) { possibleGraph = stepFieldGraph(possibleGraph, memory, atom); possibleSteps += 1; next = "guaranteed"; }
     else { guaranteedGraph = stepFieldGraph(guaranteedGraph, memory, atom); guaranteedSteps += 1; next = "possible"; }
     const changed = (usePossible ? possibleGraph : guaranteedGraph).changedProduct;
@@ -54,8 +55,11 @@ export function bindChargedField(charged: BindableState, remainingWork: Remainin
       if (conflicted !== was) cross = { products: cross.products.with(changed, conflicted),
         count: cross.count + Number(conflicted) - Number(was) };
     }
-    memory -= atom.bytes;
-    retained += atom.bytes;
+    // Continuations already hold prior solver_retained_bytes. This request
+    // charges the live graph version, not every intermediate tree copy.
+    const liveDelta = Math.max(0, possibleGraph.retainedBytes + guaranteedGraph.retainedBytes - liveBefore);
+    memory -= liveDelta;
+    retained += liveDelta;
   }
   const possible = bandResult(charged, possibleGraph, possibleSteps, false);
   const guaranteed = bandResult(charged, guaranteedGraph, guaranteedSteps, true);
