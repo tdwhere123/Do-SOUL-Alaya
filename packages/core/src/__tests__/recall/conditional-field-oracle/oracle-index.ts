@@ -1,4 +1,5 @@
 import {
+  compareUtcInstants,
   productSubjectId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   type ClaimState,
@@ -354,13 +355,17 @@ function remapOracleMap<T>(
 }
 
 function continuationInvalidated(input: IndexOracleInput): boolean {
-  if (input.as_of !== undefined && input.expires_at !== undefined && input.expires_at < input.as_of) {
+  if (input.as_of !== undefined && input.expires_at !== undefined && utcInstantBefore(input.expires_at, input.as_of)) {
     return true;
   }
   const prior = input.prior_continuation;
   if (prior === undefined) return false;
   if (prior.snapshot_id !== input.snapshot_id) return true;
-  return input.as_of !== undefined && prior.expires_at < input.as_of;
+  return input.as_of !== undefined && utcInstantBefore(prior.expires_at, input.as_of);
+}
+
+function utcInstantBefore(left: string, right: string): boolean {
+  return compareUtcInstants(left, right) === -1;
 }
 
 function invalidatedIndex(

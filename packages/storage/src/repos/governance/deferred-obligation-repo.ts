@@ -114,7 +114,7 @@ export class SqliteDeferredObligationRepo implements DeferredObligationRepo {
     this.findExpiredStatement = db.connection.prepare(`
       SELECT${DEFERRED_OBLIGATION_SELECT_COLUMNS}
       FROM deferred_obligations
-      WHERE state = 'pending' AND expires_at < ?
+      WHERE state = 'pending' AND alaya_utc_compare(expires_at, ?) < 0
       ORDER BY expires_at ASC
     `);
   }

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  compareUtcInstants,
   DeferredObligationSchema,
   IsoDatetimeStringSchema,
   ObligationCreatedPayloadSchema,
@@ -138,7 +139,7 @@ export class DeferredObligationService {
     const snapshot = await this.requirePendingObligation(parsedObligationId);
     const now = this.resolveNow();
 
-    if (snapshot.expires_at > now) {
+    if ((compareUtcInstants(snapshot.expires_at, now) ?? 1) > 0) {
       throw new CoreError(
         "CONFLICT",
         `Deferred obligation ${parsedObligationId} is not currently eligible for expiry.`

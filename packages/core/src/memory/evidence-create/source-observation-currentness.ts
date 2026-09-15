@@ -1,4 +1,5 @@
 import {
+  compareUtcInstants,
   formatFieldContractDigest,
   hashContentDigest,
   normalizeMemoryObjectKeySurface,
@@ -137,8 +138,9 @@ function newerRecord<T extends { readonly recorded_at: string; readonly identity
   left: T,
   right: T
 ): T {
-  if (left.recorded_at > right.recorded_at) return left;
-  if (left.recorded_at < right.recorded_at) return right;
+  const order = compareUtcInstants(left.recorded_at, right.recorded_at);
+  if (order === 1) return left;
+  if (order === -1) return right;
   return left.identity >= right.identity ? left : right;
 }
 
