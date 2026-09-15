@@ -3,12 +3,18 @@ import { processEnvLookup } from "../config/daemon-config-environment.js";
 import {
   ClaimService,
   ConflictDetectionService,
+  createAuditedSourceAdmission,
   createSignalEmissionWriter,
+  createSourceObservationPublication,
+  fieldContractSha256,
   ReconciliationService,
   SignalService,
   SynthesisService
 } from "@do-soul/alaya-core";
-import { MaterializationRouter } from "@do-soul/alaya-soul";
+import {
+  MaterializationRouter,
+  type SourceObservationPublicationPort
+} from "@do-soul/alaya-soul";
 import type { SqliteHandoffGapAdapter } from "../../handoff/gap-adapter.js";
 import type {
   PathRelationProposalPort,
@@ -46,6 +52,7 @@ function createMaterializationRouter(
     memoryService: createMaterializationMemoryService(input.wiring),
     synthesisService: input.wiring.synthesisService as SynthesisService,
     claimService: input.wiring.claimService as ClaimService,
+    sourceObservationPublicationPort: createSourceObservationPublicationPort(input.wiring),
     pathRelationProposalPort: input.pathRelationProposalPort,
     temporalRelationAssertionPort: input.temporalRelationAssertionPort,
     enrichPendingPort: { enqueue: input.wiring.enqueueEnrichPending },
@@ -87,6 +94,41 @@ function createMaterializationSignalService(
         await materializationRouter.materializeSignal(signal, context)
     }
   });
+}
+
+function createSourceObservationPublicationPort(
+  wiring: CreateRecallMaterializationWiringInput
+): SourceObservationPublicationPort {
+  const publication = createSourceObservationPublication({
+    stores: wiring.fieldComposition.stores,
+    sourceAdmission: createAuditedSourceAdmission({
+      sha256: fieldContractSha256,
+      stores: wiring.fieldComposition.stores,
+      eventLogRepo: wiring.eventLogRepo
+    }),
+    evidenceService: wiring.evidenceService,
+    memoryService: wiring.memoryService,
+    sha256: fieldContractSha256
+  });
+  return {
+    async publish(input) {
+      const published = await publication.publish({
+        signal: input.signal,
+        sourceEventAnchor: input.context.source_event_anchor
+      });
+      return {
+        bound: published.bound,
+        evidence: {
+          object_kind: published.evidence.object_kind,
+          object_id: published.evidence.object_id
+        },
+        memory: {
+          object_kind: published.memory.object_kind,
+          object_id: published.memory.object_id
+        }
+      };
+    }
+  };
 }
 
 function createMaterializationMemoryService(

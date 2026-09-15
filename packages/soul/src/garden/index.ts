@@ -284,6 +284,8 @@ export {
   type MaterializationTarget,
   type PathRelationProposalPayload,
   type PathRelationProposalPort,
+  type SourceObservationPublicationPort,
+  type SourceObservationPublicationResult,
   type TemporalRelationAssertionPort,
   type PathCandidateSinkPort,
   type PathCandidateMintOutcome,
