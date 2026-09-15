@@ -22,6 +22,7 @@ import {
   publicationIdentity,
   publicationReservationExists,
   type ObservationEvidencePort,
+  type ObservationTemporalProjection,
   type ObservationMemoryPort
 } from "./source-observation-identity.js";
 
@@ -51,6 +52,7 @@ export function createSourceObservationPublication(input: Readonly<{
   readonly evidenceService: ObservationEvidencePort;
   readonly memoryService: ObservationMemoryPort;
   readonly sha256: FieldContractSha256;
+  readonly deriveTemporalProjection: (assertion: string, sourceObservedAt: string | null) => ObservationTemporalProjection;
 }>): SourceObservationPublication {
   return {
     async publish(request) {
@@ -98,7 +100,9 @@ export function createSourceObservationPublication(input: Readonly<{
       }
       const bound = bindInterpretation(durable, stored, identity.evidenceObjectId);
       return await persistObservation(
-        { ...input, assertSourceCurrent }, signal, request.sourceEventAnchor, bound, identity, scope
+        { ...input, assertSourceCurrent,
+          temporalProjection: input.deriveTemporalProjection(bound.assertion_binding.text, stored.record.event_time)
+        }, signal, request.sourceEventAnchor, bound, identity, scope
       );
     }
   };

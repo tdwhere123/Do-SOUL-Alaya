@@ -1,3 +1,4 @@
+export { selectObservedTemporalProjection } from "./garden/extraction/temporal/observed-projection.js";
 export {
   catalogEligibilityOfAssertionCount,
   catalogEligibilityOfRequest,

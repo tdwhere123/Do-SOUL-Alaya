@@ -66,6 +66,7 @@ async function openFixture(filename = ":memory:") {
     database, stores, sourceAdmission, evidenceService, memoryService, notify, memoryEntryRepo,
     evidenceCapsuleRepo, eventLogRepo,
     publication: createSourceObservationPublication({
+      deriveTemporalProjection: () => ({}),
       stores, sourceAdmission, evidenceService, memoryService, sha256: fieldContractSha256
     })
   };
@@ -351,6 +352,7 @@ describe("source observation publication", () => {
     const create = interrupted.memoryService.create.bind(interrupted.memoryService);
     let fail = true;
     const publication = createSourceObservationPublication({
+      deriveTemporalProjection: () => ({}),
       stores: interrupted.stores,
       sourceAdmission: interrupted.sourceAdmission,
       evidenceService: interrupted.evidenceService,
@@ -449,6 +451,7 @@ describe("source observation publication", () => {
         .filter((row) => row.record.identity !== withdrawn.record.identity)
     };
     const publication = createSourceObservationPublication({
+      deriveTemporalProjection: () => ({}),
       stores,
       sourceAdmission: fixture.sourceAdmission,
       evidenceService: fixture.evidenceService,

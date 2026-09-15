@@ -1,3 +1,4 @@
+import { selectObservedTemporalProjection } from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { processEnvLookup } from "../config/daemon-config-environment.js";
 import {
@@ -109,6 +110,8 @@ function createSourceObservationPublicationPort(
   wiring: RouterWiring
 ): SourceObservationPublicationPort {
   const publication = createSourceObservationPublication({
+    deriveTemporalProjection: (assertion, sourceObservedAt) =>
+      selectObservedTemporalProjection(assertion, undefined, sourceObservedAt ?? undefined) ?? {},
     stores: wiring.fieldComposition.stores,
     sourceAdmission: createAuditedSourceAdmission({
       sha256: fieldContractSha256,

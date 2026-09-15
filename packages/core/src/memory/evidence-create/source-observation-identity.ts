@@ -29,6 +29,12 @@ export type ObservationMemoryPort = Pick<
   "create" | "findByIdScoped"
 >;
 
+export type ObservationTemporalProjection = Partial<Pick<
+  Parameters<ObservationMemoryPort["create"]>[0],
+  "event_time_start" | "event_time_end" | "valid_from" | "valid_to" |
+  "time_precision" | "time_source" | "projection_schema_version"
+>>;
+
 export type SourceObservationIdentity = Readonly<{
   readonly evidenceObjectId: string;
   readonly memoryObjectId: string;
@@ -124,6 +130,7 @@ export async function persistObservation(
     readonly evidenceService: ObservationEvidencePort;
     readonly memoryService: ObservationMemoryPort;
     readonly assertSourceCurrent: () => void;
+    readonly temporalProjection: ObservationTemporalProjection;
   }>,
   signal: SourceInterpretationSignal,
   sourceEventAnchor: SourceEventAnchor,
@@ -136,7 +143,7 @@ export async function persistObservation(
   );
   try {
     const memory = await findOrCreateMemory(
-      input.memoryService, signal, bound, evidence.object_id, identity.memoryObjectId, scope, input.assertSourceCurrent
+      input.memoryService, signal, bound, evidence.object_id, identity.memoryObjectId, scope, input.assertSourceCurrent, input.temporalProjection
     );
     return Object.freeze({ bound, evidence, memory });
   } catch (error) {
@@ -200,13 +207,21 @@ async function findOrCreateMemory(
   evidenceObjectId: string,
   memoryObjectId: string,
   scope: SourceScopeClass,
-  assertSourceCurrent: () => void
+  assertSourceCurrent: () => void,
+  temporalProjection: ObservationTemporalProjection
 ): Promise<Readonly<MemoryEntry>> {
   const existing = await memoryService.findByIdScoped(memoryObjectId, signal.workspace_id);
   assertSourceCurrent();
   if (existing !== null) return existing;
   try {
     return await memoryService.create({
+      event_time_start: temporalProjection.event_time_start,
+      event_time_end: temporalProjection.event_time_end,
+      valid_from: temporalProjection.valid_from,
+      valid_to: temporalProjection.valid_to,
+      time_precision: temporalProjection.time_precision,
+      time_source: temporalProjection.time_source,
+      projection_schema_version: temporalProjection.projection_schema_version,
       object_id: memoryObjectId,
       assertSourceCurrent,
       created_by: signal.source,
