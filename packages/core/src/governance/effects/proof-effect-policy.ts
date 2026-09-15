@@ -1,6 +1,7 @@
 import {
   EffectRequestSchema,
   PROOF_EFFECT_OPERATOR_ID,
+  compareUtcInstants,
   hashEffectRequestDigest,
   type EffectDecision,
   type EffectDecisionReceipt,
@@ -227,15 +228,11 @@ function isProofApplicable(receipt: AuthorizingProofRecord, request: EffectReque
     receipt.delivery_id !== request.delivery_id
   )) return false;
   if (receipt.event_time === null || receipt.valid_from === null) return false;
-  const asOfMs = Date.parse(request.effective_as_of);
-  const eventMs = Date.parse(receipt.event_time);
-  const validFromMs = Date.parse(receipt.valid_from);
-  const validToMs = receipt.valid_to === null ? Number.POSITIVE_INFINITY : Date.parse(receipt.valid_to);
-  const recordedMs = Date.parse(receipt.recorded_at);
-  return Number.isFinite(asOfMs) && Number.isFinite(eventMs) &&
-    Number.isFinite(validFromMs) && Number.isFinite(recordedMs) &&
-    recordedMs <= asOfMs &&
-    eventMs <= asOfMs && validFromMs <= asOfMs && asOfMs < validToMs;
+  const asOf = request.effective_as_of;
+  return instantAtOrBefore(receipt.recorded_at, asOf)
+    && instantAtOrBefore(receipt.event_time, asOf)
+    && instantAtOrBefore(receipt.valid_from, asOf)
+    && (receipt.valid_to === null || compareUtcInstants(asOf, receipt.valid_to) === -1);
 }
 
 function missingReceiptIds(
@@ -262,7 +259,13 @@ function validityOverlaps(left: CompetingClaim, right: CompetingClaim, asOf: str
   if (left.valid_from === null || right.valid_from === null) return false;
   const leftEnd = left.valid_to ?? asOf;
   const rightEnd = right.valid_to ?? asOf;
-  return left.valid_from < rightEnd && right.valid_from < leftEnd;
+  return compareUtcInstants(left.valid_from, rightEnd) === -1
+    && compareUtcInstants(right.valid_from, leftEnd) === -1;
+}
+
+function instantAtOrBefore(left: string, right: string): boolean {
+  const order = compareUtcInstants(left, right);
+  return order !== undefined && order !== 1;
 }
 
 export function buildEffectDecisionReceipt(

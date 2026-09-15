@@ -1,5 +1,5 @@
 import { vi, type Mock } from "vitest";
-import { FormationKind, GreenGovernanceEventType, MemoryDimension, RevokeReason, ScopeClass, SourceKind, StorageTier, type EventLogEntry, type GreenStatus, type MemoryEntry } from "@do-soul/alaya-protocol";
+import { FormationKind, GreenGovernanceEventType, MemoryDimension, RevokeReason, ScopeClass, SourceKind, StorageTier, compareUtcInstants, type EventLogEntry, type GreenStatus, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { GreenService, type GreenServiceDependencies } from "../../health/green-service.js";
 
 export function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
@@ -210,7 +210,7 @@ function hasOpenSessionOverrideCorrection(
       typeof payload.override_id === "string" &&
       !promotedOverrideIds.has(payload.override_id) &&
       typeof payload.expires_at === "string" &&
-      new Date(payload.expires_at).getTime() > new Date(nowIso).getTime()
+      compareUtcInstants(payload.expires_at, nowIso) === 1
     );
   });
 }

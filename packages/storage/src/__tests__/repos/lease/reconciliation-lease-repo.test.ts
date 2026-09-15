@@ -68,6 +68,12 @@ describe("SqliteReconciliationLeaseRepo", () => {
     expect(reclaimed?.owner_token).toBe("owner-b");
   });
 
+  it("reclaims a minute-precision expiry once millisecond now is later", () => {
+    const repo = createRepo();
+    expect(repo.tryAcquire("ws-1", "owner-a", "2026-05-22T00:00:00.000Z", "2026-05-22T00:05Z")).not.toBeNull();
+    expect(repo.tryAcquire("ws-1", "owner-b", "2026-05-22T00:05:30.000Z", T0_PLUS_10MIN)?.owner_token).toBe("owner-b");
+  });
+
   it("releases a lease so the key is immediately free for another owner", () => {
     const repo = createRepo();
     repo.tryAcquire("ws-1", "owner-a", T0, T0_PLUS_5MIN);

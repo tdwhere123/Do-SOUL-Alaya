@@ -66,7 +66,7 @@ export class SqliteDriftLeaseRepo implements DriftLeaseRepo {
         expires_at,
         granted_at
       FROM drift_leases
-      WHERE workspace_id = ? AND expires_at > ?
+      WHERE workspace_id = ? AND alaya_utc_compare(expires_at, ?) > 0
       ORDER BY granted_at ASC, lease_id ASC
     `);
 
@@ -80,7 +80,7 @@ export class SqliteDriftLeaseRepo implements DriftLeaseRepo {
         expires_at,
         granted_at
       FROM drift_leases
-      WHERE workspace_id = ? AND lease_id = ? AND expires_at > ?
+      WHERE workspace_id = ? AND lease_id = ? AND alaya_utc_compare(expires_at, ?) > 0
       LIMIT 1
     `);
 
@@ -91,7 +91,7 @@ export class SqliteDriftLeaseRepo implements DriftLeaseRepo {
 
     this.deleteExpiredStatement = db.connection.prepare(`
       DELETE FROM drift_leases
-      WHERE expires_at <= ?
+      WHERE alaya_utc_compare(expires_at, ?) <= 0
     `);
 
     this.now = options.now ?? (() => new Date().toISOString());

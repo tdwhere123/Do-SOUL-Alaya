@@ -293,7 +293,7 @@ const EVENT_LOG_GOVERNANCE_PREDICATE_SQL:
           AND json_type(applied.payload_json, '$.target_object') = 'text'
           AND json_type(applied.payload_json, '$.expires_at') = 'text'
           AND json_extract(applied.payload_json, '$.target_object') = ?
-          AND json_extract(applied.payload_json, '$.expires_at') > ?
+          AND alaya_utc_compare(json_extract(applied.payload_json, '$.expires_at'), ?) > 0
           AND NOT EXISTS(
             SELECT 1
             FROM event_log AS promoted

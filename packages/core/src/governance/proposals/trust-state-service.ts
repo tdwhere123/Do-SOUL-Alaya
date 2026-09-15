@@ -1,6 +1,7 @@
 import {
   NonEmptyStringSchema,
   TrustStateEventType,
+  compareUtcInstants,
   type ContextDeliveryRecord,
   type EventLogEntry,
   type TrustState,
@@ -152,7 +153,7 @@ function maxIso(current: string | null, next: string): string {
     return next;
   }
 
-  return Date.parse(next) > Date.parse(current) ? next : current;
+  return compareUtcInstants(next, current) === 1 ? next : current;
 }
 
 function recordUsageState(

@@ -38,6 +38,9 @@ describe("shared time helpers", () => {
     expect(isExpired("2026-04-20T07:59:59.999Z", "2026-04-20T08:00:00.000Z")).toBe(true);
     expect(isExpired("2026-04-20T08:00:00.000Z", "2026-04-20T08:00:00.000Z")).toBe(true);
     expect(isExpired("2026-04-20T08:00:01.000Z", "2026-04-20T08:00:00.000Z")).toBe(false);
+    expect(isExpired("2026-04-20T08:00Z", "2026-04-20T08:00:00.000Z")).toBe(true);
+    expect(isExpired("2026-04-20T08:00Z", "2026-04-20T08:00:30.000Z")).toBe(true);
+    expect(isExpired("2026-04-20T08:01Z", "2026-04-20T08:00:30.000Z")).toBe(false);
   });
 
   it("treats corrupt expiry as expired and rejects invalid reference clocks", () => {

@@ -67,7 +67,7 @@ export class SqliteReconciliationLeaseRepo implements ReconciliationLeaseRepo {
         owner_token = excluded.owner_token,
         acquired_at = excluded.acquired_at,
         expires_at = excluded.expires_at
-      WHERE reconciliation_leases.expires_at <= @now
+      WHERE alaya_utc_compare(reconciliation_leases.expires_at, @now) <= 0
     `);
 
     this.releaseStatement = db.connection.prepare(`

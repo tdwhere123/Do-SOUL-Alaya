@@ -274,13 +274,13 @@ export class SqliteHandoffGapRepo {
     try {
       const handoffResult = this.database.connection
         .prepare(
-          "DELETE FROM handoff_records WHERE expires_at IS NOT NULL AND expires_at <= ?"
+          "DELETE FROM handoff_records WHERE expires_at IS NOT NULL AND alaya_utc_compare(expires_at, ?) <= 0"
         )
         .run(nowIso);
 
       const gapResult = this.database.connection
         .prepare(
-          "DELETE FROM gap_records WHERE expires_at IS NOT NULL AND expires_at <= ?"
+          "DELETE FROM gap_records WHERE expires_at IS NOT NULL AND alaya_utc_compare(expires_at, ?) <= 0"
         )
         .run(nowIso);
 
@@ -302,11 +302,11 @@ export class SqliteHandoffGapRepo {
           .prepare(
             `SELECT runtime_id AS object_id, object_kind, expires_at
           FROM handoff_records
-          WHERE expires_at IS NOT NULL AND expires_at <= ?
+          WHERE expires_at IS NOT NULL AND alaya_utc_compare(expires_at, ?) <= 0
           UNION
           SELECT runtime_id AS object_id, object_kind, expires_at
           FROM gap_records
-          WHERE expires_at IS NOT NULL AND expires_at <= ?
+          WHERE expires_at IS NOT NULL AND alaya_utc_compare(expires_at, ?) <= 0
           ORDER BY expires_at ASC`
           )
           .all(nowIso, nowIso),
@@ -334,12 +334,12 @@ export class SqliteHandoffGapRepo {
             `SELECT h.runtime_id AS object_id, h.object_kind, h.expires_at
           FROM handoff_records h
           INNER JOIN runs r ON h.source_run_id = r.run_id
-          WHERE h.expires_at IS NOT NULL AND h.expires_at <= ? AND r.workspace_id = ?
+          WHERE h.expires_at IS NOT NULL AND alaya_utc_compare(h.expires_at, ?) <= 0 AND r.workspace_id = ?
           UNION
           SELECT g.runtime_id AS object_id, g.object_kind, g.expires_at
           FROM gap_records g
           INNER JOIN runs r ON g.detected_in_run_id = r.run_id
-          WHERE g.expires_at IS NOT NULL AND g.expires_at <= ? AND r.workspace_id = ?
+          WHERE g.expires_at IS NOT NULL AND alaya_utc_compare(g.expires_at, ?) <= 0 AND r.workspace_id = ?
           ORDER BY expires_at ASC`
           )
           .all(nowIso, workspaceId, nowIso, workspaceId),
