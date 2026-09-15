@@ -437,6 +437,18 @@ formulas are unchanged, but structured product slots are explicitly
 non-equivalent to the old ranked candidate pool. Duplicate product slots are
 not silently deduplicated.
 
+A validated miss without causal evidence remains scorable and is counted as
+`conditional_field_unattributed`. Stage tables and exposure comparisons preserve
+that unknown cause; they cannot infer early absence or write loss from missing
+legacy pool ranks. Such comparisons remain inconclusive.
+
+Membership continuation retains the first memory interruption so an unconsumed
+cursor can resume with a larger budget. A repeated interruption at the same
+effective budget may close an empty page only when all retained phase progress
+is unchanged. The result remains open and partial; consumed-token replay retains
+its original result. Attempted work is not retained progress. Late seed subjects
+reopen adjacency for new pairs, and guard closure waits for those dependencies.
+
 An internal execution receipt captures the actual compiler inputs, query and
 interpretation identities, live source snapshot, and original request budget.
 The worker transports that receipt through the same result boundary. Measurement
@@ -545,6 +557,9 @@ even when the independent source owner can preserve the complete range. Missing
 source clocks leave relative dates unresolved; live and replay preserve a supplied
 fixed offset for every civil-time consumer, including time-concern proposals.
 Absolute calendar years use UTC and need no clock.
+Source observation publication derives temporal fields through the existing Soul
+projection owner using the verified assertion and retained source `event_time`.
+Ingestion or provider timestamps cannot replace a missing source clock.
 Generation response-schema JSON participates in raw cache identity; current
 parser, grounding and formation identities separate newly derived artifacts
 from historical raw or previously qualified generations.

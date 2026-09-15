@@ -1,4 +1,6 @@
 import {
+  BoundSourceInterpretationSchema,
+  canonicalJson,
   SourceInterpretationSignalSchema,
   type BoundSourceInterpretation,
   type EvidenceCapsule,
@@ -44,6 +46,30 @@ export type SourceObservationPublicationResult = Readonly<{
 export type SourceObservationPublication = Readonly<{
   publish(input: SourceObservationPublicationInput): Promise<SourceObservationPublicationResult>;
 }>;
+
+/** Read-only verification of a retained publication using the live admission identities. */
+export function verifySourceObservationPublication(input: Readonly<{
+  stores: Pick<FieldFormationStores, "listRecords" | "getStoredRecord">;
+  signal: SourceInterpretationSignal;
+  bound: BoundSourceInterpretation;
+  sha256: FieldContractSha256;
+}>) {
+  const signal = SourceInterpretationSignalSchema.parse(input.signal);
+  const bound = BoundSourceInterpretationSchema.parse(input.bound);
+  const located = signal.raw_payload.source_interpretation;
+  if (signal.source !== "garden_compile" || located.outcome !== "candidates") {
+    throw new CoreError("VALIDATION", "source observation has no publishable candidates");
+  }
+  const stored = resolveCurrentSource(input.stores, signal.workspace_id, located, input.sha256);
+  verifyAssertionAndScope(stored, signal.workspace_id, signal.scope_hint, located);
+  const durable = durableInterpretation(stored.content_bytes, located);
+  const identity = publicationIdentity(stored, durable, input.sha256);
+  const expected = bindInterpretation(durable, stored, identity.evidenceObjectId);
+  if (canonicalJson(bound) !== canonicalJson(expected)) {
+    throw new CoreError("VALIDATION", "stored source observation binding differs from its publication");
+  }
+  return Object.freeze({ stored, identity });
+}
 
 /** Core admission for located source observations. Protocol location cannot mint source_target. */
 export function createSourceObservationPublication(input: Readonly<{

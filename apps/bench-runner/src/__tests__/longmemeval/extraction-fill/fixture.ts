@@ -8,7 +8,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
-import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 import { providerBackedExtractionResult } from
   "../extraction/extraction-cache-test-fixture.js";
 export { providerBackedExtractionResult };
@@ -97,7 +96,7 @@ export function buildAuthorityQuestion(
 }
 
 export function groundedExtractionResult(input: { readonly userPrompt: string }) {
-  return providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt));
+  return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt));
 }
 
 export function groundedExtractor() {
@@ -106,25 +105,15 @@ export function groundedExtractor() {
   };
 }
 
-export function buildGroundedSignalResponse(userPrompt: string): string {
+export function buildGroundedInterpretationResponse(userPrompt: string): string {
   const request = JSON.parse(userPrompt) as {
-    readonly source_assertions?: readonly {
-      readonly assertion_id: number;
-      readonly text: string;
-    }[];
+    readonly source_assertions: readonly { readonly assertion_id: number; readonly text: string }[];
   };
-  const sourceAssertion = request.source_assertions?.[0];
-  const assertion = sourceAssertion?.text;
-  if (assertion === undefined) throw new Error("expected a source assertion");
-  const envelope = JSON.parse(
-    signalsEnvelope([{ distilled: assertion, matched: assertion }])
-  ) as { signals: Record<string, unknown>[] };
-  envelope.signals[0]!.source_locator = {
-    contract_version: 3,
-    kind: "assertion_catalog",
-    assertion_id: sourceAssertion.assertion_id
-  };
-  return JSON.stringify(envelope);
+  if (request.source_assertions.length === 0) throw new Error("expected a source assertion");
+  return JSON.stringify({ interpretations: request.source_assertions.map((assertion) => ({
+    assertion_id: assertion.assertion_id,
+    relations: [{ predicate: { text: assertion.text }, arguments: [], qualifiers: [] }]
+  })) });
 }
 
 async function writeExtractionFillDataset(

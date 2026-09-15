@@ -92,14 +92,14 @@ it.each(["valid", "source-drift", "malformed-primary"] as const)("consumes bound
     expect(result.seeds).toHaveLength(2);
     db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
     const roots = new SqliteFieldSourceRecordRepo(db, fieldContractSha256).listByWorkspace(daemon.workspaceId);
-    expect(roots.some((record) => record.source_body.includes("I avoid any."))).toBe(true);
+    expect(roots.some((record) => record.source_body?.includes("I avoid any."))).toBe(true);
     expect(runner.stats.lastSemanticSupplementShards).toHaveLength(1);
     const entries = createSemanticSupplementEntries();
     assertSemanticSupplementRound({ semantic: runner.stats.lastSemanticSupplementShards!,
       semanticEntries: entries, semanticBinding: runner.semanticSupplementBinding,
       cacheKeys: [fixture.cacheKey], requests: [requireSingleRequest()] });
     const primary = requireIdentity(primaryCacheRoot);
-    if (primary.manifest.schema_version === 2) throw new Error("fixture requires profiled manifest");
+    if (primary.manifest.schema_version !== 3 && primary.manifest.schema_version !== 4) throw new Error("fixture requires profiled manifest");
     assertSemanticSupplementClosure(buildSnapshotExtractionSummary(primary.manifest, primary.manifestSha256),
       entries, runner.semanticSupplementBinding);
 

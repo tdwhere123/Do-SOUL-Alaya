@@ -195,7 +195,7 @@ describe("source-root seam membership", () => {
       content: `unrelated body ${index}`,
       content_complete: true
     }));
-    const observed = observeConditionalField(seedInput({
+    const input = seedInput({
       program: relation("observed_log"),
       view: "mixed",
       seed_query: "exact-memory-needle",
@@ -233,13 +233,16 @@ describe("source-root seam membership", () => {
           unavailable: false
         })
       }
-    }));
+    });
+    const first = observeConditionalField(input);
+    const observed = observeConditionalField({ ...input, cursor: first.page.cursor });
+    expect(observed.work.native_visits).toBeLessThanOrEqual(input.action.work_limit);
     expect(observed.page.observations.some((row) => row.object_id === memoryId)).toBe(true);
   });
 
   it("observes exact lexical memory when sourceRoots reports unavailable", () => {
     const memoryId = "aaaaaaaa-aaaa-4aaa-8aaa-000000000099";
-    const observed = observeConditionalField(seedInput({
+    const input = seedInput({
       program: relation("observed_log"),
       view: "mixed",
       seed_query: "exact-memory-needle",
@@ -279,7 +282,10 @@ describe("source-root seam membership", () => {
           unavailable: false
         })
       }
-    }));
+    });
+    const first = observeConditionalField(input);
+    const observed = observeConditionalField({ ...input, cursor: first.page.cursor });
+    expect(observed.work.native_visits).toBeLessThanOrEqual(input.action.work_limit);
     expect(observed.page.observations.some((row) => row.object_id === memoryId)).toBe(true);
     expect(observed.page.outcome.status).not.toBe("unavailable");
   });
@@ -287,7 +293,7 @@ describe("source-root seam membership", () => {
   it("does not commit source enumeration when a truncated unavailable page still has remaining families", () => {
     const memoryId = "aaaaaaaa-aaaa-4aaa-8aaa-000000000099";
     const remaining = "f:records:r:2026-01-01T00:00:00.000Z\troot-01";
-    const observed = observeConditionalField(seedInput({
+    const input = seedInput({
       program: relation("observed_log"),
       view: "mixed",
       seed_query: "exact-memory-needle",
@@ -327,7 +333,10 @@ describe("source-root seam membership", () => {
           unavailable: false
         })
       }
-    }));
+    });
+    const first = observeConditionalField(input);
+    const observed = observeConditionalField({ ...input, cursor: first.page.cursor });
+    expect(observed.work.native_visits).toBeLessThanOrEqual(input.action.work_limit);
     expect(observed.page.observations.some((row) => row.object_id === memoryId)).toBe(true);
     expect(observed.page.cursor.committed_through?.startsWith("m:")).toBe(false);
     expect(observed.page.cursor.committed_through?.startsWith("s:")).toBe(true);

@@ -17,11 +17,12 @@ import {
 } from "../../extraction-cache-test-fixture.js";
 import {
   providerBackedResult,
-  signalsEnvelope
+  interpretationsEnvelope
 } from "../../../compile-seed/compile-seed-fixture.js";
 import {
+  assertionBatchCorpus,
   assertionBatchPrompt,
-  cacheSignalResponse,
+  cacheInterpretationResponse,
   createHttpExtractor,
   extractionConfig,
   failure,
@@ -29,6 +30,7 @@ import {
   REQUEST_PROFILE,
   SYSTEM_PROMPT,
   truncatedSseResponse,
+  sourceCorpusWithAssertions,
   userPromptWithAssertions
 } from "./fixture.js";
 
@@ -67,8 +69,7 @@ describe("extraction live delegate partition accounting", () => {
           }
           return {
             ...providerBackedResult(""),
-            rawJson: signalsEnvelope([{
-              distilled: "I completed the review today.",
+            rawJson: interpretationsEnvelope([{
               matched: "I completed the review today."
             }]),
             extractorMeta: {
@@ -97,7 +98,7 @@ describe("extraction live delegate partition accounting", () => {
 
     await extractor.extract({
       systemPrompt: SYSTEM_PROMPT,
-      userPrompt: userPromptWithAssertions()
+      sourceCorpus: sourceCorpusWithAssertions(), userPrompt: userPromptWithAssertions()
     });
 
     expect(ledger.snapshot()).toMatchObject({
@@ -121,9 +122,9 @@ describe("extraction live delegate partition accounting", () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(truncatedSseResponse())
       .mockResolvedValueOnce(truncatedSseResponse())
-      .mockResolvedValueOnce(cacheSignalResponse(1))
-      .mockResolvedValueOnce(cacheSignalResponse(2))
-      .mockResolvedValueOnce(cacheSignalResponse(3));
+      .mockResolvedValueOnce(cacheInterpretationResponse(1))
+      .mockResolvedValueOnce(cacheInterpretationResponse(2))
+      .mockResolvedValueOnce(cacheInterpretationResponse(3));
     const ledger = openExtractionAttemptLedger({
       cacheRoot,
       lineageDigest: "6".repeat(64),
@@ -144,7 +145,7 @@ describe("extraction live delegate partition accounting", () => {
 
     await extractor.extract({
       systemPrompt: SYSTEM_PROMPT,
-      userPrompt: assertionBatchPrompt([1, 2, 3]),
+      sourceCorpus: assertionBatchCorpus([1, 2, 3]), userPrompt: assertionBatchPrompt([1, 2, 3]),
       maxOutputTokens: 32_768,
       outputTokenField: "max_tokens"
     });
@@ -161,16 +162,16 @@ describe("extraction live delegate partition accounting", () => {
   it("settles completed partition requests when final composition validation fails", async () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(truncatedSseResponse())
-      .mockResolvedValueOnce(cacheSignalResponse(1))
-      .mockResolvedValueOnce(cacheSignalResponse(2));
+      .mockResolvedValueOnce(cacheInterpretationResponse(1))
+      .mockResolvedValueOnce(cacheInterpretationResponse(2));
     const live = createHttpExtractor(fetchMock);
     const delegate: BenchSignalExtractor = {
       extract: (input) => live.extract({
         ...input,
         validateRawJson: (rawJson) => {
           input.validateRawJson?.(rawJson);
-          const parsed = JSON.parse(rawJson) as { readonly signals: readonly unknown[] };
-          if (parsed.signals.length > 1) throw new Error("merged envelope rejected");
+          const parsed = JSON.parse(rawJson) as { readonly interpretations: readonly unknown[] };
+          if (parsed.interpretations.length > 1) throw new Error("merged envelope rejected");
         }
       })
     };
@@ -194,7 +195,7 @@ describe("extraction live delegate partition accounting", () => {
 
     await expect(extractor.extract({
       systemPrompt: SYSTEM_PROMPT,
-      userPrompt: assertionBatchPrompt([1, 2]),
+      sourceCorpus: assertionBatchCorpus([1, 2]), userPrompt: assertionBatchPrompt([1, 2]),
       maxOutputTokens: 32_768,
       outputTokenField: "max_tokens"
     })).rejects.toThrow(/merged envelope rejected/u);

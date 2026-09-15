@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import { initializeSemanticArtifactCandidateSchema, type StorageDatabase } from "@do-soul/alaya-storage";
-import { artifactFixture } from "./artifact-lifecycle-fixture.js";
+import { artifactFixture, response } from "./artifact-lifecycle-fixture.js";
 import { createSliceHarness } from "./harness.js";
 import { CONTENT, MEM, NOW, WS } from "./ids.js";
 
@@ -134,9 +134,7 @@ function transport() {
     calls,
     execute: async (request: string) => {
       calls.push(request);
-      const unit = JSON.parse(request) as { text: string };
-      return JSON.stringify({ signals: [{ object_kind: "decision", confidence: 0.8,
-        matched_text: unit.text, distilled_fact: unit.text }] });
+      return response(request);
     },
     reconcile: async () => ({ kind: "unknown" as const })
   };

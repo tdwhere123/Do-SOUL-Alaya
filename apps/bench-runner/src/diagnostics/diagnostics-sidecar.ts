@@ -73,10 +73,7 @@ interface RecallEvidenceAccumulator {
   readonly goldChannels: Record<string, number>;
   readonly goldPlanes: Record<string, number>;
   // Mutable tallies while accumulating; frozen only in freezeRecallEvidenceSummary.
-  readonly missTaxonomyDistribution: Record<
-    keyof LongMemEvalMissTaxonomyDistribution,
-    number
-  >;
+  readonly missTaxonomyDistribution: { -readonly [K in keyof LongMemEvalMissTaxonomyDistribution]: LongMemEvalMissTaxonomyDistribution[K] };
   deliveredResultCount: number;
   graphSupportGoldCount: number;
   pathPlasticityGoldCount: number;
@@ -151,7 +148,7 @@ function accumulateMissTaxonomy(
     ? readQuestionMissTaxonomy(row)
     : null;
   if (missTaxonomy !== null) {
-    state.missTaxonomyDistribution[missTaxonomy] += 1;
+    state.missTaxonomyDistribution[missTaxonomy] = (state.missTaxonomyDistribution[missTaxonomy] ?? 0) + 1;
   }
 }
 
@@ -368,7 +365,7 @@ function incrementCount(counts: Record<string, number>, key: string): void {
 }
 
 function freezeMissTaxonomyDistribution(
-  input: Record<keyof LongMemEvalMissTaxonomyDistribution, number>
+  input: LongMemEvalMissTaxonomyDistribution
 ): LongMemEvalMissTaxonomyDistribution {
   return Object.freeze({ ...input });
 }

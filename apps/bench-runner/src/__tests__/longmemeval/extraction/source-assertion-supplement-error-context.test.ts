@@ -99,6 +99,7 @@ function createFixture() {
 }
 
 function forgeDraftIdentity(receipt: ReturnType<typeof createFixture>["receipt"]) {
+  if (receipt.schema_version !== 3) throw new Error("historical fixture requires receipt v3");
   const entry = receipt.entries[0]!;
   const binding = entry.source_draft_bindings[0]!;
   const entries = [{
@@ -144,7 +145,7 @@ function signal(assertionId: number, matchedText: string) {
     confidence: 0.9,
     matched_text: matchedText,
     source_locator: {
-      contract_version: 3,
+      contract_version: 4,
       kind: "assertion_catalog",
       assertion_id: assertionId
     }

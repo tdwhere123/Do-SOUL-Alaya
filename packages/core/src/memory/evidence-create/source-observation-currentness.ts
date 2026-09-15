@@ -17,7 +17,7 @@ import {
 type BoundPhrase = SourceLocatedInterpretation["candidates"][number]["predicate"];
 
 export function resolveCurrentSource(
-  stores: FieldFormationStores,
+  stores: Pick<FieldFormationStores, "listRecords" | "getStoredRecord">,
   workspaceId: string,
   located: SourceLocatedInterpretation,
   sha256: FieldContractSha256

@@ -34,7 +34,9 @@ it("reuses raw interpretations while deriving inclusive memory dates from each r
         evidenceRefBase: `q-s-r-${index}`, seedIndex: index, workspaceId: daemon.workspaceId,
         runId: daemon.runId, sourceObservedAt });
       expect(result.seeds).toHaveLength(1);
-      memoryIds.push(result.seeds[0]!.memoryId);
+      const memoryId = result.seeds[0]!.memoryId;
+      if (memoryId === undefined) throw new Error("expected memory publication");
+      memoryIds.push(memoryId);
     }
     expect(extract).toHaveBeenCalledTimes(1);
     expect(runner.stats.cacheHits).toBe(1);

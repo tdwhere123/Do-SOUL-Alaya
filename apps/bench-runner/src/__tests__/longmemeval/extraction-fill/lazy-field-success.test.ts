@@ -16,7 +16,7 @@ import {
 import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
 import {
   buildExtractionFillQuestion as buildQuestion,
-  buildGroundedSignalResponse,
+  buildGroundedInterpretationResponse,
   EXTRACTION_FILL_VARIANT as VARIANT,
   providerBackedExtractionResult,
   registerExtractionFillHooks
@@ -100,18 +100,12 @@ function overlayRawJson(
   emptyMemberTexts: readonly string[] = []
 ): string {
   if (members.some((member) => emptyMemberTexts.some((text) => member.text.includes(text)))) {
-    return '{"signals":[]}';
+    return '{"interpretations":[]}';
   }
   return JSON.stringify({
-    signals: members.map((member) => ({
-      object_kind: "fact",
-      confidence: 0.9,
-      matched_text: member.text.replace(/^(?:User|Assistant): /u, ""),
-      source_locator: {
-        contract_version: 3,
-        kind: "assertion_catalog",
-        assertion_id: member.assertionId
-      }
+    interpretations: members.map((member) => ({
+      assertion_id: member.assertionId,
+      relations: [{ predicate: { text: member.text }, arguments: [], qualifiers: [] }]
     }))
   });
 }
@@ -127,7 +121,7 @@ describe("runExtractionFill lazy_field success", () => {
       pinnedMetaRoot,
       extractorFactory: (): BenchSignalExtractor => ({
         extract: async (input) => providerBackedExtractionResult(
-          buildGroundedSignalResponse(input.userPrompt)
+          buildGroundedInterpretationResponse(input.userPrompt)
         )
       }),
       log: () => undefined
@@ -179,7 +173,7 @@ describe("runExtractionFill lazy_field success", () => {
       pinnedMetaRoot,
       extractorFactory: (): BenchSignalExtractor => ({
         extract: async (input) => providerBackedExtractionResult(
-          buildGroundedSignalResponse(input.userPrompt)
+          buildGroundedInterpretationResponse(input.userPrompt)
         )
       }),
       log: () => undefined
@@ -219,7 +213,7 @@ describe("runExtractionFill lazy_field success", () => {
       pinnedMetaRoot,
       extractorFactory: (): BenchSignalExtractor => ({
         extract: async (input) => providerBackedExtractionResult(
-          buildGroundedSignalResponse(input.userPrompt)
+          buildGroundedInterpretationResponse(input.userPrompt)
         )
       }),
       log: () => undefined
@@ -265,7 +259,7 @@ describe("runExtractionFill lazy_field success", () => {
       pinnedMetaRoot,
       extractorFactory: (): BenchSignalExtractor => ({
         extract: async (input) => providerBackedExtractionResult(
-          buildGroundedSignalResponse(input.userPrompt)
+          buildGroundedInterpretationResponse(input.userPrompt)
         )
       }),
       log: () => undefined
@@ -296,7 +290,7 @@ describe("runExtractionFill lazy_field success", () => {
       pinnedMetaRoot,
       extractorFactory: (): BenchSignalExtractor => ({
         extract: async (input) => providerBackedExtractionResult(
-          buildGroundedSignalResponse(input.userPrompt)
+          buildGroundedInterpretationResponse(input.userPrompt)
         )
       }),
       log: () => undefined

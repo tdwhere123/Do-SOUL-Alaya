@@ -221,7 +221,7 @@ async function seedQualifiedFactKey(databasePath: string): Promise<Readonly<{
 async function seedAssertionSignal(database: TestDatabase): Promise<CandidateMemorySignal> {
   const sourceCorpus = `User: ${assertion}`;
   const sourceLocator = {
-    contract_version: 3 as const,
+    contract_version: 4 as const,
     kind: "assertion_catalog" as const,
     assertion_id: 1
   };
@@ -291,7 +291,7 @@ function buildAssertionCapsule(signal: CandidateMemorySignal): EvidenceCapsule {
     sourceCorpus,
     sourceAssertion: assertion,
     sourceLocator: signal.raw_payload.source_locator as {
-      readonly contract_version: 3;
+      readonly contract_version: 4;
       readonly kind: "assertion_catalog";
       readonly assertion_id: number;
     }

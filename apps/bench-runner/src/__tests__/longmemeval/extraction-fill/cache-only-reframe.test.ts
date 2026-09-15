@@ -95,14 +95,14 @@ async function seedFirstQuestion(): Promise<void> {
     cacheRoot,
     dataDir,
     pinnedMetaRoot,
-    extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+    extractorFactory: () => ({ extract: async () => ({ rawJson: '{"interpretations":[]}' }) }),
     log: () => undefined
   });
 }
 
 function attachSupplementalSource(): void {
   const manifest = readExtractionCacheManifest(cacheRoot);
-  if (manifest === undefined || manifest.schema_version !== 3) {
+  if (manifest === undefined || manifest.schema_version !== 4) {
     throw new Error("expected current extraction manifest");
   }
   writeExtractionCacheManifest(cacheRoot, {

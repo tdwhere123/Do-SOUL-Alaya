@@ -57,7 +57,7 @@ describe("LongMemEval run provenance", () => {
       content_closure_sha256: EXTRACTION_CLOSURE.content_closure_sha256
     });
     const builtCache = provenance.extraction_cache;
-    if (builtCache?.schema_version !== 3) throw new Error("expected current cache");
+    if (builtCache?.schema_version !== 4) throw new Error("expected current cache");
     expect(builtCache.supplemental_source_receipt).toMatchObject({
       receipt_sha256: "d".repeat(64),
       physical_provider_url: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u)
@@ -128,7 +128,7 @@ describe("LongMemEval run provenance", () => {
     for (const field of [
       "fill_status", "window_offset", "window_limit", "expected_turns",
       "expected_key_set_sha256", "content_closure_sha256", "content_closure_index",
-      "supplemental_source_receipt"
+      "supplemental_source_receipt", "source_packing"
     ]) delete (v1Cache as Record<string, unknown>)[field];
     expect(LongMemEvalRunProvenanceSchema.safeParse({
       ...provenance,
@@ -232,8 +232,8 @@ describe("LongMemEval run provenance", () => {
     expect(() => assertRecordedRunCodeIdentity(legacyWithoutAlgorithm.code))
       .toThrow(/algorithm/u);
     const currentCache = currentProvenance.extraction_cache;
-    if (currentCache?.schema_version !== 3) {
-      throw new Error("current provenance fixture must use extraction schema v3");
+    if (currentCache?.schema_version !== 4) {
+      throw new Error("current provenance fixture must use extraction schema v4");
     }
     const digestOnlyCache = { ...currentCache };
     delete (digestOnlyCache as Record<string, unknown>).content_closure_index;

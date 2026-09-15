@@ -26,7 +26,7 @@ import {
 describe("treatment exposure receipt authority", () => {
   it("keeps a validated miss without stage evidence inconclusive through tables and exposure comparison", async () => {
     const current = {
-      ...diagnostic("current-unattributed", ["candidate:f3"], true),
+      ...(diagnostic("current-unattributed", ["candidate:f3"], true) as unknown as Record<string, unknown>),
       question_id: "current-unattributed", hit_at_5: false,
       gold_memory_ids: ["retained-gold"], gold: [],
       miss_taxonomy: "conditional_field_unattributed",

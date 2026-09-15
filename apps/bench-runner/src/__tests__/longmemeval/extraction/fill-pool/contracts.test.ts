@@ -23,13 +23,9 @@ it("retains the originating task failure for terminal fill diagnostics", () => {
 });
 
 it("does not require a semantic factor graph on the fill HTTP validator", async () => {
-  const graphless = JSON.stringify({
-    signals: [{
-      object_kind: "fact",
-      confidence: 0.8,
-      matched_text: "The build is green."
-    }]
-  });
+  const graphless = JSON.stringify({ interpretations: [{ assertion_id: 1,
+    relations: [{ predicate: { text: "green" }, arguments: [], qualifiers: [] }]
+  }] });
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
     expect(() => input.validateRawJson?.(graphless)).not.toThrow();
     return { rawJson: graphless };

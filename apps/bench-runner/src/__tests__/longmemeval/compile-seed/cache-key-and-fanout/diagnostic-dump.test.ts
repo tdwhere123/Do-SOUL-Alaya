@@ -46,6 +46,7 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
       apiKey: "test-key"
     };
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async (_input) => ({
         memoryId: "memory-1",
         signalId: "signal-memory-1",
@@ -122,6 +123,7 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
       apiKey: "test-key"
     };
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => ({
         memoryId: "memory-1",
         signalId: "signal-memory-1",

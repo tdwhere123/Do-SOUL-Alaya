@@ -19,7 +19,7 @@ import type {
 import { providerBackedExtractionResult, TEST_EXTRACTION_PROVIDER_URL } from
   "../extraction/extraction-cache-test-fixture.js";
 import { groundedExtractionResult } from "./fixture.js";
-import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
+import { interpretationsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -52,8 +52,7 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
   let calls = 0;
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
     calls += 1;
-    if (calls === 1) return providerBackedExtractionResult(signalsEnvelope([{
-      distilled: "I saved alpha.",
+    if (calls === 1) return providerBackedExtractionResult(interpretationsEnvelope([{
       matched: "I saved alpha."
     }]));
     secondStarted.resolve();

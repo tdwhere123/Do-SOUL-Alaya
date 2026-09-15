@@ -519,6 +519,16 @@ inline typed resolution.
 
 ## Control Plane Discipline
 
+Offline extraction receives reusable interpretation proposals through the Soul
+proposal entry; source binding and durable publication remain Core operations.
+Snapshot verification is read-only and uses the same Core source currentness,
+span and publication identity rules. Bench joins that proof to the canonical
+dataset round in one SQLite read transaction. Current source-bound evidence does
+not acquire fabricated legacy artifact paths; recorded legacy receipts retain
+their own validation contract. The additive read-only Core verifier, Storage
+signal-row parser, Soul temporal projection export and Eval miss-distribution
+schema are minor API additions under invariant §25 for these named consumers.
+
 Runtime control objects can guide execution, request review, and shape
 projection, but they must not silently become durable memory.
 Promotion to durable memory requires explicit evidence and governance

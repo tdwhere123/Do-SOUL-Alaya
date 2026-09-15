@@ -10,6 +10,7 @@ function testIncludeGlob(testDir) {
 }
 
 const sharedAlias = {
+  "@do-soul/alaya-protocol/node/source-frame": path.resolve(rootDir, "packages/protocol/src/node/source-frame.ts"),
   "@do-soul/alaya-protocol": path.resolve(rootDir, "packages/protocol/src/index.ts"),
   "@do-soul/alaya-graph-algorithms": path.resolve(rootDir, "packages/graph-algorithms/src/index.ts"),
   "@do-soul/alaya-storage": path.resolve(rootDir, "packages/storage/src/index.ts"),

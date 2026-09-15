@@ -56,6 +56,7 @@ export {
 export { createAuditedSourceAdmission, type AuditedSourceAdmission } from "./memory/evidence-create/audited-source-admission.js";
 export {
   createSourceObservationPublication,
+  verifySourceObservationPublication,
   type SourceObservationPublication,
   type SourceObservationPublicationInput,
   type SourceObservationPublicationResult

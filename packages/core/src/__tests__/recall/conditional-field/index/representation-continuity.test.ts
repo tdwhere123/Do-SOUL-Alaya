@@ -483,7 +483,9 @@ function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): Accepting
     budget: defaultBudget(),
     ...overrides,
     roles,
-    output_derivations: overrides.output_derivations ?? Object.fromEntries((overrides.snapshot?.values ?? []).map((value) => [productStateNodeId(value.state), roots.map((root) => root.derivation_id)]))
+    ...(overrides.output_derivations !== undefined || roots.length > 0 ? {
+      output_derivations: overrides.output_derivations ?? Object.fromEntries((overrides.snapshot?.values ?? []).map((value) => [productStateNodeId(value.state), roots.map((root) => root.derivation_id)]))
+    } : {})
   };
 }
 
@@ -494,6 +496,7 @@ function snapshotOf(values: AcceptingProjectionInput["snapshot"]["values"]) {
     query_id: QUERY_ID,
     seeds: [],
     values,
+    has_incomparable_activations: false,
     retained_transitions: [],
     facets: []
   };

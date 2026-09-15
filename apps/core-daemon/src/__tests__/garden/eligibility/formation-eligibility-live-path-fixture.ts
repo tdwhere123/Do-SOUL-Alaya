@@ -105,7 +105,7 @@ function stubMaterializationCreate(object_kind: string, object_id: string) {
 }
 
 const SOURCE_LOCATOR = Object.freeze({
-  contract_version: 3 as const,
+  contract_version: 4 as const,
   kind: "assertion_catalog" as const,
   assertion_id: 1
 });
@@ -152,7 +152,7 @@ export function assertionSignal(
       ...payload
     },
     created_at: CLOCK,
-    source_observation: null
+    source_observation: { observed_at: CLOCK, authority: "trusted_host_event", source_event_id: "eligibility-source" }
   };
 }
 

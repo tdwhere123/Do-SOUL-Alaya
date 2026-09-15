@@ -16,7 +16,7 @@ import {
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
 import {
-  buildGroundedSignalResponse,
+  buildGroundedInterpretationResponse,
   groundedExtractionResult,
   providerBackedExtractionResult
 } from "./fixture.js";
@@ -172,7 +172,7 @@ describe("extraction-fill cache validity", () => {
         extract: async (input) => {
           call += 1;
           if (call === 1) {
-            return providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt), {
+            return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt), {
               extractorMeta: {
                 recoveryKind: "none",
                 retryCount: 1,

@@ -24,7 +24,7 @@ import {
 import { readExtractionCacheManifestIdentity } from
   "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
-  buildGroundedSignalResponse,
+  buildGroundedInterpretationResponse,
   buildAuthorityQuestion,
   EXTRACTION_FILL_VARIANT,
   providerBackedExtractionResult,
@@ -122,7 +122,7 @@ describe("authority-bound provider failure isolation", () => {
       const turn = readTurnContent(input.userPrompt);
       if (turn.includes("provider-failure")) throw nonRetryable4xx();
       return providerBackedExtractionResult(
-        buildGroundedSignalResponse(input.userPrompt)
+        buildGroundedInterpretationResponse(input.userPrompt)
       );
     });
 

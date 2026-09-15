@@ -97,50 +97,35 @@ describe("native Gemini interactive extraction", () => {
     const originalSchema = soul.officialApiExtractionResponseSchema(userPrompt);
     const originalSnapshot = structuredClone(originalSchema);
     const expectedSchema = JSON.parse(JSON.stringify(originalSchema));
-    expectedSchema.properties.signals.items.additionalProperties = true;
-    expect(expectedSchema.properties.signals.maxItems).toBe(64);
-    delete expectedSchema.properties.signals.maxItems;
-    const observationProperties = expectedSchema.properties.signals.items.properties.identity_observation.properties;
-    for (const name of ["mentions", "unresolved_spans"]) {
-      expect(observationProperties[name].maxItems).toBeGreaterThan(0);
-      delete observationProperties[name].maxItems;
-    }
-    let observed = false;
+    expect(expectedSchema.properties.interpretations.maxItems).toBe(64);
+    expect(expectedSchema.properties.interpretations.items.additionalProperties).toBe(false);
+    delete expectedSchema.properties.interpretations.maxItems;
+    const relations = expectedSchema.properties.interpretations.items.properties.relations;
+    delete relations.maxItems;
+    delete relations.items.properties.arguments.maxItems;
+    delete relations.items.properties.qualifiers.maxItems;
+    let observed: unknown;
     await withServer((req, res) => {
       const chunks: Buffer[] = [];
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("end", () => {
         const wire = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        const schema = wire.generationConfig.responseJsonSchema;
-        expect(schema).toEqual(expectedSchema);
-        expect(schema.properties.signals.items.additionalProperties).toBe(true);
-        expect(schema.additionalProperties).toBe(false);
-        expect(schema.required).toEqual(["signals"]);
-        expect(schema.properties.signals.items.required).toEqual([
-          "object_kind", "confidence", "matched_text", "source_locator", "identity_observation"
-        ]);
-        expect(schema.properties.signals.items.properties.identity_observation.properties)
-          .toHaveProperty("mentions");
-        expect(schema.properties.signals.items.properties.temporal_projection).toMatchObject({
-          type: "object", required: ["projection_schema_version", "time_precision", "time_source"],
-          properties: {
-            event_time_end: { type: "string", format: "date-time", description: expect.stringContaining("Inclusive") },
-            valid_from: { type: "string", format: "date-time" },
-            projection_schema_version: { type: "number", enum: [1] }
-          }
-        });
-        observed = true;
+        observed = wire.generationConfig.responseJsonSchema;
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ candidates: [{ finishReason: "STOP",
-          content: { parts: [{ text: '{"signals":[]}' }] } }], usageMetadata: usage }));
+          content: { parts: [{ text: '{"interpretations":[]}' }] } }], usageMetadata: usage }));
       });
     }, async (origin) => {
       const result = await createGardenHttpExtractor({ ...config, providerUrl: origin })
         .extract({ ...input, userPrompt });
-      expect(result.rawJson).toBe('{"signals":[]}');
+      expect(result.rawJson).toBe('{"interpretations":[]}');
       expect(result.usage?.totalTokens).toBe(33);
     });
-    expect(observed).toBe(true);
+    expect(observed).toEqual(expectedSchema);
+    expect(observed).toMatchObject({ additionalProperties: false, required: ["interpretations"],
+      properties: { interpretations: { items: {
+        additionalProperties: false, required: ["assertion_id", "relations"]
+      } } } });
     expect(originalSchema).toEqual(originalSnapshot);
     expect(soul.officialApiExtractionResponseSchema(userPrompt)).toEqual(originalSnapshot);
   });

@@ -316,7 +316,7 @@ export class SqliteSignalRepo implements SignalRepo {
 
   public getByIdInCurrentTransaction(signalId: string): CandidateMemorySignal | null {
     const row = this.getByIdStatement.get(signalId) as SignalRow | undefined;
-    return row === undefined ? null : parseSignalRow(row);
+    return row === undefined ? null : parseStoredCandidateMemorySignal(row);
   }
 }
 
@@ -372,10 +372,10 @@ function parseSignal(signal: CandidateMemorySignal): CandidateMemorySignal {
 }
 
 const SignalRowParser: RowParser<CandidateMemorySignal> = {
-  parse: parseSignalRow
+  parse: parseStoredCandidateMemorySignal
 };
 
-function parseSignalRow(value: unknown): CandidateMemorySignal {
+export function parseStoredCandidateMemorySignal(value: unknown): CandidateMemorySignal {
   const row = readRecord(value, "signal row");
   const sourceDeliveryIdsJson = readNullableStringField(row, "source_delivery_ids_json");
   const sourceObservationJson = readNullableStringField(row, "source_observation_json");

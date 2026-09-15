@@ -287,6 +287,7 @@ function snapshot(count: number): FieldSnapshot {
       hypothesis_id: "h0", binding_context: "unbound", time_state: "as_of" },
     milligrades: 1000, accepting: true }));
   return { schema_version: 1, query_id: "query", snapshot_id: SNAPSHOT_ID, values,
+    has_incomparable_activations: false,
     seeds: values.map(({ state, milligrades }) => ({ schema_version: 1, state, milligrades })),
     retained_transitions: [], facets: [] };
 }

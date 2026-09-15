@@ -18,7 +18,7 @@ import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
-import { buildGroundedSignalResponse } from "../extraction-fill/fixture.js";
+import { buildGroundedInterpretationResponse } from "../extraction-fill/fixture.js";
 import {
   cachingExtractor,
   deferred,
@@ -31,7 +31,7 @@ import {
 
 it("uses the compact production extraction request", async () => {
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-    rawJson: '{"signals":[]}'
+    rawJson: '{"interpretations":[]}'
   }));
 
   await runExtractionPool({
@@ -55,7 +55,7 @@ it("uses the compact production extraction request", async () => {
     readonly source_assertions?: readonly { readonly text: string }[];
   };
   expect(request.schema_version).toBe(2);
-  expect(request.source_locator_contract_version).toBe(3);
+  expect(request.source_locator_contract_version).toBe(4);
   expect(request.source_assertions).toEqual([
     { assertion_id: 1, text: "User: I moved to Berlin." }
   ]);
@@ -69,7 +69,7 @@ it("extracts every source assertion through bounded request batches", async () =
       readonly source_assertions: readonly { readonly assertion_id: number }[];
     };
     requests.push(request.source_assertions.map(({ assertion_id }) => assertion_id));
-    return { rawJson: '{"signals":[]}' };
+    return { rawJson: '{"interpretations":[]}' };
   });
   const source = Array.from(
     { length: 9 },
@@ -105,7 +105,7 @@ it("attributes a concurrent 429 backoff to its own task instead of shared run st
         cleanStarted.resolve();
         await releaseClean.promise;
         return {
-          rawJson: '{"signals":[]}',
+          rawJson: '{"interpretations":[]}',
           extractorMeta: {
             recoveryKind: "none",
             retryCount: 0,
@@ -117,7 +117,7 @@ it("attributes a concurrent 429 backoff to its own task instead of shared run st
       stats.rateLimitRetries = 1;
       limitedCompleted.resolve();
       return {
-        rawJson: '{"signals":[]}',
+        rawJson: '{"interpretations":[]}',
         extractorMeta: {
           recoveryKind: "none",
           retryCount: 1,
@@ -278,7 +278,7 @@ it("reports a recovered 429 from the accepted response to adaptive concurrency",
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
         .mockImplementationOnce(async (input) => providerBackedExtractionResult(
-          buildGroundedSignalResponse(input.userPrompt), {
+          buildGroundedInterpretationResponse(input.userPrompt), {
           extractorMeta: {
             recoveryKind: "none",
             retryCount: 1,
@@ -335,7 +335,7 @@ it("starts at the explicit initial concurrency before recovering toward the maxi
       started += 1;
       if (started <= 8) await firstWave.promise;
       else if (started <= 17) await secondWave.promise;
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: '{"interpretations":[]}' };
     })
   };
   const turns = Array.from({ length: 32 }, (_, index) => ({
@@ -437,7 +437,7 @@ it("honors the derived provider wall-clock budget", async () => {
 
 it("refuses interactive fill when a request exceeds the receipt input-token bound", async () => {
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-    rawJson: '{"signals":[]}'
+    rawJson: '{"interpretations":[]}'
   }));
   await expect(runExtractionPool({
     extractor: { extract },

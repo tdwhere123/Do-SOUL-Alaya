@@ -62,21 +62,25 @@ describe("source-backed conditional association and evidence", () => {
     await relation(fixture, 811, SEED, LOG, "observed_log");
     const viaLog = await relation(fixture, 812, LOG, CONFIG, "config_via_log");
     await relation(fixture, 813, SEED, CONFIG, "config_direct");
-    const result = await fixture.service.recall(request);
-    const config = result.index.entries.find((entry) => entry.object_id === CONFIG);
+    const pages = [await fixture.service.recall(request)];
+    for (let attempt = 0; attempt < 20 && pages.at(-1)!.index.continuation !== null; attempt += 1) {
+      pages.push(await fixture.service.recall({ ...request, continuation: pages.at(-1)!.index.continuation }));
+    }
+    const entries = pages.flatMap((page) => page.index.entries);
+    const explanations = pages.flatMap((page) => page.index.explanations ?? []);
+    const config = entries.find((entry) => entry.object_id === CONFIG);
     expect(config).toBeDefined();
     expect(config?.association_milligrades).toBe(1000);
     expect(config?.claim).toBe("supported");
     expect(config?.explanation_ids.length).toBeGreaterThan(0);
-    expect(result.index.explanations?.some((derivation) => derivation.leaf_ids.includes("relation-812")))
-      .toBe(true);
+    expect(explanations.some((derivation) => derivation.leaf_ids.includes("relation-812"))).toBe(true);
     const admitted = fixture.relationReader.read("workspace-1", LOG, "config_via_log", 16);
     expect(admitted.observations[0]?.evidenceReceipts?.map((receipt) => receipt.evidenceId)).toContain(viaLog);
-    const seed = result.index.entries.find((entry) => entry.object_id === SEED);
+    const seed = entries.find((entry) => entry.object_id === SEED);
     expect(seed?.claim).toBe("unknown");
     expect(seed?.explanation_ids.some((id) => config?.explanation_ids.includes(id))).toBe(false);
-    expect(result.candidates.map((entry) => entry.object_id)).toEqual(
-      result.index.entries.map((entry) => entry.object_id)
+    for (const page of pages) expect(page.candidates.map((entry) => entry.object_id)).toEqual(
+      page.index.entries.map((entry) => entry.object_id)
     );
   });
 

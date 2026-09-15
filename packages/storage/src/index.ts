@@ -435,3 +435,5 @@ export {
 } from "@do-soul/alaya-protocol/cjk-segmentation";
 export type { CjkSegmentationStatus } from "@do-soul/alaya-protocol/cjk-segmentation";
 
+
+export { parseStoredCandidateMemorySignal } from "./repos/signal/signal-repo.js";

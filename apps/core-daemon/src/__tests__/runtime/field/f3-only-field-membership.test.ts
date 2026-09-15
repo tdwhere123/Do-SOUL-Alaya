@@ -10,13 +10,30 @@ const F3_IDENTITY = "learn cook";
 const SOURCE_SURFACE = "completed";
 
 describe("source-bound semantic factor publication", () => {
-  it("persists supplied F3 source identity without a query-time provider or ranker", async () => {
+  it("publishes certified source identity and retains the supplied proposal without a query-time provider", async () => {
     const database = planted.openMemoryDatabase();
     const field = composeField(database);
     await createF3Evidence(database, field);
     expect((await new SqliteEvidenceCapsuleRepo(database).findById(EVIDENCE_ID))?.excerpt).toBe(EXCERPT);
     const descriptors = field.fieldRepos.factors.listDescriptors(WORKSPACE_ID);
-    expect(descriptors.some((row) => row.family === "f3" && row.canonical_payload?.includes(F3_IDENTITY))).toBe(true);
+    const semantic = database.connection.prepare(
+      "SELECT graph_json, semantic_completeness_json FROM evidence_semantic_factor_formations WHERE evidence_object_id = ?"
+    ).get(EVIDENCE_ID) as { graph_json: string; semantic_completeness_json: string };
+    expect(JSON.parse(semantic.graph_json).factors).toContainEqual({
+      factor_id: "predicate", surface: "completed", source_span: [2, 11], semantic_identity: "completed"
+    });
+    expect(JSON.parse(semantic.semantic_completeness_json).upstream_semantic_formation).toMatchObject({
+      status: "formed",
+      graph: {
+        propositions: sourceSemanticProposal(EXCERPT).graph.propositions,
+        factors: [
+          { factor_id: "subject", surface: "I", source_span: [0, 1], semantic_identity: "i" },
+          { factor_id: "learn.cook", surface: "completed", source_span: [2, 11], semantic_identity: F3_IDENTITY },
+          { factor_id: "skill", surface: "Sichuan recipes last autumn", source_span: [12, 39], semantic_identity: "sichuan recipes" }
+        ], variables: [], result_variable_ids: []
+      }
+    });
+    expect(descriptors.some((row) => row.family === "f3" && row.canonical_payload?.includes(SOURCE_SURFACE))).toBe(true);
     const ids = new Set(descriptors.filter((row) => row.family === "f3").map((row) => row.factor_id));
     expect(field.fieldRepos.factors.listIncidences(WORKSPACE_ID).some((row) => ids.has(row.factor_id))).toBe(true);
   });

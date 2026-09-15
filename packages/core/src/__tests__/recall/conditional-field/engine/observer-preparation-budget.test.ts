@@ -7,6 +7,8 @@ import { observeField } from "../../../../recall/runtime/conditional-field-obser
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
 describe("observer preparation under a small continuation allowance", () => {
+  // Retain all thousand seeded products before measuring continuation work;
+  // the solver and binding indexes are included in retained-memory accounting.
   it.each([2, 13])("does not rescan every retained product under a %i-unit continuation", (work) => {
     const interpretation: QueryInterpretation = { schema_version: 1, query_id: "bounded-observer-preparation",
       snapshot_id: SNAPSHOT_ID, status: "resolved", holes: [], hypotheses: [], view: defaultView(),
@@ -15,7 +17,7 @@ describe("observer preparation under a small continuation allowance", () => {
         facet_mode: "same_path", threshold_milligrades: 0 } };
     const programState = seedProgramStates(interpretation.program)[0]!;
     const field = createConditionalField({ interpretation,
-      budget: defaultBudget({ work_units: 100_000, memory_bytes: 10_000_000 }),
+      budget: defaultBudget({ work_units: 100_000, memory_bytes: 50_000_000 }),
       seeds: Array.from({ length: 1000 }, (_, index) => ({ schema_version: 1 as const,
         state: productKey(`seed-${index}`, "h0", "unbound", programState), milligrades: 1000 })) });
     expect(field.memory_exhausted).toBe(false);
@@ -26,7 +28,7 @@ describe("observer preparation under a small continuation allowance", () => {
     let nativeCalls = 0;
     const result = observeField(interpretation, { workspace_id: "workspace-1", query_text: "seed",
       as_of: "2026-09-10T00:00:00.000Z", authorized_scopes: null, resume_field: field,
-      budget: defaultBudget({ work_units: work, finalization_reserve: 0, min_envelope: 0, memory_bytes: 10_000_000 }),
+      budget: defaultBudget({ work_units: work, finalization_reserve: 0, min_envelope: 0, memory_bytes: 50_000_000 }),
       readers: { lexical: () => {
         nativeCalls += 1;
         return { ids: [], rowsRead: 0, bytesRead: 0, nativeVisits: 0, nativeBytes: 0, truncated: false };
@@ -46,7 +48,7 @@ describe("observer preparation under a small continuation allowance", () => {
       program: { schema_version: 1, kind: "relation", relation_kind: "p", source_variable: "x", target_variable: "y",
         guard: { schema_version: 1, kind: "query_predicate", verdict: "true", time_scope: "none" }, facet_mode: "same_path", threshold_milligrades: 0 } };
     const programState = seedProgramStates(interpretation.program)[0]!;
-    const field = createConditionalField({ interpretation, budget: defaultBudget({ work_units: 100000, memory_bytes: 10000000 }),
+    const field = createConditionalField({ interpretation, budget: defaultBudget({ work_units: 100000, memory_bytes: 50000000 }),
       seeds: Array.from({ length: 1000 }, (_, index) => ({ schema_version: 1, state: productKey(`old-${index}`, "h0", "unbound", programState), milligrades: 1000 })) });
     const priorSeeds = field.seeds;
     const priorIdentities = field.seen_identities;
@@ -60,7 +62,7 @@ describe("observer preparation under a small continuation allowance", () => {
     let native = 0;
     const next = observeField(interpretation, { workspace_id: "workspace-1", query_text: "fresh", as_of: options.asOf,
       authorized_scopes: null, resume_field: field,
-      budget: defaultBudget({ work_units: 25, finalization_reserve: 0, min_envelope: 0, memory_bytes: 10000000 }), readers: {
+      budget: defaultBudget({ work_units: 25, finalization_reserve: 0, min_envelope: 0, memory_bytes: 50000000 }), readers: {
         lexical: () => { native += 1; return { ids: ["fresh"], rowsRead: 1, bytesRead: 5, nativeVisits: 1, nativeBytes: 5, truncated: false }; },
         source: ({ objectId }) => ({ row: { object_id: objectId, sourceRevision: "rev", content: "fresh", lifecycle_state: "active", scope_class: "project" },
           rowsRead: 1, bytesRead: 5, unavailable: false })
@@ -72,8 +74,8 @@ describe("observer preparation under a small continuation allowance", () => {
     expect(identityVisits.mock.calls.length).toBeLessThanOrEqual(25);
     expect(priorSeeds.length).toBe(1000);
     expect(priorIdentities.length).toBe(1000);
-    expect(pending.advance(0, 10000, 10000000).effects).toEqual([]);
+    expect(pending.advance(0, 10000, 50000000).effects).toEqual([]);
     const current = createAdjacencyEffectCursor([edge], { ...options, liveStates: next.seen_identities });
-    expect(current.advance(0, 10000, 10000000).effects.some((effect) => effect.transition !== undefined)).toBe(true);
+    expect(current.advance(0, 10000, 50000000).effects.some((effect) => effect.transition !== undefined)).toBe(true);
   });
 });

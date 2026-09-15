@@ -1,3 +1,4 @@
+import { createHistoricalSignalReplayProvider } from "../historical-signal-replay-fixture.js";
 import { createHash } from "node:crypto";
 import {
   buildVerifiedUserAssertionReceiptPreimage,
@@ -9,7 +10,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
-  OfficialApiGardenProvider,
   parseOfficialApiSourceLocator
 } from "@do-soul/alaya-soul";
 import { attachCompileSourceGrounding } from
@@ -106,7 +106,7 @@ describe("compile source grounding receipts", () => {
     const targetAnchor = buildOfficialApiSourceAssertions(canonicalCorpus)
       .find(({ text }) => text.includes("Great Ocean Road"));
     expect(targetAnchor).toBeDefined();
-    const provider = new OfficialApiGardenProvider({
+    const provider = createHistoricalSignalReplayProvider({
       apiKey: "sk-test",
       extractor: {
         extract: async () => ({
@@ -265,7 +265,7 @@ async function extractDraft(input: {
     role: "user" as const,
     content: input.source
   }];
-  const provider = new OfficialApiGardenProvider({
+  const provider = createHistoricalSignalReplayProvider({
     apiKey: "sk-test",
     extractor: { extract: async () => ({ rawJson: JSON.stringify({
       signals: [withOpenSemanticFactorGraph({
@@ -333,7 +333,7 @@ function receiptV2Digest(
 
 function assertionLocator(assertionId: number) {
   return {
-    contract_version: 3,
+    contract_version: 4,
     kind: "assertion_catalog",
     assertion_id: assertionId
   };

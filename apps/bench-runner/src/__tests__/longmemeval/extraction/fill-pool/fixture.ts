@@ -39,7 +39,7 @@ export function extractionTurns(count: number) {
 }
 
 export function retryResult(rateLimitRetries: number) {
-  return providerBackedExtractionResult('{"signals":[]}', {
+  return providerBackedExtractionResult('{"interpretations":[]}', {
     extractorMeta: {
       recoveryKind: "none" as const,
       retryCount: rateLimitRetries,

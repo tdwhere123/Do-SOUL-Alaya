@@ -52,29 +52,18 @@ async function expectRejection(promise: Promise<unknown>, pattern: RegExp): Prom
 }
 
 function rawForText(text: string, assertionId = 1): string {
-  return JSON.stringify({ signals: [{
-    object_kind: "fact",
-    confidence: 0.9,
-    matched_text: text,
-    source_locator: { contract_version: 3, kind: "assertion_catalog", assertion_id: assertionId }
-  }] });
+  return JSON.stringify({ interpretations: [interpretationFor({ text, assertionId })] });
 }
 
-function signalFor(task: ReturnType<typeof semanticTask>) {
-  return {
-    object_kind: "fact",
-    confidence: 0.9,
-    matched_text: task.text.replace(/^(?:User|Assistant): /u, ""),
-    source_locator: {
-      contract_version: 3,
-      kind: "assertion_catalog",
-      assertion_id: task.assertionId
-    }
-  };
+function interpretationFor(task: { text: string; assertionId: number }) {
+  return { assertion_id: task.assertionId, relations: [{
+    predicate: { text: task.text.replace(/^(?:User|Assistant): /u, "") },
+    arguments: [], qualifiers: []
+  }] };
 }
 
 function rawForPack(tasks: readonly ReturnType<typeof semanticTask>[]): string {
-  return JSON.stringify({ signals: tasks.map(signalFor) });
+  return JSON.stringify({ interpretations: tasks.map(interpretationFor) });
 }
 
 function reorderKeys<T extends object>(value: T, keys: readonly (keyof T)[]): T {
