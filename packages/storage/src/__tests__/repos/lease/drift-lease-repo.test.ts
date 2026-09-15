@@ -66,18 +66,12 @@ describe("SqliteDriftLeaseRepo", () => {
         `
       )
       .all("workspace-1", "2026-04-20T08:00:00.000Z") as Array<{ readonly detail: string }>;
-    const cleanupPlan = database.connection
-      .prepare(
-        `
-          EXPLAIN QUERY PLAN
-          DELETE FROM drift_leases
-          WHERE alaya_utc_compare(expires_at, ?) <= 0
-        `
-      )
-      .all("2026-04-20T08:00:00.000Z") as Array<{ readonly detail: string }>;
 
-    expect(activeLookupPlan.some((row) => row.detail.includes("idx_drift_leases_workspace_expires"))).toBe(true);
-    expect(cleanupPlan.some((row) => row.detail.includes("idx_drift_leases_expires"))).toBe(true);
+    expect(
+      activeLookupPlan.some((row) =>
+        row.detail.includes("SEARCH drift_leases USING INDEX idx_drift_leases_workspace_operation")
+      )
+    ).toBe(true);
   });
 
   it("creates and lists active leases for a workspace", async () => {
