@@ -7,11 +7,50 @@ import { defaultBudget, INTERPRETATION_CLOCK, SNAPSHOT_ID } from "../reference/d
 import { openSourceSlice, WS } from "../vertical/source-slice.js";
 import { indexEntryRevision } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
+import { restoreField } from "../../../../recall/runtime/index-continuation.js";
 
 const databases = new Set<StorageDatabase>();
 afterEach(() => { for (const database of databases) database.close(); databases.clear(); });
 
 describe("native lexical delivery at corpus scale", () => {
+  it("recovers the first memory-blocked continuation under a larger budget and replays consumed tokens", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    const expected = Array.from({ length: 48 }, (_, index) =>
+      `aaaaaaaa-aaaa-4aaa-8aaa-${String(60_000 + index).padStart(12, "0")}`);
+    for (const id of expected) await slice.writeMemory(id, "graduation degree", MemoryDimension.FACT);
+    const readers = readersFor(slice, []);
+    const run = (budget: RequestBudget, continuation: InformationIndex["continuation"] = null) =>
+      runConditionalFieldRecall({ workspace_id: WS, query_text: "graduation degree", budget,
+        result_kind_view: "memory_only", snapshot_id: SNAPSHOT_ID, interpretation_clock: INTERPRETATION_CLOCK,
+        as_of: INTERPRETATION_CLOCK, expires_at: "2099-01-01T00:00:00.000Z", readers, continuation,
+        authorized_scopes: null });
+    const small = defaultBudget({ page_budget: 5 });
+    let page = run(small);
+    const ids = page.entries.map((entry) => entry.object_id);
+    for (let attempt = 0; attempt < 40 && !restoreField(page.continuation)?.memory_exhausted; attempt += 1) {
+      expect(page.continuation).not.toBeNull();
+      page = run(small, page.continuation);
+      ids.push(...page.entries.map((entry) => entry.object_id));
+    }
+    const blocked = page.continuation;
+    expect(blocked).not.toBeNull();
+    expect(restoreField(blocked)?.memory_exhausted).toBe(true);
+    const large = { ...small, memory_bytes: 10_000_000 };
+    const recovered = run(large, blocked);
+    expect(run(large, blocked)).toEqual({ ...recovered, page_purpose: "retry" });
+    expect(run(small, blocked)).toEqual({ ...recovered, page_purpose: "retry" });
+    page = recovered;
+    ids.push(...page.entries.map((entry) => entry.object_id));
+    for (let attempt = 0; attempt < 40 && page.continuation !== null; attempt += 1) {
+      page = run(large, page.continuation);
+      ids.push(...page.entries.map((entry) => entry.object_id));
+    }
+    expect(page.continuation).toBeNull();
+    expect(page.completeness.logical_index).toBe("complete");
+    expect(ids).toEqual(expected);
+    expect(new Set(ids).size).toBe(expected.length);
+  });
+
   it.each([0, 1])("terminates an unserviceable %i-unit request without a replayable no-progress cursor", (work_units) => {
     const readers: ObserverReaders = { lexical: () => { throw new Error("An unserviceable action must not read"); } };
     const pages = collectPages(readers, defaultBudget({ work_units, finalization_reserve: 0,
@@ -32,7 +71,7 @@ describe("native lexical delivery at corpus scale", () => {
     }
     const limits: number[] = [];
     const readers = readersFor(slice, limits);
-    const budget = defaultBudget({ page_budget: 5 });
+    const budget = defaultBudget({ page_budget: 5, memory_bytes: 10_000_000 });
     const pages = collectPages(readers, budget, 50);
     expect(pages[0]!.entries).toHaveLength(5);
     expect(pages.flatMap((page) => page.entries.map((entry) => (entry.object_id ?? "")))).toEqual(expected);
@@ -60,7 +99,7 @@ describe("native lexical delivery at corpus scale", () => {
       expected.push(id);
       await slice.writeMemory(id, `graduation degree record ${index}`, MemoryDimension.FACT);
     }
-    const pages = collectPages(readersFor(slice, []), defaultBudget({ work_units: 120, finalization_reserve: 30,
+    const pages = collectPages(readersFor(slice, []), defaultBudget({ memory_bytes: 10_000_000, work_units: 120, finalization_reserve: 30,
       min_envelope: 1, page_budget: 3 }), 100);
     expect(pages.at(-1)!.continuation, JSON.stringify(pages.map((page) => [page.entries.length, page.continuation?.cursor, page.completeness]))).toBeNull();
     expect(pages.flatMap((page) => page.entries.map((entry) => (entry.object_id ?? "")))).toEqual(expected);
@@ -78,7 +117,7 @@ describe("native lexical delivery at corpus scale", () => {
       : index % 2 === 0 ? count - 1 - index / 2 : (index - 1) / 2);
     const ids = numbers.map((number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(40_000 + number).padStart(12, "0")}`);
     for (const id of ids) await slice.writeMemory(id, "graduation degree", MemoryDimension.FACT);
-    const pages = collectPages(readersFor(slice, []), defaultBudget({ work_units: work,
+    const pages = collectPages(readersFor(slice, []), defaultBudget({ memory_bytes: 10_000_000, work_units: work,
       finalization_reserve: reserve, min_envelope: 1, page_budget: 3 }), 100);
     const delivered = pages.flatMap((page) => page.entries.map((entry) => (entry.object_id ?? "")));
     expect(pages.at(-1)!.continuation).toBeNull();
