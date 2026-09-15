@@ -300,6 +300,7 @@ function evaluateApplicableGuard(
         )
       };
     }
+    if (classified.kind === "proposal_lookup") return undefined;
     if (classified.kind === "unknown") return { ...guard, verdict: "unresolved" };
     const filters = decodeSourceFilters(guard.predicate_name);
     if (filters === undefined) return undefined;

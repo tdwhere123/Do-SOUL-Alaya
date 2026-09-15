@@ -91,6 +91,23 @@ export type SourceRootObserverPage = Readonly<{
   readonly unavailable?: boolean;
 }>;
 
+export type BoundInterpretationHintRow = Readonly<{
+  readonly object_id: string;
+  readonly gist: string;
+}>;
+
+export type BoundInterpretationHintPage = Readonly<{
+  readonly rows: readonly BoundInterpretationHintRow[];
+  readonly nativeVisits: number;
+  readonly nativeBytes: number;
+  readonly rowsRead: number;
+  readonly bytesRead: number;
+  readonly truncated: boolean;
+  readonly committedThrough?: string | null;
+  readonly unavailable?: boolean;
+  readonly resourceLimited?: boolean;
+}>;
+
 export type SourceRootHydrateObserverPage = Readonly<{
   readonly row: SourceRootObserverRow | null;
   readonly rowsRead: number;
@@ -175,6 +192,20 @@ export type ObserverReaders = Readonly<{
     readonly nativeByteLimit?: number;
     readonly offset?: number;
   }>) => SourceRootHydrateObserverPage;
+  readonly boundInterpretations?: (input: Readonly<{
+    readonly workspaceId: string;
+    readonly limit: number;
+    readonly nativeLimit: number;
+    readonly afterCursor: string | null;
+  }>) => BoundInterpretationHintPage;
+  readonly sourceTextHints?: (input: Readonly<{
+    readonly workspaceId: string;
+    readonly phrases: readonly string[];
+    readonly limit: number;
+    readonly nativeLimit: number;
+    readonly afterCursor: string | null;
+    readonly byteLimit?: number;
+  }>) => SourceRootObserverPage;
   readonly relation?: (input: Readonly<{
     readonly workspaceId: string;
     readonly subject: string | null;

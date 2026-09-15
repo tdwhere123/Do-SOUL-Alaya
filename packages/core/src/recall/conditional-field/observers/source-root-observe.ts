@@ -1,5 +1,6 @@
 import { sourceRecallTarget, type TypedObservation } from "@do-soul/alaya-protocol";
 import { buildTypedObservation, sourceRootEligible } from "./observation-admission.js";
+import { sourceHintSketch, takeSourceHintPage } from "./source-hint-observe.js";
 import { scanSourceLiterals } from "./source-literal-stream.js";
 import {
   DEFAULT_SOURCE_BYTE_LIMIT,
@@ -40,11 +41,31 @@ export function observeSourceAwareSeed(
   let resourceLimited = false;
   let sourceCommitted = cursor.source;
   let memoryCommitted = cursor.memory;
+  let hintCommitted = cursor.hint;
+  const sketch = sourceHintSketch(input);
+  let hintsDone = sketch === undefined || cursor.hintsDone;
   const share = seedFamilyShare(input, wantMemory, cursor.sourcesDone);
+  const lanes = hintSourceShare(share.sourceWork, share.sourceLimit, sketch !== undefined && !hintsDone);
+  let exhaustiveWork = lanes.sourceWork;
+  let pagedHints = false;
+  if (sketch !== undefined && !hintsDone && lanes.hintWork > 0) {
+    pagedHints = true;
+    const hinted = takeSourceHintPage(input, sketch, lanes.hintLimit, lanes.hintWork, hintCommitted);
+    observations.push(...hinted.observations);
+    sourceRows.push(...hinted.rows);
+    workUnits += hinted.workUnits;
+    bytes += hinted.bytes;
+    truncated = hinted.truncated;
+    hintCommitted = hinted.hintCommitted;
+    hintsDone = hinted.hintsDone;
+    if (hinted.hydrationUnavailable) hydrationUnavailable = true;
+    if (hinted.resourceLimited) resourceLimited = true;
+    if (hinted.hintsDone) exhaustiveWork += Math.max(0, lanes.hintWork - hinted.workUnits);
+  }
   let pagedSources = false;
-  if (!cursor.sourcesDone && share.sourceLimit > 0 && share.sourceWork > 0) {
+  if (!cursor.sourcesDone && lanes.sourceLimit > 0 && exhaustiveWork > 0) {
     const sourced = takeSourcePage(
-      input, sourceRoots, share.sourceLimit, share.sourceWork, sourceCommitted, cursor.source
+      input, sourceRoots, lanes.sourceLimit, exhaustiveWork, sourceCommitted, cursor.source
     );
     pagedSources = true;
     observations.push(...sourced.observations);
@@ -74,7 +95,7 @@ export function observeSourceAwareSeed(
       if (taken.resourceLimited) resourceLimited = true;
     }
   }
-  if (!cursor.sourcesDone && !pagedSources && memoryIdle) {
+  if (!cursor.sourcesDone && !pagedSources && memoryIdle && !pagedHints) {
     const sourced = takeSourcePage(
       input, sourceRoots, pageLimit(input), Math.max(0, input.action.work_limit - workUnits), sourceCommitted, cursor.source
     );
@@ -96,7 +117,10 @@ export function observeSourceAwareSeed(
   const committed = encodeSeedCursor({
     source: sourceCommitted,
     memory: memoryCommitted,
-    sourcesDone
+    sourcesDone,
+    hint: hintCommitted,
+    hintsDone,
+    persistHint: sketch !== undefined
   });
   const cursorOut = committed === null
     ? input.cursor
@@ -254,6 +278,29 @@ function takeLexicalPage(
   };
 }
 
+function hintSourceShare(
+  sourceWork: number,
+  sourceLimit: number,
+  wantHint: boolean
+): Readonly<{
+  readonly hintWork: number;
+  readonly hintLimit: number;
+  readonly sourceWork: number;
+  readonly sourceLimit: number;
+}> {
+  if (!wantHint || sourceWork <= 0) {
+    return { hintWork: 0, hintLimit: 0, sourceWork, sourceLimit };
+  }
+  const hintWork = Math.max(1, Math.floor(sourceWork / 2));
+  const exhaustiveWork = Math.max(0, sourceWork - hintWork);
+  return {
+    hintWork,
+    hintLimit: Math.max(1, Math.floor(sourceLimit / 2) || 1),
+    sourceWork: exhaustiveWork,
+    sourceLimit: exhaustiveWork === 0 ? 0 : Math.max(1, sourceLimit - Math.max(1, Math.floor(sourceLimit / 2)))
+  };
+}
+
 function seedFamilyShare(
   input: ObserveConditionalFieldInput,
   wantMemory: boolean,
@@ -295,9 +342,11 @@ function parseSeedCursor(committed: string | null): Readonly<{
   readonly source: string | null;
   readonly memory: string | null;
   readonly sourcesDone: boolean;
+  readonly hint: string | null;
+  readonly hintsDone: boolean;
 }> {
   if (committed === null || committed === "") {
-    return { source: null, memory: null, sourcesDone: false };
+    return { source: null, memory: null, sourcesDone: false, hint: null, hintsDone: false };
   }
   if (committed.startsWith("s:")) return parseBundledSeedCursor(committed.slice(2));
   // `f:` is dual-family source progress; treating it as a memory id would skip remaining roots.
@@ -307,33 +356,37 @@ function parseSeedCursor(committed: string | null): Readonly<{
     || committed.startsWith("o:")
     || committed.startsWith("f:")
   ) {
-    return { source: committed, memory: null, sourcesDone: false };
+    return { source: committed, memory: null, sourcesDone: false, hint: null, hintsDone: false };
   }
   if (committed.startsWith("m:")) {
     const memory = committed.slice(2);
-    return { source: null, memory: memory === "" ? null : memory, sourcesDone: true };
+    return { source: null, memory: memory === "" ? null : memory, sourcesDone: true, hint: null, hintsDone: true };
   }
-  return { source: null, memory: committed, sourcesDone: true };
+  return { source: null, memory: committed, sourcesDone: true, hint: null, hintsDone: true };
 }
 
 function parseBundledSeedCursor(payload: string): Readonly<{
   readonly source: string | null;
   readonly memory: string | null;
   readonly sourcesDone: boolean;
+  readonly hint: string | null;
+  readonly hintsDone: boolean;
 }> {
   try {
     const parsed: unknown = JSON.parse(payload);
     if (parsed === null || typeof parsed !== "object") {
-      return { source: null, memory: null, sourcesDone: false };
+      return { source: null, memory: null, sourcesDone: false, hint: null, hintsDone: true };
     }
     const record = parsed as Record<string, unknown>;
     return {
       source: typeof record.source === "string" && record.source.length > 0 ? record.source : null,
       memory: typeof record.memory === "string" && record.memory.length > 0 ? record.memory : null,
-      sourcesDone: record.sourcesDone === true
+      sourcesDone: record.sourcesDone === true,
+      hint: typeof record.hint === "string" && record.hint.length > 0 ? record.hint : null,
+      hintsDone: record.hintsDone === true
     };
   } catch {
-    return { source: null, memory: null, sourcesDone: false };
+    return { source: null, memory: null, sourcesDone: false, hint: null, hintsDone: true };
   }
 }
 
@@ -341,7 +394,19 @@ function encodeSeedCursor(input: Readonly<{
   readonly source: string | null;
   readonly memory: string | null;
   readonly sourcesDone: boolean;
+  readonly hint: string | null;
+  readonly hintsDone: boolean;
+  readonly persistHint: boolean;
 }>): string | null {
+  if (input.persistHint) {
+    return `s:${JSON.stringify({
+      source: input.source,
+      memory: input.memory,
+      sourcesDone: input.sourcesDone,
+      hint: input.hint,
+      hintsDone: input.hintsDone
+    })}`;
+  }
   if (!input.sourcesDone && (input.memory === null || input.memory === "")) {
     return input.source;
   }

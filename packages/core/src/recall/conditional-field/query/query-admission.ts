@@ -28,6 +28,7 @@ import {
 } from "./query-proposal-admission.js";
 import { QUERY_PROPOSAL_PRODUCER_REGISTRY_POLICY_VERSION } from "./query-proposal-producer-registry.js";
 import { decodeSourceFilters } from "./ordinary-language.js";
+import { decodeSourceProposalPredicate } from "./query-source-proposal.js";
 import {
   classifyQueryPredicate,
   unsupportedPredicateHole,
@@ -353,6 +354,10 @@ function admitPredicateName(
   const classified = classifyQueryPredicate(name);
   if (classified.kind === "memory_filters") {
     decodeSourceFilters(name);
+    return "ok";
+  }
+  if (classified.kind === "proposal_lookup") {
+    decodeSourceProposalPredicate(name);
     return "ok";
   }
   if (classified.kind === "unknown" && holes.length === 0) {

@@ -20,6 +20,7 @@ import {
   SqliteIndexedRecallProjection,
   SqliteMemoryRecallReader,
   SqliteRelationRecallReader,
+  SqliteSourceHintReader,
   SqliteSourceRootRecallReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
@@ -121,6 +122,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
     new SqliteFieldSourceRecordRepo(database, fieldContractSha256),
     new SqliteEvidenceCapsuleRepo(database)
   );
+  const sourceHints = new SqliteSourceHintReader(database.connection);
   const kindsSql = database.connection.prepare(
     `SELECT relation_kind AS kind FROM relation_assertions
      WHERE workspace_id = ? AND relation_kind > ? ORDER BY relation_kind LIMIT 1`
@@ -172,6 +174,22 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
         truncated: page.truncated,
         committedThrough: page.committedThrough,
         unavailable: page.unavailable
+      };
+    },
+    boundInterpretations: (input) => sourceHints.pageBoundInterpretations(input),
+    sourceTextHints: (input) => {
+      const page = sourceHints.pageSourceTextHints(input);
+      return {
+        rows: page.rows.map(toSourceRootObserverRow),
+        nativeVisits: page.nativeVisits,
+        nativeBytes: page.nativeBytes,
+        rowsRead: page.rowsRead,
+        bytesRead: page.bytesRead,
+        nativeWork: page.nativeWork,
+        truncated: page.truncated,
+        committedThrough: page.committedThrough,
+        unavailable: page.unavailable,
+        resourceLimited: page.resourceLimited
       };
     },
     sourceRoot: (input) => {

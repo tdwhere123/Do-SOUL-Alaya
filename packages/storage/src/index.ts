@@ -209,6 +209,7 @@ export {
   SqliteFieldProofEffectRepo,
   SqliteFieldSourceRecordRepo,
   SqliteFieldSourceSpanRepo,
+  SqliteSourceHintReader,
   SqliteSourceRootRecallReader,
   factorFromRow,
   generationFromRow,
