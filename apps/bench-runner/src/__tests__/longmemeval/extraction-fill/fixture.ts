@@ -120,7 +120,7 @@ export function buildGroundedSignalResponse(userPrompt: string): string {
     signalsEnvelope([{ distilled: assertion, matched: assertion }])
   ) as { signals: Record<string, unknown>[] };
   envelope.signals[0]!.source_locator = {
-    contract_version: 3,
+    contract_version: 4,
     kind: "assertion_catalog",
     assertion_id: sourceAssertion.assertion_id
   };

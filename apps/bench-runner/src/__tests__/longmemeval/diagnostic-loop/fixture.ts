@@ -214,7 +214,8 @@ function trackingExtractionResult(
       request_profile: entry.requestProfile,
       cache_key: entry.cacheKey,
       raw_json: rawJson,
-      extracted_at: "2026-08-19T00:00:00.000Z"
+      extracted_at: "2026-08-19T00:00:00.000Z",
+      empty_classification: "deterministic_empty"
     });
   }
   writeExtractionCacheManifest(cacheRoot, trackingManifest(context, entries));

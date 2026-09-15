@@ -276,7 +276,7 @@ describe("bench evidence capsule — production-faithful span", () => {
     expect(raw?.matched_text).not.toBe(fullTurn);
     expect(raw).toMatchObject({
       source_locator: {
-        contract_version: 3,
+        contract_version: 4,
         kind: "assertion_catalog",
         assertion_id: 1
       },

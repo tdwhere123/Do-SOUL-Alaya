@@ -155,7 +155,7 @@ function admittedSignal(task: ReturnType<typeof semanticTask>) {
     confidence: 0.9,
     matched_text: task.text.replace(/^(?:User|Assistant): /u, ""),
     source_locator: {
-      contract_version: 3,
+      contract_version: 4,
       kind: "assertion_catalog",
       assertion_id: task.assertionId
     }

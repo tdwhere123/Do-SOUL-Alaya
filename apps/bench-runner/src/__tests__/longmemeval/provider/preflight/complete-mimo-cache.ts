@@ -49,7 +49,8 @@ function writeCompleteMimoCacheKeys(
       request_profile: MIMO.requestProfile,
       cache_key: key,
       raw_json: rawJson,
-      extracted_at: "2026-08-17T00:00:00.000Z"
+      extracted_at: "2026-08-17T00:00:00.000Z",
+      empty_classification: "deterministic_empty"
     });
   }
   const entries = keys.map((key) => ({

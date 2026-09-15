@@ -86,7 +86,7 @@ describe("diagnostic snapshot consume authority", () => {
       ...accepted,
       snapshotConsumeAuthority: "diagnostic",
       manifest: incompleteFillManifest(accepted.manifest)
-    })).rejects.toThrow(/complete v3 fill summary/u);
+    })).rejects.toThrow(/complete v3(?: or v4)? fill summary/u);
   });
 
   it("keeps promotion recall-eval rejected without a gate-eligible claim", async () => {

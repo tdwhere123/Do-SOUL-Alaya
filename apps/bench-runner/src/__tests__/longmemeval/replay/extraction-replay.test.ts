@@ -391,7 +391,15 @@ function cacheRoot(): string {
 function writeShard(root: string, cacheKey: string, rawJson: string): void {
   const path = cacheFilePath(root, cacheKey);
   mkdirSync(join(path, ".."), { recursive: true });
-  writeFileSync(path, JSON.stringify({ cache_key: cacheKey, model, request_profile: requestProfile, raw_json: rawJson }), "utf8");
+  writeFileSync(path, JSON.stringify({
+    cache_key: cacheKey,
+    model,
+    request_profile: requestProfile,
+    raw_json: rawJson,
+    ...(rawJson === JSON.stringify({ signals: [] })
+      ? { empty_classification: "deterministic_empty" }
+      : {})
+  }), "utf8");
 }
 
 function validRaw(): string {
@@ -492,7 +500,7 @@ function factFrameSignal(
   };
   const signalId = `signal-${mode}`;
   const sourceLocator = {
-    contract_version: 3 as const,
+    contract_version: 4 as const,
     kind: "assertion_catalog" as const,
     assertion_id: 1
   };
@@ -528,7 +536,7 @@ function factFrameSignal(
 function verifiedAssertionReceipt(input: Readonly<{
   readonly signalId: string;
   readonly sourceLocator: {
-    readonly contract_version: 3;
+    readonly contract_version: 4;
     readonly kind: "assertion_catalog";
     readonly assertion_id: number;
   };

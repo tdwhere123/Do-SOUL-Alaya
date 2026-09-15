@@ -99,7 +99,7 @@ describe("extraction live delegate atomic persistence", () => {
 
     const expected = {
       attempts: 1,
-      successfulShards: 0,
+      successfulShards: 1,
       pendingKeys: [],
       unresolvedAttempts: [],
       transportFailures: [],

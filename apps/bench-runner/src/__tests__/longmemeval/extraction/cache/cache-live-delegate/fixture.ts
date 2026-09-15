@@ -84,7 +84,7 @@ export function createHttpExtractor(fetchMock: ReturnType<typeof vi.fn<typeof fe
 export function assertionBatchPrompt(assertionIds: readonly number[]): string {
   return JSON.stringify({
     schema_version: 2,
-    source_locator_contract_version: 3,
+    source_locator_contract_version: 4,
     batch_contract_version: 1,
     source_corpus_identity: "a".repeat(64),
     batch_index: 0,
@@ -105,7 +105,7 @@ export function cacheSignalResponse(assertionId: number): Response {
     matched_text: matchedText,
     distilled_fact: `assertion ${assertionId}`,
     source_locator: {
-      contract_version: 3,
+      contract_version: 4,
       kind: "assertion_catalog",
       assertion_id: assertionId
     }

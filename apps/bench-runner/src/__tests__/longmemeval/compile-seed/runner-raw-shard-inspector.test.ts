@@ -116,6 +116,7 @@ function writeShard(root: string, cacheKey: string, rawJson: string): void {
     request_profile: REQUEST_PROFILE,
     cache_key: cacheKey,
     raw_json: rawJson,
-    extracted_at: "2026-08-11T00:00:00.000Z"
+    extracted_at: "2026-08-11T00:00:00.000Z",
+    ...(rawJson === '{"signals":[]}' ? { empty_classification: "deterministic_empty" } : {})
   }));
 }

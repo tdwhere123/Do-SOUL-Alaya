@@ -239,7 +239,7 @@ function applyCloneCopy(
       throw error;
     }
   });
-  assertCloneSourceStable(planned, sourceBefore, expectedSha256);
+  assertCloneSourceStable(planned, sourceBefore, expectedSha256, tmpPath);
   if (mode === undefined) {
     throw new Error("clone-or-copy completed without an observed copy mode");
   }
@@ -269,9 +269,15 @@ function copyOpenedSource(
 function assertCloneSourceStable(
   planned: PlannedInstall,
   sourceBefore: SourceIdentity,
-  expectedSha256: string
+  expectedSha256: string,
+  clonePath: string
 ): void {
   throwIfSourceInodeReplaced(planned.sourcePath, sourceBefore, undefined);
+  // Hash the clone itself. A same-size rewrite in one mtime tick can keep the
+  // source-path digest cache pointing at the pre-copy bytes.
+  if (hashRegularFileNoFollow(clonePath) !== expectedSha256) {
+    throw failClosed("source-drift", "clone digest does not match sealed source");
+  }
   if (hashRegularFileNoFollow(planned.sourcePath) !== expectedSha256) {
     throw failClosed("source-drift", "sealed source digest drifted during clone");
   }

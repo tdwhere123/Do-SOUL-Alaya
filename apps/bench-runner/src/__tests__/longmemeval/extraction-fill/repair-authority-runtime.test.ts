@@ -178,7 +178,7 @@ describe("strict JSON repair authority runtime", () => {
       authorityReceiptPath: receiptPath,
       extractorFactory: () => ({ extract }),
       log: () => undefined
-    })).rejects.toThrow(/preserved.*closure|strict-valid.*drift/iu);
+    })).rejects.toThrow(/preserved.*closure|strict-valid.*drift|inventory drifted/iu);
     expect(extract).not.toHaveBeenCalled();
   });
 

@@ -102,7 +102,8 @@ function writeCompleteHistoricalRoot(cacheRoot: string): string {
     request_profile: requestProfile,
     cache_key: cacheKey,
     raw_json: rawJson,
-    extracted_at: "2026-09-03T00:00:00.000Z"
+    extracted_at: "2026-09-03T00:00:00.000Z",
+    empty_classification: "deterministic_empty"
   });
   const entry = { cacheKey, model, requestProfile, ...inspection };
   writeExtractionCacheManifest(cacheRoot, {

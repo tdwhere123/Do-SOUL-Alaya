@@ -19,7 +19,7 @@ describe("compile raw payload projection", () => {
       ]
     };
     const sourceLocator = {
-      contract_version: 3,
+      contract_version: 4,
       kind: "assertion_catalog",
       assertion_id: 1
     };
@@ -175,7 +175,7 @@ describe("compile raw payload projection", () => {
   it("keeps the complete v2 verification tuple when semantic projections overflow", () => {
     const assertion = `I prefer ${"x".repeat(600)}.`;
     const sourceLocator = {
-      contract_version: 3,
+      contract_version: 4,
       kind: "assertion_catalog",
       assertion_id: 1
     };

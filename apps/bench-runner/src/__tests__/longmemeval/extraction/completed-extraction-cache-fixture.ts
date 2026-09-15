@@ -84,6 +84,7 @@ function writeShard(
     request_profile: "provider-default-v1",
     cache_key: cacheKey,
     raw_json: rawJson,
-    extracted_at: "2026-07-16T00:00:00.000Z"
+    extracted_at: "2026-07-16T00:00:00.000Z",
+    ...(rawJson === DEFAULT_RAW_JSON ? { empty_classification: "deterministic_empty" } : {})
   })}\n`, "utf8");
 }

@@ -76,7 +76,7 @@ export function signalsEnvelope(
       matched_text: fact.matched,
       distilled_fact: fact.distilled,
       source_locator: {
-        contract_version: 3,
+        contract_version: 4,
         kind: "assertion_catalog",
         assertion_id: fact.assertionId ?? 1
       }

@@ -451,7 +451,7 @@ describe("extraction authority runtime", () => {
       authorityReceiptPath: receiptPath,
       extractorFactory: () => ({ extract }),
       log: () => undefined
-    })).rejects.toThrow(/raw cache closure drifted/u);
+    })).rejects.toThrow(/raw cache closure drifted|cannot authorize invalid or orphan shards/u);
 
     expect(extract).not.toHaveBeenCalled();
   });

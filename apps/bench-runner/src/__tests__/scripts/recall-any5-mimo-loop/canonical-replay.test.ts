@@ -284,6 +284,7 @@ function writeSealedCache(
     writeCachedExtraction(cacheRoot, key, {
       model: MODEL, request_profile: PROFILE, cache_key: key, raw_json: rawJson,
       extracted_at: "2026-08-19T00:00:00.000Z",
+      empty_classification: "deterministic_empty",
       response_metadata: { finish_reason: "stop" }
     });
   }

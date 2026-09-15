@@ -15,6 +15,7 @@ import {
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
+  EXTRACTION_CACHE_MANIFEST_VERSION,
   computeSystemPromptSha256,
   readExtractionCacheManifest,
   writeExtractionCacheManifest
@@ -95,7 +96,7 @@ describe("runExtractionFill authority", () => {
     })).rejects.toThrow(/simulated interruption/u);
 
     expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
-      schema_version: 3,
+      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
       provider_url: "https://provider-a.invalid/v1",
       model_family: "family-a"
     });

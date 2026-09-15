@@ -156,7 +156,7 @@ describe("canonical extraction request cache identity", () => {
     >;
     expect(parsed).toEqual({
       schema_version: 2,
-      source_locator_contract_version: 3,
+      source_locator_contract_version: 4,
       batch_contract_version: 1,
       source_corpus_identity: expect.stringMatching(/^[a-f0-9]{64}$/u),
       batch_index: 0,
@@ -304,7 +304,7 @@ describe("canonical extraction request cache identity", () => {
         object_kind: "activity",
         confidence: 0.9,
         source_locator: {
-          contract_version: 3,
+          contract_version: 4,
           kind: "assertion_catalog",
           assertion_id: 3
         },
@@ -378,7 +378,8 @@ describe("canonical extraction request cache identity", () => {
       request_profile: "provider-default-v1",
       cache_key: cacheKey,
       raw_json: '{"signals":[]}',
-      extracted_at: "2026-07-22T00:00:00.000Z"
+      extracted_at: "2026-07-22T00:00:00.000Z",
+      empty_classification: "deterministic_empty"
     });
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => providerBackedResult('{"signals":[]}'))
@@ -419,7 +420,8 @@ describe("canonical extraction request cache identity", () => {
       request_profile: "provider-default-v1",
       cache_key: cacheKey,
       raw_json: '{"signals":[]}',
-      extracted_at: "2026-07-22T00:00:00.000Z"
+      extracted_at: "2026-07-22T00:00:00.000Z",
+      empty_classification: "deterministic_empty"
     });
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => providerBackedResult('{"signals":[]}'))

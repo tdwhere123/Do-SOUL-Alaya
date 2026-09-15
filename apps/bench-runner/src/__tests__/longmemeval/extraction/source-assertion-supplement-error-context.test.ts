@@ -144,7 +144,7 @@ function signal(assertionId: number, matchedText: string) {
     confidence: 0.9,
     matched_text: matchedText,
     source_locator: {
-      contract_version: 3,
+      contract_version: 4,
       kind: "assertion_catalog",
       assertion_id: assertionId
     }

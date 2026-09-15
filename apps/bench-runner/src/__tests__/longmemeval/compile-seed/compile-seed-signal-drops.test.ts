@@ -4,7 +4,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildOfficialApiExtractionRequest,
@@ -25,6 +24,7 @@ import {
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
 } from "../../../runs/compile-seed.js";
+import { computeCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
 import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {
@@ -255,7 +255,7 @@ describe("extraction cache write is atomic", () => {
         object_kind: "user_preference",
         confidence: 0.9,
         matched_text: "Atomic turn persists a complete shard.",
-        source_locator: { contract_version: 3, kind: "assertion_catalog", assertion_id: 1 },
+        source_locator: { contract_version: 4, kind: "assertion_catalog", assertion_id: 1 },
         distilled_fact: `Fact number ${i}.`
       }))
     });
@@ -285,15 +285,12 @@ describe("extraction cache write is atomic", () => {
     );
     await extractor.extract({ systemPrompt: "sys", userPrompt });
 
-    const cacheKey = createHash("sha256")
-      .update("test-model", "utf8")
-      .update("\u0000", "utf8")
-      .update("provider-default-v1", "utf8")
-      .update("\u0000", "utf8")
-      .update("sys", "utf8")
-      .update("\u0000", "utf8")
-      .update(userPrompt, "utf8")
-      .digest("hex");
+    const cacheKey = computeCacheKey(
+      "test-model",
+      "provider-default-v1",
+      "sys",
+      userPrompt
+    );
     const shardPath = join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
     const onDisk = JSON.parse(readFileSync(shardPath, "utf8")) as {
       raw_json: string;

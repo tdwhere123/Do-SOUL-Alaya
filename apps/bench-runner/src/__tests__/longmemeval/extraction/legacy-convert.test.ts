@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION } from "@do-soul/alaya-soul";
 import { convertLegacyExtractionShard } from
   "../../../runs/extraction/cache/semantic-artifact/legacy/legacy-convert.js";
 import {
@@ -33,7 +34,7 @@ describe("legacy shard conversion", () => {
       } as VerifiedLegacyExtractionEntry,
       request: {
         schema_version: 2,
-        source_locator_contract_version: 3,
+        source_locator_contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
         batch_contract_version: 1,
         source_corpus_identity: task.binding.sourceCorpusIdentity,
         batch_index: 0,

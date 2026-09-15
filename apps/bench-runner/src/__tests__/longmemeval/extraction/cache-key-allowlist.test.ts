@@ -122,7 +122,8 @@ describe("extraction cache-key allowlist continuation", () => {
       request_profile: config.requestProfile,
       cache_key: firstKey,
       raw_json: '{"signals":[]}',
-      extracted_at: "2026-08-09T00:00:00.000Z"
+      extracted_at: "2026-08-09T00:00:00.000Z",
+      empty_classification: "deterministic_empty"
     });
 
     const selected = resolveContinuationMissingTurns({
@@ -149,7 +150,8 @@ describe("extraction cache-key allowlist continuation", () => {
       request_profile: config.requestProfile,
       cache_key: firstKey,
       raw_json: '{"signals":[]}',
-      extracted_at: "2026-08-09T00:00:00.000Z"
+      extracted_at: "2026-08-09T00:00:00.000Z",
+      empty_classification: "deterministic_empty"
     });
 
     const selected = resolveContinuationMissingTurns({
@@ -177,7 +179,8 @@ describe("extraction cache-key allowlist continuation", () => {
       request_profile: config.requestProfile,
       cache_key: firstKey,
       raw_json: '{"signals":[]}',
-      extracted_at: "2026-08-09T00:00:00.000Z"
+      extracted_at: "2026-08-09T00:00:00.000Z",
+      empty_classification: "deterministic_empty"
     });
 
     const selected = resolveContinuationMissingTurns({
@@ -268,7 +271,8 @@ describe("extraction cache-key allowlist production window", () => {
         request_profile: config.requestProfile,
         cache_key: key,
         raw_json: status === "hit" ? '{"signals":[]}' : "not-json",
-        extracted_at: "2026-07-22T00:00:00.000Z"
+        extracted_at: "2026-07-22T00:00:00.000Z",
+        ...(status === "hit" ? { empty_classification: "deterministic_empty" as const } : {})
       });
 
       expect(() => resolveCacheKeyAllowlistedTurns({

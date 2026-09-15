@@ -118,7 +118,7 @@ describe("source assertion semantic supplement", () => {
     const sourceCorpus = "User: University of Melbourne\nAssistant: University of Melbourne";
     const request = parseOfficialApiExtractionRequest({
       schema_version: 2,
-      source_locator_contract_version: 3,
+      source_locator_contract_version: 4,
       batch_contract_version: 1,
       source_corpus_identity: computeOfficialApiSourceCorpusIdentity(sourceCorpus),
       batch_index: 0,
@@ -492,7 +492,7 @@ function signal(assertionId: number, matchedText: string) {
     confidence: 0.9,
     matched_text: matchedText,
     source_locator: {
-      contract_version: 3,
+      contract_version: 4,
       kind: "assertion_catalog",
       assertion_id: assertionId
     }

@@ -284,9 +284,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "spend three days in Kyoto",
                   distilled_fact: "The user plans three days in Kyoto.",
                   source_locator: {
-                    contract_version: 3,
+                    contract_version: 4,
                     kind: "assertion_catalog",
-                    assertion_id: 2
+                    assertion_id: 1
                   }
                 },
                 {
@@ -296,9 +296,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "I prefer low-impact morning workouts",
                   distilled_fact: "The user prefers low-impact morning workouts.",
                   source_locator: {
-                    contract_version: 3,
+                    contract_version: 4,
                     kind: "assertion_catalog",
-                    assertion_id: 3
+                    assertion_id: 2
                   }
                 }
               ].map(withOpenSemanticFactorGraph)
@@ -312,12 +312,18 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         daemon,
         turnContent:
           "I'd like to spend three days in Kyoto, and I prefer low-impact morning workouts.",
-        turnMessages: [{
-          message_id: "freeform-user-0",
-          role: "user",
-          content:
-            "I'd like to spend three days in Kyoto, and I prefer low-impact morning workouts."
-        }],
+        turnMessages: [
+          {
+            message_id: "freeform-user-0",
+            role: "user",
+            content: "I'd like to spend three days in Kyoto."
+          },
+          {
+            message_id: "freeform-user-1",
+            role: "user",
+            content: "I prefer low-impact morning workouts."
+          }
+        ],
         evidenceRefBase: "freeform-q0-t0",
         seedIndex: 0,
         workspaceId: daemon.workspaceId,
@@ -395,9 +401,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "spend three days in Kyoto",
                   distilled_fact: "The user plans three days in Kyoto.",
                   source_locator: {
-                    contract_version: 3,
+                    contract_version: 4,
                     kind: "assertion_catalog",
-                    assertion_id: 2
+                    assertion_id: 1
                   }
                 },
                 {
@@ -407,9 +413,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   matched_text: "I prefer low-impact morning workouts",
                   distilled_fact: "The user prefers low-impact morning workouts.",
                   source_locator: {
-                    contract_version: 3,
+                    contract_version: 4,
                     kind: "assertion_catalog",
-                    assertion_id: 3
+                    assertion_id: 2
                   }
                 }
               ].map(withOpenSemanticFactorGraph)
@@ -424,11 +430,18 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       const result = await runner.seedTurn({
         daemon,
         turnContent: fullTurn,
-        turnMessages: [{
-          message_id: "tokenecon-user-0",
-          role: "user",
-          content: fullTurn
-        }],
+        turnMessages: [
+          {
+            message_id: "tokenecon-user-0",
+            role: "user",
+            content: "I'd like to spend three days in Kyoto."
+          },
+          {
+            message_id: "tokenecon-user-1",
+            role: "user",
+            content: "I prefer low-impact morning workouts."
+          }
+        ],
         evidenceRefBase: "tokenecon-q0-t0",
         seedIndex: 0,
         workspaceId: daemon.workspaceId,
