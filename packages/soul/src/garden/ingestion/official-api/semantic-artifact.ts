@@ -53,7 +53,8 @@ export class OfficialApiSemanticArtifactCodec implements SemanticArtifactCodec {
     }
     const relations = parsed.success ? parsed.data.relations : legacy!.interpretations[0]?.relations ?? [];
     const request = parseOfficialApiExtractionRequest(JSON.parse(work.requestJson));
-    const received = classifyOfficialApiInterpretationResult(JSON.stringify({ interpretations: [
+    const empty = parsed.success ? relations.length === 0 : legacy!.interpretations.length === 0;
+    const received = classifyOfficialApiInterpretationResult(JSON.stringify({ interpretations: empty ? [] : [
       { assertion_id: unit.assertionId, relations }
     ] }), request, unit.sourceCorpus);
     return { ...work, bindingJson: JSON.stringify({ ...unit.binding, interpretations: received.located }) };
