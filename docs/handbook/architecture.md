@@ -401,6 +401,13 @@ a later memory write loses source currentness; retries reuse that evidence only
 while the same source is current. Audit precedes notification. Live semantic
 enrichment and fill consumers share interpretation admission; retained historical
 signal artifacts keep their explicit archive readers and original bytes.
+Reusable semantic artifacts contain occurrence-free relation proposals. Soul
+re-locates every proposal against the current work unit before Core publishes,
+including cache hits; Storage persists the resulting current binding. Original
+raw response and optional request provenance remain immutable and separate from
+the proposal. Candidate schema 7 adds nullable request provenance through the
+explicit initializer; legacy rows remain unchanged and ambiguous historical
+responses fail binding rather than inventing provenance.
 
 ## Low-Trust Draft and Typed-Resolution Chain
 

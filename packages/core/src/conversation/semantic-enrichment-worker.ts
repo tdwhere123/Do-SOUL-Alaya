@@ -157,9 +157,19 @@ export class SemanticEnrichmentWorker {
     }
     const lost = await this.rejectIfSourceLost(task, source);
     if (lost !== null) return lost;
+    let boundWork: readonly SemanticArtifactWork[];
+    try {
+      boundWork = work.map((unit) => {
+        const artifact = this.deps.repo.artifact(workspaceId, unit.key);
+        if (artifact === null) throw new Error("artifact missing before binding");
+        return this.deps.codec.bind(source, unit, artifact);
+      });
+    } catch {
+      return this.fail(task, 'binding_rejected');
+    }
     try {
       await this.deps.audit('published', task, () => {
-        this.deps.repo.publish(task, source, work, this.deps.now());
+        this.deps.repo.publish(task, source, boundWork, this.deps.now());
         this.deps.repo.finish(task, 'completed', null, this.deps.now());
       });
     } catch (error) {

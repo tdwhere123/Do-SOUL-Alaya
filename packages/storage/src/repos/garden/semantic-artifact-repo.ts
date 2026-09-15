@@ -5,6 +5,7 @@ import {
   GardenTaskKind,
   SOURCE_ENRICHMENT_CONTRACT,
   SourceLocatedInterpretationSchema,
+  SemanticInterpretationProposalSchema,
   canonicalizeSemanticExtractionProfile,
   semanticExtractionProfilePreimage,
   semanticExtractionProfilesEqual,
@@ -160,17 +161,19 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
 
   public artifact(workspaceId: string, key: string): AdmittedSemanticArtifact | null {
     const row = this.db.prepare(`SELECT artifact_key AS key, raw_json AS rawJson,
-      payload_json AS payloadJson, search_text AS searchText, integrity FROM garden_semantic_artifacts
+      payload_json AS payloadJson, search_text AS searchText, request_json AS requestJson, integrity FROM garden_semantic_artifacts
       WHERE workspace_id = ? AND artifact_key = ?`).get(workspaceId, key);
     if (!row) return null;
-    const stored = row as AdmittedSemanticArtifact & { integrity: string };
-    if (stored.integrity !== digest(JSON.stringify([stored.key, stored.rawJson, stored.payloadJson, stored.searchText]))) {
+    const stored = row as Omit<AdmittedSemanticArtifact, "requestJson"> & { requestJson: string | null; integrity: string };
+    if (stored.integrity !== digest(JSON.stringify([stored.key, stored.rawJson, stored.payloadJson, stored.searchText,
+      ...(stored.requestJson === null ? [] : [stored.requestJson])]))) {
       throw new Error("semantic artifact integrity mismatch");
     }
     const payload = JSON.parse(stored.payloadJson) as unknown;
     const raw = JSON.parse(stored.rawJson) as { signals?: unknown[]; interpretations?: unknown[] };
-    const validInterpretations = Array.isArray(raw.interpretations) && Array.isArray(payload) &&
-      payload.every((entry) => SourceLocatedInterpretationSchema.safeParse(entry).success);
+    const validInterpretations = Array.isArray(raw.interpretations) &&
+      (SemanticInterpretationProposalSchema.safeParse(payload).success || Array.isArray(payload) &&
+      payload.every((entry) => SourceLocatedInterpretationSchema.safeParse(entry).success));
     // Read retained historical artifacts in their recorded shape; current codecs
     // only author source-relative interpretation payloads.
     const validHistorical = Array.isArray(raw.signals) && Array.isArray(payload) && payload.length > 0 &&
@@ -180,7 +183,8 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       throw new Error("semantic artifact persisted shape mismatch");
     }
     return Object.freeze({ key: stored.key, rawJson: stored.rawJson,
-      payloadJson: stored.payloadJson, searchText: stored.searchText });
+      payloadJson: stored.payloadJson, searchText: stored.searchText,
+      ...(stored.requestJson === null ? {} : { requestJson: stored.requestJson }) });
   }
 
   public attempt(taskId: string, key: string): SemanticTransportAttempt | null {
@@ -261,9 +265,11 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       }
       return;
     }
-    this.db.prepare(`INSERT INTO garden_semantic_artifacts VALUES (?, ?, ?, ?, ?, ?)`)
+    this.db.prepare(`INSERT INTO garden_semantic_artifacts
+      (workspace_id, artifact_key, raw_json, payload_json, search_text, integrity, request_json) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(task.workspaceId, artifact.key, artifact.rawJson, artifact.payloadJson, artifact.searchText,
-        digest(JSON.stringify([artifact.key, artifact.rawJson, artifact.payloadJson, artifact.searchText])));
+        digest(JSON.stringify([artifact.key, artifact.rawJson, artifact.payloadJson, artifact.searchText,
+          ...(artifact.requestJson === undefined ? [] : [artifact.requestJson])])), artifact.requestJson ?? null);
   }
 
   public publish(task: SemanticEnrichmentTask, source: SemanticSourceSnapshot,

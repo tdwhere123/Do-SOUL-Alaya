@@ -4,7 +4,7 @@ import type { SourceRootPage, SourceRootRow } from "./bounded-source-root-reader
 const PAGE_MAX = 512;
 const GIST_BYTE_MAX = 65_536;
 
-export type BoundInterpretationHintRow = Readonly<{ object_id: string; gist: string }>;
+export type BoundInterpretationHintRow = Readonly<{ object_id: string; gist: string; cursor: string }>;
 export type BoundInterpretationHintPage = Readonly<{
   rows: readonly BoundInterpretationHintRow[];
   nativeVisits: number;
@@ -34,35 +34,45 @@ export class SqliteSourceHintReader {
       unavailable: false, resourceLimited: true };
     const rows: BoundInterpretationHintRow[] = [];
     let visits = 0;
+    let rowsRead = 0;
     let bytes = 0;
     let committed = input.afterCursor;
     let oversized = false;
+    let exhausted = false;
+    let seek: readonly [string, string] = input.afterCursor === null ? ["", ""] : JSON.parse(input.afterCursor);
+    if (!Array.isArray(seek) || seek.length !== 2 || !seek.every((value) => typeof value === "string")) {
+      throw new Error("invalid source-hint cursor");
+    }
     // Each bounded keyset step uses the remaining byte allowance. Reserving a
     // maximum gist for every possible future row would starve small corpora.
     const candidate = this.db.prepare(`SELECT CASE WHEN octet_length(object_id)<=512 THEN object_id ELSE NULL END AS object_id,
+      CASE WHEN octet_length(created_at)<=64 THEN created_at ELSE NULL END AS created_at,
       octet_length(gist) AS gist_bytes,
       CASE WHEN octet_length(gist) <= ? THEN gist ELSE NULL END AS gist
-      FROM evidence_capsules WHERE workspace_id=? AND object_id>?
-      ORDER BY evidence_capsules.object_id LIMIT 1`);
+      FROM evidence_capsules INDEXED BY idx_evidence_capsules_source_cursor
+      WHERE workspace_id=? AND (created_at,object_id)>(?,?)
+      ORDER BY evidence_capsules.created_at,evidence_capsules.object_id LIMIT 1`);
     while (visits < nativeLimit) {
-      if (byteBudget - bytes < 520) { oversized = true; break; }
-      const row = candidate.get(Math.min(GIST_BYTE_MAX, byteBudget - bytes - 520),
-        input.workspaceId, committed ?? "") as { object_id: string | null; gist: string | null; gist_bytes: number } | undefined;
-      if (row === undefined) break;
+      if (byteBudget - bytes < 584) { oversized = true; break; }
       visits++;
+      const row = candidate.get(Math.min(GIST_BYTE_MAX, byteBudget - bytes - 584),
+        input.workspaceId, ...seek) as { object_id: string | null; created_at: string | null; gist: string | null; gist_bytes: number } | undefined;
+      if (row === undefined) { exhausted = true; break; }
+      rowsRead++;
       bytes += 8;
-      if (row.object_id === null) { oversized = true; break; }
-      bytes += Buffer.byteLength(row.object_id, "utf8") + Buffer.byteLength(row.gist ?? "", "utf8");
+      if (row.object_id === null || row.created_at === null) { oversized = true; break; }
+      bytes += Buffer.byteLength(row.object_id, "utf8") + Buffer.byteLength(row.created_at, "utf8") + Buffer.byteLength(row.gist ?? "", "utf8");
       if (row.gist === null && row.gist_bytes <= GIST_BYTE_MAX) { oversized = true; break; }
-      committed = row.object_id;
+      seek = [row.created_at, row.object_id];
+      committed = JSON.stringify(seek);
       if (row.gist === null) { oversized = true; continue; }
       if (input.matches !== undefined && !input.matches(row.gist)) continue;
-      rows.push({ object_id: row.object_id, gist: row.gist });
+      rows.push({ object_id: row.object_id, gist: row.gist, cursor: committed });
       if (rows.length >= limit) break;
     }
     return { rows, nativeVisits: visits, nativeBytes: 0, nativeWork: visits,
-      rowsRead: visits, bytesRead: bytes,
-      truncated: oversized || visits === nativeLimit || rows.length === limit,
+      rowsRead, bytesRead: bytes,
+      truncated: !exhausted && (oversized || visits === nativeLimit || rows.length === limit),
       committedThrough: committed, unavailable: false,
       ...(oversized ? { resourceLimited: true } : {}) };
   }

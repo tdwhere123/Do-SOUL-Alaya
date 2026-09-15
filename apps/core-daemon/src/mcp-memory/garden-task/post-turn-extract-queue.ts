@@ -23,7 +23,7 @@ import type {
 } from "../recall/recall-usage-handlers.js";
 
 export function enqueuePostTurnExtractTask(
-  params: Readonly<{ readonly deps: RecallUsageHandlerDependencies; readonly now: () => string }>,
+  params: Readonly<{ readonly deps: Pick<RecallUsageHandlerDependencies, "gardenTaskRepo" | "sourceAdmission">; readonly now: () => string }>,
   request: SoulReportContextUsageRequest,
   context: RecallUsageToolCallContext,
   linkedDelivery: Readonly<ContextDeliveryRecord> | null

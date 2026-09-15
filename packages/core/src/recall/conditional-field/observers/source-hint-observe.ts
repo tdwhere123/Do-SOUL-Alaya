@@ -106,7 +106,7 @@ function takeProposalHintPage(
     hydrateWork += hydrated.workUnits;
     hydrateBytes += hydrated.bytes;
     if (hydrated.resourceLimited) { pending = true; break; }
-    committed = item.object_id;
+    committed = item.cursor ?? item.object_id;
     if (hydrated.observation === undefined || hydrated.row === undefined) continue;
     observations.push(hydrated.observation);
     rows.push({ ...hydrated.row, source_lookup_reasons: [reason] });

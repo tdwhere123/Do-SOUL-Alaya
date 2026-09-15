@@ -282,6 +282,8 @@ in query identity. A hint is a discovery proposal, never proof of relevance.
 Core matches the predicate and required roles conjunctively inside one candidate
 and source context. Storage performs bounded physical candidate scans before
 Core applies the context-visit cap; every scanned row and fetched byte is charged.
+Proposal pages seek the existing `(workspace_id, created_at, object_id)` index
+with a tuple cursor; the terminating empty probe also consumes native work.
 The text comparison lane hydrates current source bytes before matching phrases,
 using the same temporal, retained-chunk integrity, scope and UTF-8 boundaries as
 exhaustive lookup. Logical prefix size and physical chunk reads are separate.

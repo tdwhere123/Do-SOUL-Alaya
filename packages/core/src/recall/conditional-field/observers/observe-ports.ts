@@ -96,6 +96,7 @@ export type SourceRootObserverPage = Readonly<{
 export type BoundInterpretationHintRow = Readonly<{
   readonly object_id: string;
   readonly gist: string;
+  readonly cursor?: string;
 }>;
 
 export type BoundInterpretationHintPage = Readonly<{

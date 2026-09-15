@@ -2,7 +2,7 @@ import type { QueryInterpretation } from "@do-soul/alaya-protocol";
 import { meterReaders } from "../../../../recall/runtime/observer-reader-budget.js";
 import { takeSourceHintPage } from "../../../../recall/conditional-field/observers/source-hint-observe.js";
 import type { ObserverReaders, ObserveConditionalFieldInput } from "../../../../recall/conditional-field/observers/observe.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   locateSourceInterpretation,
@@ -44,6 +44,31 @@ afterEach(() => {
 });
 
 describe("source discovery sqlite lookup", () => {
+  it("uses the tuple index on initial and resumed scans and charges the empty probe", () => {
+    const database = openFieldDatabase(); tracked.add(database);
+    for (let i = 0; i < 30; i++) {
+      insertBoundGist(database, `hint-${String(i).padStart(2, "0")}`, "alpha", "root", "sha256:" + "a".repeat(64), null, { predicate: "alpha" });
+    }
+    database.connection.prepare("UPDATE evidence_capsules SET workspace_id='other' WHERE object_id>='hint-03'").run();
+    const prepare = vi.spyOn(database.connection, "prepare");
+    const reader = new SqliteSourceHintReader(database.connection);
+    const matches = vi.fn(() => false);
+    const first = reader.pageBoundInterpretations({ workspaceId: "workspace-1", limit: 1, nativeLimit: 2, afterCursor: null, matches });
+    const sql = prepare.mock.calls.find(([sql]) => sql.includes("FROM evidence_capsules INDEXED BY"))![0];
+    prepare.mockRestore();
+    const resumed = reader.pageBoundInterpretations({ workspaceId: "workspace-1", limit: 1, nativeLimit: 2,
+      afterCursor: first.committedThrough, matches });
+    expect(first).toMatchObject({ rows: [], rowsRead: 2, nativeWork: 2, truncated: true });
+    expect(resumed).toMatchObject({ rows: [], rowsRead: 1, nativeWork: 2, truncated: false });
+    expect(matches).toHaveBeenCalledTimes(3);
+    for (const seek of [["", ""], JSON.parse(first.committedThrough!)]) {
+      const plan = database.connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(65536, "workspace-1", ...seek) as { detail: string }[];
+      expect(plan.some((row) => row.detail.includes("SEARCH evidence_capsules USING INDEX idx_evidence_capsules_source_cursor") &&
+        row.detail.includes("(created_at,object_id)>(?,?)"))).toBe(true);
+      expect(plan.some((row) => /TEMP B-TREE|SCAN evidence_capsules/.test(row.detail))).toBe(false);
+    }
+  });
+
   it.each(["wrong root", "stale revision"] as const)("rejects a schema-valid binding with %s", (state) => {
     const database = openFieldDatabase(); tracked.add(database);
     const record = new SqliteFieldSourceRecordRepo(database, fieldSha256).insert(hashedRecord("workspace-1", "alpha", "bound"));

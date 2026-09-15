@@ -1,10 +1,9 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   GardenRole,
-  GardenTaskKind,
   SOURCE_INTERPRETATION_CONTRACT
 } from "@do-soul/alaya-protocol";
 import {
@@ -13,15 +12,13 @@ import {
   EvidenceService,
   MemoryService,
   SignalService,
-  createAuditedSourceAdmission,
+  createSourceAdmissionPort,
   createSignalEmissionWriter,
-  deriveAddressableSpanViews,
   fieldContractSha256
 } from "@do-soul/alaya-core";
 import {
   InMemoryHandoffGapHandler,
-  OfficialApiGardenProvider,
-  buildOfficialApiSourceCorpus
+  OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
 import {
   initDatabase,
@@ -43,12 +40,18 @@ import {
 } from "../../runtime/recall-materialization/recall-materialization-router.js";
 import { createSourceGroundingDeferTransitions } from "../../runtime/source-grounding-defer/transitions.js";
 
+import { GardenComputeCoordinator } from "../../../../../packages/core/src/conversation/garden-compute-coordinator.js";
+import { createMessage, createRun, createWorkspace } from "../../../../../packages/core/src/__tests__/conversation/conversation-service.test-support.js";
+import { createCompileSourceRetainer } from "../../runtime/startup/recall-core-wiring.js";
+import { enqueuePostTurnExtractTask } from "../../mcp-memory/garden-task/post-turn-extract-queue.js";
+import { createDeliveryRecord } from "../mcp-memory/garden/post-turn-extract-task-record-fixture.js";
+
 const CLOCK = "2026-09-14T12:00:00.000Z";
 const ASSERTION = "Alice uses tools.";
-const TASK_ID = "post-turn-task-1";
+const LONG_ASSERTION = `${"The archive retains neutral context. ".repeat(26)}${ASSERTION}`;
 
 describe("ordinary extraction source interpretation adapters", () => {
-  it("injects a provider-free response through the post-turn worker and SQLite publication", async () => {
+  it.each(["post-turn", "interactive"] as const)("runs the production %s entry through parsing and SQLite publication with retries", async (mode) => {
     const directory = await mkdtemp(join(tmpdir(), "alaya-ordinary-extraction-"));
     const filename = join(directory, "memory.sqlite");
     let database = initDatabase({ filename });
@@ -79,18 +82,9 @@ describe("ordinary extraction source interpretation adapters", () => {
           eventLogRepo, runtimeNotifier: notifier
         })
       });
-      const sourceAdmission = createAuditedSourceAdmission({
-        stores: field.stores, eventLogRepo, sha256: fieldContractSha256
+      const sourceAdmission = createSourceAdmissionPort({
+        stores: field.stores, sha256: fieldContractSha256
       });
-      const source = buildOfficialApiSourceCorpus(ASSERTION, [
-        { role: "user", content: ASSERTION }
-      ]);
-      const admitted = await sourceAdmission.admit({
-        workspace_id: "workspace-1", source_id: `post-turn:${TASK_ID}`, source_version: "1",
-        content_bytes: source, evidence_object_id: null, recorded_at: CLOCK,
-        event_time: null, valid_from: null, valid_to: null, speaker: "user",
-        scope_class: "project", spans: deriveAddressableSpanViews(source)
-      }, { workspaceId: "workspace-1" });
       const router = createMaterializationRouter({
         wiring: {
           evidenceService,
@@ -130,48 +124,34 @@ describe("ordinary extraction source interpretation adapters", () => {
         }
       });
       const gardenTaskRepo = new SqliteGardenTaskRepo(database.connection, eventPublisher);
-      gardenTaskRepo.enqueue({
-        id: TASK_ID,
-        workspace_id: "workspace-1",
-        role: GardenRole.LIBRARIAN,
-        kind: GardenTaskKind.POST_TURN_EXTRACT,
-        payload: {
-          run_id: "run-1",
-          workspace_id: "workspace-1",
-          created_at: CLOCK,
-          turn_index: 0,
-          admitted_source_root_id: admitted.record.identity,
-          source_observation: {
-            observed_at: CLOCK,
-            authority: "verified_delivery_observation",
-            source_event_id: "event-delivery"
-          },
-          turn_digest: {
-            last_messages: [{ role: "user", content_excerpt: ASSERTION }]
-          }
-        },
-        created_at: CLOCK
-      });
+      const enqueue = () => enqueuePostTurnExtractTask({ deps: { gardenTaskRepo, sourceAdmission }, now: () => CLOCK },
+        { delivery_id: "delivery-1", usage_state: "used", turn_index: 0,
+          turn_digest: { last_messages: [{ role: "user", content_excerpt: LONG_ASSERTION }] } },
+        { workspaceId: "workspace-1", runId: "run-1", agentTarget: "codex", sessionId: "session-1" },
+        createDeliveryRecord({ delivered_at: CLOCK }));
+      if (mode === "post-turn") { enqueue(); enqueue(); }
+      const taskId = gardenTaskRepo.peekPending(GardenRole.LIBRARIAN, "workspace-1", 10)[0]?.id;
+      let signalOrdinal = 0;
       const provider = new OfficialApiGardenProvider({
         apiKey: "sk-test",
         extractor: {
-          extract: async () => ({
+          extract: async ({ userPrompt }) => ({
             rawJson: JSON.stringify({
-              interpretations: [{
-                assertion_id: 1,
-                relations: [{
+              interpretations: JSON.parse(userPrompt).source_assertions.map((assertion: { assertion_id: number; text: string }) => ({
+                assertion_id: assertion.assertion_id,
+                relations: assertion.text.includes(ASSERTION) ? [{
                   predicate: { text: "uses" },
                   arguments: [
                     { role: "agent", phrase: { text: "Alice" } },
                     { role: "object", phrase: { text: "tools" } }
                   ],
                   qualifiers: []
-                }]
-              }]
+                }] : []
+              }))
             })
           })
         },
-        generateSignalId: () => "unused-compile-id",
+        generateSignalId: () => `compile-signal-${++signalOrdinal}`,
         now: () => CLOCK
       });
       const received: { memoryId?: string } = {};
@@ -206,8 +186,32 @@ describe("ordinary extraction source interpretation adapters", () => {
         },
         warn: () => undefined
       });
-      await process();
-      expect(gardenTaskRepo.findById(TASK_ID)?.status).toBe("completed");
+      if (mode === "post-turn") {
+        await process();
+        expect(gardenTaskRepo.findById(taskId!)?.status).toBe("completed");
+        enqueue(); await process();
+      } else {
+        const completed = vi.fn(async () => undefined);
+        const warn = vi.fn();
+        const coordinator = new GardenComputeCoordinator({ eventLogRepo, eventPublisher,
+          retainCompileSource: createCompileSourceRetainer({ fieldComposition: field, eventLogRepo }),
+          gardenComputeProvider: provider, signalReceiver: signalService,
+          releaseGovernanceLeaseSafely: completed, warn });
+        const input = { run: createRun(), workspace: createWorkspace(), modelRef: null,
+          userMessage: createMessage("user-1", "user", LONG_ASSERTION),
+          assistantMessage: createMessage("assistant-1", "assistant", "Acknowledged.") };
+        coordinator.triggerCompile(input);
+        await vi.waitFor(() => expect(completed).toHaveBeenCalledTimes(1));
+        coordinator.triggerCompile(input);
+        await vi.waitFor(() => expect(completed).toHaveBeenCalledTimes(2));
+        expect(warn.mock.calls.filter(([message]) => String(message).includes("failed"))).toEqual([]);
+      }
+      const sourceRows = database.connection.prepare("SELECT source_body FROM source_records WHERE source_id LIKE 'post-turn:%' OR source_id LIKE 'garden-compile:%'").all() as { source_body: string }[];
+      expect(sourceRows).toHaveLength(1);
+      expect(sourceRows[0]!.source_body).toContain(LONG_ASSERTION);
+      const memories = database.connection.prepare("SELECT object_id FROM memory_entries").all() as { object_id: string }[];
+      expect(memories).toHaveLength(1);
+      received.memoryId = memories[0]!.object_id;
       const signals = await signalService.listByRun("run-1");
       const observation = signals.find((signal) => signal.interpretation_contract === SOURCE_INTERPRETATION_CONTRACT);
       expect(observation).toMatchObject({
