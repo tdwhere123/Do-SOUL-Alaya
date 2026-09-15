@@ -45,8 +45,7 @@ export function resolveSourceTemporalCandidates(
       /^(?:\s+(?:or|and|to|through|until)\s+(?:the\s+year\s+)?\d|\s*(?:或|和|至|到)\s*\d)/iu.test(source.slice(candidate.end)) ||
       (opensRange && /^\s*(?:to\b|through\b|until\b|至|到)/iu.test(source.slice(candidate.end))))
       ? "unknown"
-      : sourceTemporalRole(before,
-        source.slice(candidate.end, candidate.end + 8), bounded);
+      : sourceTemporalRole(before, sourceRoleSuffix(source, candidate), bounded);
     return Object.freeze({ ...candidate, role, bounded });
   });
   return candidates.some((candidate) => candidate.role === "unknown") ? [] : candidates;
@@ -171,7 +170,7 @@ function sourceTemporalRole(before: string, after: string, bounded: boolean): So
   // window. A validity cue cannot override an unresolved inequality either.
   if (/\b(?:before|after|by)\s+(?:the\s+year\s+)?$/iu.test(before) || /^(?:之前|之后|以前|以后|前|后)/u.test(after)) return "unknown";
   if (!bounded && /\b(?:until|through)\s*$|(?:截至|直到)$/iu.test(before)) return "unknown";
-  if (hasValidityConstruction(before)) return "validity";
+  if (hasValidityConstruction(before) || hasValidityConstructionAfter(after)) return "validity";
   if (!bounded && /\b(?:from|to)\s+(?:the\s+year\s+)?$|(?:自|从|到|至)$/iu.test(before)) return "unknown";
   return "event";
 }
@@ -181,6 +180,12 @@ function hasValidityConstruction(before: string): boolean {
   // in the clause (for example an adjective) cannot supply temporal validity.
   return /\b(?:(?:effective|valid|in\s+effect|appl(?:y|ies))(?:\s+(?:from|since|on))?|since|as\s+of)\s+(?:the\s+year\s+)?$/iu.test(before) ||
     /(?:有效期|生效|有效|适用)\s*(?:自|从|起)?\s*$/u.test(before);
+}
+
+function hasValidityConstructionAfter(after: string): boolean {
+  // Copular "DATE was the effective date" names validity; a later adjective
+  // in another clause cannot travel backward onto this date.
+  return /^\s+(?:was|is|became)\s+the\s+(?:effective|valid)\s+date\b/iu.test(after);
 }
 
 function hasUnresolvedEndpointExclusion(source: string, candidate: TemporalMatch): boolean {
@@ -196,6 +201,12 @@ function sourceRolePrefix(source: string, candidate: TemporalMatch, matches: rea
   const earliest = previous?.end ?? 0;
   const start = clauseStartAfter(source, earliest, candidate.start);
   return source.slice(start, candidate.start);
+}
+
+function sourceRoleSuffix(source: string, candidate: TemporalMatch): string {
+  const rest = source.slice(candidate.end);
+  const separator = [...rest.matchAll(ROLE_CLAUSE_SEPARATOR)][0];
+  return separator === undefined ? rest : rest.slice(0, separator.index);
 }
 
 function clauseStartAfter(source: string, start: number, end: number): number {
