@@ -44,6 +44,7 @@ export function inspectTurnContentKeySpace(
   let distinctExtractionRequestCount = 0;
   const distinct = new Map<string, LongMemEvalExtractionTurn>();
   const occurrences: LongMemEvalExtractionTurn[] = [];
+  const coverageMemo = new Map<string, CachedTurnCoverage>();
   for (const question of questions) {
     for (const [sessionIndex, session] of question.haystack_sessions.entries()) {
       for (const [roundIndex, round] of pairSessionIntoRounds(session).entries()) {
@@ -54,14 +55,13 @@ export function inspectTurnContentKeySpace(
           round,
           `${question.question_id}-fill-s${sessionIndex}-r${roundIndex}`
         );
-        const requests = collectOfficialApiExtractionCoverage(normalized, turnMessages, sourcePacking).requests;
+        const coverage = coverageForTurn(normalized, turnMessages, sourcePacking, coverageMemo);
         turnOccurrences += 1;
         const occurrence = Object.freeze({ turnContent: normalized, turnMessages });
         occurrences.push(occurrence);
-        const identity = JSON.stringify(requests.map(stringifyOfficialApiExtractionRequest));
-        if (distinct.has(identity)) continue;
-        distinctExtractionRequestCount += requests.length;
-        distinct.set(identity, occurrence);
+        if (distinct.has(coverage.identity)) continue;
+        distinctExtractionRequestCount += coverage.requests.length;
+        distinct.set(coverage.identity, occurrence);
       }
     }
   }
@@ -80,4 +80,40 @@ export function collectDistinctTurnContents(
   sourcePacking?: ExtractionSourcePacking
 ): readonly string[] {
   return inspectTurnContentKeySpace(questions, sourcePacking).distinctTurnContents;
+}
+
+/** Request bytes ignore occurrence message ids; cache them per role/content round. */
+export function extractionRequestCoverageMemoKey(
+  turnContent: string,
+  messages: readonly { readonly role: string; readonly content: string }[],
+  sourcePacking?: ExtractionSourcePacking
+): string {
+  return JSON.stringify({
+    content: turnContent,
+    packing: sourcePacking ?? null,
+    messages: messages.map(({ role, content }) => ({ role, content }))
+  });
+}
+
+interface CachedTurnCoverage {
+  readonly requests: ReturnType<typeof collectOfficialApiExtractionCoverage>["requests"];
+  readonly identity: string;
+}
+
+function coverageForTurn(
+  turnContent: string,
+  turnMessages: readonly LongMemEvalRoundMessage[],
+  sourcePacking: ExtractionSourcePacking | undefined,
+  memo: Map<string, CachedTurnCoverage>
+): CachedTurnCoverage {
+  const memoKey = extractionRequestCoverageMemoKey(turnContent, turnMessages, sourcePacking);
+  const cached = memo.get(memoKey);
+  if (cached !== undefined) return cached;
+  const requests = collectOfficialApiExtractionCoverage(turnContent, turnMessages, sourcePacking).requests;
+  const coverage = Object.freeze({
+    requests,
+    identity: JSON.stringify(requests.map(stringifyOfficialApiExtractionRequest))
+  });
+  memo.set(memoKey, coverage);
+  return coverage;
 }

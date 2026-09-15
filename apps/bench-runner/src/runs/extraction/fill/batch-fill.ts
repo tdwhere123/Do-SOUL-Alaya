@@ -136,12 +136,16 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
     ...readFillRetryTelemetry(newFillStats()), authorityTelemetry: authority.snapshot() };
 }
 
-function refuseConflictingSampleWindow(input: BatchFillInput): void {
-  if (input.authority?.receipt.sample_scope === undefined) return;
+function sampleWindowPlanPath(input: BatchFillInput): string {
   const window = input.options.batch!.window ?? "initial";
   if (!/^[a-zA-Z0-9_-]{1,64}$/u.test(window)) throw new Error("invalid Batch window name");
-  const path = join(input.writeLease.stableRootPath,
+  return join(input.writeLease.stableRootPath,
     window === "initial" ? "gemini-batch-plan.json" : `gemini-batch-plan-${window}.json`);
+}
+
+function refuseConflictingSampleWindow(input: BatchFillInput): void {
+  if (input.authority?.receipt.sample_scope === undefined) return;
+  const path = sampleWindowPlanPath(input);
   if (existsSync(path)) return;
   if (readRootBatchRuns(input.writeLease).length === 0) return;
   throw new Error("sample authority already has its sole Batch job in this cache root");
