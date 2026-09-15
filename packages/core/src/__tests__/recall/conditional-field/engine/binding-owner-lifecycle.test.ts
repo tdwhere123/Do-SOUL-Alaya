@@ -196,7 +196,8 @@ describe("execution-owned binding recovery", () => {
     expect(baseline.remaining_memory_bytes - field.remaining_memory_bytes).toBeGreaterThanOrEqual(owner.bytes);
     expect(field.binding_context_bytes).toBe(owner.bytes);
     expect(retainedFieldLevels(field, budget.memory_bytes).retained_bytes_current).toBeGreaterThanOrEqual(owner.bytes);
-    expect(snapshotRestoredEngineWork(field, budget.memory_bytes).remaining_memory_bytes).toBe(budget.memory_bytes - owner.bytes);
+    expect(snapshotRestoredEngineWork(field, budget.memory_bytes).remaining_memory_bytes)
+      .toBe(budget.memory_bytes - owner.bytes - (field.solver_retained_bytes ?? 0));
     expect(() => encodeBindingContext(env("mutate"), field.binding_contexts)).toThrow(BindingContextResourceError);
     const prepared = field.binding_contexts!.fork(field.remaining_memory_bytes);
     const added = encodeBindingContext(env("prepared"), prepared);

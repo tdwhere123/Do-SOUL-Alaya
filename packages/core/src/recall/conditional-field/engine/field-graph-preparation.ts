@@ -10,7 +10,7 @@ type ProductGrade = Readonly<{ hard?: number; hardExplicit?: boolean; soft?: num
 const HARD = hardIdentityCapContractId();
 
 /** Persistent product projection; conflicting declared contracts never regain a scalar by arrival order. */
-export class PreparedProductValues implements ReadonlyMap<string, number> {
+class PreparedProductValues implements ReadonlyMap<string, number> {
   public constructor(private readonly rows = new PersistentStringMap<ProductGrade>(), public readonly size = 0,
     public readonly conflictCount = 0) {}
   public get [Symbol.toStringTag](): string { return "PreparedProductValues"; }
@@ -91,7 +91,7 @@ export type FieldGraphAtom = Readonly<{ seed?: SeedActivation; transition?: Tran
 /** Accounted retained representation, not a JavaScript RSS estimate. A cell is
  * 32 accounted bytes; AVL/heap path copies are bounded by twice log2(n+2),
  * including rotation/merge slack. Strings include worst-case nested JSON escaping.
- * Charges deliberately retain old versions while issued continuations may own them. */
+ * A request charges the live version; issued continuations keep prior retained bytes. */
 export function nextFieldGraphAtom(state: PreparedFieldGraph, auxiliaryNodes = 0): FieldGraphAtom {
   let seed: SeedActivation | undefined;
   let transition: Transition | undefined;
@@ -137,7 +137,7 @@ export function stepFieldGraph(state: PreparedFieldGraph, availableBytes: number
     const current = { ...state, changedProduct: undefined };
     const admitted = state.deferred === undefined ? current : { ...current, deferred: undefined,
       pending: state.pending.append(state.deferred), allocatedPendingSlots: state.allocatedPendingSlots + 1 };
-    return { ...prepareRow(admitted, atom), retainedBytes: state.retainedBytes + atom.bytes, next: "relax" };
+    return { ...prepareRow(admitted, atom), retainedBytes: Math.max(state.retainedBytes, atom.bytes), next: "relax" };
   }
   const result = solveMaxMinField({ nodeIds: [], seeds: new Map(), transitions: [], bottom: 0, top: 1000,
     preparedGraph: state.graph, priorValues: state.numericValues, workQueue: state.queue, workLimit: 1 });
@@ -149,7 +149,7 @@ export function stepFieldGraph(state: PreparedFieldGraph, availableBytes: number
     changedProduct = node.product;
   }
   return { ...state, numericValues: result.values, queue: result.workQueue, values,
-    retainedBytes: state.retainedBytes + atom.bytes, changedProduct, next: "prepare" };
+    retainedBytes: Math.max(state.retainedBytes, atom.bytes), changedProduct, next: "prepare" };
 }
 
 function prepareRow(state: PreparedFieldGraph, atom: FieldGraphAtom): PreparedFieldGraph {

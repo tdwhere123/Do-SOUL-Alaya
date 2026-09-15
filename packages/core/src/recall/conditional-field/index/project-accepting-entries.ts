@@ -163,16 +163,12 @@ function scanAcceptingValues(scan: {
 } {
   const { input, emitted, pageEnd, pageLimited, values, entries, members, updates } = scan;
   let { next, truncated, groundingDeferred, allowance, facet } = scan;
-  const needsConflictScan = input.snapshot.has_incomparable_activations === undefined;
-  const entryVisit = needsConflictScan ? 0 : 1;
   for (let index = scan.start; index < values.size; index += 1) {
-    if (needsConflictScan && allowance < 1) { truncated = true; break; }
     const value = values.at(index);
     if (value === undefined) break;
-    if (needsConflictScan) {
-      allowance -= 1;
-      if (value.activation?.kind === "incomparable") scan.onConflict();
-    }
+    // Snapshot rows are already materialized; incomparable detection must not
+    // bill skipped identities as projection visits.
+    if (value.activation?.kind === "incomparable") scan.onConflict();
     const key = sharedProductIdentity(value.state);
     if (emitted !== undefined) {
       const prior = emitted[key];
@@ -185,8 +181,8 @@ function scanAcceptingValues(scan: {
           next += 1;
           continue;
         }
-        if (allowance < entryVisit || updates.length >= input.budget.page_budget) { truncated = true; break; }
-        allowance -= entryVisit;
+        if (allowance < 1 || updates.length >= input.budget.page_budget) { truncated = true; break; }
+        allowance -= 1;
         updates.push(entry);
         next += 1;
         continue;
@@ -214,12 +210,12 @@ function scanAcceptingValues(scan: {
     const collected = emitted === undefined ? entries.length : members.length;
     const payloadReserve = input.finalize_payload === undefined ? 0
       : (input.payload_work_per_entry ?? 1) * (collected + (value.accepting && grounded ? 1 : 0));
-    if (allowance < entryVisit + payloadReserve) {
+    if (allowance < 1 + payloadReserve) {
       truncated = true;
       facet = { ...facet, scan_offset: Math.max(facet.scan_offset, 1) };
       break;
     }
-    allowance -= entryVisit;
+    allowance -= 1;
     if (!grounded) {
       groundingDeferred ||= value.accepting;
       if (value.accepting && input.delivered_product_ids === undefined && emitted === undefined) break;
