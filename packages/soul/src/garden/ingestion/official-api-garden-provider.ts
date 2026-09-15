@@ -224,20 +224,12 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     turnContent: string,
     context: GardenCompileContext
   ): Promise<readonly CandidateMemorySignal[]> {
-    const normalizedTurnContent = turnContent.trim();
-    if (normalizedTurnContent.length === 0) {
-      return [];
-    }
-
-    if (this.apiKey === null && !this.canUseCredentiallessCacheExtractor) {
-      throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
-    }
-
+    if (turnContent.trim().length === 0) return [];
     const createdAt = this.now();
     const materialize = (located: readonly SourceLocatedInterpretation[]) =>
       this.emitLocatedSignals(located, context, createdAt);
     try {
-      return materialize(await this.requestInterpretations(normalizedTurnContent, context));
+      return materialize(await this.extractSourceInterpretations(turnContent, context));
     } catch (error) {
       if (!(error instanceof OfficialApiGardenCompileIncompleteError)) {
         throw error;
@@ -247,6 +239,21 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         signals: materialize(error.located)
       });
     }
+  }
+
+  /** Extract proposals without publishing source-bound memory candidates. */
+  public async extractSourceInterpretations(
+    turnContent: string,
+    context: GardenCompileContext
+  ): Promise<readonly SourceLocatedInterpretation[]> {
+    const normalizedTurnContent = turnContent.trim();
+    if (normalizedTurnContent.length === 0) return [];
+    if (this.apiKey === null && !this.canUseCredentiallessCacheExtractor) {
+      throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
+    }
+    // Incomplete reception retains the existing typed receipt and located proposals;
+    // malformed or unknown reception must never become a successful empty result.
+    return this.requestInterpretations(normalizedTurnContent, context);
   }
 
   public async extractOpenSemanticFactors(

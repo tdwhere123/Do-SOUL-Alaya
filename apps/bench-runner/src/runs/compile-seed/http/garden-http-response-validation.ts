@@ -5,6 +5,7 @@ import {
   markOutputTokenTruncation
 } from "./output-token-retry.js";
 import { markGardenHttpFailure } from "./garden-http-failure-attempt.js";
+import { inspectExtractionRawEnvelope } from "../../extraction/content-closure.js";
 
 export function extractValidGardenHttpContent(
   response: ChatCompletionResponseInspection,
@@ -28,7 +29,7 @@ export function extractValidGardenHttpContent(
     });
   }
   if (validation === "default_envelope") {
-    validateDefaultSignalsEnvelope(content, response.usage);
+    validateDefaultExtractionEnvelope(content, response.usage);
   }
   return content;
 }
@@ -53,12 +54,12 @@ export function buildGardenHttpAttemptResponse(
   };
 }
 
-function validateDefaultSignalsEnvelope(
+function validateDefaultExtractionEnvelope(
   content: string,
   usage: BenchProviderUsage | undefined
 ): void {
   try {
-    inspectSignalsEnvelope(content);
+    inspectExtractionRawEnvelope(content);
   } catch (parseError) {
     throw markGardenHttpFailure(new Error(
       `garden extraction returned unparseable content: ${
@@ -70,13 +71,5 @@ function validateDefaultSignalsEnvelope(
       rawBody: content,
       ...(usage === undefined ? {} : { usage })
     });
-  }
-}
-
-function inspectSignalsEnvelope(content: string): void {
-  const parsed = JSON.parse(content) as unknown;
-  if (typeof parsed !== "object" || parsed === null ||
-      !Array.isArray((parsed as { readonly signals?: unknown }).signals)) {
-    throw new Error("signals array missing");
   }
 }

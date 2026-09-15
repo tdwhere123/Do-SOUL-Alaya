@@ -20,6 +20,31 @@ function interpretationEnvelope(assertionId: number, predicate: string, args: re
 }
 
 describe("official API ordinary extraction compile", () => {
+  it("extracts proposals without source publication authority and preserves empty versus malformed reception", async () => {
+    const { source_observation: _sourceObservation, ...withoutObservation } = createContext();
+    const turn = "Alice uses tools.";
+    const context = { ...withoutObservation,
+      turn_messages: [{ role: "user" as const, content: turn, message_id: "user-1" }] };
+    const proposals = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: createExtractor(interpretationEnvelope(1, "uses", [
+        { role: "agent", text: "Alice" }
+      ])),
+      generateSignalId: () => { throw new Error("proposal extraction must not emit signals"); }
+    });
+    await expect(proposals.extractSourceInterpretations(turn, context)).resolves.toHaveLength(1);
+    const empty = new OfficialApiGardenProvider({
+      apiKey: "sk-test", extractor: createExtractor('{"interpretations":[]}')
+    });
+    await expect(empty.extractSourceInterpretations(turn, context)).resolves.toMatchObject([
+      { outcome: "empty", candidates: [], diagnostics: [] }
+    ]);
+    const malformed = new OfficialApiGardenProvider({
+      apiKey: "sk-test", extractor: createExtractor('{"signals":[]}'), diagnosticDir: null
+    });
+    await expect(malformed.extractSourceInterpretations(turn, context)).rejects.toThrow();
+  });
+
   it("emits a source interpretation signal without kind or confidence routing fields", async () => {
     const turn = "Alice uses tools.";
     const provider = new OfficialApiGardenProvider({

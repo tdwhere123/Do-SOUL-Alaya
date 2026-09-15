@@ -5,6 +5,7 @@ import {
 import { isDeepStrictEqual } from "node:util";
 import { inspectCachedRawExtraction } from "../../compile-seed/cache/cache-shard.js";
 import type { ExtractionTransportProvenance } from "../transport-route.js";
+import { EMPTY_INTERPRETATIONS_ENVELOPE, EMPTY_SIGNALS_ENVELOPE } from "../empty-classification.js";
 
 export interface ExtractionAttemptLedgerCacheIdentity {
   readonly model: string;
@@ -61,7 +62,8 @@ export function readValidDeterministicLedgerShard(
   const shard = inspectCachedRawExtraction(
     cacheRoot, cacheKey, identity.model, identity.requestProfile
   );
-  if (shard.status !== "hit" || shard.rawJson !== '{"signals":[]}' ||
+  if (shard.status !== "hit" ||
+      (shard.rawJson !== EMPTY_INTERPRETATIONS_ENVELOPE && shard.rawJson !== EMPTY_SIGNALS_ENVELOPE) ||
       shard.transportProvenance !== undefined) return undefined;
   return { cacheKey, rawJsonSha256: shard.rawJsonSha256, successKind: "deterministic" };
 }

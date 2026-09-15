@@ -284,7 +284,7 @@ async function compileExtractionTurn(
   turn: LongMemEvalExtractionTurn
 ): Promise<void> {
   try {
-    await provider.compile(turn.turnContent, {
+    await provider.extractSourceInterpretations(turn.turnContent, {
       workspace_id: "extraction-fill",
       run_id: "extraction-fill",
       surface_id: null,
