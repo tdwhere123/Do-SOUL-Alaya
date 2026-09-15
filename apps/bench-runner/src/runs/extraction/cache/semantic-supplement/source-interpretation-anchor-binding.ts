@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { SourceInterpretationResponseEnvelopeSchema } from "@do-soul/alaya-protocol";
-import { receiveOfficialApiSourceInterpretations,
+import { classifyOfficialApiExtractionResult,
   type OfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 export const SourceInterpretationAnchorBindingSchema = z.object({
@@ -56,13 +56,7 @@ export function bindSourceInterpretationAnchors(input: InterpretationAnchorInput
 }
 
 function receive(rawJson: string, input: InterpretationAnchorInput) {
-  const receipt = receiveOfficialApiSourceInterpretations(rawJson, input.request, {
-    sourceCorpus: input.sourceCorpus, artifactKey: digest(rawJson)
-  });
-  if (receipt.status !== "complete") {
-    throw new Error("source assertion supplement interpretation source admission failed");
-  }
-  return receipt;
+  return classifyOfficialApiExtractionResult(rawJson, input.request, input.sourceCorpus);
 }
 
 function digest(value: string): string {

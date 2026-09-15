@@ -22,12 +22,14 @@ const PRIMARY_MANIFEST_SHA = "3".repeat(64);
 const CORPUS_SHA = "4".repeat(64);
 
 describe("snapshot semantic supplement binding", () => {
-  it("closes exact receipt counts over unique bounded batches", () => {
+  it.each([3, 4] as const)("closes exact receipt counts over unique bounded batches for version %s", (version) => {
     const entries = createSemanticSupplementEntries();
     const receipt = batch();
     observe(entries, receipt);
     observe(entries, receipt);
-    assertSemanticSupplementClosure(extraction(), entries, binding(receipt));
+    assertSemanticSupplementClosure(extraction(), entries, version === 3 ? binding(receipt) : {
+      ...binding(receipt), receipt_schema_version: 4, mapping_basis: "source-interpretation-to-current-anchor-v1"
+    });
     expect(entries.observed.size).toBe(1);
   });
 
@@ -89,7 +91,7 @@ describe("snapshot semantic supplement binding", () => {
 function request() {
   return parseOfficialApiExtractionRequest({
     schema_version: 2,
-    source_locator_contract_version: 3,
+    source_locator_contract_version: 4,
     batch_contract_version: 1,
     source_corpus_identity: CORPUS_SHA,
     batch_index: 0,

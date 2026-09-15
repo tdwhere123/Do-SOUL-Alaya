@@ -1,3 +1,6 @@
+import { buildSnapshotExtractionSummary } from "../../../runs/snapshot/extraction-authority.js";
+import { assertSemanticSupplementClosure, assertSemanticSupplementRound,
+  createSemanticSupplementEntries } from "../../../runs/snapshot/seed-ledger/semantic-supplement-binding.js";
 import { writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -36,17 +39,21 @@ const TURN_MESSAGES = [
   { message_id: "m2", role: "user" as const, content: "I avoid any." }
 ];
 
-it.each([false, true])("consumes bound supplemental interpretations and rejects raw drift through native publication (drift=%s)", async (drift) => {
+it.each(["valid", "source-drift", "malformed-primary"] as const)("consumes bound supplemental interpretations and rejects raw drift through native publication (mode=%s)", async (mode) => {
   const root = await mkdtemp(join(tmpdir(), "shared-raw-runtime-"));
   const primaryCacheRoot = join(root, "primary");
   const sourceCacheRoot = join(root, "source");
   vi.stubEnv("ALAYA_INGEST_RECONCILIATION_ENABLED", "0");
   vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "");
-  const daemon = await startBenchDaemon({ dataDirRoot: join(root, "consumer"),
-    workspaceId: "supplement-native", runId: "supplement-native-run" });
+  let daemon: Awaited<ReturnType<typeof startBenchDaemon>> | undefined;
+  let db: ReturnType<typeof initDatabase> | undefined;
   try {
+    daemon = await startBenchDaemon({ dataDirRoot: join(root, "consumer"),
+      workspaceId: "supplement-native", runId: "supplement-native-run" });
     const fixture = writeRuntimeFixture(primaryCacheRoot, sourceCacheRoot);
-    if (drift) writeShard(sourceCacheRoot, fixture.cacheKey, envelope([interpretation(99, "invented")]));
+    if (mode === "source-drift") writeShard(sourceCacheRoot, fixture.cacheKey, envelope([interpretation(99, "invented")]));
+    if (mode === "malformed-primary") writeShard(primaryCacheRoot, fixture.cacheKey,
+      '{"interpretations":[{"assertion_id":2,"relations":[]}]}');
     const runner = createCompileSeedRunner({
       cacheRoot: primaryCacheRoot,
       config: {
@@ -73,9 +80,9 @@ it.each([false, true])("consumes bound supplemental interpretations and rejects 
       runId: daemon.runId,
       sourceObservedAt: "2026-01-01T00:00:00.000Z"
     };
-    if (drift) {
+    if (mode !== "valid") {
       await expect(runner.seedTurn(seedInput)).rejects.toThrow();
-      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+      db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
       expect(db.connection.prepare("SELECT COUNT(*) AS count FROM evidence_capsules").get()).toEqual({ count: 0 });
       expect(runner.stats.lastSemanticSupplementShards).toHaveLength(0);
       return;
@@ -83,18 +90,30 @@ it.each([false, true])("consumes bound supplemental interpretations and rejects 
     const result = await runner.seedTurn(seedInput);
 
     expect(result.seeds).toHaveLength(2);
-    const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+    db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
     const roots = new SqliteFieldSourceRecordRepo(db, fieldContractSha256).listByWorkspace(daemon.workspaceId);
     expect(roots.some((record) => record.source_body.includes("I avoid any."))).toBe(true);
     expect(runner.stats.lastSemanticSupplementShards).toHaveLength(1);
+    const entries = createSemanticSupplementEntries();
+    assertSemanticSupplementRound({ semantic: runner.stats.lastSemanticSupplementShards!,
+      semanticEntries: entries, semanticBinding: runner.semanticSupplementBinding,
+      cacheKeys: [fixture.cacheKey], requests: [requireSingleRequest()] });
+    const primary = requireIdentity(primaryCacheRoot);
+    if (primary.manifest.schema_version === 2) throw new Error("fixture requires profiled manifest");
+    assertSemanticSupplementClosure(buildSnapshotExtractionSummary(primary.manifest, primary.manifestSha256),
+      entries, runner.semanticSupplementBinding);
+
     expect(runner.stats.rawShardInspection).toMatchObject({
       primary: { physicalReads: 1, parseMisses: 1, memoHits: 0 },
       supplement: { physicalReads: 1, parseMisses: 1, memoHits: 1 }
     });
   } finally {
-    await daemon.shutdown();
-    vi.unstubAllEnvs();
-    await rm(root, { recursive: true, force: true });
+    try { await daemon?.shutdown(); }
+    finally {
+      db?.close();
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
   }
 });
 

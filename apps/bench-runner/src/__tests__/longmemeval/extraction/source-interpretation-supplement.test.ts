@@ -23,6 +23,7 @@ describe("current interpretation supplement source admission", () => {
   });
   it.each([
     ["historical raw", { sourceRawJson: '{"signals":[]}' }],
+    ["nonempty zero-candidate primary", { primaryRawJson: '{"interpretations":[{"assertion_id":2,"relations":[]}]}' }],
     ["unknown primary", { primaryRawJson: '' }],
     ["malformed primary", { primaryRawJson: '{"interpretations":[{}]}' }],
     ["changed corpus", { sourceCorpus: `${sourceCorpus} I moved.` }],
