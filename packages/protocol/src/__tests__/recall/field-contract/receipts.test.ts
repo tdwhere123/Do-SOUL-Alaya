@@ -65,6 +65,31 @@ describe("field-contract receipts", () => {
     expect(SourceRecordIdentitySchema.parse(sourceRecord()).valid_from).toBeNull();
   });
 
+  it("classifies mixed datetime precision by instant, not string order", () => {
+    expect(classifyFieldValidTime({
+      valid_from: "2026-08-16T00:00Z",
+      valid_to: "2026-08-16T00:01:00.000Z"
+    }, "2026-08-16T00:00:30Z")).toBe("hard_active");
+    expect(classifyFieldValidTime({
+      valid_from: "2026-08-15T00:00:00.000Z",
+      valid_to: "2026-08-16T00:00Z"
+    }, "2026-08-16T00:00:00.000Z")).toBe("inactive");
+  });
+
+  it("rejects mixed-precision source intervals that are not half-open by instant", () => {
+    const record = sourceRecord();
+    expect(SourceRecordIdentitySchema.safeParse({
+      ...record,
+      valid_from: "2026-08-16T12:34:30Z",
+      valid_to: "2026-08-16T12:34Z"
+    }).success).toBe(false);
+    expect(SourceRecordIdentitySchema.safeParse({
+      ...record,
+      valid_from: "2026-08-16T12:34Z",
+      valid_to: "2026-08-16T12:34:00.0001Z"
+    }).success).toBe(true);
+  });
+
   it("rejects erase tombstones that still carry content fields", () => {
     const tombstone = {
       schema_version: 1 as const,

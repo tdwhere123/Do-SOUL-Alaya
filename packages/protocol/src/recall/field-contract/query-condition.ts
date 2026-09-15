@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   BoundedIdSchema,
+  compareUtcInstants,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
@@ -53,8 +54,12 @@ export function classifyFieldValidTime(
   asOf: string
 ): FieldValidTimeClass {
   if (time.valid_from === null) return "soft_recallable";
-  if (time.valid_from > asOf) return "inactive";
-  if (time.valid_to !== null && asOf >= time.valid_to) return "inactive";
+  const fromOrder = compareUtcInstants(time.valid_from, asOf);
+  if (fromOrder === undefined || fromOrder > 0) return "inactive";
+  if (time.valid_to !== null) {
+    const toOrder = compareUtcInstants(asOf, time.valid_to);
+    if (toOrder === undefined || toOrder >= 0) return "inactive";
+  }
   return "hard_active";
 }
 
