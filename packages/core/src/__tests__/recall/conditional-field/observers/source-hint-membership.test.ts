@@ -1,6 +1,8 @@
+import { fieldContractSha256 } from "../../../../shared/field-hash.js";
 import { describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  BoundSourceInterpretationSchema, locateSourceInterpretation, sourceRecallTarget,
   type QueryInterpretation
 } from "@do-soul/alaya-protocol";
 import {
@@ -66,7 +68,7 @@ describe("source hint membership", () => {
         ? { row: current, rowsRead: 1, bytesRead: 8, nativeWork: 5, unavailable: false }
         : { row: null, rowsRead: 1, bytesRead: 0, nativeWork: 5, unavailable: true },
       boundInterpretations: ({ afterCursor }) => ({
-        rows: afterCursor === null ? [{ object_id: "gist-1", gist: JSON.stringify({ contract: "nope" }) }] : [],
+        rows: afterCursor === null ? [{ object_id: "gist-1", gist: validHint("root-a", "rev-1") }] : [],
         nativeVisits: 1, nativeBytes: 8, nativeWork: 1, rowsRead: 1, bytesRead: 8,
         truncated: false, committedThrough: "gist-1"
       })
@@ -92,7 +94,7 @@ describe("source hint membership", () => {
         truncated: false, unavailable: true, committedThrough: null
       })
     };
-    const observed = observeConditionalField(seedInput(query, observerReaders, 1));
+    const observed = observeConditionalField(seedInput(query, observerReaders, 6));
     expect(observed.page.observations.length).toBeGreaterThan(0);
     expect(observed.page.observations[0]?.object_id).toBe("root-a");
   });
@@ -230,7 +232,7 @@ function readers(mode: "disabled" | "absent" | "empty" | "wrong" | "stale" | "co
           truncated: false, committedThrough: afterCursor };
       }
       return {
-        rows: afterCursor === null ? [{ object_id: "gist-1", gist: JSON.stringify({ contract: "nope" }) }] : [],
+        rows: afterCursor === null ? [{ object_id: "gist-1", gist: validHint(mode === "wrong" ? "missing-root" : "root-a", "rev-1") }] : [],
         nativeVisits: 1, nativeBytes: 8, rowsRead: 1, bytesRead: 8,
         truncated: false, committedThrough: "gist-1"
       };
@@ -268,4 +270,18 @@ function sourceRoot(rootId: string, revision = "rev-1"): SourceRootObserverRow {
     content: `${rootId} body`,
     content_complete: true
   };
+}
+
+function validHint(rootId: string, revision: string): string {
+  const source = "access full PC instantly";
+  const located = locateSourceInterpretation({ source, artifactKey: "hint", sha256: fieldContractSha256,
+    assertion: { assertion_id: 1, text: source, source_span: [0, source.length] },
+    response: { kind: "received", value: { interpretations: [{ assertion_id: 1,
+      relations: [{ predicate: { text: "access" }, arguments: [{ role: "capability", phrase: { text: "full PC" } }],
+        qualifiers: [{ role: "temporal", phrase: { text: "instantly" } }] }] }] } }
+  });
+  return JSON.stringify(BoundSourceInterpretationSchema.parse({ ...located, source_target: sourceRecallTarget({
+    workspace_id: "ws", root_kind: "source_record", root_id: rootId, source_version: revision,
+    content_digest: SNAPSHOT_ID, evidence_object_id: `capsule-${rootId}`
+  }) }));
 }

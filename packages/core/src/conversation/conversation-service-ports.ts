@@ -117,6 +117,7 @@ export interface ConversationBudgetBankruptcyPort {
 }
 
 export interface ConversationServiceDependencies {
+  readonly retainCompileSource?: (turnContent: string, context: Parameters<ConversationGardenComputeProviderPort["compile"]>[1]) => Promise<void>;
   readonly runRepo: ConversationRunRepoPort;
   readonly workspaceRepo: ConversationWorkspaceRepoPort;
   readonly eventLogRepo: ConversationEventLogRepoPort;

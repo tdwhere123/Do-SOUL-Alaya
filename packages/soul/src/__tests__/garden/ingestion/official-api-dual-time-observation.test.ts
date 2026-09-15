@@ -27,7 +27,8 @@ describe("official Garden dual-time observation", () => {
     expect(signal?.interpretation_contract).toBe("source-interpretation-v1");
     expect(signal?.object_kind).toBeNull();
     expect(signal?.raw_payload).not.toHaveProperty("temporal_projection");
-    expect(signal?.raw_payload.source_interpretation.candidates[0]?.qualifiers[0]?.phrase.text)
+    if (signal?.interpretation_contract !== "source-interpretation-v1") throw new Error("expected interpretation signal");
+    expect(signal.raw_payload.source_interpretation.candidates[0]?.qualifiers[0]?.phrase.text)
       .toBe("January 1, 2024");
   });
 

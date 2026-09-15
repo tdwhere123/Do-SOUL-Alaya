@@ -1,3 +1,4 @@
+import type { LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 import { expect, vi } from "vitest";
 import {
@@ -438,7 +439,7 @@ export function createPostTurnPayload(overrides: Partial<PostTurnPayload> = {}):
   return { ...payload, ...overrides };
 }
 
-export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+export function createSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): LegacyCandidateMemorySignal {
   const { source_observation = null, ...signalOverrides } = overrides;
   return {
     signal_id: "signal-post-turn",

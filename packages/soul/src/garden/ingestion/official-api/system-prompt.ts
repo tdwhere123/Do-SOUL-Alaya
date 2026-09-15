@@ -25,7 +25,7 @@ const INTERPRETATION_PROMPT_PARTS = Object.freeze([
   "The server-derived source_assertions catalog contains only User assertions the runtime can ground without unresolved references; no other conversation content is available or authoritative.",
   'Each relation is {"predicate":{"text":EXACT_SUBSTRING},"arguments":[...],"qualifiers":[...]}.',
   'Each argument or qualifier is {"role":OPEN_NAME,"phrase":{"text":EXACT_SUBSTRING}}.',
-  'Add "occurrence":N on a phrase only when selecting a repeated exact substring after its first occurrence.',
+  'For any repeated exact substring, add zero-based "occurrence":N on the phrase, including "occurrence":0 for the first match.',
   "Copy exact source wording, capitalization, punctuation, and spacing in every phrase.",
   "Roles are model interpretations of source attachment, not ontology types, persistence kinds, or certified facts.",
   "Do not emit confidence, object_kind, signal_kind, matched_text, source_locator, identity_observation, temporal_projection, preference_profile, ISO timestamps, graph ids, or semantic_identity.",

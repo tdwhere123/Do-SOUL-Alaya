@@ -73,12 +73,20 @@ export function createSourceObservationPublication(input: Readonly<{
       );
       const durable = durableInterpretation(stored.content_bytes, located);
       const identity = publicationIdentity(stored, durable, input.sha256);
+      const assertSourceCurrent = () => {
+        const current = resolveCurrentSource(input.stores, signal.workspace_id, located, input.sha256);
+        if (current.record.identity !== stored.record.identity) {
+          throw new CoreError("VALIDATION", "source revision is not current");
+        }
+        verifyAssertionAndScope(current, signal.workspace_id, signal.scope_hint, located);
+      };
       const existing = await findCompletePublication(
         input.evidenceService,
         input.memoryService,
         signal.workspace_id,
         identity
       );
+      assertSourceCurrent();
       if (existing !== null) return existing;
       if (!await publicationReservationExists(
         input.evidenceService,
@@ -90,7 +98,7 @@ export function createSourceObservationPublication(input: Readonly<{
       }
       const bound = bindInterpretation(durable, stored, identity.evidenceObjectId);
       return await persistObservation(
-        input, signal, request.sourceEventAnchor, bound, identity, scope
+        { ...input, assertSourceCurrent }, signal, request.sourceEventAnchor, bound, identity, scope
       );
     }
   };

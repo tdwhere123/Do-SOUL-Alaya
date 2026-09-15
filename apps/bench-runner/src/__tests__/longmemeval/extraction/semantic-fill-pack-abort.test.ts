@@ -1,3 +1,4 @@
+import { semanticInterpretation } from "./semantic-artifact-fixture.js";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,16 +25,7 @@ afterEach(async () => Promise.all(roots.splice(0).map((root) =>
   rm(root, { recursive: true, force: true }))));
 
 function rawForPack(tasks: ReturnType<typeof semanticTasks>): string {
-  return JSON.stringify({ signals: tasks.map((task) => ({
-    object_kind: "fact",
-    confidence: 0.9,
-    matched_text: task.text.replace(/^(?:User|Assistant): /u, ""),
-    source_locator: {
-      contract_version: 3,
-      kind: "assertion_catalog",
-      assertion_id: task.assertionId
-    }
-  })) });
+  return JSON.stringify({ interpretations: tasks.map(semanticInterpretation) });
 }
 
 async function receiptFiles(root: string): Promise<readonly string[]> {

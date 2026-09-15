@@ -1,18 +1,12 @@
 import {
   BoundSourceInterpretationSchema,
   normalizeMemoryObjectKeySurface,
-  type BoundSourceInterpretation
+  type BoundSourceInterpretation,
+  type RecallCandidate
 } from "@do-soul/alaya-protocol";
 import type { AdoptedSourceProposal, QuerySourceRolePhrase } from "../query/query-source-proposal.js";
 
-export type ProposalMatchReason = Readonly<{
-  readonly kind: "proposal";
-  readonly predicate_key: string;
-  readonly arguments: readonly QuerySourceRolePhrase[];
-  readonly qualifiers: readonly QuerySourceRolePhrase[];
-  readonly candidate_id: string;
-  readonly context_id: string;
-}>;
+export type ProposalMatchReason = NonNullable<RecallCandidate["source_lookup_reasons"]>[number];
 
 export function parseBoundInterpretationGist(gist: string): BoundSourceInterpretation | null {
   try {
@@ -35,6 +29,7 @@ export function matchBoundInterpretation(
     if (!rolesMatch(candidate.qualifiers, sketch.qualifiers)) continue;
     return {
       kind: "proposal",
+      source_target: bound.source_target,
       predicate_key: sketch.predicate_key,
       arguments: sketch.arguments,
       qualifiers: sketch.qualifiers,

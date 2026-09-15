@@ -72,7 +72,7 @@ export class MemoryWriteService {
 
   public async create(input: MemoryEntryInput): Promise<Readonly<MemoryEntry>> {
     const {
-      enqueueEnrichment: enrichmentIntent, object_id: reservedObjectId, ...memoryEntryInput
+      enqueueEnrichment: enrichmentIntent, object_id: reservedObjectId, assertSourceCurrent, ...memoryEntryInput
     } = input;
     const enqueueEnrichment = freezeEnrichmentIntent(enrichmentIntent);
     const timestamp = this.now();
@@ -132,7 +132,8 @@ export class MemoryWriteService {
     const { created, event } = await this.createRowMaybeAtomicallyEnqueued(
       memoryEntry,
       enqueueEnrichment,
-      eventInput
+      eventInput,
+      assertSourceCurrent
     );
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     this.persistObjectKeys(created);
@@ -173,7 +174,8 @@ export class MemoryWriteService {
   private async createRowMaybeAtomicallyEnqueued(
     memoryEntry: Readonly<MemoryEntry>,
     enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"],
-    createdEventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+    createdEventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">,
+    assertSourceCurrent?: () => void
   ): Promise<{
     readonly created: Readonly<MemoryEntry>;
     readonly event: EventLogEntry;
@@ -190,6 +192,7 @@ export class MemoryWriteService {
     let event: EventLogEntry | undefined;
     const created = createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, {
       beforeCreate: () => {
+        assertSourceCurrent?.();
         event = this.appendCreatedEventSynchronously(createdEventInput);
       },
       afterCreate: () => {

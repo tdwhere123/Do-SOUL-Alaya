@@ -103,7 +103,7 @@ describe("GardenComputeCoordinator", () => {
     expect(compile).toHaveBeenCalledWith(
       "remember this",
       expect.objectContaining({
-        artifact_key: "garden-compile:workspace-1:run-1",
+        artifact_key: "garden-compile:workspace-1:run-1:msg-user:msg-assistant",
         source_observation: {
           observed_at: "2026-04-29T00:00:00.000Z",
           authority: "trusted_host_event",

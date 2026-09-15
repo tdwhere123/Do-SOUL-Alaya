@@ -123,6 +123,7 @@ export async function persistObservation(
   input: Readonly<{
     readonly evidenceService: ObservationEvidencePort;
     readonly memoryService: ObservationMemoryPort;
+    readonly assertSourceCurrent: () => void;
   }>,
   signal: SourceInterpretationSignal,
   sourceEventAnchor: SourceEventAnchor,
@@ -131,11 +132,11 @@ export async function persistObservation(
   scope: SourceScopeClass
 ): Promise<SourceObservationPublicationResult> {
   const evidence = await findOrCreateEvidence(
-    input.evidenceService, signal, sourceEventAnchor, bound, identity.evidenceObjectId
+    input.evidenceService, signal, sourceEventAnchor, bound, identity.evidenceObjectId, input.assertSourceCurrent
   );
   try {
     const memory = await findOrCreateMemory(
-      input.memoryService, signal, bound, evidence.object_id, identity.memoryObjectId, scope
+      input.memoryService, signal, bound, evidence.object_id, identity.memoryObjectId, scope, input.assertSourceCurrent
     );
     return Object.freeze({ bound, evidence, memory });
   } catch (error) {
@@ -148,9 +149,11 @@ async function findOrCreateEvidence(
   signal: SourceInterpretationSignal,
   sourceEventAnchor: SourceEventAnchor,
   bound: BoundSourceInterpretation,
-  evidenceObjectId: string
+  evidenceObjectId: string,
+  assertSourceCurrent: () => void
 ): Promise<Readonly<EvidenceCapsule>> {
   const existing = await evidenceService.findByIdScoped(evidenceObjectId, signal.workspace_id);
+  assertSourceCurrent();
   if (existing !== null) return existing;
   const assertion = bound.assertion_binding.text;
   try {
@@ -181,9 +184,10 @@ async function findOrCreateEvidence(
       run_id: signal.run_id,
       workspace_id: signal.workspace_id,
       surface_id: signal.surface_id
-    });
+    }, [], undefined, undefined, undefined, assertSourceCurrent);
   } catch (error) {
     const raced = await evidenceService.findByIdScoped(evidenceObjectId, signal.workspace_id);
+    assertSourceCurrent();
     if (raced !== null) return raced;
     throw error;
   }
@@ -195,13 +199,16 @@ async function findOrCreateMemory(
   bound: BoundSourceInterpretation,
   evidenceObjectId: string,
   memoryObjectId: string,
-  scope: SourceScopeClass
+  scope: SourceScopeClass,
+  assertSourceCurrent: () => void
 ): Promise<Readonly<MemoryEntry>> {
   const existing = await memoryService.findByIdScoped(memoryObjectId, signal.workspace_id);
+  assertSourceCurrent();
   if (existing !== null) return existing;
   try {
     return await memoryService.create({
       object_id: memoryObjectId,
+      assertSourceCurrent,
       created_by: signal.source,
       dimension: MemoryDimension.OBSERVATION,
       source_kind: SourceKind.COMPILER,
@@ -216,6 +223,7 @@ async function findOrCreateMemory(
     });
   } catch (error) {
     const raced = await memoryService.findByIdScoped(memoryObjectId, signal.workspace_id);
+    assertSourceCurrent();
     if (raced !== null) return raced;
     throw error;
   }

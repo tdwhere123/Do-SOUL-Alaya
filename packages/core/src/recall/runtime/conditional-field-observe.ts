@@ -1,3 +1,4 @@
+import { meterReaders } from "./observer-reader-budget.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   SNAPSHOT_PIN_NATIVE_WORK,
@@ -35,7 +36,6 @@ import {
   RELATION_ROUTING,
   interruptObservedField,
   loadStoredRelationKinds,
-  meterReaders,
   reopenAdjacency,
   runObservationRounds
 } from "./conditional-field-observe-session.js";

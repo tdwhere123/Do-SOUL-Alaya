@@ -4,10 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SOURCE_INTERPRETATION_CONTRACT } from "@do-soul/alaya-protocol";
-import { deriveAddressableSpanViews } from "@do-soul/alaya-core";
 import {
-  OFFICIAL_API_SYSTEM_PROMPT,
-  buildOfficialApiSourceCorpus
+  OFFICIAL_API_SYSTEM_PROMPT
 } from "@do-soul/alaya-soul";
 import {
   initDatabase,
@@ -68,19 +66,6 @@ describe("compile-seed cache-hit seedTurn publication", () => {
       workspaceId: "ws-cache-hit",
       runId: "run-cache-hit",
       embeddingMode: "disabled"
-    });
-    const source = buildOfficialApiSourceCorpus(TURN, []);
-    await daemon.importSourceRecord({
-      source_id: "compile-seed:ws-cache-hit:run-cache-hit",
-      source_version: "1",
-      content_bytes: source,
-      recorded_at: CLOCK,
-      event_time: null,
-      valid_from: null,
-      valid_to: null,
-      speaker: "user",
-      scope_class: "project",
-      spans: deriveAddressableSpanViews(source)
     });
     const delegate = vi.fn<BenchSignalExtractor["extract"]>();
     const runner = createCompileSeedRunner({

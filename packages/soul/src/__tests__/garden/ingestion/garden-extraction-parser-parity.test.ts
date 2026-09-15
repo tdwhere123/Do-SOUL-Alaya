@@ -50,6 +50,7 @@ describe("garden-extraction-parser-parity", () => {
       const actual = await provider.compile(fixture.turn, context);
       expect(actual, fixture.name).toHaveLength(fixture.expectedCount);
       for (const signal of actual) {
+        if (signal.interpretation_contract !== "source-interpretation-v1") throw new Error("expected interpretation signal");
         expect(signal.signal_kind).toBe("potential_semantic_observation");
         expect(signal.object_kind).toBeNull();
         expect(signal.confidence).toBeNull();

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { parseOfficialApiSignals } from "@do-soul/alaya-soul";
+import { SourceInterpretationResponseEnvelopeSchema, SourceInterpretationRelationSchema } from "@do-soul/alaya-protocol";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
 import {
@@ -234,7 +235,11 @@ function countRawEnvelopeSignals(parsed: unknown): number | null {
 
 function countParsedDrafts(rawJson: string): number {
   const parsed = JSON.parse(rawJson) as { readonly interpretations?: unknown; readonly signals?: unknown };
-  if (Array.isArray(parsed.interpretations)) return parsed.interpretations.length;
+  if (Array.isArray(parsed.interpretations)) {
+    const envelope = SourceInterpretationResponseEnvelopeSchema.parse(parsed);
+    return envelope.interpretations.filter((entry) => entry.relations.some((relation) =>
+      SourceInterpretationRelationSchema.safeParse(relation).success)).length;
+  }
   return parseOfficialApiSignals(rawJson).length;
 }
 

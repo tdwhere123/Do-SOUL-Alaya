@@ -23,6 +23,7 @@ export type OfficialApiInterpretationReceiveStatus = "complete" | "partial";
 export type OfficialApiInterpretationEntryRejectionReason =
   | "source_generation_mismatch"
   | "source_assertion_mismatch"
+  | "candidate_rejected"
   | "malformed_response"
   | "missing_response"
   | "transport_unknown";
@@ -31,6 +32,8 @@ export interface OfficialApiInterpretationEntryRejection {
   readonly index: number;
   readonly reason: OfficialApiInterpretationEntryRejectionReason;
   readonly assertion_id?: number;
+  readonly candidate_index?: number | null;
+  readonly diagnostic_reason?: SourceLocatedInterpretation["diagnostics"][number]["reason"];
 }
 
 export interface OfficialApiInterpretationReceiveReceipt {
@@ -81,6 +84,12 @@ export function receiveOfficialApiSourceInterpretations(
   );
   const located: SourceLocatedInterpretation[] = [];
   const rejections: OfficialApiInterpretationEntryRejection[] = [];
+  const requestedIds = new Set(request.source_assertions.map((member) => member.assertion_id));
+  envelope.data.interpretations.forEach((entry, index) => {
+    if (!requestedIds.has(entry.assertion_id)) {
+      rejections.push({ index, assertion_id: entry.assertion_id, reason: "source_assertion_mismatch" });
+    }
+  });
   request.source_assertions.forEach((member, index) => {
     const catalog = indexed.get(member.assertion_id);
     if (catalog === undefined || catalog.text !== member.text) {
@@ -91,7 +100,7 @@ export function receiveOfficialApiSourceInterpretations(
       }));
       return;
     }
-    located.push(locateSourceInterpretation({
+    const interpretation = locateSourceInterpretation({
       source: input.sourceCorpus,
       artifactKey: input.artifactKey,
       sha256,
@@ -101,7 +110,13 @@ export function receiveOfficialApiSourceInterpretations(
         source_span: [catalog.start, catalog.end]
       },
       response: { kind: "received", value: envelope.data }
-    }));
+    });
+    located.push(interpretation);
+    for (const diagnostic of interpretation.diagnostics) {
+      rejections.push({ index, assertion_id: member.assertion_id,
+        reason: "candidate_rejected", candidate_index: diagnostic.candidate_index,
+        diagnostic_reason: diagnostic.reason });
+    }
   });
   return toReceipt(rejections.length === 0 ? "complete" : "partial", located, rejections);
 }

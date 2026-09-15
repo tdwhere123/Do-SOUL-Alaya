@@ -384,6 +384,24 @@ Signal ingestion is dual-track:
 Both produce candidates that flow through the Promotion Gate before
 becoming durable.
 
+Ordinary official-API extraction uses `source-interpretation-v1`. Protocol owns
+phrase location and Core owns source admission and observation publication;
+model predicate/role proposals do not certify their meaning. Interactive turns,
+post-turn tasks, and bench compile seeds retain the exact canonical extraction
+corpus before calling the provider or replaying its cache. Interactive artifact
+identity includes both message IDs. The extraction window planner alone limits
+provider input and records residual text; adapters must not independently clip
+the retained corpus. Valid empty responses remain distinct from missing or
+failed responses. Rejected relation candidates and out-of-request assertion IDs
+make receive receipts partial and cannot certify a completed cache response.
+
+Publication verifies the bound source again inside the evidence and memory write
+transactions, including reuse and duplicate recovery. Evidence can remain after
+a later memory write loses source currentness; retries reuse that evidence only
+while the same source is current. Audit precedes notification. Live semantic
+enrichment and fill consumers share interpretation admission; retained historical
+signal artifacts keep their explicit archive readers and original bytes.
+
 ## Low-Trust Draft and Typed-Resolution Chain
 
 Garden's deterministic `SignalService.evaluateTriage` +

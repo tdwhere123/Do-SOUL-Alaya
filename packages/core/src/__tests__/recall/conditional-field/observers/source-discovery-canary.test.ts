@@ -25,11 +25,13 @@ import {
 import { SOURCE_DISCOVERY_CANARY, type CanaryCase } from "./source-discovery-canary.fixture.js";
 
 describe("source discovery canary", () => {
-  it.each(SOURCE_DISCOVERY_CANARY)(
-    "$group: proposal lookup selects the intended context under a one-context hint budget",
+  it.each(SOURCE_DISCOVERY_CANARY.flatMap((canary) => [
+    { ...canary, reversed: false }, { ...canary, reversed: true }
+  ]))(
+    "$group reversed=$reversed: proposal lookup selects the intended context under equal native and context budgets",
     (canary) => {
-      const planted = plantCanary(canary);
-      const proposal = measurePage(planted.proposalQuery, planted.proposalReaders, 1);
+      const planted = plantCanary(canary, canary.reversed);
+      const proposal = measurePage(planted.proposalQuery, planted.proposalReaders, 7);
       expect(proposal.firstId).toBe(planted.intended.root_id);
       expect(proposal.firstId).not.toBe(planted.distractor.root_id);
       expect(proposal.wording).toBe(canary.intended);
@@ -38,10 +40,12 @@ describe("source discovery canary", () => {
       expect(proposal.reasons[0]?.predicate_key).toBe(canary.sketch!.predicate);
       if (canary.group === "release") {
         expect(proposal.eventTime?.startsWith("2016")).toBe(true);
-        expect(JSON.stringify(proposal.reasons)).not.toContain("2016");
+        expect(proposal.reasons[0]?.qualifiers).toEqual(canary.sketch.qualifiers ?? []);
       }
-      const text = measurePage(planted.textQuery, planted.textReaders, 1);
-      expect(text.firstId).toBe(planted.distractor.root_id);
+      const text = measurePage(planted.textQuery, planted.textReaders, 7);
+      expect(text.firstId).toBe(canary.reversed ? planted.intended.root_id : planted.distractor.root_id);
+      expect(proposal.visits).toBeLessThanOrEqual(7);
+      expect(text.visits).toBeLessThanOrEqual(7);
       expect(text.visits).toBeGreaterThan(0);
       expect(proposal.visits).toBeGreaterThan(1);
       expect(proposal.bytes).toBeGreaterThan(0);
@@ -82,6 +86,23 @@ describe("source discovery canary", () => {
     expect(measurePage(compiled, planted.proposalReaders, 1).firstId).toBeUndefined();
     expect(measurePage(compiled, planted.proposalReaders, 1).reasons).toEqual([]);
     expect(measurePage(compiled, planted.textReaders, 1).firstId).toBeUndefined();
+  });
+
+  it("keeps unsupported revisions and alternative text in query identity", () => {
+    const compile = (revision: string, alternative: string) => compileQuerySourceSketch({
+      snapshot_id: SNAPSHOT_ID, budget: defaultBudget(), interpretation_clock: INTERPRETATION_CLOCK,
+      view: sourceOnlyView(), sketch: { original_query: "same request", source_anchor: { root_id: "root", revision },
+        unresolved_alternatives: [alternative] }
+    });
+    const first = compile("revision-a", "Alice may have revised the promise");
+    const revision = compile("revision-b", "Alice may have revised the promise");
+    const alternative = compile("revision-a", "Bob may have withdrawn the promise");
+    expect(new Set([first.query_id, revision.query_id, alternative.query_id]).size).toBe(3);
+    expect(first.status).toBe("partial");
+    expect(first.holes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ description: "revision-a", status: "unresolved" }),
+      expect.objectContaining({ description: "Alice may have revised the promise", status: "unresolved" })
+    ]));
   });
 });
 
@@ -126,20 +147,22 @@ function measurePage(
   };
 }
 
-function plantCanary(canary: CanaryCase) {
+function plantCanary(canary: CanaryCase, reversed = false) {
   const intended = sourceRoot("intended", canary.intended, canary.event_time);
   const distractor = sourceRoot("distractor", canary.distractor);
   const intendedBound = boundOf(canary, canary.intended, intended, intendedRoles(canary));
   const distractorBound = boundOf(canary, canary.distractor, distractor, distractorRoles(canary));
   const proposalQuery = compileSketch(canary, "proposal");
   const textQuery = compileSketch(canary, "source_text");
+  const roots = reversed ? [intended, distractor] : [distractor, intended];
+  const bounds = reversed ? [intendedBound, distractorBound] : [distractorBound, intendedBound];
   return {
     intended,
     distractor,
     proposalQuery,
     textQuery,
-    proposalReaders: readers([intended, distractor], [intendedBound, distractorBound], "proposal"),
-    textReaders: readers([distractor, intended], [intendedBound, distractorBound], "source_text")
+    proposalReaders: readers(roots, bounds, "proposal"),
+    textReaders: readers(roots, bounds, "source_text")
   };
 }
 
@@ -183,21 +206,28 @@ function readers(
         ? { row: null, rowsRead: 1, bytesRead: 0, nativeWork: 5, unavailable: true }
         : { row, rowsRead: 1, bytesRead: Buffer.byteLength(row.content ?? "", "utf8"), nativeWork: 5, unavailable: false };
     },
-    boundInterpretations: ({ afterCursor, limit }) => {
+    boundInterpretations: ({ afterCursor, limit, nativeLimit, matches }) => {
       const start = afterCursor === null ? 0 : bounds.findIndex((row) =>
         row.source_target.evidence_object_id === afterCursor) + 1;
-      const page = bounds.slice(Math.max(0, start), Math.max(0, start) + Math.max(1, limit));
+      const scanned = bounds.slice(Math.max(0, start), Math.max(0, start) + nativeLimit);
+      const page: BoundSourceInterpretation[] = [];
+      let visits = 0;
+      for (const bound of scanned) {
+        visits++;
+        if (matches === undefined || matches(JSON.stringify(bound))) page.push(bound);
+        if (page.length >= limit) break;
+      }
       return {
         rows: page.map((bound) => ({
           object_id: bound.source_target.evidence_object_id ?? bound.source_target.root_id,
           gist: JSON.stringify(bound)
         })),
-        nativeVisits: page.length,
+        nativeVisits: visits,
         nativeBytes: 8,
-        rowsRead: page.length,
+        rowsRead: visits,
         bytesRead: 8,
-        truncated: start + page.length < bounds.length,
-        committedThrough: page.at(-1)?.source_target.evidence_object_id ?? afterCursor
+        truncated: start + visits < bounds.length,
+        committedThrough: scanned[visits - 1]?.source_target.evidence_object_id ?? afterCursor
       };
     },
     sourceTextHints: ({ afterCursor, limit }) => {

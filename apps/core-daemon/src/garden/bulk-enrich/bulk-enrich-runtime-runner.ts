@@ -1,3 +1,4 @@
+import type { SourceEnrichmentCapability } from "./source-enrichment-runtime.js";
 import {
   DYNAMICS_CONSTANTS,
   GardenEventType,
@@ -94,13 +95,7 @@ export async function runBulkEnrichTask(input: Readonly<{
   readonly reporter: BulkEnrichReporter;
   readonly sourceEnrichment?: {
     run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
-    readonly capability?: {
-      readonly configured: boolean;
-      readonly observationFamily: "official_api_signals" | "none";
-      readonly requestBytes: "reserved";
-      readonly completionTokens: "unsupported" | "enforced";
-      readonly spend: "unsupported";
-    };
+    readonly capability?: SourceEnrichmentCapability;
   };
 }>): Promise<void> {
   const completedAt = input.now();
@@ -149,13 +144,7 @@ async function runPerSourceEnrichmentTask(
     readonly reporter: BulkEnrichReporter;
     readonly sourceEnrichment?: {
       run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
-      readonly capability?: {
-        readonly configured: boolean;
-        readonly observationFamily: "official_api_signals" | "none";
-        readonly requestBytes: "reserved";
-        readonly completionTokens: "unsupported" | "enforced";
-        readonly spend: "unsupported";
-      };
+      readonly capability?: SourceEnrichmentCapability;
     };
   }>,
   completedAt: string
@@ -196,13 +185,7 @@ async function runPerSourceEnrichmentTask(
   }
 }
 
-function sourceEnrichCapabilityEntries(capability: Readonly<{
-  readonly configured: boolean;
-  readonly observationFamily: "official_api_signals" | "none";
-  readonly requestBytes: "reserved";
-  readonly completionTokens: "unsupported" | "enforced";
-  readonly spend: "unsupported";
-}> | undefined): readonly string[] {
+function sourceEnrichCapabilityEntries(capability: SourceEnrichmentCapability | undefined): readonly string[] {
   if (capability === undefined) return [];
   return [
     `source_enrich_capability:${capability.configured ? "configured" : "unconfigured"}`,

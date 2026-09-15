@@ -51,6 +51,7 @@ export function encodeRecallResult(
       ...candidatePlaneAttributes(kind, metadata),
       origin_plane: "workspace_local" as const,
       selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`,
+      ...(metadata?.source_lookup_reasons === undefined ? {} : { source_lookup_reasons: metadata.source_lookup_reasons }),
       ...(metadata?.staged_warnings === undefined ? {} : {
         staged_warnings: metadata.staged_warnings
       })

@@ -117,7 +117,7 @@ function locatedInterpretation(
 
 function observationSignal(located: SourceLocatedInterpretation, overrides: Record<string, unknown> = {}) {
   const { raw_payload, ...rest } = overrides;
-  return CandidateMemorySignalSchema.parse({
+  const signal = CandidateMemorySignalSchema.parse({
     signal_id: "signal-1",
     workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
     run_id: REAL_SQLITE_TEST_RUN_ID,
@@ -142,6 +142,8 @@ function observationSignal(located: SourceLocatedInterpretation, overrides: Reco
     created_at: CLOCK,
     ...rest
   });
+  if (signal.interpretation_contract !== SOURCE_INTERPRETATION_CONTRACT) throw new Error("Expected interpretation");
+  return signal;
 }
 
 describe("source observation publication", () => {

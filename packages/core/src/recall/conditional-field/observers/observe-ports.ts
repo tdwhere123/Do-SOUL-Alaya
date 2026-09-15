@@ -56,6 +56,7 @@ export type SourceObserverPage = Readonly<{
 }>;
 
 export type SourceRootObserverRow = Readonly<{
+  readonly source_lookup_reasons?: readonly ProposalMatchReason[];
   readonly kind: SourceEvidenceRootKind;
   readonly workspace_id: string;
   readonly root_id: string;
@@ -195,12 +196,15 @@ export type ObserverReaders = Readonly<{
     readonly offset?: number;
   }>) => SourceRootHydrateObserverPage;
   readonly boundInterpretations?: (input: Readonly<{
+    readonly matches?: (gist: string) => boolean;
+    readonly nativeByteLimit?: number;
     readonly workspaceId: string;
     readonly limit: number;
     readonly nativeLimit: number;
     readonly afterCursor: string | null;
   }>) => BoundInterpretationHintPage;
   readonly sourceTextHints?: (input: Readonly<{
+    readonly nativeByteLimit?: number;
     readonly workspaceId: string;
     readonly phrases: readonly string[];
     readonly limit: number;

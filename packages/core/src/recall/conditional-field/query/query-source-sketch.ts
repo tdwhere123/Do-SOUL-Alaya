@@ -85,8 +85,8 @@ function sourceSketchProposal(sketch: QuerySourceSketch): QueryInterpretationPro
     ...sourceAnchorConditions(sketch.source_anchor),
     ...relationConditions(sketch)
   ];
-  if (conditions.length === 0) return undefined;
-  const holes = alternativeHoles(sketch.unresolved_alternatives ?? []);
+  const holes = sketchHoles(sketch);
+  if (conditions.length === 0 && holes.length === 0) return undefined;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     original_query_digest: digestOriginalQuery(sketch.original_query),
@@ -129,7 +129,7 @@ function attachSketchHoles(
 ): QueryInterpretation {
   const holes = mergeHoles(interpretation.holes, [
     uninterpretedQueryHole(),
-    ...alternativeHoles(sketch.unresolved_alternatives ?? [])
+    ...sketchHoles(sketch)
   ]);
   return {
     ...interpretation,
@@ -139,12 +139,26 @@ function attachSketchHoles(
 }
 
 function alternativeHoles(alternatives: readonly string[]): readonly QueryHole[] {
-  return alternatives.map((_alternative, index) => ({
+  return alternatives.map((alternative, index) => ({
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     hole_id: `hole.query.alternative.${index + 1}`,
     variable: "q",
+    description: alternative,
     status: "unresolved" as const
   }));
+}
+
+function sketchHoles(sketch: QuerySourceSketch): readonly QueryHole[] {
+  return [
+    ...alternativeHoles(sketch.unresolved_alternatives ?? []),
+    ...(sketch.source_anchor?.revision === undefined ? [] : [{
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      hole_id: "hole.query.source_revision",
+      variable: "q",
+      description: sketch.source_anchor.revision,
+      status: "unresolved" as const
+    }])
+  ];
 }
 
 function mergeHoles(

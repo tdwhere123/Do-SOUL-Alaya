@@ -35,7 +35,13 @@ describe("official API source interpretation receive", () => {
       request,
       { sourceCorpus: corpus, artifactKey: "artifact-1" }
     );
-    expect(received.status).toBe("complete");
+    expect(received.status).toBe("partial");
+    expect(received.rejections).toEqual([{ index: 0, assertion_id: 1,
+      reason: "candidate_rejected", candidate_index: 1, diagnostic_reason: "absent" }]);
+    expect(() => classifyOfficialApiInterpretationResult(
+      interpretationRaw([usesRelation, { predicate: { text: "invented" }, arguments: [], qualifiers: [] }]),
+      request, corpus
+    )).toThrow(/rejected interpretation entries/);
     expect(received.located).toHaveLength(1);
     expect(received.located[0]).toMatchObject({
       contract: SOURCE_INTERPRETATION_CONTRACT,

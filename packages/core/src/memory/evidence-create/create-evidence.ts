@@ -35,6 +35,7 @@ import {
 } from "../source-write-garden-intent.js";
 
 export async function createEvidenceCapsule(input: Readonly<{
+  readonly assertSourceCurrent?: () => void;
   readonly capsuleInput: Omit<
     EvidenceCapsule,
     "object_id" | "object_kind" | "schema_version" | "lifecycle_state" | "created_at" | "updated_at"
@@ -201,6 +202,7 @@ async function admitOptionalFieldFormation(
 
 function persistCreatedEvidence(
   input: Readonly<{
+    readonly assertSourceCurrent?: () => void;
     readonly evidenceCapsuleRepo: {
       createInCurrentTransaction?(
         capsule: EvidenceCapsule,
@@ -233,6 +235,7 @@ function persistCreatedEvidence(
   return runEventLogTransaction(
     input.eventLogRepo,
     () => {
+      input.assertSourceCurrent?.();
       const event = appendCreatedSynchronously(input.eventLogRepo, evidence);
       const created = createInCurrentTransaction.call(
         input.evidenceCapsuleRepo,

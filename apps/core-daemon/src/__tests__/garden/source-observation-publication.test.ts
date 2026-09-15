@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   BoundSourceInterpretationSchema,
   CandidateMemorySignalSchema,
@@ -33,8 +33,7 @@ import {
 } from "@do-soul/alaya-storage";
 import { createDaemonFieldComposition } from "../../runtime/field/field-composition.js";
 import {
-  createMaterializationRouter,
-  type SignalMaterializationRuntimeInput
+  createMaterializationRouter
 } from "../../runtime/recall-materialization/recall-materialization-router.js";
 import { createSourceGroundingDeferTransitions } from "../../runtime/source-grounding-defer/transitions.js";
 
@@ -43,7 +42,7 @@ const ASSERTION = "Alice uses tools.";
 const SOURCE = `User: ${ASSERTION}`;
 
 describe("source observation publication wiring", () => {
-  it("materializes a typed observation through daemon services and reopens the same identity", async () => {
+  it.each(["normal", "lookup replacement", "memory transaction withdrawal"] as const)("publishes only the current source across %s and reopen", async (interleaving) => {
     const directory = await mkdtemp(join(tmpdir(), "alaya-source-observation-daemon-"));
     const filename = join(directory, "memory.sqlite");
     let database = initDatabase({ filename });
@@ -59,7 +58,7 @@ describe("source observation publication wiring", () => {
       });
       const eventLogRepo = new SqliteEventLogRepo(database);
       const field = createDaemonFieldComposition({ database, eventLogRepo });
-      const notifier = { notifyEntry: async () => undefined, notify: async () => undefined };
+      const notifier = { notifyEntry: vi.fn(async () => undefined), notify: async () => undefined };
       const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
       const memoryRepo = new SqliteMemoryEntryRepo(database);
       const evidenceService = new EvidenceService({
@@ -96,7 +95,8 @@ describe("source observation publication wiring", () => {
           enqueueEnrichPending: () => undefined
         },
         pathRelationProposalPort: {
-          submitCandidate: async () => { throw new Error("unexpected path proposal"); }
+          assertPathRelationProposalAvailable: async () => { throw new Error("unexpected path proposal"); },
+          createPathRelationProposal: async () => { throw new Error("unexpected path proposal"); }
         },
         temporalRelationAssertionPort: {
           admit: async () => { throw new Error("unexpected temporal assertion"); }
@@ -104,7 +104,7 @@ describe("source observation publication wiring", () => {
         conflictDetectionService: null,
         reconciliationService: null,
         handoffGapHandler: new InMemoryHandoffGapHandler()
-      } as SignalMaterializationRuntimeInput);
+      });
       const signalRepo = new SqliteSignalRepo(database);
       const queueRepo = new SqliteSourceGroundingDeferQueueRepo(database);
       const eventPublisher = new EventPublisher({
@@ -148,10 +148,38 @@ describe("source observation publication wiring", () => {
         },
         created_at: CLOCK
       });
+      if (interleaving === "lookup replacement") {
+        const lookup = memoryService.findByIdScoped.bind(memoryService);
+        vi.spyOn(memoryService, "findByIdScoped").mockImplementationOnce(async (...args) => {
+          await sourceAdmission.admit({ workspace_id: "workspace-1", source_id: "artifact-1", source_version: "2",
+            content_bytes: SOURCE, evidence_object_id: null, recorded_at: "2026-09-15T12:00:00.000Z",
+            event_time: null, valid_from: null, valid_to: null, speaker: "user", scope_class: "project",
+            spans: deriveAddressableSpanViews(SOURCE) }, { workspaceId: "workspace-1" });
+          return lookup(...args);
+        });
+      }
+      if (interleaving === "memory transaction withdrawal") {
+        const create = memoryRepo.createWithinTransaction.bind(memoryRepo);
+        vi.spyOn(memoryRepo, "createWithinTransaction").mockImplementation((entry, hooks) =>
+          create(entry, { ...hooks, beforeCreate: () => {
+            database.connection.prepare("UPDATE source_records SET source_body=NULL WHERE record_id=?")
+              .run(admitted.record.identity);
+            hooks.beforeCreate?.();
+          } }));
+      }
       const received = await signalService.receiveSignal(signal);
+      if (interleaving !== "normal") {
+        expect(received.materialization?.success).toBe(false);
+        expect(database.connection.prepare("SELECT COUNT(*) AS n FROM memory_entries").get()).toEqual({ n: 0 });
+        expect(database.connection.prepare("SELECT COUNT(*) AS n FROM evidence_capsules").get())
+          .toEqual({ n: interleaving === "lookup replacement" ? 0 : 1 });
+        expect(database.connection.prepare("SELECT COUNT(*) AS n FROM event_log WHERE event_type='soul.memory.created'").get())
+          .toEqual({ n: 0 });
+        return;
+      }
       expect(received.triage_result).toBe("accepted");
       expect(received.materialization?.success).toBe(true);
-      expect(received.materialization?.route_target).toBe("memory_entry_only");
+      expect(received.materialization?.target_kind).toBe("evidence_only");
       const memoryId = received.materialization?.created_objects.find((object) => object.object_kind === "memory_entry")?.object_id;
       const evidenceId = received.materialization?.created_objects.find((object) => object.object_kind === "evidence_capsule")?.object_id;
       expect(memoryId).toBeDefined();
@@ -306,14 +334,15 @@ describe("source observation publication wiring", () => {
           enqueueEnrichPending: () => undefined
         },
         pathRelationProposalPort: {
-          submitCandidate: async () => { throw new Error("unexpected path proposal"); }
+          assertPathRelationProposalAvailable: async () => { throw new Error("unexpected path proposal"); },
+          createPathRelationProposal: async () => { throw new Error("unexpected path proposal"); }
         },
         temporalRelationAssertionPort: {
           admit: async () => { throw new Error("unexpected temporal assertion"); }
         },
         conflictDetectionService: null, reconciliationService: null,
         handoffGapHandler: new InMemoryHandoffGapHandler()
-      } as SignalMaterializationRuntimeInput);
+      });
       const located = locateSourceInterpretation({
         source: SOURCE, artifactKey: "artifact-1", sha256: fieldContractSha256,
         assertion: {

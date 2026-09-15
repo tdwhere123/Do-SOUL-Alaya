@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildOfficialApiExtractionRequests,
+  buildOfficialApiSourceCorpus,
   OFFICIAL_API_SYSTEM_PROMPT,
   stringifyOfficialApiExtractionRequest,
   transportPackIdentity
@@ -154,7 +155,8 @@ describe("extraction empty envelope classification", () => {
     });
     await extractor.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(request)
+      userPrompt: stringifyOfficialApiExtractionRequest(request),
+      sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", [])
     });
     const cacheKey = stats.lastCacheKey!;
     expect(inspectMaterialization(cacheRoot, cacheKey).descriptors).toHaveLength(1);
@@ -193,7 +195,7 @@ describe("extraction empty envelope classification", () => {
     const packIdentity = transportPackIdentity("token_aware", [task.semanticKey]);
     const [admission] = admitProviderRaw({
       root: semanticRoot,
-      rawJson: EMPTY_SIGNALS_ENVELOPE,
+      rawJson: EMPTY_INTERPRETATIONS_ENVELOPE,
       tasks: [task],
       replayAuthority: currentSemanticReplayAuthority(),
       rawBinding: {
@@ -213,7 +215,7 @@ describe("extraction empty envelope classification", () => {
         memberSemanticKeys: [task.semanticKey]
       }
     });
-    expect(admission?.kind).toBe("quarantined");
+    expect(admission, JSON.stringify(admission)).toMatchObject({ kind: "quarantined" });
     expect(admission && "admission" in admission ? admission.admission.state : undefined)
       .toBe("quarantined");
   });
@@ -257,7 +259,8 @@ describe("extraction empty envelope classification", () => {
     });
     await extractor.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(request)
+      userPrompt: stringifyOfficialApiExtractionRequest(request),
+      sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", [])
     });
     expect(ledger.snapshot()).toMatchObject({
       attempts: 1,

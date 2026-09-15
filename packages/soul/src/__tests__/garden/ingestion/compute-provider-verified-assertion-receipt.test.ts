@@ -1,16 +1,10 @@
-import { createHash } from "node:crypto";
 import {
-  BoundedJsonObjectSchema,
-  buildVerifiedUserAssertionReceiptV2Preimage,
-  formatVerifiedUserAssertionV2SourceHash
+  BoundedJsonObjectSchema
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 import { OfficialApiGardenProvider } from "../../../garden/ingestion/compute-provider.js";
-import { buildOfficialApiSourceCorpus, parseOfficialApiSourceLocator } from
+import { buildOfficialApiSourceCorpus } from
   "../../../garden/triage/grounding/source-locator.js";
-import { resolveGardenSignalGrounding } from
-  "../../../garden/triage/grounding/signal-source-grounding.js";
-import { buildEvidenceInput } from "../../../garden/materialization/materialization-router.js";
 import {
   createContext,
   createExtractor
@@ -55,23 +49,3 @@ describe("OfficialApiGardenProvider verified assertion receipt", () => {
     expect(BoundedJsonObjectSchema.safeParse(signal?.raw_payload).success).toBe(true);
   });
 });
-
-function expectedVerifiedAssertionHash(
-  assertion: string,
-  sourceCorpus: string,
-  signalId: string,
-  sourceLocator: NonNullable<ReturnType<typeof parseOfficialApiSourceLocator>>
-): string {
-  const digest = createHash("sha256")
-    .update(buildVerifiedUserAssertionReceiptV2Preimage({
-      signal_id: signalId,
-      source_locator: sourceLocator,
-      workspace_id: "workspace-1",
-      run_id: "run-1",
-      surface_id: "surface-1",
-      source_assertion: assertion,
-      source_corpus: sourceCorpus
-    }), "utf8")
-    .digest("hex");
-  return formatVerifiedUserAssertionV2SourceHash(digest);
-}

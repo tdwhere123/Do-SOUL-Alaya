@@ -4,6 +4,7 @@ import {
   GardenRole,
   GardenTaskKind,
   SOURCE_ENRICHMENT_CONTRACT,
+  SourceLocatedInterpretationSchema,
   canonicalizeSemanticExtractionProfile,
   semanticExtractionProfilePreimage,
   semanticExtractionProfilesEqual,
@@ -167,10 +168,15 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       throw new Error("semantic artifact integrity mismatch");
     }
     const payload = JSON.parse(stored.payloadJson) as unknown;
-    const raw = JSON.parse(stored.rawJson) as { signals?: unknown[] };
-    if (!Array.isArray(payload) || payload.length === 0 || !Array.isArray(raw.signals) ||
-      payload.length !== raw.signals.length || payload.some((entry) =>
-        typeof entry !== 'object' || entry === null || typeof entry.matched_text !== 'string')) {
+    const raw = JSON.parse(stored.rawJson) as { signals?: unknown[]; interpretations?: unknown[] };
+    const validInterpretations = Array.isArray(raw.interpretations) && Array.isArray(payload) &&
+      payload.every((entry) => SourceLocatedInterpretationSchema.safeParse(entry).success);
+    // Read retained historical artifacts in their recorded shape; current codecs
+    // only author source-relative interpretation payloads.
+    const validHistorical = Array.isArray(raw.signals) && Array.isArray(payload) && payload.length > 0 &&
+      payload.length === raw.signals.length && payload.every((entry) =>
+        typeof entry === 'object' && entry !== null && typeof entry.matched_text === 'string');
+    if (!validInterpretations && !validHistorical) {
       throw new Error("semantic artifact persisted shape mismatch");
     }
     return Object.freeze({ key: stored.key, rawJson: stored.rawJson,

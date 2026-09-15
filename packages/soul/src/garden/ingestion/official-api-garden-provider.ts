@@ -26,11 +26,11 @@ import {
 } from "./official-api-signal-parser.js";
 import {
   createOfficialApiGardenCompileReceipt,
-  type OfficialApiGardenCompileReceipt,
-  type OfficialApiRequestEntryRejection
+  type OfficialApiGardenCompileReceipt
 } from "./official-api/request-result.js";
 import {
-  receiveOfficialApiSourceInterpretations
+  receiveOfficialApiSourceInterpretations,
+  type OfficialApiInterpretationEntryRejection
 } from "./official-api/source-interpretation-receive.js";
 import { emitLocatedInterpretationSignals } from "./official-api/source-interpretation-signal.js";
 import { buildOfficialApiSourceCorpus } from "../triage/grounding/source-locator.js";
@@ -300,7 +300,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
 
     const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, context.turn_messages);
     const located: SourceLocatedInterpretation[] = [];
-    const rejections: OfficialApiRequestEntryRejection[] = [];
+    const rejections: OfficialApiInterpretationEntryRejection[] = [];
     const unsent: OfficialApiExtractionRequest[] = [];
     let failedRequest: OfficialApiExtractionRequest | null = null;
     let incompleteError: unknown = null;

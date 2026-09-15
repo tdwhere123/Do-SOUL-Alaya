@@ -408,7 +408,7 @@ function historicalSignal(turn: string, context: GardenCompileContext, fields: R
       source_grounding: grounded.audit,
       distilled_fact: grounded.draft.distilled_fact,
       source_locator: grounded.draft.source_locator,
-      source_assertion: grounded.status === "grounded" ? grounded.audit.source_assertion : undefined
+      source_assertion: grounded.audit.status === "grounded" ? grounded.audit.source_assertion : undefined
     }
   };
 }

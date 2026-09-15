@@ -44,9 +44,21 @@ export function observeSourceAwareSeed(
   let memoryCommitted = cursor.memory;
   let hintCommitted = cursor.hint;
   const sketch = sourceHintSketch(input);
-  let hintsDone = sketch === undefined || cursor.hintsDone;
-  const share = seedFamilyShare(input, wantMemory, cursor.sourcesDone);
-  const lanes = hintSourceShare(share.sourceWork, share.sourceLimit, sketch !== undefined && !hintsDone);
+  let hintsDone = sketch === undefined || cursor.hintsDone || cursor.sourcesDone;
+  const available = [
+    ...(!hintsDone ? ["hint"] : []),
+    ...(!cursor.sourcesDone ? ["source"] : []),
+    ...(wantMemory && input.seed_query !== undefined && input.readers.lexical !== undefined ? ["memory"] : [])
+  ];
+  const laneTurn = cursor.laneTurn ?? 0;
+  const lane = available[laneTurn % Math.max(1, available.length)];
+  const limit = pageLimit(input);
+  const share = { memoryWork: lane === "memory" ? input.action.work_limit : 0,
+    memoryLimit: lane === "memory" ? limit : 0 };
+  const lanes = { hintWork: lane === "hint" ? input.action.work_limit : 0,
+    hintLimit: lane === "hint" ? limit : 0,
+    sourceWork: lane === "source" ? input.action.work_limit : 0,
+    sourceLimit: lane === "source" ? limit : 0 };
   let exhaustiveWork = lanes.sourceWork;
   let exhaustiveLimit = lanes.sourceLimit;
   let pagedHints = false;
@@ -122,13 +134,15 @@ export function observeSourceAwareSeed(
     truncated = true;
   }
   const sourcesDone = cursor.sourcesDone || (pagedSources && !sourcesTruncated);
+  if (wantMemory && share.memoryWork === 0) truncated = true;
   const committed = encodeSeedCursor({
     source: sourceCommitted,
     memory: memoryCommitted,
     sourcesDone,
     hint: hintCommitted,
     hintsDone,
-    persistHint: sketch !== undefined
+    persistHint: sketch !== undefined || wantMemory,
+    laneTurn: laneTurn + 1
   });
   const cursorOut = committed === null
     ? input.cursor
@@ -287,67 +301,8 @@ function takeLexicalPage(
   };
 }
 
-function hintSourceShare(
-  sourceWork: number,
-  sourceLimit: number,
-  wantHint: boolean
-): Readonly<{
-  readonly hintWork: number;
-  readonly hintLimit: number;
-  readonly sourceWork: number;
-  readonly sourceLimit: number;
-}> {
-  if (!wantHint || sourceWork <= 0) {
-    return { hintWork: 0, hintLimit: 0, sourceWork, sourceLimit };
-  }
-  const hintWork = Math.max(1, Math.floor(sourceWork / 2));
-  const exhaustiveWork = Math.max(0, sourceWork - hintWork);
-  return {
-    hintWork,
-    hintLimit: Math.max(1, Math.floor(sourceLimit / 2) || 1),
-    sourceWork: exhaustiveWork,
-    sourceLimit: exhaustiveWork === 0 ? 0 : Math.max(1, sourceLimit - Math.max(1, Math.floor(sourceLimit / 2)))
-  };
-}
-
-function seedFamilyShare(
-  input: ObserveConditionalFieldInput,
-  wantMemory: boolean,
-  sourcesDone: boolean
-): Readonly<{
-  readonly sourceLimit: number;
-  readonly sourceWork: number;
-  readonly memoryLimit: number;
-  readonly memoryWork: number;
-}> {
-  const limit = pageLimit(input);
-  const work = input.action.work_limit;
-  if (!wantMemory) {
-    return { sourceLimit: limit, sourceWork: work, memoryLimit: 0, memoryWork: 0 };
-  }
-  if (sourcesDone) {
-    return { sourceLimit: 0, sourceWork: 0, memoryLimit: Math.max(1, limit), memoryWork: work };
-  }
-  const hasLexical = input.seed_query !== undefined && input.readers.lexical !== undefined;
-  if (!hasLexical) {
-    return { sourceLimit: limit, sourceWork: work, memoryLimit: 0, memoryWork: 0 };
-  }
-  const hydrateReserve = input.readers.source === undefined ? 0 : SOURCE_IDENTITY_HYDRATE_RESERVE;
-  const memoryNeed = 1 + hydrateReserve;
-  const memoryWork = Math.min(work, Math.max(memoryNeed, Math.floor(work / 2)));
-  const sourceWork = Math.max(0, work - memoryWork);
-  const memoryLimit = hydrateReserve === 0
-    ? Math.max(1, limit - Math.max(1, Math.floor(limit / 2)))
-    : Math.max(1, Math.min(limit, memoryWork - hydrateReserve));
-  return {
-    sourceLimit: sourceWork === 0 ? 0 : Math.max(1, Math.floor(limit / 2)),
-    sourceWork,
-    memoryLimit,
-    memoryWork
-  };
-}
-
 function parseSeedCursor(committed: string | null): Readonly<{
+  readonly laneTurn?: number;
   readonly source: string | null;
   readonly memory: string | null;
   readonly sourcesDone: boolean;
@@ -375,6 +330,7 @@ function parseSeedCursor(committed: string | null): Readonly<{
 }
 
 function parseBundledSeedCursor(payload: string): Readonly<{
+  readonly laneTurn?: number;
   readonly source: string | null;
   readonly memory: string | null;
   readonly sourcesDone: boolean;
@@ -388,6 +344,7 @@ function parseBundledSeedCursor(payload: string): Readonly<{
     }
     const record = parsed as Record<string, unknown>;
     return {
+      laneTurn: Number.isSafeInteger(record.laneTurn) && (record.laneTurn as number) >= 0 ? record.laneTurn as number : 0,
       source: typeof record.source === "string" && record.source.length > 0 ? record.source : null,
       memory: typeof record.memory === "string" && record.memory.length > 0 ? record.memory : null,
       sourcesDone: record.sourcesDone === true,
@@ -400,6 +357,7 @@ function parseBundledSeedCursor(payload: string): Readonly<{
 }
 
 function encodeSeedCursor(input: Readonly<{
+  readonly laneTurn: number;
   readonly source: string | null;
   readonly memory: string | null;
   readonly sourcesDone: boolean;
@@ -409,6 +367,7 @@ function encodeSeedCursor(input: Readonly<{
 }>): string | null {
   if (input.persistHint) {
     return `s:${JSON.stringify({
+      laneTurn: input.laneTurn,
       source: input.source,
       memory: input.memory,
       sourcesDone: input.sourcesDone,

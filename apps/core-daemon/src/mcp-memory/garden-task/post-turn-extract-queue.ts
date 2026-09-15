@@ -3,7 +3,6 @@ import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
-  POST_TURN_EXTRACT_EXCERPT_MAX_CHARS,
   type ContextDeliveryRecord,
   type SoulReportContextUsageRequest,
   type SourceAdmissionPort
@@ -73,7 +72,7 @@ export function enqueuePostTurnExtractTask(
         createdAt,
         sourceObservation,
         turnIndex,
-        lastMessages: sliceExtractDigestMessages(lastMessages),
+        lastMessages,
         admittedSourceRootId
       }),
       created_at: createdAt
@@ -155,19 +154,6 @@ function normalizeTurnDigestMessages(
       Object.freeze({
         role: message.role,
         content_excerpt: message.content_excerpt
-      })
-    )
-  );
-}
-
-function sliceExtractDigestMessages(
-  messages: readonly { readonly role: string; readonly content_excerpt: string }[]
-): readonly { readonly role: string; readonly content_excerpt: string }[] {
-  return Object.freeze(
-    messages.map((message) =>
-      Object.freeze({
-        role: message.role,
-        content_excerpt: message.content_excerpt.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)
       })
     )
   );

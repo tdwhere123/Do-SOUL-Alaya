@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-core";
 import {
   locateSourceInterpretation,
+  MemoryDimension,
   SoulMemorySearchRequestSchema,
   sourceEvidenceRootTarget,
   sourceRecallTarget
@@ -25,7 +26,7 @@ import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixtur
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 import { fieldSha256, hashedRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import { createDependencies } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
-import { NOW, RUN, WS, openSourceSlice } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
+import { MEM, NOW, RUN, WS, openSourceSlice } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import { fieldContractSha256 } from "../../../../../../packages/core/src/shared/field-hash.js";
 import { SOURCE_DISCOVERY_CANARY } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
 import {
@@ -94,20 +95,27 @@ describe("source discovery consumer surfaces", () => {
         && result.target.root_id === record.record_id);
       expect(row?.target?.kind).toBe("source_evidence");
       if (row?.target?.kind !== "source_evidence") throw new Error("source target missing");
+      expect(row.source_lookup_reasons).toEqual([expect.objectContaining({
+        kind: "proposal", predicate_key: "access", context_id: expect.any(String),
+        candidate_id: expect.any(String), source_target: expect.objectContaining({
+          root_id: record.record_id, content_digest: record.content_digest
+        })
+      })]);
       const span = row.target.span;
       expect(row.content_preview === "[payload omitted]" || span?.content_complete === false).toBe(true);
       const start = span?.content_end ?? 0;
-      const expanded = await handler({
+      const expansion = {
         ...request,
         continuation: first.index!.continuation!,
         payload_continuation: {
-          schema_version: 1,
-          purpose: "payload_expansion",
+          schema_version: 1 as const,
+          purpose: "payload_expansion" as const,
           target: sourceEvidenceRootTarget(row.target),
           start_offset: start,
           byte_budget: 4096
         }
-      }, context);
+      };
+      const expanded = await handler(expansion, context);
       expect(expanded.page_purpose).toBe("payload");
       const preview = expanded.results[0]!.content_preview;
       expect(preview).not.toBe("[payload omitted]");
@@ -116,6 +124,20 @@ describe("source discovery consumer surfaces", () => {
         root_id: record.record_id,
         span: { content_start: start, content_end: start + preview.length }
       });
+      const repeated = await handler(expansion, context);
+      expect(repeated.page_purpose).toBe("retry");
+      expect(repeated.results).toEqual(expanded.results);
+      expect(repeated.delivery_id).toBe(expanded.delivery_id);
+      expect(expanded.results[0]?.source_lookup_reasons).toEqual(row.source_lookup_reasons);
+      const nextOffset = expanded.results[0]?.target?.kind === "source_evidence"
+        ? expanded.results[0].target.span?.content_end : undefined;
+      if (nextOffset === undefined || expanded.index?.continuation == null) throw new Error("Missing partial-source continuation");
+      const interrupted = await handler({ ...request, continuation: expanded.index.continuation,
+        payload_continuation: { schema_version: 1, purpose: "payload_expansion",
+          target: sourceEvidenceRootTarget(row.target), start_offset: nextOffset, byte_budget: 0 } }, context);
+      expect(interrupted.results[0]?.content_preview).toBe("[payload omitted]");
+      expect(interrupted.index?.completeness.payload).not.toBe("complete");
+      expect(interrupted.index?.continuation).not.toBeNull();
     } finally {
       await client.close();
       slice.database.close();
@@ -140,9 +162,13 @@ describe("source discovery consumer surfaces", () => {
     const result = await recallThroughCli(slice, canary.original_query, 8, proposal);
     const preview = (result as { readonly results?: readonly { readonly content_preview?: string }[] }).results?.[0]?.content_preview;
     expect(preview).toBe(canary.intended);
+    expect(result).toMatchObject({ results: [expect.objectContaining({
+      source_lookup_reasons: [expect.objectContaining({ kind: "proposal", predicate_key: "access",
+        source_target: expect.objectContaining({ root_id: record.record_id }) })]
+    })] });
   });
 
-  it("reopens a file-backed sqlite membership after the worker restarts", async () => {
+  it.each(["source_only", "mixed", "memory_only"] as const)("resumes %s membership and invalidates old continuations after worker restart", async (view) => {
     const canary = SOURCE_DISCOVERY_CANARY[0]!;
     const directory = await mkdtemp(join(tmpdir(), "alaya-source-discovery-reopen-"));
     const filename = join(directory, "alaya.db");
@@ -150,6 +176,8 @@ describe("source discovery consumer surfaces", () => {
     const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
     const intended = records.insert(hashedRecord(WS, canary.intended, "intended"));
     records.insert(hashedRecord(WS, canary.distractor, "distractor"));
+    await slice.writeMemory(MEM.r, canary.original_query, MemoryDimension.FACT);
+    await slice.writeMemory(MEM.c, `${canary.original_query} second memory`, MemoryDimension.FACT);
     insertBoundGist(slice.database, "a-reopen", canary.intended, intended.record_id, intended.content_digest, intended.evidence_object_id, canary.sketch);
     slice.database.close();
     closeCachedDatabase(filename);
@@ -166,12 +194,12 @@ describe("source discovery consumer surfaces", () => {
     const request = {
       workspace_id: WS,
       query_text: canary.original_query,
-      budget: defaultBudget(),
+      budget: defaultBudget({ page_budget: 1 }),
       snapshot_id: SNAPSHOT_ID,
       interpretation_clock: INTERPRETATION_CLOCK,
       as_of: NOW,
       expires_at: "2099-01-01T00:00:00Z",
-      result_kind_view: "source_only" as const,
+      result_kind_view: view,
       authorized_scopes: null,
       interpretation_proposal: proposal,
       protocol_version: 1 as const,
@@ -181,19 +209,43 @@ describe("source discovery consumer surfaces", () => {
     try {
       await first.ready();
       const before = await first.conditionalFieldPort.recall(request);
+      expect(before.execution_receipt?.actual?.native_visits).toBeGreaterThan(0);
+      expect(before.execution_receipt?.actual?.retained_bytes_current).toBeGreaterThan(0);
+      expect(before.execution_receipt?.actual?.retained_bytes_current).toBeLessThanOrEqual(request.budget.memory_bytes);
+      expect(before.index.continuation).not.toBeNull();
+      if (before.preparation_id === undefined) throw new Error("Missing delivery preparation");
+      await first.conditionalFieldPort.acknowledge!(before.preparation_id, before.index, new Map(Object.entries(before.previews)));
       const beforeIds = before.index.entries.map((entry) =>
-        entry.target.kind === "source_evidence" ? entry.target.root_id : "").filter(Boolean).sort();
+        entry.target.kind === "source_evidence" ? entry.target.root_id : entry.target.object_id).sort();
+      console.info(JSON.stringify({ sourceConsumer: view,
+        firstLegalExposureIncludesIntended: beforeIds.includes(intended.record_id),
+        actual: before.execution_receipt?.actual }));
       await first.close();
       const second = createRecallReadWorkerClient({
         databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1
       })!;
       try {
         await second.ready();
+        const invalidated = await second.conditionalFieldPort.recall({ ...request, continuation: before.index.continuation });
+        expect(invalidated.index.completeness.logical_index).toBe("invalidated");
+        expect(invalidated.index.continuation).toBeNull();
+        expect(invalidated.index.entries).toEqual([]);
+        expect(JSON.stringify(invalidated)).not.toContain(canary.intended);
         const after = await second.conditionalFieldPort.recall(request);
         const afterIds = after.index.entries.map((entry) =>
-          entry.target.kind === "source_evidence" ? entry.target.root_id : "").filter(Boolean).sort();
+          entry.target.kind === "source_evidence" ? entry.target.root_id : entry.target.object_id).sort();
         expect(afterIds).toEqual(beforeIds);
-        expect(afterIds).toContain(intended.record_id);
+        const allIds = [...afterIds];
+        let page = after;
+        for (let step = 0; step < 16 && page.index.continuation !== null; step++) {
+          if (page.preparation_id === undefined) throw new Error("Missing delivery preparation");
+          await second.conditionalFieldPort.acknowledge!(page.preparation_id, page.index, new Map(Object.entries(page.previews)));
+          page = await second.conditionalFieldPort.recall({ ...request, continuation: page.index.continuation });
+          allIds.push(...page.index.entries.map((entry) => entry.target.kind === "source_evidence" ? entry.target.root_id : entry.target.object_id));
+        }
+        if (view !== "memory_only") expect(allIds).toContain(intended.record_id);
+        if (view !== "source_only") expect(allIds).toEqual(expect.arrayContaining([MEM.r, MEM.c]));
+        expect(new Set(allIds).size).toBe(allIds.length);
       } finally {
         await second.close();
       }

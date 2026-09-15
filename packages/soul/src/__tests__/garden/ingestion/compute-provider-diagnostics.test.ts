@@ -4,8 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   GardenProviderError,
-  GardenProviderKind,
-  OfficialApiGardenCompileIncompleteError,
   OfficialApiGardenProvider
 } from "../../../garden/ingestion/compute-provider.js";
 import {

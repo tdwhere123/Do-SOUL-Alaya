@@ -32,6 +32,15 @@ export type SignalMaterializationRuntimeInput = Readonly<{
   readonly handoffGapHandler: SqliteHandoffGapAdapter;
 }>;
 
+type RouterOptions = ConstructorParameters<typeof MaterializationRouter>[0];
+type RouterWiring = Pick<CreateRecallMaterializationWiringInput,
+  "evidenceService" | "memoryService" | "fieldComposition" | "eventLogRepo" | "enqueueEnrichPending"> &
+  Pick<RouterOptions, "synthesisService" | "claimService">;
+type MaterializationRouterInput = Omit<SignalMaterializationRuntimeInput, "wiring" | "handoffGapHandler"> & {
+  readonly wiring: RouterWiring;
+  readonly handoffGapHandler: RouterOptions["handoffGapHandler"];
+};
+
 export function createSignalMaterializationRuntime(
   input: SignalMaterializationRuntimeInput
 ): Readonly<{
@@ -44,7 +53,7 @@ export function createSignalMaterializationRuntime(
 }
 
 export function createMaterializationRouter(
-  input: SignalMaterializationRuntimeInput
+  input: MaterializationRouterInput
 ): MaterializationRouter {
   const routerOptions = readMaterializationRouterOptions();
   return new MaterializationRouter({
@@ -97,7 +106,7 @@ function createMaterializationSignalService(
 }
 
 function createSourceObservationPublicationPort(
-  wiring: CreateRecallMaterializationWiringInput
+  wiring: RouterWiring
 ): SourceObservationPublicationPort {
   const publication = createSourceObservationPublication({
     stores: wiring.fieldComposition.stores,
@@ -132,7 +141,7 @@ function createSourceObservationPublicationPort(
 }
 
 function createMaterializationMemoryService(
-  wiring: CreateRecallMaterializationWiringInput
+  wiring: Pick<RouterWiring, "memoryService">
 ) {
   return {
     create: async (createInput: Parameters<typeof wiring.memoryService.create>[0]) => {

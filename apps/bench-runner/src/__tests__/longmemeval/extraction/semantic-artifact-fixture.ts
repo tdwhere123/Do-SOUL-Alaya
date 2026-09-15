@@ -24,6 +24,13 @@ export const SEMANTIC_RAW = '{"signals":[{}]}';
 export const SEMANTIC_RAW_SHA256 = createHash("sha256")
   .update(SEMANTIC_RAW, "utf8").digest("hex");
 
+export function semanticInterpretation(task: Pick<SemanticFillTask, "assertionId" | "text">) {
+  return { assertion_id: task.assertionId, relations: [{
+    predicate: { text: task.text.replace(/^(?:User|Assistant): /u, "") },
+    arguments: [], qualifiers: []
+  }] };
+}
+
 export function semanticTask(
   text = "I moved to Berlin.",
   overrides: Partial<SemanticFillTask> = {}

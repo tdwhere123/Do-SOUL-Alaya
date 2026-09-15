@@ -1,4 +1,4 @@
-import { POST_TURN_EXTRACT_EXCERPT_MAX_CHARS, type ConversationMessage } from "@do-soul/alaya-protocol";
+import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import {
   readVerifiedDeliverySourceObservation,
   type VerifiedDeliverySourceObservation
@@ -40,7 +40,7 @@ export function parsePostTurnExtractTaskPayload(payload: unknown): PostTurnExtra
 
 export function buildPostTurnContent(payload: PostTurnExtractTaskPayload): string {
   return payload.turn_digest.last_messages
-    .map((message) => `${message.role}: ${truncate(message.content_excerpt)}`)
+    .map((message) => `${message.role}: ${message.content_excerpt}`)
     .join("\n");
 }
 
@@ -51,7 +51,7 @@ export function buildPostTurnConversationMessages(
     payload.turn_digest.last_messages.map((message, index) => ({
       message_id: `post-turn-${payload.run_id}-${payload.turn_index}-${index}`,
       role: message.role as ConversationMessage["role"],
-      content: truncate(message.content_excerpt)
+      content: message.content_excerpt
     }))
   );
 }
@@ -98,10 +98,6 @@ function parseOptionalStringField(
   field: string
 ): string | undefined {
   return record[field] === undefined ? undefined : parseStringField(record, field);
-}
-
-function truncate(content: string): string {
-  return content.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS);
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

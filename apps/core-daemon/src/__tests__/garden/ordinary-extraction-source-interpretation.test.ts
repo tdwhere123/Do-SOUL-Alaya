@@ -39,8 +39,7 @@ import { createPostTurnExtractTaskProcessor } from "../../garden/host-worker/hos
 import { createPostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
 import { createDaemonFieldComposition } from "../../runtime/field/field-composition.js";
 import {
-  createMaterializationRouter,
-  type SignalMaterializationRuntimeInput
+  createMaterializationRouter
 } from "../../runtime/recall-materialization/recall-materialization-router.js";
 import { createSourceGroundingDeferTransitions } from "../../runtime/source-grounding-defer/transitions.js";
 
@@ -103,7 +102,8 @@ describe("ordinary extraction source interpretation adapters", () => {
           enqueueEnrichPending: () => undefined
         },
         pathRelationProposalPort: {
-          submitCandidate: async () => { throw new Error("unexpected path proposal"); }
+          assertPathRelationProposalAvailable: async () => { throw new Error("unexpected path proposal"); },
+          createPathRelationProposal: async () => { throw new Error("unexpected path proposal"); }
         },
         temporalRelationAssertionPort: {
           admit: async () => { throw new Error("unexpected temporal assertion"); }
@@ -111,7 +111,7 @@ describe("ordinary extraction source interpretation adapters", () => {
         conflictDetectionService: null,
         reconciliationService: null,
         handoffGapHandler: new InMemoryHandoffGapHandler()
-      } as SignalMaterializationRuntimeInput);
+      });
       const signalRepo = new SqliteSignalRepo(database);
       const queueRepo = new SqliteSourceGroundingDeferQueueRepo(database);
       const eventPublisher = new EventPublisher({
@@ -223,7 +223,7 @@ describe("ordinary extraction source interpretation adapters", () => {
         confidence: null,
         content: expect.stringContaining("Alice uses tools.")
       });
-      expect(published?.claim_id ?? null).toBeNull();
+      expect(database.connection.prepare("SELECT count(*) AS n FROM claim_forms").get()).toMatchObject({ n: 0 });
 
       database.close();
       database = initDatabase({ filename });

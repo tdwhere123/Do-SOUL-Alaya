@@ -100,7 +100,8 @@ describe("official Garden temporal observation contract", () => {
     expect(signal?.object_kind).toBeNull();
     expect(signal?.confidence).toBeNull();
     expect(signal?.raw_payload).not.toHaveProperty("temporal_projection");
-    expect(signal?.raw_payload.source_interpretation.candidates[0]?.qualifiers[0]?.phrase.text)
+    if (signal?.interpretation_contract !== "source-interpretation-v1") throw new Error("expected interpretation signal");
+    expect(signal.raw_payload.source_interpretation.candidates[0]?.qualifiers[0]?.phrase.text)
       .toBe("March 2024");
   });
 });

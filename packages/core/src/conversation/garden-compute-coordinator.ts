@@ -49,6 +49,7 @@ interface CompletedProviderCallEvent {
 }
 
 export interface GardenComputeCoordinatorDependencies {
+  readonly retainCompileSource?: (turnContent: string, context: Parameters<ConversationGardenComputeProviderPort["compile"]>[1]) => Promise<void>;
   readonly eventLogRepo: ConversationEventLogRepoPort;
   readonly eventPublisher?: EventPublisher;
   readonly gardenComputeProvider: ConversationGardenComputeProviderPort;
@@ -101,7 +102,7 @@ export class GardenComputeCoordinator {
     readonly sourceObservation: TrustedGardenSourceObservation | null;
   }>> {
     const sourceObservedAt = input.userMessage.created_at;
-    const artifactKey = `garden-compile:${input.workspace.workspace_id}:${input.run.run_id}`;
+    const artifactKey = `garden-compile:${input.workspace.workspace_id}:${input.run.run_id}:${input.userMessage.message_id}:${input.assistantMessage.message_id}`;
     const compileObservation = providerCall === null || sourceObservedAt === undefined
       ? undefined
       : {
@@ -118,6 +119,7 @@ export class GardenComputeCoordinator {
       ...(sourceObservedAt === undefined ? {} : { source_observed_at: sourceObservedAt }),
       ...(compileObservation === undefined ? {} : { source_observation: compileObservation })
     };
+    await this.deps.retainCompileSource?.(input.userMessage.content, compileContext);
     const signals = await provider.compile(input.userMessage.content, compileContext);
     const sourceObservation = await this.recordProviderCallCompleted(
       input,

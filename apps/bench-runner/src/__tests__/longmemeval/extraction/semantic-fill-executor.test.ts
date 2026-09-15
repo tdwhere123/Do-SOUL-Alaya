@@ -64,12 +64,8 @@ async function expectRejection(promise: Promise<unknown>, pattern: RegExp): Prom
 }
 
 function rawForText(text: string, assertionId = 1): string {
-  return JSON.stringify({ signals: [{
-    object_kind: "fact",
-    confidence: 0.9,
-    matched_text: text,
-    source_locator: { contract_version: 3, kind: "assertion_catalog", assertion_id: assertionId }
-  }] });
+  return JSON.stringify({ interpretations: [{ assertion_id: assertionId,
+    relations: [{ predicate: { text }, arguments: [], qualifiers: [] }] }] });
 }
 
 function replayForTaskResults(
@@ -94,16 +90,9 @@ function replayForTaskResults(
 }
 
 function signalFor(task: ReturnType<typeof semanticTask>) {
-  return {
-    object_kind: "fact",
-    confidence: 0.9,
-    matched_text: task.text.replace(/^(?:User|Assistant): /u, ""),
-    source_locator: {
-      contract_version: 3,
-      kind: "assertion_catalog",
-      assertion_id: task.assertionId
-    }
-  };
+  return { assertion_id: task.assertionId, relations: [{
+    predicate: { text: task.text.replace(/^(?:User|Assistant): /u, "") }, arguments: [], qualifiers: []
+  }] };
 }
 
 function errorMessages(cause: unknown): readonly string[] {
@@ -137,7 +126,7 @@ describe("semantic fill executor", () => {
 
   it("rejects successful replay without a physical request identity", () => {
     expect(() => createOfflineSemanticReplay({
-      defaultResult: { kind: "raw", rawJson: '{"signals":[]}' }
+      defaultResult: { kind: "raw", rawJson: '{"interpretations":[]}' }
     } as never)).toThrow(/physical request identity/u);
   });
 
@@ -242,7 +231,7 @@ describe("semantic fill executor", () => {
       envelope: envelope(),
       transport: createOfflineSemanticReplayForTasks({
         tasks: [task], transportPolicy: TOKEN_AWARE_POLICY,
-        result: { kind: "raw", rawJson: '{"signals":[]}' }
+        result: { kind: "raw", rawJson: '{"interpretations":[]}' }
       })
     });
     expect(report.admitted).toBe(0);
@@ -267,8 +256,8 @@ describe("semantic fill executor", () => {
       tasks: demand,
       envelope: envelope(),
       transport: replayForTaskResults([
-        { task: admitted, result: { kind: "raw", rawJson: JSON.stringify({ signals: [signalFor(admitted)] }) } },
-        { task: quarantined, result: { kind: "raw", rawJson: '{"signals":[]}' } }
+        { task: admitted, result: { kind: "raw", rawJson: JSON.stringify({ interpretations: [signalFor(admitted)] }) } },
+        { task: quarantined, result: { kind: "raw", rawJson: '{"interpretations":[]}' } }
       ])
     });
     expect(first.unresolved).toBeGreaterThan(0);
@@ -418,7 +407,7 @@ describe("semantic fill executor", () => {
 
   it("admits A while duplicate B remains unresolved", async () => {
     const [a, b] = semanticTasks(["I moved to Berlin.", "I moved to Paris."]);
-    const rawJson = JSON.stringify({ signals: [signalFor(a!), signalFor(b!), signalFor(b!)] });
+    const rawJson = JSON.stringify({ interpretations: [signalFor(a!), signalFor(b!), signalFor(b!)] });
     const report = await runSemanticFill({
       root,
       tasks: [a!, b!],
@@ -450,26 +439,20 @@ describe("semantic fill executor", () => {
     ]));
   });
 
-  it("ignores foreign assertion 999 without losing legal A", async () => {
+  it("does not certify a response containing an out-of-request assertion", async () => {
     const [a, b] = semanticTasks(["I moved to Berlin.", "I moved to Paris."]);
-    const foreign = {
-      ...signalFor(a!),
-      matched_text: "foreign",
-      source_locator: {
-        contract_version: 3, kind: "assertion_catalog", assertion_id: 999
-      }
-    };
+    const foreign = { ...signalFor(a!), assertion_id: 999 };
     const report = await runSemanticFill({
       root,
       tasks: [a!, b!],
       envelope: envelope(),
       transport: createOfflineSemanticReplayForTasks({
         tasks: [a!, b!], transportPolicy: TOKEN_AWARE_POLICY,
-        result: { kind: "raw", rawJson: JSON.stringify({ signals: [signalFor(a!), foreign] }) }
+        result: { kind: "raw", rawJson: JSON.stringify({ interpretations: [signalFor(a!), foreign] }) }
       })
     });
-    expect(report.admitted).toBe(1);
-    expect(inspectSemanticArtifact(root, a!.semanticKey, CAP).status).toBe("provider_backed");
+    expect(report.admitted).toBe(0);
+    expect(inspectSemanticArtifact(root, a!.semanticKey, CAP).status).toBe("missing");
     expect(inspectSemanticArtifact(root, b!.semanticKey, CAP).status).toBe("missing");
   });
 

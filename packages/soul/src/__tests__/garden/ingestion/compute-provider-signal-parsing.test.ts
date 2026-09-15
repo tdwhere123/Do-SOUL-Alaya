@@ -233,9 +233,14 @@ describe("OfficialApiGardenProvider", () => {
       },
       generateSignalId: () => "signal-partial"
     });
-    const signals = await provider.compile(turn, createContext(turn));
+    const signals = await provider.compile(turn, createContext(turn)).catch((error: unknown) => {
+      if (!(error instanceof OfficialApiGardenCompileIncompleteError)) throw error;
+      expect(error.receipt.status).toBe("partial");
+      return error.signals;
+    });
     expect(signals).toHaveLength(1);
     expect(signals.every((signal) =>
+      signal.interpretation_contract === "source-interpretation-v1" &&
       signal.raw_payload.source_interpretation.assertion_binding.assertion_id !== 9
     )).toBe(true);
   });
@@ -262,8 +267,13 @@ describe("OfficialApiGardenProvider", () => {
       },
       generateSignalId: () => "signal-mixed"
     });
-    const signals = await provider.compile(turn, createContext(turn));
+    const signals = await provider.compile(turn, createContext(turn)).catch((error: unknown) => {
+      if (!(error instanceof OfficialApiGardenCompileIncompleteError)) throw error;
+      expect(error.receipt.status).toBe("partial");
+      return error.signals;
+    });
     expect(signals).toHaveLength(1);
+    if (signals[0]?.interpretation_contract !== "source-interpretation-v1") throw new Error("Expected interpretation");
     expect(signals[0]?.raw_payload.source_interpretation.outcome).toBe("candidates");
     expect(signals[0]?.raw_payload.source_interpretation.assertion_binding.assertion_id).toBe(1);
   });

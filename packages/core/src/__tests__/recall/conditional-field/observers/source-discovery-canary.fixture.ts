@@ -7,7 +7,7 @@ export type CanaryCase = Readonly<{
   readonly original_query: string;
   readonly intended: string;
   readonly distractor: string;
-  readonly sketch: QuerySourceSketch["relation"];
+  readonly sketch: NonNullable<QuerySourceSketch["relation"]>;
   readonly unknown: string;
   readonly event_time?: string;
 }>;

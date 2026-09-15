@@ -189,10 +189,12 @@ export class EvidenceService {
     enqueueEnrichment?: {
       readonly runId: string | null;
       readonly sourceSignalId: string | null;
-    }
+    },
+    assertSourceCurrent?: () => void
   ): Promise<Readonly<EvidenceCapsule>> {
     return await createEvidenceCapsule({
       capsuleInput: input,
+      ...(assertSourceCurrent === undefined ? {} : { assertSourceCurrent }),
       searchProjections,
       factFrameProposal,
       semanticFactorProposal,

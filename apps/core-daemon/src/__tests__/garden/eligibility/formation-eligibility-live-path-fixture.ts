@@ -161,6 +161,7 @@ export function assertionSignal(
 export function withoutVerifiedAssertionHash(
   signal: CandidateMemorySignal
 ): CandidateMemorySignal {
+  if (signal.interpretation_contract === "source-interpretation-v1") return signal;
   const { verified_user_assertion_source_hash: _, ...raw_payload } = signal.raw_payload;
   return { ...signal, raw_payload };
 }

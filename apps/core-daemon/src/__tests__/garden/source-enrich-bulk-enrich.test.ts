@@ -29,9 +29,10 @@ afterEach(() => {
 });
 
 function signalResponse(request: string): string {
-  const unit = JSON.parse(request) as { text: string };
+  const unit = JSON.parse(request) as { source_assertions: { assertion_id: number; text: string }[] };
   return JSON.stringify({
-    signals: [{ object_kind: "decision", confidence: 0.8, matched_text: unit.text, distilled_fact: unit.text }]
+    interpretations: unit.source_assertions.map((assertion) => ({ assertion_id: assertion.assertion_id,
+      relations: [{ predicate: { text: assertion.text }, arguments: [], qualifiers: [] }] }))
   });
 }
 
@@ -233,12 +234,7 @@ describe("per-source bulk_enrich routing", () => {
     expect(pending).toBeDefined();
     expect(await garden.claimAtomic(pending!.id, "librarian-1", "2026-05-31T12:00:01.000Z", "workspace-1"))
       .toBe("claimed");
-    const execute = vi.fn(async (request: string) => {
-      const unit = JSON.parse(request) as { text: string };
-      return JSON.stringify({
-        signals: [{ object_kind: "decision", confidence: 0.8, matched_text: unit.text, distilled_fact: unit.text }]
-      });
-    });
+    const execute = vi.fn(async (request: string) => signalResponse(request));
     const runtime = createSourceEnrichmentRuntime({
       connection: database.connection,
       gardenTaskRepo: garden,
@@ -297,7 +293,7 @@ describe("per-source bulk_enrich routing", () => {
         "source_enrich_capability:configured",
         "source_enrich_spend:unsupported",
         "source_enrich_completion_tokens:unsupported",
-        "source_enrich_family:official_api_signals"
+        "source_enrich_family:source_interpretation"
       ],
       undefined
     );
@@ -382,7 +378,7 @@ describe("per-source bulk_enrich routing", () => {
     });
     expect(runtime?.capability).toMatchObject({
       configured: true,
-      observationFamily: "official_api_signals",
+      observationFamily: "source_interpretation",
       spend: "unsupported",
       completionTokens: "unsupported"
     });
@@ -399,7 +395,7 @@ describe("per-source bulk_enrich routing", () => {
         "source_enrich_capability:configured",
         "source_enrich_spend:unsupported",
         "source_enrich_completion_tokens:unsupported",
-        "source_enrich_family:official_api_signals"
+        "source_enrich_family:source_interpretation"
       ],
       undefined
     );

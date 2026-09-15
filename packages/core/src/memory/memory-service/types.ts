@@ -32,6 +32,7 @@ export type MemoryEntryInput = Omit<
   | "superseded_by"
 > & {
   readonly object_id?: string;
+  readonly assertSourceCurrent?: () => void;
   readonly storage_tier?: MemoryEntry["storage_tier"];
   // invariant: enqueueEnrichment means source + EventLog + raw/lexical +
   // recoverable Garden intent commit atomically, or create throws instead of

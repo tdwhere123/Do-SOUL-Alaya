@@ -20,6 +20,7 @@ export function buildCompileSeedDaemon(
   onSignal: (input: BenchSignalSeedInput) => SeededMemoryResult
 ): CompileSeedDaemon {
   return {
+    importSourceRecord: async () => undefined,
     proposeMemoryFromSignal: async (input) => onSignal(input),
     proposeMemoriesFromCompileSignals: async (inputs) => {
       const seeds = inputs.map((input) => seedCompileInput(input, onSignal));

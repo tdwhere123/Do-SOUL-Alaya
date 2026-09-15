@@ -380,7 +380,7 @@ describe("source calendar windows and temporal roles", () => {
     for (const source of ["I released the product in 2016.", "I worked before 2016.", "This policy is valid from May 2023."]) {
       const context = { ...createContext(), turn_messages: [], allow_legacy_single_user_source: true };
       const [signal] = await new OfficialApiGardenProvider({ apiKey: "test", extractor: createExtractor(JSON.stringify({
-        interpretations: [{ assertion_id: 1, relations: [{ predicate: { text: "released" }, arguments: [], qualifiers: [] }] }]
+        interpretations: [{ assertion_id: 1, relations: [{ predicate: { text: source.includes("released") ? "released" : source.includes("worked") ? "worked" : "valid" }, arguments: [], qualifiers: [] }] }]
       })) }).compile(source, context);
       expect(signal?.interpretation_contract).toBe("source-interpretation-v1");
       expect(signal?.raw_payload).not.toHaveProperty("temporal_projection");

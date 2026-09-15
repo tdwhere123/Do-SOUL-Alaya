@@ -46,6 +46,7 @@ describe("compile-seed extraction failure diagnostic", () => {
       apiKey
     };
     const daemon: CompileSeedDaemon = {
+      importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
         throw new Error("seed path must not run after extraction failure");
       },

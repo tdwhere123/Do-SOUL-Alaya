@@ -18,7 +18,6 @@ import {
 } from "@do-soul/alaya-storage";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import {
-  applyUtf8HydrateToSourceRootPage,
   encodeRecallResult,
   runConditionalFieldRecall,
   toSourceObserverRow,
@@ -73,6 +72,8 @@ export function readersFor(slice: SourceSlice): ObserverReaders {
   );
   const sourceHints = new SqliteSourceHintReader(slice.database.connection);
   return {
+    sourceRootMetadataByteLimit: 8192,
+    sourceRootChunkByteLimit: 4096,
     lexical: (input) => slice.memoryReader.lexical(
       input.workspaceId,
       input.query,
@@ -91,6 +92,7 @@ export function readersFor(slice: SourceSlice): ObserverReaders {
     },
     sourceRoots: (input) => {
       const page = sourceRoots.page({
+        ...input,
         workspaceId: input.workspaceId,
         limit: input.limit,
         nativeLimit: input.nativeLimit,
@@ -98,6 +100,7 @@ export function readersFor(slice: SourceSlice): ObserverReaders {
         byteLimit: input.byteLimit
       });
       return {
+        ...page,
         rows: page.rows.map(toSourceRootObserverRow),
         nativeVisits: page.nativeVisits,
         nativeBytes: page.nativeBytes,
@@ -128,7 +131,7 @@ export function readersFor(slice: SourceSlice): ObserverReaders {
       if (input.revision === undefined || input.digest === undefined) {
         return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
       }
-      const loaded = sourceRoots.load(
+      const loaded = sourceRoots.hydrate(
         input.workspaceId,
         sourceRecallTarget({
           workspace_id: input.workspaceId,
@@ -139,15 +142,16 @@ export function readersFor(slice: SourceSlice): ObserverReaders {
           evidence_object_id: input.evidenceObjectId ?? (
             input.rootKind === "evidence_capsule" ? input.rootId : null
           )
-        })
+        }), input.byteLimit, input.offset, input.nativeByteLimit
       );
-      return applyUtf8HydrateToSourceRootPage({
+      return {
+        ...loaded,
         row: loaded.row === null ? null : toSourceRootObserverRow(loaded.row),
         rowsRead: loaded.rowsRead,
         bytesRead: loaded.bytesRead,
         unavailable: loaded.unavailable,
         resourceLimited: loaded.resourceLimited
-      }, input.offset ?? 0, input.byteLimit ?? 65536);
+      };
     },
     relation: (input) => slice.relationReader.read(
       input.workspaceId,
