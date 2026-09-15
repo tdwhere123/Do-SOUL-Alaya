@@ -219,7 +219,7 @@ export function fieldProgressFingerprint(state: {
   readonly grounding_progress?: { readonly completed_work: number };
   readonly solver_completed_work?: number;
   readonly explanation_completed_work?: number;
-  readonly support_completed_work?: number;
+  readonly support_scan_offset?: number;
   readonly resume_cursors: unknown;
   readonly pair_progress: unknown;
   readonly support_progress?: unknown;
@@ -230,14 +230,14 @@ export function fieldProgressFingerprint(state: {
     readonly facet_index?: { readonly built: number; readonly complete: boolean };
   };
   readonly seen_identities: { readonly length: number };
-  readonly pending_path_effects?: { readonly offset: number; readonly completed_work?: number };
+  readonly pending_path_effects?: { readonly offset: number; readonly progress_position?: number };
   readonly last_observer_status: unknown;
 } | undefined): string {
   return JSON.stringify([
     state?.observations.length ?? 0, state?.seeds.length ?? 0,
     state?.transitions.length ?? 0, state?.grounding_progress?.completed_work ?? 0,
     state?.solver_completed_work ?? 0, state?.explanation_completed_work ?? 0,
-    state?.support_completed_work ?? 0, state?.pending_path_effects?.completed_work ?? 0,
+    state?.support_scan_offset ?? 0, state?.pending_path_effects?.progress_position ?? 0,
     state?.resume_cursors ?? {}, state?.pair_progress ?? {}, state?.support_progress ?? {},
     state?.projection_progress?.offset ?? 0, state?.projection_progress?.delivered_entries ?? {},
     state?.projection_progress?.facet_offset ?? 0,
