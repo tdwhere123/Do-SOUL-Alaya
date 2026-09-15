@@ -148,7 +148,7 @@ describe("source temporal projection persistence", () => {
         if (catalog && fixture.localMatch === undefined) expect(assertion).toBeDefined();
         const raw = JSON.stringify({ signals: [{ object_kind: "fact", confidence: 0.9,
           matched_text: fixture.source, distilled_fact: fixture.source,
-          ...(assertion === undefined ? {} : { source_locator: { contract_version: 3, kind: "assertion_catalog", assertion_id: assertion.assertion_id } }),
+          ...(assertion === undefined ? {} : { source_locator: { contract_version: 4, kind: "assertion_catalog", assertion_id: assertion.assertion_id } }),
           ...(fixture.nomination === undefined ? {} : { temporal_projection: fixture.nomination }) }] });
         const extractor = createOpenSemanticExtractor(raw);
         const signal = fixture.localMatch === undefined
