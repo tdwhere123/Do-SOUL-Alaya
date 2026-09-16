@@ -286,7 +286,8 @@ describe("createApp", () => {
     const app = createApp({
       requestProtection: {
         allowedOrigin: "http://localhost",
-        requestToken: "test-token"
+        requestToken: "test-token",
+        allowDesktopOriginlessRequests: true
       }
     });
 
