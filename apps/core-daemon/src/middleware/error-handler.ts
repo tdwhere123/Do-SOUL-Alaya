@@ -348,7 +348,7 @@ function handleAlayaDaemonError(
       })
     )
   );
-  return context.json({ success: false, error: publicMessage }, status);
+  return context.json({ success: false, error: publicMessage, error_code: error.code }, status);
 }
 
 function statusForAlayaError(error: AlayaError): number {

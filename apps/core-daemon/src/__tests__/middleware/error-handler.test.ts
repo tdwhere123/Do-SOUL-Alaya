@@ -139,12 +139,32 @@ describe("registerErrorHandler", () => {
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
       success: false,
-      error: "Internal server error"
+      error: "Internal server error",
+      error_code: "INTERNAL"
     });
     expect(logger.error).toHaveBeenCalledWith(
       "[daemon] sanitized alaya error",
       expect.objectContaining({ code: "INTERNAL", messageRedacted: true })
     );
     expect(JSON.stringify(logger.error.mock.calls[0]?.[1])).not.toContain("abcd1234");
+  });
+
+  it("includes a stable error_code on AlayaError validation responses", async () => {
+    const app = new Hono();
+    const logger = { error: vi.fn() };
+    registerErrorHandler(app, logger as never);
+    app.get("/alaya-validation", () => {
+      throw new AlayaError("VALIDATION", "internal field leaked");
+    });
+
+    const response = await app.request("/alaya-validation");
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Invalid request",
+      error_code: "VALIDATION"
+    });
+    expect(JSON.stringify(logger.error.mock.calls[0]?.[1])).not.toContain("internal field leaked");
   });
 });
