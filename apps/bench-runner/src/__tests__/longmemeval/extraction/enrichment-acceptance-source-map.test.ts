@@ -8,6 +8,7 @@ import {
 } from "@do-soul/alaya-soul";
 import {
   FrozenPopulationCountError,
+  FrozenPopulationMembershipError,
   loadFrozenEnrichmentPopulation,
   type FrozenAssertion
 } from "../../../runs/extraction/enrichment-acceptance/frozen-population.js";
@@ -18,6 +19,9 @@ import {
 import { composeEnrichmentPreparationReport } from "../../../runs/extraction/enrichment-acceptance/preparation-report.js";
 
 const FROZEN_ROOT = "/home/tdwhere/vibe/Do-SOUL-Alaya/.do-it/bench-runs/associative-field-gemini-source-scope-20260914";
+const FROZEN_REGRESSION_PATH = join(FROZEN_ROOT, "regression-source-review.json");
+const FROZEN_CANONICAL_PATH = join(FROZEN_ROOT, "canonical-source-review.json");
+const FROZEN_ANNOTATIONS_AVAILABLE = existsSync(FROZEN_REGRESSION_PATH) && existsSync(FROZEN_CANONICAL_PATH);
 const REGRESSION_REQUIRED = new Set([2, 4, 8, 9, 10, 12, 13, 14, 16]);
 const REGRESSION_UNRESOLVED = new Set([5, 15]);
 const BERLIN = "I moved to Berlin.";
@@ -61,23 +65,63 @@ describe("enrichment acceptance source map", () => {
     expect(loaded.rows.find((row) => row.original_ordinal === 1 && row.population === "regression")?.obligations)
       .toEqual(["keep slogan"]);
     expect(loaded.rows.filter((row) => row.population === "canonical")).toHaveLength(22);
-  });
-
-  it("enforces 38/15/21/2 on the frozen annotation files when they exist", () => {
-    const regressionPath = join(FROZEN_ROOT, "regression-source-review.json");
-    const canonicalPath = join(FROZEN_ROOT, "canonical-source-review.json");
-    if (!existsSync(regressionPath) || !existsSync(canonicalPath)) return;
-    const loaded = loadFrozenEnrichmentPopulation({ regressionPath, canonicalPath });
-    expect(loaded.counts).toEqual({ total: 38, required: 15, optional: 21, unresolved: 2 });
-    expect(loaded.rows).toHaveLength(38);
-    expect(loaded.rows.filter((row) => row.first_stage_subset)).toHaveLength(8);
+    expect(new Set(regression.map((row) => row.annotation_pointer.assertion_id)))
+      .toEqual(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]));
     expect(new Set(
       loaded.rows.filter((row) => row.classification === "required").map((row) => row.required_group_id)
     ).size).toBe(15);
-    const aspiration = loaded.rows.filter((row) => row.required_group_id === "aspiration");
-    expect(aspiration.map((row) => row.original_ordinal).sort((a, b) => a - b)).toEqual([2, 6]);
-    expect(aspiration.filter((row) => row.classification === "required")).toHaveLength(1);
   });
+
+  it("rejects replaced regression membership even when classification totals still match 38/15/21/2", () => {
+    const population = validMiniaturePopulation();
+    population.regression.assertions[3] = structuredClone(population.regression.assertions[1]!);
+    root = writeMiniaturePopulation(population);
+    let thrown: unknown;
+    try {
+      loadFrozenEnrichmentPopulation({
+        regressionPath: join(root!, "regression-source-review.json"),
+        canonicalPath: join(root!, "canonical-source-review.json")
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(FrozenPopulationMembershipError);
+    expect(thrown).not.toBeInstanceOf(FrozenPopulationCountError);
+    expect((thrown as Error).name).toBe("FrozenPopulationMembershipError");
+  });
+
+  it.skipIf(!FROZEN_ANNOTATIONS_AVAILABLE)(
+    "loads frozen annotations as 38/15/21/2 with first-eight membership and canonical 12/2 review dimensions",
+    () => {
+      const loaded = loadFrozenEnrichmentPopulation({
+        regressionPath: FROZEN_REGRESSION_PATH,
+        canonicalPath: FROZEN_CANONICAL_PATH
+      });
+      expect(loaded.counts).toEqual({ total: 38, required: 15, optional: 21, unresolved: 2 });
+      expect(loaded.rows).toHaveLength(38);
+      expect(loaded.rows.filter((row) => row.first_stage_subset).map((row) => row.annotation_pointer.assertion_id))
+        .toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(new Set(
+        loaded.rows.filter((row) => row.classification === "required").map((row) => row.required_group_id)
+      ).size).toBe(15);
+      const aspiration = loaded.rows.filter((row) => row.required_group_id === "aspiration");
+      expect(aspiration.map((row) => row.original_ordinal).sort((a, b) => a - b)).toEqual([2, 6]);
+      expect(aspiration.filter((row) => row.classification === "required")).toHaveLength(1);
+      const canonical12_2 = loaded.rows.find((row) => (
+        row.annotation_pointer.canonical_index === 12 && row.annotation_pointer.assertion_id === 2
+      ));
+      expect(canonical12_2?.participants).toEqual([
+        "First-person monitor and person seeking safety",
+        "The speaker's blood sugar levels",
+        "Potential low-blood-sugar episode while swimming"
+      ]);
+      expect(canonical12_2?.source_role).toBe("user");
+      expect(canonical12_2?.modality).toEqual(expect.stringContaining("Have been monitoring"));
+      expect(canonical12_2?.conditions).toEqual(expect.stringContaining("Since introduces"));
+      expect(canonical12_2?.time).toEqual(expect.stringContaining("Twice a day"));
+      expect(canonical12_2?.event_policy).toEqual(expect.stringContaining("Ongoing monitoring practice"));
+    }
+  );
 
   it("throws a named count error instead of claiming a zero population", () => {
     const population = validMiniaturePopulation();
@@ -98,14 +142,14 @@ describe("enrichment acceptance source map", () => {
     });
     expect(bound.status).toBe("bound");
     expect(bound.row.exact_text).toBe(`User: ${BERLIN}`);
-    expect(bound.current?.semanticKey).toBe(unit.semanticKey);
+    expect(bound.current[0]?.semanticKey).toBe(unit.semanticKey);
 
     const unbound = bindFrozenAssertionToCurrentSource(frozenRow("User: A missing source sentence."), {
       sourceCorpus: unit.sourceCorpus,
       catalogUnits: workset.units
     });
     expect(unbound.status).toBe("unbound");
-    expect(unbound.current).toBeNull();
+    expect(unbound.current).toEqual([]);
     expect(unbound.reason.length).toBeGreaterThan(0);
     expect(unbound.row.exact_text).toBe("User: A missing source sentence.");
 
@@ -123,7 +167,7 @@ describe("enrichment acceptance source map", () => {
       catalogUnits: ineligibleWorkset.units
     });
     expect(ineligible.status).toBe("ineligible");
-    expect(ineligible.current).toBeNull();
+    expect(ineligible.current).toEqual([]);
     expect(ineligible.row.exact_text).toBe(`Assistant: ${assistant}`);
 
     const ambiguous = bindFrozenAssertionToCurrentSource(frozenRow(`User: ${BERLIN}`), {
@@ -131,7 +175,7 @@ describe("enrichment acceptance source map", () => {
       catalogUnits: [unit, { ...unit, assertionId: unit.assertionId + 1, semanticKey: "ff".repeat(32) }]
     });
     expect(ambiguous.status).toBe("ambiguous");
-    expect(ambiguous.current).toBeNull();
+    expect(ambiguous.current).toEqual([]);
     expect(ambiguous.row.annotation_pointer.assertion_id).toBe(1);
   });
 
@@ -203,6 +247,13 @@ function frozenRow(exactText: string, overrides: Partial<FrozenAssertion> = {}):
     obligations: ["keep slogan"],
     forbidden: ["invent ownership"],
     duplicate_of: null,
+    participants: null,
+    source_role: null,
+    modality: null,
+    conditions: null,
+    scope: null,
+    time: null,
+    event_policy: null,
     ...overrides
   };
 }

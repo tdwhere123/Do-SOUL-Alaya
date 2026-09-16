@@ -4,14 +4,14 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FrozenPopulationCountError,
+  FrozenPopulationMembershipError,
   loadFrozenEnrichmentPopulation
 } from "../../../../runs/extraction/enrichment-acceptance/frozen-population.js";
 
-const FROZEN_ROOT = join(
-  import.meta.dirname,
-  "../../../../../../../../..",
-  ".do-it/bench-runs/associative-field-gemini-source-scope-20260914"
-);
+const FROZEN_ROOT = "/home/tdwhere/vibe/Do-SOUL-Alaya/.do-it/bench-runs/associative-field-gemini-source-scope-20260914";
+const FROZEN_REGRESSION_PATH = join(FROZEN_ROOT, "regression-source-review.json");
+const FROZEN_CANONICAL_PATH = join(FROZEN_ROOT, "canonical-source-review.json");
+const FROZEN_ANNOTATIONS_AVAILABLE = existsSync(FROZEN_REGRESSION_PATH) && existsSync(FROZEN_CANONICAL_PATH);
 
 const REGRESSION_REQUIRED = new Set([2, 4, 8, 9, 10, 12, 13, 14, 16]);
 const REGRESSION_UNRESOLVED = new Set([5, 15]);
@@ -34,6 +34,8 @@ describe("frozen enrichment population", () => {
     expect(regression).toHaveLength(16);
     expect(regression.filter((row) => row.first_stage_subset).map((row) => row.original_ordinal))
       .toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(new Set(regression.map((row) => row.annotation_pointer.assertion_id)))
+      .toEqual(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]));
     expect(regression.find((row) => row.original_ordinal === 2)?.required_group_id).toBe("aspiration");
     expect(regression.find((row) => row.original_ordinal === 6)?.required_group_id).toBe("aspiration");
     expect(regression.find((row) => row.original_ordinal === 6)?.duplicate_of).toBe(2);
@@ -42,12 +44,19 @@ describe("frozen enrichment population", () => {
     expect(regression.find((row) => row.original_ordinal === 8)?.required_group_id).toBe("release");
     expect(regression.find((row) => row.original_ordinal === 1)?.obligations).toEqual(["keep slogan"]);
     expect(regression.find((row) => row.original_ordinal === 1)?.forbidden).toEqual(["invent ownership"]);
+    expect(new Set(
+      loaded.rows.filter((row) => row.classification === "required").map((row) => row.required_group_id)
+    ).size).toBe(15);
     const canonical = loaded.rows.filter((row) => row.population === "canonical");
     expect(canonical).toHaveLength(22);
     expect(canonical.filter((row) => row.classification === "required")).toHaveLength(6);
     expect(canonical[0]?.annotation_pointer.canonical_index).toBe(1);
     expect(canonical[0]?.obligations).toEqual(["retain roots"]);
     expect(canonical[0]?.forbidden).toEqual(["invent citizenship"]);
+    const canonicalLocalIds = canonical.map((row) => (
+      `${row.annotation_pointer.canonical_index}:${row.annotation_pointer.assertion_id}`
+    ));
+    expect(new Set(canonicalLocalIds).size).toBe(canonicalLocalIds.length);
   });
 
   it("throws a named count error when the files do not yield 38/15/21/2", () => {
@@ -60,19 +69,64 @@ describe("frozen enrichment population", () => {
     })).toThrow(FrozenPopulationCountError);
   });
 
-  it("loads the frozen annotation files when present without dropping rows", () => {
-    const regressionPath = join(FROZEN_ROOT, "regression-source-review.json");
-    const canonicalPath = join(FROZEN_ROOT, "canonical-source-review.json");
-    if (!existsSync(regressionPath) || !existsSync(canonicalPath)) return;
-    const loaded = loadFrozenEnrichmentPopulation({ regressionPath, canonicalPath });
-    expect(loaded.counts).toEqual({ total: 38, required: 15, optional: 21, unresolved: 2 });
-    expect(loaded.rows).toHaveLength(38);
-    expect(loaded.rows.every((row) => row.exact_text.length > 0)).toBe(true);
-    expect(loaded.rows.filter((row) => row.first_stage_subset)).toHaveLength(8);
-    expect(new Set(
-      loaded.rows.filter((row) => row.classification === "required").map((row) => row.required_group_id)
-    ).size).toBe(15);
+  it("rejects replaced regression membership even when classification totals still match 38/15/21/2", () => {
+    const population = validPopulation();
+    population.regression.assertions[3] = structuredClone(population.regression.assertions[1]!);
+    root = writePopulation(population);
+    let thrown: unknown;
+    try {
+      loadFrozenEnrichmentPopulation({
+        regressionPath: join(root, "regression-source-review.json"),
+        canonicalPath: join(root, "canonical-source-review.json")
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(FrozenPopulationMembershipError);
+    expect(thrown).not.toBeInstanceOf(FrozenPopulationCountError);
+    expect((thrown as Error).name).toBe("FrozenPopulationMembershipError");
   });
+
+  it.skipIf(!FROZEN_ANNOTATIONS_AVAILABLE)(
+    "loads frozen annotations with unique 1-16 membership, first-eight IDs, and canonical 12/2 review dimensions",
+    () => {
+      const loaded = loadFrozenEnrichmentPopulation({
+        regressionPath: FROZEN_REGRESSION_PATH,
+        canonicalPath: FROZEN_CANONICAL_PATH
+      });
+      expect(loaded.counts).toEqual({ total: 38, required: 15, optional: 21, unresolved: 2 });
+      expect(loaded.rows).toHaveLength(38);
+      expect(loaded.rows.every((row) => row.exact_text.length > 0)).toBe(true);
+      const regression = loaded.rows.filter((row) => row.population === "regression");
+      expect(new Set(regression.map((row) => row.annotation_pointer.assertion_id)))
+        .toEqual(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]));
+      expect(
+        regression.filter((row) => row.first_stage_subset).map((row) => row.annotation_pointer.assertion_id)
+      ).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(new Set(
+        loaded.rows.filter((row) => row.classification === "required").map((row) => row.required_group_id)
+      ).size).toBe(15);
+      const alias = regression.find((row) => row.annotation_pointer.assertion_id === 6);
+      expect(alias).toMatchObject({
+        classification: "optional",
+        duplicate_of: 2,
+        required_group_id: "aspiration"
+      });
+      const canonical12_2 = loaded.rows.find((row) => (
+        row.annotation_pointer.canonical_index === 12 && row.annotation_pointer.assertion_id === 2
+      ));
+      expect(canonical12_2?.participants).toEqual([
+        "First-person monitor and person seeking safety",
+        "The speaker's blood sugar levels",
+        "Potential low-blood-sugar episode while swimming"
+      ]);
+      expect(canonical12_2?.source_role).toBe("user");
+      expect(canonical12_2?.modality).toEqual(expect.stringContaining("Have been monitoring"));
+      expect(canonical12_2?.conditions).toEqual(expect.stringContaining("Since introduces"));
+      expect(canonical12_2?.time).toEqual(expect.stringContaining("Twice a day"));
+      expect(canonical12_2?.event_policy).toEqual(expect.stringContaining("Ongoing monitoring practice"));
+    }
+  );
 });
 
 function validPopulation(): {

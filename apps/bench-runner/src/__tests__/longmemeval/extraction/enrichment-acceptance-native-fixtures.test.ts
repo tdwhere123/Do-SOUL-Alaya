@@ -27,7 +27,16 @@ import {
 } from "../../../runs/extraction/fill/semantic-fill-envelope.js";
 import type { FrozenAssertion } from "../../../runs/extraction/enrichment-acceptance/frozen-population.js";
 import { bindFrozenPopulation } from "../../../runs/extraction/enrichment-acceptance/source-binding.js";
-import { composeEnrichmentPreparationReport } from "../../../runs/extraction/enrichment-acceptance/preparation-report.js";
+import {
+  ENRICHMENT_PREFLIGHT_CAPABILITY,
+  ENRICHMENT_PREFLIGHT_MAX_OUTPUT_TOKENS,
+  ENRICHMENT_PREFLIGHT_MODEL,
+  ENRICHMENT_PREFLIGHT_REQUEST_PROFILE
+} from "../../../runs/extraction/enrichment-acceptance/current-preflight.js";
+import {
+  composeEnrichmentPreparationReport,
+  type EnrichmentBoundNativeOutcome
+} from "../../../runs/extraction/enrichment-acceptance/preparation-report.js";
 import {
   SEMANTIC_CAPABILITY as CAP,
   TOKEN_AWARE_POLICY,
@@ -95,23 +104,11 @@ describe("enrichment acceptance native fixtures", () => {
     expect(fetches).toBe(0);
   });
 
-  it("captures model, profile and cap from the current preflight module when that graph loads", async () => {
-    let loaded: {
-      ENRICHMENT_PREFLIGHT_MODEL: string;
-      ENRICHMENT_PREFLIGHT_REQUEST_PROFILE: string;
-      ENRICHMENT_PREFLIGHT_MAX_OUTPUT_TOKENS: number;
-      ENRICHMENT_PREFLIGHT_CAPABILITY: string;
-    } | null = null;
-    try {
-      loaded = await import("../../../runs/extraction/enrichment-acceptance/current-preflight.js");
-    } catch (cause) {
-      if (/lru-cache/u.test(cause instanceof Error ? cause.message : String(cause))) return;
-      throw cause;
-    }
-    expect(loaded.ENRICHMENT_PREFLIGHT_MODEL).toBe("gemini-3.1-flash-lite");
-    expect(loaded.ENRICHMENT_PREFLIGHT_REQUEST_PROFILE).toBe("gemini-3.1-low-v1");
-    expect(loaded.ENRICHMENT_PREFLIGHT_MAX_OUTPUT_TOKENS).toBe(4096);
-    expect(loaded.ENRICHMENT_PREFLIGHT_CAPABILITY).toBe("official_api_signals:v1");
+  it("captures model, profile and cap from the current preflight module when that graph loads", () => {
+    expect(ENRICHMENT_PREFLIGHT_MODEL).toBe("gemini-3.1-flash-lite");
+    expect(ENRICHMENT_PREFLIGHT_REQUEST_PROFILE).toBe("gemini-3.1-low-v1");
+    expect(ENRICHMENT_PREFLIGHT_MAX_OUTPUT_TOKENS).toBe(4096);
+    expect(ENRICHMENT_PREFLIGHT_CAPABILITY).toBe("official_api_signals:v1");
   });
 
   it("refuses older signals raw as current-contract input without fabricating interpretations", () => {
@@ -166,6 +163,24 @@ describe("enrichment acceptance native fixtures", () => {
     expect(received.located[0]?.outcome).toBe("candidates");
     expect(received.located[1]?.outcome).toBe("failed");
     expect(received.located[0]?.candidates.length).toBeGreaterThan(0);
+    const rows = [frozenRow(1, "optional", null)];
+    const report = composeEnrichmentPreparationReport({
+      population: { rows },
+      bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
+      preflight: null,
+      nativeOutcomes: [emptyNativeCell(rows[0]!, {
+        raw_state: "partial",
+        machine_admission: "partial",
+        located_outcome: "candidates",
+        candidate_ordinal: 0,
+        rejected_siblings: [{ candidate_ordinal: 1, reason: "invalid_candidate" }]
+      })]
+    });
+    expect(report.source_fidelity.rows[0]?.raw_state).toBe("partial");
+    expect(report.source_fidelity.rows[0]?.candidate_ordinal).toBe(0);
+    expect(report.source_fidelity.rows[0]?.rejected_siblings).toEqual([
+      { candidate_ordinal: 1, reason: "invalid_candidate" }
+    ]);
     expect(fetches).toBe(0);
   });
 
@@ -201,6 +216,37 @@ describe("enrichment acceptance native fixtures", () => {
     expect(revised.status).toBe("partial");
     expect(revised.located).toEqual([]);
     expect(revised.rejections.every((item) => item.reason === "source_generation_mismatch")).toBe(true);
+    const rows = [frozenRow(1, "optional", null)];
+    const foreignPointer = {
+      file: "regression-source-review.json",
+      assertion_id: 99,
+      request_key: "ff".repeat(32),
+      canonical_index: null
+    };
+    const report = composeEnrichmentPreparationReport({
+      population: { rows },
+      bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
+      preflight: null,
+      nativeOutcomes: [
+        emptyNativeCell(rows[0]!, {
+          raw_state: "valid-empty",
+          machine_admission: "valid-empty",
+          located_outcome: "empty"
+        }),
+        {
+          annotation_pointer: foreignPointer,
+          request_ordinal: 0,
+          candidate_ordinal: 0,
+          raw_state: "rejected",
+          machine_admission: "rejected",
+          located_outcome: "failed"
+        }
+      ]
+    });
+    expect(report.source_fidelity.rows[0]?.raw_state).toBe("valid-empty");
+    expect(report.native_formation_publication.unmatched_native_outcomes).toHaveLength(1);
+    expect(report.native_formation_publication.unmatched_native_outcomes[0]?.annotation_pointer)
+      .toEqual(foreignPointer);
     expect(fetches).toBe(0);
   });
 
@@ -294,6 +340,7 @@ describe("enrichment acceptance native fixtures", () => {
       population: { rows },
       bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
       preflight: null,
+      nativeOutcomes: rows.map((item) => emptyNativeCell(item)),
       fixtureOutcomes: [{
         name: "all selected outcomes empty",
         kind: "native_formation_publication",
@@ -302,8 +349,12 @@ describe("enrichment acceptance native fixtures", () => {
       }]
     });
     expect(report.source_fidelity.first_stage_required_groups).toBe(3);
+    expect(report.source_fidelity.full_required_groups).toBe(3);
+    expect(report.source_fidelity.full_required_groups).not.toBe(15);
     expect(report.source_fidelity.required_group_ids.first_stage)
       .toEqual(["aspiration", "capability", "release"]);
+    expect(report.source_fidelity.rows.every((item) => item.raw_state === "valid-empty")).toBe(true);
+    expect(report.source_fidelity.rows.every((item) => item.machine_admission === "valid-empty")).toBe(true);
     const faithfulRequiredGroups = new Set(
       report.source_fidelity.rows
         .filter((row) => row.classification === "required" && row.human_verdict !== "unreviewed")
@@ -312,6 +363,7 @@ describe("enrichment acceptance native fixtures", () => {
     expect(faithfulRequiredGroups.size).toBe(0);
     expect(report.source_fidelity.human_verdicts).toBe("unreviewed");
     expect(report.native_formation_publication.status).toBe("valid-empty");
+    expect(report.native_formation_publication.machine_admission).toBe("valid-empty");
     expect(report.native_formation_publication.human_verdict).toBe("unreviewed");
     expect(report.native_formation_publication.note).toMatch(/mechanism evidence only/u);
     expect(fetches).toBe(0);
@@ -323,6 +375,7 @@ describe("enrichment acceptance native fixtures", () => {
       population: { rows },
       bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
       preflight: null,
+      nativeOutcomes: [emptyNativeCell(rows[0]!)],
       fixtureOutcomes: [{
         name: "optional slogan fragment empty",
         kind: "native_formation_publication",
@@ -332,6 +385,9 @@ describe("enrichment acceptance native fixtures", () => {
       }]
     });
     expect(report.source_fidelity.rows[0]?.classification).toBe("optional");
+    expect(report.source_fidelity.rows[0]?.raw_state).toBe("valid-empty");
+    expect(report.source_fidelity.rows[0]?.raw_state).not.toBe("missing");
+    expect(report.source_fidelity.rows[0]?.machine_admission).toBe("valid-empty");
     expect(report.native_formation_publication.status).toBe("valid-empty");
     expect(report.native_formation_publication.status).not.toBe("missing");
     expect(report.source_fidelity.rows[0]?.human_verdict).toBe("unreviewed");
@@ -368,6 +424,18 @@ describe("enrichment acceptance native fixtures", () => {
       population: { rows },
       bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
       preflight: null,
+      nativeOutcomes: [emptyNativeCell(rows[0]!, {
+        raw_state: "unreviewed",
+        machine_admission: "unreviewed",
+        located_outcome: received.located[0]?.outcome === "candidates" ? "candidates" : "empty",
+        candidate_ordinal: 0
+      })],
+      semanticAnnotations: [{
+        annotation_pointer: rows[0]!.annotation_pointer,
+        quality_cell: "hold",
+        attributed_to: "authored false-promisor annotation",
+        detail: "product assigned as promisor"
+      }],
       fixtureOutcomes: [
         {
           name: "native substring admission",
@@ -386,6 +454,10 @@ describe("enrichment acceptance native fixtures", () => {
     expect(report.native_formation_publication.status).toBe("unreviewed");
     expect(report.native_formation_publication.human_verdict).toBe("unreviewed");
     expect(report.source_fidelity.rows[0]?.human_verdict).toBe("unreviewed");
+    expect(report.source_fidelity.rows[0]?.quality_cell).toBe("hold");
+    expect(report.source_fidelity.rows[0]?.quality_attribution)
+      .toBe("authored false-promisor annotation");
+    expect(report.source_fidelity.rows[0]?.raw_state).toBe("unreviewed");
     expect(report.source_fidelity.fixture_outcomes).toEqual([{
       name: "false promisor quality",
       kind: "source_fidelity",
@@ -409,6 +481,22 @@ describe("enrichment acceptance native fixtures", () => {
     });
     expect(report.public_consumption.status).toBe("not_exercised");
     expect(report.public_consumption.note).toMatch(/not imported/u);
+    expect(fetches).toBe(0);
+  });
+
+  it("does not treat mixed public pass and fail as exercised success", () => {
+    const rows = [frozenRow(2, "required", "aspiration")];
+    const report = composeEnrichmentPreparationReport({
+      population: { rows },
+      bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
+      preflight: null,
+      fixtureOutcomes: [
+        { name: "public success", kind: "public_consumption", result: "passed" },
+        { name: "public failure", kind: "public_consumption", result: "failed" }
+      ]
+    });
+    expect(report.public_consumption.status).toBe("not_verified");
+    expect(report.public_consumption.status).not.toBe("exercised");
     expect(fetches).toBe(0);
   });
 });
@@ -442,6 +530,28 @@ function frozenRow(
     obligations: [REVIEW_ONLY],
     forbidden: ["invent a subscription"],
     duplicate_of: null,
+    participants: null,
+    source_role: null,
+    modality: null,
+    conditions: null,
+    scope: null,
+    time: null,
+    event_policy: null,
+    ...overrides
+  };
+}
+
+function emptyNativeCell(
+  assertion: FrozenAssertion,
+  overrides: Partial<EnrichmentBoundNativeOutcome> = {}
+): EnrichmentBoundNativeOutcome {
+  return {
+    annotation_pointer: assertion.annotation_pointer,
+    request_ordinal: 0,
+    candidate_ordinal: null,
+    raw_state: "valid-empty",
+    machine_admission: "valid-empty",
+    located_outcome: "empty",
     ...overrides
   };
 }

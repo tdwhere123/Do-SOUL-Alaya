@@ -6,7 +6,19 @@ import {
 } from "@do-soul/alaya-soul";
 import type { FrozenAssertion } from "./frozen-population.js";
 
-export type FrozenBindingStatus = "bound" | "unbound" | "ineligible" | "ambiguous";
+export type FrozenBindingStatus =
+  | "bound"
+  | "unbound"
+  | "ineligible"
+  | "ambiguous"
+  | "partial";
+
+export type FrozenOccurrenceStatus =
+  | "bound"
+  | "unbound"
+  | "ineligible"
+  | "ambiguous"
+  | "lost";
 
 export interface FrozenCatalogUnit {
   readonly assertionId: number;
@@ -30,10 +42,15 @@ export interface FrozenBindingRequest {
     readonly text: string;
   }[];
   readonly source_corpus_identity?: string;
+  readonly message_ids?: readonly string[];
   readonly sourceCorpus?: string;
   readonly sourceTurn?: {
     readonly turnContent: string;
-    readonly turnMessages: readonly { readonly role: "user" | "assistant"; readonly content: string }[];
+    readonly turnMessages: readonly {
+      readonly message_id?: string;
+      readonly role: "user" | "assistant";
+      readonly content: string;
+    }[];
   };
 }
 
@@ -56,11 +73,29 @@ export interface FrozenBoundCurrentSource {
   readonly request_keys: readonly string[] | null;
 }
 
+export interface FrozenOccurrenceRestriction {
+  readonly occurrenceIdentity: string | null;
+  readonly sourceCorpusIdentity: string | null;
+  readonly locator: {
+    readonly start: number;
+    readonly end: number;
+  } | null;
+  readonly source_message_id: string | null;
+}
+
+export interface FrozenOccurrenceBinding {
+  readonly frozen: FrozenOccurrenceRestriction;
+  readonly status: FrozenOccurrenceStatus;
+  readonly reason: string;
+  readonly current: FrozenBoundCurrentSource | null;
+}
+
 export interface FrozenAssertionBinding {
   readonly row: FrozenAssertion;
   readonly status: FrozenBindingStatus;
   readonly reason: string;
-  readonly current: FrozenBoundCurrentSource | null;
+  readonly occurrences: readonly FrozenOccurrenceBinding[];
+  readonly current: readonly FrozenBoundCurrentSource[];
 }
 
 export interface FrozenPackingCardinalities {
@@ -80,44 +115,12 @@ export function bindFrozenAssertionToCurrentSource(
   row: FrozenAssertion,
   input: FrozenSourceBindingInput
 ): FrozenAssertionBinding {
-  const needle = stripLeadingRoleMarker(row.exact_text);
-  const units = selectCatalogUnits(row, input.catalogUnits);
-  if (units.length > 1) {
-    return freezeBinding(row, "ambiguous", "catalog text matches more than one current unit", null);
-  }
-  if (units.length === 1) {
-    const unit = units[0]!;
-    return freezeBinding(row, "bound", "current occurrence or unique catalog text matches one unit", Object.freeze({
-      assertion_id: unit.assertionId,
-      semanticKey: unit.semanticKey,
-      sourceCorpusIdentity: unit.binding.sourceCorpusIdentity,
-      locator: Object.freeze({
-        start: unit.binding.locator.start,
-        end: unit.binding.locator.end
-      }),
-      occurrenceIdentity: unit.binding.occurrenceIdentity ?? null,
-      request_keys: requestKeysForUnit(unit, input.requests)
-    }));
-  }
-  const corpora = collectSourceCorpora(input);
-  if (corpora === null) {
-    return freezeBinding(
-      row,
-      "unbound",
-      "exact text absent from current catalog; source corpus unavailable so eligibility is unknown",
-      null
-    );
-  }
-  const present = corpora.some((corpus) => findSourceTextOccurrence(corpus, needle, 0) !== null);
-  if (present) {
-    return freezeBinding(
-      row,
-      "ineligible",
-      "exact text is present in the current source corpus but filtered from the current catalog",
-      null
-    );
-  }
-  return freezeBinding(row, "unbound", "exact text absent from the current source corpus", null);
+  const catalogs = input.catalogUnits.map(asCatalogUnit);
+  const specs = frozenOccurrenceSpecs(row);
+  const occurrences = specs.length > 0
+    ? specs.map((spec) => bindRestrictedOccurrence(row, spec, catalogs, input))
+    : [bindUnrestrictedOccurrence(row, catalogs, input)];
+  return freezeBinding(row, occurrences);
 }
 
 export function bindFrozenPopulation(
@@ -134,33 +137,167 @@ function stripLeadingRoleMarker(text: string): string {
   return text.replace(/^(?:User|Assistant): /u, "");
 }
 
-function selectCatalogUnits(
+function bindRestrictedOccurrence(
   row: FrozenAssertion,
-  units: FrozenSourceBindingInput["catalogUnits"]
-): FrozenCatalogUnit[] {
-  const catalogs = units.map(asCatalogUnit);
-  const identities = frozenOccurrenceIdentities(row);
-  if (identities.size > 0) {
-    const hits = catalogs.filter((unit) => {
-      const identity = unit.binding.occurrenceIdentity;
-      return identity !== undefined && identities.has(identity);
-    });
-    if (hits.length > 0) return hits;
+  spec: FrozenOccurrenceRestriction,
+  catalogs: readonly FrozenCatalogUnit[],
+  input: FrozenSourceBindingInput
+): FrozenOccurrenceBinding {
+  const identityHits = selectRestrictedUnits(row, spec, catalogs);
+  const hits = identityHits.length > 0
+    ? identityHits
+    : migrateRestrictedUnits(row, spec, catalogs, input);
+  if (hits.length > 1) {
+    return occurrenceBinding(spec, "ambiguous", "frozen occurrence matches more than one current unit", null);
   }
+  if (hits.length === 1) {
+    return occurrenceBinding(
+      spec,
+      "bound",
+      identityHits.length === 1
+        ? "frozen occurrence matches one current unit"
+        : "frozen occurrence migrated through native source identity",
+      boundCurrent(hits[0]!, input.requests)
+    );
+  }
+  return occurrenceBinding(
+    spec,
+    "lost",
+    "frozen occurrence restriction has zero current hits; global same-text fallback is not used",
+    null
+  );
+}
+
+function bindUnrestrictedOccurrence(
+  row: FrozenAssertion,
+  catalogs: readonly FrozenCatalogUnit[],
+  input: FrozenSourceBindingInput
+): FrozenOccurrenceBinding {
+  const spec = emptyRestriction();
   const needle = stripLeadingRoleMarker(row.exact_text);
-  let candidates = catalogs.filter((unit) => stripLeadingRoleMarker(unit.text) === needle);
-  const corpora = frozenCorpusIdentities(row);
-  if (corpora.size > 0) {
-    const restricted = candidates.filter((unit) => corpora.has(unit.binding.sourceCorpusIdentity));
-    if (restricted.length > 0) candidates = restricted;
+  const hits = catalogs.filter((unit) => stripLeadingRoleMarker(unit.text) === needle);
+  if (hits.length > 1) {
+    return occurrenceBinding(spec, "ambiguous", "catalog text matches more than one current unit", null);
   }
-  const locators = frozenLocators(row);
-  if (locators.length > 0 && candidates.length > 1) {
-    const restricted = candidates.filter((unit) => locators.some((locator) =>
-      locator.start === unit.binding.locator.start && locator.end === unit.binding.locator.end));
-    if (restricted.length > 0) candidates = restricted;
+  if (hits.length === 1) {
+    return occurrenceBinding(
+      spec,
+      "bound",
+      "current occurrence or unique catalog text matches one unit",
+      boundCurrent(hits[0]!, input.requests)
+    );
   }
-  return candidates;
+  const corpora = collectSourceCorpora(input);
+  if (corpora === null) {
+    return occurrenceBinding(
+      spec,
+      "unbound",
+      "exact text absent from current catalog; source corpus unavailable so eligibility is unknown",
+      null
+    );
+  }
+  const present = corpora.some((corpus) => findSourceTextOccurrence(corpus, needle, 0) !== null);
+  if (present) {
+    return occurrenceBinding(
+      spec,
+      "ineligible",
+      "exact text is present in the current source corpus but filtered from the current catalog",
+      null
+    );
+  }
+  return occurrenceBinding(spec, "unbound", "exact text absent from the current source corpus", null);
+}
+
+function selectRestrictedUnits(
+  row: FrozenAssertion,
+  spec: FrozenOccurrenceRestriction,
+  catalogs: readonly FrozenCatalogUnit[]
+): FrozenCatalogUnit[] {
+  const needle = stripLeadingRoleMarker(row.exact_text);
+  return catalogs.filter((unit) => unitMatchesRestriction(unit, spec, needle));
+}
+
+function migrateRestrictedUnits(
+  row: FrozenAssertion,
+  spec: FrozenOccurrenceRestriction,
+  catalogs: readonly FrozenCatalogUnit[],
+  input: FrozenSourceBindingInput
+): FrozenCatalogUnit[] {
+  const needle = stripLeadingRoleMarker(row.exact_text);
+  const siblingIdentities = siblingOccurrenceIdentities(row, spec);
+  const textHits = catalogs.filter((unit) => {
+    if (stripLeadingRoleMarker(unit.text) !== needle) return false;
+    const identity = unit.binding.occurrenceIdentity;
+    return identity === undefined || !siblingIdentities.has(identity);
+  });
+  if (spec.sourceCorpusIdentity !== null) {
+    const corpusHits = textHits.filter((unit) =>
+      unit.binding.sourceCorpusIdentity === spec.sourceCorpusIdentity);
+    if (corpusHits.length > 0) return corpusHits;
+  }
+  if (spec.source_message_id !== null) {
+    const local = corporaForMessage(spec.source_message_id, input);
+    if (local === null) return [];
+    return textHits.filter((unit) => local.has(unit.binding.sourceCorpusIdentity));
+  }
+  return [];
+}
+
+function siblingOccurrenceIdentities(
+  row: FrozenAssertion,
+  spec: FrozenOccurrenceRestriction
+): ReadonlySet<string> {
+  const identities = new Set<string>();
+  for (const other of frozenOccurrenceSpecs(row)) {
+    if (other.occurrenceIdentity === null) continue;
+    if (other.occurrenceIdentity === spec.occurrenceIdentity &&
+        other.sourceCorpusIdentity === spec.sourceCorpusIdentity) continue;
+    identities.add(other.occurrenceIdentity);
+  }
+  return identities;
+}
+
+function corporaForMessage(
+  messageId: string,
+  input: FrozenSourceBindingInput
+): ReadonlySet<string> | null {
+  if (input.requests === undefined) return null;
+  const corpora = new Set<string>();
+  for (const request of input.requests) {
+    if (!requestHasMessage(request, messageId)) continue;
+    if (request.source_corpus_identity !== undefined) corpora.add(request.source_corpus_identity);
+  }
+  return corpora;
+}
+
+function requestHasMessage(request: FrozenBindingRequest, messageId: string): boolean {
+  if (request.message_ids?.includes(messageId) === true) return true;
+  return request.sourceTurn?.turnMessages.some((message) => message.message_id === messageId) === true;
+}
+
+function unitMatchesRestriction(
+  unit: FrozenCatalogUnit,
+  spec: FrozenOccurrenceRestriction,
+  needle: string
+): boolean {
+  if (spec.occurrenceIdentity !== null) {
+    if (unit.binding.occurrenceIdentity !== spec.occurrenceIdentity) return false;
+  } else if (stripLeadingRoleMarker(unit.text) !== needle) {
+    return false;
+  }
+  if (spec.sourceCorpusIdentity !== null &&
+      unit.binding.sourceCorpusIdentity !== spec.sourceCorpusIdentity) {
+    return false;
+  }
+  // Historical locator contract versions may differ from the live catalog.
+  // Occurrence identity is the rebind key; locator is strict only when identity is absent.
+  if (spec.occurrenceIdentity === null && spec.locator !== null) {
+    if (unit.binding.locator.start !== spec.locator.start ||
+        unit.binding.locator.end !== spec.locator.end) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function asCatalogUnit(unit: FrozenCatalogUnit | OfficialApiSemanticWorkUnit): FrozenCatalogUnit {
@@ -182,46 +319,52 @@ function asCatalogUnit(unit: FrozenCatalogUnit | OfficialApiSemanticWorkUnit): F
   };
 }
 
-function frozenOccurrenceIdentities(row: FrozenAssertion): ReadonlySet<string> {
-  const identities = new Set<string>();
-  if (row.occurrence.source_occurrence_identity !== null) {
-    identities.add(row.occurrence.source_occurrence_identity);
-  }
+function frozenOccurrenceSpecs(row: FrozenAssertion): readonly FrozenOccurrenceRestriction[] {
+  const fromBindings: FrozenOccurrenceRestriction[] = [];
   for (const binding of row.occurrence.occurrence_bindings) {
-    if (!isRecord(binding)) continue;
-    const identity = binding.occurrenceIdentity;
-    if (typeof identity === "string" && identity.length > 0) identities.add(identity);
+    const spec = restrictionFromBinding(binding, row);
+    if (spec !== null) fromBindings.push(spec);
   }
-  return identities;
+  if (fromBindings.length > 0) return Object.freeze(fromBindings);
+  const identity = row.occurrence.source_occurrence_identity;
+  const locator = readLocator(row.occurrence.source_locator);
+  if (identity === null && locator === null) return Object.freeze([]);
+  return Object.freeze([{
+    occurrenceIdentity: identity,
+    sourceCorpusIdentity: null,
+    locator,
+    source_message_id: row.occurrence.source_message_ids[0] ?? null
+  }]);
 }
 
-function frozenCorpusIdentities(row: FrozenAssertion): ReadonlySet<string> {
-  const corpora = new Set<string>();
-  for (const binding of row.occurrence.occurrence_bindings) {
-    if (!isRecord(binding)) continue;
-    const identity = binding.sourceCorpusIdentity;
-    if (typeof identity === "string" && identity.length > 0) corpora.add(identity);
+function restrictionFromBinding(
+  value: unknown,
+  row: FrozenAssertion
+): FrozenOccurrenceRestriction | null {
+  if (!isRecord(value)) return null;
+  const spec: FrozenOccurrenceRestriction = {
+    occurrenceIdentity: readOptionalString(value.occurrenceIdentity),
+    sourceCorpusIdentity: readOptionalString(value.sourceCorpusIdentity),
+    locator: readLocator(value.locator),
+    source_message_id: readOptionalString(value.source_message_id) ??
+      (row.occurrence.source_message_ids[0] ?? null)
+  };
+  if (spec.occurrenceIdentity === null &&
+      spec.sourceCorpusIdentity === null &&
+      spec.locator === null) {
+    return null;
   }
-  return corpora;
+  return spec;
 }
 
-function frozenLocators(row: FrozenAssertion): readonly { readonly start: number; readonly end: number }[] {
-  const locators: { start: number; end: number }[] = [];
-  pushLocator(locators, row.occurrence.source_locator);
-  for (const binding of row.occurrence.occurrence_bindings) {
-    if (!isRecord(binding)) continue;
-    pushLocator(locators, binding.locator);
-  }
-  return locators;
+function readLocator(value: unknown): FrozenOccurrenceRestriction["locator"] {
+  if (!isRecord(value)) return null;
+  if (typeof value.start !== "number" || typeof value.end !== "number") return null;
+  return { start: value.start, end: value.end };
 }
 
-function pushLocator(
-  locators: { start: number; end: number }[],
-  value: unknown
-): void {
-  if (!isRecord(value)) return;
-  if (typeof value.start !== "number" || typeof value.end !== "number") return;
-  locators.push({ start: value.start, end: value.end });
+function readOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -233,15 +376,15 @@ function requestKeysForUnit(
   requests: FrozenSourceBindingInput["requests"]
 ): readonly string[] | null {
   if (requests === undefined) return null;
-  const needle = stripLeadingRoleMarker(unit.text);
-  return Object.freeze(requests.filter((request) => {
-    if (request.source_corpus_identity !== undefined &&
-        request.source_corpus_identity !== unit.binding.sourceCorpusIdentity) {
-      return false;
-    }
-    return request.source_assertions.some((assertion) =>
-      stripLeadingRoleMarker(assertion.text) === needle);
-  }).map((request) => request.key));
+  return Object.freeze(requests.filter((request) => requestIncludesUnit(request, unit)).map((request) => request.key));
+}
+
+function requestIncludesUnit(request: FrozenBindingRequest, unit: FrozenCatalogUnit): boolean {
+  if (request.source_corpus_identity !== undefined &&
+      request.source_corpus_identity !== unit.binding.sourceCorpusIdentity) {
+    return false;
+  }
+  return request.source_assertions.some((assertion) => assertion.assertion_id === unit.assertionId);
 }
 
 function collectSourceCorpora(input: FrozenSourceBindingInput): readonly string[] | null {
@@ -279,11 +422,92 @@ function packingCardinalities(input: FrozenSourceBindingInput): FrozenPackingCar
   });
 }
 
-function freezeBinding(
-  row: FrozenAssertion,
-  status: FrozenBindingStatus,
+function boundCurrent(
+  unit: FrozenCatalogUnit,
+  requests: FrozenSourceBindingInput["requests"]
+): FrozenBoundCurrentSource {
+  return Object.freeze({
+    assertion_id: unit.assertionId,
+    semanticKey: unit.semanticKey,
+    sourceCorpusIdentity: unit.binding.sourceCorpusIdentity,
+    locator: Object.freeze({
+      start: unit.binding.locator.start,
+      end: unit.binding.locator.end
+    }),
+    occurrenceIdentity: unit.binding.occurrenceIdentity ?? null,
+    request_keys: requestKeysForUnit(unit, requests)
+  });
+}
+
+function emptyRestriction(): FrozenOccurrenceRestriction {
+  return Object.freeze({
+    occurrenceIdentity: null,
+    sourceCorpusIdentity: null,
+    locator: null,
+    source_message_id: null
+  });
+}
+
+function occurrenceBinding(
+  frozen: FrozenOccurrenceRestriction,
+  status: FrozenOccurrenceStatus,
   reason: string,
   current: FrozenBoundCurrentSource | null
+): FrozenOccurrenceBinding {
+  return Object.freeze({ frozen, status, reason, current });
+}
+
+function freezeBinding(
+  row: FrozenAssertion,
+  occurrences: readonly FrozenOccurrenceBinding[]
 ): FrozenAssertionBinding {
-  return Object.freeze({ row, status, reason, current });
+  const current = Object.freeze(occurrences.flatMap((item) => (
+    item.current === null ? [] : [item.current]
+  )));
+  const aggregated = aggregateAssertionStatus(occurrences);
+  return Object.freeze({
+    row,
+    status: aggregated.status,
+    reason: aggregated.reason,
+    occurrences: Object.freeze([...occurrences]),
+    current
+  });
+}
+
+function aggregateAssertionStatus(
+  occurrences: readonly FrozenOccurrenceBinding[]
+): { readonly status: FrozenBindingStatus; readonly reason: string } {
+  const bound = occurrences.filter((item) => item.status === "bound");
+  const ambiguous = occurrences.filter((item) => item.status === "ambiguous");
+  const missing = occurrences.filter((item) => (
+    item.status === "lost" || item.status === "unbound" || item.status === "ineligible"
+  ));
+  if (ambiguous.length > 0) {
+    return { status: "ambiguous", reason: ambiguous[0]!.reason };
+  }
+  if (bound.length === occurrences.length && bound.length > 0) {
+    return {
+      status: "bound",
+      reason: bound.length === 1
+        ? bound[0]!.reason
+        : "all frozen occurrences match current units"
+    };
+  }
+  if (bound.length > 0 && missing.length > 0) {
+    return {
+      status: "partial",
+      reason: `${bound.length} of ${occurrences.length} frozen occurrences bound; missing occurrences are reported`
+    };
+  }
+  if (occurrences.every((item) => item.status === "ineligible")) {
+    return { status: "ineligible", reason: occurrences[0]!.reason };
+  }
+  const lost = occurrences.find((item) => item.status === "lost");
+  if (lost !== undefined) {
+    return { status: "unbound", reason: lost.reason };
+  }
+  return {
+    status: "unbound",
+    reason: occurrences[0]?.reason ?? "exact text absent from the current source corpus"
+  };
 }

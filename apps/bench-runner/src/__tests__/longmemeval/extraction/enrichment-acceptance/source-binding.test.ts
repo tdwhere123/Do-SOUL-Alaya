@@ -6,7 +6,8 @@ import {
 import type { FrozenAssertion } from "../../../../runs/extraction/enrichment-acceptance/frozen-population.js";
 import {
   bindFrozenAssertionToCurrentSource,
-  bindFrozenPopulation
+  bindFrozenPopulation,
+  type FrozenCatalogUnit
 } from "../../../../runs/extraction/enrichment-acceptance/source-binding.js";
 
 const text = "I moved to Berlin.";
@@ -35,6 +36,13 @@ function row(overrides: Partial<FrozenAssertion> = {}): FrozenAssertion {
     obligations: ["keep slogan"],
     forbidden: ["invent ownership"],
     duplicate_of: null,
+    participants: null,
+    source_role: null,
+    modality: null,
+    conditions: null,
+    scope: null,
+    time: null,
+    event_policy: null,
     ...overrides
   };
 }
@@ -54,10 +62,11 @@ describe("frozen source binding", () => {
       }]
     });
     expect(binding.status).toBe("bound");
-    expect(binding.current?.assertion_id).toBe(unit!.assertionId);
-    expect(binding.current?.semanticKey).toBe(unit!.semanticKey);
-    expect(binding.current?.request_keys).toEqual(["request-1"]);
-    expect(binding.current?.occurrenceIdentity).toEqual(unit!.binding.occurrenceIdentity);
+    expect(binding.current).toHaveLength(1);
+    expect(binding.current[0]?.assertion_id).toBe(unit!.assertionId);
+    expect(binding.current[0]?.semanticKey).toBe(unit!.semanticKey);
+    expect(binding.current[0]?.request_keys).toEqual(["request-1"]);
+    expect(binding.current[0]?.occurrenceIdentity).toEqual(unit!.binding.occurrenceIdentity);
   });
 
   it("records unbound when the exact text is absent", () => {
@@ -69,7 +78,7 @@ describe("frozen source binding", () => {
       catalogUnits: workset.units
     });
     expect(binding.status).toBe("unbound");
-    expect(binding.current).toBeNull();
+    expect(binding.current).toEqual([]);
   });
 
   it("records ineligible when the text remains in the corpus but not the catalog", () => {
@@ -87,7 +96,7 @@ describe("frozen source binding", () => {
       exact_text: `Assistant: ${assistant}`
     }), { sourceCorpus, catalogUnits: workset.units });
     expect(binding.status).toBe("ineligible");
-    expect(binding.current).toBeNull();
+    expect(binding.current).toEqual([]);
   });
 
   it("records ambiguous when catalog text matches more than one unit", () => {
@@ -98,7 +107,7 @@ describe("frozen source binding", () => {
       catalogUnits: [unit, { ...unit, assertionId: unit.assertionId + 1, semanticKey: "ff".repeat(32) }]
     });
     expect(binding.status).toBe("ambiguous");
-    expect(binding.current).toBeNull();
+    expect(binding.current).toEqual([]);
   });
 
   it("binds a repeated catalog phrase using frozen occurrence identity", () => {
@@ -138,9 +147,10 @@ describe("frozen source binding", () => {
       }]
     });
     expect(binding.status).toBe("bound");
-    expect(binding.current?.semanticKey).toBe(unit.semanticKey);
-    expect(binding.current?.occurrenceIdentity).toBe(unit.binding.occurrenceIdentity);
-    expect(binding.current?.request_keys).toEqual(["request-intended"]);
+    expect(binding.current).toHaveLength(1);
+    expect(binding.current[0]?.semanticKey).toBe(unit.semanticKey);
+    expect(binding.current[0]?.occurrenceIdentity).toBe(unit.binding.occurrenceIdentity);
+    expect(binding.current[0]?.request_keys).toEqual(["request-intended"]);
   });
 
   it("maps every original row and reports packing independently of group counts", () => {
@@ -170,4 +180,205 @@ describe("frozen source binding", () => {
     expect(mapped.packing.pack_cardinalities).toEqual([2]);
     expect(mapped.packing.unit_count).toBe(workset.units.length);
   });
+
+  it("retains two authorized frozen occurrences without treating them as ambiguous", () => {
+    const units = twoOccurrenceUnits();
+    const binding = bindFrozenAssertionToCurrentSource(twoOccurrenceRow(units), {
+      catalogUnits: units
+    });
+    expect(binding.status).toBe("bound");
+    expect(binding.status).not.toBe("ambiguous");
+    expect(binding.occurrences).toHaveLength(2);
+    expect(binding.occurrences.map((item) => item.status)).toEqual(["bound", "bound"]);
+    expect(binding.current.map((item) => item.occurrenceIdentity)).toEqual([
+      units[0]!.binding.occurrenceIdentity,
+      units[1]!.binding.occurrenceIdentity
+    ]);
+  });
+
+  it("does not report a clean bound when one of two frozen occurrences is missing", () => {
+    const units = twoOccurrenceUnits();
+    const binding = bindFrozenAssertionToCurrentSource(twoOccurrenceRow(units), {
+      catalogUnits: [units[0]!]
+    });
+    expect(binding.status).toBe("partial");
+    expect(binding.status).not.toBe("bound");
+    expect(binding.occurrences).toHaveLength(2);
+    expect(binding.occurrences[0]).toMatchObject({
+      status: "bound",
+      current: expect.objectContaining({ occurrenceIdentity: units[0]!.binding.occurrenceIdentity })
+    });
+    expect(binding.occurrences[1]).toMatchObject({
+      status: "lost",
+      current: null,
+      frozen: expect.objectContaining({ occurrenceIdentity: units[1]!.binding.occurrenceIdentity })
+    });
+    expect(binding.current).toHaveLength(1);
+    expect(binding.current[0]?.occurrenceIdentity).toBe(units[0]!.binding.occurrenceIdentity);
+  });
+
+  it("does not bind a foreign corpus that only shares exact text", () => {
+    const units = twoOccurrenceUnits();
+    const foreign = {
+      ...units[0]!,
+      binding: {
+        ...units[0]!.binding,
+        occurrenceIdentity: "foreign-occurrence",
+        sourceCorpusIdentity: "foreign-corpus"
+      }
+    };
+    const binding = bindFrozenAssertionToCurrentSource(twoOccurrenceRow(units), {
+      catalogUnits: [foreign]
+    });
+    expect(binding.status).not.toBe("bound");
+    expect(binding.current).toEqual([]);
+    expect(binding.occurrences.every((item) => item.status === "lost")).toBe(true);
+    expect(binding.occurrences.some((item) => item.current?.sourceCorpusIdentity === "foreign-corpus"))
+      .toBe(false);
+  });
+
+  it("joins requests by assertion identity rather than shared text", () => {
+    const units = twoOccurrenceUnits();
+    const intended = units[0]!;
+    const single = row({
+      occurrence: {
+        source_message_ids: ["msg-1"],
+        source_locator: null,
+        source_occurrence_identity: intended.binding.occurrenceIdentity ?? null,
+        occurrence_bindings: [intended.binding]
+      }
+    });
+    const binding = bindFrozenAssertionToCurrentSource(single, {
+      catalogUnits: [intended],
+      requests: [{
+        key: "correct-request",
+        source_corpus_identity: intended.binding.sourceCorpusIdentity,
+        source_assertions: [{ assertion_id: intended.assertionId, text: intended.text }]
+      }, {
+        key: "different-assertion-same-text",
+        source_corpus_identity: intended.binding.sourceCorpusIdentity,
+        source_assertions: [{ assertion_id: 999, text: intended.text }]
+      }]
+    });
+    expect(binding.status).toBe("bound");
+    expect(binding.current[0]?.request_keys).toEqual(["correct-request"]);
+    expect(binding.current[0]?.request_keys).not.toContain("different-assertion-same-text");
+  });
+
+  it("migrates a stale occurrence identity through message-local exact text", () => {
+    const workset = planOfficialApiSemanticWorkset(text, [{ role: "user", content: text }]);
+    const unit = workset.units[0]!;
+    const distractor = {
+      ...unit,
+      assertionId: unit.assertionId + 1,
+      semanticKey: "ff".repeat(32),
+      binding: {
+        ...unit.binding,
+        sourceCorpusIdentity: "11".repeat(32),
+        occurrenceIdentity: "22".repeat(32)
+      }
+    };
+    const binding = bindFrozenAssertionToCurrentSource(row({
+      occurrence: {
+        source_message_ids: ["msg-intended"],
+        source_locator: null,
+        source_occurrence_identity: "ee".repeat(32),
+        occurrence_bindings: [{
+          occurrenceIdentity: "ee".repeat(32),
+          sourceCorpusIdentity: "00".repeat(32)
+        }]
+      }
+    }), {
+      catalogUnits: [unit, distractor],
+      requests: [{
+        key: "request-intended",
+        source_corpus_identity: unit.binding.sourceCorpusIdentity,
+        message_ids: ["msg-intended"],
+        source_assertions: [{ assertion_id: unit.assertionId, text: unit.text }]
+      }, {
+        key: "request-distractor",
+        source_corpus_identity: distractor.binding.sourceCorpusIdentity,
+        message_ids: ["msg-other"],
+        source_assertions: [{ assertion_id: distractor.assertionId, text: distractor.text }]
+      }]
+    });
+    expect(binding.status).toBe("bound");
+    expect(binding.current).toHaveLength(1);
+    expect(binding.current[0]?.semanticKey).toBe(unit.semanticKey);
+    expect(binding.current[0]?.request_keys).toEqual(["request-intended"]);
+    expect(binding.occurrences[0]?.reason).toMatch(/migrated through native source identity/u);
+  });
+
+  it("does not widen to same-text when a frozen locator restriction has zero hits", () => {
+    const workset = planOfficialApiSemanticWorkset(text, [{ role: "user", content: text }]);
+    const unit = workset.units[0]!;
+    const binding = bindFrozenAssertionToCurrentSource(row({
+      occurrence: {
+        source_message_ids: ["msg-1"],
+        source_locator: { start: 99, end: 120 },
+        source_occurrence_identity: null,
+        occurrence_bindings: []
+      }
+    }), {
+      sourceCorpus: unit.sourceCorpus,
+      catalogUnits: workset.units
+    });
+    expect(binding.status).not.toBe("bound");
+    expect(binding.occurrences[0]?.status).toBe("lost");
+    expect(binding.current).toEqual([]);
+  });
+
+  it("distinguishes omitted request membership from present requests without a member", () => {
+    const workset = planOfficialApiSemanticWorkset(text, [{ role: "user", content: text }]);
+    const unit = workset.units[0]!;
+    const omitted = bindFrozenAssertionToCurrentSource(row(), {
+      sourceCorpus: unit.sourceCorpus,
+      catalogUnits: workset.units
+    });
+    expect(omitted.current[0]?.request_keys).toBeNull();
+    const unavailable = bindFrozenAssertionToCurrentSource(row(), {
+      sourceCorpus: unit.sourceCorpus,
+      catalogUnits: workset.units,
+      requests: [{
+        key: "foreign-assertion",
+        source_corpus_identity: unit.binding.sourceCorpusIdentity,
+        source_assertions: [{ assertion_id: unit.assertionId + 99, text: unit.text }]
+      }]
+    });
+    expect(unavailable.current[0]?.request_keys).toEqual([]);
+  });
 });
+
+function twoOccurrenceUnits(): FrozenCatalogUnit[] {
+  const locator = { start: 0, end: text.length };
+  return [{
+    assertionId: 1,
+    text,
+    semanticKey: "aa".repeat(32),
+    binding: {
+      sourceCorpusIdentity: "bb".repeat(32),
+      occurrenceIdentity: "cc".repeat(32),
+      locator
+    }
+  }, {
+    assertionId: 1,
+    text,
+    semanticKey: "aa".repeat(32),
+    binding: {
+      sourceCorpusIdentity: "bb".repeat(32),
+      occurrenceIdentity: "dd".repeat(32),
+      locator
+    }
+  }];
+}
+
+function twoOccurrenceRow(units: FrozenCatalogUnit[]): FrozenAssertion {
+  return row({
+    occurrence: {
+      source_message_ids: ["msg-1"],
+      source_locator: null,
+      source_occurrence_identity: units[0]!.binding.occurrenceIdentity ?? null,
+      occurrence_bindings: units.map((unit) => unit.binding)
+    }
+  });
+}

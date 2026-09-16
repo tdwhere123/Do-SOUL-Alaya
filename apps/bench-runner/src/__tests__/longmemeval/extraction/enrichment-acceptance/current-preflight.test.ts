@@ -41,7 +41,14 @@ function frozenRow(obligation: string): FrozenAssertion {
     first_stage_subset: true,
     obligations: [obligation],
     forbidden: ["do not invent a subscription"],
-    duplicate_of: null
+    duplicate_of: null,
+    participants: null,
+    source_role: null,
+    modality: null,
+    conditions: null,
+    scope: null,
+    time: null,
+    event_policy: null
   };
 }
 

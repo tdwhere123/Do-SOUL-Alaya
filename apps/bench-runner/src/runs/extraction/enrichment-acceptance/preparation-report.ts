@@ -2,11 +2,14 @@ import type { FrozenAssertion, FrozenClassification } from "./frozen-population.
 import type {
   FrozenAssertionBinding,
   FrozenBindingStatus,
+  FrozenBoundCurrentSource,
+  FrozenOccurrenceBinding,
   FrozenPopulationBindings
 } from "./source-binding.js";
 import type { EnrichmentPreflight } from "./current-preflight.js";
 
 export type HumanSemanticVerdict = "unreviewed";
+export type SemanticQualityCell = "unreviewed" | "hold" | "failed";
 export type PublicConsumptionState = "not_exercised" | "not_verified" | "exercised";
 export type PreparationCellState =
   | "missing"
@@ -24,6 +27,31 @@ export interface EnrichmentFixtureOutcome {
   readonly cell_state?: PreparationCellState;
 }
 
+export interface EnrichmentRejectedSibling {
+  readonly candidate_ordinal: number;
+  readonly reason: string;
+}
+
+export interface EnrichmentBoundNativeOutcome {
+  readonly annotation_pointer?: FrozenAssertion["annotation_pointer"];
+  readonly request_key?: string;
+  readonly current_assertion_id?: number;
+  readonly request_ordinal: number | null;
+  readonly candidate_ordinal: number | null;
+  readonly raw_state: PreparationCellState;
+  readonly machine_admission: PreparationCellState;
+  readonly located_outcome?: "candidates" | "empty" | "failed";
+  readonly rejected_siblings?: readonly EnrichmentRejectedSibling[];
+  readonly unmet_obligations?: readonly string[];
+}
+
+export interface EnrichmentSemanticQualityAnnotation {
+  readonly annotation_pointer: FrozenAssertion["annotation_pointer"];
+  readonly quality_cell: Exclude<SemanticQualityCell, "unreviewed">;
+  readonly attributed_to: string;
+  readonly detail?: string;
+}
+
 export interface EnrichmentPreparationRow {
   readonly annotation_pointer: FrozenAssertion["annotation_pointer"];
   readonly original_ordinal: number;
@@ -34,10 +62,19 @@ export interface EnrichmentPreparationRow {
   readonly duplicate_of: number | null;
   readonly binding_status: FrozenBindingStatus;
   readonly binding_reason: string;
+  readonly current: readonly FrozenBoundCurrentSource[];
+  readonly occurrences: readonly FrozenOccurrenceBinding[];
   readonly current_assertion_id: number | null;
   readonly current_semantic_key: string | null;
   readonly current_request_keys: readonly string[] | null;
+  readonly request_ordinal: number | null;
+  readonly candidate_ordinal: number | null;
+  readonly rejected_siblings: readonly EnrichmentRejectedSibling[];
+  readonly unmet_obligations: readonly string[];
+  readonly native_cells: readonly EnrichmentBoundNativeOutcome[];
   readonly human_verdict: HumanSemanticVerdict;
+  readonly quality_cell: SemanticQualityCell;
+  readonly quality_attribution: string | null;
   readonly machine_admission: PreparationCellState;
   readonly raw_state: PreparationCellState;
 }
@@ -67,10 +104,11 @@ export interface EnrichmentPreparationReport {
     readonly unbound: number;
     readonly ineligible: number;
     readonly ambiguous: number;
+    readonly partial: number;
     readonly dropped_rows: number;
     readonly packing: FrozenPopulationBindings["packing"] | null;
-    readonly first_stage_required_groups: 3;
-    readonly full_required_groups: 15;
+    readonly first_stage_required_groups: number;
+    readonly full_required_groups: number;
     readonly required_group_ids: {
       readonly first_stage: readonly string[];
       readonly full: readonly string[];
@@ -84,6 +122,7 @@ export interface EnrichmentPreparationReport {
     readonly machine_admission: PreparationCellState;
     readonly human_verdict: HumanSemanticVerdict;
     readonly fixture_outcomes: readonly EnrichmentFixtureOutcome[];
+    readonly unmatched_native_outcomes: readonly EnrichmentBoundNativeOutcome[];
     readonly note: string;
   };
   readonly public_consumption: {
@@ -93,8 +132,6 @@ export interface EnrichmentPreparationReport {
   };
 }
 
-const FIRST_STAGE_REQUIRED_GROUPS = 3;
-const FULL_REQUIRED_GROUPS = 15;
 const FIRST_STAGE_GROUP_ORDER = ["aspiration", "capability", "release"] as const;
 
 export function composeEnrichmentPreparationReport(input: {
@@ -102,15 +139,21 @@ export function composeEnrichmentPreparationReport(input: {
   readonly bindings: FrozenPopulationBindings;
   readonly preflight: EnrichmentPreflight | null;
   readonly fixtureOutcomes?: readonly EnrichmentFixtureOutcome[];
+  readonly nativeOutcomes?: readonly EnrichmentBoundNativeOutcome[];
+  readonly semanticAnnotations?: readonly EnrichmentSemanticQualityAnnotation[];
 }): EnrichmentPreparationReport {
   const fixtures = Object.freeze([...(input.fixtureOutcomes ?? [])]);
+  const natives = Object.freeze([...(input.nativeOutcomes ?? [])]);
+  const qualities = Object.freeze([...(input.semanticAnnotations ?? [])]);
   const byPointer = indexBindings(input.bindings.bindings);
   const rows = Object.freeze(input.population.rows.map((row) => {
     const binding = byPointer.get(pointerKey(row)) ?? null;
-    return composeRow(row, binding);
+    return composeRow(row, binding, natives, qualities);
   }));
+  const matchedCells = new Set(rows.flatMap((row) => row.native_cells));
+  const unmatchedNatives = Object.freeze(natives.filter((item) => !matchedCells.has(item)));
   const statuses = countBindingStatuses(input.bindings.bindings);
-  const dropped = Math.max(0, input.population.rows.length - input.bindings.bindings.length);
+  const dropped = countDroppedRows(input.population.rows, input.bindings.bindings);
   const fullGroupIds = uniqueRequiredGroupIds(input.population.rows);
   const firstStageGroupIds = uniqueFirstStageGroupIds(input.population.rows);
   const nativeFixtures = fixtures.filter((item) => item.kind === "native_formation_publication");
@@ -142,10 +185,11 @@ export function composeEnrichmentPreparationReport(input: {
       unbound: statuses.unbound,
       ineligible: statuses.ineligible,
       ambiguous: statuses.ambiguous,
+      partial: statuses.partial,
       dropped_rows: dropped,
       packing: input.bindings.packing,
-      first_stage_required_groups: FIRST_STAGE_REQUIRED_GROUPS,
-      full_required_groups: FULL_REQUIRED_GROUPS,
+      first_stage_required_groups: firstStageGroupIds.length,
+      full_required_groups: fullGroupIds.length,
       required_group_ids: Object.freeze({
         first_stage: firstStageGroupIds,
         full: fullGroupIds
@@ -155,10 +199,14 @@ export function composeEnrichmentPreparationReport(input: {
       fixture_outcomes: fidelityFixtures
     }),
     native_formation_publication: Object.freeze({
-      status: nativePublicationStatus(nativeFixtures),
-      machine_admission: machineAdmission(nativeFixtures),
+      status: publicationDomainState(nativeFixtures, rows.map((row) => row.raw_state)),
+      machine_admission: publicationDomainState(
+        nativeFixtures,
+        rows.map((row) => row.machine_admission)
+      ),
       human_verdict: "unreviewed",
       fixture_outcomes: nativeFixtures,
+      unmatched_native_outcomes: unmatchedNatives,
       note: "Fixture outcomes are mechanism evidence only and do not upgrade human semantic verdicts."
     }),
     public_consumption: Object.freeze({
@@ -171,8 +219,18 @@ export function composeEnrichmentPreparationReport(input: {
 
 function composeRow(
   row: FrozenAssertion,
-  binding: FrozenAssertionBinding | null
+  binding: FrozenAssertionBinding | null,
+  natives: readonly EnrichmentBoundNativeOutcome[],
+  qualities: readonly EnrichmentSemanticQualityAnnotation[]
 ): EnrichmentPreparationRow {
+  const current = binding?.current ?? [];
+  const unique = current.length === 1 ? current[0]! : null;
+  const nativeCells = Object.freeze(
+    natives.filter((item) => nativeOutcomeMatches(item, row, binding))
+  );
+  const quality = qualities.find((item) => (
+    pointerFieldsKey(item.annotation_pointer) === pointerFieldsKey(row.annotation_pointer)
+  )) ?? null;
   return Object.freeze({
     annotation_pointer: row.annotation_pointer,
     original_ordinal: row.original_ordinal,
@@ -183,13 +241,48 @@ function composeRow(
     duplicate_of: row.duplicate_of,
     binding_status: binding?.status ?? "unbound",
     binding_reason: binding?.reason ?? "source map row has no binding result",
-    current_assertion_id: binding?.current?.assertion_id ?? null,
-    current_semantic_key: binding?.current?.semanticKey ?? null,
-    current_request_keys: binding?.current?.request_keys ?? null,
+    current,
+    occurrences: binding?.occurrences ?? [],
+    current_assertion_id: unique?.assertion_id ?? null,
+    current_semantic_key: unique?.semanticKey ?? null,
+    current_request_keys: unique?.request_keys ?? null,
+    request_ordinal: uniqueNumber(nativeCells.map((item) => item.request_ordinal)),
+    candidate_ordinal: uniqueNumber(nativeCells.map((item) => item.candidate_ordinal)),
+    rejected_siblings: Object.freeze(nativeCells.flatMap((item) => item.rejected_siblings ?? [])),
+    unmet_obligations: Object.freeze(nativeCells.flatMap((item) => item.unmet_obligations ?? [])),
+    native_cells: nativeCells,
     human_verdict: "unreviewed",
-    machine_admission: "missing",
-    raw_state: "missing"
+    quality_cell: quality?.quality_cell ?? "unreviewed",
+    quality_attribution: quality?.attributed_to ?? null,
+    machine_admission: nativeCells.length === 0
+      ? "missing"
+      : domainCellState(nativeCells.map((item) => item.machine_admission)),
+    raw_state: nativeCells.length === 0
+      ? "missing"
+      : domainCellState(nativeCells.map((item) => item.raw_state))
   });
+}
+
+function nativeOutcomeMatches(
+  outcome: EnrichmentBoundNativeOutcome,
+  row: FrozenAssertion,
+  binding: FrozenAssertionBinding | null
+): boolean {
+  if (outcome.annotation_pointer !== undefined) {
+    return pointerFieldsKey(outcome.annotation_pointer) === pointerFieldsKey(row.annotation_pointer);
+  }
+  if (binding === null) return false;
+  if (outcome.current_assertion_id !== undefined &&
+      binding.current.some((item) => item.assertion_id === outcome.current_assertion_id)) {
+    return true;
+  }
+  if (outcome.request_key !== undefined &&
+      binding.current.some((item) => (
+        item.request_keys !== null && item.request_keys.includes(outcome.request_key!)
+      ))) {
+    return true;
+  }
+  return false;
 }
 
 function indexBindings(
@@ -203,9 +296,11 @@ function indexBindings(
 }
 
 function pointerKey(row: FrozenAssertion): string {
-  const pointer = row.annotation_pointer;
+  return `${row.population}\u0000${pointerFieldsKey(row.annotation_pointer)}`;
+}
+
+function pointerFieldsKey(pointer: FrozenAssertion["annotation_pointer"]): string {
   return [
-    row.population,
     pointer.file,
     pointer.request_key,
     String(pointer.canonical_index),
@@ -213,21 +308,32 @@ function pointerKey(row: FrozenAssertion): string {
   ].join("\u0000");
 }
 
+function countDroppedRows(
+  rows: readonly FrozenAssertion[],
+  bindings: readonly FrozenAssertionBinding[]
+): number {
+  const boundPointers = new Set(bindings.map((item) => pointerKey(item.row)));
+  return rows.filter((row) => !boundPointers.has(pointerKey(row))).length;
+}
+
 function countBindingStatuses(bindings: readonly FrozenAssertionBinding[]): Record<FrozenBindingStatus, number> {
   const counts: Record<FrozenBindingStatus, number> = {
-    bound: 0, unbound: 0, ineligible: 0, ambiguous: 0
+    bound: 0, unbound: 0, ineligible: 0, ambiguous: 0, partial: 0
   };
   for (const binding of bindings) counts[binding.status] += 1;
   return counts;
 }
 
 function uniqueRequiredGroupIds(
-  rows: readonly FrozenAssertion[]
+  rows: readonly FrozenAssertion[],
+  predicate: (row: FrozenAssertion) => boolean = () => true
 ): readonly string[] {
   const ids: string[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
-    if (row.classification !== "required" || row.required_group_id === null) continue;
+    if (row.classification !== "required" || row.required_group_id === null || !predicate(row)) {
+      continue;
+    }
     if (seen.has(row.required_group_id)) continue;
     seen.add(row.required_group_id);
     ids.push(row.required_group_id);
@@ -236,45 +342,58 @@ function uniqueRequiredGroupIds(
 }
 
 function uniqueFirstStageGroupIds(rows: readonly FrozenAssertion[]): readonly string[] {
-  const present = new Set(
-    rows.filter((row) => row.first_stage_subset && row.required_group_id !== null)
-      .map((row) => row.required_group_id as string)
-  );
-  return Object.freeze(FIRST_STAGE_GROUP_ORDER.filter((id) => present.has(id)));
+  const present = uniqueRequiredGroupIds(rows, (row) => row.first_stage_subset);
+  const known = FIRST_STAGE_GROUP_ORDER.filter((id) => present.includes(id));
+  const rest = present.filter((id) => !(FIRST_STAGE_GROUP_ORDER as readonly string[]).includes(id));
+  return Object.freeze([...known, ...rest]);
 }
 
-function nativePublicationStatus(
+function uniqueNumber(values: readonly (number | null)[]): number | null {
+  const present = values.filter((item): item is number => item !== null);
+  if (present.length === 0) return null;
+  const first = present[0]!;
+  return present.every((item) => item === first) ? first : null;
+}
+
+function fixtureDomainStates(
   fixtures: readonly EnrichmentFixtureOutcome[]
+): readonly PreparationCellState[] {
+  return fixtures.flatMap((item) => item.cell_state === undefined ? [] : [item.cell_state]);
+}
+
+function domainCellState(states: readonly PreparationCellState[]): PreparationCellState {
+  if (states.length === 0) return "missing";
+  const unique = new Set(states);
+  if (unique.size === 1) return states[0]!;
+  if (unique.has("rejected")) return "rejected";
+  if (unique.has("partial")) return "partial";
+  if (unique.has("unknown")) return "unknown";
+  if (unique.has("missing")) return "partial";
+  return "partial";
+}
+
+function publicationDomainState(
+  fixtures: readonly EnrichmentFixtureOutcome[],
+  rowStates: readonly PreparationCellState[]
 ): PreparationCellState {
-  if (fixtures.length === 0) return "missing";
-  if (fixtures.some((item) => item.result === "failed")) return "rejected";
+  // Fixture result is test success or failure; cell_state is the domain outcome.
+  const fromFixtures = fixtureDomainStates(fixtures);
+  if (fromFixtures.length > 0) return domainCellState(fromFixtures);
+  const bound = rowStates.filter((state) => state !== "missing");
+  if (bound.length > 0) return domainCellState(bound);
   if (fixtures.some((item) => item.result === "not_run" || item.result === "not_verified")) {
     return "unknown";
   }
-  if (fixtures.some((item) => item.cell_state === "partial")) return "partial";
-  if (fixtures.some((item) => item.cell_state === "valid-empty")) return "valid-empty";
-  return "unreviewed";
-}
-
-function machineAdmission(
-  fixtures: readonly EnrichmentFixtureOutcome[]
-): PreparationCellState {
   if (fixtures.length === 0) return "missing";
-  if (fixtures.some((item) => item.result === "failed")) return "rejected";
-  if (fixtures.every((item) => item.result === "passed")) {
-    return fixtures.some((item) => item.cell_state === "valid-empty") ? "valid-empty" : "unreviewed";
-  }
-  if (fixtures.some((item) => item.cell_state === "partial")) return "partial";
-  return "unknown";
+  return "unreviewed";
 }
 
 function publicConsumptionStatus(
   fixtures: readonly EnrichmentFixtureOutcome[]
 ): PublicConsumptionState {
-  if (fixtures.some((item) => item.result === "passed")) return "exercised";
-  if (fixtures.some((item) => item.result === "not_verified" || item.result === "failed")) {
+  if (fixtures.some((item) => item.result === "failed" || item.result === "not_verified")) {
     return "not_verified";
   }
+  if (fixtures.some((item) => item.result === "passed")) return "exercised";
   return "not_exercised";
 }
-

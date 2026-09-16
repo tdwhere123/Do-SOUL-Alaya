@@ -80,6 +80,7 @@ export interface EnrichmentPreflightRequest {
   readonly assertion_texts: readonly string[];
   readonly user_prompt: string;
   readonly unit_keys: readonly string[];
+  readonly message_ids: readonly string[];
 }
 
 export interface EnrichmentNativeLineBound {
@@ -199,7 +200,8 @@ export async function runCurrentEnrichmentPreflight(options: {
         assertion_ids: Object.freeze(item.request.source_assertions.map((row) => row.assertion_id)),
         assertion_texts: Object.freeze(item.request.source_assertions.map((row) => row.text)),
         user_prompt: item.line.userPrompt,
-        unit_keys: item.line.unitKeys
+        unit_keys: item.line.unitKeys,
+        message_ids: Object.freeze(item.sourceTurn.turnMessages.map((message) => message.message_id))
       }))),
       packs: packs.packs,
       units: workset.units,

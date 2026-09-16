@@ -6,7 +6,8 @@ export const FROZEN_ENRICHMENT_REQUIRED_COUNT = 15;
 export const FROZEN_ENRICHMENT_OPTIONAL_COUNT = 21;
 export const FROZEN_ENRICHMENT_UNRESOLVED_COUNT = 2;
 
-const FIRST_STAGE_ASSERTION_IDS = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
+const FIRST_STAGE_ASSERTION_IDS = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8]);
+const REGRESSION_ASSERTION_IDS = Object.freeze(Array.from({ length: 16 }, (_, index) => index + 1));
 const ASPIRATION_REGRESSION_IDS = new Set([2, 6]);
 const REGRESSION_DUPLICATE_OF: Readonly<Record<number, number>> = Object.freeze({ 6: 2 });
 
@@ -47,6 +48,13 @@ export interface FrozenAssertion {
   readonly obligations: readonly string[];
   readonly forbidden: readonly string[];
   readonly duplicate_of: number | null;
+  readonly participants: readonly string[] | null;
+  readonly source_role: string | null;
+  readonly modality: string | null;
+  readonly conditions: string | null;
+  readonly scope: readonly string[] | null;
+  readonly time: string | null;
+  readonly event_policy: string | null;
 }
 
 export interface FrozenEnrichmentPopulation {
@@ -79,6 +87,14 @@ export class FrozenPopulationCountError extends Error {
   }
 }
 
+export class FrozenPopulationMembershipError extends Error {
+  readonly name = "FrozenPopulationMembershipError";
+
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 export function loadFrozenEnrichmentPopulation(input: {
   readonly regressionPath: string;
   readonly canonicalPath: string;
@@ -88,6 +104,7 @@ export function loadFrozenEnrichmentPopulation(input: {
   const regressionRows = readRegressionRows(input.regressionPath, regression);
   const canonicalRows = readCanonicalRows(input.canonicalPath, canonical);
   const rows = Object.freeze([...regressionRows, ...canonicalRows]);
+  assertFrozenPopulationMembership(rows);
   const counts = countClassifications(rows);
   if (
     counts.total !== FROZEN_ENRICHMENT_POPULATION_TOTAL ||
@@ -97,6 +114,7 @@ export function loadFrozenEnrichmentPopulation(input: {
   ) {
     throw new FrozenPopulationCountError(counts);
   }
+  assertRequiredGroupIdentities(rows);
   return Object.freeze({ rows, counts });
 }
 
@@ -110,6 +128,7 @@ function readRegressionRows(filePath: string, document: Record<string, unknown>)
     const record = asRecord(entry, "regression assertion");
     const assertionId = readPositiveInt(record.assertion_id, "regression assertion_id");
     const classification = mapFrozenClassification(record.classification);
+    const review = readSemanticReview(record);
     return freezeAssertion({
       population: "regression",
       annotation_pointer: Object.freeze({
@@ -131,10 +150,11 @@ function readRegressionRows(filePath: string, document: Record<string, unknown>)
       }),
       classification,
       required_group_id: regressionRequiredGroupId(assertionId, classification),
-      first_stage_subset: FIRST_STAGE_ASSERTION_IDS.has(assertionId),
+      first_stage_subset: FIRST_STAGE_ASSERTION_IDS.includes(assertionId),
       obligations: readStringArray(record.obligations, "regression obligations"),
       forbidden: readStringArray(record.prohibited_inferences, "regression prohibited_inferences"),
-      duplicate_of: REGRESSION_DUPLICATE_OF[assertionId] ?? null
+      duplicate_of: REGRESSION_DUPLICATE_OF[assertionId] ?? null,
+      ...review
     });
   }));
 }
@@ -159,6 +179,7 @@ function readCanonicalRows(filePath: string, document: Record<string, unknown>):
       const assertionId = readPositiveInt(review.assertion_id, "canonical assertion_id");
       const classification = mapFrozenClassification(review.classification);
       const exactText = readString(review.exact_text, "canonical exact_text");
+      const semanticReview = readSemanticReview(review);
       rows.push(freezeAssertion({
         population: "canonical",
         annotation_pointer: Object.freeze({
@@ -185,7 +206,8 @@ function readCanonicalRows(filePath: string, document: Record<string, unknown>):
         first_stage_subset: false,
         obligations: readStringArray(review.coverage, "canonical coverage"),
         forbidden: readStringArray(review.forbidden, "canonical forbidden"),
-        duplicate_of: null
+        duplicate_of: null,
+        ...semanticReview
       }));
     }
   }
@@ -210,6 +232,72 @@ function mapFrozenClassification(value: unknown): FrozenClassification {
   throw new TypeError(`unrecognized frozen classification: ${String(value)}`);
 }
 
+function assertFrozenPopulationMembership(rows: readonly FrozenAssertion[]): void {
+  const regression = rows.filter((row) => row.population === "regression");
+  const regressionIds = regression.map((row) => row.annotation_pointer.assertion_id);
+  const uniqueRegressionIds = new Set(regressionIds);
+  if (uniqueRegressionIds.size !== regressionIds.length) {
+    throw new FrozenPopulationMembershipError(
+      "regression annotation membership has duplicate assertion identities"
+    );
+  }
+  if (REGRESSION_ASSERTION_IDS.some((id) => !uniqueRegressionIds.has(id))) {
+    throw new FrozenPopulationMembershipError(
+      "regression annotation membership must contain unique assertion_ids 1-16"
+    );
+  }
+  const firstStageIds = new Set(
+    regression.filter((row) => row.first_stage_subset).map((row) => row.annotation_pointer.assertion_id)
+  );
+  if (FIRST_STAGE_ASSERTION_IDS.some((id) => !firstStageIds.has(id))) {
+    throw new FrozenPopulationMembershipError(
+      "first-stage annotation membership must contain assertion_ids 1-8"
+    );
+  }
+  const aspirationRequired = regression.find((row) => row.annotation_pointer.assertion_id === 2);
+  const aspirationAlias = regression.find((row) => row.annotation_pointer.assertion_id === 6);
+  if (
+    aspirationRequired?.required_group_id !== "aspiration" ||
+    aspirationAlias?.classification !== "optional" ||
+    aspirationAlias.duplicate_of !== 2 ||
+    aspirationAlias.required_group_id !== "aspiration"
+  ) {
+    throw new FrozenPopulationMembershipError(
+      "regression assertion 6 must remain the optional aspiration alias of assertion 2"
+    );
+  }
+  const canonicalLocalIds = new Set<string>();
+  for (const row of rows) {
+    if (row.population !== "canonical") continue;
+    const canonicalIndex = row.annotation_pointer.canonical_index;
+    if (canonicalIndex === null) {
+      throw new FrozenPopulationMembershipError("canonical assertion is missing canonical_index");
+    }
+    const localId = `${canonicalIndex}:${row.annotation_pointer.assertion_id}`;
+    if (canonicalLocalIds.has(localId)) {
+      throw new FrozenPopulationMembershipError(
+        `canonical local assertion identity ${localId} is duplicated within a request`
+      );
+    }
+    canonicalLocalIds.add(localId);
+  }
+}
+
+function assertRequiredGroupIdentities(rows: readonly FrozenAssertion[]): void {
+  const requiredGroups = new Set(
+    rows.flatMap((row) => (
+      row.classification === "required" && row.required_group_id !== null
+        ? [row.required_group_id]
+        : []
+    ))
+  );
+  if (requiredGroups.size !== FROZEN_ENRICHMENT_REQUIRED_COUNT) {
+    throw new FrozenPopulationMembershipError(
+      `required-group identities reconcile to ${requiredGroups.size}, expected ${FROZEN_ENRICHMENT_REQUIRED_COUNT}`
+    );
+  }
+}
+
 function countClassifications(rows: readonly FrozenAssertion[]): FrozenEnrichmentPopulation["counts"] {
   let required = 0;
   let optional = 0;
@@ -224,6 +312,22 @@ function countClassifications(rows: readonly FrozenAssertion[]): FrozenEnrichmen
 
 function freezeAssertion(row: FrozenAssertion): FrozenAssertion {
   return Object.freeze(row);
+}
+
+function readSemanticReview(record: Record<string, unknown>): Pick<
+  FrozenAssertion,
+  "participants" | "source_role" | "modality" | "conditions" | "scope" | "time" | "event_policy"
+> {
+  return {
+    participants: readOptionalStringArray(record.participants, "participants"),
+    source_role: readOptionalString(record.source_role),
+    modality: readOptionalString(record.modality),
+    conditions: readOptionalString(record.conditions),
+    scope: readOptionalStringArray(record.scope, "scope"),
+    time: readOptionalString(record.time),
+    // Regression annotations store this dimension as event_vs_policy.
+    event_policy: readOptionalString(record.event_policy) ?? readOptionalString(record.event_vs_policy)
+  };
 }
 
 function readOriginalSource(value: unknown, fallbackText: string): FrozenOriginalSource {
@@ -280,4 +384,9 @@ function readStringArray(value: unknown, label: string): readonly string[] {
     throw new TypeError(`${label} must be a string array`);
   }
   return Object.freeze([...value]);
+}
+
+function readOptionalStringArray(value: unknown, label: string): readonly string[] | null {
+  if (value === undefined || value === null) return null;
+  return readStringArray(value, label);
 }
