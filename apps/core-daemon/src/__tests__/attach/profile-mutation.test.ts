@@ -503,6 +503,26 @@ operator_instructions = ${JSON.stringify(stale)}
     expect(report.attached_preview).toBe("ALAYA_MCP_TOOL_CONFIRMATION_TOKEN present in MCP env");
   });
 
+  it("reports drifted when confirmation token follows a nested Codex env table", async () => {
+    const fs = new MemoryProfileFs();
+    fs.files.set(
+      codexConfigPath(),
+      [
+        "[mcp_servers.alaya]",
+        'command = "node"',
+        "args = [\"x\"]",
+        `env = { extra = { FOO = "bar" }, ALAYA_AGENT_TARGET = "codex", ALAYA_MCP_TOOL_CONFIRMATION_TOKEN = "secret" }`,
+        `operator_instructions = ${JSON.stringify(ALAYA_OPERATOR_INSTRUCTIONS)}`
+      ].join("\n")
+    );
+    const report = await detectAttachedProfileInstructionsDrift("codex", {
+      env: createProfileTestEnv(),
+      fs
+    });
+    expect(report.status).toBe("drifted");
+    expect(report.attached_preview).toBe("ALAYA_MCP_TOOL_CONFIRMATION_TOKEN present in MCP env");
+  });
+
   it("reports in_sync after a fresh attach (instructions + ALAYA_AGENT_TARGET stamp)", async () => {
     const fs = new MemoryProfileFs();
     for (const target of ["codex", "claude-code"] as const) {

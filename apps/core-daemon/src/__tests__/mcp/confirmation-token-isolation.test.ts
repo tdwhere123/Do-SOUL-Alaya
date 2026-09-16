@@ -7,6 +7,7 @@ import { createDoctorCommand } from "../../cli/doctor/doctor.js";
 import {
   attachedAgentEnvHoldsConfirmationToken,
   buildAttachedAgentMcpChildEnv,
+  extractAttachedMcpEnvKeys,
   isAttachedAgentExecutorTarget,
   MCP_TOOL_CONFIRMATION_TOKEN_ENV_KEY,
   stripReviewerCredentialsFromAgentMcpEnv
@@ -34,6 +35,19 @@ describe("confirmation token isolation", () => {
     expect(isAttachedAgentExecutorTarget("codex")).toBe(true);
     expect(isAttachedAgentExecutorTarget("cli")).toBe(false);
     expect(isAttachedAgentExecutorTarget(undefined)).toBe(false);
+  });
+
+  it("reads Codex MCP env keys after a nested inline table", () => {
+    const content = [
+      "[mcp_servers.alaya]",
+      'command = "node"',
+      'env = { extra = { FOO = "bar" }, ALAYA_AGENT_TARGET = "codex", ALAYA_MCP_TOOL_CONFIRMATION_TOKEN = "secret" }'
+    ].join("\n");
+    expect(extractAttachedMcpEnvKeys("codex", content)).toEqual([
+      "FOO",
+      "ALAYA_AGENT_TARGET",
+      "ALAYA_MCP_TOOL_CONFIRMATION_TOKEN"
+    ]);
   });
 
   it("strips the confirmation token from attached MCP stdio env", () => {

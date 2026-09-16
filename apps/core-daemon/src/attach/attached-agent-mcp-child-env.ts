@@ -47,8 +47,7 @@ export function extractAttachedMcpEnvKeys(
     if (block === undefined) {
       return [];
     }
-    const envMatch = /\benv\s*=\s*\{([^}]*)\}/u.exec(block);
-    const envBody = envMatch?.[1];
+    const envBody = extractCodexMcpEnvTableBody(block);
     if (envBody === undefined) {
       return [];
     }
@@ -66,4 +65,54 @@ export function extractAttachedMcpEnvKeys(
     return [];
   }
   return Object.keys(entryEnv);
+}
+
+function extractCodexMcpEnvTableBody(block: string): string | undefined {
+  const envAssign = /\benv\s*=\s*\{/u.exec(block);
+  if (envAssign === null) {
+    return undefined;
+  }
+  return extractDoubleQuotedBalancedBraceBody(block, envAssign.index + envAssign[0].length - 1);
+}
+
+function extractDoubleQuotedBalancedBraceBody(
+  source: string,
+  openBraceIndex: number
+): string | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = openBraceIndex; index < source.length; index += 1) {
+    const char = source[index]!;
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char !== "}") {
+      continue;
+    }
+    depth -= 1;
+    if (depth === 0) {
+      return source.slice(openBraceIndex + 1, index);
+    }
+  }
+  return undefined;
 }
