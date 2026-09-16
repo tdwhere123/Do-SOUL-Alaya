@@ -44,7 +44,7 @@ describe("McpBridge", () => {
 
     const result = await bridge.executeToolUse(toolUse, runtimeContext);
 
-    expect(soulHandler).toHaveBeenCalledWith(toolUse, runtimeContext);
+    expect(soulHandler).toHaveBeenCalledWith(toolUse, runtimeContext, expect.any(AbortSignal));
     expect(result).toEqual({
       type: "tool_result",
       tool_use_id: toolUse.id,
@@ -76,7 +76,7 @@ describe("McpBridge", () => {
 
     const result = await bridge.executeToolUse(toolUse, runtimeContext);
 
-    expect(toolsHandler).toHaveBeenCalledWith(toolUse, runtimeContext);
+    expect(toolsHandler).toHaveBeenCalledWith(toolUse, runtimeContext, expect.any(AbortSignal));
     expect(result).toEqual({
       type: "tool_result",
       tool_use_id: "toolu_write",
@@ -122,7 +122,8 @@ describe("McpBridge", () => {
 
     expect(toolsHandler).toHaveBeenCalledWith(
       expect.objectContaining({ name: "mcp__filesystem__read_file" }),
-      runtimeContext
+      runtimeContext,
+      expect.any(AbortSignal)
     );
     expect(result).toEqual({
       type: "tool_result",
@@ -365,7 +366,7 @@ describe("McpBridge", () => {
 
     const result = await bridge.executeToolUse(recallToolUse, runtimeContext);
 
-    expect(soulHandler).toHaveBeenCalledWith(recallToolUse, runtimeContext);
+    expect(soulHandler).toHaveBeenCalledWith(recallToolUse, runtimeContext, expect.any(AbortSignal));
     expect(result.tool_use_id).toBe("toolu_recall");
   });
 
@@ -389,6 +390,38 @@ describe("McpBridge", () => {
       }),
       is_error: true
     });
+  });
+
+  it("does not start a repo write after the tool timeout aborts", async () => {
+    const writes: string[] = [];
+    const bridge = new McpBridge({
+      soulHandler: async (_toolUse, _runtimeContext, signal) => {
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) {
+            resolve();
+            return;
+          }
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        mcpBridgeModule.throwIfAborted(signal);
+        writes.push("signal-row");
+        return {
+          type: "tool_result",
+          tool_use_id: toolUse.id,
+          content: JSON.stringify({ signal_id: "late", status: "emitted" })
+        };
+      },
+      toolTimeoutMs: 20
+    });
+
+    const result = await bridge.executeToolUse(toolUse, runtimeContext);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(result.is_error).toBe(true);
+    expect(JSON.parse(result.content)).toMatchObject({
+      error: { error_code: "handler_timeout" }
+    });
+    expect(writes).toEqual([]);
   });
 
   it("does not crash the process when a soul handler rejects after the timeout fires", async () => {
@@ -439,7 +472,7 @@ describe("McpBridge", () => {
 
       const result = await bridge.executeToolUse(toolUse, runtimeContext);
 
-      expect(soulHandler).toHaveBeenCalledWith(toolUse, runtimeContext);
+      expect(soulHandler).toHaveBeenCalledWith(toolUse, runtimeContext, expect.any(AbortSignal));
       expect(result).toEqual({
         type: "tool_result",
         tool_use_id: toolUse.id,

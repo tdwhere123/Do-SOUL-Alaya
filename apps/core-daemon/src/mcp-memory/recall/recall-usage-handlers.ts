@@ -28,6 +28,7 @@ import {
   type UsageProofRecord,
   type UsageReport
 } from "@do-soul/alaya-protocol";
+import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import type { GardenTaskEnqueueInput, GardenTaskRow } from "@do-soul/alaya-storage";
 import { enqueuePostTurnExtractTask } from "../garden-task/post-turn-extract-queue.js";
 import {
@@ -58,6 +59,7 @@ export interface RecallUsageToolCallContext {
   readonly agentTarget: string;
   readonly sessionId: string;
   readonly surfaceId?: string | null;
+  readonly abortSignal?: AbortSignal;
 }
 
 export interface RecallUsageHandlerDependencies {
@@ -199,16 +201,19 @@ async function executeRecall(
     policyOverride
   });
   try {
+    throwIfAborted(context.abortSignal);
     const encoded = encodeRecallHandlerResults(recallResult, policyOverride);
     assertRecallProductUpdateCompatibility(request, encoded.index.product_updates);
     const delivery = buildRecallDelivery(params, context, encoded.results, { ...recallResult, index: encoded.index });
     const response = buildRecallResponse(delivery.deliveryId, encoded.results, encoded.results.length,
       { ...recallResult, index: encoded.index }, encoded.explainabilityPartial);
+    throwIfAborted(context.abortSignal);
     await recallResult.acknowledge_delivery?.(encoded.index, new Map(encoded.index.entries.map((entry, offset) =>
       [indexEntryCacheKey(entry), encoded.results[offset]?.content_preview ?? "[payload omitted]"])));
     const replayed = recallResult.issued_delivery_id === undefined ? null
       : await params.deps.trustStateRecorder.findDeliveryById(delivery.deliveryId);
     if (replayed === null) {
+      throwIfAborted(context.abortSignal);
       if (recallResult.acknowledge_delivery === undefined) await params.deps.trustStateRecorder.recordDelivery(delivery.record);
       else await params.deps.trustStateRecorder.recordDelivery(delivery.record, {
           expected_snapshot_id: encoded.index.snapshot_id,
@@ -362,6 +367,7 @@ export function createReportContextUsageHandler(params: Readonly<{
     validateUsageStateConsistency(request);
     const linkedDelivery = await deps.trustStateRecorder.findDeliveryById(request.delivery_id);
     await validateReportedRecallHits(deps, request, context.workspaceId, linkedDelivery);
+    throwIfAborted(context.abortSignal);
     const usageState = resolveUsageState(request);
     const usedObjectIds = resolveUsedObjectIds(request);
     const usedObjects = resolveUsedObjectIdentities(request);
@@ -388,6 +394,7 @@ export function createReportContextUsageHandler(params: Readonly<{
         expectedRunId: context.runId ?? context.sessionId
       }
     );
+    throwIfAborted(context.abortSignal);
     enqueuePostTurnExtractTask(params, request, context, linkedDelivery);
     await emitContextUsageReportedTelemetry(params, {
       deliveryId: request.delivery_id,

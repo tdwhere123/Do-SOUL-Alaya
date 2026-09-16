@@ -38,7 +38,6 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createWarnLogger } from "./daemon-runtime-helpers.js";
-import { createConversationToolExecutor } from "../support/conversation-tool-executor.js";
 import type { RequestProtectionConfig } from "../../app.js";
 import {
   applyRemoteBindTokenRotation,

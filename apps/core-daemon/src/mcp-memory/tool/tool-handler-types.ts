@@ -66,6 +66,7 @@ export interface McpMemoryToolCallContext {
   // CLI surfaces.
   readonly sessionId: string;
   readonly surfaceId?: string | null;
+  readonly abortSignal?: AbortSignal;
 }
 
 export interface McpMemoryToolHandlerDependencies {

@@ -83,11 +83,13 @@ export function createAutoConfirmingBuiltinToolExecutor(toolIds: readonly string
     executeTool: async ({
       toolId,
       rawInput,
-      writableRoots
+      writableRoots,
+      abortSignal
     }: {
       readonly toolId: string;
       readonly rawInput: unknown;
       readonly writableRoots: readonly string[];
+      readonly abortSignal?: AbortSignal;
     }) => {
       const effectiveInput =
         builtinConversationToolRequiresConfirmation(toolId) &&
@@ -98,7 +100,8 @@ export function createAutoConfirmingBuiltinToolExecutor(toolIds: readonly string
           ? withToolConfirmation(rawInput as Record<string, unknown>)
           : rawInput;
       return await executeConversationToolOrThrow(toolId, effectiveInput, writableRoots, {
-        confirmationToken: TOOL_CONFIRMATION_TOKEN
+        confirmationToken: TOOL_CONFIRMATION_TOKEN,
+        abortSignal
       });
     }
   };

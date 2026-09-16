@@ -441,4 +441,43 @@ describe("cli registration", () => {
       sessionId: expect.stringMatching(/^mcp-session-[0-9a-f-]+$/)
     });
   });
+
+  it("passes ALAYA_MCP_TOOL_TIMEOUT_MS into the stdio MCP server", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const baseRuntime = createRuntime();
+    const runtime = createRuntime({
+      services: {
+        ...baseRuntime.services,
+        runService: {
+          ...baseRuntime.services.runService,
+          getById: vi.fn(async () => createRun({ run_id: "run-1", workspace_id: "workspace-1" }))
+        }
+      }
+    });
+    const bridge = createAlayaCliBridge(runtime, {
+      env: {
+        ALAYA_WORKSPACE_ID: "workspace-1",
+        ALAYA_RUN_ID: "run-1",
+        ALAYA_AGENT_TARGET: "codex",
+        ALAYA_MCP_TOOL_TIMEOUT_MS: "45000"
+      },
+      stdin,
+      stdout,
+      stderr,
+      isTTY: false
+    });
+    registerAlayaCliCommands(bridge, runtime);
+    hoisted.runAlayaMcpStdioServer.mockImplementationOnce(async () => {
+      setImmediate(() => stdin.destroy());
+      return { close: hoisted.serverClose };
+    });
+
+    const result = await bridge.dispatch(["mcp", "stdio"]);
+
+    expect(result.exitCode).toBe(0);
+    const [serverOptions] = hoisted.runAlayaMcpStdioServer.mock.calls[0] ?? [];
+    expect(serverOptions.toolTimeoutEnv).toBe("45000");
+  });
 });

@@ -10,6 +10,7 @@ import type {
   SqliteEventLogRepo,
   SqliteToolExecutionRecordRepo
 } from "@do-soul/alaya-storage";
+import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 
 export function createConversationToolExecutor(input: {
@@ -39,6 +40,7 @@ type ToolExecutionRequest = Readonly<{
   runtimeContext: { readonly run_id: string; readonly workspace_id: string };
   workspaceRoot: string;
   affectedPathRoots?: readonly string[];
+  abortSignal?: AbortSignal;
   handler: (context: { readonly writableRoots: readonly string[] }, rawInput?: unknown) => Promise<unknown>;
 }>;
 
@@ -52,7 +54,9 @@ async function executeConversationTool(
   request: ToolExecutionRequest
 ) {
   const startedAt = new Date().toISOString();
+  throwIfAborted(request.abortSignal);
   const result = await request.handler({ writableRoots: [request.workspaceRoot] }, request.rawInput);
+  throwIfAborted(request.abortSignal);
   const execution = createToolExecutionAuditRecord(request, startedAt, result);
 
   await bindEventPublisher({
