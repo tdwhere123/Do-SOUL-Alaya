@@ -7,3 +7,9 @@ export const HUMAN_REVIEWER_AGENT_TARGETS: ReadonlySet<string> = new Set([
   INSPECTOR_REVIEWER_AGENT_TARGET,
   "cli"
 ]);
+
+// Apply/reject stays off attached MCP; listing these names would invite self-review.
+export const HUMAN_REVIEW_ONLY_MEMORY_TOOL_NAMES = Object.freeze([
+  "soul.review_memory_proposal",
+  "soul.batch_review_edge_proposals"
+] as const);

@@ -60,9 +60,8 @@ describe("proposal review caller authorization", () => {
     expect(result.structuredContent).toMatchObject({
       ok: false,
       error: {
-        code: "VALIDATION",
-        message:
-          "Review requires a human reviewer surface (Inspector/alaya review); attached agents cannot review."
+        code: "UNKNOWN_TOOL",
+        message: "Unsupported Alaya memory tool."
       }
     });
   });
