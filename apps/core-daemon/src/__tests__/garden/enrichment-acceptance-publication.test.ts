@@ -187,6 +187,12 @@ describe("enrichment acceptance ordinary SQLite publication", () => {
       await process();
       expect(gardenTaskRepo.findById(taskId!)?.status).toBe("completed");
 
+      const sourceRows = database.connection.prepare(
+        "SELECT source_body FROM source_records WHERE source_id LIKE 'post-turn:%' OR source_id LIKE 'garden-compile:%'"
+      ).all() as { source_body: string }[];
+      expect(sourceRows).toHaveLength(1);
+      expect(sourceRows[0]!.source_body).toContain(LONG_ASSERTION);
+      expect(database.connection.prepare("SELECT count(*) AS n FROM claim_forms").get()).toMatchObject({ n: 0 });
       const memories = database.connection.prepare("SELECT object_id FROM memory_entries").all() as { object_id: string }[];
       expect(memories).toHaveLength(1);
       const signals = await signalService.listByRun("run-1");

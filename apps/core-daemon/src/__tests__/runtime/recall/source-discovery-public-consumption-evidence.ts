@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ConditionalFieldExecutionReceipt } from "@do-soul/alaya-core";
 import type { CanaryCase } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
@@ -133,14 +133,43 @@ export function persistRunEvidence(input: Readonly<{
     run_outcome: runOutcome,
     case_coverage: coverage
   };
-  writeExclusive(join(directory, `${stamp}-matrix.json`), {
+  persistExclusivePair(directory, stamp, {
     ...envelope,
     rows: input.rows
-  });
-  writeExclusive(join(directory, `${stamp}-traces.json`), {
+  }, {
     ...envelope,
     traces: input.traces
   });
+}
+
+function persistExclusivePair(
+  directory: string,
+  stamp: string,
+  matrix: unknown,
+  traces: unknown
+): void {
+  const matrixName = `${stamp}-matrix.json`;
+  const tracesName = `${stamp}-traces.json`;
+  const finalMatrix = join(directory, matrixName);
+  const finalTraces = join(directory, tracesName);
+  if (existsSync(finalMatrix) || existsSync(finalTraces)) {
+    throw new Error(`public consumption evidence already exists: ${stamp}`);
+  }
+  const staging = join(directory, `.${stamp}-staging`);
+  mkdirSync(staging, { recursive: true });
+  try {
+    writeExclusive(join(staging, matrixName), matrix);
+    writeExclusive(join(staging, tracesName), traces);
+    renameSync(join(staging, matrixName), finalMatrix);
+    try {
+      renameSync(join(staging, tracesName), finalTraces);
+    } catch (error) {
+      unlinkSync(finalMatrix);
+      throw error;
+    }
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
 }
 
 function boundStep(step: ConsumptionStep): unknown {

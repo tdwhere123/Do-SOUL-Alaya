@@ -97,7 +97,7 @@ describe("enrichment preparation emit", () => {
     await expect(emitEnrichmentPreparation({
       ...input,
       cacheRoot: join(root, "cache-2")
-    })).rejects.toMatchObject({ code: "EEXIST" });
+    })).rejects.toMatchObject({ name: "AlayaError", code: "CONFLICT" });
   });
 
   it("refuses to write over an incomplete preparation prefix", async () => {

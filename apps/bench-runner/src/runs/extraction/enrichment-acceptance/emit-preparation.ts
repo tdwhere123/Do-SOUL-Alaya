@@ -389,11 +389,10 @@ function assertPreparationOutputWritable(outputDir: string): void {
   const existing = PREPARATION_OUTPUT_FILES.filter((name) => existsSync(resolve(outputDir, name)));
   if (existing.length === 0) return;
   if (existing.length === PREPARATION_OUTPUT_FILES.length) {
-    const error = new Error(
+    throw new AlayaError(
+      "CONFLICT",
       `enrichment preparation output already exists: ${PREPARATION_OUTPUT_FILES.join(", ")}`
     );
-    (error as NodeJS.ErrnoException).code = "EEXIST";
-    throw error;
   }
   throw new AlayaError(
     "CONFLICT",
