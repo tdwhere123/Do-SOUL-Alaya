@@ -74,9 +74,5 @@
   "apps/core-daemon/src/cli/register.ts": {
     "max": 2,
     "reason": "CLI stdin/stdout still double-assert Node stream types"
-  },
-  "apps/inspector/web/src/pages/graph-page/graph-renderer.tsx": {
-    "max": 1,
-    "reason": "lazy 3D force-graph import still double-asserts the component type"
   }
 }
