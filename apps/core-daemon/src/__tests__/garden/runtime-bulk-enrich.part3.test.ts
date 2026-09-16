@@ -232,7 +232,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
 
     await dispatchBulkEnrich(runtime);
 
-    expect(produceForNewMemory).not.toHaveBeenCalled();
+    expect(detectAndLinkConflicts).toHaveBeenCalled();
     expect(recordFailedAttempt).toHaveBeenCalledWith(
       "workspace-1",
       "memory-owed",
