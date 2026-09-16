@@ -343,6 +343,61 @@ describe("createApp", () => {
     expect(patchManifestationBudgetConfig).not.toHaveBeenCalled();
   });
 
+  it("accepts chunked mutation bodies below the 10 MB limit", async () => {
+    const patchRuntimeEmbeddingConfig = vi.fn(
+      async (patch: unknown): Promise<Readonly<{
+        config_version: 1;
+        embedding_enabled: boolean;
+        model_id: string | null;
+        provider_url: string | null;
+        secret_ref: string | null;
+      }>> => ({
+        config_version: 1,
+        embedding_enabled: false,
+        model_id: null,
+        provider_url: null,
+        secret_ref: null,
+        ...(patch as {
+          embedding_enabled?: boolean;
+          model_id?: string | null;
+          provider_url?: string | null;
+          secret_ref?: string | null;
+        })
+      })
+    );
+    const app = createProtectedTestApp({
+      routes: {
+        config: configRouteServices({
+          configService: appConfigServiceStub({
+            patchRuntimeEmbeddingConfig
+          })
+        })
+      }
+    });
+    const response = await app.request(
+      createChunkedJsonRequest(
+        "http://localhost/config/runtime/embedding-supplement",
+        "PATCH",
+        JSON.stringify({ embedding_enabled: true }),
+        withTestAuthHeaders()
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      data: {
+        config_version: 1,
+        embedding_enabled: true,
+        model_id: null,
+        provider_url: null,
+        secret_ref: null
+      },
+      requires_daemon_restart: true
+    });
+    expect(patchRuntimeEmbeddingConfig).toHaveBeenCalledWith({ embedding_enabled: true });
+  });
+
   it("rejects oversized non-file mutation bodies", async () => {
     const patchRuntimeEmbeddingConfig = vi.fn(async () => ({
       embedding_enabled: true,

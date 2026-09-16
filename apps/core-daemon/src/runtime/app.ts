@@ -20,10 +20,9 @@ import {
   registerSecurityHeadersMiddleware,
   type CoreDaemonRateLimitConfig
 } from "../middleware/register-security-middleware.js";
-import { applyLazyRequestBodyLimit } from "../middleware/lazy-request-body-limit.js";
 import { createWarnLogger } from "./daemon/lifecycle/daemon-runtime-helpers.js";
-import { DEFAULT_DAEMON_ALLOWED_ORIGIN } from "./daemon/support/daemon-defaults.js";
 import { registerErrorHandler, type ErrorLoggerPort } from "../middleware/error-handler.js";
+import { DEFAULT_DAEMON_ALLOWED_ORIGIN } from "./daemon/support/daemon-defaults.js";
 import { registerBudgetRoutes, type BudgetRouteServices } from "../routes/governance/matrix/budget.js";
 import { registerClaimRoutes, type ClaimRouteServices } from "../routes/governance/matrix/claims.js";
 import { registerConfigRoutes, type ConfigRouteServices } from "../routes/workspace/config.js";
@@ -360,19 +359,17 @@ function registerFileUploadLimitMiddleware(
 }
 
 function registerRequestBodyLimitMiddleware(app: Hono): void {
+  const jsonBodyLimit = bodyLimit({
+    maxSize: MAX_REQUEST_BODY_BYTES,
+    onError: (context) =>
+      context.json({ success: false, error: "Request body exceeds the 10 MB limit" }, 413)
+  });
   app.use("*", async (context, next) => {
     if (!isBodyLimitedMethod(context.req.method) || context.req.path === "/files") {
       await next();
       return;
     }
-    if (hasDeclaredOversizeBody(context.req.header("content-length"), MAX_REQUEST_BODY_BYTES)) {
-      return context.json(
-        { success: false, error: "Request body exceeds the 10 MB limit" },
-        413
-      );
-    }
-    applyLazyRequestBodyLimit(context, MAX_REQUEST_BODY_BYTES);
-    await next();
+    return jsonBodyLimit(context, next);
   });
 }
 
@@ -474,7 +471,9 @@ function resolveRequestId(
 }
 
 function isBodyLimitedMethod(method: string): boolean {
-  return method === "POST" || method === "PATCH" || method === "PUT" || method === "DELETE";
+  // DELETE never accepts a body. Unexpected-body routes probe and cancel the
+  // stream; Hono bodyLimit would buffer until EOF or the 10 MB cap.
+  return method === "POST" || method === "PATCH" || method === "PUT";
 }
 
 function hasDeclaredOversizeBody(contentLengthHeader: string | undefined, maxBytes: number): boolean {
