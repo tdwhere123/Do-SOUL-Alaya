@@ -86,7 +86,8 @@ function packageProject(name, packageDir, options = {}) {
 
 // File-backed better-sqlite3 init/close/reopen on GitHub windows-latest
 // regularly exceeds 30s under NTFS I/O. hookTimeout must match or afterEach
-// rmSync aborts at Vitest's 10s default.
+// rmSync aborts at Vitest's 10s default. Ubuntu V8 coverage also pushes
+// those upgrades past the 5s default.
 const windowsSqliteTimeouts =
   process.platform === "win32" ? { testTimeout: 60_000, hookTimeout: 60_000 } : {};
 
@@ -119,7 +120,7 @@ export default [
   packageProject("@do-soul/alaya-graph-algorithms", "packages/graph-algorithms"),
   packageProject("@do-soul/alaya-cjk-segmentation", "packages/cjk-segmentation"),
   packageProject("@do-soul/alaya-storage", "packages/storage", {
-    ...(process.platform === "win32" ? windowsSqliteTimeouts : { testTimeout: 5_000 })
+    ...(process.platform === "win32" ? windowsSqliteTimeouts : { testTimeout: 30_000 })
   }),
   packageProject("@do-soul/alaya-core", "packages/core", {
     setupFiles: [path.resolve(rootDir, "packages/core/vitest.setup.ts")],
