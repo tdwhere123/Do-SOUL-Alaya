@@ -80,6 +80,8 @@ jobs:
         if: ${{ !matrix.run_coverage }}
         run: pnpm test
 
+      # Ubuntu-only hygiene. Keep changelog-version and process-env here so
+      # PR CI catches drift that used to wait for the release tag job.
       - name: Hygiene
         if: ${{ matrix.run_hygiene }}
         run: pnpm run hygiene:unused
@@ -97,6 +99,14 @@ jobs:
       - name: Guard env docs
         if: ${{ matrix.run_hygiene }}
         run: pnpm run ci:env-docs
+
+      - name: Guard changelog version
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run ci:changelog-version
+
+      - name: Guard process.env call sites
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run hygiene:process-env
 
       - name: Guard doc links
         if: ${{ matrix.run_hygiene }}

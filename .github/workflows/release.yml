@@ -91,6 +91,12 @@ jobs:
       - name: Guard env docs
         run: pnpm run ci:env-docs
 
+      - name: Guard changelog version
+        run: pnpm run ci:changelog-version
+
+      - name: Guard process.env call sites
+        run: pnpm run hygiene:process-env
+
       - name: Guard doc links
         run: pnpm run ci:doc-links
 
