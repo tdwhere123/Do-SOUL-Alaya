@@ -285,7 +285,9 @@ These rules always win over lower-level docs and task-card convenience.
     treating `soul.recall` as a passive-extraction enqueue path.
     Publication is not authorized in this isolated tree. Historical
     EventLog/`ranking_authority` readers may remain for old rows; they
-    must not execute an alternate algorithm.
+    must not execute an alternate algorithm. App 0.3.x keeps the MCP
+    response field parseable and ignored; deleting it is a later
+    protocol major, not a 0.3.x cleanup.
 
     Removing a public symbol requires `@deprecated` JSDoc on the
     schema at least one minor release before removal, a

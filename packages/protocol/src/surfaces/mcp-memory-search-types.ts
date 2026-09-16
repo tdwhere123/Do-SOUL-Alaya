@@ -230,7 +230,7 @@ export const SoulMemorySearchResponseSchema = z
     degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional(),
     /** @deprecated Historical response reader only; current delivery uses index. */
     delivery_path: z.enum(["legacy", "canonical"]).optional(),
-    /** @deprecated Historical response reader only; current association uses index. */
+    /** @deprecated Historical response reader only. Live ranking ignores this field. Keep parseable in 0.3.x; do not delete until a protocol major after the compatibility ledger expires. */
     ranking_authority: z.enum(["prefix_sk", "select_gamma"]).optional(),
     capture_identity: z.object({
       algorithm_id: NonEmptyStringSchema,
