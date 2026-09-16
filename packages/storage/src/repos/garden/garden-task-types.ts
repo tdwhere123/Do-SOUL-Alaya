@@ -75,6 +75,7 @@ export interface GardenTaskExpiryInput {
 export interface GardenTaskRepoPort {
   enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
   findById(taskId: string): GardenTaskRow | null;
+  findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
   peekPending(
     role: GardenRoleValue,
     workspace_id?: string,
@@ -113,7 +114,8 @@ export interface GardenTaskRepoPort {
     taskId: string,
     result: GardenTaskCompletionResult,
     events: readonly GardenTaskEventInput[],
-    claimedBy: string
+    claimedBy: string,
+    workspaceId?: string
   ): Promise<void>;
   peekAbandonedClaims(now: string, staleAfterMs: number): readonly GardenTaskRow[];
   gcAbandonedClaims(reclaims: readonly GardenTaskReclaimInput[]): Promise<number>;

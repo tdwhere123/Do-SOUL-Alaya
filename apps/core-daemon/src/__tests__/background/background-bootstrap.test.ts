@@ -199,4 +199,34 @@ describe("BackgroundServiceManager", () => {
       vi.useRealTimers();
     }
   });
+
+  it("does not emit unhandledRejection when a background task throws", async () => {
+    vi.useFakeTimers();
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const logger = { warn: vi.fn() };
+    const manager = new BackgroundServiceManager([
+      {
+        name: "throwing-service",
+        intervalMs: 100,
+        task: async () => {
+          throw new Error("runner boom");
+        }
+      }
+    ], { logger });
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(100);
+    await Promise.resolve();
+    await manager.stop({ timeoutMs: null });
+    process.off("unhandledRejection", unhandled);
+
+    expect(unhandled).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith("background service task failed", {
+      service: "throwing-service",
+      errorName: "Error",
+      errorMessageRedacted: true
+    });
+    vi.useRealTimers();
+  });
 });

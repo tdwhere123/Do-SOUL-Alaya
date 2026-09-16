@@ -142,7 +142,10 @@ affected public call sites.
 
 **Context**: Cross-platform CI matrix is live
 (`.github/workflows/ci.yml:26-44`, ubuntu / macos / windows Node 24;
-landed `2082994a`). `routes-audit-coverage.test.ts` exists.
+landed `2082994a`). Hygiene and audit stay on Ubuntu PR CI only;
+macOS and Windows keep build+test (Windows also CLI smoke). Do not
+move hygiene onto macOS PR CI. Native/path checks may run nightly
+across three OS. `routes-audit-coverage.test.ts` exists.
 Coverage job runs on ubuntu (`ci.yml:71-73`). Still true on HEAD
 `10da1318`: `scripts/ci/run-vitest-projects.mjs:29-48` runs projects
 sequentially; several tests still `vi.spyOn(console, "warn").mockImplementation`;
@@ -162,9 +165,9 @@ the listed zero-coverage files no longer at 0%.
 `apps/core-daemon/src/routes/workspace/files/files.ts:434-450`
 (`ALAYA_FILE_UPLOAD_ROLLBACK_DELETE_FAILED`). Unpaid grab-bag on HEAD
 `10da1318`: EventLog append retry (no production retry helper under
-`packages/storage/src/repos/runtime/`); `EventLogBackedCache` still has
-no TTL/max (`packages/core/src/governance/cache/event-log-backed-cache.ts`,
-also `#BL-068`); FTS token policy lives in
+`packages/storage/src/repos/runtime/`); `VersionedBoundedCache` has
+`maxEntries` (`packages/core/src/runtime/versioned-bounded-cache.ts`,
+also `#BL-068`) but no TTL; FTS token policy lives in
 `packages/protocol/src/recall/fts-search-policy.ts` (review, not deletion);
 Garden raw-signal salvage exists
 (`packages/soul/src/garden/official-api/raw-signal-envelope.ts:59`).
@@ -198,14 +201,14 @@ and unauthenticated legacy clients fail with a typed auth error.
 
 ### #BL-068 — Bound audit-reported in-memory caches
 
-**Status**: Open (classification corrected 2026-07-07; symbols retargeted 2026-08-14). **Due**: v0.3 hardening window.
+**Status**: Open (max-size landed on `VersionedBoundedCache`; TTL still open). **Due**: v0.3 hardening window.
 
 **Context**: `ContextLensAssembler.lensStore` is bounded by expiry and
 `MAX_LENS_STORE_SIZE` (`packages/core/src/conversation/context-lens-assembler-ports.ts:23`,
-`context-lens-assembler.ts:371-378`). `EventLogBackedCache` still has
-unbounded `store`, `pendingLoads`, and `versions` maps (audit name
-`cacheVersions`) with no max-size/TTL
-(`packages/core/src/governance/cache/event-log-backed-cache.ts:5-7,20-22`).
+`context-lens-assembler.ts:371-378`). `VersionedBoundedCache` LRU-caps
+`store` (`maxEntries` default 1024; global recall 512) and clears
+`pendingLoads`/`versions` on invalidate
+(`packages/core/src/runtime/versioned-bounded-cache.ts`). It has no TTL.
 `ToolGovernanceClient` is LRU-capped at 500
 (`packages/core/src/ports/tool-governance-client.ts:130-131`) but is
 not constructed in production (see `#BL-054`). Separate from the SQLite

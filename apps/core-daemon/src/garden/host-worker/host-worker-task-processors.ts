@@ -331,7 +331,8 @@ async function completePostTurnExtractTask(
         payload_json: buildPostTurnExtractCompletionPayload(row, runId, completedAt, true, emittedSignalIds)
       }
     ],
-    IN_PROCESS_POST_TURN_CLAIMANT
+    IN_PROCESS_POST_TURN_CLAIMANT,
+    row.workspace_id
   );
 }
 
@@ -361,7 +362,8 @@ async function failPostTurnExtractTask(
         payload_json: buildPostTurnExtractCompletionPayload(row, runId, completedAt, false, [])
       }
     ],
-    IN_PROCESS_POST_TURN_CLAIMANT
+    IN_PROCESS_POST_TURN_CLAIMANT,
+    row.workspace_id
   );
 }
 

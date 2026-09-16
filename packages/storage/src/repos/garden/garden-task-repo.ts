@@ -35,6 +35,7 @@ export type * from "./garden-task-types.js";
 export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   private readonly enqueueStatement;
   private readonly findByIdStatement;
+  private readonly findByIdInWorkspaceStatement;
   private readonly peekPendingStatement;
   private readonly peekPendingByWorkspaceStatement;
   private readonly claimStatement;
@@ -59,6 +60,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     const statements = prepareGardenTaskStatements(connection);
     this.enqueueStatement = statements.enqueueStatement;
     this.findByIdStatement = statements.findByIdStatement;
+    this.findByIdInWorkspaceStatement = statements.findByIdInWorkspaceStatement;
     this.peekPendingStatement = statements.peekPendingStatement;
     this.peekPendingByWorkspaceStatement = statements.peekPendingByWorkspaceStatement;
     this.claimStatement = statements.claimStatement;
@@ -97,6 +99,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   }
 
   public findById(taskId: string): GardenTaskRow | null {
+    // Internal identity lookup (deterministic task ids, enqueue coalesce).
+    // Agent-facing Garden MCP must use findByIdInWorkspace.
     const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
 
     try {
@@ -108,6 +112,29 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       }
 
       throw new StorageError("QUERY_FAILED", `Failed to load Garden task ${parsedTaskId}.`, error);
+    }
+  }
+
+  public findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null {
+    const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "garden_task.workspace_id");
+
+    try {
+      const row = this.findByIdInWorkspaceStatement.get(
+        parsedTaskId,
+        parsedWorkspaceId
+      ) as GardenTaskDbRow | undefined;
+      return row === undefined ? null : parseGardenTaskRow(row);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to load Garden task ${parsedTaskId} in workspace ${parsedWorkspaceId}.`,
+        error
+      );
     }
   }
 
@@ -271,12 +298,17 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     taskId: string,
     result: GardenTaskCompletionResult,
     events: readonly GardenTaskEventInput[],
-    claimedBy: string
+    claimedBy: string,
+    workspaceId?: string
   ): Promise<void> {
     const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
     const status = parseCompletedStatus(result.status);
     const completedAt = parseTimestamp(result.completed_at);
     const parsedClaimedBy = parseNonEmptyString(claimedBy, "garden_task.claimed_by");
+    const parsedWorkspaceId =
+      workspaceId === undefined
+        ? this.workspaceIdForUnscopedCompletion(parsedTaskId)
+        : parseNonEmptyString(workspaceId, "garden_task.workspace_id");
     const lastErrorText =
       result.last_error_text === undefined
         ? null
@@ -285,13 +317,27 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     try {
       if (events.length === 0) {
         this.connection.transaction(() => {
-          this.completeClaimedTask(parsedTaskId, status, completedAt, lastErrorText, parsedClaimedBy);
+          this.completeClaimedTask(
+            parsedTaskId,
+            status,
+            completedAt,
+            lastErrorText,
+            parsedClaimedBy,
+            parsedWorkspaceId
+          );
         })();
         return;
       }
 
       await this.eventPublisher.appendManyWithMutation(events, () => {
-        this.completeClaimedTask(parsedTaskId, status, completedAt, lastErrorText, parsedClaimedBy);
+        this.completeClaimedTask(
+          parsedTaskId,
+          status,
+          completedAt,
+          lastErrorText,
+          parsedClaimedBy,
+          parsedWorkspaceId
+        );
       });
     } catch (error) {
       if (error instanceof StorageError) {
@@ -489,13 +535,21 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     status: "completed" | "failed",
     completedAt: string,
     lastErrorText: string | null,
-    claimedBy: string
+    claimedBy: string,
+    workspaceId: string
   ): void {
-    const update = this.completeStatement.run(status, completedAt, lastErrorText, taskId, claimedBy);
+    const update = this.completeStatement.run(
+      status,
+      completedAt,
+      lastErrorText,
+      taskId,
+      claimedBy,
+      workspaceId
+    );
     if (update.changes === 1) {
       return;
     }
-    const row = this.findById(taskId);
+    const row = this.findByIdInWorkspace(taskId, workspaceId);
     if (row !== null && row.status === status && row.claimed_by === claimedBy) {
       return;
     }
@@ -503,6 +557,17 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       "CONFLICT",
       `Garden task ${taskId} is not claimed by the expected worker and cannot be completed.`
     );
+  }
+
+  private workspaceIdForUnscopedCompletion(taskId: string): string {
+    const row = this.findById(taskId);
+    if (row === null) {
+      throw new StorageError(
+        "CONFLICT",
+        `Garden task ${taskId} is not claimed by the expected worker and cannot be completed.`
+      );
+    }
+    return row.workspace_id;
   }
 
 }

@@ -14,9 +14,14 @@ import {
   type Tool
 } from "@modelcontextprotocol/sdk/types.js";
 import {
+  isMemoryToolAllowedForAgentTarget,
+  listAlayaMemoryToolsForAgentTarget
+} from "../../mcp-memory/tool/attach-profile-tool-allowlist.js";
+import {
   listAlayaMemoryTools,
   type AlayaMemoryToolDefinition
 } from "../../mcp-memory/tool/tool-catalog.js";
+import { fail } from "../../mcp-memory/tool/tool-handler-support.js";
 import { readRuntimeVersion } from "../../runtime/daemon/support/build-info.js";
 import type {
   McpMemoryToolCallContext,
@@ -70,7 +75,11 @@ export function createAlayaMcpServer(options: AlayaMcpServerOptions): Server {
     }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, () => createAlayaMcpToolsResult(tools));
+  server.setRequestHandler(ListToolsRequestSchema, () =>
+    createAlayaMcpToolsResult(
+      listAlayaMemoryToolsForAgentTarget(options.contextProvider().agentTarget, tools)
+    )
+  );
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> =>
     await callAlayaMcpMemoryTool(options, request.params.name, request.params.arguments ?? {})
@@ -93,12 +102,17 @@ export async function callAlayaMcpMemoryTool(
   rawArguments: unknown
 ): Promise<CallToolResult> {
   let result: Awaited<ReturnType<McpMemoryToolHandler["call"]>>;
+  const context = options.contextProvider();
   try {
-    result = await options.memoryToolHandler.call({
-      toolName,
-      arguments: rawArguments,
-      context: options.contextProvider()
-    });
+    if (!isMemoryToolAllowedForAgentTarget(toolName, context.agentTarget)) {
+      result = fail(toolName, "UNKNOWN_TOOL", `Unsupported Alaya memory tool: ${toolName}`);
+    } else {
+      result = await options.memoryToolHandler.call({
+        toolName,
+        arguments: rawArguments,
+        context
+      });
+    }
   } catch (error) {
     options.warn?.("MCP memory tool handler rejected", {
       error: error instanceof Error ? error.message : String(error),

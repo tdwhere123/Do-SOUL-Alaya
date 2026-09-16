@@ -128,10 +128,11 @@ describe("Gate-4 attached-agent MCP proof", () => {
           "soul.open_pointer",
           "soul.report_context_usage",
           "soul.emit_candidate_signal",
-          "soul.propose_memory_update",
-          "soul.review_memory_proposal"
+          "soul.propose_memory_update"
         ])
       );
+      expect(toolNames).not.toContain("soul.review_memory_proposal");
+      expect(toolNames).not.toContain("soul.batch_review_edge_proposals");
 
       const recall = await callTool<SoulMemorySearchResponse>(client, "soul.recall", {
         protocol_version: 1,
