@@ -9,6 +9,7 @@ import {
 import { StrictConfirmationRequired } from "@do-soul/alaya-core";
 import { registerErrorHandler } from "../../middleware/error-handler.js";
 import {
+  E2E_EVENT_TRIGGER_TOKEN_HEADER,
   registerE2eEventTriggerRoutes,
   type E2eEventTriggerRouteServices
 } from "../../routes/workspace/e2e-event-triggers.js";
@@ -52,7 +53,8 @@ function e2eServices(): E2eEventTriggerRouteServices & {
       notifyEntry: vi.fn(async () => {
         appendOrder.push("notify");
       })
-    }
+    },
+    triggerToken: "e2e-token"
   };
 }
 
@@ -69,7 +71,7 @@ describe("audit-covered route contracts", () => {
 
     const response = await app.request("/__e2e/events/soul-approval-requested", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", [E2E_EVENT_TRIGGER_TOKEN_HEADER]: "e2e-token" },
       body: JSON.stringify({
         run_id: "run-1",
         approval_id: "approval-1",
@@ -104,6 +106,28 @@ describe("audit-covered route contracts", () => {
     expect(services.appendOrder).toEqual(["append", "notify"]);
   });
 
+  it("E2E triggers reject a missing or wrong dedicated token before EventLog append", async () => {
+    suppressE2eWarning();
+    const app = appWithErrors();
+    const services = e2eServices();
+    registerE2eEventTriggerRoutes(app, services);
+
+    const missing = await app.request("/__e2e/events/soul-approval-requested", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ run_id: "run-1" })
+    });
+    const wrong = await app.request("/__e2e/events/soul-approval-requested", {
+      method: "POST",
+      headers: { "content-type": "application/json", [E2E_EVENT_TRIGGER_TOKEN_HEADER]: "wrong" },
+      body: JSON.stringify({ run_id: "run-1" })
+    });
+
+    expect(missing.status).toBe(403);
+    expect(wrong.status).toBe(403);
+    expect(services.eventLogRepo.append).not.toHaveBeenCalled();
+  });
+
   it("E2E dirty-state trigger rejects malformed bodies before EventLog append", async () => {
     suppressE2eWarning();
     const app = appWithErrors();
@@ -112,7 +136,7 @@ describe("audit-covered route contracts", () => {
 
     const response = await app.request("/__e2e/events/dirty-state-panic", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", [E2E_EVENT_TRIGGER_TOKEN_HEADER]: "e2e-token" },
       body: JSON.stringify({ affected_entity_count: -1 })
     });
 
@@ -130,7 +154,7 @@ describe("audit-covered route contracts", () => {
 
     const response = await app.request("/__e2e/events/dirty-state-panic", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", [E2E_EVENT_TRIGGER_TOKEN_HEADER]: "e2e-token" },
       body: JSON.stringify({
         run_id: "run-2",
         dossier_id: "dossier-1",

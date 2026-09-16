@@ -90,6 +90,18 @@ describe("request token workspace binding", () => {
     });
   });
 
+  it("rejects a long-lived file token for remote TCP binds instead of reusing it", () => {
+    expect(() =>
+      applyRemoteBindTokenRotation(
+        { requestToken: "file-token", tokenSource: "env" as const },
+        {
+          DAEMON_HOST: "192.168.1.10",
+          ALAYA_ALLOW_REMOTE_DAEMON: "1"
+        }
+      )
+    ).toThrow(/Long-lived ALAYA_REQUEST_TOKEN cannot be used for remote binds/);
+  });
+
   it("rotates a long-lived file token when unix-socket bind is configured", () => {
     const rotated = applyRemoteBindTokenRotation(
       { requestToken: "file-token", tokenSource: "env" as const },

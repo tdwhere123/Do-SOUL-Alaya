@@ -1,16 +1,16 @@
 import { useCallback, useRef, useState } from "react";
 import type { ForceGraphMethods as ForceGraphMethods2D } from "react-force-graph-2d";
-import type { ForceGraphMethods as ForceGraphMethods3D } from "react-force-graph-3d";
 import DetailDrawer from "../../components/detail-drawer";
 import { useToasts } from "../../components/toast";
 import { useFpsMonitor } from "../../hooks/useFpsMonitor";
 import { useGraphSpotlight } from "../../hooks/useGraphSpotlight";
 import type { GraphLink, GraphNode } from "../../types/graph";
 import GraphOverlays from "./graph-overlays";
+import type { Graph3DHandle } from "./graph-physics-support";
 import GraphRenderer from "./graph-renderer";
 import GraphToolbar from "./graph-toolbar";
 import { probeWebgl } from "./support";
-import type { GraphData, ViewMode } from "./types";
+import { DEFAULT_GRAPH_VIEW_MODE, type GraphData, type ViewMode } from "./types";
 import { useGraphActions } from "./useGraphActions";
 import { useGraphData } from "./useGraphData";
 import { useGraphKeyboardShortcuts, type GraphKeyboardState } from "./useGraphKeyboardShortcuts";
@@ -23,12 +23,12 @@ export default function GraphWorkspace({ workspaceId }: { readonly workspaceId: 
   const { showToast } = useToasts();
   const refs = useGraphRefs();
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("2d");
+  const [viewMode, setViewMode] = useState<ViewMode>(DEFAULT_GRAPH_VIEW_MODE);
   const [webglSupported] = useState(() => probeWebgl());
   const viewport = useViewportSize(refs.viewportRef);
   const { data, error, loading } = useGraphData(workspaceId);
   const spotlight = useGraphSpotlight({ data, workspaceId });
-  const effectiveMode: ViewMode = webglSupported ? viewMode : "2d";
+  const effectiveMode: ViewMode = webglSupported ? viewMode : DEFAULT_GRAPH_VIEW_MODE;
   const largeGraphMode = effectiveMode === "3d" && (data?.nodes.length ?? 0) > LARGE_GRAPH_NODE_THRESHOLD;
   const lowFpsDetected = useFpsMonitor({ enabled: largeGraphMode });
   const { handleGraphEngineTick } = useGraphPhysics({
@@ -71,7 +71,7 @@ function useGraphRefs() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const fg2dRef = useRef<ForceGraphMethods2D<GraphNode, GraphLink> | undefined>(undefined);
-  const fg3dRef = useRef<ForceGraphMethods3D<GraphNode, GraphLink> | undefined>(undefined);
+  const fg3dRef = useRef<Graph3DHandle | undefined>(undefined);
   const keyboardStateRef = useRef<GraphKeyboardState>({
     matchCount: 0,
     searchTerm: "",

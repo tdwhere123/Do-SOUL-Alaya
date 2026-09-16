@@ -2,6 +2,10 @@ import { constants } from "node:fs";
 import { realpath, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import type { WriteFileToolInput } from "@do-soul/alaya-protocol";
+import {
+  applyPrivateCreatedFileMode,
+  PRIVATE_FILE_MODE
+} from "../../services/support/private-file-service.js";
 import { containedNoFollowFlag, openContained } from "./open-contained.js";
 import {
   createAccessDenied,
@@ -96,7 +100,7 @@ async function writeContainedFile(
     : constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | noFollow;
   const opened = await openContained(inputPath, writableRoots, "file", {
     flags,
-    mode: 0o666,
+    mode: PRIVATE_FILE_MODE,
     errorCode: "WRITE_ERROR"
   });
   if (!opened.ok) {
@@ -106,6 +110,9 @@ async function writeContainedFile(
   let handle: FileHandle | undefined = opened.handle;
   const newlyCreated = !exists;
   try {
+    if (newlyCreated) {
+      await applyPrivateCreatedFileMode(handle);
+    }
     const buffer = Buffer.from(content, "utf8");
     await handle.truncate(0);
     await handle.write(buffer, 0, buffer.length, 0);
