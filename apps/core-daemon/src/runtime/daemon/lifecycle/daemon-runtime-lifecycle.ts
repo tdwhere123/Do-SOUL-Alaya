@@ -34,6 +34,7 @@ type GardenRuntimeLifecycle = Readonly<{
   backgroundManager: Readonly<{
     start(): void;
     stop(options: { readonly timeoutMs: number }): Promise<unknown>;
+    whenIdle?(): Promise<void>;
   }>;
   setBacklogTelemetryObserver(observer: unknown | null): void;
   runBackgroundPass(): Promise<void>;
@@ -200,14 +201,19 @@ function createShutdownHandler(
     }
 
     state.shuttingDown = (async () => {
-      await drainInFlightRequests(input);
-      await stopBackgroundServices(input, state);
-      await closeRuntimeResources(input, state);
       try {
-        await closeDaemonSqliteWriteQueue();
-        input.database.close();
+        await drainInFlightRequests(input);
+        const backgroundStop = await stopBackgroundServices(input, state);
+        await closeRuntimeResources(input, state);
+        await closeSqliteAfterBackgroundStop(input, backgroundStop);
       } finally {
-        await input.temporalRuntimeLease?.release();
+        // Unregister only after sqlite close so a hung whenIdle() still has
+        // the 60s SIGTERM backstop and second-signal force-exit.
+        unregisterSignalShutdownHandlers(
+          state,
+          input.processPort ?? process,
+          input.timerPort ?? defaultLifecycleTimerPort
+        );
       }
     })();
 
@@ -375,17 +381,25 @@ async function drainInFlightRequests(input: CreateDaemonLifecycleControlsInput):
 async function stopBackgroundServices(
   input: CreateDaemonLifecycleControlsInput,
   state: LifecycleState
-): Promise<void> {
+): Promise<"drained" | "timed_out" | "not_started" | "failed"> {
   if (!state.backgroundStarted) {
-    return;
+    return "not_started";
   }
 
-  try {
-    await input.gardenRuntime.backgroundManager.stop({ timeoutMs: BACKGROUND_STOP_TIMEOUT_MS });
-  } catch (error) {
+    let stopResult: "drained" | "timed_out" | "failed" = "drained";
+    try {
+      const result = await input.gardenRuntime.backgroundManager.stop({
+        timeoutMs: BACKGROUND_STOP_TIMEOUT_MS
+      });
+      if (result === "timed_out") {
+        input.warnLogger.warn("garden background manager shutdown timed out", {});
+        stopResult = "timed_out";
+      }
+    } catch (error) {
     input.warnLogger.warn("garden background manager shutdown failed", {
       error: error instanceof Error ? error.message : String(error)
     });
+    stopResult = "failed";
   }
   await awaitStartupBackgroundPassInFlight(state);
   if (state.startupBackgroundPassFailure !== null) {
@@ -408,6 +422,23 @@ async function stopBackgroundServices(
     });
   }
   state.backgroundStarted = false;
+  return stopResult;
+}
+
+async function closeSqliteAfterBackgroundStop(
+  input: CreateDaemonLifecycleControlsInput,
+  backgroundStop: "drained" | "timed_out" | "not_started" | "failed"
+): Promise<void> {
+  if (backgroundStop === "timed_out") {
+    input.warnLogger.warn("waiting for garden background drain before sqlite close", {});
+    await input.gardenRuntime.backgroundManager.whenIdle?.();
+  }
+  try {
+    await closeDaemonSqliteWriteQueue();
+    input.database.close();
+  } finally {
+    await input.temporalRuntimeLease?.release();
+  }
 }
 
 async function closeRuntimeResources(
@@ -416,7 +447,6 @@ async function closeRuntimeResources(
 ): Promise<void> {
   const processPort = input.processPort ?? process;
   const timerPort = input.timerPort ?? defaultLifecycleTimerPort;
-  unregisterSignalShutdownHandlers(state, processPort, timerPort);
   closeRuntimeResourceStep(input, "security status shutdown failed", () => {
     input.securityStatusService.close();
   });

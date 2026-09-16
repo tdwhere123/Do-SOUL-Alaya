@@ -38,6 +38,7 @@ export function resetToolRuntimeWiringState(): void {
   hoisted.claimServiceDeps = null;
   hoisted.computeRoutingServiceDeps = null;
   hoisted.computeRoutingServiceSetProviders = null;
+  hoisted.computeRoutingServiceInstance = null;
   hoisted.conversationToolExecutorDeps = null;
   hoisted.conversationServiceDeps = null;
   hoisted.officialGardenProviderDeps = null;
@@ -67,4 +68,17 @@ export function resetToolRuntimeWiringState(): void {
 
 export function getToolRuntimeWiringFixture() {
   return hoisted;
+}
+
+export async function resolveBootGardenProvider(): Promise<unknown> {
+  const provider = hoisted.computeRoutingServiceInstance?.getDefaultProvider() as
+    | { getProvider?: () => Promise<unknown> }
+    | undefined;
+  if (provider === undefined) {
+    throw new Error("Garden compute routing default provider was not wired.");
+  }
+  if (typeof provider.getProvider === "function") {
+    return await provider.getProvider();
+  }
+  return provider;
 }

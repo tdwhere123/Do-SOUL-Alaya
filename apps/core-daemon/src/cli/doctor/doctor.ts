@@ -75,6 +75,11 @@ export interface GardenComputeStatus {
     readonly stale_claimed_edge_classify_tasks: number;
     readonly attach_worker_recommended: boolean;
   }>;
+  // Durable recent compile outcomes. Present when the garden task repo can
+  // count failed rows so a silent extract miss is visible in doctor.
+  readonly failed_post_turn_extract_tasks?: number;
+  // GARDEN_BACKLOG compile_enqueue records that never became a queue row.
+  readonly compile_enqueue_failures?: number;
 }
 
 export type GardenKeychainCheck =
@@ -122,7 +127,7 @@ export interface DoctorCommandDependencies {
    * the deprecated embedding-fallback. When omitted, doctor reports a
    * conservative "local_heuristics + none" snapshot.
    */
-  readonly getGardenCompute?: () => Promise<GardenComputeStatus> | GardenComputeStatus;
+  readonly getGardenCompute?: (workspaceId: string) => Promise<GardenComputeStatus> | GardenComputeStatus;
   readonly getPathPlasticityLookupTelemetry?: () =>
     | Readonly<PathPlasticityLookupTelemetrySnapshot>
     | Promise<Readonly<PathPlasticityLookupTelemetrySnapshot>>;
@@ -396,7 +401,7 @@ async function readDoctorServices(
     await deps.getMcpHealth(),
     await deps.getGardenHealth(),
     deps.getGardenCredentialProvenance ? await deps.getGardenCredentialProvenance() : ({ kind: "none" } as const),
-    deps.getGardenCompute ? await deps.getGardenCompute() : defaultDoctorGardenCompute(),
+    deps.getGardenCompute ? await deps.getGardenCompute(workspaceId) : defaultDoctorGardenCompute(),
     (await deps.getPathPlasticityLookupTelemetry?.()) ?? defaultPathPlasticityLookupTelemetry(),
     (await deps.getGraphHealth?.(workspaceId)) ?? createEmptyGraphHealthSnapshot(workspaceId)
   ]);
@@ -512,7 +517,9 @@ function buildDoctorChecks(
     garden:
       services.garden.status === "healthy" &&
       services.gardenCompute.keychain_check?.ok !== false &&
-      services.gardenCompute.schema_ok !== false
+      services.gardenCompute.schema_ok !== false &&
+      (services.gardenCompute.failed_post_turn_extract_tasks ?? 0) === 0 &&
+      (services.gardenCompute.compile_enqueue_failures ?? 0) === 0
         ? "pass"
         : "fail",
     bootstrap_reconcile: resolveBootstrapReconcileCheck(bootstrapReconcileSummary),

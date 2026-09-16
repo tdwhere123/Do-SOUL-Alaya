@@ -10,6 +10,7 @@ import {
   readNonEmptyStringField,
   readNullableStringField,
   readRecord,
+  readSqliteAggregateCountField,
   type RowParser
 } from "../../shared/parse-row.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../../shared/validators.js";
@@ -76,6 +77,23 @@ export const GardenTaskBacklogCountDbRowParser: RowParser<GardenTaskBacklogCount
       role: readNonEmptyStringField(record, "role"),
       status: readNonEmptyStringField(record, "status"),
       count: readIntegerField(record, "count")
+    };
+  }
+};
+
+export interface GardenTaskKindCountDbRow {
+  readonly pending: number;
+  readonly stale: number;
+  readonly failed: number;
+}
+
+export const GardenTaskKindCountDbRowParser: RowParser<GardenTaskKindCountDbRow> = {
+  parse(value: unknown): GardenTaskKindCountDbRow {
+    const record = readRecord(value, "garden task kind count row");
+    return {
+      pending: readSqliteAggregateCountField(record, "pending"),
+      stale: readSqliteAggregateCountField(record, "stale"),
+      failed: readSqliteAggregateCountField(record, "failed")
     };
   }
 };

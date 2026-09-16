@@ -24,6 +24,7 @@ export interface HealthJournalCreateInput {
 export interface HealthJournalQueryParams {
   readonly kind?: HealthEventKindValue;
   readonly limit?: number;
+  readonly phase?: string;
 }
 
 export interface HealthJournalRepo {
@@ -48,6 +49,7 @@ export class SqliteHealthJournalRepo implements HealthJournalRepo {
   private readonly appendStatement;
   private readonly findByWorkspaceStatement;
   private readonly findByWorkspaceAndKindStatement;
+  private readonly findByWorkspaceKindAndPhaseStatement;
 
   public constructor(db: StorageDatabase) {
     this.appendStatement = db.connection.prepare(`
@@ -74,6 +76,16 @@ export class SqliteHealthJournalRepo implements HealthJournalRepo {
       SELECT entry_id, event_kind, workspace_id, run_id, summary, detail_json, created_at
       FROM health_journal
       WHERE workspace_id = ? AND event_kind = ?
+      ORDER BY created_at DESC, entry_id DESC
+      LIMIT ?
+    `);
+
+    this.findByWorkspaceKindAndPhaseStatement = db.connection.prepare(`
+      SELECT entry_id, event_kind, workspace_id, run_id, summary, detail_json, created_at
+      FROM health_journal
+      WHERE workspace_id = ?
+        AND event_kind = ?
+        AND json_extract(detail_json, '$.phase') = ?
       ORDER BY created_at DESC, entry_id DESC
       LIMIT ?
     `);
@@ -110,12 +122,18 @@ export class SqliteHealthJournalRepo implements HealthJournalRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
     const parsedLimit = parseLimit(params.limit);
     const parsedKind = params.kind === undefined ? undefined : parseEventKind(params.kind);
+    const parsedPhase =
+      params.phase === undefined ? undefined : parseNonEmptyString(params.phase, "phase");
+    if (parsedPhase !== undefined && parsedKind === undefined) {
+      throw new StorageError("VALIDATION_FAILED", "Failed to validate phase.");
+    }
 
     try {
-      const rows =
-        parsedKind === undefined
-          ? (parseRows(this.findByWorkspaceStatement.all(parsedWorkspaceId, parsedLimit), { parse: (value: unknown) => value as HealthJournalRow }, "health journal row"))
-          : (parseRows(this.findByWorkspaceAndKindStatement.all(parsedWorkspaceId, parsedKind, parsedLimit), { parse: (value: unknown) => value as HealthJournalRow }, "health journal row"));
+      const rows = parseRows(
+        this.selectFindByWorkspaceRows(parsedWorkspaceId, parsedKind, parsedPhase, parsedLimit),
+        { parse: (value: unknown) => value as HealthJournalRow },
+        "health journal row"
+      );
 
       return rows.map((row) => parseRow(row));
     } catch (error) {
@@ -125,6 +143,21 @@ export class SqliteHealthJournalRepo implements HealthJournalRepo {
         error
       );
     }
+  }
+
+  private selectFindByWorkspaceRows(
+    workspaceId: string,
+    kind: HealthEventKindValue | undefined,
+    phase: string | undefined,
+    limit: number
+  ): unknown {
+    if (kind !== undefined && phase !== undefined) {
+      return this.findByWorkspaceKindAndPhaseStatement.all(workspaceId, kind, phase, limit);
+    }
+    if (kind !== undefined) {
+      return this.findByWorkspaceAndKindStatement.all(workspaceId, kind, limit);
+    }
+    return this.findByWorkspaceStatement.all(workspaceId, limit);
   }
 }
 

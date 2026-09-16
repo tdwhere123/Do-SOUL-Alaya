@@ -24,14 +24,14 @@ export type {
   ConversationBudgetBankruptcyPort,
   ConversationContextLensAssemblerPort,
   ConversationEventLogRepoPort,
-  ConversationGardenComputeProviderPort,
-  ConversationGardenComputeProviderResolverPort,
+  ConversationGardenCompileEnqueueInput,
+  ConversationGardenCompileEnqueueResult,
+  ConversationGardenCompileQueuePort,
   ConversationGovernanceLeasePort,
   ConversationListPageOptions,
   ConversationRunRepoPort,
   ConversationServiceDependencies,
   ConversationSignalReceiverPort,
-  ConversationSessionOverridePromotionPort,
   ConversationWarnPort,
   ConversationWorkspaceRepoPort,
   MemoryContextAssemblyInput,
@@ -39,25 +39,19 @@ export type {
   MemoryTurnOrchestrationInput,
   MemoryTurnOrchestrationResult
 } from "./conversation-service-ports.js";
+export { GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE } from "./conversation-service-ports.js";
 
 export class ConversationService {
   private readonly gardenComputeCoordinator: GardenComputeCoordinator;
 
   public constructor(public readonly dependencies: ConversationServiceDependencies) {
     this.gardenComputeCoordinator = new GardenComputeCoordinator({
-      eventLogRepo: dependencies.eventLogRepo,
-      ...(dependencies.eventPublisher === undefined
+      ...(dependencies.gardenCompileQueue === undefined
         ? {}
-        : { eventPublisher: dependencies.eventPublisher }),
-      ...(dependencies.runtimeNotifier === undefined
+        : { gardenCompileQueue: dependencies.gardenCompileQueue }),
+      ...(dependencies.healthJournalRecorder === undefined
         ? {}
-        : { runtimeNotifier: dependencies.runtimeNotifier }),
-      gardenComputeProvider: dependencies.gardenComputeProvider,
-      ...(dependencies.retainCompileSource === undefined ? {} : { retainCompileSource: dependencies.retainCompileSource }),
-      resolveGardenComputeProvider: dependencies.resolveGardenComputeProvider,
-      signalReceiver: dependencies.signalReceiver,
-      sessionOverridePromotion: dependencies.sessionOverridePromotion,
-      healthJournalRecorder: dependencies.healthJournalRecorder,
+        : { healthJournalRecorder: dependencies.healthJournalRecorder }),
       warn: dependencies.warn,
       releaseGovernanceLeaseSafely: (runId, workspaceId, phase) =>
         this.releaseGovernanceLeaseSafely(runId, workspaceId, phase)

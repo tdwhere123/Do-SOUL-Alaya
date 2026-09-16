@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createDeferred,
   getToolRuntimeWiringFixture,
-  resetToolRuntimeWiringState
+  resetToolRuntimeWiringState,
+  resolveBootGardenProvider
 } from "./tool-runtime-wiring-fixture.js";
 
 import { getBuiltinConversationToolSpecs } from "../../mcp/server/builtin-conversation-tool-specs.js";
@@ -23,19 +24,6 @@ const activeRuntimes: Array<AlayaDaemonRuntime> = [];
 const isolatedConfigDirs: string[] = [];
 
 const BOOTSTRAP_TEST_TIMEOUT_MS = 15_000;
-
-async function resolveBootGardenProvider(): Promise<unknown> {
-  const provider = hoisted.conversationServiceDeps?.gardenComputeProvider as
-    | { getProvider?: () => Promise<unknown> }
-    | undefined;
-  if (provider === undefined) {
-    throw new Error("ConversationService gardenComputeProvider was not wired.");
-  }
-  if (typeof provider.getProvider === "function") {
-    return await provider.getProvider();
-  }
-  return provider;
-}
 
 async function bootDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const { createAlayaDaemonRuntime } = await import("../../index.js");
@@ -242,13 +230,12 @@ describe("daemon tool runtime bootstrap", () => {
     await bootDaemonRuntime();
 
     expect(hoisted.conversationServiceDeps).toMatchObject({
-      gardenComputeProvider: expect.objectContaining({
-        provider_kind: "local_heuristics"
-      }),
-      resolveGardenComputeProvider: {
-        resolve: expect.any(Function)
-      }
+      gardenCompileQueue: expect.objectContaining({
+        enqueue: expect.any(Function)
+      })
     });
+    expect(hoisted.conversationServiceDeps).not.toHaveProperty("gardenComputeProvider");
+    expect(hoisted.conversationServiceDeps).not.toHaveProperty("resolveGardenComputeProvider");
     expect(hoisted.conversationServiceDeps).not.toHaveProperty("engine");
     expect(hoisted.conversationServiceDeps).not.toHaveProperty("resolveExecutionStance");
     },
@@ -423,7 +410,7 @@ describe("daemon tool runtime bootstrap", () => {
       })
     ]);
     expect(
-      hoisted.conversationServiceDeps?.resolveGardenComputeProvider?.resolve(null)
+      hoisted.computeRoutingServiceInstance?.getDefaultProvider()
     ).toMatchObject({
       provider_kind: "official_api"
     });

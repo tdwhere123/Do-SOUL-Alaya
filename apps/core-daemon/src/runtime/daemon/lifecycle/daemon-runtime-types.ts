@@ -28,6 +28,8 @@ import type { FieldProjectionCheckpointPort } from
 import type { RelationProjectionCheckpointPort } from
   "../../recall-materialization/relation-projection/checkpoint.js";
 
+export const RECENT_GARDEN_COMPILE_TURN_LIMIT = 50;
+
 export type StartupStep =
   | "database"
   | "repositories"
@@ -154,16 +156,20 @@ export interface AlayaDaemonRuntimeServices {
     // attached CLI agent). `pending` counts unclaimed POST_TURN_EXTRACT tasks;
     // `stale` counts POST_TURN_EXTRACT tasks a worker CLAIMED but whose claim is
     // older than the wait window (claimed-and-aged, not pending-and-aged).
+    // `failed` counts POST_TURN_EXTRACT rows among the most recent compile
+    // turns in the doctor workspace so a silent extract miss is visible.
     // edgeClassifyPending / edgeClassifyStale carry the same pending/stale split
     // for EDGE_CLASSIFY tasks so a no-agent deployment's unrefined heuristic-edge
     // backlog is visible too. Returns null when no garden task repo is wired
     // (e.g. a non-sqlite harness).
-    getHostWorkerExtractBacklog(): Readonly<{
+    getHostWorkerExtractBacklog(workspaceId?: string): Readonly<{
       readonly pending: number;
       readonly stale: number;
+      readonly failed: number;
       readonly edgeClassifyPending: number;
       readonly edgeClassifyStale: number;
     }> | null;
+    getRecentCompileEnqueueFailures(workspaceId: string): Promise<number>;
   }>;
   readonly principalCodingEngineAvailable: boolean;
 }

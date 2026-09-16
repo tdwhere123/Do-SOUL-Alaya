@@ -51,6 +51,7 @@ export interface GardenTaskKindBacklogCount {
   readonly kind: GardenTaskKindValue;
   readonly pending: number;
   readonly stale: number;
+  readonly failed: number;
 }
 
 export interface GardenTaskCompletionResult {
@@ -128,6 +129,7 @@ export interface GardenTaskRepoPort {
   countByKind(
     kind: GardenTaskKindValue,
     staleBeforeIso: string,
-    workspace_id?: string
+    workspace_id?: string,
+    recentFailedLimit?: number
   ): GardenTaskKindBacklogCount;
 }

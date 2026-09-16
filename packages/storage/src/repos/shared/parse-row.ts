@@ -126,6 +126,20 @@ export function readIntegerField(record: Record<string, unknown>, field: string)
   return value;
 }
 
+export function readSqliteAggregateCountField(
+  record: Record<string, unknown>,
+  field: string
+): number {
+  const value = record[field];
+  if (value === null || value === undefined) {
+    return 0;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
+  }
+  return Math.trunc(value);
+}
+
 export function readFiniteNumberField(record: Record<string, unknown>, field: string): number {
   const value = record[field];
   if (typeof value !== "number" || !Number.isFinite(value)) {
