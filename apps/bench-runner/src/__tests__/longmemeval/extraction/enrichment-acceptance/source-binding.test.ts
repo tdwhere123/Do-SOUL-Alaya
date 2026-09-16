@@ -516,12 +516,12 @@ describe("frozen source binding", () => {
         key: "migrated-request",
         source_corpus_identity: "migrated-corpus",
         message_ids: ["msg-1"],
-        source_assertions: [{ assertion_id: migrated.assertionId, text: migrated.text }]
+        source_assertions: [packedAssertion(migrated)]
       }, {
         key: "foreign-request",
         source_corpus_identity: "foreign-corpus",
         message_ids: ["msg-1"],
-        source_assertions: [{ assertion_id: 7, text: foreign.text }]
+        source_assertions: [packedAssertion(foreign)]
       }]
     });
     expect(binding.status).toBe("ambiguous");
@@ -559,12 +559,12 @@ describe("frozen source binding", () => {
         key: "request-intended",
         source_corpus_identity: unit.binding.sourceCorpusIdentity,
         message_ids: ["msg-intended"],
-        source_assertions: [{ assertion_id: unit.assertionId, text: unit.text }]
+        source_assertions: [packedAssertion(unit)]
       }, {
         key: "request-distractor",
         source_corpus_identity: distractor.binding.sourceCorpusIdentity,
         message_ids: ["msg-other"],
-        source_assertions: [{ assertion_id: distractor.assertionId, text: distractor.text }]
+        source_assertions: [packedAssertion(distractor)]
       }]
     });
     expect(binding.status).toBe("bound");
@@ -675,6 +675,19 @@ describe("frozen source binding", () => {
     expect(withBothRequests.status).toBe("unbound");
     expect(withBothRequests.current).toEqual([]);
     expect(withBothRequests.occurrences[0]?.reason).not.toMatch(/migrated through native source identity/u);
+    const regressionShaped = bindFrozenAssertionToCurrentSource(row({
+      occurrence: {
+        source_message_ids: ["original-message"],
+        source_locator: original.binding.locator,
+        source_occurrence_identity: original.binding.occurrenceIdentity ?? null,
+        occurrence_bindings: []
+      }
+    }), {
+      catalogUnits: [foreign],
+      requests: [packedOriginal]
+    });
+    expect(regressionShaped.status).toBe("unbound");
+    expect(regressionShaped.current).toEqual([]);
   });
 
   it("does not widen to same-text when a frozen locator restriction has zero hits", () => {

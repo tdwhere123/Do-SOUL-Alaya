@@ -357,9 +357,12 @@ function migrateRestrictedUnits(
     }
   }
   if (spec.source_message_id === null) return [];
-  const local = corporaForMessage(spec.source_message_id, input);
+  const messageId = spec.source_message_id;
+  const local = corporaForMessage(messageId, input);
   if (local === null) return [];
-  return hits.filter((unit) => local.has(unit.binding.sourceCorpusIdentity));
+  return hits.filter((unit) =>
+    local.has(unit.binding.sourceCorpusIdentity) &&
+    unitPackedInFrozenMessage(unit, messageId, input));
 }
 
 function corporaForMessage(

@@ -12,6 +12,7 @@ import {
   OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
   OFFICIAL_API_SYSTEM_PROMPT,
   officialApiSemanticWorksetFromUnits,
+  planOfficialApiSemanticWorkset,
   planOfficialApiTransport,
   type OfficialApiSemanticWorkUnit,
   type TransportPack
@@ -196,8 +197,13 @@ export async function runCurrentEnrichmentPreflight(options: {
         dataset_sha256: loaded?.sha256 ?? null
       }),
       requests: Object.freeze(workset.requests.map((item) => {
+        const turnLocal = planOfficialApiSemanticWorkset(
+          item.sourceTurn.turnContent,
+          item.sourceTurn.turnMessages,
+          datasetRevision
+        );
         const occurrenceByAssertion = new Map(
-          item.units.map((unit) => [unit.assertionId, unit.binding.occurrenceIdentity ?? null])
+          turnLocal.units.map((unit) => [unit.assertionId, unit.binding.occurrenceIdentity ?? null])
         );
         return Object.freeze({
           key: item.line.key,

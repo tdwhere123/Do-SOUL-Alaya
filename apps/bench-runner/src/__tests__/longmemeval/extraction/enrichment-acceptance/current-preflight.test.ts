@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SOURCE_INTERPRETATION_CONTRACT } from "@do-soul/alaya-protocol";
+import { planOfficialApiSemanticWorkset } from "@do-soul/alaya-soul";
 import type { FrozenAssertion } from "../../../../runs/extraction/enrichment-acceptance/frozen-population.js";
 import {
   ENRICHMENT_PREFLIGHT_CAPABILITY,
@@ -129,5 +130,46 @@ describe("current enrichment preflight", () => {
     expect(empty.deterministic_empty_request_count).toBeGreaterThan(0);
     expect(empty.nonempty_request_count).not.toBe(empty.deterministic_empty_request_count);
     expect(empty.attempted_fetches).toBe(0);
+  });
+
+  it("records occurrence identities from the request source turn instead of merged units", async () => {
+    const originalMessages = [{
+      role: "user" as const,
+      content: text,
+      message_id: "original-message"
+    }];
+    const foreignMessages = [{
+      role: "user" as const,
+      content: text,
+      message_id: "foreign-message"
+    }];
+    const originalOcc = planOfficialApiSemanticWorkset(
+      text, originalMessages, "synthetic-revision"
+    ).units[0]!.binding.occurrenceIdentity;
+    const foreignOcc = planOfficialApiSemanticWorkset(
+      text, foreignMessages, "synthetic-revision"
+    ).units[0]!.binding.occurrenceIdentity;
+    expect(originalOcc).not.toBe(foreignOcc);
+    const preflight = await runCurrentEnrichmentPreflight({
+      cacheRoot,
+      sourcePacking: "singleton",
+      turns: [
+        { turnContent: text, turnMessages: originalMessages },
+        { turnContent: text, turnMessages: foreignMessages }
+      ],
+      datasetRevision: "synthetic-revision"
+    });
+    for (const request of preflight.requests) {
+      const local = planOfficialApiSemanticWorkset(
+        request.message_ids.includes("foreign-message") ? text : text,
+        request.message_ids.includes("foreign-message") ? foreignMessages : originalMessages,
+        "synthetic-revision"
+      ).units[0]!.binding.occurrenceIdentity;
+      if (request.occurrence_identities.length === 0) continue;
+      expect(request.occurrence_identities[0]).toBe(local);
+      expect(request.occurrence_identities[0]).not.toBe(
+        local === originalOcc ? foreignOcc : originalOcc
+      );
+    }
   });
 });
