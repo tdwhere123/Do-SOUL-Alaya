@@ -33,7 +33,6 @@ const GARDEN_BACKLOG_ENTITY_ID = "global";
 const STOP_RETRY_BACKOFF_MS = 1;
 
 export class GardenBacklogTelemetryService {
-  private timer: ReturnType<typeof setInterval> | null = null;
   private snapshotRunner: RunnerHandle | null = null;
   private captureRunner: RunnerHandle | null = null;
   private snapshotRequestedVersion = 0;
@@ -95,10 +94,6 @@ export class GardenBacklogTelemetryService {
     }
 
     this.acceptingOperations = false;
-    if (this.timer !== null) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
     const pendingTransition = this.deps.scheduler.peekBacklogWarningTransition();
     if (!this.drainBoundaryFrozen) {
       this.finalDrainBoundaryTransitionId = this.deps.scheduler.peekLastBacklogWarningTransitionId();
