@@ -66,6 +66,7 @@ export type ConsumptionStopReason =
   | "membership_page_cap"
   | "index_invalidated"
   | "declared_turn_cap";
+export type CapRemainder = "unread_after_cap" | "none";
 export type ConsumptionAttribution =
   | "hit"
   | "qualification"
@@ -83,6 +84,61 @@ export type PublicConsumer = (
   context: RecallUsageToolCallContext
 ) => Promise<SoulMemorySearchResponse>;
 
+export type PublicContinuationRef = Readonly<{
+  readonly continuation_id: string;
+  readonly query_id: string;
+  readonly snapshot_id: string;
+  readonly cursor: string;
+}>;
+
+export type PublicPayloadContinuationRef = Readonly<{
+  readonly target_kind: string;
+  readonly root_id: string | "unavailable";
+  readonly source_version: string | "unavailable";
+  readonly content_digest: string | "unavailable";
+  readonly start_offset: number | "unavailable";
+  readonly byte_budget: number | "unavailable";
+}>;
+
+export type PublicPayloadChunk = Readonly<{
+  readonly root_id: string;
+  readonly source_version: string | "unavailable";
+  readonly content_digest: string | "unavailable";
+  readonly content_start: number | "unavailable";
+  readonly content_end: number | "unavailable";
+  readonly content_complete: boolean | "unavailable";
+  readonly retained_extent: string | "unavailable";
+  readonly preview_omitted: boolean;
+  readonly chunk_utf8_bytes: number | "unavailable";
+  readonly chunk_sha256: string | "unavailable";
+  readonly chunk_text: string | "unavailable";
+}>;
+
+export type PublicStepReceipt = Readonly<{
+  readonly query_id: string;
+  readonly interpretation_id: string;
+  readonly snapshot_id: string;
+  readonly actual: Readonly<{
+    readonly native_visits: Cost;
+    readonly native_bytes: Cost;
+    readonly retained_bytes_current: Cost;
+  }> | "unavailable";
+}>;
+
+export type PublicStepExchange = Readonly<{
+  readonly step_index: number;
+  readonly request: Readonly<{
+    readonly continuation: PublicContinuationRef | null;
+    readonly payload_continuation: PublicPayloadContinuationRef | null;
+  }>;
+  readonly response: Readonly<{
+    readonly delivery_id: string | "unavailable";
+    readonly page_purpose: string | "unavailable";
+    readonly chunks: readonly PublicPayloadChunk[];
+  }>;
+  readonly receipt: PublicStepReceipt | "unavailable";
+}>;
+
 export type ConsumptionStep = Readonly<{
   readonly purpose: string;
   readonly membership_page: number;
@@ -95,7 +151,10 @@ export type ConsumptionStep = Readonly<{
   readonly preview_complete: Readonly<Record<string, boolean>>;
   readonly logical_index: string | undefined;
   readonly payload_completeness: string | undefined;
+  readonly public_exchange: PublicStepExchange;
   readonly stop_reason?: ConsumptionStopReason;
+  readonly discarded_capped_incomplete_root_ids?: readonly string[];
+  readonly cap_remainder?: CapRemainder;
 }>;
 
 export type ConsumptionTrace = Readonly<{
@@ -104,6 +163,9 @@ export type ConsumptionTrace = Readonly<{
   readonly first_page_preview_complete: Readonly<Record<string, boolean>>;
   readonly steps: readonly ConsumptionStep[];
   readonly termination: ConsumptionStep;
+  readonly discarded_capped_incomplete_root_ids: readonly string[];
+  readonly cap_remainder: CapRemainder;
+  readonly expansions_by_target: Readonly<Record<string, number>>;
 }>;
 
 export type NativeDiscovery = Readonly<{

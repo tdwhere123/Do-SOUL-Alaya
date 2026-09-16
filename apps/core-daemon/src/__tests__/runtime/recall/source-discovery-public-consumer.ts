@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   ContinuationSchema,
   PayloadContinuationRequestSchema,
@@ -12,11 +13,15 @@ import { FirstExposureSession } from
   "../../../../../../apps/bench-runner/src/runs/measurement/first-exposure-session.js";
 import {
   PUBLIC_CONSUMPTION_PROTOCOL,
+  type CapRemainder,
   type ConsumptionStep,
   type ConsumptionStopReason,
   type ConsumptionTrace,
   type Cost,
-  type PublicConsumer
+  type PublicConsumer,
+  type PublicPayloadChunk,
+  type PublicPayloadContinuationRef,
+  type PublicStepExchange
 } from "./source-discovery-public-consumption.js";
 import type { RecallUsageToolCallContext } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 
@@ -37,6 +42,7 @@ export async function consumePublicSources(input: Readonly<{
   const complete = new Map<string, boolean>();
   const expansionsByTarget = new Map<string, number>();
   const pending: PendingSource[] = [];
+  const discardedCapped = new Set<string>();
   const steps: ConsumptionStep[] = [];
   const base = membershipBase(input.request);
   const parsedInitial = SoulMemorySearchRequestSchema.parse(base);
@@ -72,7 +78,7 @@ export async function consumePublicSources(input: Readonly<{
       enqueueIncomplete(pending, response, complete);
     } else if (payloadRequest) {
       payloadExpansions += 1;
-      refreshPendingAfterPayload(pending, response, complete, expansionsByTarget);
+      refreshPendingAfterPayload(pending, response, complete, expansionsByTarget, discardedCapped);
     } else {
       membershipPage += 1;
       session.record(response, parsedContinuation(request.continuation));
@@ -90,6 +96,7 @@ export async function consumePublicSources(input: Readonly<{
       bodies,
       complete,
       response,
+      public_exchange: capturePublicExchange(turn, request, response, added),
       stop_reason: undefined
     });
     const invalidated = response.index?.completeness.logical_index === "invalidated";
@@ -97,6 +104,7 @@ export async function consumePublicSources(input: Readonly<{
       base,
       pending,
       expansionsByTarget,
+      discardedCapped,
       membershipContinuation,
       membershipPage
     });
@@ -107,16 +115,18 @@ export async function consumePublicSources(input: Readonly<{
       pending,
       lastTurn: turn + 1 >= turnCap
     });
-    const recorded = stop_reason === undefined ? step : { ...step, stop_reason };
+    const recorded = stop_reason === undefined ? step : terminateStep(step, stop_reason, discardedCapped);
     steps.push(recorded);
     if (stop_reason !== undefined) {
-      return {
-        first_exposure: firstExposure,
-        first_page_identities: firstPageIdentities,
-        first_page_preview_complete: firstPageComplete,
+      return finishTrace({
+        firstExposure,
+        firstPageIdentities,
+        firstPageComplete,
         steps,
-        termination: recorded
-      };
+        termination: recorded,
+        discardedCapped,
+        expansionsByTarget
+      });
     }
     if (next === undefined) {
       throw new Error("public consumption continued without a next request or stop reason");
@@ -127,14 +137,16 @@ export async function consumePublicSources(input: Readonly<{
   if (overflow === undefined) {
     throw new Error("public consumption produced no steps before the declared turn cap");
   }
-  const termination = { ...overflow, stop_reason: "declared_turn_cap" as const };
-  return {
-    first_exposure: firstExposure,
-    first_page_identities: firstPageIdentities,
-    first_page_preview_complete: firstPageComplete,
+  const termination = terminateStep(overflow, "declared_turn_cap", discardedCapped);
+  return finishTrace({
+    firstExposure,
+    firstPageIdentities,
+    firstPageComplete,
     steps: [...steps.slice(0, -1), termination],
-    termination
-  };
+    termination,
+    discardedCapped,
+    expansionsByTarget
+  });
 }
 
 export function publicIdentities(response: SoulMemorySearchResponse): string[] {
@@ -171,10 +183,11 @@ function nextPublicRequest(input: Readonly<{
   readonly base: SoulMemorySearchRequest;
   readonly pending: PendingSource[];
   readonly expansionsByTarget: Map<string, number>;
+  readonly discardedCapped: Set<string>;
   readonly membershipContinuation: Continuation | null;
   readonly membershipPage: number;
 }>): ReturnType<typeof SoulMemorySearchRequestSchema.parse> | undefined {
-  const expandable = nextExpandable(input.pending, input.expansionsByTarget);
+  const expandable = nextExpandable(input.pending, input.expansionsByTarget, input.discardedCapped);
   if (expandable !== undefined) {
     const used = input.expansionsByTarget.get(expandable.root_id) ?? 0;
     input.expansionsByTarget.set(expandable.root_id, used + 1);
@@ -200,13 +213,15 @@ function nextPublicRequest(input: Readonly<{
 
 function nextExpandable(
   pending: PendingSource[],
-  expansionsByTarget: Map<string, number>
+  expansionsByTarget: Map<string, number>,
+  discardedCapped: Set<string>
 ): PendingSource | undefined {
   while (pending.length > 0) {
     const candidate = pending[0]!;
     const used = expansionsByTarget.get(candidate.root_id) ?? 0;
     if (used < PUBLIC_CONSUMPTION_PROTOCOL.max_payload_expansions_per_target) return candidate;
     pending.shift();
+    discardedCapped.add(candidate.root_id);
   }
   return undefined;
 }
@@ -228,7 +243,8 @@ function refreshPendingAfterPayload(
   pending: PendingSource[],
   response: SoulMemorySearchResponse,
   complete: Map<string, boolean>,
-  expansionsByTarget: Map<string, number>
+  expansionsByTarget: Map<string, number>,
+  discardedCapped: Set<string>
 ): void {
   const current = pending[0];
   if (current === undefined) return;
@@ -240,6 +256,7 @@ function refreshPendingAfterPayload(
   const used = expansionsByTarget.get(current.root_id) ?? 0;
   if (used >= PUBLIC_CONSUMPTION_PROTOCOL.max_payload_expansions_per_target) {
     pending.shift();
+    discardedCapped.add(current.root_id);
     return;
   }
   pending[0] = updated;
@@ -288,6 +305,7 @@ function consumptionStep(input: Readonly<{
   readonly bodies: Map<string, string>;
   readonly complete: Map<string, boolean>;
   readonly response: SoulMemorySearchResponse;
+  readonly public_exchange: PublicStepExchange;
   readonly stop_reason: ConsumptionStopReason | undefined;
 }>): ConsumptionStep {
   return {
@@ -302,8 +320,130 @@ function consumptionStep(input: Readonly<{
     preview_complete: Object.fromEntries(input.complete),
     logical_index: input.response.index?.completeness.logical_index,
     payload_completeness: input.response.index?.completeness.payload,
+    public_exchange: input.public_exchange,
     ...(input.stop_reason === undefined ? {} : { stop_reason: input.stop_reason })
   };
+}
+
+function terminateStep(
+  step: ConsumptionStep,
+  stop_reason: ConsumptionStopReason,
+  discardedCapped: ReadonlySet<string>
+): ConsumptionStep {
+  const discarded = [...discardedCapped];
+  return {
+    ...step,
+    stop_reason,
+    discarded_capped_incomplete_root_ids: discarded,
+    cap_remainder: capRemainder(discarded)
+  };
+}
+
+function finishTrace(input: Readonly<{
+  readonly firstExposure: ConsumptionTrace["first_exposure"];
+  readonly firstPageIdentities: readonly string[];
+  readonly firstPageComplete: Readonly<Record<string, boolean>>;
+  readonly steps: readonly ConsumptionStep[];
+  readonly termination: ConsumptionStep;
+  readonly discardedCapped: ReadonlySet<string>;
+  readonly expansionsByTarget: ReadonlyMap<string, number>;
+}>): ConsumptionTrace {
+  const discarded = [...input.discardedCapped];
+  return {
+    first_exposure: input.firstExposure,
+    first_page_identities: input.firstPageIdentities,
+    first_page_preview_complete: input.firstPageComplete,
+    steps: input.steps,
+    termination: input.termination,
+    discarded_capped_incomplete_root_ids: discarded,
+    cap_remainder: capRemainder(discarded),
+    expansions_by_target: Object.fromEntries(input.expansionsByTarget)
+  };
+}
+
+function capRemainder(discarded: readonly string[]): CapRemainder {
+  return discarded.length > 0 ? "unread_after_cap" : "none";
+}
+
+function capturePublicExchange(
+  stepIndex: number,
+  request: SoulMemorySearchRequest,
+  response: SoulMemorySearchResponse,
+  added: readonly ConditionalFieldExecutionReceipt[]
+): PublicStepExchange {
+  const receipt = added.at(-1);
+  return {
+    step_index: stepIndex,
+    request: {
+      continuation: continuationRef(request.continuation),
+      payload_continuation: payloadContinuationRef(request.payload_continuation)
+    },
+    response: {
+      delivery_id: response.delivery_id ?? "unavailable",
+      page_purpose: response.page_purpose ?? response.index?.page_purpose ?? "unavailable",
+      chunks: responseChunks(response)
+    },
+    receipt: receipt === undefined ? "unavailable" : {
+      query_id: receipt.query_id,
+      interpretation_id: receipt.interpretation_id,
+      snapshot_id: receipt.snapshot_id,
+      actual: receipt.actual === undefined ? "unavailable" : {
+        native_visits: observedCost(receipt.actual.native_visits),
+        native_bytes: observedCost(receipt.actual.native_bytes),
+        retained_bytes_current: observedCost(receipt.actual.retained_bytes_current)
+      }
+    }
+  };
+}
+
+function continuationRef(
+  continuation: SoulMemorySearchRequest["continuation"]
+): PublicStepExchange["request"]["continuation"] {
+  if (continuation === undefined || continuation === null) return null;
+  return {
+    continuation_id: continuation.continuation_id,
+    query_id: continuation.query_id,
+    snapshot_id: continuation.snapshot_id,
+    cursor: continuation.cursor
+  };
+}
+
+function payloadContinuationRef(
+  payload: SoulMemorySearchRequest["payload_continuation"]
+): PublicPayloadContinuationRef | null {
+  if (payload === undefined) return null;
+  const target = payload.target;
+  return {
+    target_kind: target.kind,
+    root_id: target.kind === "source_evidence" ? target.root_id : "unavailable",
+    source_version: target.kind === "source_evidence" ? target.source_version : "unavailable",
+    content_digest: target.kind === "source_evidence" ? target.content_digest : "unavailable",
+    start_offset: payload.start_offset ?? "unavailable",
+    byte_budget: payload.byte_budget ?? "unavailable"
+  };
+}
+
+function responseChunks(response: SoulMemorySearchResponse): PublicPayloadChunk[] {
+  const chunks: PublicPayloadChunk[] = [];
+  for (const row of response.results) {
+    if (row.target?.kind !== "source_evidence") continue;
+    const span = row.target.span;
+    const omitted = row.content_preview === "[payload omitted]";
+    chunks.push({
+      root_id: row.target.root_id,
+      source_version: row.target.source_version,
+      content_digest: row.target.content_digest,
+      content_start: span?.content_start ?? "unavailable",
+      content_end: span?.content_end ?? "unavailable",
+      content_complete: span?.content_complete ?? "unavailable",
+      retained_extent: span?.retained_extent ?? "unavailable",
+      preview_omitted: omitted,
+      chunk_utf8_bytes: omitted ? "unavailable" : Buffer.byteLength(row.content_preview, "utf8"),
+      chunk_sha256: omitted ? "unavailable" : createHash("sha256").update(row.content_preview, "utf8").digest("hex"),
+      chunk_text: omitted ? "unavailable" : row.content_preview
+    });
+  }
+  return chunks;
 }
 
 function membershipBase(request: SoulMemorySearchRequest): SoulMemorySearchRequest {

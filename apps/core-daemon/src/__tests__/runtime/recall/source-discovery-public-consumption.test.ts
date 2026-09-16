@@ -1,52 +1,50 @@
-import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { MemoryDimension } from "@do-soul/alaya-protocol";
-import {
-  RecallService,
-  type ConditionalFieldExecutionReceipt
-} from "@do-soul/alaya-core";
-import {
-  closeCachedDatabase,
-  SqliteFieldSourceRecordRepo
-} from "@do-soul/alaya-storage";
+import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
-import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
-import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
-import { assertBuiltWorker, builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
-import { fieldSha256, hashedRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
-import { createDependencies } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
-import { MEM, NOW, RUN, WS, openSourceSlice } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
+import { assertBuiltWorker } from "./recall-read-worker-client-fixture.js";
+import { WS, RUN } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import {
   SOURCE_DISCOVERY_CANARY,
-  canaryDistractorRelation,
   type CanaryCase
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
 import { consumePublicSources } from "./source-discovery-public-consumer.js";
 import {
   PUBLIC_CONSUMPTION_PROTOCOL,
   compileCanarySketch,
-  insertBoundGist,
   observePlantedDiscovery,
   publicSearchRequest,
   scoreConsumption,
-  tapRecallReceipts,
-  type ConsumptionStep,
   type ConsumptionTrace,
   type Enumeration,
   type LookupMode,
   type ResultView
 } from "./source-discovery-public-consumption.js";
+import {
+  boundTrace,
+  persistRunEvidence,
+  type CaseIdentity
+} from "./source-discovery-public-consumption-evidence.js";
+import {
+  withOmittedPairWorker,
+  withPlantedWorker,
+  withPublicOrderedPairWorker
+} from "./source-discovery-public-consumption-plant.js";
+
+const COMPLETE_SOURCE_MARKER = "COMPLETE_SOURCE_MARKER";
+const TRAILING_SOURCE_MARKER = "TRAILING_SOURCE_MARKER";
+const CAPPED_SOURCE_MARKER = "CAPPED_SOURCE_MARKER";
 
 const rows: unknown[] = [];
 const traces: unknown[] = [];
+const completedCases: CaseIdentity[] = [];
 
 afterAll(() => {
-  persistRunEvidence();
+  persistRunEvidence({
+    rows,
+    traces,
+    selected: selectedPublicConsumptionCases(),
+    completed: completedCases
+  });
 });
 
 describe("public source consumption comparison", () => {
@@ -83,8 +81,7 @@ describe("public source consumption comparison", () => {
           for (const lookup of ["proposal", "source_text"] as const) {
             const row = await runPair({
               canary, view, enumeration: "canonical", lookup, intendedId: planted.intendedId,
-              handler, receipts, native: native[lookup],
-              maxResults: PUBLIC_CONSUMPTION_PROTOCOL.historical_max_results,
+              handler, receipts, maxResults: PUBLIC_CONSUMPTION_PROTOCOL.historical_max_results,
               cell: "historical_page1"
             });
             assertSettledConsumption(row);
@@ -155,35 +152,60 @@ describe("public source consumption comparison", () => {
       .toBe(text.interpretation_proposal?.original_query_digest);
   });
 
-  it("reads a later omitted source after the first public payload target hits the expansion cap", async () => {
+  it("completes the first public target then reads a later omitted source through the worker", async () => {
     const canary = SOURCE_DISCOVERY_CANARY[1]!;
-    const firstBody = `FIRST_SOURCE_MARKER ${canary.intended} ${"x".repeat(70_000)}`;
-    const secondBody = `SECOND_SOURCE_MARKER ${canary.intended} ${"y".repeat(8_000)}`;
+    const firstBody = `${COMPLETE_SOURCE_MARKER} ${canary.intended} ${"y".repeat(8_000)}`;
+    const secondBody = `${TRAILING_SOURCE_MARKER} ${canary.intended} ${"z".repeat(9_000)}`;
     await withOmittedPairWorker(canary, firstBody, secondBody, async (planted, handler, receipts, client) => {
       planted.database.close();
       closeCachedDatabase(planted.filename);
       await client.ready();
-      const request = publicSearchRequest(canary, "proposal", "source_only", "canonical");
-      const started = receipts.length;
-      const trace = await consumePublicSources({
-        handler,
-        context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" },
-        request,
-        receipts
-      });
-      const bodies = trace.termination.source_bodies;
+      const trace = await consumePairTrace(canary, handler, receipts);
+      const publicFirst = trace.first_page_identities[0];
+      const laterId = trace.first_page_identities.find((id) => id !== publicFirst);
+      const bodyById: Record<string, string> = {
+        [planted.first_id]: planted.first_body,
+        [planted.second_id]: planted.second_body
+      };
       expect(trace.first_page_identities).toEqual(expect.arrayContaining([
-        planted.firstId,
-        planted.secondId
+        planted.first_id,
+        planted.second_id
       ]));
-      expect(bodies[planted.secondId] ?? "").toContain("SECOND_SOURCE_MARKER");
-      expect(trace.termination.payload_expansions).toBeGreaterThanOrEqual(
-        PUBLIC_CONSUMPTION_PROTOCOL.max_payload_expansions_per_target + 1
-      );
+      expect(publicFirst).toBeDefined();
+      expect(laterId).toBeDefined();
+      expect(trace.termination.preview_complete[publicFirst!]).toBe(true);
+      expect(trace.termination.source_bodies[publicFirst!]).toBe(bodyById[publicFirst!]);
+      expect((trace.termination.source_bodies[laterId!] ?? "").length).toBeGreaterThan(0);
+      expect(payloadStepsFor(trace, laterId!).length).toBeGreaterThan(0);
       expect(trace.termination.stop_reason).toMatch(/continuation_exhausted|membership_page_cap|index_invalidated|declared_turn_cap/);
-      expect(trace.termination.stop_reason).toBeDefined();
-      traces.push(boundTrace("multi_source_cap", canary, "source_only", "canonical", "proposal", trace,
-        receipts.slice(started)));
+      recordTrace("public_first_complete_then_later_read", canary, trace, receipts);
+    });
+  }, 90_000);
+
+  it("keeps the first public target incomplete at the per-target expansion cap then fully consumes a later public target", async () => {
+    const canary = SOURCE_DISCOVERY_CANARY[1]!;
+    const publicFirstBody = cappedSourceBody(canary);
+    const laterBody = completeSourceBody(canary);
+    await withPublicOrderedPairWorker(canary, publicFirstBody, laterBody, async (planted, handler, receipts) => {
+      const trace = await consumePairTrace(canary, handler, receipts);
+      const publicFirst = trace.first_page_identities[0];
+      const laterId = trace.first_page_identities.find((id) => id !== publicFirst);
+      expect(publicFirst).toBe(planted.public_first_id);
+      expect(laterId).toBe(planted.later_id);
+      const cap = PUBLIC_CONSUMPTION_PROTOCOL.max_payload_expansions_per_target;
+      const firstPayload = payloadStepsFor(trace, publicFirst!);
+      expect(firstPayload).toHaveLength(cap);
+      expect(firstPayload.every((step) => step.preview_complete[publicFirst!] !== true)).toBe(true);
+      expect(trace.termination.preview_complete[publicFirst!]).toBe(false);
+      expect(trace.termination.source_bodies[publicFirst!] ?? "").toContain(CAPPED_SOURCE_MARKER);
+      expect(trace.termination.source_bodies[publicFirst!] ?? "").not.toBe(publicFirstBody);
+      expect(trace.termination.preview_complete[laterId!]).toBe(true);
+      expect(trace.termination.source_bodies[laterId!] ?? "").toContain(COMPLETE_SOURCE_MARKER);
+      expect(trace.discarded_capped_incomplete_root_ids).toEqual([publicFirst]);
+      expect(trace.cap_remainder).toBe("unread_after_cap");
+      expect(trace.termination.discarded_capped_incomplete_root_ids).toEqual([publicFirst]);
+      expect(trace.termination.stop_reason).toMatch(/continuation_exhausted|membership_page_cap|index_invalidated|declared_turn_cap/);
+      recordTrace("public_first_capped_then_later_complete", canary, trace, receipts);
     });
   }, 90_000);
 });
@@ -195,7 +217,7 @@ async function runPair(input: Readonly<{
   readonly lookup: LookupMode;
   readonly intendedId: string;
   readonly handler: ReturnType<typeof createRecallHandler>;
-  readonly receipts: ConditionalFieldExecutionReceipt[];
+  readonly receipts: import("@do-soul/alaya-core").ConditionalFieldExecutionReceipt[];
   readonly native?: ReturnType<typeof observePlantedDiscovery>;
   readonly maxResults: number;
   readonly cell: string;
@@ -217,6 +239,13 @@ async function runPair(input: Readonly<{
     Object.keys(step.source_bodies)))];
   const settled = input.receipts.slice(started);
   traces.push(boundTrace(input.cell, input.canary, input.view, input.enumeration, input.lookup, trace, settled));
+  completedCases.push({
+    cell: input.cell,
+    group: input.canary.group,
+    view: input.view,
+    enumeration: input.enumeration,
+    lookup: input.lookup
+  });
   return {
     cell: input.cell,
     group: input.canary.group,
@@ -273,245 +302,81 @@ function assertPairedControls(pair: readonly Awaited<ReturnType<typeof runPair>>
   expect(pair[0]!.cell).toBe(pair[1]!.cell);
 }
 
-async function withPlantedWorker(
+async function consumePairTrace(
   canary: CanaryCase,
-  view: ResultView,
-  intendedFirst: boolean,
-  run: (
-    planted: {
-      readonly database: import("@do-soul/alaya-storage").StorageDatabase;
-      readonly filename: string;
-      readonly intendedId: string;
-    },
-    handler: ReturnType<typeof createRecallHandler>,
-    receipts: ConditionalFieldExecutionReceipt[],
-    client: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>
-  ) => Promise<void>
-): Promise<void> {
-  const directory = await mkdtemp(join(tmpdir(), "alaya-public-consumption-"));
-  const filename = join(directory, "alaya.db");
-  const slice = await openSourceSlice(() => {}, filename);
-  const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
-  const intended = records.insert({
-    ...hashedRecord(WS, canary.intended, "intended"),
-    ...(canary.event_time === undefined ? {} : { event_time: canary.event_time })
+  handler: ReturnType<typeof createRecallHandler>,
+  receipts: import("@do-soul/alaya-core").ConditionalFieldExecutionReceipt[]
+): Promise<ConsumptionTrace> {
+  return consumePublicSources({
+    handler,
+    context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" },
+    request: publicSearchRequest(canary, "proposal", "source_only", "canonical"),
+    receipts
   });
-  const distractorInput = Array.from({ length: 128 }, (_, index) =>
-    hashedRecord(WS, canary.distractor, `distractor-${index}`)).find((row) =>
-      (intended.record_id < row.record_id) === intendedFirst);
-  if (distractorInput === undefined) throw new Error("Could not plant requested physical order");
-  const distractor = records.insert(distractorInput);
-  insertBoundGist(slice.database, `gist-${intended.record_id}`, canary.intended, intended.record_id,
-    intended.content_digest, intended.evidence_object_id, canary.sketch, WS, RUN, NOW);
-  insertBoundGist(slice.database, `gist-${distractor.record_id}`, canary.distractor, distractor.record_id,
-    distractor.content_digest, distractor.evidence_object_id, canaryDistractorRelation(canary), WS, RUN, NOW);
-  if (view !== "source_only") {
-    await slice.writeMemory(MEM.r, canary.original_query, MemoryDimension.FACT);
-    await slice.writeMemory(MEM.c, `${canary.original_query} second memory`, MemoryDimension.FACT);
-  }
-  await runPlantedHandler(filename, slice, intended.record_id, run);
 }
 
-async function withOmittedPairWorker(
-  canary: CanaryCase,
-  firstBody: string,
-  secondBody: string,
-  run: (
-    planted: {
-      readonly database: import("@do-soul/alaya-storage").StorageDatabase;
-      readonly filename: string;
-      readonly firstId: string;
-      readonly secondId: string;
-    },
-    handler: ReturnType<typeof createRecallHandler>,
-    receipts: ConditionalFieldExecutionReceipt[],
-    client: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>
-  ) => Promise<void>
-): Promise<void> {
-  const directory = await mkdtemp(join(tmpdir(), "alaya-public-omitted-pair-"));
-  const filename = join(directory, "alaya.db");
-  const slice = await openSourceSlice(() => {}, filename);
-  const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
-  const first = records.insert(hashedRecord(WS, firstBody, "first-omitted"));
-  const second = records.insert(hashedRecord(WS, secondBody, "second-omitted"));
-  insertBoundGist(slice.database, `gist-${first.record_id}`, canary.intended, first.record_id,
-    first.content_digest, first.evidence_object_id, canary.sketch, WS, RUN, NOW);
-  insertBoundGist(slice.database, `gist-${second.record_id}`, canary.intended, second.record_id,
-    second.content_digest, second.evidence_object_id, canary.sketch, WS, RUN, NOW);
-  const receipts: ConditionalFieldExecutionReceipt[] = [];
-  const client = createRecallReadWorkerClient({
-    databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1
-  })!;
-  const service = tapRecallReceipts(new RecallService({
-    ...createDependencies().dependencies,
-    now: () => NOW,
-    conditionalFieldPort: client.conditionalFieldPort,
-    activeConstraintsPort: client.activeConstraintsPort,
-    readSnapshot: client.readSnapshot
-  }), receipts);
-  const handler = createRecallHandler({
-    deps: { ...createDeps(), recallService: service },
-    now: () => NOW,
-    generateId: randomUUID,
-    warn: () => undefined
-  });
-  try {
-    await run({
-      database: slice.database,
-      filename,
-      firstId: first.record_id,
-      secondId: second.record_id
-    }, handler, receipts, client);
-  } finally {
-    await client.close();
-    try { slice.database.close(); } catch { /* already closed after native observe */ }
-    closeCachedDatabase(filename);
-    await rm(directory, { recursive: true, force: true });
-  }
+function payloadStepsFor(trace: ConsumptionTrace, rootId: string): ConsumptionTrace["steps"] {
+  return trace.steps.filter((step) =>
+    step.public_exchange.request.payload_continuation?.root_id === rootId);
 }
 
-async function runPlantedHandler(
-  filename: string,
-  slice: Awaited<ReturnType<typeof openSourceSlice>>,
-  intendedId: string,
-  run: (
-    planted: {
-      readonly database: import("@do-soul/alaya-storage").StorageDatabase;
-      readonly filename: string;
-      readonly intendedId: string;
-    },
-    handler: ReturnType<typeof createRecallHandler>,
-    receipts: ConditionalFieldExecutionReceipt[],
-    client: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>
-  ) => Promise<void>
-): Promise<void> {
-  const receipts: ConditionalFieldExecutionReceipt[] = [];
-  const client = createRecallReadWorkerClient({
-    databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1
-  })!;
-  const service = tapRecallReceipts(new RecallService({
-    ...createDependencies().dependencies,
-    now: () => NOW,
-    conditionalFieldPort: client.conditionalFieldPort,
-    activeConstraintsPort: client.activeConstraintsPort,
-    readSnapshot: client.readSnapshot
-  }), receipts);
-  const handler = createRecallHandler({
-    deps: { ...createDeps(), recallService: service },
-    now: () => NOW,
-    generateId: randomUUID,
-    warn: () => undefined
-  });
-  try {
-    await run({ database: slice.database, filename, intendedId }, handler, receipts, client);
-  } finally {
-    await client.close();
-    try { slice.database.close(); } catch { /* already closed after native observe */ }
-    closeCachedDatabase(filename);
-    await rm(dirname(filename), { recursive: true, force: true });
-  }
-}
-
-function boundTrace(
-  cell: string,
+function recordTrace(
+  cell: CaseIdentity["cell"],
   canary: CanaryCase,
-  view: ResultView,
-  enumeration: Enumeration,
-  lookup: LookupMode,
   trace: ConsumptionTrace,
-  receipts: readonly ConditionalFieldExecutionReceipt[]
-): unknown {
-  return {
+  receipts: import("@do-soul/alaya-core").ConditionalFieldExecutionReceipt[]
+): void {
+  traces.push(boundTrace(cell, canary, "source_only", "canonical", "proposal", trace, receipts));
+  completedCases.push({
     cell,
     group: canary.group,
-    view,
-    enumeration,
-    lookup,
-    first_exposure: trace.first_exposure === null ? null : {
-      delivery_id: trace.first_exposure.delivery_id,
-      commitment: trace.first_exposure.commitment,
-      page_purpose: trace.first_exposure.page_purpose,
-      identity: trace.first_exposure.initial?.identity ?? null,
-      digest: trace.first_exposure.initial?.digest ?? null
-    },
-    first_page_identities: trace.first_page_identities,
-    steps: trace.steps.map(boundStep),
-    termination: boundStep(trace.termination),
-    settled_receipts: receipts.map((receipt) => ({
-      query_id: receipt.query_id,
-      interpretation_id: receipt.interpretation_id,
-      snapshot_id: receipt.snapshot_id,
-      actual: receipt.actual === undefined ? "unavailable" as const : {
-        native_visits: receipt.actual.native_visits,
-        native_bytes: receipt.actual.native_bytes,
-        retained_bytes_current: receipt.actual.retained_bytes_current
+    view: "source_only",
+    enumeration: "canonical",
+    lookup: "proposal"
+  });
+}
+
+function completeSourceBody(canary: CanaryCase): string {
+  return `${COMPLETE_SOURCE_MARKER} ${canary.intended} ${"y".repeat(8_000)}`;
+}
+
+function cappedSourceBody(canary: CanaryCase): string {
+  return `${CAPPED_SOURCE_MARKER} ${canary.intended} ${"x".repeat(90_000)}`;
+}
+
+function selectedPublicConsumptionCases(): CaseIdentity[] {
+  const cases: CaseIdentity[] = [];
+  for (const canary of SOURCE_DISCOVERY_CANARY) {
+    for (const view of ["source_only", "mixed"] as const) {
+      for (const enumeration of ["canonical", "associative"] as const) {
+        for (const lookup of ["proposal", "source_text"] as const) {
+          cases.push({ cell: "primary", group: canary.group, view, enumeration, lookup });
+          cases.push({
+            cell: "supplemental_intended_first", group: canary.group, view, enumeration, lookup
+          });
+        }
       }
-    }))
-  };
-}
-
-function boundStep(step: ConsumptionStep): unknown {
-  return {
-    purpose: step.purpose,
-    membership_page: step.membership_page,
-    payload_expansions: step.payload_expansions,
-    cumulative_native_visits: step.cumulative_native_visits,
-    cumulative_native_bytes: step.cumulative_native_bytes,
-    retained_bytes_current: step.retained_bytes_current,
-    public_identities: step.public_identities,
-    preview_complete: step.preview_complete,
-    logical_index: step.logical_index,
-    payload_completeness: step.payload_completeness,
-    stop_reason: step.stop_reason ?? null,
-    source_body_bytes: Object.fromEntries(Object.entries(step.source_bodies).map(([id, body]) =>
-      [id, Buffer.byteLength(body, "utf8")])),
-    source_body_sha256: Object.fromEntries(Object.entries(step.source_bodies).map(([id, body]) =>
-      [id, createHash("sha256").update(body, "utf8").digest("hex")]))
-  };
-}
-
-function persistRunEvidence(): void {
-  const identity = resultCandidateIdentity();
-  const capturedAt = new Date().toISOString();
-  const stamp = capturedAt.replaceAll(":", "-");
-  const directory = join(evidenceDirectory(), "public-source-consumption-runs", identity.result_sha);
-  mkdirSync(directory, { recursive: true });
-  writeExclusive(join(directory, `${stamp}-matrix.json`), {
-    protocol: PUBLIC_CONSUMPTION_PROTOCOL,
-    result_identity: identity,
-    captured_at: capturedAt,
-    rows
-  });
-  writeExclusive(join(directory, `${stamp}-traces.json`), {
-    result_identity: identity,
-    captured_at: capturedAt,
-    traces
-  });
-}
-
-function resultCandidateIdentity(): Readonly<{
-  readonly result_sha: string | "unavailable";
-  readonly result_tree: string | "unavailable";
-}> {
-  try {
-    const porcelain = execFileSync("git", ["status", "--porcelain"], {
-      cwd: process.cwd(), encoding: "utf8"
-    });
-    const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: process.cwd(), encoding: "utf8" }).trim();
-    const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: process.cwd(), encoding: "utf8" }).trim();
-    if (porcelain.trim() !== "" || !/^[a-f0-9]{40}$/u.test(sha) || !/^[a-f0-9]{40}$/u.test(tree)) {
-      return { result_sha: "unavailable", result_tree: "unavailable" };
     }
-    return { result_sha: sha, result_tree: tree };
-  } catch {
-    return { result_sha: "unavailable", result_tree: "unavailable" };
+    for (const lookup of ["proposal", "source_text"] as const) {
+      cases.push({
+        cell: "historical_page1", group: canary.group, view: "source_only",
+        enumeration: "canonical", lookup
+      });
+    }
   }
-}
-
-function writeExclusive(path: string, value: unknown): void {
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
-}
-
-function evidenceDirectory(): string {
-  return join(process.cwd(), ".do-it/bench-runs/query-source-discovery");
+  for (const lookup of ["proposal", "source_text"] as const) {
+    cases.push({
+      cell: "memory_only", group: SOURCE_DISCOVERY_CANARY[0]!.group, view: "memory_only",
+      enumeration: "canonical", lookup
+    });
+  }
+  cases.push({
+    cell: "public_first_complete_then_later_read", group: SOURCE_DISCOVERY_CANARY[1]!.group,
+    view: "source_only", enumeration: "canonical", lookup: "proposal"
+  });
+  cases.push({
+    cell: "public_first_capped_then_later_complete", group: SOURCE_DISCOVERY_CANARY[1]!.group,
+    view: "source_only", enumeration: "canonical", lookup: "proposal"
+  });
+  return cases;
 }
