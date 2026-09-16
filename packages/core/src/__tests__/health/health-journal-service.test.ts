@@ -14,7 +14,8 @@ describe("HealthJournalService", () => {
           calls.push(`event:${entry.entity_id}`);
           return createEventLogEntry(entry);
         }),
-        queryByEntity: vi.fn(async () => [])
+        queryByEntity: vi.fn(async () => []),
+        transactional: identityTxn
       },
       repo: {
         append: vi.fn((entry: HealthJournalEntry) => {
@@ -39,7 +40,8 @@ describe("HealthJournalService", () => {
   it("writes the expected event and repo payload", async () => {
     const eventLogRepo = {
       append: vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
-      queryByEntity: vi.fn(async () => [])
+      queryByEntity: vi.fn(async () => []),
+      transactional: identityTxn
     };
     const repo = {
       append: vi.fn((entry: Partial<HealthJournalEntry>) => createHealthEntry(entry)),
@@ -102,8 +104,10 @@ describe("HealthJournalService", () => {
     const service = new HealthJournalService({
       eventLogRepo: {
         append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
-        queryByEntity: vi.fn(async () => [])
+        queryByEntity: vi.fn(async () => []),
+        transactional: identityTxn
       },
+      runtimeNotifier: { notifyEntry: () => undefined },
       repo
     });
 
@@ -131,8 +135,10 @@ describe("HealthJournalService", () => {
     const service = new HealthJournalService({
       eventLogRepo: {
         append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
-        queryByEntity: vi.fn(async () => [])
+        queryByEntity: vi.fn(async () => []),
+        transactional: identityTxn
       },
+      runtimeNotifier: { notifyEntry: () => undefined },
       repo
     });
 
@@ -148,7 +154,8 @@ describe("HealthJournalService", () => {
       runtimeNotifier: { notifyEntry: () => undefined },
       eventLogRepo: {
         append: vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
-        queryByEntity: vi.fn(async () => [])
+        queryByEntity: vi.fn(async () => []),
+        transactional: identityTxn
       },
       repo: {
         append: vi.fn(() => {
@@ -169,6 +176,10 @@ describe("HealthJournalService", () => {
     ).rejects.toThrow("repo failed");
   });
 });
+
+function identityTxn<T>(fn: () => T): T {
+  return fn();
+}
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {

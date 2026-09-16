@@ -146,7 +146,8 @@ function createDependencies(
       }),
       queryByEntity: vi.fn(async (entityType: string, entityId: string) =>
         events.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
-      )
+      ),
+      transactional: <T>(fn: () => T): T => fn()
     },
     runtimeNotifier: {
       notifyEntry: notifySpy

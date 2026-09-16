@@ -54,6 +54,7 @@ export interface GreenServiceMemoryRepoPort {
 export interface GreenServiceEventLogRepoPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  transactional<T>(fn: () => T): T;
   queryByWorkspace(workspaceId: string): Promise<readonly EventLogEntry[]>;
   queryByType(eventType: string): Promise<readonly EventLogEntry[]>;
   hasOpenSessionOverrideCorrection(query: {

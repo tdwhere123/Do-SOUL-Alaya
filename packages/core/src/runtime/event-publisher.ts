@@ -411,8 +411,16 @@ function adaptLegacyEventLogRepo(repo: LegacyEventLogAppendPort): EventPublisher
     deleteById: (id) => {
       repo.deleteById?.(id);
     },
-    transactional: <T>(fn: () => T): T =>
-      repo.transactional !== undefined ? repo.transactional(fn) : fn(),
+    transactional: <T>(fn: () => T): T => {
+      if (repo.transactional === undefined) {
+        throw new CoreError(
+          "CONFLICT",
+          "EventLog mutate requires transactional() on the same connection",
+          { subCode: "PORT_UNAVAILABLE" }
+        );
+      }
+      return repo.transactional(fn);
+    },
     ...(repo.getStorageConnectionIdentity === undefined
       ? {}
       : { getStorageConnectionIdentity: () => repo.getStorageConnectionIdentity!() })

@@ -27,6 +27,7 @@ function createRuntime(
     database,
     configEnv,
     eventLogRepo: new SqliteEventLogRepo(database),
+    runtimeNotifier: { notifyEntry: () => undefined },
     memoryEntryRepo: new SqliteMemoryEntryRepo(database),
     healthJournalService: {
       getRecentEvents: vi.fn(async () => Object.freeze([])),
@@ -204,6 +205,7 @@ describe("daemon local embedding product default", () => {
           ["ALAYA_LOCAL_EMBEDDING_CACHE_DIR", "/nonexistent/alaya-test-model-cache"]
         ]),
         eventLogRepo: new SqliteEventLogRepo(database),
+    runtimeNotifier: { notifyEntry: () => undefined },
         memoryEntryRepo: new SqliteMemoryEntryRepo(database),
         healthJournalService: {
           getRecentEvents: vi.fn(async () => Object.freeze([])),

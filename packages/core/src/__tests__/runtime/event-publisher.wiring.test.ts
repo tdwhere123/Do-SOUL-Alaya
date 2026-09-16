@@ -431,6 +431,32 @@ describe("EventPublisher wiring (fake EventLog repo)", () => {
     ).toThrow(/requires a runtime notifier/);
   });
 
+  it("bindEventPublisher refuses EventLog mutate when transactional is omitted", async () => {
+    const entry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: WorkerStateChangedPayloadSchema.parse({
+        workerId: "worker-1",
+        state: "active",
+        previousState: "init"
+      })
+    });
+    const publisher = bindEventPublisher({
+      eventLogRepo: {
+        append: () => entry
+      },
+      runtimeNotifier: { notifyEntry: () => undefined },
+      purpose: "TestService"
+    });
+    await expect(
+      publisher.appendManyWithMutation([toEventInput(entry)], () => "saved")
+    ).rejects.toThrow(/requires transactional/);
+  });
+
   it("wakes an injected notifier when the adapter is given a subscriber", async () => {
     const notifyEntry = vi.fn(async () => undefined);
     const entry = createEventLogEntry({

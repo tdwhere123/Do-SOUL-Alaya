@@ -86,6 +86,7 @@ describe("embedding policy parity regression net", () => {
           ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
         ]),
         eventLogRepo: fixture.eventLogRepo,
+        runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: {
           getRecentEvents: vi.fn(async () => Object.freeze([])),
           record: vi.fn(async () => undefined)

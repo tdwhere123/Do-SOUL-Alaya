@@ -96,9 +96,7 @@ export class EmbeddingRecallService {
       ...(dependencies.eventPublisher === undefined
         ? {}
         : { eventPublisher: dependencies.eventPublisher }),
-      ...(dependencies.runtimeNotifier === undefined
-        ? {}
-        : { runtimeNotifier: dependencies.runtimeNotifier }),
+      runtimeNotifier: dependencies.runtimeNotifier,
       healthJournalRecorder: dependencies.healthJournalRecorder,
       provider: dependencies.provider,
       now: this.now,

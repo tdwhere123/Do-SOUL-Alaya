@@ -12,7 +12,7 @@ import type { EmbeddingRecallServiceDependencies } from "./types.js";
 export interface EmbeddingRecallTelemetryDependencies {
   readonly eventLogRepo: EmbeddingRecallServiceDependencies["eventLogRepo"];
   readonly eventPublisher?: EmbeddingRecallServiceDependencies["eventPublisher"];
-  readonly runtimeNotifier?: EmbeddingRecallServiceDependencies["runtimeNotifier"];
+  readonly runtimeNotifier: EmbeddingRecallServiceDependencies["runtimeNotifier"];
   readonly healthJournalRecorder: EmbeddingRecallServiceDependencies["healthJournalRecorder"];
   readonly provider: EmbeddingRecallServiceDependencies["provider"];
   readonly now: () => string;

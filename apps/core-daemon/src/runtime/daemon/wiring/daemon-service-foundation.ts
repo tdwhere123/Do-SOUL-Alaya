@@ -249,6 +249,7 @@ function createSlotClaimRuntime(
   const slotService = new SlotService({
     slotRepo: input.slotRepo,
     eventLogRepo: input.eventLogRepo,
+    eventPublisher,
     runtimeNotifier: input.runtimeNotifier,
     arbitrationService: {
       arbitrateSlot: async (slotId, options) => await arbitrationService.arbitrateSlot(slotId, options)

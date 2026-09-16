@@ -51,7 +51,7 @@ export interface GovernanceLeaseServiceEventLogPort {
 export interface GovernanceLeaseServiceDependencies {
   readonly eventLogRepo: GovernanceLeaseServiceEventLogPort;
   readonly eventPublisher?: EventPublisher;
-  readonly runtimeNotifier?: { notifyEntry(entry: EventLogEntry): void | Promise<void> };
+  readonly runtimeNotifier: { notifyEntry(entry: EventLogEntry): void | Promise<void> };
   readonly runLookup: GovernanceRunWorkspaceLookup;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;

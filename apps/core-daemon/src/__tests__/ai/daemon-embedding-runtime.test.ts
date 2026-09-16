@@ -142,6 +142,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
           database: fixture.database,
           configEnv,
           eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
           healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
           memoryEntryRepo: fixture.memoryEntryRepo,
           warn: fixture.warn as unknown as WarnFn,
@@ -181,6 +182,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         database: fixture.database,
         configEnv,
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn,
@@ -232,6 +234,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
           ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
         ]),
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn,
@@ -286,6 +289,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
           ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
         ]),
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn,
@@ -333,6 +337,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         database: fixture.database,
         configEnv,
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn,
@@ -375,6 +380,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         database: fixture.database,
         configEnv,
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn,
@@ -411,6 +417,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         database: fixture.database,
         configEnv: new Map(),
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn,
@@ -438,6 +445,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         database: fixture.database,
         configEnv,
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn
@@ -462,6 +470,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         database: fixture.database,
         configEnv,
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn
@@ -481,6 +490,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         database: fixture.database,
         configEnv: new Map(),
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn
@@ -494,6 +504,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
           ["ALAYA_LOCAL_CROSS_ENCODER_MODEL", "local/test-reranker"]
         ]),
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn
@@ -515,6 +526,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
           ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
         ]),
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn,
@@ -543,6 +555,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
           ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
         ]),
         eventLogRepo: fixture.eventLogRepo,
+          runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn

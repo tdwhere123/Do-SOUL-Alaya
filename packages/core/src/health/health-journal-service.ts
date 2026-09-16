@@ -34,6 +34,7 @@ export interface HealthJournalServiceRepoPort {
 export interface HealthJournalServiceEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  transactional<T>(fn: () => T): T;
 }
 
 export interface HealthJournalServiceRuntimeNotifierPort {
@@ -44,7 +45,7 @@ export interface HealthJournalServiceDependencies {
   readonly repo: HealthJournalServiceRepoPort;
   readonly eventLogRepo: HealthJournalServiceEventLogPort;
   readonly eventPublisher?: EventPublisher;
-  readonly runtimeNotifier?: HealthJournalServiceRuntimeNotifierPort;
+  readonly runtimeNotifier: HealthJournalServiceRuntimeNotifierPort;
   readonly generateEntryId?: () => string;
   readonly now?: () => string;
 }

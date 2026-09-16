@@ -146,6 +146,7 @@ export function createHarness(options: {
       queryByEntity: vi.fn(async (entityType, entityId) =>
         events.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
       ),
+      transactional: <T>(fn: () => T): T => fn(),
       queryByWorkspace: vi.fn(async (workspaceId) =>
         events.filter((event) => event.workspace_id === workspaceId)
       ),
