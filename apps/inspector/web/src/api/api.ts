@@ -17,21 +17,43 @@ import {
 import { unrefTimeout } from "./unref-timeout";
 
 let inspectorToken: string | null = null;
+let inspectorSessionReady = false;
 let currentWorkspaceId: string | null = null;
 let onUnauthorized: (() => void) | null = null;
 const workspaceIdListeners = new Set<() => void>();
 
 const INSPECTOR_TOKEN_STORAGE_KEY = "alaya-inspector-token";
+const INSPECTOR_SESSION_READY_STORAGE_KEY = "alaya-inspector-session-ready";
 const INSPECTOR_WORKSPACE_STORAGE_KEY = "alaya-inspector-workspace-id";
 
 export const setInspectorToken = (token: string) => {
   inspectorToken = token;
   if (token.trim().length === 0) {
+    inspectorSessionReady = false;
     sessionStorage.removeItem(INSPECTOR_TOKEN_STORAGE_KEY);
+    sessionStorage.removeItem(INSPECTOR_SESSION_READY_STORAGE_KEY);
     return;
   }
+  persistInspectorSessionReady();
   sessionStorage.setItem(INSPECTOR_TOKEN_STORAGE_KEY, token);
 };
+
+export const markInspectorSessionReady = (): void => {
+  persistInspectorSessionReady();
+};
+
+export const hasInspectorSession = (): boolean => {
+  if (inspectorSessionReady || sessionStorage.getItem(INSPECTOR_SESSION_READY_STORAGE_KEY) === "1") {
+    inspectorSessionReady = true;
+    return true;
+  }
+  return (getInspectorToken() ?? "").trim().length > 0;
+};
+
+function persistInspectorSessionReady(): void {
+  inspectorSessionReady = true;
+  sessionStorage.setItem(INSPECTOR_SESSION_READY_STORAGE_KEY, "1");
+}
 
 export const getInspectorToken = () => {
   if (inspectorToken !== null && inspectorToken.trim().length > 0) {
@@ -184,6 +206,7 @@ function buildRequestInit(
   return {
     ...rest,
     method,
+    credentials: "include",
     headers: {
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(token ? { "X-Alaya-Inspector-Token": token } : {}),

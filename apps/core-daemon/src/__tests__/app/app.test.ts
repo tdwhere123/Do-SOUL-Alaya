@@ -16,7 +16,9 @@ import {
 
 const testRequestProtection = {
   allowedOrigin: "http://localhost",
-  requestToken: "test-token"
+  requestToken: "test-token",
+  boundWorkspaceIds: "*" as const,
+  allowProcessSecretPatch: true
 } as const;
 
 function createProtectedTestApp(
@@ -259,6 +261,27 @@ describe("createApp", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ status: "ok" });
+  });
+
+  it("rejects process-level secret patch when the process grant is unconfigured", async () => {
+    const app = createApp({
+      requestProtection: {
+        allowedOrigin: "http://localhost",
+        requestToken: "test-token"
+      }
+    });
+
+    const response = await app.request("/config/runtime/embedding-supplement", {
+      method: "PATCH",
+      headers: withTestAuthHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ embedding_enabled: true })
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Process-level secret patch is not allowed"
+    });
   });
 
   it("registers typed route service bags on the Hono app", async () => {

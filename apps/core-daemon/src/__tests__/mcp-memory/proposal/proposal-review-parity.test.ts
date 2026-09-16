@@ -67,7 +67,8 @@ describe("proposal review inspector cli parity", () => {
     const daemonApp = createApp({
       requestProtection: {
         allowedOrigin: "http://localhost:5173",
-        requestToken: "daemon-request-token"
+        requestToken: "daemon-request-token",
+        boundWorkspaceIds: ["ws1"]
       },
       routes: {
         proposals: proposalRouteServices({

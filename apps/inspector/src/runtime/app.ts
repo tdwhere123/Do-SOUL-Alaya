@@ -80,7 +80,7 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
   const proxyOptions = createProxyOptions(options, env);
   const launchSessionStore = createInspectorLaunchSessionStore();
   registerLaunchSession(app, options, launchSessionStore);
-  registerInspectorMiddleware(app, options.token);
+  registerInspectorMiddleware(app, options.token, launchSessionStore);
   registerInspectorApiRoutes(app, options, proxyOptions);
   return app;
 }
@@ -92,17 +92,22 @@ function registerLaunchSession(
 ): void {
   const launchCode = normalizeOptionalSecret(options.launchCode);
   if (launchCode !== undefined) {
-    launchSessionStore.register(launchCode, options.token);
+    launchSessionStore.register(launchCode);
   }
   registerInspectorLaunchSessionRoutes(app, launchSessionStore);
 }
 
-function registerInspectorMiddleware(app: Hono, token: string): void {
+function registerInspectorMiddleware(
+  app: Hono,
+  token: string,
+  launchSessionStore: ReturnType<typeof createInspectorLaunchSessionStore>
+): void {
   registerRequestIdMiddleware(app);
   registerErrorHandler(app);
   app.use("*", createApiSecurityHeadersMiddleware());
   app.use("/api/*", createInspectorAuthMiddleware(token, {
-    publicRoutes: [{ path: "/api/launch-session", method: "POST" }]
+    publicRoutes: [{ path: "/api/launch-session", method: "POST" }],
+    hasSession: (sessionId) => launchSessionStore.hasSession(sessionId)
   }));
   app.use("*", async (context, next) => {
     if (isBodylessMethod(context.req.method)) {

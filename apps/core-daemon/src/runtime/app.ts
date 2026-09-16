@@ -87,7 +87,7 @@ export interface RequestProtectionConfig {
   readonly requestToken: string;
   readonly allowDesktopOriginlessRequests?: boolean;
   readonly tokenSource?: "env" | "ephemeral" | "rotated";
-  readonly boundWorkspaceIds?: readonly string[];
+  readonly boundWorkspaceIds?: readonly string[] | "*";
   readonly allowProcessSecretPatch?: boolean;
   readonly workspaceTokens?: readonly WorkspaceTokenBinding[];
 }

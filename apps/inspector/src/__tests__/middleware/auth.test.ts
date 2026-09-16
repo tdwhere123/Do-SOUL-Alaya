@@ -34,6 +34,25 @@ describe("inspector auth", () => {
     expect(constantTimeTokenEqual("short", "a-much-longer-token")).toBe(false);
   });
 
+  it("accepts a valid inspector session cookie without the process token", async () => {
+    const sessions = new Set(["session-1"]);
+    const app = new Hono();
+    app.use("*", createInspectorAuthMiddleware("secret-token", {
+      hasSession: (sessionId) => sessions.has(sessionId)
+    }));
+    app.get("/", (context) => context.json({ ok: true }));
+
+    const allowed = await app.request("/", {
+      headers: { cookie: "alaya_inspector_session=session-1" }
+    });
+    const expired = await app.request("/", {
+      headers: { cookie: "alaya_inspector_session=missing" }
+    });
+
+    expect(allowed.status).toBe(200);
+    expect(expired.status).toBe(401);
+  });
+
   it("allows only an exact public path and method", async () => {
     const app = new Hono();
     app.use("*", createInspectorAuthMiddleware("secret-token", {

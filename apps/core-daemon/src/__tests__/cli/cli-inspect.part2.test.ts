@@ -12,6 +12,7 @@ import {
   type BrowserOpenerChildProcess,
   type InspectorChildProcess
 } from "../../cli/inspect/inspect.js";
+import { INSPECTOR_LAUNCH_CODE_ENV } from "../../cli/inspect/inspect-constants.js";
 
 import type { AlayaCliContext } from "../../cli/bridge.js";
 
@@ -391,9 +392,9 @@ describe("cli inspect", () => {
       ALAYA_DAEMON_URL: "http://127.0.0.1:3000",
       ALAYA_REQUEST_TOKEN: "daemon-request-token",
       ALAYA_INSPECTOR_TOKEN: "b".repeat(64),
-      ALAYA_INSPECTOR_LAUNCH_CODE: "d".repeat(32),
       ALAYA_INSPECTOR_PORT: "5175",
       ALAYA_INSPECTOR_WORKSPACE_ID: "ws-1"
     });
+    expect(env).not.toHaveProperty(INSPECTOR_LAUNCH_CODE_ENV);
   });
 });

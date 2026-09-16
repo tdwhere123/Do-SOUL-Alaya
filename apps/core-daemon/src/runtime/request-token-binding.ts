@@ -22,7 +22,7 @@ export type WorkspaceTokenBinding = {
 export type RequestTokenProtection = {
   readonly requestToken: string;
   readonly tokenSource?: "env" | "ephemeral" | "rotated";
-  readonly boundWorkspaceIds?: readonly string[];
+  readonly boundWorkspaceIds?: readonly string[] | "*";
   readonly allowProcessSecretPatch?: boolean;
   readonly workspaceTokens?: readonly WorkspaceTokenBinding[];
 };
@@ -112,11 +112,9 @@ export function resolveRequestTokenGrants(
 ): readonly RequestTokenGrant[] {
   const processGrant: RequestTokenGrant = {
     token: protection.requestToken,
-    workspaceIds:
-      protection.boundWorkspaceIds === undefined
-        ? "*"
-        : protection.boundWorkspaceIds,
-    allowProcessSecretPatch: protection.allowProcessSecretPatch ?? true
+    // Unbound process tokens must not inherit all-workspace access.
+    workspaceIds: protection.boundWorkspaceIds ?? [],
+    allowProcessSecretPatch: protection.allowProcessSecretPatch ?? false
   };
   const workspaceGrants = (protection.workspaceTokens ?? []).map((binding) => ({
     token: binding.token,
@@ -210,12 +208,20 @@ function applyDefaultWorkspaceBinding<T extends RequestTokenProtection>(
   }) as T;
 }
 
-function workspaceIdsFromEnv(envLike: RequestProtectionEnvLike): readonly string[] | undefined {
+function workspaceIdsFromEnv(envLike: RequestProtectionEnvLike): readonly string[] | "*" | undefined {
+  const listedRaw = envLike.ALAYA_REQUEST_TOKEN_WORKSPACES?.trim();
+  if (listedRaw === "*") {
+    return "*";
+  }
   const listed = envLike.ALAYA_REQUEST_TOKEN_WORKSPACES?.split(",")
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
   if (listed !== undefined && listed.length > 0) {
     return listed;
+  }
+  const current = envLike.ALAYA_WORKSPACE_ID?.trim();
+  if (current !== undefined && current.length > 0) {
+    return [current];
   }
   return undefined;
 }

@@ -1,5 +1,10 @@
 import type { Context, Hono } from "hono";
-import type { InspectorLaunchSessionStore } from "../launch/launch-session-store.js";
+import { setCookie } from "hono/cookie";
+import {
+  INSPECTOR_SESSION_COOKIE,
+  INSPECTOR_SESSION_TTL_MS,
+  type InspectorLaunchSessionStore
+} from "../launch/launch-session-store.js";
 import {
   createLaunchSessionFailureLimiter,
   resolveLaunchSessionClientKey,
@@ -10,6 +15,7 @@ import {
 interface InspectorLaunchSessionRouteOptions extends LaunchSessionFailureLimiterOptions {
   readonly failureLimiter?: LaunchSessionFailureLimiter;
   readonly resolveClientKey?: (context: Context) => string;
+  readonly sessionTtlMs?: number;
 }
 
 export function registerInspectorLaunchSessionRoutes(
@@ -25,6 +31,10 @@ export function registerInspectorLaunchSessionRoutes(
       nowMs: options.nowMs
     });
   const resolveClientKey = options.resolveClientKey ?? resolveLaunchSessionClientKey;
+  const sessionMaxAgeSeconds = Math.max(
+    1,
+    Math.floor((options.sessionTtlMs ?? INSPECTOR_SESSION_TTL_MS) / 1000)
+  );
 
   app.post("/api/launch-session", async (context) => {
     const clientKey = resolveClientKey(context);
@@ -44,8 +54,8 @@ export function registerInspectorLaunchSessionRoutes(
       return context.json({ error: "invalid_request" }, 400);
     }
 
-    const token = launchSessionStore.redeem(code);
-    if (token === null) {
+    const sessionId = launchSessionStore.redeem(code);
+    if (sessionId === null) {
       failureLimiter.recordFailure(clientKey);
       if (failureLimiter.isLimited(clientKey)) {
         return context.json({ error: "rate_limited" }, 429);
@@ -54,7 +64,13 @@ export function registerInspectorLaunchSessionRoutes(
     }
 
     failureLimiter.reset(clientKey);
-    return context.json({ token });
+    setCookie(context, INSPECTOR_SESSION_COOKIE, sessionId, {
+      httpOnly: true,
+      sameSite: "Strict",
+      path: "/",
+      maxAge: sessionMaxAgeSeconds
+    });
+    return context.json({ ok: true });
   });
 }
 

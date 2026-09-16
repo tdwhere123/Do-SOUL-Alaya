@@ -84,8 +84,9 @@ async function executeInspect(
       return launchResult.result;
     }
     launch = launchResult.launch;
-    const opened = await maybeOpenInspectorUrl(args.open, launch.url, deps, ctx);
-    const printedUrl = opened ? inspectorUrlWithoutLaunchCode(launch.url) : launch.url;
+    await maybeOpenInspectorUrl(args.open, launch.url, deps, ctx);
+    // Redeemable codes must not appear on stdout; --open may still pass the fragment to the browser.
+    const printedUrl = inspectorUrlWithoutLaunchCode(launch.url);
     ctx.stdout.write(`${printedUrl}\n`);
     await waitForChildExitOrSignal(launch.child);
     return { exitCode: ALAYA_SYSEXITS.OK, json: { url: printedUrl, port: args.port } };

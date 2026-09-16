@@ -1,5 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Context, MiddlewareHandler, Next } from "hono";
+import { getCookie } from "hono/cookie";
+import { INSPECTOR_SESSION_COOKIE } from "../launch/launch-session-store.js";
 
 export interface InspectorPublicRoute {
   readonly path: string;
@@ -8,6 +10,7 @@ export interface InspectorPublicRoute {
 
 export interface InspectorAuthOptions {
   readonly publicRoutes?: readonly InspectorPublicRoute[];
+  readonly hasSession?: (sessionId: string) => boolean;
 }
 
 export function createInspectorAuthMiddleware(token: string, options: InspectorAuthOptions = {}): MiddlewareHandler {
@@ -16,9 +19,15 @@ export function createInspectorAuthMiddleware(token: string, options: InspectorA
     throw new Error("inspector_token_missing");
   }
   const publicRoutes = options.publicRoutes ?? [];
+  const hasSession = options.hasSession;
 
   return async (context: Context, next: Next) => {
     if (isPublicRoute(context.req.path, context.req.method, publicRoutes)) {
+      await next();
+      return;
+    }
+
+    if (hasValidInspectorSession(context, hasSession)) {
       await next();
       return;
     }
@@ -41,6 +50,17 @@ export function constantTimeTokenEqual(provided: string, expected: string): bool
   providedBuffer.copy(paddedProvided);
   expectedBuffer.copy(paddedExpected);
   return timingSafeEqual(paddedProvided, paddedExpected) && providedBuffer.length === expectedBuffer.length;
+}
+
+function hasValidInspectorSession(
+  context: Context,
+  hasSession: ((sessionId: string) => boolean) | undefined
+): boolean {
+  if (hasSession === undefined) {
+    return false;
+  }
+  const sessionId = normalizeToken(getCookie(context, INSPECTOR_SESSION_COOKIE));
+  return sessionId !== null && hasSession(sessionId);
 }
 
 function normalizeToken(value: string | undefined): string | null {

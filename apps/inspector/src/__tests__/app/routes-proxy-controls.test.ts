@@ -118,7 +118,7 @@ describe("inspector routes", () => {
   });
 
 
-  it("allows unauthenticated launch-session exchange", async () => {
+  it("allows unauthenticated launch-session exchange into an httpOnly cookie", async () => {
     const app = createInspectorApp({
       token: "secret-token",
       launchCode: "launch-code"
@@ -131,7 +131,23 @@ describe("inspector routes", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ token: "secret-token" });
+    expect(await response.json()).toEqual({ ok: true });
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    expect(setCookie).toMatch(/alaya_inspector_session=/);
+    expect(setCookie).toMatch(/HttpOnly/i);
+    expect(setCookie).not.toContain("secret-token");
+
+    const status = await app.request("/api/status", {
+      headers: { cookie: cookieHeaderFromSetCookie(setCookie) }
+    });
+    expect(status.status).not.toBe(401);
+
+    const replay = await app.request("/api/launch-session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: "launch-code" })
+    });
+    expect(replay.status).toBe(401);
   });
 
   it("serves static files, rejects traversal, and tolerates a missing frontend bundle", async () => {
@@ -426,3 +442,9 @@ describe("inspector routes", () => {
   });
 
 });
+
+function cookieHeaderFromSetCookie(setCookie: string): string {
+  const match = /alaya_inspector_session=[^;]+/.exec(setCookie);
+  expect(match).not.toBeNull();
+  return match?.[0] ?? "";
+}

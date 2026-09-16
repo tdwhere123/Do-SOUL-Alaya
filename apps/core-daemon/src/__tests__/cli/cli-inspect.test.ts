@@ -128,8 +128,10 @@ describe("cli inspect", () => {
 
     expect(result.exitCode).toBe(0);
     expect(stdoutChunks.join("")).toBe(
-      "http://127.0.0.1:5174/?workspaceId=ws-1#launch=cccccccccccccccccccccccccccccccc\n"
+      "http://127.0.0.1:5174/?workspaceId=ws-1\n"
     );
+    expect(stdoutChunks.join("")).not.toContain("#launch=");
+    expect(stdoutChunks.join("")).not.toContain("c".repeat(32));
     expect(stdoutChunks.join("")).not.toContain("#token=");
     expect(stdoutChunks.join("")).not.toContain("a".repeat(64));
   });

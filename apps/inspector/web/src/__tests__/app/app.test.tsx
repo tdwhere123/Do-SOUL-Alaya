@@ -45,7 +45,8 @@ function stubInspectorFetch(options?: {
       if (options?.onLaunchRedeem) {
         return options.onLaunchRedeem(code);
       }
-      return jsonResponse({ token: "test-token" });
+      expect(init?.credentials).toBe("include");
+      return jsonResponse({ ok: true });
     }
 
     if (url.includes("/status")) {
@@ -211,7 +212,7 @@ describe("AppContent", () => {
           return jsonResponse({ error: "already redeemed" }, 410);
         }
         expect(code).toBe("strict-launch-code");
-        return jsonResponse({ token: "strict-token" });
+        return jsonResponse({ ok: true });
       }
     });
 

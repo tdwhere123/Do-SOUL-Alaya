@@ -1,4 +1,5 @@
 import { serve, type ServerType } from "@hono/node-server";
+import { readInspectorLaunchProof } from "../launch/launch-proof.js";
 import { assertInspectorDaemonUrl } from "../routes/shared.js";
 import { createInspectorApp } from "./app.js";
 
@@ -49,7 +50,7 @@ export async function startInspectorServer(options: InspectorServerOptions = {})
     throw new Error("inspector_workspace_id_missing");
   }
 
-  const launchCode = env.ALAYA_INSPECTOR_LAUNCH_CODE?.trim();
+  const launchCode = readInspectorLaunchProof(env);
   if (!launchCode) {
     stderr.write("inspector_launch_code_missing\n");
     process.exitCode = 2;

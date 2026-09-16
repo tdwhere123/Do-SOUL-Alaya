@@ -29,6 +29,7 @@ describe("apiFetch", () => {
     );
     await apiFetch("/status");
     const [, init] = fetchMock.mock.calls[0];
+    expect((init as RequestInit).credentials).toBe("include");
     expect((init as RequestInit).headers).toMatchObject({
       "X-Alaya-Inspector-Token": "test-token"
     });
