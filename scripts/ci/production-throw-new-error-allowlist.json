@@ -1515,6 +1515,10 @@
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
+  "apps/core-daemon/src/background/bootstrap.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
   "apps/core-daemon/src/cli/inspect/inspect-browser.ts": {
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
@@ -1605,6 +1609,10 @@
   },
   "apps/core-daemon/src/mcp-memory/tool/tool-handler-dispatch.ts": {
     "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/routes/workspace/e2e-event-triggers.ts": {
+    "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/config/daemon-config-environment.ts": {
@@ -1721,6 +1729,10 @@
   },
   "apps/core-daemon/src/runtime/recall/worker-actual-cost.ts": {
     "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/request-token-binding.ts": {
+    "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/server-options.ts": {
