@@ -1,7 +1,6 @@
-import { type MemoryEntry } from "@do-soul/alaya-protocol";
+import { type MemoryEntry, readErrorMessage } from "@do-soul/alaya-protocol";
 
 import type { EmbeddingRecallTelemetry } from "./embedding-recall-telemetry.js";
-import { toErrorMessage } from "./helpers.js";
 import type {
   EmbeddingRecallRepoPort,
   EmbeddingVectorRecord,
@@ -62,7 +61,7 @@ export async function loadStoredVectors(params: {
       params.eligibleMemories.map((memory) => memory.object_id)
     );
   } catch (error) {
-    const message = toErrorMessage(error);
+    const message = readErrorMessage(error, "unknown_error");
     const warning = params.precheck
       ? "embedding supplement precheck failed"
       : "embedding supplement degraded";
@@ -109,7 +108,7 @@ export async function probeHasStoredVectors(params: {
     params.warn("embedding supplement precheck failed", {
       workspace_id: params.workspaceId,
       reason: "local_vector_lookup_failed",
-      error: toErrorMessage(error)
+      error: readErrorMessage(error, "unknown_error")
     });
     throw Object.assign(new Error("embedding supplement precheck failed"), {
       reason: "local_vector_lookup_failed"
@@ -180,7 +179,7 @@ export async function resolveQueryEmbeddingNowSafely(params: {
       workspace_id: params.workspaceId,
       run_id: params.runId,
       reason: "query_embedding_failed",
-      error: toErrorMessage(error)
+      error: readErrorMessage(error, "unknown_error")
     });
     await params.recordDegraded(
       {

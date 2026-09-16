@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
+import { readErrorMessage } from "@do-soul/alaya-protocol";
 
 import { QUERY_EMBEDDING_WARMUP_BATCH_SIZE } from "./constants.js";
 import {
   assertValidEmbeddingBatch,
   createPreparedEmbeddingQueryHandle,
-  toErrorMessage,
   waitForPreparedQuery
 } from "./helpers.js";
 import type {
@@ -100,7 +100,7 @@ export class QueryEmbeddingEngine {
           status: "failed",
           reason: "query_embedding_failed",
           error_name: error instanceof Error ? error.name : undefined,
-          error_message: toErrorMessage(error)
+          error_message: readErrorMessage(error, "unknown_error")
         });
       });
 
@@ -168,7 +168,7 @@ export class QueryEmbeddingEngine {
           );
         }
       } catch (error) {
-        lastError = toErrorMessage(error);
+        lastError = readErrorMessage(error, "unknown_error");
       }
     }
     return lastError;

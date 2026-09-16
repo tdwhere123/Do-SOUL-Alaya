@@ -1,10 +1,10 @@
+import { readErrorMessage } from "@do-soul/alaya-protocol";
 import {
   clamp01,
   cosineSimilarity,
   isFiniteNonzeroVector,
   isProviderMatchedEmbedding,
-  isUsableEmbeddingRecordVector,
-  toErrorMessage
+  isUsableEmbeddingRecordVector
 } from "./helpers.js";
 import type { QueryEmbeddingEngine } from "./query-embedding-engine.js";
 import type {
@@ -65,7 +65,7 @@ async function loadPoolVectors(
       workspace_id: params.workspaceId,
       run_id: params.runId,
       reason: "local_vector_lookup_failed",
-      error: toErrorMessage(error)
+      error: readErrorMessage(error, "unknown_error")
     });
     return null;
   }
@@ -81,7 +81,7 @@ async function resolvePoolQueryEmbeddingSafely(
       workspace_id: params.workspaceId,
       run_id: params.runId,
       reason: "query_embedding_failed",
-      error: toErrorMessage(error)
+      error: readErrorMessage(error, "unknown_error")
     });
     return null;
   }

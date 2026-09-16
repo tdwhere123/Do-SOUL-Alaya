@@ -1,4 +1,4 @@
-import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import { type MemoryEntry, readErrorMessage } from "@do-soul/alaya-protocol";
 import {
   EmbeddingBackfillPartialFailureError,
   hashMemoryContent,
@@ -6,7 +6,7 @@ import {
   type EmbeddedBackfillCandidate,
   type EmbeddingBackfillHandlerDependencies
 } from "../embedding-backfill-handler-shared.js";
-import { assertValidEmbeddingBatch, toErrorMessage } from "../helpers.js";
+import { assertValidEmbeddingBatch } from "../helpers.js";
 import type { EmbeddingVectorRecord } from "../types.js";
 
 interface PersistEmbeddedBatchParams {
@@ -94,7 +94,7 @@ function throwPersistenceFailure(
   objectId: string,
   error: unknown
 ): never {
-  const message = toErrorMessage(error);
+  const message = readErrorMessage(error, "unknown_error");
   params.auditEntries.push(`embedding_failed:persistence:${objectId}:${message}`);
   params.warn("embedding backfill upsert failed", {
     workspace_id: params.workspaceId,

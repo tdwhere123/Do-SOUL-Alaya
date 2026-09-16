@@ -5,15 +5,15 @@ import {
   type EventLogEntry,
   type GardenBacklogSnapshot,
   type GardenBacklogThresholds,
-  type GardenBacklogWarningTransition
+  type GardenBacklogWarningTransition,
+  readErrorMessage
 } from "@do-soul/alaya-protocol";
 import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
 import { bindEventPublisher } from "../runtime/event-publisher.js";
 import {
   delay,
   normalizeStopTimeoutMs,
-  raceWithTimeout,
-  toErrorMessage
+  raceWithTimeout
 } from "./garden-backlog-telemetry-service-helpers.js";
 import type {
   GardenBacklogTelemetryServiceDependencies,
@@ -83,7 +83,7 @@ export class GardenBacklogTelemetryService {
       await Promise.all([this.ensureCaptureRunner(), this.ensureSnapshotRunner()]);
     } catch (error) {
       this.warn("garden backlog telemetry poll failed", {
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
     }
   }
@@ -284,7 +284,7 @@ export class GardenBacklogTelemetryService {
       this.snapshotPublishRetryArmed = false;
     } catch (error) {
       this.warn("garden backlog snapshot publish failed", {
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
       this.scheduleSnapshotPublishRetry();
       return;
@@ -340,7 +340,7 @@ export class GardenBacklogTelemetryService {
       } catch (error) {
         this.warn("garden backlog warning event publish failed", {
           transition: signal.transition,
-          error: toErrorMessage(error)
+          error: readErrorMessage(error, "unknown_error")
         });
         return;
       }
@@ -415,7 +415,7 @@ export class GardenBacklogTelemetryService {
       this.snapshotRequestedVersion += 1;
       void this.ensureSnapshotRunner().catch((error) => {
         this.warn("garden backlog snapshot retry failed", {
-          error: toErrorMessage(error)
+          error: readErrorMessage(error, "unknown_error")
         });
       });
     });
@@ -433,7 +433,7 @@ export class GardenBacklogTelemetryService {
       await this.notifyEntry(entry);
     } catch (error) {
       this.warn("garden backlog snapshot notify failed", {
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
     }
   }
@@ -450,7 +450,7 @@ export class GardenBacklogTelemetryService {
     } catch (error) {
       this.warn("garden backlog warning notify failed", {
         transition: args.transition,
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
     }
 
@@ -469,7 +469,7 @@ export class GardenBacklogTelemetryService {
     } catch (error) {
       this.warn("garden backlog warning journal record failed", {
         transition: args.transition,
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
     }
   }

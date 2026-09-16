@@ -19,6 +19,7 @@ import {
   writeTextAtomic
 } from "../../runtime/config/storage-pointer-file.js";
 import { readBundle } from "./operations-bundle-reader.js";
+import { readErrorMessage } from "@do-soul/alaya-protocol";
 
 export type { AlayaOperationsService, ImportPreview, OperationAuditRecord, OperationName, OperationsBundle } from "./operations-types.js";
 export { AlayaOperationError } from "./operations-types.js";
@@ -191,7 +192,7 @@ async function finishImportAudit(
     artifact_path: null,
     bundle_path: audit.bundlePath,
     partial_state: restoredPaths,
-    error: error === null ? null : toErrorMessage(error)
+    error: error === null ? null : readOperationAuditError(error)
   });
 }
 
@@ -309,7 +310,7 @@ async function failArtifactOperationAudit(
     artifact_path: input.artifactPath,
     bundle_path: null,
     partial_state: [],
-    error: toErrorMessage(error)
+    error: readOperationAuditError(error)
   });
 }
 
@@ -351,6 +352,11 @@ async function readOptionalBuffer(filePath: string): Promise<Buffer | null> {
   }
 }
 
+function readOperationAuditError(error: unknown): string {
+  const message = readErrorMessage(error, "unknown_error").trim();
+  return message.length > 0 ? message : "unknown_error";
+}
+
 function normalizeOptionalPath(value: string | null | undefined): string | null {
   if (value === null || value === undefined) {
     return null;
@@ -361,14 +367,6 @@ function normalizeOptionalPath(value: string | null | undefined): string | null 
 
 function toFilenameTimestamp(isoTimestamp: string): string {
   return isoTimestamp.replace(/[:]/g, "-");
-}
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    const trimmed = error.message.trim();
-    return trimmed.length > 0 ? trimmed : "unknown_error";
-  }
-  return "unknown_error";
 }
 
 function isFsCode(error: unknown, code: string): boolean {

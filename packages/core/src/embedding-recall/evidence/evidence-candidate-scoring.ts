@@ -1,9 +1,9 @@
+import { readErrorMessage } from "@do-soul/alaya-protocol";
 import {
   assertValidEmbeddingBatch,
   clamp01,
   createCosineBatchScorer,
-  hashMemoryContent,
-  toErrorMessage
+  hashMemoryContent
 } from "../helpers.js";
 import { EVIDENCE_DOCUMENT_MAX_OPERATOR_ID } from "../constants.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
@@ -247,7 +247,7 @@ function failedScoring(
     run_id: params.runId,
     reason: "evidence_candidate_embedding_failed",
     failure_class: failureClass,
-    error: toErrorMessage(error)
+    error: readErrorMessage(error, "unknown_error")
   });
   return scoringResult(
     "failed", expectedCount, 0, inferenceCalls, startedAt, failureClass

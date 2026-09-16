@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { assertValidEmbeddingBatch, hashMemoryContent, toErrorMessage } from "../helpers.js";
+import { readErrorMessage } from "@do-soul/alaya-protocol";
+import { assertValidEmbeddingBatch, hashMemoryContent } from "../helpers.js";
 import type {
   EmbeddingProviderPort,
   EvidenceDocumentEmbeddingRecord,
@@ -44,7 +45,7 @@ export class EvidenceDocumentEmbeddingError extends Error {
     public readonly inferenceCalls: number,
     cause: unknown
   ) {
-    super(toErrorMessage(cause), { cause });
+    super(readErrorMessage(cause, "unknown_error"), { cause });
     this.name = "EvidenceDocumentEmbeddingError";
   }
 }
@@ -222,7 +223,7 @@ export class EvidenceDocumentEmbeddingEngine {
     this.warn("evidence document embedding store degraded", {
       workspace_id: workspaceId,
       phase,
-      error: toErrorMessage(error)
+      error: readErrorMessage(error, "unknown_error")
     });
   }
 
