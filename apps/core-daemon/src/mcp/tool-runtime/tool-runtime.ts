@@ -1,5 +1,4 @@
 import { CoreError } from "@do-soul/alaya-core";
-import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   ExecShellToolInputSchema,
   ExecShellToolResultSchema,
@@ -16,7 +15,6 @@ import {
   type ToolUseBlock,
 } from "@do-soul/alaya-protocol";
 import { createWarnLogger } from "../../runtime/daemon/lifecycle/daemon-runtime-helpers.js";
-import { constantTimeTokenEqual } from "../../shared/constant-time-token.js";
 import {
   builtinConversationToolRequiresConfirmation,
   isBuiltinConversationToolId
@@ -28,6 +26,7 @@ import {
   type GitBindingValidationOptions,
   type ValidatedBuiltinConversationToolCall
 } from "./tool-runtime-files.js";
+import { authorizeConfirmedBuiltinTool } from "./tool-confirmation.js";
 
 export type { GitBindingValidationOptions } from "./tool-runtime-files.js";
 export { registerConversationToolSpecs } from "./registration.js";
@@ -162,49 +161,6 @@ export async function handleConversationToolUse(
   }
 }
 
-function authorizeConfirmedBuiltinTool(
-  toolUse: ToolUseBlock,
-  configuredToken: string | undefined
-): { readonly ok: true; readonly input: Record<string, unknown> } | StructuredToolErrorResult {
-  const token = normalizeConfirmationToken(configuredToken ?? processEnvLookup().ALAYA_MCP_TOOL_CONFIRMATION_TOKEN);
-  if (token === null) {
-    return {
-      ok: false,
-      code: "CONFIRMATION_REQUIRED",
-      message:
-        `Tool ${toolUse.name} requires server-verifiable confirmation, but ` +
-        "ALAYA_MCP_TOOL_CONFIRMATION_TOKEN is not configured."
-    };
-  }
-
-  const input = isRecord(toolUse.input) ? toolUse.input : {};
-  const receipt = isRecord(input["_alaya_confirmation"]) ? input["_alaya_confirmation"] : null;
-  const confirmed = receipt?.["confirmed"] === true;
-  const providedToken = normalizeConfirmationToken(
-    typeof receipt?.["token"] === "string" ? receipt["token"] : undefined
-  );
-  if (!confirmed || providedToken === null || !constantTimeTokenEqual(providedToken, token)) {
-    return {
-      ok: false,
-      code: "CONFIRMATION_REQUIRED",
-      message: `Tool ${toolUse.name} requires a valid server-verifiable confirmation receipt.`
-    };
-  }
-
-  const { _alaya_confirmation: _confirmation, ...strippedInput } = input;
-  void _confirmation;
-  return { ok: true, input: strippedInput };
-}
-
-function normalizeConfirmationToken(value: string | undefined): string | null {
-  const trimmed = value?.trim() ?? "";
-  return trimmed.length === 0 ? null : trimmed;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 export async function executeConversationTool(
   toolId: string,
   input: unknown,
@@ -226,7 +182,9 @@ export async function executeConversationToolOrThrow(
         type: "tool_use",
         id: "catalog-exec",
         name: toolId,
-        input: isRecord(input) ? input : {}
+        input: (typeof input === "object" && input !== null && !Array.isArray(input)
+          ? { ...(input as Record<string, unknown>) }
+          : {}) as Record<string, unknown>
       },
       options.confirmationToken
     );

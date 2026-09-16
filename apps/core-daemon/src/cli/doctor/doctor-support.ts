@@ -8,6 +8,7 @@ import type { GardenCredentialProvenance } from "../../services/config/config-se
 import type { GraphHealthWarning } from "../../services/status/graph-health-service.js";
 import type { AlayaCliArgsSchema } from "../bridge.js";
 import { writeDoctorAuditSummary } from "./doctor-audit.js";
+import { ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW } from "../../attach/profile-mutation/profile-mutation.js";
 import type {
   DoctorArgs,
   DoctorBootstrapReconcileSummary,
@@ -161,6 +162,11 @@ export function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorR
   writeRecallGraphSummary(stream, report);
   writeDoctorAuditSummary(stream, report.audit);
   writeDoctorProfileSummary(stream, report);
+  if (report.confirmation_token_isolation === "executor_holds_token") {
+    stream.write(
+      "attached MCP executor holds ALAYA_MCP_TOOL_CONFIRMATION_TOKEN; confirmation belongs in an isolated confirmer.\n"
+    );
+  }
 }
 
 function createStorageSnapshot(
@@ -425,6 +431,13 @@ function writeLocalOnnxHostSingleFlightHint(stream: NodeJS.WritableStream): void
 
 function writeDoctorProfileSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {
   for (const profile of report.attached_profiles) {
+    if (profile.attached_preview === ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW) {
+      stream.write(
+        `attached profile (${profile.target}): MCP env must not contain ALAYA_MCP_TOOL_CONFIRMATION_TOKEN ` +
+          `(${profile.profile_path}).\n`
+      );
+      continue;
+    }
     if (profile.status === "drifted") {
       stream.write(
         `attached profile (${profile.target}): instructions DRIFTED — ` +

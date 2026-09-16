@@ -9,6 +9,8 @@ import type { PathPlasticityLookupTelemetrySnapshot } from "../../garden/path-pl
 import type { GardenCredentialProvenance } from "../../services/config/config-service.js";
 import type { ResolveSecretError } from "../../secrets/index.js";
 import { detectAttachedProfileInstructionsDrift, type ProfileInstructionsDriftReport, type ProfileTarget } from "../../attach/index.js";
+import { ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW } from "../../attach/profile-mutation/profile-mutation.js";
+import { attachedAgentEnvHoldsConfirmationToken } from "../../attach/attached-agent-mcp-child-env.js";
 import { ALAYA_SYSEXITS, type AlayaCliContext, type AlayaCliResult, type AlayaSubcommandSpec } from "../bridge.js";
 import { resolveCliWorkspaceContext } from "../support/workspace-context.js";
 import {
@@ -245,6 +247,7 @@ export interface DoctorReport {
   }>;
   readonly attached_profiles: ReadonlyArray<ProfileInstructionsDriftReport>;
   readonly audit: DoctorAuditSnapshot;
+  readonly confirmation_token_isolation: "ok" | "executor_holds_token";
   // Present only when --reconcile-bootstrap is requested.
   readonly bootstrap_reconcile?: DoctorBootstrapReconcileSummary;
   readonly checks: Readonly<Record<DoctorCheckName, DoctorCheckStatus>>;
@@ -309,7 +312,14 @@ async function buildDoctorReport(
     : null;
   const attachedProfiles = await readAttachedProfileDrift();
   const audit = readDoctorAuditSnapshot(services.storage.db_path);
-  const checks = buildDoctorChecks(startup.ready, services, bootstrapReconcileSummary, attachedProfiles, audit);
+  const checks = buildDoctorChecks(
+    startup.ready,
+    services,
+    bootstrapReconcileSummary,
+    attachedProfiles,
+    audit,
+    ctx.env
+  );
   return {
     checked_at: now(),
     overall: Object.values(checks).every((status) => status === "pass") ? "green" : "degraded",
@@ -337,6 +347,9 @@ async function buildDoctorReport(
     storage_growth: services.storageGrowth,
     attached_profiles: attachedProfiles,
     audit,
+    confirmation_token_isolation: attachedAgentEnvHoldsConfirmationToken(ctx.env)
+      ? "executor_holds_token"
+      : "ok",
     ...(bootstrapReconcileSummary === null ? {} : { bootstrap_reconcile: bootstrapReconcileSummary }),
     checks
   };
@@ -482,7 +495,8 @@ function buildDoctorChecks(
   services: Awaited<ReturnType<typeof readDoctorServices>>,
   bootstrapReconcileSummary: DoctorBootstrapReconcileSummary | null,
   attachedProfiles: readonly ProfileInstructionsDriftReport[],
-  audit: DoctorAuditSnapshot
+  audit: DoctorAuditSnapshot,
+  env: NodeJS.ProcessEnv
 ): Record<DoctorCheckName, DoctorCheckStatus> {
   return {
     runtime: daemonReady ? "pass" : "fail",
@@ -504,7 +518,11 @@ function buildDoctorChecks(
     bootstrap_reconcile: resolveBootstrapReconcileCheck(bootstrapReconcileSummary),
     config:
       doctorAuditCheckStatus(audit) === "pass" &&
-      attachedProfiles.every((profile) => profile.status !== "error")
+      attachedProfiles.every((profile) => profile.status !== "error") &&
+      attachedProfiles.every(
+        (profile) => profile.attached_preview !== ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW
+      ) &&
+      !attachedAgentEnvHoldsConfirmationToken(env)
         ? "pass"
         : "fail"
   };

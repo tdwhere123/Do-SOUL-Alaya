@@ -182,7 +182,7 @@ describe("cli registration", () => {
   // Cover the env-spoof guard on the MCP stdio path. ALAYA_AGENT_TARGET
   // values such as cli/inspector must not promote the attached LLM to a
   // human-reviewer surface; the env is sanitised at the boundary.
-  it("strips reviewer credentials and HTTP tokens from the MCP stdio child env", async () => {
+  it("strips reviewer credentials, HTTP tokens, and confirmation token from the MCP stdio child env", async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
     const stderr = new PassThrough();
@@ -193,7 +193,8 @@ describe("cli registration", () => {
       ALAYA_REVIEWER_TOKEN: "review-token",
       ALAYA_REVIEWER_IDENTITY: "user:reviewer",
       ALAYA_REQUEST_TOKEN: "http-token",
-      ALAYA_REQUEST_TOKEN_WORKSPACES: "workspace-1"
+      ALAYA_REQUEST_TOKEN_WORKSPACES: "workspace-1",
+      ALAYA_MCP_TOOL_CONFIRMATION_TOKEN: "confirm-secret"
     };
     const runtime = createRuntime({
       services: {
@@ -224,6 +225,7 @@ describe("cli registration", () => {
     expect(env.ALAYA_REVIEWER_IDENTITY).toBeUndefined();
     expect(env.ALAYA_REQUEST_TOKEN).toBeUndefined();
     expect(env.ALAYA_REQUEST_TOKEN_WORKSPACES).toBeUndefined();
+    expect(env.ALAYA_MCP_TOOL_CONFIRMATION_TOKEN).toBeUndefined();
   });
 
   it.each([
