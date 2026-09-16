@@ -36,7 +36,11 @@ function materializedSuccessEvent(signal: CandidateMemorySignal): EventLogEntry 
 
 function deferredTriageEvent(
   signal: CandidateMemorySignal,
-  extras: { readonly defer_class?: "source_grounding"; readonly defer_reason?: string } = {}
+  extras: {
+    readonly defer_class?: "source_grounding" | "write_path";
+    readonly defer_reason?: string;
+    readonly deferral?: "prewrite_unavailable" | "lease_busy";
+  } = {}
 ): EventLogEntry {
   return {
     event_id: "evt_triaged",
@@ -99,7 +103,7 @@ function createResumeService(input: {
 }
 
 describe("SignalService write-path deferred resume", () => {
-  it("rematerializes a deferred signal that already had a successful materialization event", async () => {
+  it("rematerializes a write-path deferred signal that already materialized successfully", async () => {
     const existing = createSignal({ signal_state: "deferred" });
     const materialize = vi.fn(async (signal: CandidateMemorySignal) => ({
       signal_id: signal.signal_id,
@@ -110,7 +114,14 @@ describe("SignalService write-path deferred resume", () => {
     }));
     const service = createResumeService({
       existing,
-      events: [emittedEvent(existing), materializedSuccessEvent(existing)],
+      events: [
+        emittedEvent(existing),
+        materializedSuccessEvent(existing),
+        deferredTriageEvent(existing, {
+          defer_class: "write_path",
+          deferral: "lease_busy"
+        })
+      ],
       materialize
     });
 
@@ -123,6 +134,25 @@ describe("SignalService write-path deferred resume", () => {
       success: true,
       target_kind: "evidence_only"
     });
+  });
+
+  it("does not rematerialize a deferred route that only has a successful materialized event", async () => {
+    const existing = createSignal({ signal_state: "deferred" });
+    const materialize = vi.fn(async () => {
+      throw new Error("non-write-path deferred routes must stay sticky");
+    });
+    const service = createResumeService({
+      existing,
+      events: [emittedEvent(existing), materializedSuccessEvent(existing), deferredTriageEvent(existing)],
+      materialize
+    });
+
+    const result = await service.receiveSignal(createSignal());
+
+    expect(materialize).not.toHaveBeenCalled();
+    expect(result.signal.signal_state).toBe("deferred");
+    expect(result.triage_result).toBe("deferred");
+    expect(result.materialization).toBeNull();
   });
 
   it("does not rematerialize a triage-deferred signal that never materialized", async () => {
@@ -167,5 +197,56 @@ describe("SignalService write-path deferred resume", () => {
     expect(materialize).not.toHaveBeenCalled();
     expect(result.signal.signal_state).toBe("deferred");
     expect(result.materialization).toBeNull();
+  });
+
+  it("records write_path deferral on the corrective triage event", async () => {
+    const appended: Array<Record<string, unknown>> = [];
+    const service = new SignalService({
+      eventLogRepo: {
+        append: vi.fn((event) => {
+          appended.push(event.payload_json as Record<string, unknown>);
+          return {
+            event_id: `evt_${appended.length}`,
+            created_at: "2026-03-18T00:00:03.000Z",
+            revision: appended.length,
+            ...event
+          };
+        }),
+        queryByEntity: vi.fn(async () => []),
+        transactional: <T>(fn: () => T) => fn()
+      },
+      signalRepo: {
+        create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" as const })),
+        getById: vi.fn(async () => null),
+        listByRun: vi.fn(async () => []),
+        ...atomicUpdateState()
+      },
+      runtimeNotifier: {
+        notifyEntry: vi.fn(async () => {})
+      },
+      postTriageMaterializer: {
+        materialize: vi.fn(async (signal: CandidateMemorySignal) => ({
+          signal_id: signal.signal_id,
+          target_kind: "deferred" as const,
+          routing_reason: "reconciliation deferred: lease held",
+          created_objects: [],
+          success: true as const,
+          defer_class: "write_path" as const,
+          deferral: "lease_busy" as const
+        }))
+      }
+    });
+
+    await service.receiveSignal(createSignal());
+
+    expect(appended).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          triage_result: "deferred",
+          defer_class: "write_path",
+          deferral: "lease_busy"
+        })
+      ])
+    );
   });
 });

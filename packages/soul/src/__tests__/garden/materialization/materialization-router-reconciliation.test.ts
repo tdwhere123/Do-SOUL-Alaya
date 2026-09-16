@@ -69,6 +69,8 @@ describe("MaterializationRouter ingest reconciliation", () => {
     expect(result.success).toBe(true);
     expect(result.target_kind).toBe("deferred");
     expect(result.route_target).toBe("deferred");
+    expect(result.defer_class).toBe("write_path");
+    expect(result.deferral).toBe("prewrite_unavailable");
     expect(appliedVerdicts).toEqual([]);
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.evidenceService.create).not.toHaveBeenCalled();
@@ -89,6 +91,8 @@ describe("MaterializationRouter ingest reconciliation", () => {
     expect(result.success).toBe(true);
     expect(result.target_kind).toBe("deferred");
     expect(result.route_target).toBe("deferred");
+    expect(result.defer_class).toBe("write_path");
+    expect(result.deferral).toBe("lease_busy");
     expect(appliedVerdicts).toEqual([]);
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.evidenceService.create).not.toHaveBeenCalled();

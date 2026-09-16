@@ -192,7 +192,9 @@ describe("post-turn evidence finalizer", () => {
           triage_result: "deferred" as const,
           materialization: {
             created_objects: [],
-            target_kind: "deferred"
+            target_kind: "deferred",
+            defer_class: "write_path" as const,
+            deferral: "lease_busy" as const
           }
         };
       }
@@ -228,6 +230,59 @@ describe("post-turn evidence finalizer", () => {
     expect(receiveSignal).toHaveBeenCalledTimes(2);
     expect(receiveSignal.mock.calls[0]?.[0]?.signal_id).toBe("candidate-1");
     expect(receiveSignal.mock.calls[1]?.[0]?.signal_id).toBe("candidate-1");
+  });
+
+  it("does not extra-retry a deferred candidate without write_path defer_class", async () => {
+    const receiveSignal = vi.fn(async (signal: CandidateMemorySignal) => ({
+      signal,
+      triage_result: "deferred" as const,
+      materialization: {
+        created_objects: [],
+        target_kind: "deferred"
+      }
+    }));
+
+    await finalizePostTurnEvidence({
+      taskId: "task-1",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      createdAt: CREATED_AT,
+      turnContent: "I use Atlas.",
+      turnMessages: [{ message_id: "a1", role: "assistant", content: "I use Atlas." }],
+      sourceObservation: {
+        observed_at: CREATED_AT,
+        authority: "trusted_host_event",
+        source_event_id: "event-1"
+      },
+      candidates: [{
+        signal_id: "candidate-1",
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        surface_id: null,
+        source: "garden_compile",
+        signal_kind: "potential_claim",
+        object_kind: "path_relation",
+        signal_state: "emitted",
+        scope_hint: "project",
+        domain_tags: [],
+        confidence: 0.9,
+        evidence_refs: [],
+        source_memory_refs: [],
+        supersedes_refs: [],
+        exception_to_refs: [],
+        contradicts_refs: [],
+        incompatible_with_refs: [],
+        created_at: CREATED_AT,
+        raw_payload: { gist: "I use Atlas." },
+        source_observation: null
+      } satisfies CandidateMemorySignal],
+      signalReceiver: {
+        receiveSignal,
+        hasCreatedEvidence: vi.fn(async () => true)
+      }
+    });
+
+    expect(receiveSignal).toHaveBeenCalledTimes(1);
   });
 
   it("does not extra-retry a source-grounding deferred candidate", async () => {

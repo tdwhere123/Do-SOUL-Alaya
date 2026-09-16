@@ -289,7 +289,7 @@ export class SignalService {
     if (events.some(isSourceGroundingDeferTriageEvent)) {
       return false;
     }
-    return events.some(isSuccessfulMaterializationEvent);
+    return events.some(isWritePathDeferTriageEvent) && events.some(isSuccessfulMaterializationEvent);
   }
 
   private async triageAndMaybeMaterialize(
@@ -413,6 +413,18 @@ function isSourceGroundingDeferTriageEvent(event: EventLogEntry): boolean {
   }
   const parsed = SoulSignalTriagedPayloadSchema.safeParse(event.payload_json);
   return parsed.success && parsed.data.defer_class === "source_grounding";
+}
+
+function isWritePathDeferTriageEvent(event: EventLogEntry): boolean {
+  if (event.event_type !== SignalEventType.SOUL_SIGNAL_TRIAGED) {
+    return false;
+  }
+  const parsed = SoulSignalTriagedPayloadSchema.safeParse(event.payload_json);
+  return (
+    parsed.success &&
+    parsed.data.defer_class === "write_path" &&
+    parsed.data.deferral !== undefined
+  );
 }
 
 function isSuccessfulMaterializationEvent(event: EventLogEntry): boolean {

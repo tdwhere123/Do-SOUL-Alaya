@@ -1,5 +1,8 @@
 import {
-  diagnosticWarn, readErrorMessage, type CandidateMemorySignal
+  diagnosticWarn,
+  readErrorMessage,
+  SignalDeferClass,
+  type CandidateMemorySignal
 } from "@do-soul/alaya-protocol";
 import type {
   MaterializationCreatedObject,
@@ -232,13 +235,20 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
       const decision = await this.runReconciledDecision(signal, port, state, context);
       if (decision.kind === "deferred") {
         // Retryable write-path deferral must not look like materialization
-        // failure: FAILED is terminal, while target_kind deferred is resumed.
+        // failure: FAILED is terminal. Stamp write_path so resume does not
+        // rematerialize other deferred routes that share target_kind deferred.
         return materializationSuccess({
           signal_id: signal.signal_id,
           target_kind: "deferred",
           route_target: "deferred",
           routing_reason: `${target.routing_reason} — reconciliation deferred: ${decision.reason}`,
-          created_objects: state.createdObjects
+          created_objects: state.createdObjects,
+          ...(decision.deferral === undefined
+            ? {}
+            : {
+                defer_class: SignalDeferClass.WRITE_PATH,
+                deferral: decision.deferral
+              })
         });
       }
       await this.finalizeReconciledAppend(signal, state, context);

@@ -45,7 +45,8 @@ export interface MaterializationTarget {
   readonly routing_reason: string;
   /** Structured fail-closed reason when kind is deferred for source grounding. */
   readonly defer_reason?: SourceGroundingDeferReason;
-  readonly defer_class?: "source_grounding";
+  readonly defer_class?: "source_grounding" | "write_path";
+  readonly deferral?: "prewrite_unavailable" | "lease_busy";
 }
 
 /** Immutable admission envelope plus separately trusted source observation. */
@@ -70,7 +71,8 @@ export interface MaterializationResultFields {
   readonly routing_reason: string;
   readonly created_objects: readonly MaterializationCreatedObject[];
   readonly defer_reason?: SourceGroundingDeferReason;
-  readonly defer_class?: "source_grounding";
+  readonly defer_class?: "source_grounding" | "write_path";
+  readonly deferral?: "prewrite_unavailable" | "lease_busy";
 }
 
 export interface MaterializationSuccessResult extends MaterializationResultFields {
@@ -381,7 +383,8 @@ export interface ConflictDetectionPort {
 //               evidence ref so durable content keeps matching evidence
 //   - noop   -> the router creates nothing; the drop is audited
 //   - deferred -> neighbor scan or lease was unavailable; the router
-//               creates nothing and reports failure so the caller can retry
+//               creates nothing and reports success with target_kind
+//               deferred plus write_path defer_class so the caller can retry
 
 // NOOP creating no object is what makes a re-seed of the same haystack
 // idempotent — no fresh capsule is minted to accumulate on the surviving
