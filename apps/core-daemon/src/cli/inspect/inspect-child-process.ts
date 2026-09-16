@@ -1,6 +1,7 @@
 import { spawn as spawnChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   INSPECTOR_CHILD_ENV_KEYS,
   INSPECTOR_STDERR_CAPTURE_LIMIT,
@@ -49,11 +50,11 @@ export function buildInspectorChildEnv(input: SpawnInspectorInput): NodeJS.Proce
 
 export function writeInheritedLaunchProof(stream: unknown, launchCode: string): void {
   if (stream === null || stream === undefined || typeof stream !== "object") {
-    throw new Error("inspector launch proof fd is unavailable");
+    throw new AlayaError("INTERNAL", "inspector launch proof fd is unavailable");
   }
   const writable = stream as { end?: (chunk: string) => void };
   if (typeof writable.end !== "function") {
-    throw new Error("inspector launch proof fd is unavailable");
+    throw new AlayaError("INTERNAL", "inspector launch proof fd is unavailable");
   }
   writable.end(`${launchCode}\n`);
 }

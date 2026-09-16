@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Context } from "hono";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
 import {
   isLoopbackHost,
@@ -259,7 +260,7 @@ export function bindProcessWorkspaceIds(
 ): void {
   const live = protection.liveWorkspaceGrant;
   if (live === undefined) {
-    throw new Error("process workspace grant cannot be bound on a snapshot");
+    throw new AlayaError("INTERNAL", "process workspace grant cannot be bound on a snapshot");
   }
   live.boundWorkspaceIds = Object.freeze(
     workspaceIds.map((id) => id.trim()).filter((id) => id.length > 0)

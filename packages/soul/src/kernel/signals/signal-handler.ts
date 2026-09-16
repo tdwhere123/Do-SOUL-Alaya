@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  AlayaError,
   CandidateMemorySignalInputSchema,
   CandidateMemorySignalSchema,
   SoulApplyOverrideRequestSchema,
@@ -314,5 +315,5 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal.reason !== undefined) {
     throw signal.reason;
   }
-  throw new Error("Aborted");
+  throw new AlayaError("ABORTED", "Aborted");
 }

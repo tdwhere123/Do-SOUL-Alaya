@@ -1743,10 +1743,6 @@
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/core-daemon/src/runtime/startup/recall-core-wiring.ts": {
-    "max": 1,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/core-daemon/src/runtime/temporal-cutover/cutover-apply.ts": {
     "max": 10,
     "reason": "remaining production throw new Error; convert to AlayaError family"
@@ -1781,10 +1777,6 @@
   },
   "apps/core-daemon/src/trust/state.ts": {
     "max": 2,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/inspector/src/middleware/auth.ts": {
-    "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/inspector/src/routes/shared.ts": {

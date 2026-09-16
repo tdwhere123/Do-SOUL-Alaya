@@ -1,5 +1,6 @@
 import type { SourceEnrichmentCapability } from "./source-enrichment-runtime.js";
 import {
+  AlayaError,
   DYNAMICS_CONSTANTS,
   GardenEventType,
   GardenRole,
@@ -364,7 +365,7 @@ async function detectBulkEnrichConflicts(
     strictNoDrop: true
   });
   if (scan.availability === "unavailable") {
-    throw new Error("conflict candidate scan unavailable");
+    throw new AlayaError("UNAVAILABLE", "conflict candidate scan unavailable");
   }
 }
 

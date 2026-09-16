@@ -1,4 +1,4 @@
-import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { AlayaError, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import process from "node:process";
 import { executeExtractionBatchFill } from "./fill/batch-fill.js";
 import { existsSync, realpathSync } from "node:fs";
@@ -142,7 +142,8 @@ export function assertCatalogRefillTestFailpointUnreachable(
   if (env[CATALOG_REFILL_TEST_FAILPOINT_ENV] === undefined) {
     return;
   }
-  throw new Error(
+  throw new AlayaError(
+    "INTERNAL",
     "catalog refill test failpoint is unreachable from the production entry"
   );
 }

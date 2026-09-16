@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type { ExtractionTargetSelectionReceipt } from
   "../authority/target-selection/receipt.js";
 import {
@@ -27,7 +28,8 @@ export function assertMaterializationTestFailpointUnreachable(
   if (env[MATERIALIZATION_TEST_FAILPOINT_ENV] === undefined) {
     return;
   }
-  throw new Error(
+  throw new AlayaError(
+    "INTERNAL",
     "materialization test failpoint is unreachable from the production entry"
   );
 }
