@@ -1,5 +1,5 @@
 import { Suspense, lazy, type ReactNode } from "react";
-import { Navigate, Route, Routes, useSearchParams } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useSearchParams } from "react-router-dom";
 import { getWorkspaceId } from "../api";
 import BenchTrendPage from "../pages/bench-trend";
 import GovernancePage from "../pages/governance";
@@ -29,9 +29,19 @@ export function InspectorRoutes() {
         <Route path="/health-inbox" element={<LegacyRedirect to="/governance" tab="health-inbox" />} />
         <Route path="/status" element={<LegacyRedirect to="/system" tab="status" />} />
         <Route path="/config" element={<LegacyRedirect to="/system" tab="config" />} />
-        <Route path="/" element={<Navigate to="/overview" replace />} />
+        <Route path="/" element={<OverviewRedirect />} />
       </Route>
     </Routes>
+  );
+}
+
+function OverviewRedirect() {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname: "/overview", search: location.search, hash: location.hash }}
+      replace
+    />
   );
 }
 

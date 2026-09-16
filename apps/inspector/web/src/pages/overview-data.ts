@@ -1,5 +1,5 @@
-import { useCallback } from "react";
-import { apiFetch } from "../api";
+import { useCallback, useSyncExternalStore } from "react";
+import { apiFetch, getWorkspaceId, subscribeWorkspaceId } from "../api";
 import { useApiQuery } from "../hooks/useApiQuery";
 
 export interface BenchSummaryShape {
@@ -67,12 +67,19 @@ export const EMPTY_BENCH_DATA: BenchSummaryData = {
 
 const OVERVIEW_RECALL_WINDOW_HOURS = 24 * 7;
 
-export function useOverviewData(workspaceId: string | null): OverviewQueryData {
+export function useOverviewData(): OverviewQueryData {
+  const workspaceId = useSyncExternalStore(
+    subscribeWorkspaceId,
+    getWorkspaceId,
+    getWorkspaceId
+  );
   const fetchOverviewData = useCallback(
     (signal: AbortSignal) => loadOverviewData(workspaceId, signal),
     [workspaceId]
   );
-  const { data } = useApiQuery(fetchOverviewData, [workspaceId]);
+  const { data } = useApiQuery(fetchOverviewData, [workspaceId], {
+    enabled: workspaceId !== null
+  });
   return {
     pendingCount: data?.pendingCount ?? null,
     recallStats: data?.recallStats ?? null,

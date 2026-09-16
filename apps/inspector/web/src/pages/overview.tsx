@@ -1,4 +1,3 @@
-import { getWorkspaceId } from "../api";
 import { useDaemonHealth } from "../hooks/useDaemonHealth";
 import { useI18n } from "../i18n/locale";
 import { useOverviewData } from "./overview-data";
@@ -12,7 +11,7 @@ import {
 export default function OverviewPage() {
   const { t } = useI18n();
   const health = useDaemonHealth();
-  const overview = useOverviewData(getWorkspaceId());
+  const overview = useOverviewData();
   const degradedMessage = health.state.kind === "degraded" ? health.state.message : null;
 
   return (

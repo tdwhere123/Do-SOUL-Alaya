@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import OverviewPage from "../../pages/overview";
 import { ToastProvider } from "../../components/toast";
@@ -106,6 +106,19 @@ describe("OverviewPage", () => {
 
   it("shows the pending memory count returned by the daemon", async () => {
     renderOverview();
+    await waitFor(() =>
+      expect(screen.getByTestId("overview-card-proposals").textContent).toContain("5")
+    );
+  });
+
+  it("loads the pending count after workspace is bound on an already-mounted overview", async () => {
+    setWorkspaceId(null);
+    renderOverview();
+    expect(await screen.findByTestId("overview-card-proposals")).toBeTruthy();
+    expect(screen.getByTestId("overview-card-proposals").textContent).toContain("—");
+    act(() => {
+      setWorkspaceId("ws1");
+    });
     await waitFor(() =>
       expect(screen.getByTestId("overview-card-proposals").textContent).toContain("5")
     );
