@@ -40,6 +40,7 @@ export interface FrozenBindingRequest {
   readonly source_assertions: readonly {
     readonly assertion_id: number;
     readonly text: string;
+    readonly occurrenceIdentity?: string;
   }[];
   readonly source_corpus_identity?: string;
   readonly message_ids?: readonly string[];
@@ -342,18 +343,17 @@ function migrateRestrictedUnits(
       unit.binding.locator.start === spec.locator!.start &&
       unit.binding.locator.end === spec.locator!.end);
   }
-  // Same corpus identity is not the same message occurrence. When the frozen
-  // message is known, keep same-corpus hits only if a current request carries
-  // that message; otherwise leave the slot lost rather than substituting.
+  // Same corpus identity is not the same message occurrence. Same-corpus hits
+  // stay only when a request that carries the frozen message packed this unit's
+  // current occurrence identity; assertion_id coincidence is not provenance.
   if (spec.sourceCorpusIdentity !== null) {
     const corpusHits = hits.filter((unit) =>
       unit.binding.sourceCorpusIdentity === spec.sourceCorpusIdentity);
     if (corpusHits.length > 0) {
-      if (spec.source_message_id === null) return corpusHits;
+      if (spec.source_message_id === null) return [];
+      const messageId = spec.source_message_id;
       return corpusHits.filter((unit) =>
-        (input.requests ?? []).some((request) =>
-          requestHasMessage(request, spec.source_message_id!) &&
-          requestIncludesUnit(request, unit)));
+        unitPackedInFrozenMessage(unit, messageId, input));
     }
   }
   if (spec.source_message_id === null) return [];
@@ -378,6 +378,18 @@ function corporaForMessage(
 function requestHasMessage(request: FrozenBindingRequest, messageId: string): boolean {
   if (request.message_ids?.includes(messageId) === true) return true;
   return request.sourceTurn?.turnMessages.some((message) => message.message_id === messageId) === true;
+}
+
+function unitPackedInFrozenMessage(
+  unit: FrozenCatalogUnit,
+  messageId: string,
+  input: FrozenSourceBindingInput
+): boolean {
+  const occurrenceIdentity = unit.binding.occurrenceIdentity;
+  if (occurrenceIdentity === undefined || occurrenceIdentity.length === 0) return false;
+  return (input.requests ?? []).some((request) =>
+    requestHasMessage(request, messageId) &&
+    request.source_assertions.some((assertion) => assertion.occurrenceIdentity === occurrenceIdentity));
 }
 
 function unitMatchesRestriction(

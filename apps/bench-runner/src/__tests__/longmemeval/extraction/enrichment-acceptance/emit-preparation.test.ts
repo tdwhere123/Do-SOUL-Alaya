@@ -153,30 +153,32 @@ function writeMiniaturePopulation(directory: string): void {
       };
     })
   };
+  const requests = Array.from({ length: 16 }, (_, index) => {
+    const canonicalIndex = index + 1;
+    return {
+      canonical_index: canonicalIndex,
+      key: canonicalIndex.toString(16).padStart(64, "0"),
+      assertion_reviews: Array.from({ length: dual.has(canonicalIndex) ? 2 : 1 }, (__, offset) => {
+        const assertionId = offset + 1;
+        const classification = requiredCanonical.has(`${canonicalIndex}:${assertionId}`)
+          ? "in_scope_durable_proposition"
+          : "legitimate_abstention_candidate";
+        return {
+          key: canonicalIndex.toString(16).padStart(64, "0"),
+          assertion_id: assertionId,
+          exact_text: `canonical ${canonicalIndex} ${assertionId}.`,
+          source_message_ids: ["canonical-msg"],
+          occurrence_bindings: [{ occurrenceIdentity: "cc".repeat(32) }],
+          classification,
+          coverage: ["retain roots"],
+          forbidden: ["invent citizenship"]
+        };
+      })
+    };
+  });
   const canonical = {
-    requests: Array.from({ length: 16 }, (_, index) => {
-      const canonicalIndex = index + 1;
-      return {
-        canonical_index: canonicalIndex,
-        key: canonicalIndex.toString(16).padStart(64, "0"),
-        assertion_reviews: Array.from({ length: dual.has(canonicalIndex) ? 2 : 1 }, (__, offset) => {
-          const assertionId = offset + 1;
-          const classification = requiredCanonical.has(`${canonicalIndex}:${assertionId}`)
-            ? "in_scope_durable_proposition"
-            : "legitimate_abstention_candidate";
-          return {
-            key: canonicalIndex.toString(16).padStart(64, "0"),
-            assertion_id: assertionId,
-            exact_text: `canonical ${canonicalIndex} ${assertionId}.`,
-            source_message_ids: ["canonical-msg"],
-            occurrence_bindings: [{ occurrenceIdentity: "cc".repeat(32) }],
-            classification,
-            coverage: ["retain roots"],
-            forbidden: ["invent citizenship"]
-          };
-        })
-      };
-    })
+    canonical_sample_keys: requests.map((request) => request.key),
+    requests
   };
   writeFileSync(join(directory, "regression-source-review.json"), JSON.stringify(regression));
   writeFileSync(join(directory, "canonical-source-review.json"), JSON.stringify(canonical));

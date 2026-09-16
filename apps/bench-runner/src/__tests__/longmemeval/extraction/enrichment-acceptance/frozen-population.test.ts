@@ -105,6 +105,37 @@ describe("frozen enrichment population", () => {
     expect((thrown as Error).name).toBe("FrozenPopulationMembershipError");
   });
 
+  it("rejects swapped canonical request keys even when indexes and local membership stay 1-16", () => {
+    const population = validPopulation();
+    const left = population.canonical.requests[2]! as {
+      key: string;
+      assertion_reviews: { key: string }[];
+    };
+    const right = population.canonical.requests[3]! as {
+      key: string;
+      assertion_reviews: { key: string }[];
+    };
+    const leftKey = left.key;
+    const rightKey = right.key;
+    left.key = rightKey;
+    for (const review of left.assertion_reviews) review.key = rightKey;
+    right.key = leftKey;
+    for (const review of right.assertion_reviews) review.key = leftKey;
+    root = writePopulation(population);
+    let thrown: unknown;
+    try {
+      loadFrozenEnrichmentPopulation({
+        regressionPath: join(root, "regression-source-review.json"),
+        canonicalPath: join(root, "canonical-source-review.json")
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(FrozenPopulationMembershipError);
+    expect(thrown).not.toBeInstanceOf(FrozenPopulationCountError);
+    expect((thrown as Error).message).toMatch(/canonical_sample_keys/u);
+  });
+
   it("rejects canonical request 3 replaced by a clone of request 2 even when classification totals still match 38/15/21/2", () => {
     const population = validPopulation();
     const clone = structuredClone(population.canonical.requests[1]!) as {
@@ -171,7 +202,7 @@ describe("frozen enrichment population", () => {
 
 function validPopulation(): {
   regression: { assertions: Record<string, unknown>[] };
-  canonical: { requests: Record<string, unknown>[] };
+  canonical: { canonical_sample_keys: string[]; requests: Record<string, unknown>[] };
 } {
   const regressionAssertions = Array.from({ length: 16 }, (_, index) => {
     const assertionId = index + 1;
@@ -224,7 +255,13 @@ function validPopulation(): {
       })
     };
   });
-  return { regression: { assertions: regressionAssertions }, canonical: { requests } };
+  return {
+    regression: { assertions: regressionAssertions },
+    canonical: {
+      canonical_sample_keys: requests.map((request) => request.key),
+      requests
+    }
+  };
 }
 
 function writePopulation(population: ReturnType<typeof validPopulation>): string {

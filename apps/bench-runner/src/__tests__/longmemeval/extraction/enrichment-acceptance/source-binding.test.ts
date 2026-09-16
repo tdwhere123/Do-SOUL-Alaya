@@ -281,10 +281,7 @@ describe("frozen source binding", () => {
         key: "request-local",
         source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
         message_ids: ["msg-1"],
-        source_assertions: units.map((unit) => ({
-          assertion_id: unit.assertionId,
-          text: unit.text
-        }))
+        source_assertions: rotated.map(packedAssertion)
       }]
     });
     expect(binding.status).toBe("bound");
@@ -319,10 +316,7 @@ describe("frozen source binding", () => {
         key: "request-local",
         source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
         message_ids: ["msg-1"],
-        source_assertions: rotated.map((unit) => ({
-          assertion_id: unit.assertionId,
-          text: unit.text
-        }))
+        source_assertions: rotated.map(packedAssertion)
       }]
     });
     expect(binding.status).toBe("ambiguous");
@@ -363,10 +357,7 @@ describe("frozen source binding", () => {
         key: "request-local",
         source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
         message_ids: ["msg-1"],
-        source_assertions: rotated.map((unit) => ({
-          assertion_id: unit.assertionId,
-          text: unit.text
-        }))
+        source_assertions: rotated.map(packedAssertion)
       }]
     });
     expect(binding.status).toBe("ambiguous");
@@ -421,10 +412,7 @@ describe("frozen source binding", () => {
         key: "request-local",
         source_corpus_identity: u1.binding.sourceCorpusIdentity,
         message_ids: ["msg-1"],
-        source_assertions: [
-          { assertion_id: 1, text: u1.text },
-          { assertion_id: 2, text: u2.text }
-        ]
+        source_assertions: [packedAssertion(u1), packedAssertion(u2)]
       }]
     });
     expect(binding.status).toBe("ambiguous");
@@ -448,10 +436,7 @@ describe("frozen source binding", () => {
         key: "request-local",
         source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
         message_ids: ["msg-1"],
-        source_assertions: [{
-          assertion_id: rotated[0]!.assertionId,
-          text: rotated[0]!.text
-        }]
+        source_assertions: [packedAssertion(rotated[0]!)]
       }]
     });
     expect(binding.status).toBe("ambiguous");
@@ -497,10 +482,7 @@ describe("frozen source binding", () => {
         key: "request-local",
         source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
         message_ids: ["msg-1"],
-        source_assertions: catalog.map((unit) => ({
-          assertion_id: unit.assertionId,
-          text: unit.text
-        }))
+        source_assertions: catalog.map(packedAssertion)
       }]
     });
     expect(binding.status).toBe("ambiguous");
@@ -647,6 +629,52 @@ describe("frozen source binding", () => {
         end: original.binding.locator.end
       }
     });
+    const packedOriginal = {
+      key: "request-original",
+      source_corpus_identity: original.binding.sourceCorpusIdentity,
+      message_ids: ["original-message"],
+      source_assertions: [{
+        assertion_id: original.assertionId,
+        text: original.text,
+        occurrenceIdentity: original.binding.occurrenceIdentity
+      }]
+    };
+    const packedForeign = {
+      key: "request-foreign",
+      source_corpus_identity: foreign.binding.sourceCorpusIdentity,
+      message_ids: ["foreign-message"],
+      source_assertions: [{
+        assertion_id: foreign.assertionId,
+        text: foreign.text,
+        occurrenceIdentity: foreign.binding.occurrenceIdentity
+      }]
+    };
+    const frozenRow = row({
+      occurrence: {
+        source_message_ids: ["original-message"],
+        source_locator: original.binding.locator,
+        source_occurrence_identity: original.binding.occurrenceIdentity ?? null,
+        occurrence_bindings: [{
+          occurrenceIdentity: original.binding.occurrenceIdentity,
+          sourceCorpusIdentity: original.binding.sourceCorpusIdentity,
+          locator: original.binding.locator,
+          source_message_id: "original-message"
+        }]
+      }
+    });
+    const withOriginalRequest = bindFrozenAssertionToCurrentSource(frozenRow, {
+      catalogUnits: [foreign],
+      requests: [packedOriginal]
+    });
+    expect(withOriginalRequest.status).toBe("unbound");
+    expect(withOriginalRequest.current).toEqual([]);
+    const withBothRequests = bindFrozenAssertionToCurrentSource(frozenRow, {
+      catalogUnits: [foreign],
+      requests: [packedOriginal, packedForeign]
+    });
+    expect(withBothRequests.status).toBe("unbound");
+    expect(withBothRequests.current).toEqual([]);
+    expect(withBothRequests.occurrences[0]?.reason).not.toMatch(/migrated through native source identity/u);
   });
 
   it("does not widen to same-text when a frozen locator restriction has zero hits", () => {
@@ -688,6 +716,20 @@ describe("frozen source binding", () => {
     expect(unavailable.current[0]?.request_keys).toEqual([]);
   });
 });
+
+function packedAssertion(unit: FrozenCatalogUnit): {
+  assertion_id: number;
+  text: string;
+  occurrenceIdentity?: string;
+} {
+  return {
+    assertion_id: unit.assertionId,
+    text: unit.text,
+    ...(unit.binding.occurrenceIdentity === undefined
+      ? {}
+      : { occurrenceIdentity: unit.binding.occurrenceIdentity })
+  };
+}
 
 function twoOccurrenceUnits(): FrozenCatalogUnit[] {
   const locator = { start: 0, end: text.length };

@@ -228,7 +228,7 @@ function composeRow(
   const nativeCells = Object.freeze(
     materializeMissingExpectedRequestCells(
       row,
-      unique,
+      current,
       natives.filter((item) => nativeOutcomeMatches(item, row, binding))
     )
   );
@@ -311,20 +311,22 @@ function currentIdentityAgrees(
 
 function materializeMissingExpectedRequestCells(
   row: FrozenAssertion,
-  current: FrozenBoundCurrentSource | null,
+  current: readonly FrozenBoundCurrentSource[],
   attributed: readonly EnrichmentBoundNativeOutcome[]
 ): readonly EnrichmentBoundNativeOutcome[] {
-  if (current === null || current.request_keys === null) return attributed;
+  const expectedKeys = expectedRequestKeys(current);
+  if (expectedKeys === null) return attributed;
   const accounted = new Set(
     attributed.flatMap((item) => item.request_key === undefined ? [] : [item.request_key])
   );
-  const missing = current.request_keys.flatMap((key) => {
+  const assertionId = uniqueAssertionId(current);
+  const missing = expectedKeys.flatMap((key) => {
     if (accounted.has(key)) return [];
     accounted.add(key);
     return [Object.freeze({
       annotation_pointer: row.annotation_pointer,
       request_key: key,
-      current_assertion_id: current.assertion_id,
+      ...(assertionId === null ? {} : { current_assertion_id: assertionId }),
       request_ordinal: null,
       candidate_ordinal: null,
       raw_state: "missing" as const,
@@ -332,6 +334,30 @@ function materializeMissingExpectedRequestCells(
     })];
   });
   return missing.length === 0 ? attributed : [...attributed, ...missing];
+}
+
+function expectedRequestKeys(
+  current: readonly FrozenBoundCurrentSource[]
+): readonly string[] | null {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  let sawList = false;
+  for (const item of current) {
+    if (item.request_keys === null) continue;
+    sawList = true;
+    for (const key of item.request_keys) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      keys.push(key);
+    }
+  }
+  return sawList ? Object.freeze(keys) : null;
+}
+
+function uniqueAssertionId(current: readonly FrozenBoundCurrentSource[]): number | null {
+  if (current.length === 0) return null;
+  const first = current[0]!.assertion_id;
+  return current.every((item) => item.assertion_id === first) ? first : null;
 }
 
 function indexBindings(

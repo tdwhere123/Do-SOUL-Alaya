@@ -260,7 +260,7 @@ function frozenRow(exactText: string, overrides: Partial<FrozenAssertion> = {}):
 
 function validMiniaturePopulation(): {
   regression: { assertions: Record<string, unknown>[] };
-  canonical: { requests: Record<string, unknown>[] };
+  canonical: { canonical_sample_keys: string[]; requests: Record<string, unknown>[] };
 } {
   const regressionAssertions = Array.from({ length: 16 }, (_, index) => {
     const assertionId = index + 1;
@@ -313,7 +313,13 @@ function validMiniaturePopulation(): {
       })
     };
   });
-  return { regression: { assertions: regressionAssertions }, canonical: { requests } };
+  return {
+    regression: { assertions: regressionAssertions },
+    canonical: {
+      canonical_sample_keys: requests.map((request) => request.key),
+      requests
+    }
+  };
 }
 
 function writeMiniaturePopulation(population: ReturnType<typeof validMiniaturePopulation>): string {

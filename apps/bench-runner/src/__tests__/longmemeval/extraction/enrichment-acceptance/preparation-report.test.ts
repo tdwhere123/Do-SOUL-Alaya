@@ -587,4 +587,45 @@ describe("enrichment preparation report", () => {
     expect(prepared?.native_cells.some((cell) => cell.request_key === "unselected-request")).toBe(false);
     expect(report.native_formation_publication.unmatched_native_outcomes).toEqual([]);
   });
+
+  it("materializes missing cells from the union of current request keys when a row has two occurrences", () => {
+    const units = twoOccurrenceUnits();
+    const frozen = twoOccurrenceRow(units);
+    const bindings = bindFrozenPopulation([frozen], {
+      catalogUnits: units,
+      requests: [
+        {
+          key: "first-request",
+          source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+          source_assertions: [{ assertion_id: units[0]!.assertionId, text: units[0]!.text }]
+        },
+        {
+          key: "second-request",
+          source_corpus_identity: units[1]!.binding.sourceCorpusIdentity,
+          source_assertions: [{ assertion_id: units[1]!.assertionId, text: units[1]!.text }]
+        }
+      ]
+    });
+    expect(bindings.bindings[0]?.current).toHaveLength(2);
+    const report = composeEnrichmentPreparationReport({
+      population: { rows: [frozen] },
+      bindings,
+      preflight: null,
+      nativeOutcomes: [{
+        request_key: "first-request",
+        current_assertion_id: units[0]!.assertionId,
+        request_ordinal: 0,
+        candidate_ordinal: 0,
+        raw_state: "valid-empty",
+        machine_admission: "valid-empty",
+        located_outcome: "empty"
+      }]
+    });
+    const prepared = report.source_fidelity.rows[0];
+    expect(prepared?.native_cells.map((cell) => cell.request_key))
+      .toEqual(["first-request", "second-request"]);
+    expect(prepared?.native_cells.map((cell) => cell.raw_state))
+      .toEqual(["valid-empty", "missing"]);
+    expect(prepared?.raw_state).toBe("partial");
+  });
 });

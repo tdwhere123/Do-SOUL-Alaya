@@ -187,12 +187,15 @@ function readCanonicalRows(filePath: string, document: Record<string, unknown>):
   if (!Array.isArray(requests) || requests.length !== CANONICAL_REQUEST_INDEXES.length) {
     throw new TypeError("canonical annotations must contain 16 requests");
   }
+  const sampleKeys = readCanonicalSampleKeys(document);
   const file = basename(filePath);
   const rows: FrozenAssertion[] = [];
+  const observedKeys: string[] = [];
   for (const requestValue of requests) {
     const request = asRecord(requestValue, "canonical request");
     const canonicalIndex = readPositiveInt(request.canonical_index, "canonical_index");
     const requestKey = readString(request.key, "canonical key");
+    observedKeys.push(requestKey);
     const reviews = request.assertion_reviews;
     if (!Array.isArray(reviews)) {
       throw new TypeError("canonical request is missing assertion_reviews");
@@ -203,7 +206,12 @@ function readCanonicalRows(filePath: string, document: Record<string, unknown>):
       const classification = mapFrozenClassification(review.classification);
       const exactText = readString(review.exact_text, "canonical exact_text");
       const semanticReview = readSemanticReview(review);
-      const reviewKey = readString(review.key ?? requestKey, "canonical review key");
+      if (typeof review.key !== "string" || review.key.length === 0) {
+        throw new FrozenPopulationMembershipError(
+          `canonical assertion review is missing key at canonical_index ${canonicalIndex}`
+        );
+      }
+      const reviewKey = readString(review.key, "canonical review key");
       if (reviewKey !== requestKey) {
         throw new FrozenPopulationMembershipError(
           `canonical assertion review key does not match parent request key at canonical_index ${canonicalIndex}`
@@ -240,7 +248,25 @@ function readCanonicalRows(filePath: string, document: Record<string, unknown>):
       }));
     }
   }
+  if (
+    observedKeys.length !== sampleKeys.length
+    || observedKeys.some((key, index) => key !== sampleKeys[index])
+  ) {
+    throw new FrozenPopulationMembershipError(
+      "canonical request keys do not match canonical_sample_keys inventory"
+    );
+  }
   return Object.freeze(rows);
+}
+
+function readCanonicalSampleKeys(document: Record<string, unknown>): readonly string[] {
+  const keys = document.canonical_sample_keys;
+  if (!Array.isArray(keys) || keys.length !== CANONICAL_REQUEST_INDEXES.length) {
+    throw new FrozenPopulationMembershipError(
+      "canonical annotations must contain 16 canonical_sample_keys"
+    );
+  }
+  return Object.freeze(keys.map((key, index) => readString(key, `canonical_sample_keys[${index}]`)));
 }
 
 function regressionRequiredGroupId(
