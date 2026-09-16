@@ -12,6 +12,7 @@ import {
   type BrowserOpenerChildProcess,
   type InspectorChildProcess
 } from "../../cli/inspect/inspect.js";
+import { INSPECTOR_LAUNCH_CODE_ENV } from "../../cli/inspect/inspect-constants.js";
 
 import type { AlayaCliContext } from "../../cli/bridge.js";
 
@@ -334,7 +335,7 @@ describe("cli inspect", () => {
   });
 
   it("prefers Windows browser bridge candidates when running in WSL", () => {
-    const launchUrl = "http://127.0.0.1:5174/?workspaceId=ws-1#launch=launch-code";
+    const launchUrl = "http://127.0.0.1:5174/?workspaceId=ws-1";
     expect(
       openCommandCandidates(launchUrl, {
         os: "linux",
@@ -349,7 +350,7 @@ describe("cli inspect", () => {
 
   it("falls back to the next browser opener when the first command is missing", async () => {
     const attempts: string[] = [];
-    const launchUrl = "http://127.0.0.1:5174/?workspaceId=ws-1#launch=launch-code";
+    const launchUrl = "http://127.0.0.1:5174/?workspaceId=ws-1";
 
     await openUrlWithSpawn(launchUrl, {
       env: { WSL_INTEROP: "/run/WSL/1_interop" },
@@ -390,10 +391,10 @@ describe("cli inspect", () => {
     expect(env).toEqual({
       ALAYA_DAEMON_URL: "http://127.0.0.1:3000",
       ALAYA_REQUEST_TOKEN: "daemon-request-token",
-      ALAYA_INSPECTOR_TOKEN: "b".repeat(64),
-      ALAYA_INSPECTOR_LAUNCH_CODE: "d".repeat(32),
       ALAYA_INSPECTOR_PORT: "5175",
       ALAYA_INSPECTOR_WORKSPACE_ID: "ws-1"
     });
+    expect(env).not.toHaveProperty("ALAYA_INSPECTOR_TOKEN");
+    expect(env).not.toHaveProperty(INSPECTOR_LAUNCH_CODE_ENV);
   });
 });

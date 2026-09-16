@@ -4,6 +4,7 @@ import type { CoreDaemonLifecycleState, RequestProtectionConfig } from "../../ap
 import { closeDaemonSqliteWriteQueue } from "../../startup/database.js";
 import { closeServer, finalizeServerClose, type CloseableHttpServer } from "./daemon-server-close.js";
 import { processEnvLookup } from "../../config/daemon-config-environment.js";
+import { bindProcessWorkspaceIds as bindRequestProtectionWorkspaceIds } from "../../request-token-binding.js";
 import {
   clearSignalShutdownTimeout,
   installSignalShutdownHandler,
@@ -258,7 +259,14 @@ function createHttpServerStarter(
       input.warnLogger.warn(message, {});
     });
     logListeningAddress(input, hostname, port, policy.kind === "unix" ? policy.path : undefined);
-    return Object.freeze({ hostname, port, close: shutdown });
+    return Object.freeze({
+      hostname,
+      port,
+      bindProcessWorkspaceIds: (workspaceIds: readonly string[]) => {
+        bindRequestProtectionWorkspaceIds(input.requestProtection, workspaceIds);
+      },
+      close: shutdown
+    });
   };
 }
 

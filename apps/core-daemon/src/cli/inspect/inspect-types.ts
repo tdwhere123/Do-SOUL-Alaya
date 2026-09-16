@@ -42,6 +42,7 @@ export interface InspectDaemonListenOptions {
 export interface InspectDaemonServer {
   readonly hostname: string;
   readonly port: number;
+  bindProcessWorkspaceIds?(workspaceIds: readonly string[]): void;
   close(): Promise<void>;
 }
 

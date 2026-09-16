@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyRemoteBindTokenRotation,
   authorizeProtectedRequest,
+  bindProcessWorkspaceIds,
+  ensureLiveWorkspaceGrant,
   extractWorkspaceIdFromUnknown,
   type RequestTokenProtection
 } from "../../runtime/request-token-binding.js";
@@ -127,12 +129,61 @@ describe("request token workspace binding", () => {
     expect(rotated.requestToken).not.toBe("file-token");
   });
 
-  it("does not bind the process token to ALAYA_WORKSPACE_ID", () => {
+  it("binds the process token to ALAYA_WORKSPACE_ID when workspaces are not listed", () => {
     const bound = applyRemoteBindTokenRotation(
       { requestToken: PROCESS_TOKEN } as RequestTokenProtection,
       { ALAYA_WORKSPACE_ID: "ws-default" }
     );
-    expect(bound.boundWorkspaceIds).toBeUndefined();
+    expect(bound.boundWorkspaceIds).toEqual(["ws-default"]);
+    const currentWorkspace = authorizeProtectedRequest({
+      providedToken: PROCESS_TOKEN,
+      protection: bound,
+      method: "GET",
+      path: "/workspaces/ws-default/memories"
+    });
+    const otherWorkspace = authorizeProtectedRequest({
+      providedToken: PROCESS_TOKEN,
+      protection: bound,
+      method: "GET",
+      path: "/workspaces/ws-other/memories"
+    });
+    expect(currentWorkspace.ok).toBe(true);
+    expect(otherWorkspace.ok).toBe(false);
+  });
+
+  it("denies process-level secret patch when the grant is unconfigured", () => {
+    const protection = { requestToken: PROCESS_TOKEN };
+    const patch = authorizeProtectedRequest({
+      providedToken: PROCESS_TOKEN,
+      protection,
+      method: "PATCH",
+      path: "/config/runtime/embedding-supplement"
+    });
+    expect(patch).toEqual({
+      ok: false,
+      error: "Process-level secret patch is not allowed"
+    });
+  });
+
+  it("does not grant implicit all-workspace access to an unbound process token", () => {
+    const scoped = authorizeProtectedRequest({
+      providedToken: PROCESS_TOKEN,
+      protection: { requestToken: PROCESS_TOKEN },
+      method: "GET",
+      path: "/workspaces/ws-a/memories"
+    });
+    expect(scoped).toEqual({
+      ok: false,
+      error: "Workspace is not authorized for this token"
+    });
+  });
+
+  it("grants all workspaces only when ALAYA_REQUEST_TOKEN_WORKSPACES is explicitly *", () => {
+    const bound = applyRemoteBindTokenRotation(
+      { requestToken: PROCESS_TOKEN } as RequestTokenProtection,
+      { ALAYA_WORKSPACE_ID: "ws-default", ALAYA_REQUEST_TOKEN_WORKSPACES: "*" }
+    );
+    expect(bound.boundWorkspaceIds).toBe("*");
     const otherWorkspace = authorizeProtectedRequest({
       providedToken: PROCESS_TOKEN,
       protection: bound,
@@ -161,6 +212,32 @@ describe("request token workspace binding", () => {
       path: "/workspaces/ws-default/memories"
     });
     expect(listed.ok).toBe(true);
+    expect(other.ok).toBe(false);
+  });
+
+  it("binds an inspect-started process grant after workspace resolve", () => {
+    const protection = ensureLiveWorkspaceGrant({ requestToken: PROCESS_TOKEN });
+    const before = authorizeProtectedRequest({
+      providedToken: PROCESS_TOKEN,
+      protection,
+      method: "GET",
+      path: "/workspaces/ws-1/memories"
+    });
+    bindProcessWorkspaceIds(protection, ["ws-1"]);
+    const after = authorizeProtectedRequest({
+      providedToken: PROCESS_TOKEN,
+      protection,
+      method: "GET",
+      path: "/workspaces/ws-1/memories"
+    });
+    const other = authorizeProtectedRequest({
+      providedToken: PROCESS_TOKEN,
+      protection,
+      method: "GET",
+      path: "/workspaces/ws-other/memories"
+    });
+    expect(before.ok).toBe(false);
+    expect(after.ok).toBe(true);
     expect(other.ok).toBe(false);
   });
 });

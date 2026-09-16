@@ -118,7 +118,7 @@ describe("inspector routes", () => {
   });
 
 
-  it("allows unauthenticated launch-session exchange", async () => {
+  it("allows unauthenticated launch-session exchange into an httpOnly cookie", async () => {
     const app = createInspectorApp({
       token: "secret-token",
       launchCode: "launch-code"
@@ -131,7 +131,72 @@ describe("inspector routes", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ token: "secret-token" });
+    expect(await response.json()).toEqual({ ok: true });
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    expect(setCookie).toMatch(/alaya_inspector_session=/);
+    expect(setCookie).toMatch(/HttpOnly/i);
+    expect(setCookie).not.toContain("secret-token");
+
+    const status = await app.request("/api/status", {
+      headers: { cookie: cookieHeaderFromSetCookie(setCookie) }
+    });
+    expect(status.status).not.toBe(401);
+
+    const replay = await app.request("/api/launch-session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: "launch-code" })
+    });
+    expect(replay.status).toBe(401);
+  });
+
+  it("mints a session cookie on the first HTML GET when client address is unavailable", async () => {
+    const staticRoot = await mkdtemp(path.join(tmpdir(), "inspector-loopback-"));
+    await writeFile(path.join(staticRoot, "index.html"), "<html>ok</html>", "utf8");
+    try {
+      const app = createInspectorApp({
+        launchCode: "loopback-code",
+        staticRoot
+      });
+
+      const html = await app.request("/");
+      expect(html.status).toBe(200);
+      const setCookie = html.headers.get("set-cookie") ?? "";
+      expect(setCookie).toMatch(/alaya_inspector_session=/);
+      expect(setCookie).toMatch(/HttpOnly/i);
+      expect(setCookie).not.toContain("loopback-code");
+
+      const status = await app.request("/api/status", {
+        headers: { cookie: cookieHeaderFromSetCookie(setCookie) }
+      });
+      expect(status.status).not.toBe(401);
+
+      const replay = await app.request("/api/launch-session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: "loopback-code" })
+      });
+      expect(replay.status).toBe(401);
+    } finally {
+      await rm(staticRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not mint a session cookie for an explicit non-loopback client", async () => {
+    const staticRoot = await mkdtemp(path.join(tmpdir(), "inspector-remote-"));
+    await writeFile(path.join(staticRoot, "index.html"), "<html>ok</html>", "utf8");
+    try {
+      const remoteApp = createInspectorApp({
+        launchCode: "remote-code",
+        staticRoot,
+        resolveClientAddress: () => "203.0.113.10"
+      });
+      const remoteHtml = await remoteApp.request("/");
+      expect(remoteHtml.status).toBe(200);
+      expect(remoteHtml.headers.get("set-cookie")).toBeNull();
+    } finally {
+      await rm(staticRoot, { recursive: true, force: true });
+    }
   });
 
   it("serves static files, rejects traversal, and tolerates a missing frontend bundle", async () => {
@@ -426,3 +491,9 @@ describe("inspector routes", () => {
   });
 
 });
+
+function cookieHeaderFromSetCookie(setCookie: string): string {
+  const match = /alaya_inspector_session=[^;]+/.exec(setCookie);
+  expect(match).not.toBeNull();
+  return match?.[0] ?? "";
+}

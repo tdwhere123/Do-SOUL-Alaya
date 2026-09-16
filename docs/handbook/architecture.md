@@ -219,7 +219,7 @@ surfaces are:
   diagnostics, and MCP-memory-tool fallback.
 - **Memory Inspector** (`apps/inspector`) — local-only memory-tooling
   surface, started on demand via `alaya inspect`. Listens on
-  `127.0.0.1:5174` with a per-launch random token; serves seven primary
+  `127.0.0.1:5174` with a per-launch httpOnly session; serves seven primary
   routes (`/overview`, `/governance`, `/memory-browser`, `/graph`,
   `/system`, `/recall`, `/bench-trend`) plus legacy redirects into
   those pages. Inspector writes are
@@ -241,8 +241,8 @@ surfaces are:
 
 The MCP server and CLI fallback share one runtime contract; CLI
 fallback parity with MCP is enforced by tests. The Inspector consumes
-daemon HTTP routes only and has its own contract surface (token-based
-auth + JSON over HTTP, no SSE / WebSocket).
+daemon HTTP routes only and has its own contract surface (httpOnly session cookie
+  + JSON over HTTP, no SSE / WebSocket).
 
 Persistent daemon HTTP authentication has an explicit operator-owned
 lifecycle: `ALAYA_REQUEST_TOKEN` remains stable across restarts, and changing

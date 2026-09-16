@@ -142,6 +142,7 @@ function createRuntime(overrides: Partial<AlayaDaemonRuntime> = {}): AlayaDaemon
     startHttpServer: async () => ({
       hostname: "127.0.0.1",
       port: 3000,
+      bindProcessWorkspaceIds: () => {},
       close: async () => {}
     }),
     shutdown: async () => {}

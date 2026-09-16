@@ -97,7 +97,8 @@ export function createRequestProtection(
         ? configuredRequestToken
         : randomBytes(32).toString("hex"),
     allowDesktopOriginlessRequests: !isRemoteDaemonOptInEnabled(env),
-    tokenSource
+    tokenSource,
+    liveWorkspaceGrant: { boundWorkspaceIds: [] as readonly string[] | "*" }
   });
   const rotated = applyRemoteBindTokenRotation(protection, env);
   if (rotated.tokenSource === "rotated") {

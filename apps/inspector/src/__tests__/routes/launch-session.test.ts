@@ -1,11 +1,14 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { createInspectorLaunchSessionStore } from "../../launch/launch-session-store.js";
+import {
+  INSPECTOR_SESSION_COOKIE,
+  createInspectorLaunchSessionStore
+} from "../../launch/launch-session-store.js";
 import { registerInspectorLaunchSessionRoutes } from "../../routes/launch-session.js";
 
 describe("inspector launch session", () => {
-  it("redeems a one-time launch code into an inspector token", async () => {
-    const app = createApp("launch-code", "secret-token");
+  it("redeems a one-time launch code into an httpOnly session cookie", async () => {
+    const app = createApp("launch-code");
 
     const response = await app.request("/api/launch-session", {
       method: "POST",
@@ -14,7 +17,12 @@ describe("inspector launch session", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ token: "secret-token" });
+    expect(await response.json()).toEqual({ ok: true });
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain(`${INSPECTOR_SESSION_COOKIE}=`);
+    expect(setCookie).toMatch(/HttpOnly/i);
+    expect(setCookie).toMatch(/SameSite=Strict/i);
+    expect(setCookie).not.toContain("secret-token");
   });
 
   it("rejects invalid, reused, and expired launch codes", async () => {
@@ -22,7 +30,7 @@ describe("inspector launch session", () => {
     const store = createInspectorLaunchSessionStore(() => now);
     const app = new Hono();
     registerInspectorLaunchSessionRoutes(app, store);
-    store.register("expired-code", "secret-token", 1);
+    store.register("expired-code", 1);
 
     await expectStatus(app, { code: "missing-code" }, 401);
 
@@ -30,14 +38,26 @@ describe("inspector launch session", () => {
     await expectStatus(app, { code: "expired-code" }, 401);
 
     now = 1_010;
-    store.register("single-use", "secret-token");
+    store.register("single-use");
     const first = await app.request("/api/launch-session", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code: "single-use" })
     });
     expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ ok: true });
     await expectStatus(app, { code: "single-use" }, 401);
+  });
+
+  it("expires redeemed sessions after the session TTL", () => {
+    let now = 1_000;
+    const store = createInspectorLaunchSessionStore(() => now, 5);
+    store.register("code");
+    const sessionId = store.redeem("code");
+    expect(sessionId).not.toBeNull();
+    expect(store.hasSession(sessionId as string)).toBe(true);
+    now = 1_006;
+    expect(store.hasSession(sessionId as string)).toBe(false);
   });
 
   it("rate-limits consecutive invalid redeems and resets on success", async () => {
@@ -58,10 +78,10 @@ describe("inspector launch session", () => {
     await expectStatus(app, { code: "bad-4" }, 429);
 
     now = 61_001;
-    store.register("good-code", "secret-token");
+    store.register("good-code");
     const success = await redeem(app, { code: "good-code" });
     expect(success.status).toBe(200);
-    expect(await success.json()).toEqual({ token: "secret-token" });
+    expect(await success.json()).toEqual({ ok: true });
 
     await expectStatus(app, { code: "bad-after-reset" }, 401);
   });
@@ -84,9 +104,9 @@ describe("inspector launch session", () => {
   });
 });
 
-function createApp(code: string, token: string): Hono {
+function createApp(code: string): Hono {
   const store = createInspectorLaunchSessionStore();
-  store.register(code, token);
+  store.register(code);
   const app = new Hono();
   registerInspectorLaunchSessionRoutes(app, store);
   return app;

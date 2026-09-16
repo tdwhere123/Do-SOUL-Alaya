@@ -7,8 +7,8 @@ import {
   type SetURLSearchParams
 } from "react-router-dom";
 import {
-  getInspectorToken,
-  setInspectorToken,
+  hasInspectorSession,
+  markInspectorSessionReady,
   setUnauthorizedHandler,
   setWorkspaceId
 } from "../api";
@@ -24,7 +24,7 @@ export interface InspectorLaunchState {
 }
 
 /** One redeem per code per page load — StrictMode remounts must share the same Promise. */
-const redeemInFlight = new Map<string, Promise<string | null>>();
+const redeemInFlight = new Map<string, Promise<boolean>>();
 
 export function useInspectorLaunchState(): InspectorLaunchState {
   const location = useLocation();
@@ -77,10 +77,9 @@ async function bootstrapInspectorSession(
   }
 ): Promise<void> {
   if (launchParams.launchCode) {
-    const token = await redeemLaunchCode(launchParams.launchCode);
-    if (token !== null) {
-      // Persist before cancelled check — a successful redeem must not be discarded on remount.
-      setInspectorToken(token);
+    const redeemed = await redeemLaunchCode(launchParams.launchCode);
+    if (redeemed) {
+      markInspectorSessionReady();
       setWorkspaceId(launchWorkspaceId(launchParams.workspaceId));
       callbacks.clearLaunch();
       if (callbacks.cancelled()) {
@@ -91,8 +90,9 @@ async function bootstrapInspectorSession(
       return;
     }
 
-    // Single-use code already consumed by a prior mount that persisted the token.
-    if (getInspectorToken()) {
+    // Single-use code already consumed by a prior mount that established the session.
+    if (hasInspectorSession() || (await probeInspectorSession())) {
+      markInspectorSessionReady();
       if (launchParams.workspaceId !== null) {
         setWorkspaceId(launchWorkspaceId(launchParams.workspaceId));
       }
@@ -113,7 +113,11 @@ async function bootstrapInspectorSession(
     return;
   }
 
-  if (getInspectorToken()) {
+  if (hasInspectorSession() || (await probeInspectorSession())) {
+    markInspectorSessionReady();
+    if (launchParams.workspaceId !== null) {
+      setWorkspaceId(launchWorkspaceId(launchParams.workspaceId));
+    }
     if (callbacks.cancelled()) {
       return;
     }
@@ -129,7 +133,16 @@ async function bootstrapInspectorSession(
   callbacks.setReady(false);
 }
 
-async function redeemLaunchCode(code: string): Promise<string | null> {
+async function probeInspectorSession(): Promise<boolean> {
+  try {
+    const response = await fetch("/api/status", { credentials: "include" });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function redeemLaunchCode(code: string): Promise<boolean> {
   const existing = redeemInFlight.get(code);
   if (existing !== undefined) {
     return existing;
@@ -142,17 +155,18 @@ async function redeemLaunchCode(code: string): Promise<string | null> {
   return pending;
 }
 
-async function performRedeem(code: string): Promise<string | null> {
+async function performRedeem(code: string): Promise<boolean> {
   const response = await fetch("/api/launch-session", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code })
   });
   if (!response.ok) {
-    return null;
+    return false;
   }
-  const body = (await response.json()) as { readonly token?: unknown };
-  return typeof body.token === "string" && body.token.trim().length > 0 ? body.token : null;
+  const body = (await response.json()) as { readonly ok?: unknown };
+  return body.ok === true;
 }
 
 function readLaunchParams(searchParams: URLSearchParams, hash: string): {

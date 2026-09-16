@@ -107,10 +107,16 @@ describe("cli inspect", () => {
     const stdoutOk = new PassThrough();
     const stdoutOkChunks: string[] = [];
     stdoutOk.on("data", (chunk) => stdoutOkChunks.push(chunk.toString()));
+    const boundWorkspaces: string[][] = [];
     const okCommand = createInspectCommand({
       checkPortAvailable: async () => true,
       generateToken: () => "a".repeat(64),
-      startDaemonServer: async () => fakeDaemonServer(),
+      startDaemonServer: async () => ({
+        ...fakeDaemonServer(),
+        bindProcessWorkspaceIds: (workspaceIds) => {
+          boundWorkspaces.push([...workspaceIds]);
+        }
+      }),
       spawnInspector: () => childOk,
       getWorkspaceById: async (_url, id) => ({
         status: "ok",
@@ -133,8 +139,10 @@ describe("cli inspect", () => {
     setTimeout(() => childOk.emitExit(0, null), 10);
     const okResult = await okPromise;
     expect(okResult.exitCode).toBe(0);
-    expect(stdoutOkChunks.join("")).toContain("?workspaceId=explicit-ws#launch=");
+    expect(stdoutOkChunks.join("")).toContain("?workspaceId=explicit-ws");
+    expect(stdoutOkChunks.join("")).not.toContain("#launch=");
     expect(stdoutOkChunks.join("")).not.toContain("#token=");
+    expect(boundWorkspaces).toEqual([["explicit-ws"], ["explicit-ws"]]);
 
     const stderrMissing = new PassThrough();
     const stderrMissingChunks: string[] = [];
@@ -202,7 +210,8 @@ describe("cli inspect", () => {
 
       expect(result.exitCode).toBe(0);
       expect(daemon.requests).toEqual(["/workspaces/explicit-ws"]);
-      expect(stdoutChunks.join("")).toContain("?workspaceId=explicit-ws#launch=");
+      expect(stdoutChunks.join("")).toContain("?workspaceId=explicit-ws");
+      expect(stdoutChunks.join("")).not.toContain("#launch=");
       expect(stdoutChunks.join("")).not.toContain("#token=");
     } finally {
       daemon.restore();
