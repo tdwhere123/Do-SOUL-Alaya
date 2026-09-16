@@ -1,4 +1,5 @@
 import { CoreError } from "@do-soul/alaya-core";
+import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   ExecShellToolInputSchema,
@@ -96,6 +97,7 @@ export interface ExternalConversationToolExecutor {
     readonly rawInput: unknown;
     readonly runtimeContext: Readonly<ConversationRuntimeContext>;
     readonly writableRoots: readonly string[];
+    readonly abortSignal?: AbortSignal;
   }): Promise< unknown>;
 }
 
@@ -210,17 +212,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export async function executeConversationTool(
   toolId: string,
   input: unknown,
-  writableRoots: readonly string[]
+  writableRoots: readonly string[],
+  abortSignal?: AbortSignal
 ): Promise< unknown> {
-  return await executeValidatedConversationTool(validateConversationToolInput(toolId, input), writableRoots);
+  throwIfAborted(abortSignal);
+  return await executeValidatedConversationTool(
+    validateConversationToolInput(toolId, input),
+    writableRoots,
+    abortSignal
+  );
 }
 
 export async function executeConversationToolOrThrow(
   toolId: string,
   input: unknown,
   writableRoots: readonly string[],
-  options: { readonly confirmationToken?: string } = {}
+  options: { readonly confirmationToken?: string; readonly abortSignal?: AbortSignal } = {}
 ): Promise< unknown> {
+  throwIfAborted(options.abortSignal);
   let effectiveInput = input;
   if (builtinConversationToolRequiresConfirmation(toolId)) {
     const confirmation = authorizeConfirmedBuiltinTool(
@@ -238,7 +247,8 @@ export async function executeConversationToolOrThrow(
     effectiveInput = confirmation.input;
   }
 
-  const result = await executeConversationTool(toolId, effectiveInput, writableRoots);
+  throwIfAborted(options.abortSignal);
+  const result = await executeConversationTool(toolId, effectiveInput, writableRoots, options.abortSignal);
 
   if (isStructuredToolError(result)) {
     throw new StructuredToolExecutionError(result);
@@ -367,9 +377,10 @@ export function readErrorMessage(
 
 async function executeValidatedConversationTool(
   validatedCall: ValidatedBuiltinConversationToolCall,
-  writableRoots: readonly string[]
+  writableRoots: readonly string[],
+  abortSignal?: AbortSignal
 ): Promise< unknown> {
-  const result = await executeBuiltinConversationTool(validatedCall, writableRoots);
+  const result = await executeBuiltinConversationTool(validatedCall, writableRoots, abortSignal);
 
   switch (validatedCall.toolId) {
     case "tools.read_file":
@@ -483,7 +494,8 @@ async function executeExternalConversationTool(input: {
         toolId: input.toolUse.name,
         rawInput: builtinTool ? validatedInput : (rawInput ?? validatedInput),
         runtimeContext: input.runtimeContext,
-        writableRoots: context.writableRoots
+        writableRoots: context.writableRoots,
+        ...(input.abortSignal === undefined ? {} : { abortSignal: input.abortSignal })
       })
   });
 }
