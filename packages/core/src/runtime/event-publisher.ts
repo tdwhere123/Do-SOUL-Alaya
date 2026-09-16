@@ -240,24 +240,6 @@ export class EventPublisher {
     return entry;
   }
 
-  /**
-   * EventLog-first when apply cannot join the EventLog transaction (async repo
-   * ports). Prefer appendManyWithMutation when apply is synchronous.
-   */
-  public async appendApplyThenPropagate<T>(
-    eventInput: EventPublisherInput,
-    apply: (entry: EventLogEntry) => T | Promise<T>
-  ): Promise<T> {
-    const entry = await this.appendToEventLog(eventInput);
-    const result = await apply(entry);
-    try {
-      await this.propagate(entry);
-    } catch (propagateError) {
-      await this.reportPostCommitPropagationFailure(entry, propagateError, [entry]);
-    }
-    return result;
-  }
-
   private async appendToEventLog(
     eventInput: EventPublisherInput
   ): Promise<EventLogEntry> {
@@ -369,29 +351,31 @@ export function appendEventLogSynchronously(
   return entry;
 }
 
-const INERT_HOT_STATE: RunHotStateApplierPort = { apply: () => undefined };
-const INERT_NOTIFIER: RuntimeNotifier = {
-  notify: () => undefined,
-  notifyEntry: () => undefined
-};
-
 export type LegacyEventLogAppendPort = Pick<EventPublisherEventLogRepoPort, "append"> &
   Partial<EventPublisherEventLogRepoPort>;
 
-export const EVENT_PUBLISHER_ADAPTER_FALLBACK_CODE = "ALAYA_EVENT_PUBLISHER_ADAPTER_FALLBACK";
+export type NotifyEntryPort = Pick<RuntimeNotifier, "notifyEntry">;
 
 /**
- * Production services take EventPublisher. Daemon wiring that still injects a
- * raw EventLog repo is adapted here so append+notify cannot skip propagate.
- *
- * Remove this adapter once every production bindEventPublisher call site
- * injects runtimeNotifier and runHotStateService, or passes eventPublisher.
- * Inert fallbacks hide "no subscribers" from "notifier never wired".
+ * Adapts a notifyEntry-only port. `notify` is unused for EventLog envelopes;
+ * omitting notifyEntry would leave subscribers asleep after a durable append.
+ */
+export function runtimeNotifierFromNotifyEntry(notifyEntry: RuntimeNotifier["notifyEntry"]): RuntimeNotifier {
+  return {
+    notify: () => undefined,
+    notifyEntry
+  };
+}
+
+/**
+ * Production services take a fully wired EventPublisher. Remaining EventLog-repo
+ * adapters must pass notifyEntry; a missing notifier is a wiring defect, not a
+ * successful no-subscriber publish.
  */
 export function bindEventPublisher(input: {
   readonly eventPublisher?: EventPublisher;
   readonly eventLogRepo?: LegacyEventLogAppendPort | { readonly append?: LegacyEventLogAppendPort["append"] };
-  readonly runtimeNotifier?: Partial<RuntimeNotifier>;
+  readonly runtimeNotifier?: NotifyEntryPort | RuntimeNotifier;
   readonly runHotStateService?: RunHotStateApplierPort;
   readonly purpose: string;
 }): EventPublisher {
@@ -402,27 +386,22 @@ export function bindEventPublisher(input: {
   if (eventLogRepo?.append === undefined) {
     throw new CoreError("CONFLICT", `${input.purpose} requires an event publisher`);
   }
-  const missingNotifier = input.runtimeNotifier === undefined;
-  const missingHotState = input.runHotStateService === undefined;
-  if (missingNotifier || missingHotState) {
-    process.emitWarning(
-      `${input.purpose} EventPublisher adapter fell back to inert notifier/hot-state; EventLog rows will not wake subscribers`,
-      {
-        type: "AlayaEventPublisherAdapterWarning",
-        code: EVENT_PUBLISHER_ADAPTER_FALLBACK_CODE,
-        detail: JSON.stringify({
-          purpose: input.purpose,
-          missingNotifier,
-          missingHotState
-        })
-      }
-    );
+  const runtimeNotifier = input.runtimeNotifier;
+  if (typeof runtimeNotifier?.notifyEntry !== "function") {
+    throw new CoreError("CONFLICT", `${input.purpose} requires a runtime notifier`, {
+      subCode: "PORT_UNAVAILABLE"
+    });
   }
-  // Spreading a class instance drops prototype methods and unbinds `this`.
   return new EventPublisher({
     eventLogRepo: adaptLegacyEventLogRepo(eventLogRepo as LegacyEventLogAppendPort),
-    runtimeNotifier: { ...INERT_NOTIFIER, ...input.runtimeNotifier },
-    runHotStateService: input.runHotStateService ?? INERT_HOT_STATE
+    runtimeNotifier: {
+      notify:
+        "notify" in runtimeNotifier && runtimeNotifier.notify !== undefined
+          ? runtimeNotifier.notify
+          : () => undefined,
+      notifyEntry: runtimeNotifier.notifyEntry
+    },
+    runHotStateService: input.runHotStateService ?? { apply: () => undefined }
   });
 }
 

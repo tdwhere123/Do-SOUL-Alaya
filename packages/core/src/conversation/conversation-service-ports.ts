@@ -122,6 +122,7 @@ export interface ConversationServiceDependencies {
   readonly workspaceRepo: ConversationWorkspaceRepoPort;
   readonly eventLogRepo: ConversationEventLogRepoPort;
   readonly eventPublisher?: EventPublisher;
+  readonly runtimeNotifier?: { notifyEntry(entry: EventLogEntry): void | Promise<void> };
   readonly gardenComputeProvider: ConversationGardenComputeProviderPort;
   readonly resolveGardenComputeProvider?: ConversationGardenComputeProviderResolverPort;
   readonly signalReceiver: ConversationSignalReceiverPort;

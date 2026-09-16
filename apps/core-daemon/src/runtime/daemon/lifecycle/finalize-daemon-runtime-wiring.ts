@@ -244,7 +244,8 @@ function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
     sourceRecordAdmission: createAuditedSourceAdmission({
       sha256: fieldContractSha256,
       stores: input.fieldComposition.stores,
-      eventLogRepo: input.eventLogRepo
+      eventLogRepo: input.eventLogRepo,
+      runtimeNotifier: input.runtimeNotifier
     }),
     environmentStatusService: input.environmentStatusService,
     embeddingStatusService: input.embeddingStatusService,

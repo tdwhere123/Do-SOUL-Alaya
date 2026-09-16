@@ -8,15 +8,16 @@ describe("HealthJournalService", () => {
     const service = new HealthJournalService({
       generateEntryId: () => "entry-1",
       now: () => "2026-03-27T00:00:00.000Z",
+      runtimeNotifier: { notifyEntry: () => undefined },
       eventLogRepo: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+        append: vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
           calls.push(`event:${entry.entity_id}`);
           return createEventLogEntry(entry);
         }),
         queryByEntity: vi.fn(async () => [])
       },
       repo: {
-        append: vi.fn(async (entry: HealthJournalEntry) => {
+        append: vi.fn((entry: HealthJournalEntry) => {
           calls.push(`repo:${entry.entry_id}`);
           return createHealthEntry(entry);
         }),
@@ -37,11 +38,11 @@ describe("HealthJournalService", () => {
 
   it("writes the expected event and repo payload", async () => {
     const eventLogRepo = {
-      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
+      append: vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
       queryByEntity: vi.fn(async () => [])
     };
     const repo = {
-      append: vi.fn(async (entry: Partial<HealthJournalEntry>) => createHealthEntry(entry)),
+      append: vi.fn((entry: Partial<HealthJournalEntry>) => createHealthEntry(entry)),
       findByWorkspace: vi.fn(async () => [])
     };
     const runtimeNotifier = {
@@ -90,7 +91,7 @@ describe("HealthJournalService", () => {
 
   it("delegates recent queries to the repo", async () => {
     const repo = {
-      append: vi.fn(async (entry: { entry_id?: string; created_at?: string }) =>
+      append: vi.fn((entry: { entry_id?: string; created_at?: string }) =>
         createHealthEntry({
           entry_id: entry.entry_id ?? "entry-1",
           created_at: entry.created_at ?? "2026-03-27T00:00:00.000Z"
@@ -119,7 +120,7 @@ describe("HealthJournalService", () => {
 
   it("caps direct service queries to the shared maximum limit", async () => {
     const repo = {
-      append: vi.fn(async (entry: { entry_id?: string; created_at?: string }) =>
+      append: vi.fn((entry: { entry_id?: string; created_at?: string }) =>
         createHealthEntry({
           entry_id: entry.entry_id ?? "entry-1",
           created_at: entry.created_at ?? "2026-03-27T00:00:00.000Z"
@@ -144,12 +145,13 @@ describe("HealthJournalService", () => {
     const service = new HealthJournalService({
       generateEntryId: () => "entry-1",
       now: () => "2026-03-27T00:00:00.000Z",
+      runtimeNotifier: { notifyEntry: () => undefined },
       eventLogRepo: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
+        append: vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
         queryByEntity: vi.fn(async () => [])
       },
       repo: {
-        append: vi.fn(async () => {
+        append: vi.fn(() => {
           throw new Error("repo failed");
         }),
         findByWorkspace: vi.fn(async () => [])

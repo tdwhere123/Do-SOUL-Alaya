@@ -125,6 +125,7 @@ export class ContextLensAssembler {
     }
     await bindEventPublisher({
       eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "ContextLensAssembler"
     }).publish({
       event_type: RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED,
@@ -253,6 +254,7 @@ export class ContextLensAssembler {
       tokensAfterDegradation = workingProjection.total_token_estimate;
       await bindEventPublisher({
         eventLogRepo: this.dependencies.eventLogRepo,
+        runtimeNotifier: this.dependencies.runtimeNotifier,
         purpose: "ContextLensAssembler"
       }).publish({
         event_type: BudgetEventType.SOUL_BUDGET_DEGRADED,

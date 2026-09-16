@@ -30,7 +30,7 @@ export interface GardenBacklogTelemetryWarnPort {
 export interface GardenBacklogTelemetryServiceDependencies {
   readonly scheduler: GardenBacklogTelemetrySchedulerPort;
   readonly eventLogRepo: GardenBacklogTelemetryEventLogPort;
-  readonly runtimeNotifier?: Pick<RuntimeNotifier, "notifyEntry">;
+  readonly runtimeNotifier: Pick<RuntimeNotifier, "notifyEntry">;
   readonly healthJournal?: HealthJournalRecordPort;
   readonly thresholds: GardenBacklogThresholds;
   readonly stopTimeoutMs?: number | null;

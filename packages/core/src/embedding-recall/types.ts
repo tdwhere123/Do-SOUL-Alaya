@@ -137,6 +137,7 @@ export interface EmbeddingRecallServiceDependencies {
   readonly provider: EmbeddingProviderPort;
   readonly eventLogRepo: EmbeddingRecallEventLogPort;
   readonly eventPublisher?: import("../runtime/event-publisher.js").EventPublisher;
+  readonly runtimeNotifier?: { notifyEntry(entry: EventLogEntry): void | Promise<void> };
   readonly healthJournalRecorder?: HealthJournalRecordPort;
   readonly generateQueryId?: () => string;
   readonly now?: () => string;

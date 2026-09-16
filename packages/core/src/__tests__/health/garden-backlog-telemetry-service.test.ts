@@ -45,6 +45,7 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
         acknowledgeBacklogWarningTransition: () => false
       },
       eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined },
       warn,
       thresholds: {
         warning_queue_depth: 10,

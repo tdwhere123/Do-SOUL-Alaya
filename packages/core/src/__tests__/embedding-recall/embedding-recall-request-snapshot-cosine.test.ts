@@ -79,6 +79,7 @@ async function prepareCosineParityCase(testCase: CosineParityCase) {
   const query = new Float32Array(testCase.query);
   const stored = new Float32Array(testCase.stored);
   const service = new EmbeddingRecallService({
+    runtimeNotifier: { notifyEntry: () => undefined },
     embeddingRepo: {
       listByObjectIds: vi.fn(async () => [createEmbeddingRecord({
         object_id: memory.object_id,

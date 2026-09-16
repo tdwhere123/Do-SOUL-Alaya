@@ -113,39 +113,36 @@ export function buildManifestationChangedEventInput(audit: ManifestationChangedA
 
 export async function appendRetentionUpdatedEvent(
   eventLogRepo: DynamicsServiceEventLogRepoPort,
-  audit: RetentionUpdatedAudit
+  audit: RetentionUpdatedAudit,
+  runtimeNotifier: DynamicsServiceRuntimeNotifier
 ): Promise<EventLogEntry> {
   return await bindEventPublisher({
     eventLogRepo,
+    runtimeNotifier,
     purpose: "dynamics-audit"
   }).publish(buildRetentionUpdatedEventInput(audit));
 }
 
 export async function appendStateChangedEvent(
   eventLogRepo: DynamicsServiceEventLogRepoPort,
-  audit: StateChangedAudit
+  audit: StateChangedAudit,
+  runtimeNotifier: DynamicsServiceRuntimeNotifier
 ): Promise<EventLogEntry> {
   return await bindEventPublisher({
     eventLogRepo,
+    runtimeNotifier,
     purpose: "dynamics-audit"
   }).publish(buildStateChangedEventInput(audit));
 }
 
 export async function appendManifestationChangedEvent(
   eventLogRepo: DynamicsServiceEventLogRepoPort,
-  audit: ManifestationChangedAudit
+  audit: ManifestationChangedAudit,
+  runtimeNotifier: DynamicsServiceRuntimeNotifier
 ): Promise<EventLogEntry> {
   return await bindEventPublisher({
     eventLogRepo,
+    runtimeNotifier,
     purpose: "dynamics-audit"
   }).publish(buildManifestationChangedEventInput(audit));
-}
-
-export async function broadcastEvents(
-  runtimeNotifier: DynamicsServiceRuntimeNotifier,
-  events: readonly EventLogEntry[]
-): Promise<void> {
-  for (const event of events) {
-    await runtimeNotifier.notifyEntry(event);
-  }
 }

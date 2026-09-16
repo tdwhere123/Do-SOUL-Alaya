@@ -10,6 +10,7 @@ describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
     embedTexts: EmbeddingProviderPort["embedTexts"];
   }) {
     return new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [])
       },

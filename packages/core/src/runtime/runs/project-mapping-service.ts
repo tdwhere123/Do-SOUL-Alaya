@@ -138,8 +138,8 @@ export class ProjectMappingService {
       last_transition_at: timestamp
     });
 
-    // EventLog-first is intentional: project-mapping writes are at-least-once. If repo persistence
-    // fails after append, reconciliation should treat the EventLog as the source of truth.
+    // EventLog and mapping row share one SQLite transaction so apply failure
+    // cannot leave a ledger-only mapping.
     const eventInput = {
       event_type: ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED,
       entity_type: ObjectKind.PROJECT_MAPPING_ANCHOR,
@@ -157,15 +157,10 @@ export class ProjectMappingService {
     };
     await bindEventPublisher({
       eventLogRepo: this.dependencies.eventLogRepo,
-      runtimeNotifier: this.dependencies.runtimeNotifier === undefined
-        ? undefined
-        : {
-            notify: () => undefined,
-            notifyEntry: (entry) => this.dependencies.runtimeNotifier!.notifyEntry(entry)
-          },
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "ProjectMappingService"
-    }).appendApplyThenPropagate(eventInput, async () => {
-      await this.dependencies.projectMappingRepo.create(anchor);
+    }).appendManyWithMutation([eventInput], () => {
+      this.dependencies.projectMappingRepo.create(anchor);
     });
 
     return anchor;
@@ -348,8 +343,8 @@ export class ProjectMappingService {
     const fromState = resolveProjectMappingFromState(anchor.mapping_state, options);
     const transitionedAt = this.now();
 
-    // EventLog-first is intentional: project-mapping transitions are at-least-once. If repo
-    // persistence fails after append, recovery should replay from the EventLog entry.
+    // EventLog and mapping row share one SQLite transaction so apply failure
+    // cannot leave a ledger-only mapping.
     const eventInput = {
       event_type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED,
       entity_type: ObjectKind.PROJECT_MAPPING_ANCHOR,
@@ -369,15 +364,10 @@ export class ProjectMappingService {
     };
     await bindEventPublisher({
       eventLogRepo: this.dependencies.eventLogRepo,
-      runtimeNotifier: this.dependencies.runtimeNotifier === undefined
-        ? undefined
-        : {
-            notify: () => undefined,
-            notifyEntry: (entry) => this.dependencies.runtimeNotifier!.notifyEntry(entry)
-          },
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "ProjectMappingService"
-    }).appendApplyThenPropagate(eventInput, async () => {
-      await this.dependencies.projectMappingRepo.updateState(
+    }).appendManyWithMutation([eventInput], () => {
+      this.dependencies.projectMappingRepo.updateState(
         anchor.object_id,
         options.targetState,
         options.acceptedBy,

@@ -55,6 +55,7 @@ describe("evidence scoring selection receipt", () => {
 
 function createService(embedTexts: EmbeddingProviderPort["embedTexts"]): EmbeddingRecallService {
   return new EmbeddingRecallService({
+    runtimeNotifier: { notifyEntry: () => undefined },
     embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
     provider: createProvider({ embedTexts }),
     eventLogRepo: { append: vi.fn(), queryByEntity: vi.fn(async () => []) }

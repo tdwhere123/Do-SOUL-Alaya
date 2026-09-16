@@ -27,6 +27,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -69,6 +70,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: {
         getById: vi.fn(async () => ({ workspace_id: "workspace-2" }))
       }
@@ -90,6 +92,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -122,6 +125,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -150,6 +154,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -188,6 +193,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -215,6 +221,7 @@ describe("GovernanceLeaseService", () => {
       now: () => now,
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo(),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -245,6 +252,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -257,6 +265,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "22222222-2222-4222-8222-222222222222",
       eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
     await expect(restartedBeforeRelease.getActive("run-1")).resolves.toMatchObject({
@@ -270,6 +279,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "33333333-3333-4333-8333-333333333333",
       eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
     await expect(restartedAfterRelease.getActive("run-1")).resolves.toBeNull();
@@ -282,6 +292,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -296,6 +307,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:02:00.000Z",
       generateRuntimeId: () => "22222222-2222-4222-8222-222222222222",
       eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -313,6 +325,7 @@ describe("GovernanceLeaseService", () => {
       now: () => "2026-03-25T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({ queryGovernanceLeaseEventsByRun }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -352,6 +365,7 @@ describe("GovernanceLeaseService", () => {
           })
         ])
       }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -385,6 +399,7 @@ describe("GovernanceLeaseService", () => {
       eventLogRepo: createEventLogRepo({
         queryGovernanceLeaseEventsByRun: vi.fn(async () => await queryDeferred.promise)
       }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 

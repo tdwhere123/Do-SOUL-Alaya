@@ -322,12 +322,10 @@ export class SignalService {
   ): Promise<SignalServiceReceiveResult> {
     const emittedEvent = await bindEventPublisher({
       eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "SignalService"
     }).publish(emittedInput);
     const storedSignal = await this.dependencies.signalRepo.create(signal);
-    if (emittedEvent.run_id !== null) {
-      await this.dependencies.runtimeNotifier.notifyEntry(emittedEvent);
-    }
     const context = resolveSignalMaterializationContext(storedSignal, emittedEvent);
     return context === null
       ? await this.deferUnverifiableEmission(storedSignal)

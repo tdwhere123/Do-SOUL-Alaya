@@ -17,7 +17,7 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
-import { bindEventPublisher } from "../../runtime/event-publisher.js";
+import { bindEventPublisher, type RuntimeNotifier } from "../../runtime/event-publisher.js";
 import { parseObjectId } from "../../shared/validators.js";
 
 // invariant: soul.explore_graph reads the unified path plane, not
@@ -56,6 +56,7 @@ export interface GraphExploreServiceEventLogRepoPort {
 export interface GraphExploreServiceDependencies {
   readonly pathRepo: GraphExploreServicePathRepoPort;
   readonly eventLogRepo: GraphExploreServiceEventLogRepoPort;
+  readonly runtimeNotifier: Pick<RuntimeNotifier, "notifyEntry">;
   readonly now?: () => string;
 }
 
@@ -111,6 +112,7 @@ export class GraphExploreService {
   ): Promise<void> {
     await bindEventPublisher({
       eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "GraphExploreService"
     }).publish({
       event_type: GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,

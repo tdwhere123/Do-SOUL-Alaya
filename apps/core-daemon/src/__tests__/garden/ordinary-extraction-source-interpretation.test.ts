@@ -93,6 +93,7 @@ describe("ordinary extraction source interpretation adapters", () => {
           claimService: { create: async () => { throw new Error("unexpected claim route"); } },
           fieldComposition: field,
           eventLogRepo,
+          runtimeNotifier: notifier,
           enqueueEnrichPending: () => undefined
         },
         pathRelationProposalPort: {
@@ -194,7 +195,10 @@ describe("ordinary extraction source interpretation adapters", () => {
         const completed = vi.fn(async () => undefined);
         const warn = vi.fn();
         const coordinator = new GardenComputeCoordinator({ eventLogRepo, eventPublisher,
-          retainCompileSource: createCompileSourceRetainer({ fieldComposition: field, eventLogRepo }),
+          retainCompileSource: createCompileSourceRetainer(
+            { fieldComposition: field, eventLogRepo },
+            { notifyEntry: () => undefined }
+          ),
           gardenComputeProvider: provider, signalReceiver: signalService,
           releaseGovernanceLeaseSafely: completed, warn });
         const input = { run: createRun(), workspace: createWorkspace(), modelRef: null,

@@ -81,7 +81,7 @@ function createDependencies(
     generateObjectId: () => (slots.size === 0 ? SLOT_ID_1 : SLOT_ID_2),
     now: () => "2026-03-21T01:00:00.000Z",
     slotRepo: {
-      create: vi.fn(async (slot) => {
+      create: vi.fn((slot) => {
         order.push("repo_create");
         slots.set(slot.object_id, Object.freeze({ ...slot }));
         return Object.freeze({ ...slot });
@@ -115,7 +115,7 @@ function createDependencies(
 
         return null;
       }),
-      updateWinner: vi.fn(async (objectId, winnerClaimId, incumbentSince, updatedAt) => {
+      updateWinner: vi.fn((objectId, winnerClaimId, incumbentSince, updatedAt) => {
         order.push("repo_update");
         const existing = slots.get(objectId);
         if (existing === undefined) {
@@ -133,7 +133,7 @@ function createDependencies(
       })
     },
     eventLogRepo: {
-      append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+      append: vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
         order.push("event_log");
         const created = {
           event_id: `event-${events.length + 1}`,

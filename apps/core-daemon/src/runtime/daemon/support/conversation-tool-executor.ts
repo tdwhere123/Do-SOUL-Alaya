@@ -60,8 +60,8 @@ async function executeConversationTool(
     eventLogRepo: input.eventLogRepo,
     runtimeNotifier: input.runtimeNotifier,
     purpose: "conversation-tool-executor"
-  }).appendApplyThenPropagate(execution.event, async () => {
-    await input.toolExecutionRecordRepo.insert(execution.record);
+  }).appendManyWithMutation([execution.event], () => {
+    input.toolExecutionRecordRepo.insert(execution.record);
   });
 
   return { result };

@@ -44,7 +44,7 @@ export interface GreenServiceGreenStatusRepoPort {
   findEligible(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   findGrace(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
-  upsert(greenStatus: Readonly<GreenStatus>): Promise<Readonly<GreenStatus>>;
+  upsert(greenStatus: Readonly<GreenStatus>): Readonly<GreenStatus>;
 }
 
 export interface GreenServiceMemoryRepoPort {

@@ -273,7 +273,8 @@ function createKnowledgeInteractionRuntime(
   return {
     graphExploreService: new GraphExploreService({
       pathRepo: input.pathRelationRepo,
-      eventLogRepo: input.eventLogRepo
+      eventLogRepo: input.eventLogRepo,
+      runtimeNotifier: input.runtimeNotifier
     }),
     pathRelationProposalServiceRef,
     healthIssueGroupRepo,

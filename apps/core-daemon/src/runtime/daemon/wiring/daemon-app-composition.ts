@@ -391,7 +391,7 @@ function createOptionalRouteServices(input: CreateCoreDaemonAppInput) {
           e2eEventTriggers: {
             runService: input.runService,
             workspaceService: input.workspaceService,
-            eventLogRepo: createE2eEventLogRepo(input.eventLogRepo),
+            eventLogRepo: createE2eEventLogRepo(input.eventLogRepo, input.runtimeNotifier),
             runtimeNotifier: input.runtimeNotifier
           }
         }
@@ -406,9 +406,13 @@ export function shouldEnableE2eEventTriggers(env: NodeJS.ProcessEnv): boolean {
   return env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS === "1";
 }
 
-function createE2eEventLogRepo(eventLogRepo: E2eEventLogInputPort): E2eEventLogRepo {
+function createE2eEventLogRepo(
+  eventLogRepo: E2eEventLogInputPort,
+  runtimeNotifier: { notifyEntry(entry: import("@do-soul/alaya-protocol").EventLogEntry): void | Promise<void> }
+): E2eEventLogRepo {
   const publisher = bindEventPublisher({
     eventLogRepo,
+    runtimeNotifier,
     purpose: "e2eEventTriggers"
   });
   return {

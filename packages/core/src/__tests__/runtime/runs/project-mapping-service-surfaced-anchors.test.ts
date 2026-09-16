@@ -32,7 +32,7 @@ describe("ProjectMappingService", () => {
       [acceptedAnchor.global_object_id, acceptedAnchor],
       [rejectedAnchor.global_object_id, rejectedAnchor]
     ]);
-    const create = vi.fn(async (anchor: ProjectMappingAnchor) => {
+    const create = vi.fn((anchor: ProjectMappingAnchor) => {
       anchorsByGlobalObjectId.set(anchor.global_object_id, anchor);
     });
     const findByGlobalObjectId = vi.fn(async (globalObjectId: string) =>
@@ -99,13 +99,18 @@ describe("ProjectMappingService", () => {
       releaseCreate = resolve;
     });
     const anchorsByGlobalObjectId = new Map<string, ProjectMappingAnchor>();
-    const create = vi.fn(async (anchor: ProjectMappingAnchor) => {
-      await createBarrier;
+    const create = vi.fn((anchor: ProjectMappingAnchor) => {
       anchorsByGlobalObjectId.set(anchor.global_object_id, anchor);
     });
-    const findByGlobalObjectId = vi.fn(async (globalObjectId: string) =>
-      anchorsByGlobalObjectId.get(globalObjectId) ?? null
-    );
+    let findCalls = 0;
+    const findByGlobalObjectId = vi.fn(async (globalObjectId: string) => {
+      findCalls += 1;
+      // Hold the inner lookup so overlapping callers join the pending create.
+      if (findCalls === 2) {
+        await createBarrier;
+      }
+      return anchorsByGlobalObjectId.get(globalObjectId) ?? null;
+    });
     const memoryFindById = vi.fn(async () => {
       throw new Error("ensureSuggestedAnchors must not require local memory lookups");
     });
@@ -123,7 +128,9 @@ describe("ProjectMappingService", () => {
     const service = new ProjectMappingService(dependencies);
 
     const firstPassPromise = service.ensureSuggestedAnchors(["global-created"], "workspace-1", "system");
-    await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(findByGlobalObjectId).toHaveBeenCalledTimes(2);
+    });
     const secondPassPromise = service.ensureSuggestedAnchors(["global-created"], "workspace-1", "system");
     releaseCreate();
     const [firstPass, secondPass] = await Promise.all([firstPassPromise, secondPassPromise]);
@@ -149,7 +156,7 @@ describe("ProjectMappingService", () => {
         accepted_by: AcceptedBy.REVIEW
       })
     );
-    const updateState = vi.fn(async () => {});
+    const updateState = vi.fn(() => {});
     const memoryFindById = vi.fn(async () => {
       throw new Error("ensureAdoptableAnchor must not require local memory lookups");
     });

@@ -16,6 +16,7 @@ describe("GardenComputeCoordinator", () => {
     const warn = vi.fn();
     const releaseError = new Error("lease release failed");
     const coordinator = new GardenComputeCoordinator({
+      runtimeNotifier: { notifyEntry: () => undefined },
       eventLogRepo: {
         queryConversationMessageEventsByRun: vi.fn(async () => []),
         append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
@@ -66,6 +67,7 @@ describe("GardenComputeCoordinator", () => {
   it("passes admitted artifact key and source observation into compile", async () => {
     const compile = vi.fn(async () => []);
     const coordinator = new GardenComputeCoordinator({
+      runtimeNotifier: { notifyEntry: () => undefined },
       eventLogRepo: {
         queryConversationMessageEventsByRun: vi.fn(async () => []),
         append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({

@@ -11,7 +11,7 @@ export interface GreenStatusRepo {
   findEligible(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   findGrace(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
-  upsert(greenStatus: Readonly<GreenStatus>): Promise<Readonly<GreenStatus>>;
+  upsert(greenStatus: Readonly<GreenStatus>): Readonly<GreenStatus>;
   delete(objectId: string): Promise<void>;
 }
 
@@ -193,7 +193,7 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
     }
   }
 
-  public async upsert(greenStatus: Readonly<GreenStatus>): Promise<Readonly<GreenStatus>> {
+  public upsert(greenStatus: Readonly<GreenStatus>): Readonly<GreenStatus> {
     const parsedGreenStatus = parseGreenStatus(greenStatus);
 
     try {

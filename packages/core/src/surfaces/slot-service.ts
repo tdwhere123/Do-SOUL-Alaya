@@ -26,7 +26,7 @@ export type SlotElectionResult = {
 };
 
 export interface SlotServiceSlotRepoPort {
-  create(slot: Readonly<Slot>): Promise<Readonly<Slot>>;
+  create(slot: Readonly<Slot>): Readonly<Slot>;
   findById(objectId: string): Promise<Readonly<Slot> | null>;
   findByUniqueKey(
     canonicalKey: string,
@@ -41,7 +41,7 @@ export interface SlotServiceSlotRepoPort {
     winnerClaimId: string | null,
     incumbentSince: string | null,
     updatedAt: string
-  ): Promise<Readonly<Slot>>;
+  ): Readonly<Slot>;
 }
 
 export interface SlotServiceEventLogRepoPort {
@@ -334,9 +334,12 @@ export class SlotService {
         winner_claim_id: slot.winner_claim_id
       })
     };
-    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async (event) => {
-      const created = await this.dependencies.slotRepo.create(slot);
-      deferredNotifyEvents?.push(event);
+    return await this.eventPublisher().appendManyWithMutation([eventInput], (entries) => {
+      const created = this.dependencies.slotRepo.create(slot);
+      const event = entries[0];
+      if (event !== undefined) {
+        deferredNotifyEvents?.push(event);
+      }
       return created;
     });
   }
@@ -370,9 +373,12 @@ export class SlotService {
         occurred_at: now
       })
     };
-    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async (event) => {
-      const updated = await this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, now, now);
-      deferredNotifyEvents?.push(event);
+    return await this.eventPublisher().appendManyWithMutation([eventInput], (entries) => {
+      const updated = this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, now, now);
+      const event = entries[0];
+      if (event !== undefined) {
+        deferredNotifyEvents?.push(event);
+      }
       return updated;
     });
   }

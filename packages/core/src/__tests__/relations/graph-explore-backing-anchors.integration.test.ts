@@ -36,6 +36,7 @@ describe("GraphExploreService backing-object path reads", () => {
       "answers_with"
     ));
     const service = new GraphExploreService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       pathRepo,
       eventLogRepo: { append: vi.fn(async (entry) => ({
         ...entry,

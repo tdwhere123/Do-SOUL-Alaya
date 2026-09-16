@@ -21,7 +21,7 @@ export interface HealthJournalServiceRepoPort {
     readonly summary: string;
     readonly detail_json: Record<string, unknown>;
     readonly created_at: string;
-  }): Promise<Readonly<HealthJournalEntry>>;
+  }): Readonly<HealthJournalEntry>;
   findByWorkspace(
     workspaceId: string,
     params?: {
@@ -82,15 +82,10 @@ export class HealthJournalService implements HealthJournalRecordPort {
     await bindEventPublisher({
       eventPublisher: this.dependencies.eventPublisher,
       eventLogRepo: this.dependencies.eventLogRepo,
-      runtimeNotifier: this.dependencies.runtimeNotifier === undefined
-        ? undefined
-        : {
-            notify: () => undefined,
-            notifyEntry: (entry) => this.dependencies.runtimeNotifier!.notifyEntry(entry)
-          },
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "HealthJournalService"
-    }).appendApplyThenPropagate(eventInput, async () => {
-      await this.dependencies.repo.append({
+    }).appendManyWithMutation([eventInput], () => {
+      this.dependencies.repo.append({
         entry_id: entryId,
         event_kind: normalizedEntry.event_kind,
         workspace_id: normalizedEntry.workspace_id,

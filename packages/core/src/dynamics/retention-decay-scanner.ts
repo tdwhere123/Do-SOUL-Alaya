@@ -1,6 +1,5 @@
 import {
   StorageTier,
-  type EventLogEntry,
   type ManifestationState,
   type MemoryEntry,
   type RetentionState
@@ -13,7 +12,6 @@ import {
   appendManifestationChangedEvent,
   appendRetentionUpdatedEvent,
   appendStateChangedEvent,
-  broadcastEvents,
   buildManifestationChangedEventInput,
   buildRetentionUpdatedEventInput,
   buildStateChangedEventInput
@@ -203,47 +201,39 @@ export class RetentionDecayScanner {
       now
     );
 
-    const events: EventLogEntry[] = [];
     let manifestationChanged = false;
 
     if (hasScoreChanged(transition.previousRetention, transition.retentionScore)) {
-      events.push(
-        await appendRetentionUpdatedEvent(this.deps.eventLogRepo, {
-          memory: updated,
-          fromRetention: transition.previousRetention,
-          toRetention: transition.retentionScore,
-          reasonCode: HEALTH_SCAN_REASON,
-          occurredAt: now
-        })
-      );
+      await appendRetentionUpdatedEvent(this.deps.eventLogRepo, {
+        memory: updated,
+        fromRetention: transition.previousRetention,
+        toRetention: transition.retentionScore,
+        reasonCode: HEALTH_SCAN_REASON,
+        occurredAt: now
+      }, this.deps.runtimeNotifier);
     }
 
     if (transition.previousRetentionState !== transition.retentionState) {
-      events.push(
-        await appendStateChangedEvent(this.deps.eventLogRepo, {
-          memory: updated,
-          fromState: transition.previousRetentionState,
-          toState: transition.retentionState,
-          reasonCode: HEALTH_SCAN_REASON,
-          occurredAt: now
-        })
-      );
+      await appendStateChangedEvent(this.deps.eventLogRepo, {
+        memory: updated,
+        fromState: transition.previousRetentionState,
+        toState: transition.retentionState,
+        reasonCode: HEALTH_SCAN_REASON,
+        occurredAt: now
+      }, this.deps.runtimeNotifier);
     }
 
     if (transition.previousManifestation !== transition.manifestationState) {
-      events.push(
-        await appendManifestationChangedEvent(this.deps.eventLogRepo, {
-          memory: updated,
-          fromState: transition.previousManifestation,
-          toState: transition.manifestationState,
-          reasonCode: HEALTH_SCAN_REASON,
-          occurredAt: now
-        })
-      );
+      await appendManifestationChangedEvent(this.deps.eventLogRepo, {
+        memory: updated,
+        fromState: transition.previousManifestation,
+        toState: transition.manifestationState,
+        reasonCode: HEALTH_SCAN_REASON,
+        occurredAt: now
+      }, this.deps.runtimeNotifier);
       manifestationChanged = true;
     }
 
-    await broadcastEvents(this.deps.runtimeNotifier, events);
     return { updated: true, manifestationChanged };
   }
 

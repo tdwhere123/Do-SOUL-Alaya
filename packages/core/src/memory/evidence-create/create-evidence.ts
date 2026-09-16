@@ -175,6 +175,9 @@ async function admitOptionalFieldFormation(
       append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">):
         EventLogEntry | Promise<EventLogEntry>;
     };
+    readonly runtimeNotifier: {
+      notifyEntry(entry: EventLogEntry): void | Promise<void>;
+    };
   }>,
   evidence: EvidenceCapsule,
   views: EvidenceFormationPlan
@@ -190,7 +193,7 @@ async function admitOptionalFieldFormation(
       semanticExtractor: input.semanticExtractor
     });
     if (admitted !== null) {
-      await appendSourceRecordAdmitted(input.eventLogRepo, admitted);
+      await appendSourceRecordAdmitted(input.eventLogRepo, admitted, input.runtimeNotifier);
     }
   } catch (error) {
     input.warn?.("optional evidence formation failed", {

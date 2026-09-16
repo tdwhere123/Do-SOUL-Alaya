@@ -27,7 +27,7 @@ export interface HealthJournalQueryParams {
 }
 
 export interface HealthJournalRepo {
-  append(input: HealthJournalCreateInput): Promise<Readonly<HealthJournalEntry>>;
+  append(input: HealthJournalCreateInput): Readonly<HealthJournalEntry>;
   findByWorkspace(
     workspaceId: string,
     params?: HealthJournalQueryParams
@@ -79,7 +79,7 @@ export class SqliteHealthJournalRepo implements HealthJournalRepo {
     `);
   }
 
-  public async append(input: HealthJournalCreateInput): Promise<Readonly<HealthJournalEntry>> {
+  public append(input: HealthJournalCreateInput): Readonly<HealthJournalEntry> {
     const parsedInput = parseCreateInput(input);
 
     try {

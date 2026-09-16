@@ -92,7 +92,7 @@ export function createHarness(options: {
   const events: EventLogEntry[] = [...(options.initialEvents ?? [])];
   const warn = vi.fn();
   const notifyEntry = vi.fn(async (_entry: EventLogEntry) => undefined);
-  const appendEvent = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+  const appendEvent = vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
     const created: EventLogEntry = {
       event_id: `event-${events.length + 1}`,
       created_at: "2026-03-24T00:00:00.000Z",
@@ -102,7 +102,7 @@ export function createHarness(options: {
     events.push(created);
     return created;
   });
-  const upsertStatus = vi.fn(async (status: Readonly<GreenStatus>) => {
+  const upsertStatus = vi.fn((status: Readonly<GreenStatus>) => {
     const copy = { ...status };
     statuses.set(copy.target_object_id, copy);
     return Object.freeze(copy);

@@ -21,7 +21,8 @@ function fixture() {
     "local_repo", null, "active", CLOCK, null, null);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const field = createDaemonFieldComposition({ database, eventLogRepo, fieldProjectionAdmissionMode: "explicit_checkpoint" });
-  const admission = createAuditedSourceAdmission({ stores: field.stores, eventLogRepo, sha256: fieldContractSha256 });
+  const admission = createAuditedSourceAdmission({ stores: field.stores, eventLogRepo, sha256: fieldContractSha256,
+    runtimeNotifier: { notifyEntry: () => undefined } });
   return { database, eventLogRepo, field, admission };
 }
 
@@ -54,6 +55,7 @@ describe("mandatory audited source admission", () => {
     const f = fixture();
     let fail = true;
     const admission = createAuditedSourceAdmission({ stores: f.field.stores, sha256: fieldContractSha256,
+      runtimeNotifier: { notifyEntry: () => undefined },
       eventLogRepo: { append: (event) => { if (fail) throw new Error("audit unavailable"); return f.eventLogRepo.append(event); } } });
     await expect(admission.admit(request(), { workspaceId: "workspace-a" })).rejects.toThrow("audit unavailable");
     const committed = f.field.stores.listRecords("workspace-a");

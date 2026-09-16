@@ -75,6 +75,7 @@ describe("worker stored measurement producer", () => {
     const directory = await mkdtemp(join(tmpdir(), "alaya-unequal-measurement-rpc-"));
     const field = composeField(fixture.database);
     await createAuditedSourceAdmission({ stores: field.stores, sha256: fieldContractSha256,
+      runtimeNotifier: { notifyEntry: () => undefined },
       eventLogRepo: new SqliteEventLogRepo(fixture.database) }).admit({
       workspace_id: WORKSPACE, source_id: "independent-source", source_version: "1", content_bytes: QUERY_TEXT,
       evidence_object_id: null, recorded_at: NOW, event_time: null, valid_from: null, valid_to: null,

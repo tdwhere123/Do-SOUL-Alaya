@@ -8,7 +8,7 @@ import {
   type GardenBacklogWarningTransition
 } from "@do-soul/alaya-protocol";
 import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
-import { bindEventPublisher } from "../runtime/event-publisher.js";
+import { bindEventPublisher, EventPublisherPropagationError } from "../runtime/event-publisher.js";
 import {
   delay,
   normalizeStopTimeoutMs,
@@ -282,9 +282,8 @@ export class GardenBacklogTelemetryService {
       run_id: null
     } as const;
 
-    let entry: EventLogEntry;
     try {
-      entry = await this.appendEvent(
+      await this.appendEvent(
         ComputeRecallGardenEventType.GARDEN_BACKLOG_TELEMETRY_SNAPSHOT,
         payload
       );
@@ -300,8 +299,6 @@ export class GardenBacklogTelemetryService {
     if (generation !== this.snapshotRunnerGeneration) {
       return;
     }
-
-    void this.notifySnapshotBestEffort(entry);
   }
 
   private async publishWarningTransitionsSafely(generation: number): Promise<void> {
@@ -338,9 +335,8 @@ export class GardenBacklogTelemetryService {
         transition: signal.transition
       } as const;
 
-      let entry: EventLogEntry;
       try {
-        entry = await this.appendEvent(
+        await this.appendEvent(
           ComputeRecallGardenEventType.GARDEN_BACKLOG_WARNING,
           eventPayload
         );
@@ -373,7 +369,6 @@ export class GardenBacklogTelemetryService {
       }
 
       void this.finishWarningSideEffectsBestEffort({
-        entry,
         detailPayload: journalDetailPayload,
         generation,
         queueDepthTotal: signal.snapshot.queue_depth_total,
@@ -388,22 +383,33 @@ export class GardenBacklogTelemetryService {
       | typeof ComputeRecallGardenEventType.GARDEN_BACKLOG_WARNING,
     payload: Record<string, unknown>
   ): Promise<EventLogEntry> {
-    return await bindEventPublisher({
-      eventLogRepo: this.deps.eventLogRepo,
-      purpose: "GardenBacklogTelemetryService"
-    }).publish({
-      event_type: eventType,
-      entity_type: GARDEN_BACKLOG_ENTITY_TYPE,
-      entity_id: GARDEN_BACKLOG_ENTITY_ID,
-      workspace_id: this.systemWorkspaceId,
-      run_id: null,
-      caused_by: SYSTEM_ACTOR,
-      payload_json: parseComputeRecallGardenEventPayload(eventType, payload)
-    });
-  }
-
-  private async notifyEntry(entry: EventLogEntry): Promise<void> {
-    await this.deps.runtimeNotifier?.notifyEntry(entry);
+    try {
+      return await bindEventPublisher({
+        eventLogRepo: this.deps.eventLogRepo,
+        runtimeNotifier: this.deps.runtimeNotifier,
+        purpose: "GardenBacklogTelemetryService"
+      }).publish({
+        event_type: eventType,
+        entity_type: GARDEN_BACKLOG_ENTITY_TYPE,
+        entity_id: GARDEN_BACKLOG_ENTITY_ID,
+        workspace_id: this.systemWorkspaceId,
+        run_id: null,
+        caused_by: SYSTEM_ACTOR,
+        payload_json: parseComputeRecallGardenEventPayload(eventType, payload)
+      });
+    } catch (error) {
+      if (error instanceof EventPublisherPropagationError) {
+        try {
+          await this.deps.runtimeNotifier.notifyEntry(error.entry);
+        } catch (notifyError) {
+          this.warn("garden backlog notify failed after committed EventLog append", {
+            error: toErrorMessage(notifyError)
+          });
+        }
+        return error.entry;
+      }
+      throw error;
+    }
   }
 
   private warn(message: string, meta: Record<string, unknown>): void {
@@ -431,32 +437,12 @@ export class GardenBacklogTelemetryService {
     this.captureRunner = null;
   }
 
-  private async notifySnapshotBestEffort(entry: EventLogEntry): Promise<void> {
-    try {
-      await this.notifyEntry(entry);
-    } catch (error) {
-      this.warn("garden backlog snapshot notify failed", {
-        error: toErrorMessage(error)
-      });
-    }
-  }
-
   private async finishWarningSideEffectsBestEffort(args: {
     readonly detailPayload: Record<string, unknown>;
-    readonly entry: EventLogEntry;
     readonly generation: number;
     readonly queueDepthTotal: number;
     readonly transition: GardenBacklogWarningTransition;
   }): Promise<void> {
-    try {
-      await this.notifyEntry(args.entry);
-    } catch (error) {
-      this.warn("garden backlog warning notify failed", {
-        transition: args.transition,
-        error: toErrorMessage(error)
-      });
-    }
-
     if (args.generation !== this.captureRunnerGeneration) {
       return;
     }

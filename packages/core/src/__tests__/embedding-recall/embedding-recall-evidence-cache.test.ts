@@ -9,6 +9,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       texts.map((text) => vectorFor(text))
     );
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
       provider: createProvider({ embedTexts }),
       eventLogRepo: {
@@ -51,6 +52,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       texts.map((text) => vectorFor(text))
     );
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
       provider: createProvider({ embedTexts }),
       eventLogRepo: {
@@ -88,6 +90,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
           : new Float32Array([0, 1]))
     );
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
       provider: createProvider({ embedTexts }),
       eventLogRepo: {
@@ -130,6 +133,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
         : new Float32Array([0, 1]))
     );
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
       provider: createProvider({ embedTexts }),
       eventLogRepo: {
@@ -261,6 +265,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
   it("persists linked documents under evidence identity while scoring memory identity", async () => {
     const upsertMany = vi.fn(async () => undefined);
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
       evidenceDocumentEmbeddingRepo: {
         listSourcesByWorkspace: vi.fn(async () => []),
@@ -309,6 +314,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       return texts.map((text) => vectorFor(text));
     });
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
       provider: createProvider({ embedTexts }),
       eventLogRepo: {
@@ -353,6 +359,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       throw new Error("synchronous document failure");
     });
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
       provider: createProvider({ embedTexts }),
       eventLogRepo: {
@@ -437,6 +444,7 @@ async function scoreEqualCandidates(
   }>[]
 ) {
   const service = new EmbeddingRecallService({
+    runtimeNotifier: { notifyEntry: () => undefined },
     embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
     provider: createProvider({
       embedTexts: vi.fn(async (texts: readonly string[]) =>

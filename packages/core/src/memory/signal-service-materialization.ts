@@ -84,12 +84,12 @@ async function completeMaterializationAttempt(
         claimToken
       });
     }
-    const matEvent = await appendMaterializationEvent(
+    await appendMaterializationEvent(
       dependencies,
       triagedSignal,
       attempt.materialization
     );
-    return await completeFailedMaterialization(dependencies, warn, triageResult, attempt, matEvent);
+    return await completeFailedMaterialization(dependencies, warn, triageResult, attempt);
   }
 
   if (attempt.materialization.target_kind === "deferred") {
@@ -111,12 +111,12 @@ async function completeMaterializationAttempt(
       claimToken
     });
   }
-  const matEvent = await appendMaterializationEvent(
+  await appendMaterializationEvent(
     dependencies,
     triagedSignal,
     attempt.materialization
   );
-  return await completeSuccessfulMaterialization(dependencies, triageResult, attempt, matEvent);
+  return await completeSuccessfulMaterialization(dependencies, triageResult, attempt);
 }
 
 async function runMaterializationAttempt(
@@ -171,6 +171,7 @@ async function appendMaterializationEvent(
 ): Promise<EventLogEntry> {
   return await bindEventPublisher({
     eventLogRepo: dependencies.eventLogRepo,
+    runtimeNotifier: dependencies.runtimeNotifier,
     purpose: "SignalService"
   }).publish(buildSignalMaterializationEvent(triagedSignal, materialization));
 }
@@ -179,14 +180,12 @@ async function completeFailedMaterialization(
   dependencies: SignalServiceDependencies,
   warn: SignalServiceWarnPort,
   triageResult: SignalTriageResult,
-  attempt: MaterializationAttempt,
-  matEvent: EventLogEntry
+  attempt: MaterializationAttempt
 ): Promise<SignalServiceReceiveResult> {
   const failedSignal = await dependencies.signalRepo.updateState(
     attempt.materializingSignal.signal_id,
     SignalState.FAILED
   );
-  await notifyRunBoundEvent(dependencies, matEvent);
 
   if (!attempt.caughtMaterializationError) {
     warn(
@@ -212,27 +211,16 @@ async function completeFailedMaterialization(
 async function completeSuccessfulMaterialization(
   dependencies: SignalServiceDependencies,
   triageResult: SignalTriageResult,
-  attempt: MaterializationAttempt,
-  matEvent: EventLogEntry
+  attempt: MaterializationAttempt
 ): Promise<SignalServiceReceiveResult> {
   const materializedSignal = await dependencies.signalRepo.updateState(
     attempt.materializingSignal.signal_id,
     SignalState.MATERIALIZED
   );
-  await notifyRunBoundEvent(dependencies, matEvent);
 
   return {
     signal: materializedSignal,
     triage_result: triageResult,
     materialization: attempt.materialization
   };
-}
-
-async function notifyRunBoundEvent(
-  dependencies: SignalServiceDependencies,
-  event: EventLogEntry
-): Promise<void> {
-  if (event.run_id !== null) {
-    await dependencies.runtimeNotifier.notifyEntry(event);
-  }
 }

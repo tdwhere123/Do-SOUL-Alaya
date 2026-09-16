@@ -206,7 +206,8 @@ function createGovernanceAndSurfaceFoundation(
   const surfaceService = createSurfaceService(input, eventPublisher, healthJournalService);
   const taskSurfaceBuilder = new TaskSurfaceBuilder({
     surfaceRepo: input.surfaceIdentityRepo,
-    eventLogRepo: input.eventLogRepo
+    eventLogRepo: input.eventLogRepo,
+    runtimeNotifier: input.runtimeNotifier
   });
 
   return {
@@ -299,7 +300,8 @@ function createSurfaceService(
 function createGovernanceServices(input: DaemonServiceFoundationInput) {
   const sessionOverrideService = new SessionOverrideService({
     eventLogRepo: input.eventLogRepo,
-    runLookup: input.runRepo
+    runLookup: input.runRepo,
+    runtimeNotifier: input.runtimeNotifier
   });
   const proposalService = new ProposalService({
     proposalRepo: input.proposalRepo,

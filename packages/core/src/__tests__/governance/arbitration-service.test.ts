@@ -106,7 +106,7 @@ function createDependencies(seed: {
     return claims.get(claimId) as ClaimForm;
   });
 
-  const updateWinnerSpy = vi.fn(async (_slotId, winnerClaimId, incumbentSince, updatedAt) => {
+  const updateWinnerSpy = vi.fn((_slotId, winnerClaimId, incumbentSince, updatedAt) => {
     if (slotState === null) {
       throw new Error("missing slot");
     }
@@ -123,7 +123,7 @@ function createDependencies(seed: {
 
   const broadcastSpy = vi.fn(async () => {});
 
-  const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+  const appendSpy = vi.fn((entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
     order.push("event_log");
     const event = {
       event_id: `event-${eventLog.length + 1}`,
@@ -149,7 +149,7 @@ function createDependencies(seed: {
       )
     },
     conflictMatrixRepo: {
-      create: vi.fn(async (edge) => {
+      create: vi.fn((edge) => {
         order.push("repo_create");
         edges.set(edge.object_id, Object.freeze({ ...edge }));
         return edge;

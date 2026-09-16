@@ -12,6 +12,7 @@ import type { EmbeddingRecallServiceDependencies } from "./types.js";
 export interface EmbeddingRecallTelemetryDependencies {
   readonly eventLogRepo: EmbeddingRecallServiceDependencies["eventLogRepo"];
   readonly eventPublisher?: EmbeddingRecallServiceDependencies["eventPublisher"];
+  readonly runtimeNotifier?: EmbeddingRecallServiceDependencies["runtimeNotifier"];
   readonly healthJournalRecorder: EmbeddingRecallServiceDependencies["healthJournalRecorder"];
   readonly provider: EmbeddingRecallServiceDependencies["provider"];
   readonly now: () => string;
@@ -34,6 +35,7 @@ export class EmbeddingRecallTelemetry {
       await bindEventPublisher({
         eventPublisher: this.deps.eventPublisher,
         eventLogRepo: this.deps.eventLogRepo,
+        runtimeNotifier: this.deps.runtimeNotifier,
         purpose: "EmbeddingRecallTelemetry"
       }).publish({
         event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
@@ -98,7 +100,9 @@ export class EmbeddingRecallTelemetry {
   }): Promise<void> {
     try {
       await bindEventPublisher({
+        eventPublisher: this.deps.eventPublisher,
         eventLogRepo: this.deps.eventLogRepo,
+        runtimeNotifier: this.deps.runtimeNotifier,
         purpose: "EmbeddingRecallTelemetry"
       }).publish(params.entry);
     } catch (error) {

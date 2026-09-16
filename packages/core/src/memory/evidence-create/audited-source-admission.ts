@@ -1,4 +1,4 @@
-import type { SourceAdmissionRequest, SourceAdmissionResult } from "@do-soul/alaya-protocol";
+import type { EventLogEntry, SourceAdmissionRequest, SourceAdmissionResult } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import { createSourceAdmissionPort } from "./source-admission.js";
 import { appendSourceRecordAdmitted } from "./source-admission-audit.js";
@@ -10,6 +10,7 @@ export type AuditedSourceAdmission = Readonly<{
 /** Mandatory source import: unlike optional evidence formation, errors escape. */
 export function createAuditedSourceAdmission(input: Parameters<typeof createSourceAdmissionPort>[0] & Readonly<{
   eventLogRepo: Parameters<typeof appendSourceRecordAdmitted>[0];
+  runtimeNotifier: { notifyEntry(entry: EventLogEntry): void | Promise<void> };
 }>): AuditedSourceAdmission {
   const admission = createSourceAdmissionPort(input);
   return {
@@ -27,7 +28,7 @@ export function createAuditedSourceAdmission(input: Parameters<typeof createSour
       // Receipt-first contract: an audit failure leaves the committed identity.
       // A retry reuses that receipt and retries audit; callers must not publish
       // readiness until this promise succeeds. Audit is at least once.
-      await appendSourceRecordAdmitted(input.eventLogRepo, result.record);
+      await appendSourceRecordAdmitted(input.eventLogRepo, result.record, input.runtimeNotifier);
       return result;
     }
   };
