@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { SurfaceEventType, SurfaceAnchorKind, SurfaceStatus, WorkspaceKind, WorkspaceState, type SurfaceAnchor } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
-import { SqliteSurfaceAnchorRepo } from "../../../repos/surface/surface-anchor-repo.js";
+import { parseSurfaceAnchorRow, SqliteSurfaceAnchorRepo } from "../../../repos/surface/surface-anchor-repo.js";
+import { StorageError } from "../../../shared/errors.js";
+import { parseRows } from "../../../repos/shared/parse-row.js";
 import { SqliteSurfaceIdentityRepo } from "../../../repos/surface/surface-identity-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
@@ -122,6 +124,22 @@ describe("SqliteSurfaceAnchorRepo", () => {
 
     expect(created.event.revision).toBe(0);
     expect(deleted.revision).toBe(1);
+  });
+
+  it("rejects a missing column as VALIDATION_FAILED", () => {
+    const complete = createSurfaceAnchor();
+    const { workspace_id: _omitted, ...incomplete } = complete;
+
+    expect(() => parseSurfaceAnchorRow(incomplete)).toThrow(StorageError);
+    try {
+      parseSurfaceAnchorRow(incomplete);
+    } catch (error) {
+      expect(error).toMatchObject({ code: "VALIDATION_FAILED" });
+    }
+
+    expect(() => parseRows([incomplete], { parse: parseSurfaceAnchorRow }, "surface anchor row")).toThrow(
+      StorageError
+    );
   });
 
   it("lists anchors by surface", async () => {
