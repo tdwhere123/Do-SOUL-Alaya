@@ -143,18 +143,23 @@ describe("ReconciliationService LLM lock shrink", () => {
   });
 
   it("degrades LLM UPDATE when the target version changes during the round trip", async () => {
-    const neighbor = createMemoryEntry({
-      object_id: "memory-neighbor",
-      content: "The user lives in Berlin city center",
-      updated_at: "2026-05-16T00:00:00.000Z"
-    });
-    const { deps, update } = createDeps([neighbor], {
+    const store: MemoryEntry[] = [
+      createMemoryEntry({
+        object_id: "memory-neighbor",
+        content: "The user lives in Berlin city center",
+        updated_at: "2026-05-16T00:00:00.000Z"
+      })
+    ];
+    const { deps, update } = createDeps(store, {
       thresholds: { similarityFloor: 0.2 },
       rewriteAuthorization: authorizedDurableRewrite
     });
     deps.llmDecision.decide = vi.fn<DecideFn>(async () => {
-      neighbor.updated_at = "2026-05-16T00:00:01.000Z";
-      neighbor.content = "The user lives in Berlin after a concurrent edit";
+      store[0] = createMemoryEntry({
+        object_id: "memory-neighbor",
+        content: "The user lives in Berlin after a concurrent edit",
+        updated_at: "2026-05-16T00:00:01.000Z"
+      });
       return { kind: "update", targetObjectId: "memory-neighbor", reason: "refines" };
     });
     const service = new ReconciliationService(deps);
@@ -172,16 +177,22 @@ describe("ReconciliationService LLM lock shrink", () => {
   });
 
   it("degrades LLM NOOP when the target version changes during the round trip", async () => {
-    const neighbor = createMemoryEntry({
-      object_id: "memory-neighbor",
-      content: "The user lives in Berlin city center",
-      updated_at: "2026-05-16T00:00:00.000Z"
-    });
-    const { deps, append, update } = createDeps([neighbor], {
+    const store: MemoryEntry[] = [
+      createMemoryEntry({
+        object_id: "memory-neighbor",
+        content: "The user lives in Berlin city center",
+        updated_at: "2026-05-16T00:00:00.000Z"
+      })
+    ];
+    const { deps, append, update } = createDeps(store, {
       thresholds: { similarityFloor: 0.2 }
     });
     deps.llmDecision.decide = vi.fn<DecideFn>(async () => {
-      neighbor.updated_at = "2026-05-16T00:00:01.000Z";
+      store[0] = createMemoryEntry({
+        object_id: "memory-neighbor",
+        content: "The user lives in Berlin city center",
+        updated_at: "2026-05-16T00:00:01.000Z"
+      });
       return { kind: "noop", targetObjectId: "memory-neighbor", reason: "equivalent" };
     });
     const service = new ReconciliationService(deps);
