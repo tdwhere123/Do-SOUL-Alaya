@@ -7,7 +7,9 @@ import {
 
 describe("bench embeddingMode vs effective supplement", () => {
   it("rejects disabled only when the probed local_onnx supplement is on", () => {
-    const environment = { ALAYA_EMBEDDING_PROVIDER: "local_onnx" };
+    const environment: Readonly<Record<string, string | undefined>> = {
+      ALAYA_EMBEDDING_PROVIDER: "local_onnx"
+    };
     const run = () => assertBenchEmbeddingModeMatchesEffective("disabled", environment);
     if (resolveEffectiveEmbeddingPosture((key) => environment[key]).embeddingSupplementEnabled) {
       expect(run).toThrow(/embeddingMode=disabled but effective embedding supplement is on/);
