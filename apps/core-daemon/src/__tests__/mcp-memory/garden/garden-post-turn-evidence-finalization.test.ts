@@ -69,10 +69,10 @@ describe("external post-turn evidence finalization", () => {
     const taskId = "post-turn-empty-retry";
     let completionAttempts = 0;
     const harness = await createGardenMcpHarness({
-      completeWithEvents: async (_taskId, _result, _events, _claimedBy, original) => {
+      completeWithEvents: async (_taskId, _result, _events, _claimedBy, workspaceId, original) => {
         completionAttempts += 1;
         if (completionAttempts === 1) throw new Error("completion event unavailable");
-        await original(_taskId, _result, _events, _claimedBy);
+        await original(_taskId, _result, _events, _claimedBy, workspaceId);
       }
     });
     enqueuePostTurnTask(harness, taskId);

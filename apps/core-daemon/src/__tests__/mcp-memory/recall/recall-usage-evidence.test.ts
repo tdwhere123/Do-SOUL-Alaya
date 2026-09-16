@@ -85,7 +85,7 @@ describe("recall usage evidence proof", () => {
       coRecallCoherenceGate: { coherentPairKeys },
       gardenTaskRepo: {
         enqueue,
-        findById: vi.fn(() => null),
+        findByIdInWorkspace: vi.fn(() => null),
         peekPending: vi.fn(() => [])
       } as never
     } as never);

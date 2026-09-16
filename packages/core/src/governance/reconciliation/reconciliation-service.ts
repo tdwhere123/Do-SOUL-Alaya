@@ -8,7 +8,10 @@ import {
 
 import { KeyedMutex } from "@do-soul/alaya-protocol";
 import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "../policy/run-workspace-guard.js";
-import { ReconciliationDecider } from "./reconciliation-decider.js";
+import {
+  ReconciliationDecider,
+  type PreparedReconciliation
+} from "./reconciliation-decider.js";
 import {
   addDecision,
   auditDroppedContent,
@@ -228,10 +231,45 @@ export class ReconciliationService {
   }
 
   public async runWithDecision(input: ReconciliationInput, applyVerdict: ReconciliationVerdictApplier): Promise<ReconciliationDecision> {
+    const prepared = await this.withWorkspaceExclusion(
+      input,
+      async () => {
+        const next = await this.decider.prepare(input);
+        if (next.kind === "ready") {
+          await this.applyDecision(input, next.decision, applyVerdict);
+        }
+        return next;
+      },
+      async () => {
+        const degraded = await this.applyLeaseBusyAdd(input, applyVerdict, 0);
+        return { kind: "ready" as const, decision: degraded };
+      }
+    );
+    if (prepared.kind === "ready") {
+      return prepared.decision;
+    }
+
+    // Model RTT must not hold mutex/lease; a second ingest would stall for the round trip.
+    const nominated = await this.decider.finishWithLlm(input, prepared);
+    return await this.withWorkspaceExclusion(
+      input,
+      async () => {
+        const decision = await this.casLlmTarget(input.workspaceId, prepared, nominated);
+        return await this.applyDecision(input, decision, applyVerdict);
+      },
+      async () => await this.applyLeaseBusyAdd(input, applyVerdict, nominated.bestSimilarity)
+    );
+  }
+
+  private async withWorkspaceExclusion<T>(
+    input: ReconciliationInput,
+    section: () => Promise<T>,
+    onLeaseBusy: () => Promise<T>
+  ): Promise<T> {
     return await this.mutex.runExclusive(input.workspaceId, async () => {
       await assertGovernanceRunWorkspace(this.runLookup, input.runId, input.workspaceId);
       if (this.lease === undefined) {
-        return await this.runDecisionSection(input, applyVerdict);
+        return await section();
       }
       const ownerToken = randomUUID();
       const nowDate = this.now();
@@ -242,21 +280,10 @@ export class ReconciliationService {
         new Date(nowDate.getTime() + this.leaseTtlMs).toISOString()
       );
       if (acquired === null) {
-        // another process holds this workspace's reconcile — degrade, don't block.
-        this.warn("reconciliation lease busy — degrading to ADD", {
-          workspace_id: input.workspaceId,
-          signal_id: input.signalId
-        });
-        const degraded = addDecision(
-          0,
-          true,
-          "reconciliation lease held by another process — added with conflict scan"
-        );
-        await applyVerdict(degraded);
-        return degraded;
+        return await onLeaseBusy();
       }
       try {
-        return await this.runDecisionSection(input, applyVerdict);
+        return await section();
       } finally {
         try {
           this.lease.release(input.workspaceId, ownerToken);
@@ -271,9 +298,63 @@ export class ReconciliationService {
     });
   }
 
-  private async runDecisionSection(input: ReconciliationInput, applyVerdict: ReconciliationVerdictApplier): Promise<ReconciliationDecision> {
-    const decision = await this.decider.decide(input);
+  private async applyLeaseBusyAdd(
+    input: ReconciliationInput,
+    applyVerdict: ReconciliationVerdictApplier,
+    bestSimilarity: number
+  ): Promise<ReconciliationDecision> {
+    this.warn("reconciliation lease busy — degrading to ADD", {
+      workspace_id: input.workspaceId,
+      signal_id: input.signalId
+    });
+    const degraded = addDecision(
+      bestSimilarity,
+      true,
+      "reconciliation lease held by another process — added with conflict scan"
+    );
+    await applyVerdict(degraded);
+    return degraded;
+  }
 
+  private async casLlmTarget(
+    workspaceId: string,
+    prepared: Extract<PreparedReconciliation, { kind: "needs_llm" }>,
+    decision: ReconciliationDecision
+  ): Promise<ReconciliationDecision> {
+    if (decision.kind === "add" || decision.survivingObjectId === undefined) {
+      return decision;
+    }
+    const snapshot = prepared.snapshots.find((item) => item.objectId === decision.survivingObjectId);
+    if (snapshot === undefined) {
+      return addDecision(
+        decision.bestSimilarity,
+        true,
+        "LLM target missing from snapshot — added with conflict scan"
+      );
+    }
+    const current = await this.findUpdateTarget(workspaceId, decision.survivingObjectId);
+    if (current === null) {
+      return addDecision(
+        decision.bestSimilarity,
+        true,
+        "LLM target missing or archived after round trip — added with conflict scan"
+      );
+    }
+    if (current.updated_at !== snapshot.updatedAt || current.content !== snapshot.content) {
+      return addDecision(
+        decision.bestSimilarity,
+        true,
+        "LLM target changed during round trip — added with conflict scan"
+      );
+    }
+    return decision;
+  }
+
+  private async applyDecision(
+    input: ReconciliationInput,
+    decision: ReconciliationDecision,
+    applyVerdict: ReconciliationVerdictApplier
+  ): Promise<ReconciliationDecision> {
     if (decision.kind === "update" && decision.survivingObjectId !== undefined) {
       return await this.applyUpdateDecision(
         input,
