@@ -20,6 +20,8 @@ const PROCESS_TOKEN = "process-token";
 
 function headersFor(token: string): Record<string, string> {
   return {
+    // Originless desktop is denied before workspace grant; Inspector sends Origin.
+    origin: "http://localhost:5173",
     "x-request-token": token,
     "x-alaya-desktop": "1",
     "content-type": "application/json"
