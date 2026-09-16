@@ -1211,8 +1211,8 @@
     {
       "specifier": "@do-soul/alaya",
       "path": "apps/core-daemon/src/index.ts",
-      "expected_count": 21,
-      "expected_sha256": "b7f0cf892c94de40092cefccd726d99943faef518e5d2f1b730bd40ecbead2e6"
+      "expected_count": 23,
+      "expected_sha256": "e58eaffc22a1da75b460f6decf138b2a311432be2678aa4ad7d318a50e5c63cd"
     },
     {
       "specifier": "@do-soul/alaya/mcp-server",
