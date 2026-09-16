@@ -124,7 +124,7 @@ describe("HealthJournalService", () => {
 
   it("delegates phase-scoped recent queries to the repo", async () => {
     const repo = {
-      append: vi.fn(async (entry: { entry_id?: string; created_at?: string }) =>
+      append: vi.fn((entry: { entry_id?: string; created_at?: string }) =>
         createHealthEntry({
           entry_id: entry.entry_id ?? "entry-1",
           created_at: entry.created_at ?? "2026-03-27T00:00:00.000Z"
@@ -135,8 +135,10 @@ describe("HealthJournalService", () => {
     const service = new HealthJournalService({
       eventLogRepo: {
         append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
-        queryByEntity: vi.fn(async () => [])
+        queryByEntity: vi.fn(async () => []),
+        transactional: identityTxn
       },
+      runtimeNotifier: { notifyEntry: () => undefined },
       repo
     });
 
@@ -155,7 +157,7 @@ describe("HealthJournalService", () => {
 
   it("rejects a phase filter without an event kind", async () => {
     const repo = {
-      append: vi.fn(async (entry: { entry_id?: string; created_at?: string }) =>
+      append: vi.fn((entry: { entry_id?: string; created_at?: string }) =>
         createHealthEntry({
           entry_id: entry.entry_id ?? "entry-1",
           created_at: entry.created_at ?? "2026-03-27T00:00:00.000Z"
@@ -166,8 +168,10 @@ describe("HealthJournalService", () => {
     const service = new HealthJournalService({
       eventLogRepo: {
         append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
-        queryByEntity: vi.fn(async () => [])
+        queryByEntity: vi.fn(async () => []),
+        transactional: identityTxn
       },
+      runtimeNotifier: { notifyEntry: () => undefined },
       repo
     });
 
