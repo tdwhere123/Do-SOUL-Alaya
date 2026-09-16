@@ -69,25 +69,24 @@ export class GardenBacklogTelemetryService {
     this.acceptingOperations = true;
     this.drainBoundaryFrozen = false;
     this.finalDrainBoundaryTransitionId = null;
-    if (this.timer !== null) {
+  }
+
+  public async poll(): Promise<void> {
+    if (!this.acceptingOperations) {
       return;
     }
 
-    this.timer = setInterval(() => {
-      if (!this.acceptingOperations) {
-        return;
-      }
-
+    try {
       this.snapshotRequestedVersion += 1;
-
       if (this.deps.scheduler.peekBacklogWarningTransition() !== null) {
         this.captureRequestedVersion += 1;
       }
-
-      void this.ensureCaptureRunner();
-      void this.ensureSnapshotRunner();
-    }, this.thresholds.snapshot_interval_ms);
-    this.timer.unref?.();
+      await Promise.all([this.ensureCaptureRunner(), this.ensureSnapshotRunner()]);
+    } catch (error) {
+      this.warn("garden backlog telemetry poll failed", {
+        error: toErrorMessage(error)
+      });
+    }
   }
 
   public async stop(): Promise<GardenBacklogTelemetryStopResult> {
@@ -275,15 +274,14 @@ export class GardenBacklogTelemetryService {
   }
 
   private async publishSnapshotSafely(generation: number): Promise<void> {
-    const snapshot = this.getSnapshot();
-    const payload = {
-      ...snapshot,
-      workspace_id: this.systemWorkspaceId,
-      run_id: null
-    } as const;
-
     let entry: EventLogEntry;
     try {
+      const snapshot = this.getSnapshot();
+      const payload = {
+        ...snapshot,
+        workspace_id: this.systemWorkspaceId,
+        run_id: null
+      } as const;
       entry = await this.appendEvent(
         ComputeRecallGardenEventType.GARDEN_BACKLOG_TELEMETRY_SNAPSHOT,
         payload
@@ -420,7 +418,11 @@ export class GardenBacklogTelemetryService {
         return;
       }
       this.snapshotRequestedVersion += 1;
-      void this.ensureSnapshotRunner();
+      void this.ensureSnapshotRunner().catch((error) => {
+        this.warn("garden backlog snapshot retry failed", {
+          error: toErrorMessage(error)
+        });
+      });
     });
   }
 
