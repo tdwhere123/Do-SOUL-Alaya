@@ -13,7 +13,7 @@ import { CoreError } from "../../shared/errors.js";
 import { bindEventPublisher } from "../../runtime/event-publisher.js";
 import { isExpired } from "../../shared/time.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
-import { EventLogBackedCache } from "../cache/event-log-backed-cache.js";
+import { VersionedBoundedCache } from "../../runtime/versioned-bounded-cache.js";
 import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "../policy/run-workspace-guard.js";
 
 const OVERRIDE_REHYDRATE_FAILED_WARNING_CODE = "ALAYA_SESSION_OVERRIDE_REHYDRATE_FAILED";
@@ -38,7 +38,7 @@ export interface SessionOverrideServiceDependencies {
  * be reconstructed after daemon restart.
  */
 export class SessionOverrideService {
-  private readonly cache = new EventLogBackedCache<readonly Readonly<SessionOverride>[]>();
+  private readonly cache = new VersionedBoundedCache<readonly Readonly<SessionOverride>[]>();
   private readonly generateRuntimeId: () => string;
   private readonly now: () => string;
 
