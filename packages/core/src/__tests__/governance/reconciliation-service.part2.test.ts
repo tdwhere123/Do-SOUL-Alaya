@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { type MemoryEntry } from "@do-soul/alaya-protocol";
 import { ReconciliationService, createRuleOnlyReconciliationDecisionPort, type ReconciliationServiceDependencies, type ReconciliationVerdictApplier } from "../../governance/reconciliation/reconciliation-service.js";
 
-import { DecideFn, UpdateFn, baseInput, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
+import { authorizedDurableRewrite, DecideFn, UpdateFn, baseInput, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
 
 describe("ReconciliationService", () => {
 it("does not ADD when pre-write recall reports unavailable", async () => {
@@ -76,9 +76,167 @@ it("serializes concurrent reconciles for the same workspace", async () => {
       drive(service, { incomingContent: "fact three", incomingDomainTags: [] }).decision
     ]);
 
-    // The keyed mutex must keep at most one critical section running per
-    // workspace key — the decide -> create window stays closed.
+    // The keyed mutex must keep at most one durable section running per
+    // workspace key — recall and commit stay exclusive; the LLM wait does not.
     expect(maxActive).toBe(1);
+  });
+});
+
+describe("ReconciliationService LLM lock shrink", () => {
+  function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+    let resolve!: () => void;
+    const promise = new Promise<void>((next) => {
+      resolve = next;
+    });
+    return { promise, resolve };
+  }
+
+  it("does not hold the workspace mutex across the LLM round trip", async () => {
+    const neighbor = createMemoryEntry({
+      object_id: "memory-neighbor",
+      content: "The user lives in Berlin city center"
+    });
+    const llmEntered = deferred();
+    const llmRelease = deferred();
+    const { deps } = createDeps([neighbor], {
+      thresholds: { similarityFloor: 0.2 }
+    });
+    deps.llmDecision.decide = vi.fn<DecideFn>(async () => {
+      llmEntered.resolve();
+      await llmRelease.promise;
+      return { kind: "add", reason: "distinct" };
+    });
+    const service = new ReconciliationService(deps);
+
+    const first = drive(service, {
+      incomingContent: "The user lives in Berlin since 2019",
+      incomingDomainTags: ["bench-seed"]
+    });
+    await llmEntered.promise;
+
+    const second = drive(service, {
+      incomingContent: "The user works as a marine biologist.",
+      incomingDomainTags: ["career"]
+    }).decision;
+    const secondDecision = await Promise.race([
+      second,
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("second reconcile blocked while LLM held the mutex")), 1000);
+      })
+    ]);
+    expect(secondDecision.kind).toBe("add");
+
+    llmRelease.resolve();
+    const firstDecision = await first.decision;
+    expect(firstDecision.kind).toBe("add");
+  });
+
+  it("does not hold the storage lease across the LLM round trip", async () => {
+    const neighbor = createMemoryEntry({
+      object_id: "memory-neighbor",
+      content: "The user lives in Berlin city center"
+    });
+    const acquireCalls: string[] = [];
+    const releaseCalls: string[] = [];
+    let leaseHeld = false;
+    let heldDuringLlm = true;
+    const lease = {
+      tryAcquire: (leaseKey: string, ownerToken: string) => {
+        leaseHeld = true;
+        acquireCalls.push(`${leaseKey}:${ownerToken}`);
+        return { owner_token: ownerToken };
+      },
+      release: (leaseKey: string, ownerToken: string) => {
+        leaseHeld = false;
+        releaseCalls.push(`${leaseKey}:${ownerToken}`);
+      }
+    };
+    const { deps } = createDeps([neighbor], {
+      thresholds: { similarityFloor: 0.2 },
+      lease
+    });
+    deps.llmDecision.decide = vi.fn<DecideFn>(async () => {
+      heldDuringLlm = leaseHeld;
+      return { kind: "add", reason: "distinct" };
+    });
+    const service = new ReconciliationService(deps);
+
+    const decision = await drive(service, {
+      incomingContent: "The user lives in Berlin since 2019",
+      incomingDomainTags: ["bench-seed"]
+    }).decision;
+
+    expect(decision.kind).toBe("add");
+    expect(heldDuringLlm).toBe(false);
+    expect(acquireCalls).toHaveLength(2);
+    expect(releaseCalls).toEqual(acquireCalls);
+  });
+
+  it("degrades LLM UPDATE when the target version changes during the round trip", async () => {
+    const store: MemoryEntry[] = [
+      createMemoryEntry({
+        object_id: "memory-neighbor",
+        content: "The user lives in Berlin city center",
+        updated_at: "2026-05-16T00:00:00.000Z"
+      })
+    ];
+    const { deps, update } = createDeps(store, {
+      thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: authorizedDurableRewrite
+    });
+    deps.llmDecision.decide = vi.fn<DecideFn>(async () => {
+      store[0] = createMemoryEntry({
+        object_id: "memory-neighbor",
+        content: "The user lives in Berlin after a concurrent edit",
+        updated_at: "2026-05-16T00:00:01.000Z"
+      });
+      return { kind: "update", targetObjectId: "memory-neighbor", reason: "refines" };
+    });
+    const service = new ReconciliationService(deps);
+
+    const driven = drive(service, {
+      incomingContent: "The user lives in Berlin since 2019",
+      incomingDomainTags: ["bench-seed"]
+    });
+    const decision = await driven.decision;
+
+    expect(decision.kind).toBe("add");
+    expect(decision.runConflictScan).toBe(true);
+    expect(driven.appliedVerdicts).toEqual(["add"]);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("degrades LLM NOOP when the target version changes during the round trip", async () => {
+    const store: MemoryEntry[] = [
+      createMemoryEntry({
+        object_id: "memory-neighbor",
+        content: "The user lives in Berlin city center",
+        updated_at: "2026-05-16T00:00:00.000Z"
+      })
+    ];
+    const { deps, append, update } = createDeps(store, {
+      thresholds: { similarityFloor: 0.2 }
+    });
+    deps.llmDecision.decide = vi.fn<DecideFn>(async () => {
+      store[0] = createMemoryEntry({
+        object_id: "memory-neighbor",
+        content: "The user lives in Berlin city center",
+        updated_at: "2026-05-16T00:00:01.000Z"
+      });
+      return { kind: "noop", targetObjectId: "memory-neighbor", reason: "equivalent" };
+    });
+    const service = new ReconciliationService(deps);
+
+    const driven = drive(service, {
+      incomingContent: "The user lives in Berlin downtown",
+      incomingDomainTags: ["bench-seed"]
+    });
+    const decision = await driven.decision;
+
+    expect(decision.kind).toBe("add");
+    expect(driven.appliedVerdicts).toEqual(["add"]);
+    expect(append).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 });
 

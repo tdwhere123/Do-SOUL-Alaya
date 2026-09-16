@@ -92,11 +92,13 @@ export interface ReconciliationEventLogPort {
 }
 
 // invariant: the storage-level advisory-lease port. A multi-process
-// reconciliation cannot wrap its LLM round trip in one SQLite
-// transaction, so cross-process mutual exclusion is a compare-and-set
-// lease instead: tryAcquire INSERTs-OR-CONFLICTs a row keyed by
-// workspace_id and wins only when no live lease exists (or the existing
-// one is expired and reclaimable). The daemon wires
+// reconciliation cannot wrap prepare and commit in one SQLite
+// transaction across the LLM round trip, so cross-process mutual
+// exclusion is a compare-and-set lease on each durable section:
+// tryAcquire INSERTs-OR-CONFLICTs a row keyed by workspace_id and wins
+// only when no live lease exists (or the existing one is expired and
+// reclaimable). The LLM call is outside this lease; commit CAS-checks
+// the candidate `updated_at`. The daemon wires
 // SqliteReconciliationLeaseRepo; the in-process KeyedMutex is only a
 // local defense layer and is not a substitute for this storage lease.
 export interface ReconciliationLeasePort {
@@ -195,10 +197,11 @@ export interface ReconciliationServiceDependencies {
    */
   readonly mutex?: KeyedMutex;
   /**
-   * Optional storage-level advisory lease. When wired, the whole
-   * decide->write section is guarded by a per-workspace compare-and-set
-   * lease so a second daemon or out-of-process Garden worker cannot
-   * interleave a concurrent reconcile.
+   * Optional storage-level advisory lease. When wired, each durable
+   * read-write section is guarded by a per-workspace compare-and-set
+   * lease. The LLM round trip is outside the lease; commit re-reads the
+   * candidate `updated_at` snapshot so a concurrent writer cannot be
+   * overwritten blindly.
    */
   readonly lease?: ReconciliationLeasePort;
   /** Lease TTL in milliseconds; defaults to RECONCILE_LEASE_TTL_MS. */
@@ -220,14 +223,12 @@ export const DEFAULT_TOP_K = 8;
 
 export const DEFAULT_MAX_LLM_CANDIDATES = 4;
 
-// invariant: the reconciliation advisory-lease TTL. It MUST outlast the
-// slowest single reconciliation pass — most of which is one cold-cache
-// LLM `decide()` round trip plus a few async repo writes. Five minutes
-// is generous headroom over a worst-case cold call so a still-running
-// holder is never reclaimed mid-pass, while still being short enough
-// that a crashed holder unwedges ingest within minutes rather than
-// indefinitely. The lease is released explicitly in the normal path; the
-// TTL is only the crash-recovery backstop.
+// invariant: the reconciliation advisory-lease TTL. The lease covers a
+// durable read-write section only (prepare or CAS-commit), not the LLM
+// round trip. Five minutes is crash-recovery headroom so a crashed
+// holder unwedges ingest without waiting indefinitely. The lease is
+// released explicitly in the normal path; the TTL is only the
+// crash-recovery backstop.
 export const RECONCILE_LEASE_TTL_MS = 5 * 60 * 1000;
 
 // invariant: Jaccard stopword filter. A handful of high-frequency

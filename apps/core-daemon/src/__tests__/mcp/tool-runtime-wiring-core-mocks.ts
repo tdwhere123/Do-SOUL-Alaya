@@ -243,6 +243,7 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       const instance = {
         start: vi.fn(() => undefined),
         stop: vi.fn(async () => undefined),
+        poll: vi.fn(async () => undefined),
         capture: vi.fn(async () => undefined),
         getSnapshot: vi.fn(() => ({
           workspace_id: null,
