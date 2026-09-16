@@ -42,6 +42,7 @@ import {
   applyRemoteBindTokenRotation,
   type RequestProtectionEnvLike as RequestTokenProtectionEnvLike
 } from "../../request-token-binding.js";
+import { isRemoteDaemonOptInEnabled } from "../../server-options.js";
 import type { AlayaConfigPaths } from "../../../cli/support/config-files.js";
 import type { DaemonStartupStepRecord } from "./daemon-runtime-types.js";
 import { parseEnv } from "../../../services/env-file/env-file-service.js";
@@ -93,7 +94,7 @@ export function createRequestProtection(
       configuredRequestToken !== undefined && configuredRequestToken.length > 0
         ? configuredRequestToken
         : randomBytes(32).toString("hex"),
-    allowDesktopOriginlessRequests: true,
+    allowDesktopOriginlessRequests: !isRemoteDaemonOptInEnabled(env),
     tokenSource,
     liveWorkspaceGrant: { boundWorkspaceIds: [] as readonly string[] | "*" }
   });

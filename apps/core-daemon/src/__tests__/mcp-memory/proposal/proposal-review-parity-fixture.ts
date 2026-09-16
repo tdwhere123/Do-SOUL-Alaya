@@ -81,7 +81,8 @@ export async function runReviewParityScenario(
     requestProtection: {
       allowedOrigin: "http://localhost:5173",
       requestToken: "daemon-request-token",
-      boundWorkspaceIds: ["ws1"]
+      boundWorkspaceIds: ["ws1"],
+      allowDesktopOriginlessRequests: true
     },
     routes: {
       proposals: {
