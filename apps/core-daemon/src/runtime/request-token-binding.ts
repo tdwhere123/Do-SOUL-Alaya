@@ -96,6 +96,8 @@ export function extractWorkspaceIdFromQuery(value: string | undefined): string |
 }
 
 export function extractWorkspaceIdFromUnknown(value: unknown): string | null {
+  // Nested JSON is ignored: HTTP routes bind workspace from path, query,
+  // top-level body, or the resolved run — nested payload ids are not grants.
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyRemoteBindTokenRotation,
   authorizeProtectedRequest,
+  extractWorkspaceIdFromUnknown,
   type RequestTokenProtection
 } from "../../runtime/request-token-binding.js";
 
@@ -18,6 +19,21 @@ const protection = {
     { token: WORKSPACE_B_TOKEN, workspaceIds: ["ws-b"] }
   ]
 };
+
+describe("extractWorkspaceIdFromUnknown", () => {
+  it("reads only a top-level workspace_id and ignores nested payload ids", () => {
+    expect(extractWorkspaceIdFromUnknown({ workspace_id: "ws-a" })).toBe("ws-a");
+    expect(extractWorkspaceIdFromUnknown({ workspace_id: "  ws-a  " })).toBe("ws-a");
+    expect(extractWorkspaceIdFromUnknown({ filter: { workspace_id: "ws-b" } })).toBeNull();
+    expect(
+      extractWorkspaceIdFromUnknown({ payload: { workspace_id: "ws-b" }, target: { workspace_id: "ws-c" } })
+    ).toBeNull();
+    expect(extractWorkspaceIdFromUnknown({ workspace_id: 12 })).toBeNull();
+    expect(extractWorkspaceIdFromUnknown({ workspace_id: "" })).toBeNull();
+    expect(extractWorkspaceIdFromUnknown([{ workspace_id: "ws-a" }])).toBeNull();
+    expect(extractWorkspaceIdFromUnknown(null)).toBeNull();
+  });
+});
 
 describe("request token workspace binding", () => {
   it("rejects a workspace A token against workspace B paths", () => {
