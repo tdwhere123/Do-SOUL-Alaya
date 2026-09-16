@@ -118,7 +118,8 @@ describe("request token workspace scope", () => {
       requestProtection: {
         allowedOrigin: "http://localhost:5173",
         requestToken: PROCESS_TOKEN,
-        boundWorkspaceIds: ["wsA"]
+        boundWorkspaceIds: ["wsA"],
+        allowDesktopOriginlessRequests: true
       },
       routes: {
         globalMemory: globalMemoryRouteServices({
@@ -182,7 +183,8 @@ describe("request token workspace scope", () => {
       requestProtection: {
         allowedOrigin: "http://localhost:5173",
         requestToken: PROCESS_TOKEN,
-        boundWorkspaceIds: ["wsA"]
+        boundWorkspaceIds: ["wsA"],
+        allowDesktopOriginlessRequests: true
       },
       routes: {
         overrides: routeServices<OverrideRouteServices>({
