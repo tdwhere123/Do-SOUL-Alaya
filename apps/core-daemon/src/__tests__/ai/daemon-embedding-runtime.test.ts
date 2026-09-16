@@ -558,7 +558,8 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
           runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
-        warn: fixture.warn as unknown as WarnFn
+        warn: fixture.warn as unknown as WarnFn,
+        localOnnxTransformersProbe: () => ({ availability: "available" })
       });
       expect(embed).toHaveBeenCalledTimes(1);
       expect(runtime.embeddingRecallService).toBeDefined();

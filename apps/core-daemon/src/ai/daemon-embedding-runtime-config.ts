@@ -1,4 +1,9 @@
-import { parseEnvBoolean } from "@do-soul/alaya-core";
+import {
+  parseEnvBoolean,
+  probeLocalOnnxTransformersPackage,
+  type LocalOnnxTransformersAvailability,
+  type LocalOnnxTransformersProbe
+} from "@do-soul/alaya-core";
 import type { EmbeddingProviderKind } from "@do-soul/alaya-protocol";
 import type { ResolveSecretError } from "../secrets/index.js";
 import { resolveSecretRef } from "../secrets/index.js";
@@ -8,21 +13,24 @@ import {
   readNonEmptyEnv
 } from "../runtime/daemon/lifecycle/daemon-runtime-support.js";
 
-export type { EmbeddingProviderKind };
+export type { EmbeddingProviderKind, LocalOnnxTransformersProbe };
 
 const EMBEDDING_KEYS = DAEMON_ONLY_CONFIG_ENV_KEYS.embedding;
 
+export type EffectiveEmbeddingProviderKind = EmbeddingProviderKind | "off";
+
 export interface EffectiveEmbeddingPosture {
-  readonly providerKind: EmbeddingProviderKind;
+  readonly providerKind: EffectiveEmbeddingProviderKind;
   readonly embeddingSupplementEnabled: boolean;
   readonly providerWasExplicit: boolean;
+  readonly localOnnxAvailability: LocalOnnxTransformersAvailability | "not_applicable";
 }
 
 export interface EmbeddingRuntimeConfig {
   readonly embeddingApiKey: string | null;
   readonly configuredEmbeddingModel: string | null;
   readonly configuredEmbeddingProviderUrl: string | null;
-  readonly embeddingProviderKind: EmbeddingProviderKind;
+  readonly embeddingProviderKind: EffectiveEmbeddingProviderKind;
   readonly localEmbeddingCacheDir: string | null;
   readonly localEmbeddingModel: string | null;
   readonly embeddingSupplementEnabled: boolean;
@@ -31,28 +39,42 @@ export interface EmbeddingRuntimeConfig {
 }
 
 export function resolveEffectiveEmbeddingPosture(
-  read: (key: string) => string | undefined
+  read: (key: string) => string | undefined,
+  probe: LocalOnnxTransformersProbe = probeLocalOnnxTransformersPackage
 ): EffectiveEmbeddingPosture {
   const explicit = readExplicitEmbeddingProviderKind(readNonEmptyEnv(read(EMBEDDING_KEYS.provider)));
-  const providerKind = explicit ?? "local_onnx";
+  const requestedKind = explicit ?? "local_onnx";
+  const localOnnxAvailability = requestedKind === "local_onnx"
+    ? probe().availability
+    : "not_applicable";
+  // A missing extra must not inherit the local_onnx default string as "enabled".
+  const providerKind: EffectiveEmbeddingProviderKind =
+    localOnnxAvailability === "unavailable" ? "off" : requestedKind;
   const supplementRaw = readNonEmptyEnv(read(EMBEDDING_KEYS.supplement));
+  const requestedSupplement = supplementRaw === null
+    ? requestedKind === "local_onnx"
+    : parseEnvBoolean(supplementRaw, EMBEDDING_KEYS.supplement);
   return Object.freeze({
     providerKind,
     providerWasExplicit: explicit !== null,
-    embeddingSupplementEnabled: supplementRaw === null
-      ? providerKind === "local_onnx"
-      : parseEnvBoolean(supplementRaw, EMBEDDING_KEYS.supplement)
+    localOnnxAvailability,
+    embeddingSupplementEnabled: providerKind !== "off" && requestedSupplement
   });
 }
 
 export function readEmbeddingRuntimeConfig(
   configEnv: ReadonlyMap<string, string>,
-  warn: (message: string, meta: Record<string, unknown>) => void
+  warn: (message: string, meta: Record<string, unknown>) => void,
+  probe: LocalOnnxTransformersProbe = probeLocalOnnxTransformersPackage
 ): EmbeddingRuntimeConfig {
-  const posture = resolveEffectiveEmbeddingPosture((key) => readConfigEnvValue(configEnv, key));
+  const posture = resolveEffectiveEmbeddingPosture(
+    (key) => readConfigEnvValue(configEnv, key),
+    probe
+  );
   warn("effective embedding runtime", {
     provider_kind: posture.providerKind,
-    embedding_supplement_enabled: posture.embeddingSupplementEnabled
+    embedding_supplement_enabled: posture.embeddingSupplementEnabled,
+    local_onnx_availability: posture.localOnnxAvailability
   });
   const secretRef = readConfigEnvValue(configEnv, EMBEDDING_KEYS.openaiSecretRef);
   return {

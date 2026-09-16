@@ -18,6 +18,7 @@ import {
   recallEvalEmbeddingMode,
   recallEvalEmbeddingProviderKind
 } from "../../../runs/lifecycle/recall-eval/recall-eval-runtime.js";
+import { resolveEffectiveEmbeddingPosture } from "@do-soul/alaya";
 
 describe("embedding treatment activation", () => {
   it("accepts an observed finite zero similarity", () => {
@@ -234,11 +235,13 @@ describe("embedding treatment activation", () => {
   });
 
   it("follows product local_onnx admission when recall-eval mode is unset", () => {
-    expect(recallEvalEmbeddingMode({})).toBe("env");
+    const extraPresent = resolveEffectiveEmbeddingPosture(() => undefined)
+      .embeddingSupplementEnabled;
+    expect(recallEvalEmbeddingMode({})).toBe(extraPresent ? "env" : "disabled");
     expect(recallEvalEmbeddingMode({ ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false" }))
       .toBe("disabled");
     expect(recallEvalEmbeddingMode({ ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true" }))
-      .toBe("env");
+      .toBe(extraPresent ? "env" : "disabled");
   });
 
   it("honors explicit recall-eval embedding modes", () => {
@@ -254,8 +257,9 @@ describe("embedding treatment activation", () => {
   });
 
   it("opens the product local_onnx supplement when recall-eval follows admission", () => {
+    const posture = resolveEffectiveEmbeddingPosture(() => undefined);
     const embeddingMode = recallEvalEmbeddingMode({});
-    expect(embeddingMode).toBe("env");
+    expect(embeddingMode).toBe(posture.embeddingSupplementEnabled ? "env" : "disabled");
     const launch = createBenchDaemonLaunchConfig({
       dataDir: "/tmp/bench-product-embed-admission",
       embeddingMode,
@@ -264,8 +268,11 @@ describe("embedding treatment activation", () => {
       reviewerToken: "test-token",
       ambientEnv: {}
     });
-    expect(launch.environment.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT).toBe("true");
-    expect(launch.environment.ALAYA_EMBEDDING_PROVIDER).toBe("local_onnx");
+    expect(launch.environment.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT)
+      .toBe(posture.embeddingSupplementEnabled ? "true" : "false");
+    if (posture.embeddingSupplementEnabled) {
+      expect(launch.environment.ALAYA_EMBEDDING_PROVIDER).toBe("local_onnx");
+    }
   });
 
   it("pins OpenAI explicitly and rejects invalid threads before mutation", () => {

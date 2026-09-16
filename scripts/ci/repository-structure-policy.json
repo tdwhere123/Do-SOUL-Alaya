@@ -1171,8 +1171,8 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 919,
-      "expected_sha256": "bb6c2db6b97bb9f38fc36c38707e42f8afa18767bfb81b8940e2cba1d596de15"
+      "expected_count": 927,
+      "expected_sha256": "d9501b70a1823b233dc1a2bb152813b0c989f17b6b27b821ac3567d4cc9c9c09"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",
@@ -1213,8 +1213,8 @@
     {
       "specifier": "@do-soul/alaya",
       "path": "apps/core-daemon/src/index.ts",
-      "expected_count": 23,
-      "expected_sha256": "e58eaffc22a1da75b460f6decf138b2a311432be2678aa4ad7d318a50e5c63cd"
+      "expected_count": 24,
+      "expected_sha256": "8011185b565fc8a2005516aec15ed332b83b5ca3cfa5cb8b315ad8b6aa996e68"
     },
     {
       "specifier": "@do-soul/alaya/mcp-server",
