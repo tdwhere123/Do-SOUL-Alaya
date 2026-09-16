@@ -42,7 +42,8 @@ describe("Garden MCP tools", () => {
       "task-completed",
       { status: "completed", completed_at: "2026-05-07T00:00:03.000Z" },
       [],
-      "worker-a"
+      "worker-a",
+      "workspace-a"
     );
 
     const response = await harness.callTool<GardenListPendingTasksResponse>(

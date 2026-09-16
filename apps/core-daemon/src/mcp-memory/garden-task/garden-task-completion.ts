@@ -222,7 +222,8 @@ async function commitCandidateSignalCompletion(
       ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
     },
     [buildCompletedTaskEvent(row, context, resolvedRunId, request.status, emittedSignalIds, params.now())],
-    completionClaimedBy
+    completionClaimedBy,
+    context.workspaceId
   );
 }
 
@@ -335,7 +336,8 @@ async function completeEdgeClassifyTask(
       ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
     },
     [buildCompletedTaskEvent(row, context, resolvedRunId, request.status, [...objectsAffected], params.now())],
-    context.agentTarget
+    context.agentTarget,
+    context.workspaceId
   );
 
   emitEdgeClassifyBacklogDiagnostic(params.deps, context.workspaceId, params.warn);

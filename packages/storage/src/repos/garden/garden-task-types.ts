@@ -113,7 +113,8 @@ export interface GardenTaskRepoPort {
     taskId: string,
     result: GardenTaskCompletionResult,
     events: readonly GardenTaskEventInput[],
-    claimedBy: string
+    claimedBy: string,
+    workspaceId?: string
   ): Promise<void>;
   peekAbandonedClaims(now: string, staleAfterMs: number): readonly GardenTaskRow[];
   gcAbandonedClaims(reclaims: readonly GardenTaskReclaimInput[]): Promise<number>;

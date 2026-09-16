@@ -95,4 +95,64 @@ describe("garden task enqueue identity", () => {
     expect(repo.findByIdInWorkspace("task-ws-1", "workspace-1")?.id).toBe("task-ws-1");
     expect(repo.findByIdInWorkspace("task-ws-1", "workspace-2")).toBeNull();
   });
+
+  it("completeWithEvents conflicts when the workspace does not own the claimed task", async () => {
+    const database = initDatabase({ filename: ":memory:" });
+    databases.add(database);
+    const repo = new SqliteGardenTaskRepo(database.connection, {
+      appendManyWithMutation: async (_events, mutate) => mutate([])
+    });
+    const payload = {
+      task_id: "task-ws-complete",
+      task_kind: GardenTaskKind.BULK_ENRICH,
+      required_tier: GardenTier.TIER_2,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_refs: ["mem-1"],
+      priority: 20,
+      created_at: "2026-09-06T00:00:00.000Z",
+      source_object_id: "mem-1",
+      source_revision: 1,
+      enrichment_contract: "source_enrichment.v1"
+    };
+    repo.enqueue({
+      id: "task-ws-complete",
+      workspace_id: "workspace-1",
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.BULK_ENRICH,
+      payload,
+      created_at: "2026-09-06T00:00:00.000Z"
+    });
+    await expect(
+      repo.claimAtomic("task-ws-complete", "worker-a", "2026-09-06T00:00:01.000Z")
+    ).resolves.toBe("claimed");
+
+    await expect(
+      repo.completeWithEvents(
+        "task-ws-complete",
+        { status: "completed", completed_at: "2026-09-06T00:00:02.000Z" },
+        [],
+        "worker-a",
+        "workspace-2"
+      )
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(repo.findById("task-ws-complete")).toMatchObject({
+      status: "claimed",
+      claimed_by: "worker-a",
+      workspace_id: "workspace-1"
+    });
+
+    await repo.completeWithEvents(
+      "task-ws-complete",
+      { status: "completed", completed_at: "2026-09-06T00:00:03.000Z" },
+      [],
+      "worker-a",
+      "workspace-1"
+    );
+    expect(repo.findById("task-ws-complete")).toMatchObject({
+      status: "completed",
+      claimed_by: "worker-a",
+      workspace_id: "workspace-1"
+    });
+  });
 });

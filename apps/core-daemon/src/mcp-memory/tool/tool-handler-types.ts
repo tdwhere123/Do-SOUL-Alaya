@@ -245,7 +245,8 @@ export interface McpMemoryToolHandlerDependencies {
       taskId: string,
       result: GardenTaskCompletionResult,
       events: readonly GardenTaskEventInput[],
-      claimedBy: string
+      claimedBy: string,
+      workspaceId: string
     ): Promise<void>;
     beginCompletionAttempt(
       taskId: string,

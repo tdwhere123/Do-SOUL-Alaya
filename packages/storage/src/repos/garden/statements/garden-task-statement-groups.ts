@@ -157,7 +157,7 @@ const GARDEN_TASK_CLAIM_SQL: SqlDefinitionMap<GardenTaskClaimStatements> = {
   completeStatement: `
       UPDATE garden_tasks
       SET status = ?, completed_at = ?, last_error_text = ?
-      WHERE id = ? AND status = 'claimed' AND claimed_by = ?
+      WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND workspace_id = ?
     `
 };
 
