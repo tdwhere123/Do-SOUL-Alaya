@@ -311,6 +311,8 @@ describe("conditional-field schemas", () => {
       .toBe("unreachable-on-target");
     expect(COMPATIBILITY_LEDGER.find((row) => row.field === "ranking_authority")?.disposition)
       .toBe("freeze-live");
+    expect(COMPATIBILITY_LEDGER.find((row) => row.field === "ranking_authority")?.note)
+      .toMatch(/ignore|0\.3\.x/);
   });
 
   it("requires interpretation status and a snapshot pin", () => {
