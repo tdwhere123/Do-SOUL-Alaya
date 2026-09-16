@@ -142,7 +142,10 @@ affected public call sites.
 
 **Context**: Cross-platform CI matrix is live
 (`.github/workflows/ci.yml:26-44`, ubuntu / macos / windows Node 24;
-landed `2082994a`). `routes-audit-coverage.test.ts` exists.
+landed `2082994a`). Hygiene and audit stay on Ubuntu PR CI only;
+macOS and Windows keep build+test (Windows also CLI smoke). Do not
+move hygiene onto macOS PR CI. Native/path checks may run nightly
+across three OS. `routes-audit-coverage.test.ts` exists.
 Coverage job runs on ubuntu (`ci.yml:71-73`). Still true on HEAD
 `10da1318`: `scripts/ci/run-vitest-projects.mjs:29-48` runs projects
 sequentially; several tests still `vi.spyOn(console, "warn").mockImplementation`;

@@ -6,7 +6,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync
@@ -14,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { removeTempDirectorySync } from "../../../../storage/src/__tests__/temp-directory.js";
 import {
   localOnnxHostSingleFlightEnabled,
   resolveLocalOnnxHostLockPath,
@@ -25,7 +25,7 @@ describe("local-onnx-host-single-flight", () => {
 
   afterEach(() => {
     while (roots.length > 0) {
-      rmSync(roots.pop()!, { recursive: true, force: true });
+      removeTempDirectorySync(roots.pop()!);
     }
   });
 
