@@ -198,21 +198,35 @@ describe("createApp", () => {
     expect(limited.headers.get("retry-after")).toBe("60");
   });
 
-  it("does not consume rate limit quota for requests rejected by token authentication", async () => {
+  it("rate limits failed token authentication by peer identity without consuming the valid-token quota", async () => {
     const app = createProtectedTestApp({
       rateLimit: {
-        maxRequests: 1,
+        maxRequests: 2,
         windowMs: 60_000,
         nowMs: () => 1_000
       }
     });
 
-    const badHeaders = { "x-request-token": "wrong-token", "x-alaya-desktop": "1" };
-    expect((await app.request("/unknown", { headers: badHeaders })).status).toBe(403);
-    expect((await app.request("/unknown", { headers: badHeaders })).status).toBe(403);
+    expect(
+      (await app.request("/unknown", { headers: { "x-request-token": "bad-one", "x-alaya-desktop": "1" } })).status
+    ).toBe(403);
+    expect(
+      (await app.request("/unknown", { headers: { "x-request-token": "bad-two", "x-alaya-desktop": "1" } })).status
+    ).toBe(403);
+
+    const limited = await app.request("/unknown", {
+      headers: { "x-request-token": "bad-three", "x-alaya-desktop": "1" }
+    });
+    expect(limited.status).toBe(429);
+    await expect(limited.json()).resolves.toEqual({
+      success: false,
+      error: "Rate limit exceeded"
+    });
 
     const goodHeaders = withTestAuthHeaders();
     expect((await app.request("/unknown", { headers: goodHeaders })).status).toBe(404);
+    expect((await app.request("/unknown", { headers: goodHeaders })).status).toBe(404);
+    expect((await app.request("/unknown", { headers: goodHeaders })).status).toBe(429);
   });
 
   it("accepts trimmed allowed-origin values after startup normalization", async () => {
@@ -341,6 +355,61 @@ describe("createApp", () => {
       error: "Config patch body must be a JSON object"
     });
     expect(patchManifestationBudgetConfig).not.toHaveBeenCalled();
+  });
+
+  it("accepts chunked mutation bodies below the 10 MB limit", async () => {
+    const patchRuntimeEmbeddingConfig = vi.fn(
+      async (patch: unknown): Promise<Readonly<{
+        config_version: 1;
+        embedding_enabled: boolean;
+        model_id: string | null;
+        provider_url: string | null;
+        secret_ref: string | null;
+      }>> => ({
+        config_version: 1,
+        embedding_enabled: false,
+        model_id: null,
+        provider_url: null,
+        secret_ref: null,
+        ...(patch as {
+          embedding_enabled?: boolean;
+          model_id?: string | null;
+          provider_url?: string | null;
+          secret_ref?: string | null;
+        })
+      })
+    );
+    const app = createProtectedTestApp({
+      routes: {
+        config: configRouteServices({
+          configService: appConfigServiceStub({
+            patchRuntimeEmbeddingConfig
+          })
+        })
+      }
+    });
+    const response = await app.request(
+      createChunkedJsonRequest(
+        "http://localhost/config/runtime/embedding-supplement",
+        "PATCH",
+        JSON.stringify({ embedding_enabled: true }),
+        withTestAuthHeaders()
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      data: {
+        config_version: 1,
+        embedding_enabled: true,
+        model_id: null,
+        provider_url: null,
+        secret_ref: null
+      },
+      requires_daemon_restart: true
+    });
+    expect(patchRuntimeEmbeddingConfig).toHaveBeenCalledWith({ embedding_enabled: true });
   });
 
   it("rejects oversized non-file mutation bodies", async () => {

@@ -2,10 +2,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { isZodValidationError } from "@do-soul/alaya-protocol";
 import { createInspectorAuthMiddleware } from "../middleware/auth.js";
 import { createApiSecurityHeadersMiddleware } from "../middleware/security-headers.js";
-import { applyLazyRequestBodyLimit } from "../middleware/lazy-request-body-limit.js";
 import { registerInspectorBenchSummaryRoutes } from "../routes/bench-summary.js";
 import { registerInspectorConfigRoutes } from "../routes/config.js";
 import { registerInspectorGraphRoutes } from "../routes/graph.js";
@@ -104,16 +104,19 @@ function registerInspectorMiddleware(app: Hono, token: string): void {
   app.use("/api/*", createInspectorAuthMiddleware(token, {
     publicRoutes: [{ path: "/api/launch-session", method: "POST" }]
   }));
+  const inspectorBodyLimit = bodyLimit({
+    maxSize: MAX_INSPECTOR_REQUEST_BODY_BYTES,
+    onError: (context) => context.json({ error: "request_body_too_large" }, 413)
+  });
   app.use("*", async (context, next) => {
-    if (isBodylessMethod(context.req.method)) {
+    if (
+      isBodylessMethod(context.req.method) ||
+      isInspectorNoBodyMutation(context.req.method, context.req.path)
+    ) {
       await next();
       return;
     }
-    if (hasDeclaredOversizeBody(context.req.header("content-length"), MAX_INSPECTOR_REQUEST_BODY_BYTES)) {
-      return context.json({ error: "request_body_too_large" }, 413);
-    }
-    applyLazyRequestBodyLimit(context, MAX_INSPECTOR_REQUEST_BODY_BYTES);
-    await next();
+    return inspectorBodyLimit(context, next);
   });
 }
 
@@ -185,6 +188,14 @@ function isBodylessMethod(method: string): boolean {
   return method !== "POST" && method !== "PATCH" && method !== "PUT" && method !== "DELETE";
 }
 
+function isInspectorNoBodyMutation(method: string, path: string): boolean {
+  // keep/retire/downgrade probe unexpected bodies without waiting for EOF.
+  return (
+    method === "DELETE" ||
+    (method === "POST" && /\/(keep|retire|downgrade)$/.test(path))
+  );
+}
+
 function normalizeOptionalSecret(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized === undefined || normalized.length === 0 ? undefined : normalized;
@@ -246,12 +257,4 @@ function readErrorName(error: unknown): string | null {
 
   const candidate = error as { readonly cause?: unknown };
   return candidate.cause === undefined ? null : readErrorName(candidate.cause);
-}
-
-function hasDeclaredOversizeBody(contentLengthHeader: string | undefined, maxBytes: number): boolean {
-  const declaredLength = contentLengthHeader === undefined
-    ? Number.NaN
-    : Number.parseInt(contentLengthHeader, 10);
-
-  return Number.isFinite(declaredLength) && declaredLength > maxBytes;
 }

@@ -315,7 +315,8 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
           occurredAt: "2026-05-07T00:00:02.000Z"
         })
       ],
-      "agent-target-failed"
+      "agent-target-failed",
+      "workspace-failed"
     );
 
     const row = getGardenTask(database, "task-failed");

@@ -19,9 +19,14 @@ import {
   withTimeout
 } from "@do-soul/alaya-engine-gateway";
 import {
+  isMemoryToolAllowedForAgentTarget,
+  listAlayaMemoryToolsForAgentTarget
+} from "../../mcp-memory/tool/attach-profile-tool-allowlist.js";
+import {
   listAlayaMemoryTools,
   type AlayaMemoryToolDefinition
 } from "../../mcp-memory/tool/tool-catalog.js";
+import { fail } from "../../mcp-memory/tool/tool-handler-support.js";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import { readRuntimeVersion } from "../../runtime/daemon/support/build-info.js";
 import type {
@@ -78,7 +83,11 @@ export function createAlayaMcpServer(options: AlayaMcpServerOptions): Server {
     }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, () => createAlayaMcpToolsResult(tools));
+  server.setRequestHandler(ListToolsRequestSchema, () =>
+    createAlayaMcpToolsResult(
+      listAlayaMemoryToolsForAgentTarget(options.contextProvider().agentTarget, tools)
+    )
+  );
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> =>
     await callAlayaMcpMemoryTool(options, request.params.name, request.params.arguments ?? {})
@@ -109,15 +118,19 @@ export async function callAlayaMcpMemoryTool(
       options.toolTimeoutEnv ?? processEnvLookup().ALAYA_MCP_TOOL_TIMEOUT_MS
     );
   let result: Awaited<ReturnType<McpMemoryToolHandler["call"]>>;
+  const context = options.contextProvider();
   try {
-    result = await withTimeout(async (signal) => {
-      const context = options.contextProvider();
-      return await options.memoryToolHandler.call({
-        toolName,
-        arguments: rawArguments,
-        context: { ...context, abortSignal: signal }
-      });
-    }, timeoutMs);
+    if (!isMemoryToolAllowedForAgentTarget(toolName, context.agentTarget)) {
+      result = fail(toolName, "UNKNOWN_TOOL", `Unsupported Alaya memory tool: ${toolName}`);
+    } else {
+      result = await withTimeout(async (signal) => {
+        return await options.memoryToolHandler.call({
+          toolName,
+          arguments: rawArguments,
+          context: { ...context, abortSignal: signal }
+        });
+      }, timeoutMs);
+    }
   } catch (error) {
     if (isHandlerTimeoutError(error)) {
       const payload = {

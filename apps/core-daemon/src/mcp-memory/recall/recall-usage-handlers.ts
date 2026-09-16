@@ -156,7 +156,7 @@ export interface RecallUsageHandlerDependencies {
   };
   readonly gardenTaskRepo?: {
     enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
-    findById(taskId: string): GardenTaskRow | null;
+    findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
     peekPending(
       role: string,
       workspace_id?: string,

@@ -22,7 +22,7 @@ function failingGardenTaskRepo(): NonNullable<RecallUsageHandlerDependencies["ga
     enqueue: () => {
       throw new Error("storage unavailable");
     },
-    findById: () => null,
+    findByIdInWorkspace: () => null,
     peekPending: () => []
   };
 }
