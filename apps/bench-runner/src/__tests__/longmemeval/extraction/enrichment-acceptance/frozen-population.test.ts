@@ -1,0 +1,141 @@
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  FrozenPopulationCountError,
+  loadFrozenEnrichmentPopulation
+} from "../../../../runs/extraction/enrichment-acceptance/frozen-population.js";
+
+const FROZEN_ROOT = join(
+  import.meta.dirname,
+  "../../../../../../../../..",
+  ".do-it/bench-runs/associative-field-gemini-source-scope-20260914"
+);
+
+const REGRESSION_REQUIRED = new Set([2, 4, 8, 9, 10, 12, 13, 14, 16]);
+const REGRESSION_UNRESOLVED = new Set([5, 15]);
+
+describe("frozen enrichment population", () => {
+  let root: string;
+  afterEach(() => {
+    if (root !== undefined) rmSync(root, { recursive: true, force: true });
+  });
+
+  it("emits 38 rows with 15 required, 21 optional, 2 unresolved and preserves first-eight groups", () => {
+    root = writePopulation(validPopulation());
+    const loaded = loadFrozenEnrichmentPopulation({
+      regressionPath: join(root, "regression-source-review.json"),
+      canonicalPath: join(root, "canonical-source-review.json")
+    });
+    expect(loaded.counts).toEqual({ total: 38, required: 15, optional: 21, unresolved: 2 });
+    expect(loaded.rows).toHaveLength(38);
+    const regression = loaded.rows.filter((row) => row.population === "regression");
+    expect(regression).toHaveLength(16);
+    expect(regression.filter((row) => row.first_stage_subset).map((row) => row.original_ordinal))
+      .toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(regression.find((row) => row.original_ordinal === 2)?.required_group_id).toBe("aspiration");
+    expect(regression.find((row) => row.original_ordinal === 6)?.required_group_id).toBe("aspiration");
+    expect(regression.find((row) => row.original_ordinal === 6)?.duplicate_of).toBe(2);
+    expect(regression.find((row) => row.original_ordinal === 6)?.classification).toBe("optional");
+    expect(regression.find((row) => row.original_ordinal === 4)?.required_group_id).toBe("capability");
+    expect(regression.find((row) => row.original_ordinal === 8)?.required_group_id).toBe("release");
+    expect(regression.find((row) => row.original_ordinal === 1)?.obligations).toEqual(["keep slogan"]);
+    expect(regression.find((row) => row.original_ordinal === 1)?.forbidden).toEqual(["invent ownership"]);
+    const canonical = loaded.rows.filter((row) => row.population === "canonical");
+    expect(canonical).toHaveLength(22);
+    expect(canonical.filter((row) => row.classification === "required")).toHaveLength(6);
+    expect(canonical[0]?.annotation_pointer.canonical_index).toBe(1);
+    expect(canonical[0]?.obligations).toEqual(["retain roots"]);
+    expect(canonical[0]?.forbidden).toEqual(["invent citizenship"]);
+  });
+
+  it("throws a named count error when the files do not yield 38/15/21/2", () => {
+    const population = validPopulation();
+    population.regression.assertions[1]!.classification = "legitimate_abstention_candidate";
+    root = writePopulation(population);
+    expect(() => loadFrozenEnrichmentPopulation({
+      regressionPath: join(root, "regression-source-review.json"),
+      canonicalPath: join(root, "canonical-source-review.json")
+    })).toThrow(FrozenPopulationCountError);
+  });
+
+  it("loads the frozen annotation files when present without dropping rows", () => {
+    const regressionPath = join(FROZEN_ROOT, "regression-source-review.json");
+    const canonicalPath = join(FROZEN_ROOT, "canonical-source-review.json");
+    if (!existsSync(regressionPath) || !existsSync(canonicalPath)) return;
+    const loaded = loadFrozenEnrichmentPopulation({ regressionPath, canonicalPath });
+    expect(loaded.counts).toEqual({ total: 38, required: 15, optional: 21, unresolved: 2 });
+    expect(loaded.rows).toHaveLength(38);
+    expect(loaded.rows.every((row) => row.exact_text.length > 0)).toBe(true);
+    expect(loaded.rows.filter((row) => row.first_stage_subset)).toHaveLength(8);
+    expect(new Set(
+      loaded.rows.filter((row) => row.classification === "required").map((row) => row.required_group_id)
+    ).size).toBe(15);
+  });
+});
+
+function validPopulation(): {
+  regression: { assertions: Record<string, unknown>[] };
+  canonical: { requests: Record<string, unknown>[] };
+} {
+  const regressionAssertions = Array.from({ length: 16 }, (_, index) => {
+    const assertionId = index + 1;
+    const classification = REGRESSION_REQUIRED.has(assertionId)
+      ? "in_scope_durable_proposition"
+      : REGRESSION_UNRESOLVED.has(assertionId)
+        ? "unsupported_unresolved_interpretation"
+        : "legitimate_abstention_candidate";
+    return {
+      key: "aa".repeat(32),
+      assertion_id: assertionId,
+      exact_text: `User: regression fact ${assertionId}.`,
+      source_message_id: "msg-1",
+      source_locator: { assertion_id: assertionId },
+      source_occurrence_identity: "bb".repeat(32),
+      original_source: {
+        exact_text: `regression fact ${assertionId}.`,
+        utf8_start: 0,
+        utf8_end: 10,
+        normalization: "none"
+      },
+      classification,
+      obligations: ["keep slogan"],
+      prohibited_inferences: ["invent ownership"]
+    };
+  });
+  const dual = new Set([1, 8, 10, 12, 14, 16]);
+  const requiredCanonical = new Set(["1:1", "5:1", "10:2", "11:1", "12:2", "16:2"]);
+  const requests = Array.from({ length: 16 }, (_, index) => {
+    const canonicalIndex = index + 1;
+    const assertionCount = dual.has(canonicalIndex) ? 2 : 1;
+    return {
+      canonical_index: canonicalIndex,
+      key: canonicalIndex.toString(16).padStart(64, "0"),
+      assertion_reviews: Array.from({ length: assertionCount }, (__, assertionOffset) => {
+        const assertionId = assertionOffset + 1;
+        const classification = requiredCanonical.has(`${canonicalIndex}:${assertionId}`)
+          ? "in_scope_durable_proposition"
+          : "legitimate_abstention_candidate";
+        return {
+          key: canonicalIndex.toString(16).padStart(64, "0"),
+          assertion_id: assertionId,
+          exact_text: `canonical ${canonicalIndex} ${assertionId}.`,
+          source_message_ids: ["canonical-msg"],
+          occurrence_bindings: [{ occurrenceIdentity: "cc".repeat(32) }],
+          classification,
+          coverage: ["retain roots"],
+          forbidden: ["invent citizenship"]
+        };
+      })
+    };
+  });
+  return { regression: { assertions: regressionAssertions }, canonical: { requests } };
+}
+
+function writePopulation(population: ReturnType<typeof validPopulation>): string {
+  const directory = mkdtempSync(join(tmpdir(), "frozen-population-"));
+  writeFileSync(join(directory, "regression-source-review.json"), JSON.stringify(population.regression));
+  writeFileSync(join(directory, "canonical-source-review.json"), JSON.stringify(population.canonical));
+  return directory;
+}
