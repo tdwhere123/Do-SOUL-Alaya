@@ -1,22 +1,21 @@
 import { Suspense, lazy } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import type { ForceGraphMethods as ForceGraphMethods2D } from "react-force-graph-2d";
-import type ForceGraph3DType from "react-force-graph-3d";
-import type { ForceGraphMethods as ForceGraphMethods3D } from "react-force-graph-3d";
 import { useI18n } from "../../i18n/locale";
 import type { GraphLink, GraphNode, SpotlightState } from "../../types/graph";
-import { isRecentlyReinforced, linkStrength, linkWidth, nodeInfluenceSize } from "../../utils/graph";
+import { linkWidth, nodeInfluenceSize } from "../../utils/graph";
+import type { Graph3DHandle } from "./graph-physics-support";
 import { formatGraphNodeTooltip } from "./support";
 import type { GraphData, ViewMode } from "./types";
 import { useGraphRendererStyles } from "./useGraphRendererStyles";
 
-const ForceGraph3D = lazy(() => import("react-force-graph-3d")) as unknown as typeof ForceGraph3DType;
+const GraphRenderer3D = lazy(() => import("./graph-renderer-3d"));
 
 interface GraphRendererProps {
   readonly data: GraphData;
   readonly effectiveMode: ViewMode;
   readonly fg2dRef: React.MutableRefObject<ForceGraphMethods2D<GraphNode, GraphLink> | undefined>;
-  readonly fg3dRef: React.MutableRefObject<ForceGraphMethods3D<GraphNode, GraphLink> | undefined>;
+  readonly fg3dRef: React.MutableRefObject<Graph3DHandle | undefined>;
   readonly largeGraphMode: boolean;
   readonly matchIds: ReadonlySet<string>;
   readonly nodeSpotlightState: (id: string) => SpotlightState;
@@ -38,7 +37,7 @@ export default function GraphRenderer(props: GraphRendererProps) {
   return (
     <div className="absolute inset-0" data-spotlight-active={props.spotlightActive ? "true" : "false"}>
       {props.effectiveMode === "2d" ? <GraphRenderer2D {...props} styles={styles} /> : null}
-      {props.effectiveMode === "3d" ? <GraphRenderer3D {...props} styles={styles} /> : null}
+      {props.effectiveMode === "3d" ? <GraphRenderer3DBoundary {...props} styles={styles} /> : null}
     </div>
   );
 }
@@ -73,35 +72,21 @@ function GraphRenderer2D(props: GraphRendererProps & { readonly styles: ReturnTy
   );
 }
 
-function GraphRenderer3D(props: GraphRendererProps & { readonly styles: ReturnType<typeof useGraphRendererStyles> }) {
+function GraphRenderer3DBoundary(
+  props: GraphRendererProps & { readonly styles: ReturnType<typeof useGraphRendererStyles> }
+) {
   const { t } = useI18n();
   return (
     <Suspense fallback={<Graph3DFallback label={t("graph:viewMode.3d")} />}>
-      <ForceGraph3D
-        ref={props.fg3dRef}
-        graphData={props.data}
-        width={props.viewport.width}
-        height={props.viewport.height}
-        backgroundColor="#FDF6E3"
-        controlType="orbit"
-        nodeId="id"
-        nodeRelSize={4}
-        nodeVal={(node) => nodeInfluenceSize(node)}
-        nodeColor={props.styles.computeNodeColor}
-        nodeLabel={formatGraphNodeTooltip}
-        nodeOpacity={0.92}
-        linkSource="source"
-        linkTarget="target"
-        linkColor={props.styles.computeLinkColor}
-        linkWidth={(link) => linkWidth(link.strength_normalized, link.weight)}
-        linkOpacity={0.85}
-        linkDirectionalParticles={(link) => linkDirectionalParticles(link, props.largeGraphMode, props.styles.now)}
-        linkDirectionalParticleSpeed={(link) => 0.005 + 0.012 * linkStrength(link.strength_normalized, link.weight)}
-        linkDirectionalParticleWidth={2}
-        cooldownTicks={props.largeGraphMode ? 60 : 120}
-        d3VelocityDecay={props.largeGraphMode ? 0.55 : 0.4}
+      <GraphRenderer3D
+        data={props.data}
+        fg3dRef={props.fg3dRef}
+        largeGraphMode={props.largeGraphMode}
+        viewport={props.viewport}
+        computeNodeColor={props.styles.computeNodeColor}
+        computeLinkColor={props.styles.computeLinkColor}
+        now={props.styles.now}
         onEngineTick={() => props.onEngineTick("3d")}
-        onEngineStop={() => props.onEngineTick("3d")}
         onNodeClick={props.onNodeClick}
         onBackgroundClick={props.onBackgroundClick}
       />
@@ -117,9 +102,4 @@ function Graph3DFallback({ label }: { readonly label: string }) {
       </p>
     </div>
   );
-}
-
-function linkDirectionalParticles(link: GraphLink, largeGraphMode: boolean, now: number): number {
-  if (largeGraphMode) return 0;
-  return isRecentlyReinforced(link.last_reinforced_at, now) ? 2 : 0;
 }

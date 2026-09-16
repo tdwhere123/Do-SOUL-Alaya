@@ -42,7 +42,8 @@ describe("Garden MCP tools", () => {
       "task-completed",
       { status: "completed", completed_at: "2026-05-07T00:00:03.000Z" },
       [],
-      "worker-a"
+      "worker-a",
+      "workspace-a"
     );
 
     const response = await harness.callTool<GardenListPendingTasksResponse>(
@@ -179,6 +180,33 @@ describe("Garden MCP tools", () => {
       payload: {}
     });
     expect(harness.getGardenTask("task-foreign").status).toBe("pending");
+  });
+
+  it("complete of a foreign-workspace task id is not found and does not complete it", async () => {
+    const harness = await createGardenMcpHarness();
+    harness.enqueueTask("task-foreign-complete", {
+      workspace_id: "workspace-a",
+      payload: createTaskDescriptor({
+        task_id: "task-foreign-complete",
+        workspace_id: "workspace-a",
+        target_object_refs: ["secret-foreign-memory"]
+      })
+    });
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-foreign-complete"
+    });
+    harness.setContext({ workspaceId: "workspace-b", agentTarget: "garden-worker" });
+
+    await expect(
+      harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+        task_id: "task-foreign-complete",
+        status: "completed"
+      })
+    ).rejects.toThrow("Tool call failed for garden.complete_task");
+    expect(harness.getGardenTask("task-foreign-complete")).toMatchObject({
+      status: "claimed",
+      claimed_by: "garden-worker"
+    });
   });
 
   it("complete with candidate_signals preserves its persisted verified delivery observation", async () => {

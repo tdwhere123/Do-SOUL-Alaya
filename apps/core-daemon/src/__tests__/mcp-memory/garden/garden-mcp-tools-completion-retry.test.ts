@@ -27,12 +27,12 @@ describe("Garden MCP tools", () => {
         receivedSignals += 1;
         return await context.signalService.receiveSignal(signal);
       },
-      completeWithEvents: async (taskId, result, events, claimedBy, original) => {
+      completeWithEvents: async (taskId, result, events, claimedBy, workspaceId, original) => {
         if (failCompleteOnce) {
           failCompleteOnce = false;
           throw new Error("simulated completion persistence failure");
         }
-        await original(taskId, result, events, claimedBy);
+        await original(taskId, result, events, claimedBy, workspaceId);
       }
     });
     harness.enqueueTask("task-complete-failure-retry", {
@@ -99,12 +99,12 @@ describe("Garden MCP tools", () => {
   it("rejects a shortened completion retry after a partial completion failure", async () => {
     let failCompleteOnce = true;
     const harness = await createGardenMcpHarness({
-      completeWithEvents: async (taskId, result, events, claimedBy, original) => {
+      completeWithEvents: async (taskId, result, events, claimedBy, workspaceId, original) => {
         if (failCompleteOnce) {
           failCompleteOnce = false;
           throw new Error("simulated completion persistence failure");
         }
-        await original(taskId, result, events, claimedBy);
+        await original(taskId, result, events, claimedBy, workspaceId);
       }
     });
     harness.enqueueTask("task-shortened-envelope-retry");
@@ -184,12 +184,12 @@ describe("Garden MCP tools", () => {
   it("rejects an omitted completion envelope retry after a partial completion failure", async () => {
     let failCompleteOnce = true;
     const harness = await createGardenMcpHarness({
-      completeWithEvents: async (taskId, result, events, claimedBy, original) => {
+      completeWithEvents: async (taskId, result, events, claimedBy, workspaceId, original) => {
         if (failCompleteOnce) {
           failCompleteOnce = false;
           throw new Error("simulated completion persistence failure");
         }
-        await original(taskId, result, events, claimedBy);
+        await original(taskId, result, events, claimedBy, workspaceId);
       }
     });
     harness.enqueueTask("task-omitted-envelope-retry");
@@ -240,12 +240,12 @@ describe("Garden MCP tools", () => {
   it("rejects an empty completion envelope retry after a partial completion failure", async () => {
     let failCompleteOnce = true;
     const harness = await createGardenMcpHarness({
-      completeWithEvents: async (taskId, result, events, claimedBy, original) => {
+      completeWithEvents: async (taskId, result, events, claimedBy, workspaceId, original) => {
         if (failCompleteOnce) {
           failCompleteOnce = false;
           throw new Error("simulated completion persistence failure");
         }
-        await original(taskId, result, events, claimedBy);
+        await original(taskId, result, events, claimedBy, workspaceId);
       }
     });
     harness.enqueueTask("task-empty-envelope-retry");
@@ -299,12 +299,12 @@ describe("Garden MCP tools", () => {
   it("rejects an extended completion retry after a partial completion failure", async () => {
     let failCompleteOnce = true;
     const harness = await createGardenMcpHarness({
-      completeWithEvents: async (taskId, result, events, claimedBy, original) => {
+      completeWithEvents: async (taskId, result, events, claimedBy, workspaceId, original) => {
         if (failCompleteOnce) {
           failCompleteOnce = false;
           throw new Error("simulated completion persistence failure");
         }
-        await original(taskId, result, events, claimedBy);
+        await original(taskId, result, events, claimedBy, workspaceId);
       }
     });
     harness.enqueueTask("task-extended-envelope-retry");

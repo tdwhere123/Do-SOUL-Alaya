@@ -25,6 +25,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Hygiene/audit stay on Ubuntu PR CI. macOS and Windows keep
+          # build+test (Windows also CLI smoke). Do not move hygiene onto
+          # every PR OS; native/path issues can use a nightly three-OS job.
           - label: ubuntu-node24
             os: ubuntu-latest
             node: '24'
@@ -80,6 +83,8 @@ jobs:
         if: ${{ !matrix.run_coverage }}
         run: pnpm test
 
+      # Ubuntu-only hygiene. Keep changelog-version and process-env here so
+      # PR CI catches drift that used to wait for the release tag job.
       - name: Hygiene
         if: ${{ matrix.run_hygiene }}
         run: pnpm run hygiene:unused
@@ -94,9 +99,23 @@ jobs:
           pnpm run ci:test-as-any -- --self-test
           pnpm run ci:test-as-any
 
+      - name: Guard production as-unknown-as
+        if: ${{ matrix.run_hygiene }}
+        run: |
+          pnpm run ci:production-unknown-as -- --self-test
+          pnpm run ci:production-unknown-as
+
       - name: Guard env docs
         if: ${{ matrix.run_hygiene }}
         run: pnpm run ci:env-docs
+
+      - name: Guard changelog version
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run ci:changelog-version
+
+      - name: Guard process.env call sites
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run hygiene:process-env
 
       - name: Guard doc links
         if: ${{ matrix.run_hygiene }}
