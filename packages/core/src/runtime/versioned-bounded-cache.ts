@@ -1,6 +1,6 @@
 type NormalizeCachedValue<Value> = (value: Value) => Value | undefined;
 
-export const VERSIONED_BOUNDED_CACHE_MAX_ENTRIES = 1024;
+const VERSIONED_BOUNDED_CACHE_MAX_ENTRIES = 1024;
 
 export class VersionedBoundedCache<Value> {
   private readonly store = new Map<string, Value>();
