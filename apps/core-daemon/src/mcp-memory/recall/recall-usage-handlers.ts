@@ -28,6 +28,7 @@ import {
   type UsageProofRecord,
   type UsageReport
 } from "@do-soul/alaya-protocol";
+import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import type { GardenTaskEnqueueInput, GardenTaskRow } from "@do-soul/alaya-storage";
 import { enqueuePostTurnExtractTask } from "../garden-task/post-turn-extract-queue.js";
 import {
@@ -58,6 +59,7 @@ export interface RecallUsageToolCallContext {
   readonly agentTarget: string;
   readonly sessionId: string;
   readonly surfaceId?: string | null;
+  readonly abortSignal?: AbortSignal;
 }
 
 export interface RecallUsageHandlerDependencies {
@@ -388,6 +390,7 @@ export function createReportContextUsageHandler(params: Readonly<{
         expectedRunId: context.runId ?? context.sessionId
       }
     );
+    throwIfAborted(context.abortSignal);
     enqueuePostTurnExtractTask(params, request, context, linkedDelivery);
     await emitContextUsageReportedTelemetry(params, {
       deliveryId: request.delivery_id,

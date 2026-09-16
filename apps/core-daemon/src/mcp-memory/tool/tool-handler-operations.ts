@@ -54,6 +54,7 @@ import type {
   McpMemoryToolCallContext,
   McpMemoryToolHandlerDependencies
 } from "./tool-handler-types.js";
+import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import { createVerifiedDeliverySourceObservation } from "../../runtime/recall-materialization/recall-materialization-source-receipt.js";
 
 export type GardenTaskOperations = Readonly<{
@@ -198,6 +199,7 @@ async function emitCandidateSignal(
     createVerifiedDeliverySourceObservation(deliveries)
   );
   warnIfModelToolSignalMissingDeliveryAnchor(signal, input.warn);
+  throwIfAborted(context.abortSignal);
   const received = await input.deps.signalService.receiveSignal(signal);
   return SoulEmitCandidateSignalResponseSchema.parse({ signal_id: received.signal.signal_id, status: "emitted" });
 }
@@ -227,6 +229,7 @@ async function proposeMemoryUpdate(
 ): Promise<SoulProposeMemoryUpdateResponse> {
   const workflow = requireProposalWorkflow(deps);
   await validateSourceDeliveryAnchors(deps, request.source_delivery_ids, context);
+  throwIfAborted(context.abortSignal);
   return SoulProposeMemoryUpdateResponseSchema.parse(await workflow.proposeMemoryUpdate(request, context));
 }
 
@@ -235,6 +238,7 @@ async function reviewMemoryProposal(
   request: SoulReviewMemoryProposalRequest,
   context: McpMemoryToolCallContext
 ): Promise<SoulReviewMemoryProposalResponse> {
+  throwIfAborted(context.abortSignal);
   const reviewed = await requireProposalWorkflow(deps).reviewMemoryProposal(request, context);
   return SoulReviewMemoryProposalResponseSchema.parse({
     proposal_id: reviewed.proposal_id,
@@ -275,6 +279,7 @@ async function proposeEdge(
   request: SoulProposeEdgeRequest,
   context: McpMemoryToolCallContext
 ): Promise<SoulProposeEdgeResponse> {
+  throwIfAborted(context.abortSignal);
   const service = requireEdgeProposalService(deps);
   return SoulProposeEdgeResponseSchema.parse(await service.proposeExplicitEdge({
     sourceMemoryId: request.source_memory_id,
@@ -302,6 +307,7 @@ async function batchReviewEdgeProposals(
   request: SoulBatchReviewEdgeProposalsRequest,
   context: McpMemoryToolCallContext
 ): Promise<SoulBatchReviewEdgeProposalsResponse> {
+  throwIfAborted(context.abortSignal);
   const service = requireEdgeProposalService(deps);
   assertEdgeReviewCallerIsAllowed(context, deps.reviewerIdentityBinding);
   const reviewerIdentity = resolveEdgeReviewerIdentity(request, deps.reviewerIdentityBinding);
@@ -327,6 +333,7 @@ async function applyOverride(
   context: McpMemoryToolCallContext
 ): Promise<SoulApplyOverrideResponse> {
   if (context.runId === null) throw new ToolValidationError("soul.apply_override requires a run context.");
+  throwIfAborted(context.abortSignal);
   const applied = await deps.sessionOverrideService.apply({
     runId: context.runId,
     workspaceId: context.workspaceId,

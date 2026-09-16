@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isHandlerTimeoutError, throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import { hasAlayaMemoryToolName } from "./tool-catalog.js";
 import { createGardenTaskHandlers } from "../garden-task/garden-task-handlers.js";
 import { createMcpMemoryToolDispatcher } from "./tool-handler-dispatch.js";
@@ -59,10 +60,17 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       }
 
       try {
+        throwIfAborted(context.abortSignal);
         await deps.zeroDayToolAccess?.enforceToolAccess(context.workspaceId, toolName);
+        throwIfAborted(context.abortSignal);
         await surfaceRegistrar.ensureAgentSurfaceForCall(context);
+        throwIfAborted(context.abortSignal);
         return await dispatcher.dispatchToolCall({ toolName, rawArguments, context });
       } catch (error) {
+        // Timeout abort is not a tool-domain failure; keep it as the race winner.
+        if (isHandlerTimeoutError(error)) {
+          throw error;
+        }
         return fail(toolName, classifyError(error), sanitizeError(error));
       }
     }

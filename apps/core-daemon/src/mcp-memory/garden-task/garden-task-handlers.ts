@@ -9,6 +9,7 @@ import {
   type GardenListPendingTasksRequest,
   type GardenRoleValue
 } from "@do-soul/alaya-protocol";
+import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import type { GardenTaskOperations } from "../tool/tool-handler-operations.js";
 import type {
   GardenTaskCompletionResult,
@@ -30,6 +31,7 @@ export interface GardenTaskToolCallContext {
   readonly workspaceId: string;
   readonly runId: string | null;
   readonly agentTarget: string;
+  readonly abortSignal?: AbortSignal;
 }
 
 export interface GardenTaskHandlerDependencies {
@@ -93,8 +95,10 @@ export function createGardenTaskHandlers(params: Readonly<{
   return {
     listPendingGardenTasks: createListPendingGardenTasks(params.deps),
     claimGardenTask: createClaimGardenTaskHandler(params),
-    completeGardenTask: async (request, context) =>
-      GardenCompleteTaskResponseSchema.parse(await completion.completeGardenTask(request, context))
+    completeGardenTask: async (request, context) => {
+      throwIfAborted(context.abortSignal);
+      return GardenCompleteTaskResponseSchema.parse(await completion.completeGardenTask(request, context));
+    }
   };
 }
 
@@ -106,6 +110,7 @@ function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies) {
     if (deps.gardenTaskRepo === undefined) {
       throw new GardenTaskUnavailableError("Garden task queue is not available.");
     }
+    throwIfAborted(context.abortSignal);
     const rows = deps.gardenTaskRepo.peekPending(
       mapGardenMcpWorkerRole(request.role),
       context.workspaceId,
@@ -127,6 +132,7 @@ function createClaimGardenTaskHandler(params: Readonly<{
     if (repo === undefined) {
       throw new GardenTaskUnavailableError("Garden task queue is not available.");
     }
+    throwIfAborted(context.abortSignal);
     const claimResult = await repo.claimAtomic(
       request.task_id,
       context.agentTarget,

@@ -14,6 +14,11 @@ import {
   type Tool
 } from "@modelcontextprotocol/sdk/types.js";
 import {
+  isHandlerTimeoutError,
+  resolveMcpToolTimeoutMs,
+  withTimeout
+} from "@do-soul/alaya-engine-gateway";
+import {
   listAlayaMemoryTools,
   type AlayaMemoryToolDefinition
 } from "../../mcp-memory/tool/tool-catalog.js";
@@ -29,6 +34,8 @@ export interface AlayaMcpServerOptions {
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly tools?: readonly AlayaMemoryToolDefinition[];
   readonly version?: string;
+  readonly toolTimeoutMs?: number;
+  readonly toolTimeoutEnv?: string;
 }
 
 export interface AlayaMcpStdioServer {
@@ -88,18 +95,40 @@ export function createAlayaMcpToolsResult(tools: readonly AlayaMemoryToolDefinit
 }
 
 export async function callAlayaMcpMemoryTool(
-  options: Pick<AlayaMcpServerOptions, "memoryToolHandler" | "contextProvider" | "warn">,
+  options: Pick<
+    AlayaMcpServerOptions,
+    "memoryToolHandler" | "contextProvider" | "warn" | "toolTimeoutMs" | "toolTimeoutEnv"
+  >,
   toolName: string,
   rawArguments: unknown
 ): Promise<CallToolResult> {
+  const timeoutMs =
+    options.toolTimeoutMs ?? resolveMcpToolTimeoutMs(options.toolTimeoutEnv);
   let result: Awaited<ReturnType<McpMemoryToolHandler["call"]>>;
   try {
-    result = await options.memoryToolHandler.call({
-      toolName,
-      arguments: rawArguments,
-      context: options.contextProvider()
-    });
+    result = await withTimeout(async (signal) => {
+      const context = options.contextProvider();
+      return await options.memoryToolHandler.call({
+        toolName,
+        arguments: rawArguments,
+        context: { ...context, abortSignal: signal }
+      });
+    }, timeoutMs);
   } catch (error) {
+    if (isHandlerTimeoutError(error)) {
+      const payload = {
+        ok: false as const,
+        error: {
+          code: "UNAVAILABLE" as const,
+          message: error.message
+        }
+      };
+      return {
+        isError: true,
+        content: [{ type: "text", text: JSON.stringify(payload) }],
+        structuredContent: payload
+      };
+    }
     options.warn?.("MCP memory tool handler rejected", {
       error: error instanceof Error ? error.message : String(error),
       toolName

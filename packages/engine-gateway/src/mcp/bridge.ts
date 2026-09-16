@@ -3,6 +3,9 @@ import { soulToolDefs } from "../provider/soul-tool-specs.js";
 import { parseEnvPositiveInt } from "@do-soul/alaya-protocol";
 import { withTimeout } from "./with-timeout.js";
 
+export { isHandlerTimeoutError, throwIfAborted, withTimeout } from "./with-timeout.js";
+export type { HandlerTimeoutError } from "./with-timeout.js";
+
 export const DEFAULT_TOOL_TIMEOUT_MS = 30000;
 const MCP_TOOL_TIMEOUT_ENV = "ALAYA_MCP_TOOL_TIMEOUT_MS";
 
@@ -13,15 +16,15 @@ export interface McpToolResultBlock {
   readonly is_error?: boolean;
 }
 
+export type McpToolUseHandler = (
+  toolUse: ToolUseBlock,
+  runtimeContext: Readonly<ConversationRuntimeContext> | undefined,
+  signal: AbortSignal
+) => Promise<McpToolResultBlock>;
+
 export interface McpBridgeDependencies {
-  readonly soulHandler: (
-    toolUse: ToolUseBlock,
-    runtimeContext?: Readonly<ConversationRuntimeContext>
-  ) => Promise<McpToolResultBlock>;
-  readonly toolsHandler?: (
-    toolUse: ToolUseBlock,
-    runtimeContext?: Readonly<ConversationRuntimeContext>
-  ) => Promise<McpToolResultBlock>;
+  readonly soulHandler: McpToolUseHandler;
+  readonly toolsHandler?: McpToolUseHandler;
   readonly hasConversationToolName?: (toolName: string) => boolean;
   /** Pre-resolved tool timeout; when omitted, uses DEFAULT_TOOL_TIMEOUT_MS. */
   readonly toolTimeoutMs?: number;
@@ -30,10 +33,7 @@ export interface McpBridgeDependencies {
 }
 
 export class McpBridge {
-  private readonly toolsHandler: (
-    toolUse: ToolUseBlock,
-    runtimeContext?: Readonly<ConversationRuntimeContext>
-  ) => Promise<McpToolResultBlock>;
+  private readonly toolsHandler: McpToolUseHandler;
   private readonly hasConversationToolName: (toolName: string) => boolean;
   private readonly timeoutMs: number;
 
@@ -63,17 +63,15 @@ export class McpBridge {
         if (!Object.hasOwn(allowedSoulToolNames, toolUse.name)) {
           return createErrorResult(toolUse.id, "unsupported tool");
         }
-        // Signal passed for future abort-aware handlers; withTimeout already
-        // suppresses a late reject so a timed-out handler cannot crash the daemon.
         return await withTimeout(
-          (_signal) => this.dependencies.soulHandler(toolUse, runtimeContext),
+          (signal) => this.dependencies.soulHandler(toolUse, runtimeContext, signal),
           this.timeoutMs
         );
       }
 
       if (this.hasConversationToolName(toolUse.name)) {
         return await withTimeout(
-          (_signal) => this.toolsHandler(toolUse, runtimeContext),
+          (signal) => this.toolsHandler(toolUse, runtimeContext, signal),
           this.timeoutMs
         );
       }

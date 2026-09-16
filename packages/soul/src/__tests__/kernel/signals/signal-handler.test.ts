@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SoulSignalHandler, materializeCandidateSignal } from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal, ConversationRuntimeContext } from "@do-soul/alaya-protocol";
 
@@ -168,6 +168,27 @@ describe("normalizeSignalInput — extra fields and coercions", () => {
     );
 
     expect(capturedSignal!.evidence_refs).toEqual(["msg-1", "msg-2"]);
+  });
+
+  it("does not receive a signal after the abort signal fires", async () => {
+    const receiveSignal = vi.fn(async () => ({}));
+    const handler = new SoulSignalHandler({ receiveSignal });
+    const controller = new AbortController();
+    controller.abort({ error_code: "handler_timeout" });
+
+    const result = await handler.handleToolUse(
+      {
+        id: "tu-aborted",
+        type: "tool_use",
+        name: "soul.emit_candidate_signal",
+        input: makeToolInput()
+      },
+      makeRuntimeContext(),
+      controller.signal
+    );
+
+    expect(result.is_error).toBe(true);
+    expect(receiveSignal).not.toHaveBeenCalled();
   });
 });
 
