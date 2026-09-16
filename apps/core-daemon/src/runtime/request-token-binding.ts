@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { Context } from "hono";
 import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
 import {
   resolveDaemonListenPolicy,
@@ -85,6 +86,17 @@ export function isWorkspaceGrantDenied(
   workspaceId: string
 ): boolean {
   return grant !== undefined && !workspaceScopeAllows(grant, workspaceId);
+}
+
+export function respondIfWorkspaceGrantDenied(
+  context: Context,
+  workspaceId: string
+) {
+  const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
+  if (!isWorkspaceGrantDenied(grant, workspaceId)) {
+    return undefined;
+  }
+  return context.json({ success: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE }, 403);
 }
 
 export function extractWorkspaceIdFromQuery(value: string | undefined): string | null {

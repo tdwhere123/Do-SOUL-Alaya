@@ -4,6 +4,8 @@ import {
   extractWorkspaceIdFromPath,
   WORKSPACE_TOKEN_DENIED_MESSAGE
 } from "../../runtime/request-token-binding.js";
+import type { BudgetRouteServices } from "../../routes/governance/matrix/budget.js";
+import type { OverrideRouteServices } from "../../routes/governance/matrix/overrides.js";
 import type { FileRouteServices } from "../../routes/workspace/files/files.js";
 import type { ProjectMappingRouteServices } from "../../routes/workspace/project-mapping.js";
 import type { SoulSearchRouteServices } from "../../routes/memory/soul/soul-search.js";
@@ -169,5 +171,60 @@ describe("request token workspace scope", () => {
         context: expect.objectContaining({ workspaceId: "wsA" })
       })
     );
+  });
+
+  it("rejects override and budget run-id grants outside the token workspace", async () => {
+    const apply = vi.fn();
+    const resolve = vi.fn();
+    const getSnapshot = vi.fn();
+    const app = createApp({
+      requestProtection: {
+        allowedOrigin: "http://localhost:5173",
+        requestToken: PROCESS_TOKEN,
+        boundWorkspaceIds: ["wsA"]
+      },
+      routes: {
+        overrides: routeServices<OverrideRouteServices>({
+          runService: {
+            getById: vi.fn(async () => ({ run_id: "run-b", workspace_id: "wsB" }))
+          },
+          sessionOverrideService: { apply }
+        }),
+        budget: routeServices<BudgetRouteServices>({
+          runService: {
+            getById: vi.fn(async () => ({ run_id: "run-b", workspace_id: "wsB" }))
+          },
+          budgetBankruptcyService: { getSnapshot, resolve }
+        })
+      }
+    });
+
+    const override = await app.request("/runs/run-b/overrides", {
+      method: "POST",
+      headers: headersFor(PROCESS_TOKEN),
+      body: JSON.stringify({
+        target_object: "memory-1",
+        correction: "prefer concise answers"
+      })
+    });
+    const snapshot = await app.request("/runs/run-b/budget-snapshot", {
+      headers: headersFor(PROCESS_TOKEN)
+    });
+    const bankruptcy = await app.request("/runs/run-b/budget-bankruptcy/resolve", {
+      method: "POST",
+      headers: headersFor(PROCESS_TOKEN),
+      body: JSON.stringify({ option_id: "option-1", action: "accept" })
+    });
+
+    expect(override.status).toBe(403);
+    expect(snapshot.status).toBe(403);
+    expect(bankruptcy.status).toBe(403);
+    expect(apply).not.toHaveBeenCalled();
+    expect(getSnapshot).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    await expect(override.json()).resolves.toEqual({
+      success: false,
+      error: WORKSPACE_TOKEN_DENIED_MESSAGE
+    });
   });
 });
