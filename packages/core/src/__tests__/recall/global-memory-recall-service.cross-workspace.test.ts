@@ -188,6 +188,75 @@ describe("GlobalMemoryRecallService cross-workspace invalidation", () => {
     expect(auditRows).toHaveLength(1);
     subscription.dispose();
   });
+
+  it("does not cache a select that finishes after invalidation", async () => {
+    let releaseList!: () => void;
+    let startedList!: () => void;
+    const listStarted = new Promise<void>((resolve) => {
+      startedList = resolve;
+    });
+    let entries = [
+      createGlobalMemoryEntry({
+        global_object_id: "memory-shared-3",
+        content: "In-flight v1",
+        updated_at: "2026-04-30T00:00:00.000Z"
+      })
+    ];
+    const list = vi.fn(async () => {
+      const snapshot = [...entries];
+      if (list.mock.calls.length === 1) {
+        startedList();
+        await new Promise<void>((resolve) => {
+          releaseList = resolve;
+        });
+      }
+      return snapshot;
+    });
+    const service = createGlobalMemoryRecallPort({
+      globalMemorySource: { list }
+    });
+    const runtimeNotifier = createRuntimeNotifierHarness();
+    const subscription = service.subscribeToInvalidations(runtimeNotifier);
+
+    const pending = service.recall({
+      workspaceId: "workspace-b",
+      queryText: "in-flight",
+      limit: 5
+    });
+    await listStarted;
+
+    entries = [
+      createGlobalMemoryEntry({
+        global_object_id: "memory-shared-3",
+        content: "In-flight v2",
+        updated_at: "2026-04-30T01:00:00.000Z"
+      })
+    ];
+    await runtimeNotifier.notifyEntry(
+      createEventLogEntry(
+        createMemoryEventInput({
+          event_type: "soul.memory.updated",
+          entity_id: "memory-shared-3",
+          payload_json: {
+            workspace_id: "workspace-a",
+            memory_id: "memory-shared-3"
+          }
+        }),
+        1
+      )
+    );
+    releaseList();
+    await pending;
+
+    const refreshed = await service.recall({
+      workspaceId: "workspace-b",
+      queryText: "in-flight",
+      limit: 5
+    });
+    expect(refreshed[0]?.content).toBe("In-flight v2");
+    expect(list).toHaveBeenCalledTimes(2);
+    subscription.dispose();
+  });
 });
 
 function createGlobalMemorySource(initialEntries: readonly Readonly<GlobalMemoryEntry>[]) {

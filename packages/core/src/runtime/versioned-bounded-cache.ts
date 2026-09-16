@@ -1,9 +1,21 @@
 type NormalizeCachedValue<Value> = (value: Value) => Value | undefined;
 
-export class EventLogBackedCache<Value> {
+const VERSIONED_BOUNDED_CACHE_MAX_ENTRIES = 1024;
+
+export class VersionedBoundedCache<Value> {
   private readonly store = new Map<string, Value>();
   private readonly pendingLoads = new Map<string, Promise<Value | undefined>>();
   private readonly versions = new Map<string, number>();
+  private epoch = 0;
+  private readonly maxEntries: number;
+
+  public constructor(options?: { readonly maxEntries?: number }) {
+    this.maxEntries = Math.max(1, Math.floor(options?.maxEntries ?? VERSIONED_BOUNDED_CACHE_MAX_ENTRIES));
+  }
+
+  public get size(): number {
+    return this.store.size;
+  }
 
   public entries(): IterableIterator<[string, Value]> {
     return this.store.entries();
@@ -11,13 +23,21 @@ export class EventLogBackedCache<Value> {
 
   public set(key: string, value: Value): void {
     this.bump(key);
-    this.store.set(key, value);
+    this.write(key, value);
   }
 
   public delete(key: string): void {
     this.bump(key);
     this.store.delete(key);
+    this.pendingLoads.delete(key);
     this.clearVersionIfIdle(key);
+  }
+
+  public invalidate(): void {
+    this.epoch += 1;
+    this.store.clear();
+    this.pendingLoads.clear();
+    this.versions.clear();
   }
 
   public refresh(key: string, normalize: NormalizeCachedValue<Value>): Value | undefined {
@@ -38,7 +58,7 @@ export class EventLogBackedCache<Value> {
       return undefined;
     }
 
-    this.store.set(key, normalized);
+    this.write(key, normalized);
     return normalized;
   }
 
@@ -48,7 +68,12 @@ export class EventLogBackedCache<Value> {
     normalize: NormalizeCachedValue<Value>
   ): Promise<Value | undefined> {
     if (this.store.has(key)) {
-      return this.refresh(key, normalize);
+      const cached = this.store.get(key);
+      const value = this.refresh(key, normalize);
+      if (value !== undefined && value === cached) {
+        this.touch(key);
+      }
+      return value;
     }
 
     const pending = this.pendingLoads.get(key);
@@ -64,9 +89,10 @@ export class EventLogBackedCache<Value> {
     load: () => Promise<Value | undefined>,
     normalize: NormalizeCachedValue<Value>
   ): Promise<Value | undefined> {
+    const epochBeforeLoad = this.epoch;
     const versionBeforeLoad = this.version(key);
     const promise = load()
-      .then((loaded) => this.finishLoad(key, loaded, normalize, versionBeforeLoad))
+      .then((loaded) => this.finishLoad(key, loaded, normalize, epochBeforeLoad, versionBeforeLoad))
       .finally(() => this.finishPending(key, promise));
     this.pendingLoads.set(key, promise);
     return promise;
@@ -76,17 +102,49 @@ export class EventLogBackedCache<Value> {
     key: string,
     loaded: Value | undefined,
     normalize: NormalizeCachedValue<Value>,
+    epochBeforeLoad: number,
     versionBeforeLoad: number
   ): Value | undefined {
-    if (this.version(key) !== versionBeforeLoad || this.store.has(key)) {
-      return this.refresh(key, normalize);
+    if (this.epoch !== epochBeforeLoad || this.version(key) !== versionBeforeLoad || this.store.has(key)) {
+      const current = this.refresh(key, normalize);
+      if (current !== undefined) {
+        return current;
+      }
+      // Generation moved; give the waiter its load without caching it.
+      return loaded === undefined ? undefined : normalize(loaded);
     }
 
     const normalized = loaded === undefined ? undefined : normalize(loaded);
     if (normalized !== undefined) {
-      this.store.set(key, normalized);
+      this.write(key, normalized);
     }
     return normalized;
+  }
+
+  private write(key: string, value: Value): void {
+    this.store.delete(key);
+    this.store.set(key, value);
+    this.evictOverflow();
+  }
+
+  private touch(key: string): void {
+    const value = this.store.get(key);
+    if (value === undefined) {
+      return;
+    }
+    this.store.delete(key);
+    this.store.set(key, value);
+  }
+
+  private evictOverflow(): void {
+    while (this.store.size > this.maxEntries) {
+      const oldestKey = this.store.keys().next().value;
+      if (oldestKey === undefined) {
+        break;
+      }
+      this.store.delete(oldestKey);
+      this.clearVersionIfIdle(oldestKey);
+    }
   }
 
   private finishPending(key: string, promise: Promise<Value | undefined>): void {
