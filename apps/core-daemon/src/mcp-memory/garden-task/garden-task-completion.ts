@@ -180,6 +180,7 @@ async function completeCandidateSignalTask(
   const completionClaimedBy = completionEnvelopeJson === null
     ? context.agentTarget
     : `${context.agentTarget}:complete:${params.generateId()}`;
+  throwIfAborted(context.abortSignal);
   beginCompletionAttemptIfNeeded(repo, row, completionClaimedBy, completionEnvelopeJson, params.now);
 
   try {

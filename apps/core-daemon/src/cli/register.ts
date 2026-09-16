@@ -15,7 +15,7 @@ import type { AlayaDaemonRuntime } from "../index.js";
 import { stripReviewerCredentialsFromAgentMcpEnv } from "../attach/attached-agent-mcp-child-env.js";
 import { createAttachClaudeCommandSpec, createAttachCodexCommandSpec, createDetachCommandSpec } from "./attach/index.js";
 import { runAlayaMcpStdioServer } from "../mcp/server/mcp-server.js";
-import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
+import { processEnvLookup, DAEMON_ONLY_CONFIG_ENV_KEYS } from "../runtime/config/daemon-config-environment.js";
 import {
   ALAYA_SYSEXITS,
   type AlayaCliArgsSchema,
@@ -441,6 +441,7 @@ async function startMcpStdioSession(
     warn: (message, meta) => {
       ctx.stderr.write(`${message}: ${JSON.stringify(meta)}\n`);
     },
+    toolTimeoutEnv: ctx.env[DAEMON_ONLY_CONFIG_ENV_KEYS.mcp.toolTimeoutMs],
     stdin: ctx.stdin as unknown as Readable,
     stdout: ctx.stdout as unknown as Writable
   });

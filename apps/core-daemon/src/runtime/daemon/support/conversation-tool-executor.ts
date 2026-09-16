@@ -54,6 +54,7 @@ async function executeConversationTool(
   request: ToolExecutionRequest
 ) {
   const startedAt = new Date().toISOString();
+  throwIfAborted(request.abortSignal);
   const result = await request.handler({ writableRoots: [request.workspaceRoot] }, request.rawInput);
   throwIfAborted(request.abortSignal);
   const execution = createToolExecutionAuditRecord(request, startedAt, result);

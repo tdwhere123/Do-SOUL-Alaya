@@ -351,11 +351,13 @@ async function resolveStagedWarning(
 ): Promise<SoulResolveResponse> {
   const handler = deps.soulResolveHandler;
   if (handler === undefined) throw new ToolUnavailableError("soul.resolve is not wired into this daemon");
+  throwIfAborted(context.abortSignal);
   return await handler.resolve(rawArguments, {
     workspaceId: context.workspaceId,
     runId: context.runId,
     agentTarget: context.agentTarget,
-    sessionId: context.sessionId
+    sessionId: context.sessionId,
+    abortSignal: context.abortSignal
   });
 }
 

@@ -22,6 +22,7 @@ import {
   listAlayaMemoryTools,
   type AlayaMemoryToolDefinition
 } from "../../mcp-memory/tool/tool-catalog.js";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import { readRuntimeVersion } from "../../runtime/daemon/support/build-info.js";
 import type {
   McpMemoryToolCallContext,
@@ -103,7 +104,10 @@ export async function callAlayaMcpMemoryTool(
   rawArguments: unknown
 ): Promise<CallToolResult> {
   const timeoutMs =
-    options.toolTimeoutMs ?? resolveMcpToolTimeoutMs(options.toolTimeoutEnv);
+    options.toolTimeoutMs ??
+    resolveMcpToolTimeoutMs(
+      options.toolTimeoutEnv ?? processEnvLookup().ALAYA_MCP_TOOL_TIMEOUT_MS
+    );
   let result: Awaited<ReturnType<McpMemoryToolHandler["call"]>>;
   try {
     result = await withTimeout(async (signal) => {

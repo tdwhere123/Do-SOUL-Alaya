@@ -73,6 +73,7 @@ type ConversationToolExecutionRequest = Readonly<{
   readonly runtimeContext: Readonly<ConversationRuntimeContext>;
   readonly workspaceRoot: string;
   readonly affectedPathRoots?: readonly string[];
+  readonly abortSignal?: AbortSignal;
   readonly handler: (
     context: ConversationToolExecutionContext,
     rawInput?: unknown
@@ -107,6 +108,7 @@ export async function handleConversationToolUse(
     readonly externalToolExecutor?: ExternalConversationToolExecutor;
     readonly gitBindingValidation?: GitBindingValidationOptions;
     readonly confirmationToken?: string;
+    readonly abortSignal?: AbortSignal;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   } = {}
 ): Promise<ToolResultBlock> {
@@ -148,6 +150,7 @@ export async function handleConversationToolUse(
       runtimeContext,
       workspaceRoot: workspace.root_path,
       affectedPathRoots,
+      abortSignal: options.abortSignal,
       warn: options.warn ?? defaultWarn
     });
 
@@ -442,6 +445,7 @@ async function executeExternalConversationTool(input: {
   readonly runtimeContext: Readonly<ConversationRuntimeContext>;
   readonly workspaceRoot: string;
   readonly affectedPathRoots?: readonly string[];
+  readonly abortSignal?: AbortSignal;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }) {
   if (input.externalToolExecutor === undefined) {
@@ -473,6 +477,7 @@ async function executeExternalConversationTool(input: {
     runtimeContext: input.runtimeContext,
     workspaceRoot: input.workspaceRoot,
     affectedPathRoots: input.affectedPathRoots,
+    abortSignal: input.abortSignal,
     handler: async (context: ConversationToolExecutionContext, rawInput?: unknown) =>
       await externalToolExecutor.executeTool({
         toolId: input.toolUse.name,
