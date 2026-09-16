@@ -1,13 +1,14 @@
 import {
   MemoryGraphEdgeType,
   type MemoryGraphEdgeTypeValue,
-  type MemoryEntry
+  type MemoryEntry,
+  type QueryAvailability
 } from "@do-soul/alaya-protocol";
 import {
   type PathMintOutcome,
 } from "../../relations/edge-proposals/path-relation-proposal-service.js";
 import { CoreError } from "../../shared/errors.js";
-import { readCandidateQuery } from "./candidate-query-result.js";
+import { readCandidateQuery, type CandidateQueryResult } from "./candidate-query-result.js";
 import {
   DEFAULT_LLM_MAX_PAIRS,
   TAG_OVERLAP_CONTRADICTS_THRESHOLD,
@@ -26,6 +27,10 @@ export type {
   ConflictDetectionMemoryRepoPort,
   ConflictDetectionServiceDeps
 } from "./conflict-detection-service-shared.js";
+
+export interface ConflictDetectionScanResult {
+  readonly availability: QueryAvailability;
+}
 
 interface ConflictDetectionRequest {
   readonly newMemoryId: string;
@@ -52,24 +57,33 @@ export class ConflictDetectionService {
     this.ruleEnabled = deps.ruleEnabled ?? true;
   }
 
-  public async detectAndLinkConflicts(params: ConflictDetectionRequest): Promise<void> {
+  public async detectAndLinkConflicts(
+    params: ConflictDetectionRequest
+  ): Promise<ConflictDetectionScanResult> {
     const strictNoDrop = params.strictNoDrop ?? false;
     if (!this.ruleEnabled && this.deps.llmPort === undefined) {
-      return;
+      return { availability: "ok" };
     }
-    const context = await this.loadConflictCandidateContext(params, strictNoDrop);
+    const loaded = await this.loadConflictCandidateContext(params, strictNoDrop);
+    if (loaded.availability === "unavailable") {
+      return { availability: "unavailable" };
+    }
     const contradictsCandidates = this.ruleEnabled
-      ? await this.linkRuleDetectedConflicts(params, context, strictNoDrop)
+      ? await this.linkRuleDetectedConflicts(params, loaded.context, strictNoDrop)
       : [];
     if (this.deps.llmPort !== undefined && contradictsCandidates.length === 0) {
-      await this.linkLlmDetectedConflicts(params, context, strictNoDrop);
+      await this.linkLlmDetectedConflicts(params, loaded.context, strictNoDrop);
     }
+    return { availability: "ok" };
   }
 
   private async loadConflictCandidateContext(
     params: ConflictDetectionRequest,
     strictNoDrop: boolean
-  ): Promise<ConflictCandidateContext> {
+  ): Promise<
+    | { readonly availability: "ok"; readonly context: ConflictCandidateContext }
+    | { readonly availability: "unavailable" }
+  > {
     const sameDimension = await this.fetchCandidates(
       () =>
         readConflictDimensionCandidates(
@@ -81,30 +95,48 @@ export class ConflictDetectionService {
       params.workspaceId,
       strictNoDrop
     );
+    if (sameDimension.availability === "unavailable") {
+      return { availability: "unavailable" };
+    }
     // INCOMPATIBLE_WITH candidate narrowing: the gate keeps a peer only if
     // jaccard(domain_tags) >= TAG_OVERLAP_CONTRADICTS_THRESHOLD, which
     // requires >=1 shared tag, so the shared-tag set is a superset of every
     // gate-passing peer. Fetching it instead of the full workspace yields
     // identical edges with a sub-linear candidate set. Only the rule path
     // reads it; skip the fetch entirely when the rule path is disabled.
-    const sharedTagCandidates = this.ruleEnabled
-      ? await this.fetchCandidates(
-          () =>
-            this.deps.memoryRepo.findBySharedDomainTags(
-              params.workspaceId,
-              params.newMemoryDomainTags
-            ),
-          "memoryRepo.findBySharedDomainTags failed",
+    if (!this.ruleEnabled) {
+      return {
+        availability: "ok",
+        context: Object.freeze({
+          sameDimension: sameDimension.items,
+          sharedTagCandidates: [] as readonly Readonly<MemoryEntry>[],
+          newTokens: tokenize(params.newMemoryContent),
+          newTagSet: new Set(params.newMemoryDomainTags)
+        })
+      };
+    }
+    const sharedTagCandidates = await this.fetchCandidates(
+      () =>
+        this.deps.memoryRepo.findBySharedDomainTags(
           params.workspaceId,
-          strictNoDrop
-        )
-      : ([] as readonly Readonly<MemoryEntry>[]);
-    return Object.freeze({
-      sameDimension,
-      sharedTagCandidates,
-      newTokens: tokenize(params.newMemoryContent),
-      newTagSet: new Set(params.newMemoryDomainTags)
-    });
+          params.newMemoryDomainTags
+        ),
+      "memoryRepo.findBySharedDomainTags failed",
+      params.workspaceId,
+      strictNoDrop
+    );
+    if (sharedTagCandidates.availability === "unavailable") {
+      return { availability: "unavailable" };
+    }
+    return {
+      availability: "ok",
+      context: Object.freeze({
+        sameDimension: sameDimension.items,
+        sharedTagCandidates: sharedTagCandidates.items,
+        newTokens: tokenize(params.newMemoryContent),
+        newTagSet: new Set(params.newMemoryDomainTags)
+      })
+    };
   }
 
   private async linkRuleDetectedConflicts(
@@ -167,19 +199,18 @@ export class ConflictDetectionService {
   }
 
   // Candidate reads share readCandidateQuery with pre-write recall so a
-  // repository throw is never silently an empty list at the query layer.
-  // Strict no-drop rethrows so bulk-enrich can retry; best-effort inline
-  // still refuses to break an already-created memory, but that conversion
-  // to empty is explicit here rather than a private catch.
+  // repository throw is never silently an empty list. Strict no-drop
+  // rethrows so bulk-enrich can retry. Best-effort returns unavailable
+  // so callers skip linking instead of treating a failed scan as no peers.
   private async fetchCandidates(
     fetch: () => Promise<readonly Readonly<MemoryEntry>[]>,
     warnMessage: string,
     workspaceId: string,
     strictNoDrop: boolean
-  ): Promise<readonly Readonly<MemoryEntry>[]> {
+  ): Promise<CandidateQueryResult<Readonly<MemoryEntry>>> {
     const result = await readCandidateQuery(fetch);
     if (result.availability === "ok") {
-      return result.items;
+      return result;
     }
     if (strictNoDrop) {
       throw result.error;
@@ -188,7 +219,7 @@ export class ConflictDetectionService {
       workspace_id: workspaceId,
       error: errorMessage(result.error)
     });
-    return [] as readonly Readonly<MemoryEntry>[];
+    return result;
   }
 
   private async writeEdge(

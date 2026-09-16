@@ -286,7 +286,7 @@ describe("MaterializationRouter ingest reconciliation", () => {
     for (const runConflictScan of [true, false]) {
       const deps = createDeps();
       const { reconciliationPort } = fakeReconciliationPort({ kind: "add", runConflictScan });
-      const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+      const detectAndLinkConflicts = vi.fn<DetectFn>(async () => ({ availability: "ok" }));
       const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
       const router = new MaterializationRouter({
         ...deps,

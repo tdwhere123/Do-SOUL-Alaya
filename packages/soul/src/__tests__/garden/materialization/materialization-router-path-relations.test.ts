@@ -471,7 +471,7 @@ describe("MaterializationRouter path relations and distillation", () => {
 
   it("does NOT run conflict detection inline on the write-path (enqueues instead)", async () => {
     const deps = createDeps();
-    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => ({ availability: "ok" }));
     const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
     const router = new MaterializationRouter({
       ...deps,

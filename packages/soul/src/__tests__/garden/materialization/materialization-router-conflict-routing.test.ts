@@ -54,7 +54,7 @@ describe("MaterializationRouter potential_conflict routing", () => {
     const deps = createDeps();
     const evaluate = vi.fn<NonNullable<ConflictDetectionPort["evaluate"]>>(async () => undefined);
     const detectAndLinkConflicts = vi.fn<ConflictDetectionPort["detectAndLinkConflicts"]>(
-      async () => undefined
+      async () => ({ availability: "ok" })
     );
     const router = new MaterializationRouter({
       ...deps,

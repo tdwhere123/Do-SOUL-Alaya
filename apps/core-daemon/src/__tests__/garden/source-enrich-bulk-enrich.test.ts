@@ -125,7 +125,7 @@ async function runTask(
         },
         memoryLookup: { findById: vi.fn() },
         edgeProducer: { produceForNewMemory: vi.fn() },
-        conflictDetection: { detectAndLinkConflicts: vi.fn() },
+        conflictDetection: { detectAndLinkConflicts: vi.fn(async () => ({ availability: "ok" })) },
         signalLookup: { getById: vi.fn() },
         signalRefReplay: { replaySignalRefs: vi.fn() }
       }
@@ -209,7 +209,7 @@ describe("per-source bulk_enrich routing", () => {
           },
           memoryLookup: { findById: vi.fn() },
           edgeProducer: { produceForNewMemory: vi.fn() },
-          conflictDetection: { detectAndLinkConflicts: vi.fn() },
+          conflictDetection: { detectAndLinkConflicts: vi.fn(async () => ({ availability: "ok" })) },
           signalLookup: { getById: vi.fn() },
           signalRefReplay: { replaySignalRefs: vi.fn() }
         }
@@ -314,7 +314,7 @@ describe("per-source bulk_enrich routing", () => {
           },
           memoryLookup: { findById: vi.fn() },
           edgeProducer: { produceForNewMemory: vi.fn() },
-          conflictDetection: { detectAndLinkConflicts: vi.fn() },
+          conflictDetection: { detectAndLinkConflicts: vi.fn(async () => ({ availability: "ok" })) },
           signalLookup: { getById: vi.fn() },
           signalRefReplay: { replaySignalRefs: vi.fn() }
         }
@@ -356,7 +356,7 @@ describe("per-source bulk_enrich routing", () => {
           },
           memoryLookup: { findById: vi.fn() },
           edgeProducer: { produceForNewMemory: vi.fn() },
-          conflictDetection: { detectAndLinkConflicts: vi.fn() },
+          conflictDetection: { detectAndLinkConflicts: vi.fn(async () => ({ availability: "ok" })) },
           signalLookup: { getById: vi.fn() },
           signalRefReplay: { replaySignalRefs: vi.fn() }
         }

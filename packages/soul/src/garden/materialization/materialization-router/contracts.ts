@@ -10,6 +10,7 @@ import {
   type OpenSemanticFactorFormationAdmission,
   type PathGovernanceClass as PathGovernanceClassValue,
   type PathRelation,
+  type QueryAvailability,
   type RelationValidity,
   type SourceGroundingDeferReason,
   type SourceInterpretationSignal,
@@ -348,7 +349,7 @@ export interface ConflictDetectionPort {
     readonly newMemoryDomainTags: readonly string[];
     readonly workspaceId: string;
     readonly runId: string;
-  }): Promise<void>;
+  }): Promise<{ readonly availability: QueryAvailability }>;
   evaluate?(params: {
     readonly signalId: string;
     readonly workspaceId: string;

@@ -80,7 +80,7 @@ export function buildToolRuntimeWiringCoreMocks(params: {
     }),
     ClaimService: hoisted.claimServiceCtor,
     ConflictDetectionService: makeClass({
-      detectAndLinkConflicts: vi.fn(async () => undefined)
+      detectAndLinkConflicts: vi.fn(async () => ({ availability: "ok" }))
     }),
     ConsolidationExecutor: makeClass({
       runCycle: vi.fn(async () => ({

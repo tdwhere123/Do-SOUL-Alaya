@@ -157,7 +157,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     enrichPendingRepo.enqueue("workspace-1", "memory-2");
 
     const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
-    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => ({ availability: "ok" }));
     const findById = vi.fn(async (memoryId: string) => buildMemory(memoryId));
 
     const runtime = createGardenRuntime(
@@ -196,7 +196,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     enrichPendingRepo.enqueue("workspace-1", "memory-1");
 
     const produceForNewMemory = vi.fn(async () => undefined);
-    const detectAndLinkConflicts = vi.fn(async () => undefined);
+    const detectAndLinkConflicts = vi.fn(async () => ({ availability: "ok" as const }));
     const runtime = createGardenRuntime(
       createRuntimeInput({
         enrichPendingRepo,
@@ -220,7 +220,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
   it("does not drain enrich_pending for a per-source source_enrich bulk_enrich task", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
-    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => ({ availability: "ok" }));
     const runtime = createGardenRuntime(
       createRuntimeInput({
         enrichPendingRepo,
