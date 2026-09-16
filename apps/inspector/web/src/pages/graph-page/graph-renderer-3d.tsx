@@ -2,12 +2,13 @@ import ForceGraph3D from "react-force-graph-3d";
 import type { ForceGraphMethods as ForceGraphMethods3D } from "react-force-graph-3d";
 import type { GraphLink, GraphNode } from "../../types/graph";
 import { isRecentlyReinforced, linkStrength, linkWidth, nodeInfluenceSize } from "../../utils/graph";
+import type { Graph3DHandle } from "./graph-physics-support";
 import { formatGraphNodeTooltip } from "./support";
 import type { GraphData } from "./types";
 
 export interface GraphRenderer3DProps {
   readonly data: GraphData;
-  readonly fg3dRef: React.MutableRefObject<ForceGraphMethods3D<GraphNode, GraphLink> | undefined>;
+  readonly fg3dRef: React.MutableRefObject<Graph3DHandle | undefined>;
   readonly largeGraphMode: boolean;
   readonly onBackgroundClick: () => void;
   readonly onEngineTick: () => void;
@@ -21,7 +22,12 @@ export interface GraphRenderer3DProps {
 export default function GraphRenderer3D(props: GraphRenderer3DProps) {
   return (
     <ForceGraph3D
-      ref={props.fg3dRef}
+      ref={
+        // Library ref type stays in this 3D leaf so 2D modules stay uncoupled.
+        props.fg3dRef as React.MutableRefObject<
+          ForceGraphMethods3D<GraphNode, GraphLink> | undefined
+        >
+      }
       graphData={props.data}
       width={props.viewport.width}
       height={props.viewport.height}

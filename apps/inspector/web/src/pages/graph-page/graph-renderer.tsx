@@ -1,10 +1,10 @@
 import { Suspense, lazy } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import type { ForceGraphMethods as ForceGraphMethods2D } from "react-force-graph-2d";
-import type { ForceGraphMethods as ForceGraphMethods3D } from "react-force-graph-3d";
 import { useI18n } from "../../i18n/locale";
 import type { GraphLink, GraphNode, SpotlightState } from "../../types/graph";
 import { linkWidth, nodeInfluenceSize } from "../../utils/graph";
+import type { Graph3DHandle } from "./graph-physics-support";
 import { formatGraphNodeTooltip } from "./support";
 import type { GraphData, ViewMode } from "./types";
 import { useGraphRendererStyles } from "./useGraphRendererStyles";
@@ -15,7 +15,7 @@ interface GraphRendererProps {
   readonly data: GraphData;
   readonly effectiveMode: ViewMode;
   readonly fg2dRef: React.MutableRefObject<ForceGraphMethods2D<GraphNode, GraphLink> | undefined>;
-  readonly fg3dRef: React.MutableRefObject<ForceGraphMethods3D<GraphNode, GraphLink> | undefined>;
+  readonly fg3dRef: React.MutableRefObject<Graph3DHandle | undefined>;
   readonly largeGraphMode: boolean;
   readonly matchIds: ReadonlySet<string>;
   readonly nodeSpotlightState: (id: string) => SpotlightState;

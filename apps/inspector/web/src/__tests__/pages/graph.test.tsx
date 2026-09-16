@@ -65,7 +65,7 @@ describe("GraphPage (react-force-graph driven)", () => {
     expect(screen.queryByTestId("force-graph-3d")).not.toBeTruthy();
   });
 
-  it("does not mount 3D until the view-mode toggle is pressed", async () => {
+  it("defaults to 2D with the 2D control pressed", async () => {
     renderGraphWithEnv();
     await screen.findByTestId("force-graph-2d");
     expect(screen.queryByTestId("force-graph-3d")).not.toBeTruthy();

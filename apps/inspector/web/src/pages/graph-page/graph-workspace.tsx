@@ -1,12 +1,12 @@
 import { useCallback, useRef, useState } from "react";
 import type { ForceGraphMethods as ForceGraphMethods2D } from "react-force-graph-2d";
-import type { ForceGraphMethods as ForceGraphMethods3D } from "react-force-graph-3d";
 import DetailDrawer from "../../components/detail-drawer";
 import { useToasts } from "../../components/toast";
 import { useFpsMonitor } from "../../hooks/useFpsMonitor";
 import { useGraphSpotlight } from "../../hooks/useGraphSpotlight";
 import type { GraphLink, GraphNode } from "../../types/graph";
 import GraphOverlays from "./graph-overlays";
+import type { Graph3DHandle } from "./graph-physics-support";
 import GraphRenderer from "./graph-renderer";
 import GraphToolbar from "./graph-toolbar";
 import { probeWebgl } from "./support";
@@ -71,7 +71,7 @@ function useGraphRefs() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const fg2dRef = useRef<ForceGraphMethods2D<GraphNode, GraphLink> | undefined>(undefined);
-  const fg3dRef = useRef<ForceGraphMethods3D<GraphNode, GraphLink> | undefined>(undefined);
+  const fg3dRef = useRef<Graph3DHandle | undefined>(undefined);
   const keyboardStateRef = useRef<GraphKeyboardState>({
     matchCount: 0,
     searchTerm: "",
