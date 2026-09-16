@@ -401,15 +401,21 @@ export function bindEventPublisher(input: {
   }
   return new EventPublisher({
     eventLogRepo: adaptLegacyEventLogRepo(eventLogRepo as LegacyEventLogAppendPort),
-    runtimeNotifier: {
-      notify:
-        "notify" in runtimeNotifier && runtimeNotifier.notify !== undefined
-          ? runtimeNotifier.notify
-          : () => undefined,
-      notifyEntry: runtimeNotifier.notifyEntry
-    },
+    runtimeNotifier: bindRuntimeNotifier(runtimeNotifier),
     runHotStateService: input.runHotStateService ?? { apply: () => undefined }
   });
+}
+
+function bindRuntimeNotifier(runtimeNotifier: NotifyEntryPort | RuntimeNotifier): RuntimeNotifier {
+  // Copying methods onto a fresh object unbinds class `this` (workspace listener maps).
+  return {
+    notify: (runId, event) => {
+      if ("notify" in runtimeNotifier && runtimeNotifier.notify !== undefined) {
+        return runtimeNotifier.notify(runId, event);
+      }
+    },
+    notifyEntry: (entry) => runtimeNotifier.notifyEntry(entry)
+  };
 }
 
 function adaptLegacyEventLogRepo(repo: LegacyEventLogAppendPort): EventPublisherEventLogRepoPort {

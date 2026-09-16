@@ -517,6 +517,38 @@ describe("EventPublisher wiring (fake EventLog repo)", () => {
     expect(recorded).toEqual(["bound:evt_worker-1"]);
   });
 
+  it("bindEventPublisher keeps class-instance notifier `this` across notifyEntry", async () => {
+    const entry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: WorkerStateChangedPayloadSchema.parse({
+        workerId: "worker-1",
+        state: "active",
+        previousState: "init"
+      })
+    });
+    class ClassNotifier {
+      public readonly seen: string[] = [];
+      private readonly tag = "bound";
+      public notify(): void {}
+      public notifyEntry(received: EventLogEntry): void {
+        this.seen.push(`${this.tag}:${received.event_id}`);
+      }
+    }
+    const notifier = new ClassNotifier();
+    const publisher = bindEventPublisher({
+      eventLogRepo: createSingleEntryRepo(entry, []),
+      runtimeNotifier: notifier,
+      purpose: "TestService"
+    });
+    await expect(publisher.publish(toEventInput(entry))).resolves.toEqual(entry);
+    expect(notifier.seen).toEqual(["bound:evt_worker-1"]);
+  });
+
   it("appendManyWithMutation appends, applies, then notifies", async () => {
     const recorded: string[] = [];
     const entry = createEventLogEntry({
