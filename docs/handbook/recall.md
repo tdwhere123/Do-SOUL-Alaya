@@ -413,7 +413,9 @@ references rather than silently granting full content exposure.
 The protocol 4.0.0 candidate is an unreleased major semantic cutover under
 invariant §25. Explicit legacy selector request keys are rejected. Historical
 response `delivery_path` and `ranking_authority` remain deprecated parseable
-fields and are omitted on the target path. `recent_turn` remains accepted and
+fields and are omitted on the target path. Live ranking ignores
+`ranking_authority`; do not delete it in 0.3.x. Removal waits for a protocol
+major after the compatibility ledger expires so old parsers keep working. `recent_turn` remains accepted and
 ignored by Recall. Required `results`, `index` and continuation retain their
 documented roles. Retired `strategy_mix` is absent from the target payload and
 rejected by the strict response schema; ignored inputs do not activate old behavior.

@@ -1,6 +1,6 @@
 import type { EventLogEntry, GlobalMemoryEntry } from "@do-soul/alaya-protocol";
 import type { GlobalMemoryRecallEntry, GlobalMemoryRecallPort } from "./global-memory-recall-port.js";
-import { selectGlobalMemoryRecallEntries } from "./global-memory/selection.js";
+import { selectGlobalMemoryRecallEntries, normalizeGlobalMemoryQuery } from "./global-memory/selection.js";
 
 export interface GlobalMemoryRecallSourcePort {
   list(): Promise<readonly Readonly<GlobalMemoryEntry>[]>;
@@ -111,17 +111,6 @@ class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
       this.cacheByQuery.delete(cacheKey);
     }
   }
-}
-
-function normalizeGlobalMemoryQuery(queryText: string | null): readonly string[] | null {
-  if (queryText === null) return null;
-  const tokens = queryText
-    .trim()
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((token) => token.length > 0);
-
-  return tokens.length === 0 ? null : tokens;
 }
 
 function createRecallCacheKey(params: {

@@ -312,7 +312,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
   public finish(task: SemanticEnrichmentTask, status: "completed" | "failed", reason: string | null, now: string): void {
     this.assertClaim(task);
     const result = prepareGardenTaskClaimStatements(this.db).completeStatement.run(
-      status, now, reason, task.id, task.claim);
+      status, now, reason, task.id, task.claim, task.workspaceId);
     if (result.changes !== 1) throw new Error("stale completion");
   }
 

@@ -21,25 +21,35 @@ export function registerSecurityHeadersMiddleware(app: Hono): void {
   app.use("*", createApiSecurityHeadersMiddleware());
 }
 
+export function resolveRateLimitSettings(
+  config: CoreDaemonRateLimitConfig | undefined
+): Required<Pick<CoreDaemonRateLimitConfig, "maxRequests" | "windowMs" | "failClosedOnUnknownSocket">> &
+  Pick<CoreDaemonRateLimitConfig, "nowMs"> {
+  return {
+    maxRequests: config?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS,
+    windowMs: config?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS,
+    failClosedOnUnknownSocket: config?.failClosedOnUnknownSocket ?? isRemoteDaemonBind(),
+    ...(config?.nowMs === undefined ? {} : { nowMs: config.nowMs })
+  };
+}
+
 export function registerRateLimitMiddleware(
   app: Hono,
   config: CoreDaemonRateLimitConfig | undefined
 ): void {
-  // Fixed-window cap on protected routes; /health exempt.
-  // see also: resolveProtectedRateLimitKey — loopback anonymous socket bucket.
+  const settings = resolveRateLimitSettings(config);
+  // Successful protected requests keep a token+peer quota; failed auth is
+  // counted separately by peer identity in the token gate.
   app.use(
     "*",
     createFixedWindowRateLimitMiddleware({
-      maxRequests: config?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS,
-      windowMs: config?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS,
-      ...(config?.nowMs === undefined ? {} : { nowMs: config.nowMs }),
+      maxRequests: settings.maxRequests,
+      windowMs: settings.windowMs,
+      ...(settings.nowMs === undefined ? {} : { nowMs: settings.nowMs }),
       skip: (context) => !isProtectedRequest(context.req.method, context.req.path),
-      failClosedOnUnknownSocket: config?.failClosedOnUnknownSocket ?? isRemoteDaemonBind(),
+      failClosedOnUnknownSocket: settings.failClosedOnUnknownSocket,
       resolveKey: (context) =>
-        resolveProtectedRateLimitKey(
-          context,
-          config?.failClosedOnUnknownSocket ?? isRemoteDaemonBind()
-        )
+        resolveProtectedRateLimitKey(context, settings.failClosedOnUnknownSocket)
     })
   );
 }

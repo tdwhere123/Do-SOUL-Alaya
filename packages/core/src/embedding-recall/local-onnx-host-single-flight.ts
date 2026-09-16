@@ -206,24 +206,26 @@ async function ensurePrivateLockDirectory(directory: string): Promise<void> {
 
 function releaseLockDatabase(database: DatabaseSync): unknown | undefined {
   const errors: unknown[] = [];
-  if (database.isTransaction) {
-    try {
-      database.exec("ROLLBACK");
-    } catch (error) {
-      errors.push(error);
-    }
+  // Some node:sqlite builds omit isTransaction/isOpen; skipping ROLLBACK/close then leaves the lock held.
+  try {
+    database.exec("ROLLBACK");
+  } catch (error) {
+    if (!isBenignLockReleaseError(error)) errors.push(error);
   }
-  if (database.isOpen) {
-    try {
-      database.close();
-    } catch (error) {
-      errors.push(error);
-    }
+  try {
+    database.close();
+  } catch (error) {
+    if (!isBenignLockReleaseError(error)) errors.push(error);
   }
   if (errors.length === 0) return undefined;
   return errors.length === 1
     ? errors[0]
     : new AggregateError(errors, "Local ONNX lock rollback and close failed");
+}
+
+function isBenignLockReleaseError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /cannot rollback - no transaction is active|database is not open/i.test(message);
 }
 
 function lockOpenFlags(): number {

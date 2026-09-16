@@ -120,7 +120,18 @@ export default [
   packageProject("@do-soul/alaya-graph-algorithms", "packages/graph-algorithms"),
   packageProject("@do-soul/alaya-cjk-segmentation", "packages/cjk-segmentation"),
   packageProject("@do-soul/alaya-storage", "packages/storage", {
-    ...(process.platform === "win32" ? windowsSqliteTimeouts : { testTimeout: 30_000 })
+    ...(process.platform === "win32"
+      ? {
+          // Two forks still miss 60s on file-backed schema upgrades under
+          // NTFS. Serialize this project; 120s covers one upgrade-and-reopen.
+          // groupOrder keeps the worker cap from colliding with siblings.
+          fileParallelism: false,
+          maxWorkers: 1,
+          testTimeout: 120_000,
+          hookTimeout: 120_000,
+          sequence: { groupOrder: 1 }
+        }
+      : { testTimeout: 30_000 })
   }),
   packageProject("@do-soul/alaya-core", "packages/core", {
     setupFiles: [path.resolve(rootDir, "packages/core/vitest.setup.ts")],

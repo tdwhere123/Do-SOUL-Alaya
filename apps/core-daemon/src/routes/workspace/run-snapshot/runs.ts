@@ -7,12 +7,7 @@ import {
   type RunService,
   type WorkspaceService
 } from "@do-soul/alaya-core";
-import {
-  isWorkspaceGrantDenied,
-  REQUEST_TOKEN_GRANT_CONTEXT_KEY,
-  WORKSPACE_TOKEN_DENIED_MESSAGE,
-  type RequestTokenGrant
-} from "../../../runtime/request-token-binding.js";
+import { respondIfWorkspaceGrantDenied } from "../../../runtime/request-token-binding.js";
 import {
   parseJsonBody,
   parseListPagination,
@@ -279,9 +274,9 @@ async function assertRunWorkspace(
 ): Promise<string | Response> {
   const run = await services.runService.getById(runId);
   await services.workspaceService.getById(run.workspace_id);
-  const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
-  if (isWorkspaceGrantDenied(grant, run.workspace_id)) {
-    return context.json({ success: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE }, 403);
+  const denied = respondIfWorkspaceGrantDenied(context, run.workspace_id);
+  if (denied !== undefined) {
+    return denied;
   }
   return run.workspace_id;
 }
