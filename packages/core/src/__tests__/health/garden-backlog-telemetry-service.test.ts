@@ -90,6 +90,7 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
         }),
         queryByEntity: vi.fn(async () => [])
       },
+      runtimeNotifier: { notifyEntry: () => undefined },
       warn,
       thresholds: {
         warning_queue_depth: 10,
