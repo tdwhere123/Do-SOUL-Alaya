@@ -14,7 +14,7 @@ describe("inspector server startup", () => {
 
     await expect(
       startInspectorServer({
-        env: { ALAYA_INSPECTOR_TOKEN: "token" },
+        env: {},
         stderr,
         stdout: new PassThrough()
       })
@@ -32,7 +32,6 @@ describe("inspector server startup", () => {
     await expect(
       startInspectorServer({
         env: {
-          ALAYA_INSPECTOR_TOKEN: "token",
           ALAYA_DAEMON_URL: "http://127.0.0.1:5173",
           ALAYA_INSPECTOR_WORKSPACE_ID: "ws-1"
         },
@@ -53,7 +52,6 @@ describe("inspector server startup", () => {
     await expect(
       startInspectorServer({
         env: {
-          ALAYA_INSPECTOR_TOKEN: "token",
           ALAYA_DAEMON_URL: "http://127.0.0.1:5173",
           ALAYA_INSPECTOR_WORKSPACE_ID: "ws-1",
           ALAYA_INSPECTOR_LAUNCH_CODE: "from-env"
@@ -75,7 +73,6 @@ describe("inspector server startup", () => {
     await expect(
       startInspectorServer({
         env: {
-          ALAYA_INSPECTOR_TOKEN: "token",
           ALAYA_DAEMON_URL: "http://127.0.0.1:5173"
         },
         stderr,
@@ -95,7 +92,6 @@ describe("inspector server startup", () => {
     await expect(
       startInspectorServer({
         env: {
-          ALAYA_INSPECTOR_TOKEN: "token",
           ALAYA_DAEMON_URL: "http://evil.example:5173",
           ALAYA_INSPECTOR_WORKSPACE_ID: "ws-1",
           ALAYA_INSPECTOR_LAUNCH_CODE: "launch"

@@ -42,7 +42,6 @@ export function buildInspectorChildEnv(input: SpawnInspectorInput): NodeJS.Proce
       env[key] = value;
     }
   }
-  env.ALAYA_INSPECTOR_TOKEN = input.token;
   env.ALAYA_INSPECTOR_PORT = String(input.port);
   env.ALAYA_INSPECTOR_WORKSPACE_ID = input.workspaceId;
   return env;

@@ -391,10 +391,10 @@ describe("cli inspect", () => {
     expect(env).toEqual({
       ALAYA_DAEMON_URL: "http://127.0.0.1:3000",
       ALAYA_REQUEST_TOKEN: "daemon-request-token",
-      ALAYA_INSPECTOR_TOKEN: "b".repeat(64),
       ALAYA_INSPECTOR_PORT: "5175",
       ALAYA_INSPECTOR_WORKSPACE_ID: "ws-1"
     });
+    expect(env).not.toHaveProperty("ALAYA_INSPECTOR_TOKEN");
     expect(env).not.toHaveProperty(INSPECTOR_LAUNCH_CODE_ENV);
   });
 });

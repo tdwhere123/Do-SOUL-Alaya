@@ -66,7 +66,8 @@ export const INSPECTOR_CORRELATION_ID_HEADER = "x-correlation-id";
 export const DEFAULT_INSPECTOR_DAEMON_TIMEOUT_MS = 30_000;
 
 export interface InspectorAppOptions {
-  readonly token: string;
+  // CLI `--token` still supplies this; Inspector HTTP auth is cookie-only.
+  readonly token?: string;
   readonly launchCode?: string;
   readonly workspaceId?: string;
   readonly daemonUrl?: string;
@@ -80,9 +81,6 @@ export interface InspectorAppOptions {
 }
 
 export function createInspectorApp(options: InspectorAppOptions): Hono {
-  if (normalizeOptionalSecret(options.token) === undefined) {
-    throw new Error("inspector_token_missing");
-  }
   const app = new Hono();
   const env = options.env ?? process.env;
   const proxyOptions = createProxyOptions(options, env);

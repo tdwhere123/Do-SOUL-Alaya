@@ -150,44 +150,53 @@ describe("inspector routes", () => {
     expect(replay.status).toBe(401);
   });
 
-  it("mints a session cookie on the first loopback HTML GET and consumes the launch proof", async () => {
+  it("mints a session cookie on the first HTML GET when client address is unavailable", async () => {
     const staticRoot = await mkdtemp(path.join(tmpdir(), "inspector-loopback-"));
     await writeFile(path.join(staticRoot, "index.html"), "<html>ok</html>", "utf8");
-    const app = createInspectorApp({
-      token: "secret-token",
-      launchCode: "loopback-code",
-      staticRoot,
-      resolveClientAddress: () => "127.0.0.1"
-    });
+    try {
+      const app = createInspectorApp({
+        launchCode: "loopback-code",
+        staticRoot
+      });
 
-    const html = await app.request("/");
-    expect(html.status).toBe(200);
-    const setCookie = html.headers.get("set-cookie") ?? "";
-    expect(setCookie).toMatch(/alaya_inspector_session=/);
-    expect(setCookie).toMatch(/HttpOnly/i);
-    expect(setCookie).not.toContain("secret-token");
-    expect(setCookie).not.toContain("loopback-code");
+      const html = await app.request("/");
+      expect(html.status).toBe(200);
+      const setCookie = html.headers.get("set-cookie") ?? "";
+      expect(setCookie).toMatch(/alaya_inspector_session=/);
+      expect(setCookie).toMatch(/HttpOnly/i);
+      expect(setCookie).not.toContain("loopback-code");
 
-    const status = await app.request("/api/status", {
-      headers: { cookie: cookieHeaderFromSetCookie(setCookie) }
-    });
-    expect(status.status).not.toBe(401);
+      const status = await app.request("/api/status", {
+        headers: { cookie: cookieHeaderFromSetCookie(setCookie) }
+      });
+      expect(status.status).not.toBe(401);
 
-    const replay = await app.request("/api/launch-session", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code: "loopback-code" })
-    });
-    expect(replay.status).toBe(401);
+      const replay = await app.request("/api/launch-session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: "loopback-code" })
+      });
+      expect(replay.status).toBe(401);
+    } finally {
+      await rm(staticRoot, { recursive: true, force: true });
+    }
+  });
 
-    const remoteApp = createInspectorApp({
-      token: "secret-token",
-      launchCode: "remote-code",
-      staticRoot,
-      resolveClientAddress: () => "203.0.113.10"
-    });
-    const remoteHtml = await remoteApp.request("/");
-    expect(remoteHtml.headers.get("set-cookie")).toBeNull();
+  it("does not mint a session cookie for an explicit non-loopback client", async () => {
+    const staticRoot = await mkdtemp(path.join(tmpdir(), "inspector-remote-"));
+    await writeFile(path.join(staticRoot, "index.html"), "<html>ok</html>", "utf8");
+    try {
+      const remoteApp = createInspectorApp({
+        launchCode: "remote-code",
+        staticRoot,
+        resolveClientAddress: () => "203.0.113.10"
+      });
+      const remoteHtml = await remoteApp.request("/");
+      expect(remoteHtml.status).toBe(200);
+      expect(remoteHtml.headers.get("set-cookie")).toBeNull();
+    } finally {
+      await rm(staticRoot, { recursive: true, force: true });
+    }
   });
 
   it("serves static files, rejects traversal, and tolerates a missing frontend bundle", async () => {

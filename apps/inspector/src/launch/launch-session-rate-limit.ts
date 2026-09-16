@@ -77,6 +77,10 @@ export function isLoopbackInspectorClient(
   resolveClientAddress?: (context: Context) => string | undefined
 ): boolean {
   const address = resolveClientAddress?.(context) ?? readSocketRemoteAddress(context);
+  if (address === undefined) {
+    // Inspector HTTP only listens on 127.0.0.1; missing conninfo is still that listener.
+    return true;
+  }
   return address === "127.0.0.1" || address === "::1" || address === "localhost";
 }
 
