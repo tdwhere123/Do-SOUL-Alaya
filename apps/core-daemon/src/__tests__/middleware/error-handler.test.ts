@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { EngineError, EngineErrorKind } from "@do-soul/alaya-protocol";
+import { EngineError, EngineErrorKind, AlayaError } from "@do-soul/alaya-protocol";
 import { StorageError } from "@do-soul/alaya-storage";
 import { registerErrorHandler } from "../../middleware/error-handler.js";
 
@@ -124,5 +124,47 @@ describe("registerErrorHandler", () => {
       expect.objectContaining({ code: "DUPLICATE_KEY", messageRedacted: true })
     );
     expect(JSON.stringify(logger.error.mock.calls[0]?.[1])).not.toContain("sqlite detail");
+  });
+
+  it("maps remaining AlayaError codes without leaking internal copy", async () => {
+    const app = new Hono();
+    const logger = { error: vi.fn() };
+    registerErrorHandler(app, logger as never);
+    app.get("/alaya-internal", () => {
+      throw new AlayaError("INTERNAL", "workspace_id leaked token abcd1234");
+    });
+
+    const response = await app.request("/alaya-internal");
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Internal server error",
+      error_code: "INTERNAL"
+    });
+    expect(logger.error).toHaveBeenCalledWith(
+      "[daemon] sanitized alaya error",
+      expect.objectContaining({ code: "INTERNAL", messageRedacted: true })
+    );
+    expect(JSON.stringify(logger.error.mock.calls[0]?.[1])).not.toContain("abcd1234");
+  });
+
+  it("includes a stable error_code on AlayaError validation responses", async () => {
+    const app = new Hono();
+    const logger = { error: vi.fn() };
+    registerErrorHandler(app, logger as never);
+    app.get("/alaya-validation", () => {
+      throw new AlayaError("VALIDATION", "internal field leaked");
+    });
+
+    const response = await app.request("/alaya-validation");
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Invalid request",
+      error_code: "VALIDATION"
+    });
+    expect(JSON.stringify(logger.error.mock.calls[0]?.[1])).not.toContain("internal field leaked");
   });
 });

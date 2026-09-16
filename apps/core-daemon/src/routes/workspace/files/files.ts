@@ -4,6 +4,7 @@ import { basename, extname, join } from "node:path";
 import type { Context, Hono } from "hono";
 import {
   FileApprovalEventType,
+  AlayaError,
   type EventLogEntry,
   type FileRecord,
   type FileUploadResponse,
@@ -351,7 +352,10 @@ async function persistFileRecord(
   record: FileRecord
 ): Promise<Readonly<{ record: Readonly<FileRecord>; event: EventLogEntry }>> {
   if (record.workspace_id === null) {
-    throw new Error("Invariant violation: workspace_id must be resolved before persisting a file");
+    throw new AlayaError(
+      "INTERNAL",
+      "Invariant violation: workspace_id must be resolved before persisting a file"
+    );
   }
 
   const created = await services.fileRepo.createWithEvent(record, {

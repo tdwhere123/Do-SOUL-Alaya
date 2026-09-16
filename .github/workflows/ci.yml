@@ -103,6 +103,12 @@ jobs:
         if: ${{ matrix.run_hygiene }}
         run: pnpm run hygiene:storage-row-casts
 
+      - name: Guard production throw new Error
+        if: ${{ matrix.run_hygiene }}
+        run: |
+          pnpm run ci:throw-new-error -- --self-test
+          pnpm run ci:throw-new-error
+
       - name: Guard production as-unknown-as
         if: ${{ matrix.run_hygiene }}
         run: |

@@ -1,3 +1,5 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
+
 export type OperationName = "backup" | "export" | "import";
 
 export interface OperationAuditRecord {
@@ -42,12 +44,11 @@ export interface AlayaOperationsService {
   importBundle(input: { readonly bundlePath: string }): Promise<Readonly<{ audit_path: string; restored_paths: readonly string[] }>>;
 }
 
-export class AlayaOperationError extends Error {
-  public constructor(
-    public readonly code: "DATAERR" | "NOINPUT" | "CANTCREAT" | "NOPERM",
-    message: string
-  ) {
-    super(message);
+export class AlayaOperationError extends AlayaError {
+  declare public readonly code: "DATAERR" | "NOINPUT" | "CANTCREAT" | "NOPERM";
+
+  public constructor(code: "DATAERR" | "NOINPUT" | "CANTCREAT" | "NOPERM", message: string) {
+    super(code, message);
     this.name = "AlayaOperationError";
   }
 }

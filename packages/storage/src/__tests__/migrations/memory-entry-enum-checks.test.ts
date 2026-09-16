@@ -156,6 +156,6 @@ describe("memory_entries enum CHECKs", () => {
     `);
     expect(() => insert.run("mem-illegal-dimension", "not-a-dimension", "hot")).toThrow(/CHECK/i);
     insert.run("mem-legal", "fact", "hot");
-    // File-backed upgrade-and-reopen exceeds 5s under coverage remap and on NTFS.
+    // File-backed upgrade-and-reopen exceeds the 5s Linux default under coverage remap and on NTFS.
   }, process.platform === "win32" ? 180_000 : 60_000);
 });

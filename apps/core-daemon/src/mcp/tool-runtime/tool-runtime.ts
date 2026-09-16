@@ -11,6 +11,7 @@ import {
   SearchFilesToolResultSchema,
   WriteFileToolInputSchema,
   WriteFileToolResultSchema,
+  AlayaError,
   type ConversationRuntimeContext,
   type ToolUseBlock,
 } from "@do-soul/alaya-protocol";
@@ -272,7 +273,7 @@ export function validateConversationToolInput(toolId: string, value: unknown): V
         input: parseToolInput(toolId, ExecShellToolInputSchema, value)
       };
     default:
-      throw new Error(`Unsupported tool: ${toolId}`);
+      throw new AlayaError("UNKNOWN_TOOL", `Unsupported tool: ${toolId}`);
   }
 }
 
@@ -284,7 +285,7 @@ export function parseToolInput<TOutput>(
   const parsed = schema.safeParse(value);
 
   if (!parsed.success) {
-    throw new Error(`Invalid input for ${toolId}: ${formatSchemaIssues(parsed.error.issues)}`);
+    throw new CoreError("VALIDATION", `Invalid input for ${toolId}: ${formatSchemaIssues(parsed.error.issues)}`);
   }
 
   return parsed.data;
@@ -298,7 +299,7 @@ export function parseToolResult<TOutput>(
   const parsed = schema.safeParse(value);
 
   if (!parsed.success) {
-    throw new Error(`Invalid result for ${toolId}: ${formatSchemaIssues(parsed.error.issues)}`);
+    throw new CoreError("VALIDATION", `Invalid result for ${toolId}: ${formatSchemaIssues(parsed.error.issues)}`);
   }
 
   return parsed.data;
@@ -355,7 +356,7 @@ export function readErrorMessage(
     return "Invalid MCP tool payload.";
   }
 
-  if (error instanceof Error && error.message.startsWith("Unsupported tool: ")) {
+  if (error instanceof AlayaError && error.code === "UNKNOWN_TOOL") {
     return error.message;
   }
 
@@ -445,7 +446,7 @@ async function executeExternalConversationTool(input: {
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }) {
   if (input.externalToolExecutor === undefined) {
-    throw new Error(`Unsupported tool: ${input.toolUse.name}`);
+    throw new AlayaError("UNKNOWN_TOOL", `Unsupported tool: ${input.toolUse.name}`);
   }
   const builtinTool = isBuiltinConversationToolId(input.toolUse.name);
   const validatedInput = builtinTool
@@ -463,7 +464,7 @@ async function executeExternalConversationTool(input: {
     }
 
     if (!externalToolExecutor.hasTool(input.toolUse.name)) {
-      throw new Error(`Unsupported tool: ${input.toolUse.name}`);
+      throw new AlayaError("UNKNOWN_TOOL", `Unsupported tool: ${input.toolUse.name}`);
     }
   }
 
