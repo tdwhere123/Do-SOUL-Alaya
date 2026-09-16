@@ -60,3 +60,69 @@ export const SOURCE_DISCOVERY_CANARY: readonly CanaryCase[] = [
     event_time: "2016-01-01T00:00:00.000Z"
   }
 ];
+
+export function canaryRequiredPhrases(canary: CanaryCase): readonly string[] {
+  if (canary.group === "aspiration") {
+    return [
+      "definitive cloud platform",
+      "potential to bring technological freedom to all",
+      "gamers, creatives, and businesses"
+    ];
+  }
+  if (canary.group === "capability") {
+    return ["full PC", "instantly", "all the devices you own"];
+  }
+  return [
+    "original product was released in 2016",
+    "promise of allowing all individuals",
+    "high-end PC from the cloud"
+  ];
+}
+
+export function canaryForbiddenPhrases(canary: CanaryCase): readonly string[] {
+  if (canary.group === "aspiration") return ["Investors heard"];
+  if (canary.group === "capability") return ["Windows is the easiest", "sat unused in storage"];
+  return ["vendor released a 2016 memo", "stayed private"];
+}
+
+export function canaryContentScopeCheck(text: string, canary: CanaryCase): Readonly<{
+  readonly has_full_intended: boolean;
+  readonly has_all_required_phrases: boolean;
+  readonly has_forbidden_distractor: boolean;
+}> {
+  return {
+    has_full_intended: text.includes(canary.intended),
+    has_all_required_phrases: canaryRequiredPhrases(canary).every((phrase) => text.includes(phrase)),
+    has_forbidden_distractor: canaryForbiddenPhrases(canary).some((phrase) => text.includes(phrase))
+  };
+}
+
+export function canaryDistractorRelation(canary: CanaryCase): NonNullable<CanaryCase["sketch"]> {
+  if (canary.group === "aspiration") {
+    return {
+      predicate: "strives",
+      arguments: [{ role: "aim", phrase: "definitive cloud platform" }],
+      qualifiers: [
+        { role: "audience", phrase: "Investors" },
+        { role: "scope", phrase: "potential to bring technological freedom to all" }
+      ]
+    };
+  }
+  if (canary.group === "capability") {
+    return {
+      predicate: "access",
+      arguments: [
+        { role: "capability", phrase: "full PC" },
+        { role: "devices", phrase: "storage" }
+      ],
+      qualifiers: [{ role: "temporal", phrase: "instantly" }]
+    };
+  }
+  return {
+    predicate: "released",
+    arguments: [
+      { role: "theme", phrase: "2016 memo" },
+      { role: "promise", phrase: "promise of allowing all individuals to enjoy the power of a high-end PC from the cloud" }
+    ]
+  };
+}
