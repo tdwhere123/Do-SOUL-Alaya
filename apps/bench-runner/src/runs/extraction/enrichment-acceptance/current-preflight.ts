@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  AlayaError,
   DEFAULT_EXTRACTION_SOURCE_PACKING,
   extractionSourcePackingSize,
   SOURCE_INTERPRETATION_CONTRACT,
@@ -137,7 +138,7 @@ export async function runCurrentEnrichmentPreflight(options: {
   let attemptedFetches = 0;
   globalThis.fetch = async () => {
     attemptedFetches += 1;
-    throw new Error("provider forbidden in enrichment preflight");
+    throw new AlayaError("CONFLICT", "provider forbidden in enrichment preflight");
   };
   try {
     const loaded = options.turns === undefined
@@ -179,7 +180,7 @@ export async function runCurrentEnrichmentPreflight(options: {
     const semanticFill = captureSemanticFill(options, executionTurns);
     const provenance = collectEnrichmentOccurrenceProvenance(occurrenceTurns ?? executionTurns, datasetRevision);
     if (attemptedFetches !== 0) {
-      throw new Error(`enrichment preflight attempted ${attemptedFetches} provider fetches`);
+      throw new AlayaError("CONFLICT", `enrichment preflight attempted ${attemptedFetches} provider fetches`);
     }
     return Object.freeze({
       identities: Object.freeze({
@@ -205,7 +206,7 @@ export async function runCurrentEnrichmentPreflight(options: {
           assertion_texts: Object.freeze(item.request.source_assertions.map((row) => row.text)),
           occurrence_provenance: Object.freeze(item.units.map((unit) => {
             const evidence = provenance.get(unit.binding.occurrenceIdentity);
-            if (evidence === undefined) throw new Error("native occurrence provenance missing");
+            if (evidence === undefined) throw new AlayaError("INTERNAL", "native occurrence provenance missing");
             return evidence;
           })),
           user_prompt: item.line.userPrompt,
@@ -243,7 +244,7 @@ function assertNoAnnotationInterpolation(
     const payload = `${line.systemPrompt}\n${line.userPrompt}`;
     for (const annotation of annotations) {
       if (annotation.length > 0 && payload.includes(annotation)) {
-        throw new Error("frozen annotation text entered a current request payload");
+        throw new AlayaError("CONFLICT", "frozen annotation text entered a current request payload");
       }
     }
   }

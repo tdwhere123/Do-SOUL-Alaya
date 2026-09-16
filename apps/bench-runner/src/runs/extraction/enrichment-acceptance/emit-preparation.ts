@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { AlayaError, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
 import { loadFrozenEnrichmentPopulation } from "./frozen-population.js";
 import {
@@ -67,10 +67,10 @@ export async function emitEnrichmentPreparation(
   requireExistingFile(input.canonicalPath, "canonicalPath");
   if (input.turns === undefined) {
     if (input.dataDir === undefined) {
-      throw new Error("enrichment preparation dataDir is required when turns are not supplied");
+      throw new AlayaError("VALIDATION", "enrichment preparation dataDir is required when turns are not supplied");
     }
     if (input.pinnedMetaRoot === undefined) {
-      throw new Error("enrichment preparation pinnedMetaRoot is required when turns are not supplied");
+      throw new AlayaError("VALIDATION", "enrichment preparation pinnedMetaRoot is required when turns are not supplied");
     }
   }
   mkdirSync(input.outputDir, { recursive: true });
@@ -80,7 +80,7 @@ export async function emitEnrichmentPreparation(
   let attemptedFetches = 0;
   globalThis.fetch = async () => {
     attemptedFetches += 1;
-    throw new Error("provider forbidden in enrichment preparation emit");
+    throw new AlayaError("CONFLICT", "provider forbidden in enrichment preparation emit");
   };
   try {
     const population = loadFrozenEnrichmentPopulation({
@@ -97,7 +97,7 @@ export async function emitEnrichmentPreparation(
       ...(input.datasetRevision === undefined ? {} : { datasetRevision: input.datasetRevision })
     });
     if (preflight.attempted_fetches !== 0 || attemptedFetches !== 0) {
-      throw new Error("enrichment preparation emit attempted a provider fetch");
+      throw new AlayaError("CONFLICT", "enrichment preparation emit attempted a provider fetch");
     }
     const bindings = bindFrozenPopulation(population.rows, {
       catalogUnits: preflight.units,
@@ -395,14 +395,15 @@ function assertPreparationOutputWritable(outputDir: string): void {
     (error as NodeJS.ErrnoException).code = "EEXIST";
     throw error;
   }
-  throw new Error(
+  throw new AlayaError(
+    "CONFLICT",
     `enrichment preparation output is incomplete and must not be overwritten: ${existing.join(", ")}`
   );
 }
 
 function requireExistingFile(path: string, label: string): void {
   if (!existsSync(path)) {
-    throw new Error(`enrichment preparation ${label} is required and missing: ${path}`);
+    throw new AlayaError("VALIDATION", `enrichment preparation ${label} is required and missing: ${path}`);
   }
 }
 
@@ -414,7 +415,7 @@ function readRequiredFlag(argv: readonly string[], name: string): string {
   const index = argv.indexOf(`--${name}`);
   const value = index >= 0 ? argv[index + 1] : undefined;
   if (value === undefined || value.length === 0 || value.startsWith("--")) {
-    throw new Error(`emit enrichment preparation requires --${name}`);
+    throw new AlayaError("VALIDATION", `emit enrichment preparation requires --${name}`);
   }
   return value;
 }

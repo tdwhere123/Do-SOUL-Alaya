@@ -98,6 +98,7 @@ describe("enrichment acceptance ordinary SQLite publication", () => {
           claimService: { create: async () => { throw new Error("unexpected claim route"); } },
           fieldComposition: field,
           eventLogRepo,
+          runtimeNotifier: notifier,
           enqueueEnrichPending: () => undefined
         },
         pathRelationProposalPort: {
