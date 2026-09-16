@@ -30,6 +30,7 @@ export function parseRow<T>(value: unknown, parser: RowParser<T>, label: string)
   }
 }
 
+/** Maps unknown query rows through a field parser. Identity `value as Row` hides missing columns. */
 export function parseRows<T>(
   values: unknown,
   parser: RowParser<T>,

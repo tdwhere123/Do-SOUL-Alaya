@@ -88,6 +88,9 @@ jobs:
           pnpm run ci:test-as-any -- --self-test
           pnpm run ci:test-as-any
 
+      - name: Guard storage row casts
+        run: pnpm run hygiene:storage-row-casts
+
       - name: Guard production as-unknown-as
         run: |
           pnpm run ci:production-unknown-as -- --self-test
