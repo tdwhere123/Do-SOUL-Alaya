@@ -25,6 +25,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Hygiene/audit stay on Ubuntu PR CI. macOS and Windows keep
+          # build+test (Windows also CLI smoke). Do not move hygiene onto
+          # every PR OS; native/path issues can use a nightly three-OS job.
           - label: ubuntu-node24
             os: ubuntu-latest
             node: '24'
