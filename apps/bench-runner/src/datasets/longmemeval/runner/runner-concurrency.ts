@@ -21,8 +21,8 @@ import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
 } from "../../../diagnostics/spool.js";
-import { refuseRetiredLocalCrossEncoderTreatment } from
-  "../../../harness/strict-treatment-config.js";
+import { warnRetiredLocalCrossEncoderTreatment } from
+  "../../../harness/daemon/daemon-environment.js";
 import { loadQuestionManifestSelection } from "../../../runs/selection/question-manifest.js";
 import { deriveMergedLongMemEvalReleaseAuthority } from
   "../../../cli/merge/release-evidence-authority.js";
@@ -161,7 +161,7 @@ export async function runLongMemEvalConcurrent(
   opts: LongMemEvalRunOptions,
   deps: LongMemEvalConcurrencyDeps = {}
 ): Promise<LongMemEvalRunResult> {
-  refuseRetiredLocalCrossEncoderTreatment(process.env);
+  warnRetiredLocalCrossEncoderTreatment(process.env);
   validateLongMemEvalConcurrency(opts);
   const context = await prepareLongMemEvalConcurrentRun(opts, deps);
   let succeeded = false;

@@ -61,6 +61,10 @@ export {
 } from "./ai/daemon-embedding-runtime-config.js";
 export { resolveSecretRef } from "./secrets/index.js";
 export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secrets/index.js";
+export {
+  RETIRED_DAEMON_ENV_KEYS,
+  warnUnregisteredPrefixedDaemonEnvKeys
+} from "./runtime/config/daemon-config-environment.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");

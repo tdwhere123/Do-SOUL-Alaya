@@ -46,8 +46,8 @@ import {
 } from "../../../runs/compile-seed.js";
 
 import { withBenchDaemon } from "./bench-daemon.test-support.js";
-import { refuseRetiredLocalCrossEncoderTreatment } from
-  "../../../harness/strict-treatment-config.js";
+import { warnRetiredLocalCrossEncoderTreatment } from
+  "../../../harness/daemon/daemon-environment.js";
 
 const handles: BenchDaemonHandle[] = [];
 
@@ -360,7 +360,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
 
   it("warns on retired cross-encoder env keys instead of refusing startup", () => {
     const emitWarning = vi.fn();
-    expect(() => refuseRetiredLocalCrossEncoderTreatment({
+    expect(() => warnRetiredLocalCrossEncoderTreatment({
       ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
       ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: "/tmp/cross-encoder-cache",
       ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/ms-marco-MiniLM-L-6-v2"

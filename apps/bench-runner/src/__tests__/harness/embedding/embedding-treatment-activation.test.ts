@@ -205,6 +205,9 @@ describe("embedding treatment activation", () => {
     expect(requiresEmbeddingTreatmentDiagnostics({
       ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
     })).toBe(false);
+    expect(requiresEmbeddingTreatmentDiagnostics({
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "sometimes"
+    })).toBe(false);
   });
 
   it.each([
