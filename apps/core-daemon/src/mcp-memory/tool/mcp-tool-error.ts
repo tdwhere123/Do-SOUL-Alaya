@@ -1,3 +1,4 @@
+import { AlayaError, type AlayaErrorOptions } from "@do-soul/alaya-protocol";
 import type { McpMemoryToolErrorCode } from "./tool-handler-types.js";
 
 export type McpToolWorkflowErrorCode = Extract<
@@ -7,14 +8,13 @@ export type McpToolWorkflowErrorCode = Extract<
 
 const MCP_TOOL_ERROR_BRAND = Symbol.for("do-soul.alaya.McpToolError");
 
-export class McpToolError extends Error {
-  public readonly code: McpMemoryToolErrorCode;
+export class McpToolError extends AlayaError {
+  declare public readonly code: McpMemoryToolErrorCode;
   public readonly [MCP_TOOL_ERROR_BRAND] = true as const;
 
-  public constructor(code: McpMemoryToolErrorCode, message: string) {
-    super(message);
+  public constructor(code: McpMemoryToolErrorCode, message: string, options?: AlayaErrorOptions) {
+    super(code, message, options);
     this.name = "McpToolError";
-    this.code = code;
     Object.setPrototypeOf(this, new.target.prototype);
   }
 

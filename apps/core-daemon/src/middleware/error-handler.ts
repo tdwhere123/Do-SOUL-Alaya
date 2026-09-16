@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { z } from "zod";
 import { CoreError } from "@do-soul/alaya-core";
 import {
+  AlayaError,
   EngineError,
   EngineErrorKind,
   withLoggerCorrelation,
@@ -205,6 +206,10 @@ function handleDaemonError(
   if (engineErrorResponse !== null) {
     return engineErrorResponse;
   }
+  const alayaErrorResponse = handleAlayaDaemonError(error, context, logger, requestId);
+  if (alayaErrorResponse !== null) {
+    return alayaErrorResponse;
+  }
   const zodErrorResponse = handleZodDaemonError(error, context, logger, requestId);
   if (zodErrorResponse !== null) {
     return zodErrorResponse;
@@ -319,6 +324,60 @@ function handleEngineDaemonError(
     )
   );
   return context.json({ success: false, error: publicMessage, kind: error.kind }, 502);
+}
+
+function handleAlayaDaemonError(
+  error: unknown,
+  context: ErrorHandlerContext,
+  logger: ErrorLoggerPort,
+  requestId?: string
+): Response | null {
+  if (!(error instanceof AlayaError)) {
+    return null;
+  }
+  const status = statusForAlayaError(error);
+  const publicMessage = publicMessageForAlayaError(error);
+  logger.error(
+    "[daemon] sanitized alaya error",
+    correlatedErrorMeta(
+      context,
+      summarizeHandledError(error, {
+        code: error.code,
+        publicMessage,
+        request_id: requestId
+      })
+    )
+  );
+  return context.json({ success: false, error: publicMessage }, status);
+}
+
+function statusForAlayaError(error: AlayaError): number {
+  if (typeof error.statusCode === "number") {
+    return error.statusCode;
+  }
+  switch (error.code) {
+    case "VALIDATION":
+      return 400;
+    case "NOT_FOUND":
+      return 404;
+    case "CONFLICT":
+      return 409;
+    default:
+      return 500;
+  }
+}
+
+function publicMessageForAlayaError(error: AlayaError): string {
+  switch (error.code) {
+    case "VALIDATION":
+      return publicMessageForValidationError(error.message);
+    case "NOT_FOUND":
+      return "Resource not found";
+    case "CONFLICT":
+      return "Request conflict";
+    default:
+      return "Internal server error";
+  }
 }
 
 function handleZodDaemonError(

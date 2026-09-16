@@ -1,4 +1,5 @@
 import {
+  AlayaError,
   GraphExploreDirSchema,
   MemoryGraphEdgeTypeSchema,
   type GraphExploreDir,
@@ -57,7 +58,7 @@ export function registerSoulRoutes(app: Hono, services: SoulRouteServices): void
   if (topologyService !== undefined) {
     const topologyAuditService = services.topologyAuditService;
     if (topologyAuditService === undefined) {
-      throw new Error("TopologyService requires topology audit logging.");
+      throw new AlayaError("INTERNAL", "TopologyService requires topology audit logging.");
     }
 
     app.get("/soul/workspaces/:workspaceId/topology", async (context) => {

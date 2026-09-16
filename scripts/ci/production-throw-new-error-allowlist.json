@@ -1,0 +1,2390 @@
+{
+  "apps/bench-runner/scripts/executed-dist-closure.mjs": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/scripts/fill-query-factors.mjs": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/scripts/longmemeval-replay/contract.mjs": {
+    "max": 39,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/scripts/longmemeval-replay/diagnostics-json-stream-reader.mjs": {
+    "max": 21,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/scripts/longmemeval-replay/measurement-status.mjs": {
+    "max": 16,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/scripts/longmemeval-replay/separability-boundary-objective.mjs": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/scripts/longmemeval-replay/separability-evidence-mode.mjs": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/scripts/longmemeval-replay/separability-features.mjs": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/scripts/longmemeval-replay/stage-matrix.mjs": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/scripts/prove-cache-only-replay.mjs": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/scripts/replay-longmemeval-diagnostics.mjs": {
+    "max": 19,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/artifacts/artifact-gzip-reader.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/artifacts/artifact-json-reader.ts": {
+    "max": 20,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/artifacts/artifact-utf8.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/artifacts/diagnostics-artifacts.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/cli-options-promotion.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/cli-options.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/diagnostic-loop/args.ts": {
+    "max": 10,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/diagnostic-loop/command.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/emit-embedding-cache-overlay/command.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/extraction-authority/args.ts": {
+    "max": 12,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/extraction-authority/command.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/extraction-authority/continuation.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/extraction-authority/publication.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/extraction-fill/batch-flags.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/extraction-fill/command-core.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/extraction-fill/lazy-field-flags.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge-shared.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge-sidecar.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge/canonical-shard-plan.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge/command/merge-command-archive.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge/command/merge-command-shards.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge/contained-artifact-path.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge/measurement-accounting.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge/merged/merged-evidence-manifest.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge/quality/merge-quality.ts": {
+    "max": 14,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge/shard/shard-diagnostics-reader.ts": {
+    "max": 12,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge/shard/shard-evidence-verifier.ts": {
+    "max": 21,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge/shard/shard-ordering.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/merge/shard/shard-provenance-verifier.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/options/flag-values.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/options/recall-eval-flags.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/output/exclusive-output.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/provider-preflight/canonical-replay-contract.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/provider-preflight/command.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/provider-preflight/replay-request-manifest.ts": {
+    "max": 13,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/proxy-bootstrap.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/recall-eval/command.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/source-snapshot/command.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/cli/target-selection/command.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/locomo/fetch.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/comparison/dataset-identity.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/ingestion/dataset.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/ingestion/fetch.ts": {
+    "max": 19,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/ingestion/source-time.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/ingestion/streaming-dataset-reader.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/expansion/authority/expansion-recall-authority.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/expansion/authority/expansion-run-authority.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/expansion/expansion-capability.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/fanout-authority.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/product/product-bi-encoder-policy.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/product/product-formation-policy.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/r3-spend-approval.ts": {
+    "max": 14,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/schema/absolute-quality.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/schema/contract.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/schema/material-effect.ts": {
+    "max": 10,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/verifiers/product-policy-verifier.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/runner.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/runner/edge-formation-config.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/runner/policy/snapshot-producer-policy.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/runner/question/runner-question-seeding.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/runner/question/runner-question.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/runner/runner-concurrency-worker.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/runner/runner-concurrency.ts": {
+    "max": 12,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/runner/runner-execution.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/runner/runner-helpers.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/datasets/longmemeval/runner/runner-reporting.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/miss/delivery-miss-taxonomy.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/miss/diagnostics-miss-taxonomy.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/phase/phase-authority.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/release-evidence-validator.ts": {
+    "max": 16,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/spool.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/stage-attribution/diagnostic-100q.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/stage-attribution/exposure/build-receipts.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/stage-attribution/exposure/comparison-artifact.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/stage-attribution/load-recall-eval-diagnostics.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/stage-attribution/mechanism/artifact.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/stage-attribution/mechanism/classify.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/diagnostics/stage-attribution/mechanism/receipt.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/daemon-config-directory.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/daemon-environment.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/daemon-startup.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/handle/bench-recall-response.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/handle/daemon-handle-ops-support.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/handle/daemon-handle-ops.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/runtime/daemon-edge-accrual.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/runtime/daemon-event-metrics.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/runtime/daemon-mcp-support.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/seed/daemon-seed-answer-hq.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/seed/daemon-seed-operations.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/seed/daemon-seed-review.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/seed/daemon-source-evidence-fallback.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/daemon/workspace/daemon-workspace-manager.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/embedding/embedding-treatment-activation.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/embedding/embedding-warmup.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/recall/conditional-request-budget.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/recall/recall-diagnostics-schema.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/recall/recall-weight-overrides.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/seeding/compile-raw-payload.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/strict-treatment-config.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/harness/token/token-economy.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/archive/archive-evidence-helpers.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/compile-seed/cache/cache-shard.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/compile-seed/cache/cached-response-metadata.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/compile-seed/compile-seed-cache.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/compile-seed/compile-seed-config.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/compile-seed/compile-seed-http.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/compile-seed/compile-seed-preflight.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/compile-seed/compile-seed-runner-context.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/compile-seed/http/garden-http-assertion-partition.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/compile-seed/http/gemini-http.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/compile-seed/preflight/cache-preflight-proof.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/compile-seed/preflight/cache-window-key-binding.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/authority/checkpoint.ts": {
+    "max": 18,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/authority/identity.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/authority/run-lock.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/canary-unlock-admission.ts": {
+    "max": 14,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/canary-unlock-closure.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/canary-unlock-query-window.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/checkpoint.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/identity.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/production-phases.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/report.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/run-state.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/run.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/diagnostic-loop/smoke-gate.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/adaptive-concurrency.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/attempt-ledger-shards.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/attempt-ledger.ts": {
+    "max": 12,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/attempt-ledger/contract.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/attempt-ledger/fork-contract.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/attempt-ledger/outcome.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/catalog-refill/completion-witness.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/catalog-refill/resume-manifest.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/catalog-refill/scope.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/continuation/child-claim.ts": {
+    "max": 10,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/continuation/continuation.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/continuation/predecessor-state.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/continuation/renewal.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/continuation/runtime.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/direct-spend.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/inspection.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/no-progress-watchdog.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/receipt-limits.ts": {
+    "max": 12,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/receipt.ts": {
+    "max": 24,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/receipt/artifact-io.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/receipt/inventory.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/receipt/scope.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/repair/preserved-valid-closure.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/repair/repair-scope.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/sample-scope.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/target-root-binding.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/target-selection/final-identity.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/target-selection/receipt-shape.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/target-selection/receipt.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/bounded-artifact-reader.ts": {
+    "max": 13,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/compatibility.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/inventory.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/materialization/contract.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/materialization/descriptor-io.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/materialization/preflight-inventory.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/materialization/preflight.ts": {
+    "max": 16,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/materialization/receipt.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/materialization/successor-verifier.ts": {
+    "max": 24,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/materialization/successor/control-history.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/materialization/target-tree.ts": {
+    "max": 14,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/materialization/transaction-recovery.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/materialization/transaction.ts": {
+    "max": 10,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/occurrence-index.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/receipt.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/replay.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/target-materializer.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/extraction-cache-manifest.ts": {
+    "max": 16,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/io/manifest-byte-reader.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/manifest-model-resolution.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/manifest-snapshot.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/admission-identity.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/bench-mode.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/bindings.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/contract.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/derived-path.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/derived-replay.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/file-adapter.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/legacy/legacy-convert-validation.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/legacy/legacy-convert.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/legacy/legacy-sealed-entry.ts": {
+    "max": 18,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/replay-authority.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/reservation.ts": {
+    "max": 13,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/store.ts": {
+    "max": 15,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/verified-admission.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-supplement/source-assertion-catalog-rebind.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-supplement/source-assertion-supplement-runtime.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-supplement/source-assertion-supplement.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-supplement/source-draft-anchor-binding.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/semantic-supplement/source-interpretation-anchor-binding.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/cache/supplemental-source-receipt.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/chat-completion-response.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/content-closure.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/expansion-fill-authority.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/expansion-manifest-artifacts.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/extraction-fill.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/batch-campaign.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/batch-fill.ts": {
+    "max": 21,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/batch/executor.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/batch/http.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/batch/import.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/batch/native-codec.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/batch/output-inventory.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/batch/plan.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/batch/remote-operation.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/batch/store.ts": {
+    "max": 32,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/execution-authority.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/execution/receipt-bound-authority.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/fill-execution.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/fill-preparation.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/fill-window.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/fulfillment/fulfill.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/manifest/durable-exclusive-publication.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/manifest/fill-manifest-contract.ts": {
+    "max": 12,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/manifest/fill-root-guard.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/manifest/kernel-write-lease.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/policy/fill-concurrency.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/policy/provider-request-plan-budget.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/policy/provider-time-budget.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-attempt-evidence.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-attempt-ledger.ts": {
+    "max": 14,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-authority.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-envelope.ts": {
+    "max": 13,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-execution-authority.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-executor.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-pack-execution.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-plan.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-receipt-ledger-bind.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-receipt.ts": {
+    "max": 17,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/semantic-workset-tasks.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/extraction/transport-route.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/fs/open-flags.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/fs/opened-contained-path.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/question-isolated-execution.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/embedding-isolate/session.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/embedding-isolate/stub-host.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/performance-proof/attribution-receipt.ts": {
+    "max": 10,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/performance-proof/exact-parity.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/performance-proof/provider-free-run.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-impl.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-process/child-runtime.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-process/child.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-process/harness-timers.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-process/ipc-client.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-process/parent-opened-file-proofs.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-question-options.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-run-context.ts": {
+    "max": 15,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-runtime.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-shards-merge-load.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-shards-merge-payload.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-shards-merge.ts": {
+    "max": 14,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-shards.ts": {
+    "max": 10,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/workspace-install/install.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/workspace-install/phases.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/lifecycle/recall-eval/workspace-install/provider-free.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/measurement/cohort-binding.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/measurement/first-exposure-session.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/measurement/question-validity.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/measurement/recall-eval-memory-profile.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/archive/archive-evidence-sidecar.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/contract/contained-worktree-file.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/contract/extraction-authority-reference.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/contract/frozen-code-contract.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/contract/untracked-worktree-frame.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/contract/worktree-binary.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/contract/worktree-git-bytes.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/contract/worktree-state-measure.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/effective-recall-config.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/embedding/local-onnx.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/evidence-manifest.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/identity/history-code-slug.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/identity/run-code-identity.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/recall-eval/recall-eval-archive-bundle.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/recall-eval/recall-eval-diagnostics-spool.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/recall-eval/recall-eval-diagnostics.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/recall-eval/recall-eval-rank-identity.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/run.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/shard-aggregate.ts": {
+    "max": 13,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provenance/source-rounds.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provider/catalog.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provider/gemini-endpoint.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provider/protocol-probe.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provider/replay-proof.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provider/replay-receipt.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/provider/retire-obsolete-cache.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/qa/qa-chat.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/query-factors/cache/document.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/query-factors/cache/source-set.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/query-factors/query-semantic-factor-cache-certification.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/query-factors/query-semantic-factor-cache-identity.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/query-factors/query-semantic-factor-cache.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/query-factors/query-semantic-factor-fill-store.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/selection/cohort-ledger.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/selection/contract.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/selection/question-manifest.ts": {
+    "max": 17,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/bound-file.ts": {
+    "max": 19,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/current/current-attribution.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/current/current-bound-artifacts.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/current/current-substrate-authority.ts": {
+    "max": 17,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/current/diagnostic-consume-authority.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/current/diagnostic-write-authority.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/current/snapshot-answers-with-formation.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/extraction-authority.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/freeze/db-copy.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/freeze/extraction-authority-publisher.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/freeze/publish-lock.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/ingestion-mode.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/integrity.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/manifest-validation.ts": {
+    "max": 13,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/materialize.ts": {
+    "max": 13,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/measurement-oracle.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/embedding-cache-overlay/contract.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/embedding-cache-overlay/emit.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/embedding-cache-overlay/ensure.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/embedding-cache-overlay/importer.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/embedding-cache-overlay/overlay-schema.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/embedding-cache-overlay/product-emit.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/embedding-cache-overlay/runtime-binding.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/embedding-cache-overlay/writer.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/evidence-search-projection-rebuild.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/fact-frame-formation-replay.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/fact-frame-formation/backfill.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/fact-frame-formation/verified-assertion-authority.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/fact-frame-retrofit.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/recall-eval-db.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/recall-eval-loader.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/recall-eval-working-sqlite.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/workspace-slice/classify-tables.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/workspace-slice/explode.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/workspace-slice/install.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/workspace-slice/overlay-replicate.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/workspace-slice/pager.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/workspace-slice/rebuild-fts.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/workspace-slice/sealed-cache.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/workspace-slice/slice-snapshot.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/recall-eval/workspace-slice/stream-copy.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/run-provenance.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/seed-ledger/direct-source-evidence-proof.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/seed-ledger/seed-ledger-binding.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/seed-ledger/seed-ledger-closure.ts": {
+    "max": 10,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/seed-ledger/seed-ledger-materialization-proof.ts": {
+    "max": 19,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/seed-ledger/seed-ledger-rounds.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/seed-ledger/seed-ledger-shared.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/seed-ledger/semantic-supplement-binding.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/seed-ledger/source-observation-proof.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/sidecar-validation.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/snapshot-seed-identity.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/source-records/contract.ts": {
+    "max": 14,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/source-records/inspect.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/source-records/prepare.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/substrate-binding.ts": {
+    "max": 24,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/snapshot/writer.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/shared/version.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/bin/alaya.mjs": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/ai/daemon-embedding-provider-readiness.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/ai/daemon-embedding-runtime-config.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/ai/daemon-embedding-runtime.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/ai/edge-auto-producer-llm-adapter.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/ai/garden-chat-completion.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/ai/reconciliation-llm-decision.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/attach/profile-mutation/profile-mutation-launcher.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/attach/profile-mutation/profile-mutation-text.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/cli/inspect/inspect-browser.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/cli/inspect/inspect-child-process.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/cli/inspect/inspect-daemon-client.ts": {
+    "max": 10,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/cli/inspect/inspect.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/cli/install/args.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/cli/install/install.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/cli/install/keychain-install.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/cli/review/review-support.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/cli/source-grounding-defers/command.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/cli/source-grounding-defers/projection.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/cli/support/module-loader.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/garden/bulk-enrich/bulk-enrich-runtime-runner.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/garden/host-worker/host-worker-task-processors.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/garden/post-turn-extract/task-payload.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/garden/runtime/runtime.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/garden/scheduler/scheduler-path-graph.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/garden/scheduler/scheduler-runtime-consolidation.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/garden/scheduler/scheduler-runtime-embedding-backfill.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/garden/support/credential.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/mcp-memory/recall/recall-usage-handlers.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/mcp-memory/tool/daemon-handler.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/mcp-memory/tool/tool-catalog.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/mcp-memory/tool/tool-handler-dispatch.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/config/daemon-config-environment.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/daemon/lifecycle/daemon-runtime-lifecycle.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/daemon/lifecycle/daemon-runtime-support.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/daemon/support/daemon-env.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/daemon/support/path-formation-order.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/daemon/wiring/daemon-knowledge-foundation.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/daemon/wiring/daemon-service-foundation.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/field/sqlite-field-projection-lifecycle.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/garden-wiring/garden-compute-support.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/garden-wiring/garden-signal-ref-replay.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-materialization/recall-materialization-edge-reconciliation.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-materialization/recall-materialization-garden-nomination.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-materialization/recall-materialization-wiring.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/active-constraints.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/client-config.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/dispatch.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/evidence-search-matches.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/field-operations.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/memory-window.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/observer-operations.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/payload-readers.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/prepared-delivery.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/snapshot-session.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/tier-window-client.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall-read-worker/worker-readers.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall/recall-path-readers.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall/recall-read-worker-client.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall/recall-read-worker.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/recall/worker-actual-cost.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/server-options.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/startup/database.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/startup/recall-core-wiring.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/temporal-cutover/cutover-apply.ts": {
+    "max": 10,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/temporal-cutover/cutover-plan.ts": {
+    "max": 9,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/temporal-cutover/cutover-recover.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/temporal-cutover/journal.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/temporal-cutover/lease.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/runtime/timing/node-timer-delay.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/secrets/keychain/index.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/security/zero-day-policies.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/core-daemon/src/trust/state.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/inspector/src/middleware/auth.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/inspector/src/routes/shared.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/inspector/src/runtime/server.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/inspector/web/src/components/toast.tsx": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/conversation/output-shaping-service.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/conversation/semantic-enrichment-worker.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/evidence/evidence-candidate-scoring.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/evidence/evidence-document-embedding-backfill-handler.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/evidence/evidence-document-embedding-engine.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/evidence/prefix-eligibility.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/helpers.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/local-onnx-embedding-client.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/local-onnx-host-single-flight.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/local-onnx-process/child.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/local-onnx-process/ipc-client.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/local-onnx-process/vectors.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/local-onnx.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/openai-client.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/embedding-recall/pool-scoring.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/governance/claims/canonical-alias-service.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/governance/security/security-status-service.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/health/garden-backlog-telemetry-service.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/manifestation/manifestation-resolver-helpers.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/memory/consolidation-executor-shared.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/memory/consolidation-executor.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/memory/consolidation-planner.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/memory/evidence-fact-frame-formation.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/memory/signal-service-grounding-defer.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/conditional-field/engine/path-composition-seed.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/conditional-field/query/compile-query.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/field/finite-field-capture.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/field/finite-field-seal.ts": {
+    "max": 22,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/field/query-attribution/query-fact-frame-attribution-producer.ts": {
+    "max": 12,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/field/retrieval/projection/generation-identity.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/field/retrieval/projection/generation-lifecycle.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/field/retrieval/projection/source-projection.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/runtime/index-continuation.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/runtime/recall-field-projection.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/runtime/recall-index-commit.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/runtime/recall-service-helpers.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/runtime/recall-service-runner.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/runtime/request-governance.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/recall/runtime/zero-live-extraction.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/relations/producers/answers-with-edge-producer-service.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/relations/producers/hq-answer-overlap.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/relations/producers/path-pair-sparsify.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/relations/relation-assertions/relation-assertion-service.ts": {
+    "max": 15,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/relations/relation-assertions/relation-assertion-transition-contract.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/runtime/config/core-config.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/runtime/config/recall-env-access.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/runtime/event-publisher.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/runtime/runs/run-hot-state-service.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/core/src/runtime/runtime-event-normalizer.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/engine-gateway/src/provider/chat-completion/execute-chat-completion.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/engine-gateway/src/provider/chat-completion/provider-url-guard.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/eval/src/cli/cli.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/eval/src/contracts/longmemeval-selection-contract.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/eval/src/gates/longmemeval-authority-wire.ts": {
+    "max": 11,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/eval/src/gates/longmemeval-provenance-binding.ts": {
+    "max": 19,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/eval/src/gates/longmemeval-verified-evidence.ts": {
+    "max": 20,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/eval/src/history/history-entry-write.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/eval/src/history/history-files.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/eval/src/history/history.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/eval/src/metrics/edge-proposal-kpi.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/graph-algorithms/src/boolean-hypergraph.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/graph-algorithms/src/index.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/graph-algorithms/src/max-min-field.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/config/env-value.ts": {
+    "max": 8,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/config/provider-url.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/events/compute-recall-garden.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/events/file-approval.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/events/graph-auditor.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/events/obligation-trust-narrative.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/events/project-mapping.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/events/runtime-governance/registry.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/events/tool-worker.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/events/worker-runtime.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/evidence/associative-fact-frame.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/evidence/formation/evidence-osf-semantic-completeness.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/evidence/formation/source-grammar/semantic-graph.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/garden/locate-source-interpretation.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/garden/semantic-extraction-profile.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/governance/governance-subject.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/memory/canonical-alias.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/recall/conditional-field/common.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/recall/conditional-field/product-identity.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/recall/field-contract/canonical-identity.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/recall/field-contract/operator-manifest.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/recall/field-contract/projection-generation.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/recall/kind-projection.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/recall/query-osf-semantic-completeness.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/recall/selection/capture/canonical-selection-receipt.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/relations/open-semantic-factor-graph.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/relations/path-anchor-normalization.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/relations/time-concern-window-digest.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/runtime/node-template.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/protocol/src/surfaces/mcp-json-schema.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/extraction/semantic-factors/query-compiler.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/extraction/temporal-date.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/ingestion/compute-routing-service.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/ingestion/official-api-garden-provider.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/ingestion/official-api-signal-parser.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/ingestion/official-api/extraction-capability.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/ingestion/official-api/extraction-request.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/ingestion/official-api/request-result.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/ingestion/official-api/semantic-artifact-identity.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/ingestion/official-api/semantic-artifact.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/ingestion/official-api/source-interpretation-receive.ts": {
+    "max": 10,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/ingestion/official-api/system-prompt.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/maintenance/auditor-maintenance-operations.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/maintenance/janitor.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/materialization/materialization-router/memory-routes.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/materialization/materialization-router/path-side-effects.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/materialization/materialization-router/router.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/scheduling/events/completion-payload.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/scheduling/garden-task-runner.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/scheduling/in-memory-garden-task-repo.ts": {
+    "max": 7,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/scheduling/scheduler-helpers.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/scheduling/scheduler.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/garden/triage/degradation-pipeline.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/kernel/signals/signal-handler.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/soul/src/kernel/workers/worker-safety-reader.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/capsules/evidence-capsule-repo.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/capsules/reads/bounded-capsule-source-reader.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/capsules/reads/evidence-search/evidence-keyword-merge.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/capsules/reads/evidence-search/evidence-keyword-search.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/capsules/reads/qualification/fact-frame-formation-read.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/capsules/reads/qualification/semantic-factor-formation-read.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/capsules/writes/fact-frame-formation/capture-store.ts": {
+    "max": 4,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/capsules/writes/semantic-factor-formation/capture-store.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/control/api-key-cipher.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/field/bounded-source-root-reader.ts": {
+    "max": 5,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/field/source-hint-reader.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/field/source-repo.ts": {
+    "max": 6,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/field/usage-effect-repo.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/garden/garden-librarian-data-ports.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/garden/semantic-artifact-repo.ts": {
+    "max": 22,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/garden/semantic-artifact-schema.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/governance/reads/bounded-active-constraints.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/health/health-journal-repo.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/memory-entry/reads/bounded-recall-reader.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/memory-entry/reads/keyword-search.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/path/reads/governance-path-reader.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/path/reads/relation-assertion/bounded-reader.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/repos/tooling/extension-descriptor-repo.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/sqlite/db.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/sqlite/dynamic-prepared-statement-cache.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/sqlite/retained-source-chunk-digest.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/sqlite/temporal-cutover-gate.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/sqlite/temporal-maintenance-lease.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/sqlite/write-queue/install.ts": {
+    "max": 1,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/sqlite/write-queue/port.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/sqlite/write-queue/worker-port.ts": {
+    "max": 3,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "packages/storage/src/sqlite/write-queue/worker.ts": {
+    "max": 2,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  }
+}

@@ -88,6 +88,11 @@ jobs:
           pnpm run ci:test-as-any -- --self-test
           pnpm run ci:test-as-any
 
+      - name: Guard production throw new Error
+        run: |
+          pnpm run ci:throw-new-error -- --self-test
+          pnpm run ci:throw-new-error
+
       - name: Guard env docs
         run: pnpm run ci:env-docs
 

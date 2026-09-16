@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { CoreError } from "@do-soul/alaya-core";
 import {
   McpToolError,
@@ -38,6 +39,7 @@ describe("McpToolError", () => {
     [new ContextUsageNotFoundError("missing memory"), "NOT_FOUND"]
   ] as const)("classifyError(%s) maps instanceof to the protocol code", (error, code) => {
     expect(error).toBeInstanceOf(McpToolError);
+    expect(error).toBeInstanceOf(AlayaError);
     expect(classifyError(error)).toBe(code);
   });
 
