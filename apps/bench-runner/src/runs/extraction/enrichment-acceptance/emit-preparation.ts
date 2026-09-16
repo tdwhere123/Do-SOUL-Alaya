@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -17,7 +18,8 @@ import {
 } from "./source-binding.js";
 import { composeEnrichmentPreparationReport } from "./preparation-report.js";
 
-export const ENRICHMENT_PREPARATION_CANDIDATE_PLACEHOLDER = "HEAD";
+const GIT_OBJECT_ID = /^[a-f0-9]{40}$/u;
+
 export function enrichmentPreparationIdentityNote(
   candidate: string,
   codeTree: string
@@ -65,6 +67,7 @@ export async function emitEnrichmentPreparation(
 ): Promise<EnrichmentPreparationEmitResult> {
   requireExistingFile(input.regressionPath, "regressionPath");
   requireExistingFile(input.canonicalPath, "canonicalPath");
+  const { candidate, codeTree } = readPinnedIdentity(input);
   if (input.turns === undefined) {
     if (input.dataDir === undefined) {
       throw new AlayaError("VALIDATION", "enrichment preparation dataDir is required when turns are not supplied");
@@ -110,11 +113,10 @@ export async function emitEnrichmentPreparation(
       preflight,
       selectedStage: "none"
     });
-    const candidate = input.candidate ?? ENRICHMENT_PREPARATION_CANDIDATE_PLACEHOLDER;
-    const codeTree = input.codeTree ?? ENRICHMENT_PREPARATION_CANDIDATE_PLACEHOLDER;
     const sourceMapPath = resolve(input.outputDir, "source-map.json");
     const preflightPath = resolve(input.outputDir, "preflight.json");
     const reportPath = resolve(input.outputDir, "preparation-report.json");
+    assertPreparationOutputWritable(input.outputDir);
     writeJson(sourceMapPath, serializeSourceMap({
       candidate,
       codeTree,
@@ -407,7 +409,65 @@ function requireExistingFile(path: string, label: string): void {
 }
 
 function writeJson(path: string, value: unknown): void {
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  try {
+    writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    if (isNodeErrno(error, "EEXIST")) {
+      throw new AlayaError("CONFLICT", `enrichment preparation output already exists: ${path}`);
+    }
+    throw error;
+  }
+}
+
+function readPinnedIdentity(input: {
+  readonly candidate?: string;
+  readonly codeTree?: string;
+}): Readonly<{ readonly candidate: string; readonly codeTree: string }> {
+  if (input.candidate === undefined && input.codeTree === undefined) {
+    return readCleanGitIdentity();
+  }
+  if (input.candidate === undefined || input.codeTree === undefined) {
+    throw new AlayaError(
+      "VALIDATION",
+      "enrichment preparation candidate and codeTree must both be 40-hex git object ids"
+    );
+  }
+  return {
+    candidate: requireGitObjectId(input.candidate, "candidate"),
+    codeTree: requireGitObjectId(input.codeTree, "codeTree")
+  };
+}
+
+function requireGitObjectId(value: string, label: string): string {
+  if (!GIT_OBJECT_ID.test(value)) {
+    throw new AlayaError("VALIDATION", `enrichment preparation ${label} must be a 40-hex git object id`);
+  }
+  return value;
+}
+
+function readCleanGitIdentity(): Readonly<{ readonly candidate: string; readonly codeTree: string }> {
+  try {
+    const porcelain = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim();
+    const sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
+    if (porcelain !== "" || !GIT_OBJECT_ID.test(sha) || !GIT_OBJECT_ID.test(tree)) {
+      throw new AlayaError(
+        "VALIDATION",
+        "enrichment preparation requires --candidate and --codeTree when git HEAD is not a clean 40-hex commit"
+      );
+    }
+    return { candidate: sha, codeTree: tree };
+  } catch (error) {
+    if (error instanceof AlayaError) throw error;
+    throw new AlayaError(
+      "VALIDATION",
+      "enrichment preparation requires --candidate and --codeTree when git identity is unavailable"
+    );
+  }
+}
+
+function isNodeErrno(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === code;
 }
 
 function readRequiredFlag(argv: readonly string[], name: string): string {

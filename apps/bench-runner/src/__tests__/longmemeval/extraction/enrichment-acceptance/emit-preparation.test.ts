@@ -12,6 +12,9 @@ import { bindFrozenAssertionToCurrentSource } from "../../../../runs/extraction/
 const REGRESSION_REQUIRED = new Set([2, 4, 8, 9, 10, 12, 13, 14, 16]);
 const REGRESSION_UNRESOLVED = new Set([5, 15]);
 const TEXT = "I moved to Berlin.";
+const PINNED_CANDIDATE = "aa".repeat(20);
+const PINNED_TREE = "bb".repeat(20);
+const PINNED = { candidate: PINNED_CANDIDATE, codeTree: PINNED_TREE } as const;
 const TURN = {
   turnContent: TEXT,
   turnMessages: [{ message_id: "message-1", role: "user" as const, content: TEXT }]
@@ -41,13 +44,15 @@ describe("enrichment preparation emit", () => {
       outputDir,
       cacheRoot: join(root, "cache"),
       turns: [TURN],
-      datasetRevision: "synthetic-revision"
+      datasetRevision: "synthetic-revision",
+      ...PINNED
     });
     expect(fetches).toBe(0);
     expect(result.attempted_fetches).toBe(0);
     expect(result.provider_calls).toBe(0);
     expect(result.query_calls).toBe(0);
-    expect(result.candidate).toBe("HEAD");
+    expect(result.candidate).toBe(PINNED_CANDIDATE);
+    expect(result.code_tree).toBe(PINNED_TREE);
     expect(result.semantic_fill.status).toBe("not_run");
     expect(result.semantic_fill.reason).toMatch(/substrate manifest/u);
     expect(result.source_fidelity.denominator).toBe(38);
@@ -71,7 +76,7 @@ describe("enrichment preparation emit", () => {
     };
     expect(sourceMap.attempted_fetches).toBe(0);
     expect(sourceMap.bindings).toHaveLength(38);
-    expect(sourceMap.identity_note).toBe("Candidate HEAD tree HEAD");
+    expect(sourceMap.identity_note).toBe(`Candidate ${PINNED_CANDIDATE} tree ${PINNED_TREE}`);
     expect(preflight.dispatch_authorized).toBe(false);
     expect(preflight.native_fill_readiness).toBe("not_run");
     expect(preflight.semantic_fill.status).toBe("not_run");
@@ -91,7 +96,8 @@ describe("enrichment preparation emit", () => {
       outputDir,
       cacheRoot: join(root, "cache"),
       turns: [TURN],
-      datasetRevision: "synthetic-revision"
+      datasetRevision: "synthetic-revision",
+      ...PINNED
     };
     await emitEnrichmentPreparation(input);
     await expect(emitEnrichmentPreparation({
@@ -112,8 +118,9 @@ describe("enrichment preparation emit", () => {
       outputDir,
       cacheRoot: join(root, "cache"),
       turns: [TURN],
-      datasetRevision: "synthetic-revision"
-    })).rejects.toThrow(/incomplete and must not be overwritten/u);
+      datasetRevision: "synthetic-revision",
+      ...PINNED
+    })).rejects.toMatchObject({ name: "AlayaError", code: "CONFLICT" });
     expect(existsSync(join(outputDir, "preflight.json"))).toBe(false);
     expect(existsSync(join(outputDir, "preparation-report.json"))).toBe(false);
   });
@@ -126,8 +133,24 @@ describe("enrichment preparation emit", () => {
       outputDir: join(root, "out"),
       cacheRoot: join(root, "cache"),
       turns: [TURN],
-      datasetRevision: "synthetic-revision"
+      datasetRevision: "synthetic-revision",
+      ...PINNED
     })).rejects.toThrow(/regressionPath is required and missing/u);
+  });
+
+  it("refuses the moving ref HEAD as a candidate identity", async () => {
+    root = mkdtempSync(join(tmpdir(), "enrichment-emit-head-"));
+    writeMiniaturePopulation(root);
+    await expect(emitEnrichmentPreparation({
+      regressionPath: join(root, "regression-source-review.json"),
+      canonicalPath: join(root, "canonical-source-review.json"),
+      outputDir: join(root, "out"),
+      cacheRoot: join(root, "cache"),
+      turns: [TURN],
+      datasetRevision: "synthetic-revision",
+      candidate: "HEAD",
+      codeTree: "HEAD"
+    })).rejects.toMatchObject({ name: "AlayaError", code: "VALIDATION" });
   });
 
   it("packs occurrence identity by corpus and assertion id so a foreign message is not substituted", () => {

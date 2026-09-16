@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type { ConditionalFieldExecutionReceipt } from "@do-soul/alaya-core";
 import type { CanaryCase } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
 import {
@@ -113,6 +114,9 @@ export function persistRunEvidence(input: Readonly<{
   readonly fileFailed: boolean | "unavailable";
 }>): void {
   const identity = resultCandidateIdentity();
+  if (identity.result_sha === "unavailable" || identity.result_tree === "unavailable") {
+    return;
+  }
   const capturedAt = new Date().toISOString();
   const stamp = capturedAt.replaceAll(":", "-");
   const coverage: CaseCoverage = {
@@ -152,24 +156,31 @@ function persistExclusivePair(
   const tracesName = `${stamp}-traces.json`;
   const finalMatrix = join(directory, matrixName);
   const finalTraces = join(directory, tracesName);
-  if (existsSync(finalMatrix) || existsSync(finalTraces)) {
-    throw new Error(`public consumption evidence already exists: ${stamp}`);
-  }
-  const staging = join(directory, `.${stamp}-staging`);
-  mkdirSync(staging, { recursive: true });
+  const staging = mkdtempSync(join(directory, `.${stamp}-`));
   try {
     writeExclusive(join(staging, matrixName), matrix);
     writeExclusive(join(staging, tracesName), traces);
-    renameSync(join(staging, matrixName), finalMatrix);
     try {
-      renameSync(join(staging, tracesName), finalTraces);
+      writeFileSync(finalTraces, readFileSync(join(staging, tracesName)), { flag: "wx" });
     } catch (error) {
-      unlinkSync(finalMatrix);
-      throw error;
+      throw exclusiveEvidenceError(error, stamp);
+    }
+    try {
+      writeFileSync(finalMatrix, readFileSync(join(staging, matrixName)), { flag: "wx" });
+    } catch (error) {
+      unlinkSync(finalTraces);
+      throw exclusiveEvidenceError(error, stamp);
     }
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
+}
+
+function exclusiveEvidenceError(error: unknown, stamp: string): Error {
+  if (typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "EEXIST") {
+    return new AlayaError("CONFLICT", `public consumption evidence already exists: ${stamp}`);
+  }
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function boundStep(step: ConsumptionStep): unknown {
