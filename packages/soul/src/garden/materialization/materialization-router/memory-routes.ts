@@ -231,16 +231,15 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     try {
       const decision = await this.runReconciledDecision(signal, port, state, context);
       if (decision.kind === "deferred") {
-        return materializationFailure(
-          {
-            signal_id: signal.signal_id,
-            target_kind: target.kind,
-            route_target: target.route_target,
-            routing_reason: `${target.routing_reason} — reconciliation unavailable`,
-            created_objects: state.createdObjects
-          },
-          decision.reason
-        );
+        // Retryable write-path deferral must not look like materialization
+        // failure: FAILED is terminal, while target_kind deferred is resumed.
+        return materializationSuccess({
+          signal_id: signal.signal_id,
+          target_kind: "deferred",
+          route_target: "deferred",
+          routing_reason: `${target.routing_reason} — reconciliation deferred: ${decision.reason}`,
+          created_objects: state.createdObjects
+        });
       }
       await this.finalizeReconciledAppend(signal, state, context);
       return this.buildReconciledMaterializationResult(signal, target, decision, state);

@@ -11,11 +11,14 @@ export interface PostTurnSignalReceiveResult {
     readonly signal_id: string;
     readonly workspace_id: string;
   }>;
+  readonly triage_result?: "accepted" | "dropped" | "deferred";
   readonly materialization?: Readonly<{
     readonly created_objects: readonly Readonly<{
       readonly object_kind: string;
       readonly object_id: string;
     }>[];
+    readonly target_kind?: string;
+    readonly defer_class?: "source_grounding";
   }> | null;
 }
 
@@ -28,6 +31,12 @@ export function receivedEvidenceCapsule(result: PostTurnSignalReceiveResult): bo
   return result.materialization?.created_objects.some(
     (created) => created.object_kind === "evidence_capsule"
   ) ?? false;
+}
+
+export function isWritePathMaterializationDeferral(result: PostTurnSignalReceiveResult): boolean {
+  return result.triage_result === "deferred"
+    && result.materialization?.target_kind === "deferred"
+    && result.materialization.defer_class !== "source_grounding";
 }
 
 export function createPostTurnSignalReceiver(

@@ -3,6 +3,7 @@ import {
   CandidateMemorySignalSchema,
   SignalEventType,
   SignalState,
+  SoulSignalMaterializedPayloadSchema,
   SoulSignalTriagedPayloadSchema,
   type CandidateMemorySignal,
   type EventLogEntry
@@ -214,6 +215,10 @@ export class SignalService {
         : await this.triageAndMaybeMaterialize(existingSignal, context);
     }
 
+    if (existingSignal.signal_state === SignalState.DEFERRED) {
+      return await this.resumeWritePathDeferredSignal(existingSignal);
+    }
+
     if (
       (existingSignal.signal_state === SignalState.TRIAGED ||
         existingSignal.signal_state === SignalState.COMPILED) &&
@@ -234,6 +239,57 @@ export class SignalService {
       triage_result: mapExistingSignalStateToTriage(existingSignal.signal_state),
       materialization: null
     };
+  }
+
+  private async resumeWritePathDeferredSignal(
+    existingSignal: CandidateMemorySignal
+  ): Promise<SignalServiceReceiveResult> {
+    const events = await this.dependencies.eventLogRepo.queryByEntity(
+      "candidate_memory_signal",
+      existingSignal.signal_id
+    );
+    if (
+      this.dependencies.postTriageMaterializer === undefined ||
+      !this.isWritePathDeferredRetryEligible(existingSignal, events)
+    ) {
+      return {
+        signal: existingSignal,
+        triage_result: "deferred",
+        materialization: null
+      };
+    }
+    const emissions = events.filter(
+      (event) => event.event_type === SignalEventType.SOUL_SIGNAL_EMITTED
+    );
+    if (emissions.length !== 1) {
+      return await this.deferUnverifiableEmission(existingSignal);
+    }
+    const context = resolveSignalMaterializationContext(existingSignal, emissions[0]!);
+    if (context === null) {
+      return await this.deferUnverifiableEmission(existingSignal);
+    }
+    return await materializeAcceptedSignal(
+      this.dependencies,
+      this.warn,
+      existingSignal,
+      "accepted",
+      context
+    );
+  }
+
+  private isWritePathDeferredRetryEligible(
+    signal: CandidateMemorySignal,
+    events: readonly EventLogEntry[]
+  ): boolean {
+    if (
+      this.dependencies.sourceGroundingDeferQueue?.get(signal.workspace_id, signal.signal_id) != null
+    ) {
+      return false;
+    }
+    if (events.some(isSourceGroundingDeferTriageEvent)) {
+      return false;
+    }
+    return events.some(isSuccessfulMaterializationEvent);
   }
 
   private async triageAndMaybeMaterialize(
@@ -349,4 +405,20 @@ export class SignalService {
       signal
     });
   }
+}
+
+function isSourceGroundingDeferTriageEvent(event: EventLogEntry): boolean {
+  if (event.event_type !== SignalEventType.SOUL_SIGNAL_TRIAGED) {
+    return false;
+  }
+  const parsed = SoulSignalTriagedPayloadSchema.safeParse(event.payload_json);
+  return parsed.success && parsed.data.defer_class === "source_grounding";
+}
+
+function isSuccessfulMaterializationEvent(event: EventLogEntry): boolean {
+  if (event.event_type !== SignalEventType.SOUL_SIGNAL_MATERIALIZED) {
+    return false;
+  }
+  const parsed = SoulSignalMaterializedPayloadSchema.safeParse(event.payload_json);
+  return parsed.success && parsed.data.success === true;
 }

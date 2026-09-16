@@ -66,7 +66,29 @@ describe("MaterializationRouter ingest reconciliation", () => {
 
     const result = await router.materializeSignal(factSignal());
 
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.target_kind).toBe("deferred");
+    expect(result.route_target).toBe("deferred");
+    expect(appliedVerdicts).toEqual([]);
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.evidenceService.create).not.toHaveBeenCalled();
+  });
+
+  it("does not append when reconciliation defers because the reconcile lease is held", async () => {
+    const deps = createDeps();
+    const { reconciliationPort, appliedVerdicts } = fakeReconciliationPort({
+      kind: "deferred",
+      deferral: "lease_busy",
+      retryable: true,
+      reason: "reconcile lease held — not added"
+    });
+    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+
+    const result = await router.materializeSignal(factSignal());
+
+    expect(result.success).toBe(true);
+    expect(result.target_kind).toBe("deferred");
+    expect(result.route_target).toBe("deferred");
     expect(appliedVerdicts).toEqual([]);
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.evidenceService.create).not.toHaveBeenCalled();
