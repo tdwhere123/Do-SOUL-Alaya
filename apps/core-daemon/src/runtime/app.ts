@@ -248,7 +248,7 @@ function resolveRequestProtectionSettings(
       processEnvLookup().ALLOWED_ORIGIN ??
       DEFAULT_DAEMON_ALLOWED_ORIGIN,
     allowDesktopOriginlessRequests:
-      requestProtection?.allowDesktopOriginlessRequests ?? true
+      requestProtection?.allowDesktopOriginlessRequests ?? false
   };
 }
 

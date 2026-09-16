@@ -45,4 +45,24 @@ describe("X-Alaya-Desktop is not authentication", () => {
     expect(remote.allowDesktopOriginlessRequests).toBe(false);
     expect(loopback.allowDesktopOriginlessRequests).toBe(true);
   });
+
+  it("rejects originless desktop when createApp is not given the bypass flag", async () => {
+    const app = createApp({
+      requestProtection: {
+        allowedOrigin: "http://localhost:5173",
+        requestToken: "secret-token"
+      }
+    });
+    const originless = await app.request("/unknown", {
+      headers: {
+        "x-request-token": "secret-token",
+        "x-alaya-desktop": "1"
+      }
+    });
+    expect(originless.status).toBe(403);
+    await expect(originless.json()).resolves.toEqual({
+      success: false,
+      error: "Origin is not allowed"
+    });
+  });
 });
