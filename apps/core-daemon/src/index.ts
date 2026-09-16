@@ -56,7 +56,8 @@ export type { RelationProjectionAdmissionMode } from "./runtime/recall-materiali
 export { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
 export {
   resolveEffectiveEmbeddingPosture,
-  type EffectiveEmbeddingPosture
+  type EffectiveEmbeddingPosture,
+  type EffectiveEmbeddingProviderKind
 } from "./ai/daemon-embedding-runtime-config.js";
 export { resolveSecretRef } from "./secrets/index.js";
 export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secrets/index.js";

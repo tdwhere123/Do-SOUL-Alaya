@@ -209,7 +209,8 @@ describe("daemon local embedding product default", () => {
           getRecentEvents: vi.fn(async () => Object.freeze([])),
           record: vi.fn(async () => undefined)
         },
-        warn: vi.fn()
+        warn: vi.fn(),
+        localOnnxTransformersProbe: () => ({ availability: "available" })
       });
 
       await runtime.providerWarmup;
@@ -429,6 +430,50 @@ describe("daemon local embedding product default", () => {
       expect(ready.fine_assessment).not.toHaveProperty("max_candidates");
       expect(runtime.defaultPolicyDecorator!(ready).fine_assessment)
         .not.toHaveProperty("max_candidates");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not report the supplement enabled when the local extra is ERR_MODULE_NOT_FOUND", async () => {
+    const embedTexts = vi.fn(async () => [new Float32Array([1])]);
+    const database = initDatabase({ filename: ":memory:" });
+    const warn = vi.fn();
+    const runtime = createDaemonEmbeddingRuntime({
+      database,
+      configEnv: new Map([
+        ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"],
+        ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"]
+      ]),
+      eventLogRepo: new SqliteEventLogRepo(database),
+      memoryEntryRepo: new SqliteMemoryEntryRepo(database),
+      healthJournalService: {
+        getRecentEvents: vi.fn(async () => Object.freeze([])),
+        record: vi.fn(async () => undefined)
+      },
+      warn,
+      localOnnxTransformersProbe: () => ({
+        availability: "unavailable",
+        code: "ERR_MODULE_NOT_FOUND"
+      })
+    });
+    try {
+      await expect(runtime.providerWarmup).resolves.toBe("not_requested");
+      expect(runtime.embeddingRecallService).toBeUndefined();
+      expect(runtime.defaultPolicyDecorator).toBeUndefined();
+      expect(isPolicyEnabled(runtime)).toBe(false);
+      expect(embedTexts).not.toHaveBeenCalled();
+      await expect(runtime.embeddingStatusService.getStatus("workspace-1")).resolves.toMatchObject({
+        embedding_enabled: false,
+        provider_configured: false,
+        effective_mode: "keyword_only",
+        degraded_reason: null
+      });
+      expect(warn).toHaveBeenCalledWith("effective embedding runtime", {
+        provider_kind: "off",
+        embedding_supplement_enabled: false,
+        local_onnx_availability: "unavailable"
+      });
     } finally {
       database.close();
     }

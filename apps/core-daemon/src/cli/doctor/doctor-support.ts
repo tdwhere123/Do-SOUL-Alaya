@@ -6,6 +6,7 @@ import {
 } from "@do-soul/alaya-core";
 import type { GardenCredentialProvenance } from "../../services/config/config-service.js";
 import type { GraphHealthWarning } from "../../services/status/graph-health-service.js";
+import { resolveEffectiveEmbeddingPosture } from "../../ai/daemon-embedding-runtime-config.js";
 import type { AlayaCliArgsSchema } from "../bridge.js";
 import { writeDoctorAuditSummary } from "./doctor-audit.js";
 import type {
@@ -410,8 +411,8 @@ function writeRecallGraphSummary(stream: NodeJS.WritableStream, report: DoctorRe
 }
 
 function writeLocalOnnxHostSingleFlightHint(stream: NodeJS.WritableStream): void {
-  const provider = processEnvLookup().ALAYA_EMBEDDING_PROVIDER?.trim().toLowerCase();
-  if (provider !== undefined && provider !== "" && provider !== "local_onnx") {
+  const posture = resolveEffectiveEmbeddingPosture((key) => processEnvLookup()[key]);
+  if (posture.providerKind !== "local_onnx") {
     return;
   }
   if (localOnnxHostSingleFlightEnabled(processEnvLookup())) {

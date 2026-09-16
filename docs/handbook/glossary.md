@@ -256,8 +256,9 @@ benchmark contracts. See `recall.md`.
 
 **API Embedding Provider** — A network-backed embedding supplement. API use is
 always explicit opt-in through `ALAYA_EMBEDDING_PROVIDER=openai` and requires
-both provider credentials and an enabled supplement; local default-on behavior
-never authorizes a network call.
+both provider credentials and an enabled supplement; local default-on applies
+only when `@huggingface/transformers` resolves, and never authorizes a network
+call. Missing extra makes effective provider off.
 
 ## Provider
 
