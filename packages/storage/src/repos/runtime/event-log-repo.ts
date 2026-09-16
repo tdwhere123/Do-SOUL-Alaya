@@ -375,14 +375,26 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByType(eventType: string): Promise<readonly EventLogEntry[]> {
+    return await this.queryByTypePage(eventType, DEFAULT_EVENT_LOG_PAGE);
+  }
+
+  public async queryByTypePage(
+    eventType: string,
+    page: EventLogPageOptions
+  ): Promise<readonly EventLogEntry[]> {
+    const parsedPage = parseEventLogPage(page);
     return queryEventLogRows(
       this.activeStatements().queryByTypeStatement.all(
         eventType,
-        DEFAULT_EVENT_LOG_PAGE.limit,
-        DEFAULT_EVENT_LOG_PAGE.offset
+        parsedPage.limit,
+        parsedPage.offset
       ),
-      "Failed to query event log by type."
+      "Failed to query paged event log by type."
     );
+  }
+
+  public async queryByTypeAll(eventType: string): Promise<readonly EventLogEntry[]> {
+    return await queryEventLogScopeAll(() => this.activeStatements(), { kind: "type", eventType });
   }
 
   public async getLatestEventId(runId: string): Promise<string | null> {

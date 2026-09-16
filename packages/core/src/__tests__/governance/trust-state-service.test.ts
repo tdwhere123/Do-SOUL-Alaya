@@ -175,7 +175,7 @@ describe("trust-state-service", () => {
 
   it("rebuilds process-local counters from EventLog counter events", async () => {
     const eventLogReader = {
-      queryByType: vi.fn(async (eventType: string) => {
+      queryByTypeAll: vi.fn(async (eventType: string) => {
         const events = new Map<string, readonly EventLogEntry[]>([
           [
             TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED,
@@ -202,13 +202,34 @@ describe("trust-state-service", () => {
 
     await rebuildCountersFromEventLog(eventLogReader, recorder);
 
-    expect(eventLogReader.queryByType).toHaveBeenCalledTimes(3);
+    expect(eventLogReader.queryByTypeAll).toHaveBeenCalledTimes(3);
     expect(recorder.replayCounterIncrement.mock.calls).toEqual([
       ["installed", "codex"],
       ["installed", "codex"],
       ["configured", "codex"],
       ["unverifiable", "claude-code"]
     ]);
+  });
+
+  it("rebuilds counters for more than one EventLog page of the same type", async () => {
+    const installedEvents = Array.from({ length: 501 }, (_, index) =>
+      buildEvent(TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED, `codex-${index}`, "installed")
+    );
+    const eventLogReader = {
+      queryByTypeAll: vi.fn(async (eventType: string) =>
+        eventType === TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED ? installedEvents : []
+      )
+    };
+    const recorder = {
+      replayCounterIncrement: vi.fn()
+    };
+
+    await rebuildCountersFromEventLog(eventLogReader, recorder);
+
+    expect(recorder.replayCounterIncrement).toHaveBeenCalledTimes(501);
+    expect(eventLogReader.queryByTypeAll).toHaveBeenCalledWith(
+      TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED
+    );
   });
 });
 

@@ -309,6 +309,25 @@ it("queryByType returns only matching event types", async () => {
   expect(events[0]?.event_type).toBe(WorkspaceRunEventType.RUN_CREATED);
 });
 
+it("queryByType defaults to the repository page cap and queryByTypeAll is the explicit full-history path", async () => {
+  const { eventLogRepo } = await createEventLogRepos();
+  for (let index = 0; index < 501; index += 1) {
+    await appendRunCreatedEvent(eventLogRepo, {
+      entityId: `run-type-cap-${index}`,
+      runId: `run-type-cap-${index}`,
+      title: `run ${index}`
+    });
+  }
+
+  await expect(eventLogRepo.queryByType(WorkspaceRunEventType.RUN_CREATED)).resolves.toHaveLength(500);
+  await expect(eventLogRepo.queryByTypeAll(WorkspaceRunEventType.RUN_CREATED)).resolves.toHaveLength(501);
+  await expect(
+    eventLogRepo.queryByTypePage(WorkspaceRunEventType.RUN_CREATED, { limit: 501, offset: 0 })
+  ).rejects.toMatchObject({
+    code: "VALIDATION_FAILED"
+  });
+});
+
 it("returns multiple matching events in append order", async () => {
   const { eventLogRepo } = await createEventLogRepos();
   await appendRunMessageEvent(eventLogRepo, {

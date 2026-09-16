@@ -21,7 +21,7 @@ export type SummaryCounts = Readonly<{
 export type TrustCounterName = "installed" | "configured" | "unverifiable";
 
 export interface EventLogReader {
-  queryByType(eventType: string): Promise<readonly EventLogEntry[]>;
+  queryByTypeAll(eventType: string): Promise<readonly EventLogEntry[]>;
 }
 
 export interface TrustCounterReplayRecorder {
@@ -117,7 +117,7 @@ export async function rebuildCountersFromEventLog(
   recorder: TrustCounterReplayRecorder
 ): Promise<void> {
   for (const config of COUNTER_REPLAY_CONFIGS) {
-    const events = await eventLogReader.queryByType(config.eventType);
+    const events = await eventLogReader.queryByTypeAll(config.eventType);
     for (const event of events) {
       recorder.replayCounterIncrement(config.counterName, readAgentTarget(event));
     }
