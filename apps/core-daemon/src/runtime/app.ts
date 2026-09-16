@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { processEnvLookup } from "./config/daemon-config-environment.js";
@@ -15,9 +15,16 @@ import {
   type WorkspaceTokenBinding
 } from "./request-token-binding.js";
 import {
+  createFixedWindowRateLimiter,
+  rateLimitRejection,
+  resolvePeerRateLimitKey,
+  type FixedWindowRateLimiter
+} from "../middleware/rate-limit.js";
+import {
   isProtectedRequest,
   registerRateLimitMiddleware,
   registerSecurityHeadersMiddleware,
+  resolveRateLimitSettings,
   type CoreDaemonRateLimitConfig
 } from "../middleware/register-security-middleware.js";
 import { applyLazyRequestBodyLimit } from "../middleware/lazy-request-body-limit.js";
@@ -167,11 +174,20 @@ export function createApp(
   const requestProtection = resolveRequestProtectionSettings(protectionConfig);
   const bodyLimits = createRequestBodyLimits();
 
+  const rateLimitSettings = resolveRateLimitSettings(services.rateLimit);
+  const authFailureLimiter = createFixedWindowRateLimiter(rateLimitSettings);
+
   registerRequestIdMiddleware(app);
   registerDrainMiddleware(app, lifecycle);
   registerSecurityHeadersMiddleware(app);
   registerCorsMiddleware(app, requestProtection.allowedOrigin);
-  registerProtectedRequestMiddleware(app, protectionConfig, requestProtection);
+  registerProtectedRequestMiddleware(
+    app,
+    protectionConfig,
+    requestProtection,
+    authFailureLimiter,
+    rateLimitSettings.failClosedOnUnknownSocket
+  );
   registerRateLimitMiddleware(app, services.rateLimit);
   registerFileUploadLimitMiddleware(app, bodyLimits.fileUploadBodyLimit);
   registerRequestBodyLimitMiddleware(app);
@@ -292,55 +308,80 @@ function resolveCorsOrigin(origin: string | undefined, allowedOrigin: string): s
 function registerProtectedRequestMiddleware(
   app: Hono,
   requestProtection: RequestProtectionConfig | undefined,
-  settings: ResolvedRequestProtectionSettings
+  settings: ResolvedRequestProtectionSettings,
+  authFailureLimiter: FixedWindowRateLimiter,
+  failClosedOnUnknownSocket: boolean
 ): void {
   app.use("*", async (context, next) => {
-    if (!isProtectedRequest(context.req.method, context.req.path)) {
-      await next();
-      return;
-    }
-
-    if (requestProtection === undefined) {
-      return context.json(
-        { success: false, error: "Request protection is not configured" },
-        503
-      );
-    }
-
-    const origin = normalizeOrigin(context.req.header("origin"));
-    const localOperatorRequest = isLocalOperatorRequest(
-      context.req.header("x-alaya-desktop")
+    const denied = gateProtectedRequest(
+      context,
+      requestProtection,
+      settings,
+      authFailureLimiter,
+      failClosedOnUnknownSocket
     );
-
-    if (
-      !isAllowedProtectedRequest(
-        origin,
-        settings.allowedOrigin,
-        localOperatorRequest,
-        settings.allowDesktopOriginlessRequests
-      )
-    ) {
-      return context.json({ success: false, error: "Origin is not allowed" }, 403);
+    if (denied !== undefined) {
+      return denied;
     }
-
-    const queryWorkspaceId = extractWorkspaceIdFromQuery(context.req.query("workspace_id"));
-    const authorized = authorizeProtectedRequest({
-      providedToken: context.req.header("x-request-token"),
-      protection: requestProtection,
-      method: context.req.method,
-      path: context.req.path,
-      workspaceIds: queryWorkspaceId === null ? [] : [queryWorkspaceId]
-    });
-    if (authorized.ok === false) {
-      return context.json({ success: false, error: authorized.error }, 403);
-    }
-    const requestScopedContext = context as typeof context & {
-      set(name: string, value: RequestTokenGrant): void;
-    };
-    requestScopedContext.set(REQUEST_TOKEN_GRANT_CONTEXT_KEY, authorized.grant);
-
     await next();
   });
+}
+
+function gateProtectedRequest(
+  context: Context,
+  requestProtection: RequestProtectionConfig | undefined,
+  settings: ResolvedRequestProtectionSettings,
+  authFailureLimiter: FixedWindowRateLimiter,
+  failClosedOnUnknownSocket: boolean
+): Response | undefined {
+  if (!isProtectedRequest(context.req.method, context.req.path)) {
+    return undefined;
+  }
+  if (requestProtection === undefined) {
+    return context.json(
+      { success: false, error: "Request protection is not configured" },
+      503
+    );
+  }
+  if (!isOriginAllowedForProtectedRequest(context, settings)) {
+    return context.json({ success: false, error: "Origin is not allowed" }, 403);
+  }
+
+  const queryWorkspaceId = extractWorkspaceIdFromQuery(context.req.query("workspace_id"));
+  const authorized = authorizeProtectedRequest({
+    providedToken: context.req.header("x-request-token"),
+    protection: requestProtection,
+    method: context.req.method,
+    path: context.req.path,
+    workspaceIds: queryWorkspaceId === null ? [] : [queryWorkspaceId]
+  });
+  if (authorized.ok === false) {
+    const peerKey = resolvePeerRateLimitKey(context, failClosedOnUnknownSocket);
+    const rejected = rateLimitRejection(context, authFailureLimiter.consume(peerKey));
+    if (rejected !== undefined) {
+      return rejected;
+    }
+    return context.json({ success: false, error: authorized.error }, 403);
+  }
+  const requestScopedContext = context as typeof context & {
+    set(name: string, value: RequestTokenGrant): void;
+  };
+  requestScopedContext.set(REQUEST_TOKEN_GRANT_CONTEXT_KEY, authorized.grant);
+  return undefined;
+}
+
+function isOriginAllowedForProtectedRequest(
+  context: { readonly req: { header(name: string): string | undefined } },
+  settings: ResolvedRequestProtectionSettings
+): boolean {
+  const origin = normalizeOrigin(context.req.header("origin"));
+  const localOperatorRequest = isLocalOperatorRequest(context.req.header("x-alaya-desktop"));
+  return isAllowedProtectedRequest(
+    origin,
+    settings.allowedOrigin,
+    localOperatorRequest,
+    settings.allowDesktopOriginlessRequests
+  );
 }
 
 function registerFileUploadLimitMiddleware(

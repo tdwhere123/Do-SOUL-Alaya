@@ -1,7 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
 import {
+  isLoopbackHost,
+  isRemoteDaemonOptInEnabled,
+  isUnixSocketPath,
   resolveDaemonListenPolicy,
+  resolveUnixSocketPath,
   type DaemonHostEnvLike,
   type DaemonListenPolicy
 } from "./server-options.js";
@@ -179,6 +183,7 @@ export function applyRemoteBindTokenRotation<T extends RequestTokenProtection>(
   generateToken: () => string = generateRotatedRequestToken
 ): T {
   const withWorkspaceBinding = applyDefaultWorkspaceBinding(protection, envLike);
+  rejectLongLivedStaticTokenOnRemoteBind(withWorkspaceBinding, envLike);
   if (withWorkspaceBinding.tokenSource === "rotated") {
     return withWorkspaceBinding;
   }
@@ -191,6 +196,28 @@ export function applyRemoteBindTokenRotation<T extends RequestTokenProtection>(
     requestToken: generateToken(),
     tokenSource: "rotated" as const
   }) as T;
+}
+
+function rejectLongLivedStaticTokenOnRemoteBind(
+  protection: RequestTokenProtection,
+  envLike: RequestProtectionEnvLike
+): void {
+  if (protection.tokenSource !== "env") {
+    return;
+  }
+  if (resolveUnixSocketPath(envLike) !== undefined) {
+    return;
+  }
+  const host = envLike.DAEMON_HOST?.trim() ?? "";
+  if (host.length === 0 || isLoopbackHost(host) || isUnixSocketPath(host)) {
+    return;
+  }
+  if (!isRemoteDaemonOptInEnabled(envLike)) {
+    return;
+  }
+  throw new Error(
+    "Long-lived ALAYA_REQUEST_TOKEN cannot be used for remote binds. Bind loopback or a unix socket, which rotates the token."
+  );
 }
 
 function applyDefaultWorkspaceBinding<T extends RequestTokenProtection>(

@@ -19,6 +19,16 @@ export interface FixedWindowRateLimitOptions {
   readonly failClosedOnUnknownSocket?: boolean;
 }
 
+export type RateLimitDecision =
+  | { readonly kind: "allow" }
+  | { readonly kind: "limited"; readonly retryAfterSeconds: number }
+  | { readonly kind: "identity_unavailable" };
+
+export interface FixedWindowRateLimiter {
+  inspect(key: string): RateLimitDecision;
+  consume(key: string): RateLimitDecision;
+}
+
 const DEFAULT_RESPONSE_BODY = {
   success: false,
   error: "Rate limit exceeded"
@@ -28,12 +38,39 @@ const CLEANUP_INTERVAL = 128;
 const DEFAULT_MAX_BUCKETS = 4_096;
 const UNKNOWN_SOCKET_KEY = "__alaya_rate_limit_unknown_socket__";
 
+export function createFixedWindowRateLimiter(
+  options: Omit<FixedWindowRateLimitOptions, "skip" | "resolveKey">
+): FixedWindowRateLimiter {
+  const buckets = new LruCache<string, Bucket>(options.maxBuckets ?? DEFAULT_MAX_BUCKETS);
+  const nowMs = options.nowMs ?? Date.now;
+  const maxBuckets = options.maxBuckets ?? DEFAULT_MAX_BUCKETS;
+  let requestsSinceCleanup = 0;
+
+  const sweep = (): number => {
+    requestsSinceCleanup += 1;
+    const now = nowMs();
+    cleanupExpiredBuckets(buckets, now, options.windowMs, requestsSinceCleanup);
+    if (requestsSinceCleanup >= CLEANUP_INTERVAL) {
+      requestsSinceCleanup = 0;
+    }
+    return now;
+  };
+
+  return {
+    inspect(key: string): RateLimitDecision {
+      return decide(buckets, key, sweep(), options.windowMs, options.maxRequests, maxBuckets, false);
+    },
+    consume(key: string): RateLimitDecision {
+      return decide(buckets, key, sweep(), options.windowMs, options.maxRequests, maxBuckets, true);
+    }
+  };
+}
+
 export function createFixedWindowRateLimitMiddleware(
   options: FixedWindowRateLimitOptions
 ): MiddlewareHandler {
-  const buckets = new LruCache<string, Bucket>(options.maxBuckets ?? DEFAULT_MAX_BUCKETS);
-  const nowMs = options.nowMs ?? Date.now;
-  let requestsSinceCleanup = 0;
+  const limiter = createFixedWindowRateLimiter(options);
+  const failClosed = options.failClosedOnUnknownSocket === true;
 
   return async (context, next) => {
     if (options.skip?.(context) === true) {
@@ -41,40 +78,29 @@ export function createFixedWindowRateLimitMiddleware(
       return;
     }
 
-    requestsSinceCleanup += 1;
-    const now = nowMs();
-    cleanupExpiredBuckets(buckets, now, options.windowMs, requestsSinceCleanup);
-    if (requestsSinceCleanup >= CLEANUP_INTERVAL) {
-      requestsSinceCleanup = 0;
+    const key =
+      options.resolveKey?.(context) ?? resolveProtectedRateLimitKey(context, failClosed);
+    const decision = limiter.consume(key);
+    const rejected = rateLimitRejection(context, decision);
+    if (rejected !== undefined) {
+      return rejected;
     }
-
-    const key = options.resolveKey?.(context)
-      ?? resolveProtectedRateLimitKey(context, options.failClosedOnUnknownSocket === true);
-    if (key === UNKNOWN_SOCKET_KEY) {
-      return context.json({ success: false, error: "Rate limit identity unavailable" }, 403);
-    }
-    const bucket = readBucket(
-      buckets,
-      key,
-      now,
-      options.windowMs,
-      options.maxBuckets ?? DEFAULT_MAX_BUCKETS
-    );
-    if (bucket === null) {
-      return context.json(DEFAULT_RESPONSE_BODY, 429);
-    }
-    if (bucket.count >= options.maxRequests) {
-      const retryAfterSeconds = Math.max(
-        1,
-        Math.ceil((options.windowMs - (now - bucket.startedAtMs)) / 1000)
-      );
-      context.header("retry-after", String(retryAfterSeconds));
-      return context.json(DEFAULT_RESPONSE_BODY, 429);
-    }
-
-    bucket.count += 1;
     await next();
   };
+}
+
+export function rateLimitRejection(
+  context: Context,
+  decision: RateLimitDecision
+): Response | undefined {
+  if (decision.kind === "identity_unavailable") {
+    return context.json({ success: false, error: "Rate limit identity unavailable" }, 403);
+  }
+  if (decision.kind === "limited") {
+    context.header("retry-after", String(decision.retryAfterSeconds));
+    return context.json(DEFAULT_RESPONSE_BODY, 429);
+  }
+  return undefined;
 }
 
 export function readSocketRemoteAddress(context: Context): string | undefined {
@@ -85,6 +111,29 @@ export function readSocketRemoteAddress(context: Context): string | undefined {
     return undefined;
   }
 }
+
+export function readUnixPeerCredentials(context: Context): string | undefined {
+  try {
+    const incoming = (context.env as { incoming?: { socket?: NodeJS.Socket } } | undefined)
+      ?.incoming;
+    const handle = (
+      incoming?.socket as { _handle?: { getPeerCredentials?: () => UnixPeerCredentials } } | undefined
+    )?._handle;
+    const creds = handle?.getPeerCredentials?.();
+    if (creds === undefined || !Number.isInteger(creds.uid) || !Number.isInteger(creds.pid)) {
+      return undefined;
+    }
+    return `${creds.uid}:${creds.pid}`;
+  } catch {
+    return undefined;
+  }
+}
+
+type UnixPeerCredentials = {
+  readonly pid: number;
+  readonly uid: number;
+  readonly gid?: number;
+};
 
 function cleanupExpiredBuckets(
   buckets: LruCache<string, Bucket>,
@@ -101,6 +150,46 @@ function cleanupExpiredBuckets(
       buckets.delete(key);
     }
   });
+}
+
+function decide(
+  buckets: LruCache<string, Bucket>,
+  key: string,
+  now: number,
+  windowMs: number,
+  maxRequests: number,
+  maxBuckets: number,
+  consume: boolean
+): RateLimitDecision {
+  if (key === UNKNOWN_SOCKET_KEY) {
+    return { kind: "identity_unavailable" };
+  }
+  if (!consume) {
+    const existing = buckets.get(key);
+    if (existing === undefined || now - existing.startedAtMs >= windowMs) {
+      return { kind: "allow" };
+    }
+    if (existing.count >= maxRequests) {
+      return limitedDecision(windowMs, now, existing.startedAtMs);
+    }
+    return { kind: "allow" };
+  }
+  const bucket = readBucket(buckets, key, now, windowMs, maxBuckets);
+  if (bucket === null) {
+    return { kind: "limited", retryAfterSeconds: 1 };
+  }
+  if (bucket.count >= maxRequests) {
+    return limitedDecision(windowMs, now, bucket.startedAtMs);
+  }
+  bucket.count += 1;
+  return { kind: "allow" };
+}
+
+function limitedDecision(windowMs: number, now: number, startedAtMs: number): RateLimitDecision {
+  return {
+    kind: "limited",
+    retryAfterSeconds: Math.max(1, Math.ceil((windowMs - (now - startedAtMs)) / 1000))
+  };
 }
 
 function readBucket(
@@ -120,7 +209,9 @@ function readBucket(
     return fresh;
   }
   if (buckets.size >= maxBuckets) {
-    emitWarning("rate-limit LRU is full of active buckets; refusing a new client instead of resetting counters");
+    emitWarning(
+      "rate-limit LRU is full of active buckets; refusing a new client instead of resetting counters"
+    );
     return null;
   }
   const fresh = { startedAtMs: now, count: 0 };
@@ -128,20 +219,36 @@ function readBucket(
   return fresh;
 }
 
+export function resolvePeerRateLimitKey(
+  context: Context,
+  failClosedOnUnknownSocket = false
+): string {
+  // Failed auth must not key by the attacker-chosen token or random tokens
+  // fill the LRU and never share a bucket.
+  const peercred = readUnixPeerCredentials(context);
+  if (peercred !== undefined) {
+    return `unix:${peercred}`;
+  }
+  const socket = readSocketRemoteAddress(context);
+  if (socket === undefined && failClosedOnUnknownSocket) {
+    return UNKNOWN_SOCKET_KEY;
+  }
+  return socket ?? "anonymous";
+}
+
 export function resolveProtectedRateLimitKey(
   context: Context,
   failClosedOnUnknownSocket = false
 ): string {
   const token = normalizeHeader(context.req.header("x-request-token"));
-  const socket = readSocketRemoteAddress(context);
-  if (socket === undefined && failClosedOnUnknownSocket) {
+  const peer = resolvePeerRateLimitKey(context, failClosedOnUnknownSocket);
+  if (peer === UNKNOWN_SOCKET_KEY) {
     return UNKNOWN_SOCKET_KEY;
   }
-  const identity = socket ?? "anonymous";
   if (token !== undefined) {
-    return `token:${hashRateLimitCredential(token)}:${identity}`;
+    return `token:${hashRateLimitCredential(token)}:${peer}`;
   }
-  return identity;
+  return peer;
 }
 
 function hashRateLimitCredential(credential: string): string {
