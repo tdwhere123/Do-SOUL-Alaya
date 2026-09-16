@@ -475,4 +475,116 @@ describe("enrichment preparation report", () => {
     expect(report.source_fidelity.rows[0]?.raw_state).toBe("missing");
     expect(report.native_formation_publication.unmatched_native_outcomes).toHaveLength(1);
   });
+
+  it("does not attribute a pointer-matched native outcome that contradicts current binding identities", () => {
+    const units = twoOccurrenceUnits();
+    const frozen = twoOccurrenceRow([units[0]!]);
+    const bindings = bindFrozenPopulation([frozen], {
+      catalogUnits: [units[0]!],
+      requests: [{
+        key: "original-request",
+        source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+        source_assertions: [{ assertion_id: units[0]!.assertionId, text: units[0]!.text }]
+      }]
+    });
+    const report = composeEnrichmentPreparationReport({
+      population: { rows: [frozen] },
+      bindings,
+      preflight: null,
+      nativeOutcomes: [nativeCell(frozen, {
+        request_key: "foreign-request",
+        current_assertion_id: 999
+      })]
+    });
+    expect(report.source_fidelity.rows[0]?.current_request_keys).toEqual(["original-request"]);
+    expect(report.source_fidelity.rows[0]?.native_cells.some((cell) => (
+      cell.request_key === "foreign-request" || cell.current_assertion_id === 999
+    ))).toBe(false);
+    expect(report.source_fidelity.rows[0]?.raw_state).toBe("missing");
+    expect(report.source_fidelity.rows[0]?.machine_admission).toBe("missing");
+    expect(report.native_formation_publication.unmatched_native_outcomes).toHaveLength(1);
+    expect(report.native_formation_publication.unmatched_native_outcomes[0]?.request_key)
+      .toBe("foreign-request");
+    expect(report.native_formation_publication.unmatched_native_outcomes[0]?.current_assertion_id)
+      .toBe(999);
+  });
+
+  it("does not let a valid-empty fixture hide a rejected native row", () => {
+    const required = row(2, "required", "aspiration");
+    const report = composeEnrichmentPreparationReport({
+      population: { rows: [required] },
+      bindings: bindFrozenPopulation([required], { catalogUnits: [] }),
+      preflight: null,
+      nativeOutcomes: [nativeCell(required, {
+        raw_state: "rejected",
+        machine_admission: "rejected",
+        located_outcome: "failed"
+      })],
+      fixtureOutcomes: [{
+        name: "authored passing fixture",
+        kind: "native_formation_publication",
+        result: "passed",
+        cell_state: "valid-empty"
+      }]
+    });
+    expect(report.source_fidelity.rows[0]?.machine_admission).toBe("rejected");
+    expect(report.native_formation_publication.machine_admission).toBe("rejected");
+    expect(report.native_formation_publication.status).toBe("rejected");
+    expect(report.native_formation_publication.machine_admission).not.toBe("valid-empty");
+  });
+
+  it("materializes a missing cell for an expected request key with no attributed outcome", () => {
+    const units = twoOccurrenceUnits();
+    const frozen = twoOccurrenceRow([units[0]!]);
+    const bindings = bindFrozenPopulation([frozen], {
+      catalogUnits: [units[0]!],
+      requests: [
+        {
+          key: "original-request",
+          source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+          source_assertions: [{ assertion_id: units[0]!.assertionId, text: units[0]!.text }]
+        },
+        {
+          key: "missing-request",
+          source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+          source_assertions: [{ assertion_id: units[0]!.assertionId, text: units[0]!.text }]
+        },
+        {
+          key: "unselected-request",
+          source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+          source_assertions: [{ assertion_id: 99, text: "other" }]
+        }
+      ]
+    });
+    const report = composeEnrichmentPreparationReport({
+      population: { rows: [frozen] },
+      bindings,
+      preflight: null,
+      nativeOutcomes: [{
+        request_key: "original-request",
+        current_assertion_id: units[0]!.assertionId,
+        request_ordinal: 0,
+        candidate_ordinal: 0,
+        raw_state: "valid-empty",
+        machine_admission: "valid-empty",
+        located_outcome: "empty",
+        rejected_siblings: [{ candidate_ordinal: 1, reason: "invalid_candidate" }]
+      }]
+    });
+    const prepared = report.source_fidelity.rows[0];
+    expect(prepared?.current_request_keys).toEqual(["original-request", "missing-request"]);
+    expect(prepared?.native_cells.map((cell) => cell.request_key))
+      .toEqual(["original-request", "missing-request"]);
+    expect(prepared?.native_cells.map((cell) => cell.raw_state))
+      .toEqual(["valid-empty", "missing"]);
+    expect(prepared?.native_cells.map((cell) => cell.machine_admission))
+      .toEqual(["valid-empty", "missing"]);
+    expect(prepared?.raw_state).toBe("partial");
+    expect(prepared?.machine_admission).toBe("partial");
+    expect(prepared?.request_ordinal).toBe(0);
+    expect(prepared?.candidate_ordinal).toBe(0);
+    expect(prepared?.rejected_siblings).toEqual([{ candidate_ordinal: 1, reason: "invalid_candidate" }]);
+    expect(prepared?.native_cells.some((cell) => cell.request_key === "unselected-request")).toBe(false);
+    expect(report.native_formation_publication.unmatched_native_outcomes).toEqual([]);
+  });
 });

@@ -592,6 +592,63 @@ describe("frozen source binding", () => {
     expect(binding.occurrences[0]?.reason).toMatch(/migrated through native source identity/u);
   });
 
+  it("does not substitute a same-contract foreign-message occurrence for a missing current occurrence", () => {
+    const originalMessages = [{
+      role: "user" as const,
+      content: text,
+      message_id: "original-message"
+    }];
+    const foreignMessages = [{
+      role: "user" as const,
+      content: text,
+      message_id: "foreign-message"
+    }];
+    const originalWorkset = planOfficialApiSemanticWorkset(text, originalMessages);
+    const foreignWorkset = planOfficialApiSemanticWorkset(text, foreignMessages);
+    const original = originalWorkset.units[0]!;
+    const foreign = foreignWorkset.units[0]!;
+    expect(original.binding.sourceCorpusIdentity).toBe(foreign.binding.sourceCorpusIdentity);
+    expect(original.binding.locator.contract_version).toBe(foreign.binding.locator.contract_version);
+    expect(original.binding.occurrenceIdentity).not.toBe(foreign.binding.occurrenceIdentity);
+    const binding = bindFrozenAssertionToCurrentSource(row({
+      occurrence: {
+        source_message_ids: ["original-message"],
+        source_locator: original.binding.locator,
+        source_occurrence_identity: original.binding.occurrenceIdentity,
+        occurrence_bindings: [{
+          occurrenceIdentity: original.binding.occurrenceIdentity,
+          sourceCorpusIdentity: original.binding.sourceCorpusIdentity,
+          locator: original.binding.locator,
+          source_message_id: "original-message"
+        }]
+      }
+    }), {
+      catalogUnits: [foreign],
+      requests: [{
+        key: "request-foreign",
+        source_corpus_identity: foreign.binding.sourceCorpusIdentity,
+        message_ids: ["foreign-message"],
+        source_assertions: [{ assertion_id: foreign.assertionId, text: foreign.text }]
+      }]
+    });
+    expect(binding.status).not.toBe("bound");
+    expect(binding.status).toBe("unbound");
+    expect(binding.current).toEqual([]);
+    expect(binding.occurrences).toHaveLength(1);
+    expect(binding.occurrences[0]?.status).toBe("lost");
+    expect(binding.occurrences[0]?.current).toBeNull();
+    expect(binding.occurrences[0]?.reason).not.toMatch(/migrated through native source identity/u);
+    expect(binding.occurrences[0]?.frozen).toMatchObject({
+      occurrenceIdentity: original.binding.occurrenceIdentity,
+      sourceCorpusIdentity: original.binding.sourceCorpusIdentity,
+      source_message_id: "original-message",
+      locator: {
+        start: original.binding.locator.start,
+        end: original.binding.locator.end
+      }
+    });
+  });
+
   it("does not widen to same-text when a frozen locator restriction has zero hits", () => {
     const workset = planOfficialApiSemanticWorkset(text, [{ role: "user", content: text }]);
     const unit = workset.units[0]!;

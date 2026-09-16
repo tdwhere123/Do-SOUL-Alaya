@@ -87,6 +87,46 @@ describe("frozen enrichment population", () => {
     expect((thrown as Error).name).toBe("FrozenPopulationMembershipError");
   });
 
+  it("rejects replaced canonical index 16 with 99 even when classification totals still match 38/15/21/2", () => {
+    const population = validPopulation();
+    population.canonical.requests[15]!.canonical_index = 99;
+    root = writePopulation(population);
+    let thrown: unknown;
+    try {
+      loadFrozenEnrichmentPopulation({
+        regressionPath: join(root, "regression-source-review.json"),
+        canonicalPath: join(root, "canonical-source-review.json")
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(FrozenPopulationMembershipError);
+    expect(thrown).not.toBeInstanceOf(FrozenPopulationCountError);
+    expect((thrown as Error).name).toBe("FrozenPopulationMembershipError");
+  });
+
+  it("rejects canonical request 3 replaced by a clone of request 2 even when classification totals still match 38/15/21/2", () => {
+    const population = validPopulation();
+    const clone = structuredClone(population.canonical.requests[1]!) as {
+      assertion_reviews: { assertion_id: number }[];
+    };
+    clone.assertion_reviews[0]!.assertion_id = 2;
+    population.canonical.requests[2] = clone;
+    root = writePopulation(population);
+    let thrown: unknown;
+    try {
+      loadFrozenEnrichmentPopulation({
+        regressionPath: join(root, "regression-source-review.json"),
+        canonicalPath: join(root, "canonical-source-review.json")
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(FrozenPopulationMembershipError);
+    expect(thrown).not.toBeInstanceOf(FrozenPopulationCountError);
+    expect((thrown as Error).name).toBe("FrozenPopulationMembershipError");
+  });
+
   it.skipIf(!FROZEN_ANNOTATIONS_AVAILABLE)(
     "loads frozen annotations with unique 1-16 membership, first-eight IDs, and canonical 12/2 review dimensions",
     () => {

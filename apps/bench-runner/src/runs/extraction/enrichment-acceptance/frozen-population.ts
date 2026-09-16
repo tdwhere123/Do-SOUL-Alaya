@@ -11,6 +11,29 @@ const REGRESSION_ASSERTION_IDS = Object.freeze(Array.from({ length: 16 }, (_, in
 const ASPIRATION_REGRESSION_IDS = new Set([2, 6]);
 const REGRESSION_DUPLICATE_OF: Readonly<Record<number, number>> = Object.freeze({ 6: 2 });
 
+/** Frozen canonical request identity: indexes 1-16 once, and the local assertion_id set per index. */
+const CANONICAL_LOCAL_ASSERTION_MEMBERSHIP: Readonly<Record<number, readonly number[]>> = Object.freeze({
+  1: Object.freeze([1, 2]),
+  2: Object.freeze([1]),
+  3: Object.freeze([1]),
+  4: Object.freeze([1]),
+  5: Object.freeze([1]),
+  6: Object.freeze([1]),
+  7: Object.freeze([1]),
+  8: Object.freeze([1, 2]),
+  9: Object.freeze([1]),
+  10: Object.freeze([1, 2]),
+  11: Object.freeze([1]),
+  12: Object.freeze([1, 2]),
+  13: Object.freeze([1]),
+  14: Object.freeze([1, 2]),
+  15: Object.freeze([1]),
+  16: Object.freeze([1, 2])
+});
+const CANONICAL_REQUEST_INDEXES = Object.freeze(
+  Object.keys(CANONICAL_LOCAL_ASSERTION_MEMBERSHIP).map(Number).sort((left, right) => left - right)
+);
+
 export type FrozenPopulationKind = "regression" | "canonical";
 export type FrozenClassification = "required" | "optional" | "unresolved";
 
@@ -161,7 +184,7 @@ function readRegressionRows(filePath: string, document: Record<string, unknown>)
 
 function readCanonicalRows(filePath: string, document: Record<string, unknown>): readonly FrozenAssertion[] {
   const requests = document.requests;
-  if (!Array.isArray(requests) || requests.length !== 16) {
+  if (!Array.isArray(requests) || requests.length !== CANONICAL_REQUEST_INDEXES.length) {
     throw new TypeError("canonical annotations must contain 16 requests");
   }
   const file = basename(filePath);
@@ -180,12 +203,18 @@ function readCanonicalRows(filePath: string, document: Record<string, unknown>):
       const classification = mapFrozenClassification(review.classification);
       const exactText = readString(review.exact_text, "canonical exact_text");
       const semanticReview = readSemanticReview(review);
+      const reviewKey = readString(review.key ?? requestKey, "canonical review key");
+      if (reviewKey !== requestKey) {
+        throw new FrozenPopulationMembershipError(
+          `canonical assertion review key does not match parent request key at canonical_index ${canonicalIndex}`
+        );
+      }
       rows.push(freezeAssertion({
         population: "canonical",
         annotation_pointer: Object.freeze({
           file,
           assertion_id: assertionId,
-          request_key: readString(review.key ?? requestKey, "canonical review key"),
+          request_key: reviewKey,
           canonical_index: canonicalIndex
         }),
         original_ordinal: assertionId,
@@ -266,20 +295,62 @@ function assertFrozenPopulationMembership(rows: readonly FrozenAssertion[]): voi
       "regression assertion 6 must remain the optional aspiration alias of assertion 2"
     );
   }
-  const canonicalLocalIds = new Set<string>();
+  assertCanonicalRequestMembership(rows);
+}
+
+function assertCanonicalRequestMembership(rows: readonly FrozenAssertion[]): void {
+  const byIndex = new Map<number, { key: string; assertionIds: number[] }>();
   for (const row of rows) {
     if (row.population !== "canonical") continue;
     const canonicalIndex = row.annotation_pointer.canonical_index;
     if (canonicalIndex === null) {
       throw new FrozenPopulationMembershipError("canonical assertion is missing canonical_index");
     }
-    const localId = `${canonicalIndex}:${row.annotation_pointer.assertion_id}`;
-    if (canonicalLocalIds.has(localId)) {
+    const assertionId = row.annotation_pointer.assertion_id;
+    const requestKey = row.annotation_pointer.request_key;
+    const existing = byIndex.get(canonicalIndex);
+    if (existing === undefined) {
+      byIndex.set(canonicalIndex, { key: requestKey, assertionIds: [assertionId] });
+      continue;
+    }
+    if (existing.key !== requestKey) {
       throw new FrozenPopulationMembershipError(
-        `canonical local assertion identity ${localId} is duplicated within a request`
+        `canonical request key collision at canonical_index ${canonicalIndex}`
       );
     }
-    canonicalLocalIds.add(localId);
+    if (existing.assertionIds.includes(assertionId)) {
+      throw new FrozenPopulationMembershipError(
+        `canonical local assertion identity ${canonicalIndex}:${assertionId} is duplicated within a request`
+      );
+    }
+    existing.assertionIds.push(assertionId);
+  }
+  if (
+    byIndex.size !== CANONICAL_REQUEST_INDEXES.length
+    || CANONICAL_REQUEST_INDEXES.some((index) => !byIndex.has(index))
+  ) {
+    throw new FrozenPopulationMembershipError(
+      "canonical request membership must contain unique canonical_index values 1-16"
+    );
+  }
+  const distinctKeys = new Set(Array.from(byIndex.values(), (entry) => entry.key));
+  if (distinctKeys.size !== CANONICAL_REQUEST_INDEXES.length) {
+    throw new FrozenPopulationMembershipError(
+      "canonical request membership must contain 16 distinct request keys"
+    );
+  }
+  for (const index of CANONICAL_REQUEST_INDEXES) {
+    const observed = byIndex.get(index)?.assertionIds ?? [];
+    const expected = CANONICAL_LOCAL_ASSERTION_MEMBERSHIP[index] ?? [];
+    const observedSet = new Set(observed);
+    if (
+      observedSet.size !== expected.length
+      || expected.some((assertionId) => !observedSet.has(assertionId))
+    ) {
+      throw new FrozenPopulationMembershipError(
+        `canonical local assertion membership at canonical_index ${index} does not match the frozen inventory`
+      );
+    }
   }
 }
 

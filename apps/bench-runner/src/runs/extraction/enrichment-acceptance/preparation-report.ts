@@ -226,7 +226,11 @@ function composeRow(
   const current = binding?.current ?? [];
   const unique = current.length === 1 ? current[0]! : null;
   const nativeCells = Object.freeze(
-    natives.filter((item) => nativeOutcomeMatches(item, row, binding))
+    materializeMissingExpectedRequestCells(
+      row,
+      unique,
+      natives.filter((item) => nativeOutcomeMatches(item, row, binding))
+    )
   );
   const quality = qualities.find((item) => (
     pointerFieldsKey(item.annotation_pointer) === pointerFieldsKey(row.annotation_pointer)
@@ -269,16 +273,65 @@ function nativeOutcomeMatches(
   binding: FrozenAssertionBinding | null
 ): boolean {
   if (outcome.annotation_pointer !== undefined) {
-    return pointerFieldsKey(outcome.annotation_pointer) === pointerFieldsKey(row.annotation_pointer);
+    if (pointerFieldsKey(outcome.annotation_pointer) !== pointerFieldsKey(row.annotation_pointer)) {
+      return false;
+    }
+    return suppliedIdentitiesAgreeWithBinding(outcome, binding);
   }
   if (binding === null) return false;
   if (outcome.request_key === undefined || outcome.current_assertion_id === undefined) {
     return false;
   }
-  return binding.current.some((item) =>
-    item.assertion_id === outcome.current_assertion_id &&
-    item.request_keys !== null &&
-    item.request_keys.includes(outcome.request_key!));
+  return binding.current.some((item) => currentIdentityAgrees(item, outcome));
+}
+
+function suppliedIdentitiesAgreeWithBinding(
+  outcome: EnrichmentBoundNativeOutcome,
+  binding: FrozenAssertionBinding | null
+): boolean {
+  // Pointer-only authored evidence may attribute by pointer. Supplied request
+  // or assertion identities must still agree with one current binding source.
+  if (outcome.request_key === undefined && outcome.current_assertion_id === undefined) {
+    return true;
+  }
+  if (binding === null) return false;
+  return binding.current.some((item) => currentIdentityAgrees(item, outcome));
+}
+
+function currentIdentityAgrees(
+  item: FrozenBoundCurrentSource,
+  outcome: EnrichmentBoundNativeOutcome
+): boolean {
+  if (outcome.current_assertion_id !== undefined && item.assertion_id !== outcome.current_assertion_id) {
+    return false;
+  }
+  if (outcome.request_key === undefined) return true;
+  return item.request_keys !== null && item.request_keys.includes(outcome.request_key);
+}
+
+function materializeMissingExpectedRequestCells(
+  row: FrozenAssertion,
+  current: FrozenBoundCurrentSource | null,
+  attributed: readonly EnrichmentBoundNativeOutcome[]
+): readonly EnrichmentBoundNativeOutcome[] {
+  if (current === null || current.request_keys === null) return attributed;
+  const accounted = new Set(
+    attributed.flatMap((item) => item.request_key === undefined ? [] : [item.request_key])
+  );
+  const missing = current.request_keys.flatMap((key) => {
+    if (accounted.has(key)) return [];
+    accounted.add(key);
+    return [Object.freeze({
+      annotation_pointer: row.annotation_pointer,
+      request_key: key,
+      current_assertion_id: current.assertion_id,
+      request_ordinal: null,
+      candidate_ordinal: null,
+      raw_state: "missing" as const,
+      machine_admission: "missing" as const
+    })];
+  });
+  return missing.length === 0 ? attributed : [...attributed, ...missing];
 }
 
 function indexBindings(
@@ -372,10 +425,14 @@ function publicationDomainState(
   fixtures: readonly EnrichmentFixtureOutcome[],
   rowStates: readonly PreparationCellState[]
 ): PreparationCellState {
-  // Fixture result is test success or failure; cell_state is the domain outcome.
+  // Fixture cell_state is mechanism evidence only. Attributed native or
+  // missing-cell row states own the machine domain whenever any row is not
+  // solely missing; fixture-only tests still publish their cell_state.
+  if (rowStates.some((state) => state !== "missing")) {
+    return domainCellState(rowStates);
+  }
   const fromFixtures = fixtureDomainStates(fixtures);
   if (fromFixtures.length > 0) return domainCellState(fromFixtures);
-  if (rowStates.length > 0) return domainCellState(rowStates);
   if (fixtures.some((item) => item.result === "not_run" || item.result === "not_verified")) {
     return "unknown";
   }

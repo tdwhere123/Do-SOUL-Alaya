@@ -342,10 +342,19 @@ function migrateRestrictedUnits(
       unit.binding.locator.start === spec.locator!.start &&
       unit.binding.locator.end === spec.locator!.end);
   }
+  // Same corpus identity is not the same message occurrence. When the frozen
+  // message is known, keep same-corpus hits only if a current request carries
+  // that message; otherwise leave the slot lost rather than substituting.
   if (spec.sourceCorpusIdentity !== null) {
     const corpusHits = hits.filter((unit) =>
       unit.binding.sourceCorpusIdentity === spec.sourceCorpusIdentity);
-    if (corpusHits.length > 0) return corpusHits;
+    if (corpusHits.length > 0) {
+      if (spec.source_message_id === null) return corpusHits;
+      return corpusHits.filter((unit) =>
+        (input.requests ?? []).some((request) =>
+          requestHasMessage(request, spec.source_message_id!) &&
+          requestIncludesUnit(request, unit)));
+    }
   }
   if (spec.source_message_id === null) return [];
   const local = corporaForMessage(spec.source_message_id, input);
