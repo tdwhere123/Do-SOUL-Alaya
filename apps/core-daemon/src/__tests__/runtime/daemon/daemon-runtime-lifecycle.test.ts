@@ -393,11 +393,11 @@ describe("createDaemonLifecycleControls", () => {
 
     controls.startBackgroundServices();
     const shutdown = controls.shutdown();
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith("waiting for garden background drain before sqlite close", {});
+    });
     expect(database.close).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith("garden background manager shutdown timed out", {});
-    expect(warn).toHaveBeenCalledWith("waiting for garden background drain before sqlite close", {});
     releaseIdle();
     await shutdown;
     expect(database.close).toHaveBeenCalledTimes(1);
