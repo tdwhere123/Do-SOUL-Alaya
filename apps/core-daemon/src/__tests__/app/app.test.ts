@@ -392,7 +392,8 @@ describe("createApp", () => {
         model_id: null,
         provider_url: null,
         secret_ref: null
-      }
+      },
+      requires_daemon_restart: true
     });
     expect(patchRuntimeEmbeddingConfig).toHaveBeenCalledWith({ embedding_enabled: true });
   });
