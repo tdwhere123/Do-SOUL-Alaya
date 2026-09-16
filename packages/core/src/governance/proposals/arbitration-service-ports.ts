@@ -59,6 +59,7 @@ export interface ArbitrationServiceClaimServicePort {
 export interface ArbitrationServiceEventLogRepoPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  transactional<T>(fn: () => T): T;
 }
 
 export interface ArbitrationRuntimeNotifierPort {

@@ -176,7 +176,8 @@ function createDependencies(seed: {
       append: appendSpy,
       queryByEntity: vi.fn(async (entityType: string, entityId: string) =>
         eventLog.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
-      )
+      ),
+      transactional: identityTxn
     },
     runtimeNotifier: {
       notifyEntry: broadcastSpy
@@ -488,3 +489,7 @@ describe("ArbitrationService", () => {
     await expect(service.listEdgesByWorkspace(WORKSPACE_ID)).resolves.toHaveLength(1);
   });
 });
+
+function identityTxn<T>(fn: () => T): T {
+  return fn();
+}

@@ -9,7 +9,7 @@ import type {
 export interface ProjectMappingServiceEventLogRepoPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
-  transactional?<T>(fn: () => T): T;
+  transactional<T>(fn: () => T): T;
 }
 
 export interface ProjectMappingServiceProjectMappingRepoPort {

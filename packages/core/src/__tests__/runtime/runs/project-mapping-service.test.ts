@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AcceptedBy, ConfirmationPolicy, MemoryDimension, ObjectLifecycleState, ProjectMappingEventType, ProjectMappingState, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { ProjectMappingService, StrictConfirmationRequired } from "../../../runtime/runs/project-mapping-service.js";
-import { createAnchor, createDependencies, createMemoryEntry } from "./project-mapping-service-test-fixtures.js";
+import { createAnchor, createDependencies, createMemoryEntry, identityTxn } from "./project-mapping-service-test-fixtures.js";
 
 describe("ProjectMappingService", () => {
 it("suggests a new anchor and appends the suggestion event before persisting it", async () => {
@@ -21,7 +21,8 @@ it("suggests a new anchor and appends the suggestion event before persisting it"
         queryByEntity: vi.fn(async () => {
           order.push("event_query");
           return [];
-        })
+        }),
+        transactional: identityTxn
       },
       projectMappingRepo: {
         ...createDependencies().dependencies.projectMappingRepo,
@@ -243,7 +244,8 @@ it("blocks batch acceptance when any anchor requires strict confirmation", async
       },
       eventLogRepo: {
         append,
-        queryByEntity: vi.fn(async () => [])
+        queryByEntity: vi.fn(async () => []),
+        transactional: identityTxn
       }
     });
     const service = new ProjectMappingService(dependencies);

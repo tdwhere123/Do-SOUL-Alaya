@@ -170,7 +170,8 @@ export function createDependencies(overrides: Partial<ProjectMappingServiceDepen
     },
     eventLogRepo: {
       append: appendSpy,
-      queryByEntity: queryByEntitySpy
+      queryByEntity: queryByEntitySpy,
+      transactional: identityTxn
     },
     runtimeNotifier: {
       notifyEntry: () => undefined
@@ -185,4 +186,8 @@ export function createDependencies(overrides: Partial<ProjectMappingServiceDepen
     createdAnchors,
     stateUpdates
   };
+}
+
+export function identityTxn<T>(fn: () => T): T {
+  return fn();
 }
