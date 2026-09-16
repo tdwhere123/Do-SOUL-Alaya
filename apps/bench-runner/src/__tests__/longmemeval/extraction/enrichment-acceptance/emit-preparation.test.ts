@@ -152,7 +152,8 @@ describe("enrichment preparation emit", () => {
         source_corpus_identity: original.binding.sourceCorpusIdentity,
         assertion_ids: [original.assertionId],
         assertion_texts: [original.text],
-        occurrence_identities: [original.binding.occurrenceIdentity ?? null],
+        occurrence_provenance: [{ assertion_id: original.assertionId,
+          occurrenceIdentity: original.binding.occurrenceIdentity, source_message_id: "original-message" }],
         user_prompt: TEXT,
         unit_keys: [original.semanticKey],
         message_ids: ["original-message"]

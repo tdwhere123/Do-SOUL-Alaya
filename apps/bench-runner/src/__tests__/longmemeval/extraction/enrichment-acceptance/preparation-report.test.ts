@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { planOfficialApiSemanticWorkset } from "@do-soul/alaya-soul";
 import type { FrozenAssertion } from "../../../../runs/extraction/enrichment-acceptance/frozen-population.js";
 import {
   bindFrozenPopulation,
@@ -116,6 +117,78 @@ function twoOccurrenceRow(units: FrozenCatalogUnit[]): FrozenAssertion {
 }
 
 describe("enrichment preparation report", () => {
+  it("retains a missing sibling assertion in the same native request", () => {
+    const text = `${TEXT} ${TEXT}`;
+    const units = planOfficialApiSemanticWorkset(text, [{ role: "user", content: text }]).units;
+    expect(units).toHaveLength(2);
+    const frozen = twoOccurrenceRow([...units]);
+    const bindings = bindFrozenPopulation([frozen], { catalogUnits: units, requests: [{
+      key: "same-request", source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+      source_assertions: units.map((unit) => ({ assertion_id: unit.assertionId, text: unit.text,
+        occurrenceIdentity: unit.binding.occurrenceIdentity }))
+    }] });
+    const cell = nativeCell(frozen, { request_key: "same-request", current_assertion_id: units[0]!.assertionId });
+    const report = composeEnrichmentPreparationReport({ population: { rows: [frozen] }, bindings,
+      preflight: null, nativeOutcomes: [cell] });
+    expect(report.source_fidelity.rows[0]!.native_cells).toHaveLength(2);
+    expect(report.source_fidelity.rows[0]!.native_cells[1]).toMatchObject({
+      current_assertion_id: units[1]!.assertionId, occurrence_identity: units[1]!.binding.occurrenceIdentity,
+      raw_state: "missing", machine_admission: "missing"
+    });
+    expect(report.native_formation_publication.status).toBe("partial");
+  });
+
+  it("keeps the full denominator but excludes unselected rows from stage missing cells", () => {
+    const rows = Array.from({ length: 38 }, (_, index) => row(index + 1, "optional", null, index < 8));
+    const bindings = bindFrozenPopulation(rows, { catalogUnits: [] });
+    const report = composeEnrichmentPreparationReport({ population: { rows }, bindings,
+      preflight: null, selectedStage: "first_stage", nativeOutcomes: rows.slice(0, 8).map((source) => nativeCell(source)) });
+    expect(report.source_fidelity.denominator).toBe(38);
+    expect(report.source_fidelity.rows.filter((source) => source.selected)).toHaveLength(8);
+    expect(report.source_fidelity.rows.slice(8).every((source) =>
+      source.raw_state === "not_exercised" && source.native_cells.length === 0)).toBe(true);
+    expect(report.native_formation_publication.machine_admission).toBe("valid-empty");
+    const missing = composeEnrichmentPreparationReport({ population: { rows }, bindings,
+      preflight: null, selectedStage: "first_stage", nativeOutcomes: rows.slice(0, 7).map((source) => nativeCell(source)) });
+    expect(missing.native_formation_publication.machine_admission).toBe("partial");
+  });
+
+  it("requires occurrence attribution when a request assertion is shared by two source occurrences", () => {
+    const units = ["original", "repeated"].map((message_id) => {
+      const messages = [{ role: "user" as const, content: TEXT, message_id }];
+      return planOfficialApiSemanticWorkset(TEXT, messages).units[0]!;
+    });
+    const frozen = twoOccurrenceRow(units);
+    const bindings = bindFrozenPopulation([frozen], { catalogUnits: units, requests: [{
+      key: "shared", source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+      source_assertions: units.map((unit) => ({ assertion_id: unit.assertionId, text: unit.text,
+        occurrenceIdentity: unit.binding.occurrenceIdentity }))
+    }] });
+    const cell = nativeCell(frozen, { request_key: "shared", current_assertion_id: 1,
+      occurrence_identity: units[0]!.binding.occurrenceIdentity });
+    const report = composeEnrichmentPreparationReport({ population: { rows: [frozen] }, bindings,
+      preflight: null, nativeOutcomes: [cell] });
+    expect(report.source_fidelity.rows[0]!.native_cells).toHaveLength(2);
+    expect(report.source_fidelity.rows[0]!.native_cells[1]).toMatchObject({ raw_state: "missing",
+      occurrence_identity: units[1]!.binding.occurrenceIdentity });
+    const complete = composeEnrichmentPreparationReport({ population: { rows: [frozen] }, bindings,
+      preflight: null, nativeOutcomes: [cell, { ...cell, occurrence_identity: units[1]!.binding.occurrenceIdentity }] });
+    expect(complete.native_formation_publication.status).toBe("valid-empty");
+    const conflicting = composeEnrichmentPreparationReport({ population: { rows: [frozen] }, bindings,
+      preflight: null, nativeOutcomes: [{ ...cell, occurrence_identity: "unrelated" }] });
+    expect(conflicting.native_formation_publication.unmatched_native_outcomes).toHaveLength(1);
+    expect(conflicting.native_formation_publication.status).toBe("missing");
+  });
+
+  it("does not let fixture valid-empty replace absent selected native observations", () => {
+    const rows = [row(1, "optional", null)];
+    const report = composeEnrichmentPreparationReport({ population: { rows },
+      bindings: bindFrozenPopulation(rows, { catalogUnits: [] }), preflight: null,
+      fixtureOutcomes: [{ name: "authored empty", kind: "native_formation_publication",
+        result: "passed", cell_state: "valid-empty" }] });
+    expect(report.native_formation_publication.machine_admission).toBe("missing");
+    expect(report.native_formation_publication.fixture_outcomes[0]!.cell_state).toBe("valid-empty");
+  });
   it("separates evidence layers and keeps human verdicts unreviewed", () => {
     const population = { rows: [
       row(1, "optional", null),
@@ -237,7 +310,7 @@ describe("enrichment preparation report", () => {
     expect(partialReport.source_fidelity.rows[0]?.occurrences[1]?.status).toBe("lost");
   });
 
-  it("records machine admission partial when a passing fixture has cell_state partial", () => {
+  it("retains partial fixture evidence separately from missing native outcomes", () => {
     const population = { rows: [row(2, "required", "aspiration")] };
     const report = composeEnrichmentPreparationReport({
       population,
@@ -250,12 +323,13 @@ describe("enrichment preparation report", () => {
         cell_state: "partial"
       }]
     });
-    expect(report.native_formation_publication.status).toBe("partial");
-    expect(report.native_formation_publication.machine_admission).toBe("partial");
+    expect(report.native_formation_publication.status).toBe("missing");
+    expect(report.native_formation_publication.machine_admission).toBe("missing");
+    expect(report.native_formation_publication.fixture_outcomes[0]!.cell_state).toBe("partial");
     expect(report.native_formation_publication.machine_admission).not.toBe("unreviewed");
   });
 
-  it("records domain rejected when a passing fixture has cell_state rejected", () => {
+  it("retains rejected fixture evidence separately from missing native outcomes", () => {
     const population = { rows: [row(2, "required", "aspiration")] };
     const report = composeEnrichmentPreparationReport({
       population,
@@ -268,8 +342,9 @@ describe("enrichment preparation report", () => {
         cell_state: "rejected"
       }]
     });
-    expect(report.native_formation_publication.status).toBe("rejected");
-    expect(report.native_formation_publication.machine_admission).toBe("rejected");
+    expect(report.native_formation_publication.status).toBe("missing");
+    expect(report.native_formation_publication.machine_admission).toBe("missing");
+    expect(report.native_formation_publication.fixture_outcomes[0]!.cell_state).toBe("rejected");
     expect(report.native_formation_publication.status).not.toBe("unreviewed");
   });
 
@@ -597,12 +672,14 @@ describe("enrichment preparation report", () => {
         {
           key: "first-request",
           source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
-          source_assertions: [{ assertion_id: units[0]!.assertionId, text: units[0]!.text }]
+          source_assertions: [{ assertion_id: units[0]!.assertionId, text: units[0]!.text,
+            occurrenceIdentity: units[0]!.binding.occurrenceIdentity }]
         },
         {
           key: "second-request",
           source_corpus_identity: units[1]!.binding.sourceCorpusIdentity,
-          source_assertions: [{ assertion_id: units[1]!.assertionId, text: units[1]!.text }]
+          source_assertions: [{ assertion_id: units[1]!.assertionId, text: units[1]!.text,
+            occurrenceIdentity: units[1]!.binding.occurrenceIdentity }]
         }
       ]
     });

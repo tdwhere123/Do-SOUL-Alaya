@@ -107,7 +107,8 @@ export async function emitEnrichmentPreparation(
     const report = composeEnrichmentPreparationReport({
       population,
       bindings,
-      preflight
+      preflight,
+      selectedStage: "none"
     });
     const candidate = input.candidate ?? ENRICHMENT_PREPARATION_CANDIDATE_PLACEHOLDER;
     const codeTree = input.codeTree ?? ENRICHMENT_PREPARATION_CANDIDATE_PLACEHOLDER;
@@ -161,16 +162,10 @@ export function toBindingRequests(
     key: request.key,
     source_corpus_identity: request.source_corpus_identity,
     message_ids: request.message_ids,
-    source_assertions: Object.freeze(request.assertion_ids.map((assertionId, index) => {
-      const occurrenceIdentity = request.occurrence_identities[index];
-      return Object.freeze({
-        assertion_id: assertionId,
-        text: request.assertion_texts[index] ?? "",
-        ...(occurrenceIdentity === undefined || occurrenceIdentity === null
-          ? {}
-          : { occurrenceIdentity })
-      });
-    }))
+    source_assertions: Object.freeze(request.occurrence_provenance.map((occurrence) => ({
+      ...occurrence,
+      text: request.assertion_texts[request.assertion_ids.indexOf(occurrence.assertion_id)] ?? ""
+    })))
   })));
 }
 

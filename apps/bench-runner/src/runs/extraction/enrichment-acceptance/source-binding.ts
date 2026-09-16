@@ -41,6 +41,7 @@ export interface FrozenBindingRequest {
     readonly assertion_id: number;
     readonly text: string;
     readonly occurrenceIdentity?: string;
+    readonly source_message_id?: string | null;
   }[];
   readonly source_corpus_identity?: string;
   readonly message_ids?: readonly string[];
@@ -147,7 +148,9 @@ function bindRestrictedOccurrences(
   const claimed = new Set<string>();
   const slots: Array<FrozenOccurrenceBinding | null> = specs.map(() => null);
   for (const [index, spec] of specs.entries()) {
-    const hits = selectRestrictedUnits(row, spec, catalogs).filter((unit) => !claimed.has(unitKey(unit)));
+    const hits = selectRestrictedUnits(row, spec, catalogs).filter((unit) =>
+      !claimed.has(unitKey(unit)) && (spec.occurrenceIdentity !== null ||
+        spec.source_message_id === null || unitPackedInFrozenMessage(unit, spec.source_message_id, input)));
     if (hits.length === 1) {
       claimed.add(unitKey(hits[0]!));
       slots[index] = occurrenceBinding(
@@ -343,9 +346,8 @@ function migrateRestrictedUnits(
       unit.binding.locator.start === spec.locator!.start &&
       unit.binding.locator.end === spec.locator!.end);
   }
-  // Same corpus identity is not the same message occurrence. Same-corpus hits
-  // stay only when a request that carries the frozen message packed this unit's
-  // current occurrence identity; assertion_id coincidence is not provenance.
+  // Same corpus identity is not message provenance. Migration needs the native
+  // containing-message witness for this precise packed occurrence.
   if (spec.sourceCorpusIdentity !== null) {
     const corpusHits = hits.filter((unit) =>
       unit.binding.sourceCorpusIdentity === spec.sourceCorpusIdentity);
@@ -379,6 +381,7 @@ function corporaForMessage(
 }
 
 function requestHasMessage(request: FrozenBindingRequest, messageId: string): boolean {
+  if (request.source_assertions.some((assertion) => assertion.source_message_id === messageId)) return true;
   if (request.message_ids?.includes(messageId) === true) return true;
   return request.sourceTurn?.turnMessages.some((message) => message.message_id === messageId) === true;
 }
@@ -391,8 +394,11 @@ function unitPackedInFrozenMessage(
   const occurrenceIdentity = unit.binding.occurrenceIdentity;
   if (occurrenceIdentity === undefined || occurrenceIdentity.length === 0) return false;
   return (input.requests ?? []).some((request) =>
-    requestHasMessage(request, messageId) &&
-    request.source_assertions.some((assertion) => assertion.occurrenceIdentity === occurrenceIdentity));
+    request.source_corpus_identity === unit.binding.sourceCorpusIdentity &&
+    request.source_assertions.some((assertion) =>
+      assertion.assertion_id === unit.assertionId &&
+      assertion.occurrenceIdentity === occurrenceIdentity &&
+      assertion.source_message_id === messageId));
 }
 
 function unitMatchesRestriction(
@@ -504,7 +510,9 @@ function requestIncludesUnit(request: FrozenBindingRequest, unit: FrozenCatalogU
       request.source_corpus_identity !== unit.binding.sourceCorpusIdentity) {
     return false;
   }
-  return request.source_assertions.some((assertion) => assertion.assertion_id === unit.assertionId);
+  return request.source_assertions.some((assertion) => assertion.assertion_id === unit.assertionId &&
+    (assertion.occurrenceIdentity === undefined ||
+      assertion.occurrenceIdentity === unit.binding.occurrenceIdentity));
 }
 
 function collectSourceCorpora(input: FrozenSourceBindingInput): readonly string[] | null {
@@ -537,7 +545,8 @@ function packingCardinalities(input: FrozenSourceBindingInput): FrozenPackingCar
       : Object.freeze(input.packs.map((pack) => pack.assertion_ids.length)),
     request_assertion_cardinalities: input.requests === undefined
       ? null
-      : Object.freeze(input.requests.map((request) => request.source_assertions.length)),
+      : Object.freeze(input.requests.map((request) =>
+        new Set(request.source_assertions.map((assertion) => assertion.assertion_id)).size)),
     unit_count: input.catalogUnits.length
   });
 }

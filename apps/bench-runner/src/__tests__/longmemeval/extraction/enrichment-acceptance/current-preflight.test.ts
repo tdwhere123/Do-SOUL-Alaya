@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SOURCE_INTERPRETATION_CONTRACT } from "@do-soul/alaya-protocol";
 import { planOfficialApiSemanticWorkset } from "@do-soul/alaya-soul";
 import type { FrozenAssertion } from "../../../../runs/extraction/enrichment-acceptance/frozen-population.js";
+import { toBindingRequests } from "../../../../runs/extraction/enrichment-acceptance/emit-preparation.js";
+import { bindFrozenPopulation } from "../../../../runs/extraction/enrichment-acceptance/source-binding.js";
 import {
   ENRICHMENT_PREFLIGHT_CAPABILITY,
   ENRICHMENT_PREFLIGHT_MAX_OUTPUT_TOKENS,
@@ -132,7 +134,7 @@ describe("current enrichment preflight", () => {
     expect(empty.attempted_fetches).toBe(0);
   });
 
-  it("records occurrence identities from the request source turn instead of merged units", async () => {
+  it("retains both native message occurrences behind one deduplicated request", async () => {
     const originalMessages = [{
       role: "user" as const,
       content: text,
@@ -159,17 +161,14 @@ describe("current enrichment preflight", () => {
       ],
       datasetRevision: "synthetic-revision"
     });
-    for (const request of preflight.requests) {
-      const local = planOfficialApiSemanticWorkset(
-        request.message_ids.includes("foreign-message") ? text : text,
-        request.message_ids.includes("foreign-message") ? foreignMessages : originalMessages,
-        "synthetic-revision"
-      ).units[0]!.binding.occurrenceIdentity;
-      if (request.occurrence_identities.length === 0) continue;
-      expect(request.occurrence_identities[0]).toBe(local);
-      expect(request.occurrence_identities[0]).not.toBe(
-        local === originalOcc ? foreignOcc : originalOcc
-      );
-    }
+    expect(preflight.requests).toHaveLength(1);
+    expect(preflight.requests[0]!.occurrence_provenance).toEqual(expect.arrayContaining([
+      { assertion_id: 1, occurrenceIdentity: originalOcc, source_message_id: "original-message" },
+      { assertion_id: 1, occurrenceIdentity: foreignOcc, source_message_id: "foreign-message" }
+    ]));
+    const requests = toBindingRequests(preflight);
+    expect(requests[0]!.source_assertions).toHaveLength(2);
+    const bindings = bindFrozenPopulation([], { catalogUnits: preflight.units, requests });
+    expect(bindings.packing.request_assertion_cardinalities).toEqual([1]);
   });
 });

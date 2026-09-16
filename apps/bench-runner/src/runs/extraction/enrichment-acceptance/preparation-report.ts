@@ -12,6 +12,7 @@ export type HumanSemanticVerdict = "unreviewed";
 export type SemanticQualityCell = "unreviewed" | "hold" | "failed";
 export type PublicConsumptionState = "not_exercised" | "not_verified" | "exercised";
 export type PreparationCellState =
+  | "not_exercised"
   | "missing"
   | "valid-empty"
   | "partial"
@@ -36,6 +37,7 @@ export interface EnrichmentBoundNativeOutcome {
   readonly annotation_pointer?: FrozenAssertion["annotation_pointer"];
   readonly request_key?: string;
   readonly current_assertion_id?: number;
+  readonly occurrence_identity?: string;
   readonly request_ordinal: number | null;
   readonly candidate_ordinal: number | null;
   readonly raw_state: PreparationCellState;
@@ -59,6 +61,7 @@ export interface EnrichmentPreparationRow {
   readonly classification: FrozenClassification;
   readonly required_group_id: string | null;
   readonly first_stage_subset: boolean;
+  readonly selected: boolean;
   readonly duplicate_of: number | null;
   readonly binding_status: FrozenBindingStatus;
   readonly binding_reason: string;
@@ -118,6 +121,7 @@ export interface EnrichmentPreparationReport {
     readonly fixture_outcomes: readonly EnrichmentFixtureOutcome[];
   };
   readonly native_formation_publication: {
+    readonly selected_stage: "full" | "first_stage" | "none";
     readonly status: PreparationCellState;
     readonly machine_admission: PreparationCellState;
     readonly human_verdict: HumanSemanticVerdict;
@@ -141,14 +145,17 @@ export function composeEnrichmentPreparationReport(input: {
   readonly fixtureOutcomes?: readonly EnrichmentFixtureOutcome[];
   readonly nativeOutcomes?: readonly EnrichmentBoundNativeOutcome[];
   readonly semanticAnnotations?: readonly EnrichmentSemanticQualityAnnotation[];
+  readonly selectedStage?: "full" | "first_stage" | "none";
 }): EnrichmentPreparationReport {
   const fixtures = Object.freeze([...(input.fixtureOutcomes ?? [])]);
   const natives = Object.freeze([...(input.nativeOutcomes ?? [])]);
   const qualities = Object.freeze([...(input.semanticAnnotations ?? [])]);
   const byPointer = indexBindings(input.bindings.bindings);
+  const selectedStage = input.selectedStage ?? "full";
   const rows = Object.freeze(input.population.rows.map((row) => {
     const binding = byPointer.get(pointerKey(row)) ?? null;
-    return composeRow(row, binding, natives, qualities);
+    const selected = selectedStage === "full" || selectedStage === "first_stage" && row.first_stage_subset;
+    return composeRow(row, binding, natives, qualities, selected);
   }));
   const matchedCells = new Set(rows.flatMap((row) => row.native_cells));
   const unmatchedNatives = Object.freeze(natives.filter((item) => !matchedCells.has(item)));
@@ -199,11 +206,9 @@ export function composeEnrichmentPreparationReport(input: {
       fixture_outcomes: fidelityFixtures
     }),
     native_formation_publication: Object.freeze({
-      status: publicationDomainState(nativeFixtures, rows.map((row) => row.raw_state)),
-      machine_admission: publicationDomainState(
-        nativeFixtures,
-        rows.map((row) => row.machine_admission)
-      ),
+      selected_stage: selectedStage,
+      status: publicationDomainState(rows.filter((row) => row.selected).map((row) => row.raw_state)),
+      machine_admission: publicationDomainState(rows.filter((row) => row.selected).map((row) => row.machine_admission)),
       human_verdict: "unreviewed",
       fixture_outcomes: nativeFixtures,
       unmatched_native_outcomes: unmatchedNatives,
@@ -221,16 +226,17 @@ function composeRow(
   row: FrozenAssertion,
   binding: FrozenAssertionBinding | null,
   natives: readonly EnrichmentBoundNativeOutcome[],
-  qualities: readonly EnrichmentSemanticQualityAnnotation[]
+  qualities: readonly EnrichmentSemanticQualityAnnotation[],
+  selected: boolean
 ): EnrichmentPreparationRow {
   const current = binding?.current ?? [];
   const unique = current.length === 1 ? current[0]! : null;
   const nativeCells = Object.freeze(
-    materializeMissingExpectedRequestCells(
+    selected ? materializeMissingExpectedRequestCells(
       row,
       current,
       natives.filter((item) => nativeOutcomeMatches(item, row, binding))
-    )
+    ) : []
   );
   const quality = qualities.find((item) => (
     pointerFieldsKey(item.annotation_pointer) === pointerFieldsKey(row.annotation_pointer)
@@ -242,6 +248,7 @@ function composeRow(
     classification: row.classification,
     required_group_id: row.required_group_id,
     first_stage_subset: row.first_stage_subset,
+    selected,
     duplicate_of: row.duplicate_of,
     binding_status: binding?.status ?? "unbound",
     binding_reason: binding?.reason ?? "source map row has no binding result",
@@ -258,10 +265,10 @@ function composeRow(
     human_verdict: "unreviewed",
     quality_cell: quality?.quality_cell ?? "unreviewed",
     quality_attribution: quality?.attributed_to ?? null,
-    machine_admission: nativeCells.length === 0
+    machine_admission: !selected ? "not_exercised" : nativeCells.length === 0
       ? "missing"
       : domainCellState(nativeCells.map((item) => item.machine_admission)),
-    raw_state: nativeCells.length === 0
+    raw_state: !selected ? "not_exercised" : nativeCells.length === 0
       ? "missing"
       : domainCellState(nativeCells.map((item) => item.raw_state))
   });
@@ -291,7 +298,8 @@ function suppliedIdentitiesAgreeWithBinding(
 ): boolean {
   // Pointer-only authored evidence may attribute by pointer. Supplied request
   // or assertion identities must still agree with one current binding source.
-  if (outcome.request_key === undefined && outcome.current_assertion_id === undefined) {
+  if (outcome.request_key === undefined && outcome.current_assertion_id === undefined &&
+      outcome.occurrence_identity === undefined) {
     return true;
   }
   if (binding === null) return false;
@@ -302,6 +310,9 @@ function currentIdentityAgrees(
   item: FrozenBoundCurrentSource,
   outcome: EnrichmentBoundNativeOutcome
 ): boolean {
+  if (outcome.occurrence_identity !== undefined && item.occurrenceIdentity !== outcome.occurrence_identity) {
+    return false;
+  }
   if (outcome.current_assertion_id !== undefined && item.assertion_id !== outcome.current_assertion_id) {
     return false;
   }
@@ -314,19 +325,21 @@ function materializeMissingExpectedRequestCells(
   current: readonly FrozenBoundCurrentSource[],
   attributed: readonly EnrichmentBoundNativeOutcome[]
 ): readonly EnrichmentBoundNativeOutcome[] {
-  const expectedKeys = expectedRequestKeys(current);
-  if (expectedKeys === null) return attributed;
-  const accounted = new Set(
-    attributed.flatMap((item) => item.request_key === undefined ? [] : [item.request_key])
-  );
-  const assertionId = uniqueAssertionId(current);
-  const missing = expectedKeys.flatMap((key) => {
-    if (accounted.has(key)) return [];
-    accounted.add(key);
+  const expected = current.flatMap((source) => (source.request_keys ?? []).map((key) => ({ source, key })));
+  const missing = expected.flatMap(({ source, key }) => {
+    // An outcome without occurrence attribution covers a request/assertion only
+    // when that pair has exactly one expected occurrence in this frozen row.
+    const peers = expected.filter((cell) => cell.key === key && cell.source.assertion_id === source.assertion_id);
+    const accounted = attributed.some((item) => item.request_key === key &&
+      item.current_assertion_id === source.assertion_id &&
+      (item.occurrence_identity === source.occurrenceIdentity ||
+        item.occurrence_identity === undefined && peers.length === 1));
+    if (accounted) return [];
     return [Object.freeze({
       annotation_pointer: row.annotation_pointer,
       request_key: key,
-      ...(assertionId === null ? {} : { current_assertion_id: assertionId }),
+      current_assertion_id: source.assertion_id,
+      ...(source.occurrenceIdentity === null ? {} : { occurrence_identity: source.occurrenceIdentity }),
       request_ordinal: null,
       candidate_ordinal: null,
       raw_state: "missing" as const,
@@ -334,30 +347,6 @@ function materializeMissingExpectedRequestCells(
     })];
   });
   return missing.length === 0 ? attributed : [...attributed, ...missing];
-}
-
-function expectedRequestKeys(
-  current: readonly FrozenBoundCurrentSource[]
-): readonly string[] | null {
-  const keys: string[] = [];
-  const seen = new Set<string>();
-  let sawList = false;
-  for (const item of current) {
-    if (item.request_keys === null) continue;
-    sawList = true;
-    for (const key of item.request_keys) {
-      if (seen.has(key)) continue;
-      seen.add(key);
-      keys.push(key);
-    }
-  }
-  return sawList ? Object.freeze(keys) : null;
-}
-
-function uniqueAssertionId(current: readonly FrozenBoundCurrentSource[]): number | null {
-  if (current.length === 0) return null;
-  const first = current[0]!.assertion_id;
-  return current.every((item) => item.assertion_id === first) ? first : null;
 }
 
 function indexBindings(
@@ -430,12 +419,6 @@ function uniqueNumber(values: readonly (number | null)[]): number | null {
   return present.every((item) => item === first) ? first : null;
 }
 
-function fixtureDomainStates(
-  fixtures: readonly EnrichmentFixtureOutcome[]
-): readonly PreparationCellState[] {
-  return fixtures.flatMap((item) => item.cell_state === undefined ? [] : [item.cell_state]);
-}
-
 function domainCellState(states: readonly PreparationCellState[]): PreparationCellState {
   if (states.length === 0) return "missing";
   const unique = new Set(states);
@@ -448,22 +431,9 @@ function domainCellState(states: readonly PreparationCellState[]): PreparationCe
 }
 
 function publicationDomainState(
-  fixtures: readonly EnrichmentFixtureOutcome[],
   rowStates: readonly PreparationCellState[]
 ): PreparationCellState {
-  // Fixture cell_state is mechanism evidence only. Attributed native or
-  // missing-cell row states own the machine domain whenever any row is not
-  // solely missing; fixture-only tests still publish their cell_state.
-  if (rowStates.some((state) => state !== "missing")) {
-    return domainCellState(rowStates);
-  }
-  const fromFixtures = fixtureDomainStates(fixtures);
-  if (fromFixtures.length > 0) return domainCellState(fromFixtures);
-  if (fixtures.some((item) => item.result === "not_run" || item.result === "not_verified")) {
-    return "unknown";
-  }
-  if (fixtures.length === 0) return "missing";
-  return "unreviewed";
+  return rowStates.length === 0 ? "not_exercised" : domainCellState(rowStates);
 }
 
 function publicConsumptionStatus(

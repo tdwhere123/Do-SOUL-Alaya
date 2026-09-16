@@ -12,7 +12,6 @@ import {
   OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
   OFFICIAL_API_SYSTEM_PROMPT,
   officialApiSemanticWorksetFromUnits,
-  planOfficialApiSemanticWorkset,
   planOfficialApiTransport,
   type OfficialApiSemanticWorkUnit,
   type TransportPack
@@ -35,6 +34,7 @@ import {
   type LongMemEvalExtractionTurn
 } from "../turn-contents.js";
 import type { FrozenAssertion } from "./frozen-population.js";
+import { collectEnrichmentOccurrenceProvenance, type EnrichmentOccurrenceProvenance } from "./source-provenance.js";
 
 export const ENRICHMENT_PREFLIGHT_MODEL = "gemini-3.1-flash-lite";
 export const ENRICHMENT_PREFLIGHT_REQUEST_PROFILE = "gemini-3.1-low-v1";
@@ -79,7 +79,7 @@ export interface EnrichmentPreflightRequest {
   readonly source_corpus_identity: string;
   readonly assertion_ids: readonly number[];
   readonly assertion_texts: readonly string[];
-  readonly occurrence_identities: readonly (string | null)[];
+  readonly occurrence_provenance: readonly EnrichmentOccurrenceProvenance[];
   readonly user_prompt: string;
   readonly unit_keys: readonly string[];
   readonly message_ids: readonly string[];
@@ -177,6 +177,7 @@ export async function runCurrentEnrichmentPreflight(options: {
     const packs = planCurrentPacks(workset.units, packing);
     const bounds = sizeWorksetLines(workset.lines);
     const semanticFill = captureSemanticFill(options, executionTurns);
+    const provenance = collectEnrichmentOccurrenceProvenance(occurrenceTurns ?? executionTurns, datasetRevision);
     if (attemptedFetches !== 0) {
       throw new Error(`enrichment preflight attempted ${attemptedFetches} provider fetches`);
     }
@@ -197,22 +198,16 @@ export async function runCurrentEnrichmentPreflight(options: {
         dataset_sha256: loaded?.sha256 ?? null
       }),
       requests: Object.freeze(workset.requests.map((item) => {
-        const turnLocal = planOfficialApiSemanticWorkset(
-          item.sourceTurn.turnContent,
-          item.sourceTurn.turnMessages,
-          datasetRevision
-        );
-        const occurrenceByAssertion = new Map(
-          turnLocal.units.map((unit) => [unit.assertionId, unit.binding.occurrenceIdentity ?? null])
-        );
         return Object.freeze({
           key: item.line.key,
           source_corpus_identity: item.request.source_corpus_identity,
           assertion_ids: Object.freeze(item.request.source_assertions.map((row) => row.assertion_id)),
           assertion_texts: Object.freeze(item.request.source_assertions.map((row) => row.text)),
-          occurrence_identities: Object.freeze(item.request.source_assertions.map((row) => (
-            occurrenceByAssertion.get(row.assertion_id) ?? null
-          ))),
+          occurrence_provenance: Object.freeze(item.units.map((unit) => {
+            const evidence = provenance.get(unit.binding.occurrenceIdentity);
+            if (evidence === undefined) throw new Error("native occurrence provenance missing");
+            return evidence;
+          })),
           user_prompt: item.line.userPrompt,
           unit_keys: item.line.unitKeys,
           message_ids: Object.freeze(item.sourceTurn.turnMessages.map((message) => message.message_id))

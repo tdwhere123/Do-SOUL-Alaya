@@ -4,6 +4,7 @@ import {
   planOfficialApiSemanticWorkset
 } from "@do-soul/alaya-soul";
 import type { FrozenAssertion } from "../../../../runs/extraction/enrichment-acceptance/frozen-population.js";
+import { collectEnrichmentOccurrenceProvenance } from "../../../../runs/extraction/enrichment-acceptance/source-provenance.js";
 import {
   bindFrozenAssertionToCurrentSource,
   bindFrozenPopulation,
@@ -48,6 +49,49 @@ function row(overrides: Partial<FrozenAssertion> = {}): FrozenAssertion {
 }
 
 describe("frozen source binding", () => {
+  it("does not migrate to a foreign utterance when the frozen message id moves to its companion", () => {
+    const messages = (source: string, companion: string) => [
+      { role: "user" as const, content: text, message_id: source },
+      { role: "assistant" as const, content: "Thank you for telling me.", message_id: companion }
+    ];
+    const original = planOfficialApiSemanticWorkset(text, messages("original", "companion")).units[0]!;
+    const foreignMessages = messages("foreign", "original");
+    const foreign = planOfficialApiSemanticWorkset(text, foreignMessages).units[0]!;
+    const evidence = collectEnrichmentOccurrenceProvenance([
+      { turnContent: text, turnMessages: foreignMessages }
+    ], "revision");
+    const frozen = row({ occurrence: {
+      source_message_ids: ["original"], source_locator: original.binding.locator,
+      source_occurrence_identity: original.binding.occurrenceIdentity,
+      occurrence_bindings: [{ ...original.binding, source_message_id: "original" }]
+    } });
+    const request = {
+      key: "request", source_corpus_identity: foreign.binding.sourceCorpusIdentity,
+      message_ids: ["foreign", "original"],
+      source_assertions: [{ ...evidence.get(foreign.binding.occurrenceIdentity)!, text: foreign.text }]
+    };
+    expect(request.source_assertions[0]!.source_message_id).toBe("foreign");
+    const result = bindFrozenAssertionToCurrentSource(frozen, { catalogUnits: [foreign], requests: [request] });
+    expect(result.status).toBe("unbound");
+    expect(result.occurrences[0]!.status).toBe("lost");
+    const locatorOnly = { ...frozen, occurrence: { ...frozen.occurrence,
+      source_occurrence_identity: null, occurrence_bindings: [] } };
+    expect(bindFrozenAssertionToCurrentSource(locatorOnly, {
+      catalogUnits: [foreign], requests: [request]
+    }).status).toBe("unbound");
+    // The same corpus/locator can still migrate historical identity when the
+    // native occurrence actually belongs to the intended source message.
+    const historical = { ...frozen, occurrence: { ...frozen.occurrence,
+      source_message_ids: ["foreign"], occurrence_bindings: [{ ...original.binding,
+        source_message_id: "foreign", locator: { ...original.binding.locator, contract_version: 3 } }]
+    } };
+    expect(bindFrozenAssertionToCurrentSource(historical, {
+      catalogUnits: [foreign], requests: [request]
+    }).status).toBe("bound");
+    expect(bindFrozenAssertionToCurrentSource(frozen, {
+      catalogUnits: [original], requests: []
+    }).status).toBe("bound");
+  });
   it("binds exact catalog text after stripping a single leading role marker", () => {
     const workset = planOfficialApiSemanticWorkset(text, [{ role: "user", content: text }]);
     const unit = workset.units[0];
@@ -559,7 +603,7 @@ describe("frozen source binding", () => {
         key: "request-intended",
         source_corpus_identity: unit.binding.sourceCorpusIdentity,
         message_ids: ["msg-intended"],
-        source_assertions: [packedAssertion(unit)]
+        source_assertions: [{ ...packedAssertion(unit), source_message_id: "msg-intended" }]
       }, {
         key: "request-distractor",
         source_corpus_identity: distractor.binding.sourceCorpusIdentity,
@@ -734,10 +778,12 @@ function packedAssertion(unit: FrozenCatalogUnit): {
   assertion_id: number;
   text: string;
   occurrenceIdentity?: string;
+  source_message_id: string;
 } {
   return {
     assertion_id: unit.assertionId,
     text: unit.text,
+    source_message_id: "msg-1",
     ...(unit.binding.occurrenceIdentity === undefined
       ? {}
       : { occurrenceIdentity: unit.binding.occurrenceIdentity })
