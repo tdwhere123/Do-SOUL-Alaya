@@ -46,6 +46,8 @@ import {
 } from "../../../runs/compile-seed.js";
 
 import { withBenchDaemon } from "./bench-daemon.test-support.js";
+import { warnRetiredLocalCrossEncoderTreatment } from
+  "../../../harness/daemon/daemon-environment.js";
 
 const handles: BenchDaemonHandle[] = [];
 
@@ -356,36 +358,18 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
     emitWarning.mockRestore();
   });
 
-  it(
-    "refuses retired cross-encoder configuration before daemon startup",
-    async () => {
-      const keys = [
-        "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
-        "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR",
-        "ALAYA_LOCAL_CROSS_ENCODER_MODEL"
-      ] as const;
-      const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
-      process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK = "true";
-      process.env.ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR = "/tmp/cross-encoder-cache";
-      process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2";
-      try {
-        await expect(withBenchDaemon(
-          {
-            workspaceId: "harness-cross-encoder-env-ws",
-            runId: "harness-cross-encoder-env-run"
-          },
-          async () => undefined
-        )).rejects.toThrow(/cross-encoder reranking is retired/u);
-      } finally {
-        for (const key of keys) {
-          const value = original[key];
-          if (value === undefined) delete process.env[key];
-          else process.env[key] = value;
-        }
-      }
-    },
-    60_000
-  );
+  it("warns on retired cross-encoder env keys instead of refusing startup", () => {
+    const emitWarning = vi.fn();
+    expect(() => warnRetiredLocalCrossEncoderTreatment({
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
+      ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: "/tmp/cross-encoder-cache",
+      ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/ms-marco-MiniLM-L-6-v2"
+    }, emitWarning as typeof process.emitWarning)).not.toThrow();
+    expect(emitWarning).toHaveBeenCalledWith(
+      expect.stringContaining("ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK (retired)"),
+      expect.objectContaining({ code: "ALAYA_UNREGISTERED_ENV_KEYS" })
+    );
+  });
 
   it(
     "uses configured reviewer credentials and restores managed env on shutdown",

@@ -5,7 +5,6 @@ const RAW_EMBEDDING_SCHEMA_VERSION = 1;
 
 export type TreatmentBooleanKey =
   | "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT"
-  | "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
   | "ALAYA_RECALL_D2Q";
 
 export function readOptionalTreatmentBoolean(
@@ -13,17 +12,6 @@ export function readOptionalTreatmentBoolean(
   key: TreatmentBooleanKey
 ): boolean | null {
   return parseEnvOptionalBoolean(raw, key) ?? null;
-}
-
-export function refuseRetiredLocalCrossEncoderTreatment(
-  env: Readonly<Record<string, string | undefined>>
-): void {
-  if (readOptionalTreatmentBoolean(
-    env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-  ) === true) {
-    throw new Error("local cross-encoder reranking is retired");
-  }
 }
 
 export function readOptionalOnnxThreadCount(raw: string | undefined): number | null {

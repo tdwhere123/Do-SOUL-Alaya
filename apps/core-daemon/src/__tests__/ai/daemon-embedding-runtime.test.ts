@@ -8,7 +8,6 @@ import {
 } from "@do-soul/alaya-storage";
 import { LocalOnnxEmbeddingClient } from "@do-soul/alaya-core";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
-import { LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR } from "../../ai/daemon-embedding-runtime-config.js";
 
 type RuntimeInput = Parameters<typeof createDaemonEmbeddingRuntime>[0];
 type HealthSvc = RuntimeInput["healthJournalService"];
@@ -474,7 +473,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
     }
   });
 
-  it("fails loud when local cross-encoder rerank is requested", () => {
+  it("ignores retired local cross-encoder rerank instead of throwing", () => {
     const fixture = buildFixture();
     try {
       const unset = createDaemonEmbeddingRuntime({
@@ -487,7 +486,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
       });
       expect(unset).not.toHaveProperty("answerRerankService");
 
-      expect(() => createDaemonEmbeddingRuntime({
+      const ignored = createDaemonEmbeddingRuntime({
         database: fixture.database,
         configEnv: new Map([
           ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "true"],
@@ -497,7 +496,8 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn
-      })).toThrow(LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR);
+      });
+      expect(ignored).not.toHaveProperty("answerRerankService");
     } finally {
       teardown(fixture);
     }

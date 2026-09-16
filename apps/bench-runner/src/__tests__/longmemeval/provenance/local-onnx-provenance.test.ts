@@ -75,12 +75,12 @@ describe("local ONNX runtime provenance", () => {
     expect(second).not.toBe(first);
   });
 
-  it("refuses the retired cross-encoder treatment before inspecting artifacts", async () => {
+  it("ignores retired cross-encoder env and records the disabled identity", async () => {
     await expect(resolveLocalCrossEncoderRuntimeProvenance({
       ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
       ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: "/missing",
       ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/missing"
-    })).rejects.toThrow(/retired/u);
+    })).resolves.toEqual({ enabled: false });
   });
 
   it("records only the disabled identity for the retired treatment", async () => {

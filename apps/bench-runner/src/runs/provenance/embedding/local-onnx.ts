@@ -5,8 +5,8 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
 import { resolveBenchEmbeddingSchemaVersion } from "../../../harness/daemon/handle/daemon-handle-ops-support.js";
-import { refuseRetiredLocalCrossEncoderTreatment } from
-  "../../../harness/strict-treatment-config.js";
+import { warnRetiredLocalCrossEncoderTreatment } from
+  "../../../harness/daemon/daemon-environment.js";
 
 const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
 
@@ -98,7 +98,7 @@ export type LocalCrossEncoderRuntimeProvenance = Readonly<{ enabled: false }>;
 export async function resolveLocalCrossEncoderRuntimeProvenance(
   env: Readonly<Record<string, string | undefined>>
 ): Promise<LocalCrossEncoderRuntimeProvenance> {
-  refuseRetiredLocalCrossEncoderTreatment(env);
+  warnRetiredLocalCrossEncoderTreatment(env);
   return { enabled: false };
 }
 

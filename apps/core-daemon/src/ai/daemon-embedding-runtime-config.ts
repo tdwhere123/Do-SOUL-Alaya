@@ -10,9 +10,6 @@ import {
 
 export type { EmbeddingProviderKind };
 
-export const LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR =
-  "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK is set, but local cross-encoder rerank was removed. Unset the flag; it no longer changes ranking.";
-
 const EMBEDDING_KEYS = DAEMON_ONLY_CONFIG_ENV_KEYS.embedding;
 
 export interface EffectiveEmbeddingPosture {
@@ -52,7 +49,6 @@ export function readEmbeddingRuntimeConfig(
   configEnv: ReadonlyMap<string, string>,
   warn: (message: string, meta: Record<string, unknown>) => void
 ): EmbeddingRuntimeConfig {
-  refuseRetiredLocalCrossEncoderRerank(configEnv);
   const posture = resolveEffectiveEmbeddingPosture((key) => readConfigEnvValue(configEnv, key));
   warn("effective embedding runtime", {
     provider_kind: posture.providerKind,
@@ -83,18 +79,6 @@ export function readEmbeddingRuntimeConfig(
       EMBEDDING_KEYS.d2q
     )
   };
-}
-
-function refuseRetiredLocalCrossEncoderRerank(
-  configEnv: ReadonlyMap<string, string>
-): void {
-  const raw = readNonEmptyEnv(
-    readConfigEnvValue(configEnv, EMBEDDING_KEYS.localCrossEncoderRerank)
-  );
-  if (raw === null) return;
-  const normalized = raw.toLowerCase();
-  if (normalized === "false" || normalized === "0") return;
-  throw new Error(LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR);
 }
 
 export function isD2qActive(config: EmbeddingRuntimeConfig): boolean {

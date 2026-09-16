@@ -5,8 +5,8 @@ import {
   RecallTokenEconomySampleSchema
 } from "@do-soul/alaya-protocol";
 import { assertBiEncoderRunActivation } from "../embedding/embedding-treatment-activation.js";
-import { refuseRetiredLocalCrossEncoderTreatment } from
-  "../strict-treatment-config.js";
+import { warnRetiredLocalCrossEncoderTreatment } from
+  "../daemon/daemon-environment.js";
 import {
   RecallAnswerShapePlanSchema,
   RecallAnswerSupportObservationSchema,
@@ -471,7 +471,7 @@ export function parseBenchRecallDiagnosticsForRun(
 ): BenchRecallDiagnostics {
   const diagnostics = BenchRecallDiagnosticsSchema.parse(value);
   assertBiEncoderRunActivation(diagnostics, env);
-  refuseRetiredLocalCrossEncoderTreatment(env);
+  warnRetiredLocalCrossEncoderTreatment(env);
   assertCrossEncoderControlInactive(diagnostics);
   return diagnostics;
 }

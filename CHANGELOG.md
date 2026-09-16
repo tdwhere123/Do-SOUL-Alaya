@@ -20,6 +20,13 @@ independently of the app semver.
 Live ranking ignores it. Do not delete the field in this series; removal
 waits for a protocol major after the compatibility ledger expires.
 
+Retired local cross-encoder env keys (`ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK`,
+`ALAYA_LOCAL_CROSS_ENCODER_MODEL`, `ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR`) are
+ignored. Daemon startup emits the shared unregistered/retired env warning.
+Unset them; they no longer change ranking. A later release will drop the
+warning once operators have migrated. Do not add a throw tombstone for this
+deleted feature.
+
 Protocol 4.12.0 is an additive minor under handbook invariant §25.
 MCP-reachable `MemoryDimensionSchema` admits `observation`. Optional
 `QueryHole.description` preserves unresolved query text, and optional
