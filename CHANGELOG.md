@@ -22,6 +22,10 @@ reconciliation deferral (`lease_busy` | `prewrite_unavailable`) on the
 EventLog triage payload. Existing triage fields remain parseable;
 unavailable still must not ADD.
 
+`SoulMemorySearchResponse.ranking_authority` stays parseable in app 0.3.x.
+Live ranking ignores it. Do not delete the field in this series; removal
+waits for a protocol major after the compatibility ledger expires.
+
 Protocol 4.12.0 is an additive minor under handbook invariant §25.
 MCP-reachable `MemoryDimensionSchema` admits `observation`. Optional
 `QueryHole.description` preserves unresolved query text, and optional

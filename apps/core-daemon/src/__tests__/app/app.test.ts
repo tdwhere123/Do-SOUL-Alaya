@@ -16,7 +16,8 @@ import {
 
 const testRequestProtection = {
   allowedOrigin: "http://localhost",
-  requestToken: "test-token"
+  requestToken: "test-token",
+  allowDesktopOriginlessRequests: true
 } as const;
 
 function createProtectedTestApp(
@@ -61,7 +62,8 @@ describe("createApp", () => {
     const app = createApp({
       requestProtection: {
         allowedOrigin: "http://localhost:5173",
-        requestToken: "secret-token"
+        requestToken: "secret-token",
+        allowDesktopOriginlessRequests: true
       }
     });
 
@@ -110,7 +112,8 @@ describe("createApp", () => {
     const app = createApp({
       requestProtection: {
         allowedOrigin: "http://localhost:5173",
-        requestToken: "secret-token"
+        requestToken: "secret-token",
+        allowDesktopOriginlessRequests: true
       }
     });
 
@@ -140,7 +143,8 @@ describe("createApp", () => {
     const app = createApp({
       requestProtection: {
         allowedOrigin: "http://localhost:5173",
-        requestToken: "secret-token"
+        requestToken: "secret-token",
+        allowDesktopOriginlessRequests: true
       }
     });
 
@@ -251,7 +255,8 @@ describe("createApp", () => {
     const app = createApp({
       requestProtection: {
         allowedOrigin: "http://localhost:5173",
-        requestToken: "secret-token"
+        requestToken: "secret-token",
+        allowDesktopOriginlessRequests: true
       }
     });
 
