@@ -156,6 +156,6 @@ describe("memory_entries enum CHECKs", () => {
     `);
     expect(() => insert.run("mem-illegal-dimension", "not-a-dimension", "hot")).toThrow(/CHECK/i);
     insert.run("mem-legal", "fact", "hot");
-    // File-backed upgrade-and-reopen on NTFS can exceed the 60s storage budget.
-  }, process.platform === "win32" ? 180_000 : 5_000);
+    // File-backed upgrade-and-reopen exceeds the 5s Linux default under coverage.
+  }, process.platform === "win32" ? 180_000 : 60_000);
 });
