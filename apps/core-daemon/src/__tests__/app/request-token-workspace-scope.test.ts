@@ -20,6 +20,7 @@ const PROCESS_TOKEN = "process-token";
 
 function headersFor(token: string): Record<string, string> {
   return {
+    origin: "http://localhost:5173",
     "x-request-token": token,
     "x-alaya-desktop": "1",
     origin: "http://localhost:5173",

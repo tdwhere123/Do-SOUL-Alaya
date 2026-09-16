@@ -10,7 +10,8 @@ import type { ExtractionCacheWriteLease } from "../manifest/fill-root-guard.js";
 import { newFillStats } from "../fill-stats.js";
 import {
   catalogRefillTurnsThisRun,
-  finalizeCatalogRefillSuccess
+  finalizeCatalogRefillSuccess,
+  type CatalogRefillResumeFailpoint
 } from "../catalog-refill/runtime.js";
 import {
   prepareCatalogRefillSupplementalReceipt
@@ -25,7 +26,8 @@ export function finishPreparedExtractionFill(
   log: (message: string) => void,
   writeLease: ExtractionCacheWriteLease,
   authority: ExecutionExtractionAuthority | undefined,
-  allowProviderTaskFailures: boolean
+  allowProviderTaskFailures: boolean,
+  durableFailpoint?: CatalogRefillResumeFailpoint
 ): ExtractionFillResult {
   const telemetry = authority?.snapshot();
   const repairScopeTurns = authority?.receipt.repair_scope?.shard_count;
@@ -60,7 +62,9 @@ export function finishPreparedExtractionFill(
     : finishExtractionQuestionBatch(
       prepared, cacheRoot, stats, log, writeLease, telemetry, repairScopeTurns
     );
-  finalizeCatalogRefillSuccess(authority, cacheRoot, result.manifest, supplemental);
+  finalizeCatalogRefillSuccess(
+    authority, cacheRoot, result.manifest, supplemental, durableFailpoint
+  );
   return result;
 }
 
