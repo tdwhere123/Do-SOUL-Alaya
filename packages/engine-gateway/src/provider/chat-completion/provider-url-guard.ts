@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import {
   assertPublicHttpProviderUrl,
   isBlockedProviderHost,
+  parseEnvBoolean,
   parseHttpProviderUrl,
   type EnvLookup
 } from "@do-soul/alaya-protocol";
@@ -14,7 +15,7 @@ export function assertAllowedProviderChatUrl(
   env: EnvLookup = {}
 ): void {
   assertPublicHttpProviderUrl(endpoint, {
-    allowPrivate: env[PRIVATE_PROVIDER_OPT_IN] === "1"
+    allowPrivate: parseEnvBoolean(env[PRIVATE_PROVIDER_OPT_IN], PRIVATE_PROVIDER_OPT_IN)
   });
 }
 
@@ -23,7 +24,7 @@ export async function assertAllowedProviderChatUrlResolved(
   env: EnvLookup = {}
 ): Promise<void> {
   assertAllowedProviderChatUrl(endpoint, env);
-  if (env[PRIVATE_PROVIDER_OPT_IN] === "1") {
+  if (parseEnvBoolean(env[PRIVATE_PROVIDER_OPT_IN], PRIVATE_PROVIDER_OPT_IN)) {
     return;
   }
   await assertProviderHostResolvesPublic(endpoint);

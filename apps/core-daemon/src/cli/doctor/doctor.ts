@@ -1,4 +1,4 @@
-import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
+import { parseEnvBoolean, type EmbeddingStatus, type ToolchainStatus } from "@do-soul/alaya-protocol";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import type {
   EmbeddingQueryWarmupSummary,
@@ -350,7 +350,7 @@ function resolveRuntimeWiringFromEnv(env: NodeJS.ProcessEnv): RuntimeWiringStatu
     request_token_source:
       requestToken !== undefined && requestToken.length > 0 ? "env" : "ephemeral",
     daemon_socket: daemonSocket !== undefined && daemonSocket.length > 0 ? daemonSocket : null,
-    wildcard_bind_opt_in: env.ALAYA_ALLOW_WILDCARD_BIND === "1",
+    wildcard_bind_opt_in: parseEnvBoolean(env.ALAYA_ALLOW_WILDCARD_BIND, "ALAYA_ALLOW_WILDCARD_BIND"),
     request_token_workspaces:
       tokenWorkspaces !== undefined && tokenWorkspaces.length > 0 ? tokenWorkspaces : null
   };

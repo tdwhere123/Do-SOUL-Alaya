@@ -16,6 +16,7 @@ import { stripReviewerCredentialsFromAgentMcpEnv } from "../attach/attached-agen
 import { createAttachClaudeCommandSpec, createAttachCodexCommandSpec, createDetachCommandSpec } from "./attach/index.js";
 import { runAlayaMcpStdioServer } from "../mcp/server/mcp-server.js";
 import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 import {
   ALAYA_SYSEXITS,
   type AlayaCliArgsSchema,
@@ -252,7 +253,10 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
       return {
         request_token_source: runtime.requestProtection.tokenSource ?? "ephemeral",
         daemon_socket: daemonSocket !== undefined && daemonSocket.length > 0 ? daemonSocket : null,
-        wildcard_bind_opt_in: processEnvLookup().ALAYA_ALLOW_WILDCARD_BIND === "1",
+        wildcard_bind_opt_in: parseEnvBoolean(
+          processEnvLookup().ALAYA_ALLOW_WILDCARD_BIND,
+          "ALAYA_ALLOW_WILDCARD_BIND"
+        ),
         request_token_workspaces:
           tokenWorkspaces !== undefined && tokenWorkspaces.length > 0 ? tokenWorkspaces : null
       };

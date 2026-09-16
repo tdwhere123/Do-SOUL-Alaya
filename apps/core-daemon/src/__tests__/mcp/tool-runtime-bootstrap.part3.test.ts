@@ -237,9 +237,8 @@ describe("daemon tool runtime bootstrap", () => {
   });
 
   it("leaves an operator off-switch: ALAYA_INGEST_RECONCILIATION_ENABLED=false skips reconciliation construction", async () => {
-    // The second documented disable token alongside "0" (index.ts checks
-    // raw !== "0" && raw !== "false"). Asserting it explicitly pins both
-    // off-switch spellings so a future single-token parse regresses loudly.
+    // The second documented disable token alongside "0". The shared
+    // boolean vocabulary also accepts off/no/disabled.
     process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = "false";
 
     await bootDaemonRuntime();

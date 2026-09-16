@@ -1,3 +1,4 @@
+import { parseDefaultOnFlag } from "@do-soul/alaya-protocol";
 import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
   SqliteBootstrappingRecordRepo,
@@ -126,13 +127,18 @@ function createDaemonMemoryRepos(input: {
   const enrichPendingRepo = new SqliteEnrichPendingRepo(input.database);
   const sourceGroundingDeferQueueRepo = new SqliteSourceGroundingDeferQueueRepo(input.database);
 
+  const orphanDetectionEnabled = parseDefaultOnFlag(
+    processEnvLookup().ORPHAN_DETECTION_ENABLED,
+    "ORPHAN_DETECTION_ENABLED"
+  );
+
   return {
     memoryEntryRepo,
     globalMemoryRepo: createOptionalGlobalMemoryRepo(input.database),
     globalMemoryRecallCacheRepo: createOptionalGlobalMemoryRecallCacheRepo(input.database),
-    orphanDetectionEnabled: processEnvLookup().ORPHAN_DETECTION_ENABLED !== "false",
+    orphanDetectionEnabled,
     orphanRadarRepo:
-      processEnvLookup().ORPHAN_DETECTION_ENABLED !== "false"
+      orphanDetectionEnabled
         ? new SqliteOrphanRadarRepo(input.database)
         : null,
     pathRelationRepo: new SqlitePathRelationRepo(input.database),

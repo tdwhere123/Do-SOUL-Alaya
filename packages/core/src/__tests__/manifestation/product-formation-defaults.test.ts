@@ -26,13 +26,19 @@ describe("product formation defaults", () => {
     expect(resolveProductFormationEnabled(undefined)).toBe(true);
     expect(resolveProductFormationEnabled("")).toBe(true);
     expect(resolveProductFormationEnabled("1")).toBe(true);
+    expect(resolveProductFormationEnabled("on")).toBe(true);
+    expect(resolveProductFormationEnabled("yes")).toBe(true);
     expect(resolveProductFormationEnabled("false")).toBe(false);
     expect(resolveProductFormationEnabled("0")).toBe(false);
+    expect(() => resolveProductFormationEnabled("2")).toThrow(/product formation flag/);
   });
 
   it("normalizes the remaining seed-time formation defaults", () => {
     expect(resolveProductFormationOptIn(undefined)).toBe(false);
     expect(resolveProductFormationOptIn("true")).toBe(true);
+    expect(resolveProductFormationOptIn("on")).toBe(true);
+    expect(resolveProductFormationOptIn("yes")).toBe(true);
+    expect(() => resolveProductFormationOptIn("2")).toThrow(/product formation opt-in/);
     expect(resolveProductEdgeClassifyHostWorker(undefined)).toBe(true);
     expect(resolveProductEdgeClassifyHostWorker("false")).toBe(false);
     expect(resolveProductMaterializationConfidenceFloor(undefined)).toBe(0.5);

@@ -4,6 +4,7 @@ import { lstat, mkdir, open } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 
 /**
  * Cross-process single-flight for local ONNX model work.
@@ -36,8 +37,10 @@ interface HostLockTarget {
 export function localOnnxHostSingleFlightEnabled(
   env: { readonly ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT?: string } = {}
 ): boolean {
-  const raw = env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+  return parseEnvBoolean(
+    env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT,
+    "ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT"
+  );
 }
 
 export function resolveLocalOnnxHostLockPath(

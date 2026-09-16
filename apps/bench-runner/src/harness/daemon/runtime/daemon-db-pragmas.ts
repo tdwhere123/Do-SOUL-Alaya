@@ -5,6 +5,7 @@ import {
   hasEmbeddingOverlayBind,
   initDatabase
 } from "@do-soul/alaya-storage";
+import { parseDefaultOnFlag } from "@do-soul/alaya-protocol";
 import { emitBenchHarnessWarning } from "./daemon-warnings.js";
 
 const BENCH_FAST_PRAGMA_ENV = "ALAYA_BENCH_FAST_PRAGMA";
@@ -17,15 +18,7 @@ const CACHE_FLOOR_KIB = 65_536;
 const CACHE_CAP_KIB = 1_048_576;
 
 function isBenchFastPragmaEnabled(): boolean {
-  const raw = process.env[BENCH_FAST_PRAGMA_ENV];
-  if (raw === undefined) return true;
-  const normalized = raw.trim().toLowerCase();
-  return (
-    normalized !== "0" &&
-    normalized !== "false" &&
-    normalized !== "off" &&
-    normalized !== "no"
-  );
+  return parseDefaultOnFlag(process.env[BENCH_FAST_PRAGMA_ENV], BENCH_FAST_PRAGMA_ENV);
 }
 
 // FILE by default so temp B-trees spill to disk and do not feed RSS toward the

@@ -1,4 +1,8 @@
-import type { RuntimeGardenProviderKind } from "@do-soul/alaya-protocol";
+import {
+  parseEnvBoolean,
+  parseEnvOptionalBoolean,
+  type RuntimeGardenProviderKind
+} from "@do-soul/alaya-protocol";
 import { PATH_RELATION_COUNTER_DEFAULT_TTL_MS } from
   "../../relations/edge-proposals/path-relation-proposal-service-shared.js";
 
@@ -25,9 +29,7 @@ export function resolveProductFormationEnabled(
   value: string | undefined,
   defaultValue = true
 ): boolean {
-  const normalized = value?.trim().toLowerCase();
-  if (normalized === undefined || normalized === "") return defaultValue;
-  return normalized !== "0" && normalized !== "false";
+  return parseEnvBoolean(value, "product formation flag", defaultValue);
 }
 
 export function resolveProductGardenProviderKind(
@@ -42,17 +44,14 @@ export function resolveProductGardenProviderKind(
 }
 
 export function resolveProductFormationOptIn(value: string | undefined): boolean {
-  const normalized = value?.trim().toLowerCase();
-  return normalized === "1" || normalized === "true";
+  return parseEnvBoolean(value, "product formation opt-in");
 }
 
 export function resolveProductEdgeClassifyHostWorker(
   value: string | undefined
 ): boolean {
-  const normalized = value?.trim().toLowerCase();
-  if (normalized === "1" || normalized === "true") return true;
-  if (normalized === "0" || normalized === "false") return false;
-  return PRODUCT_FORMATION_DEFAULTS.edgeClassifyHostWorker;
+  return parseEnvOptionalBoolean(value, "ALAYA_EDGE_CLASSIFY_HOST_WORKER")
+    ?? PRODUCT_FORMATION_DEFAULTS.edgeClassifyHostWorker;
 }
 
 export function resolveProductMaterializationConfidenceFloor(

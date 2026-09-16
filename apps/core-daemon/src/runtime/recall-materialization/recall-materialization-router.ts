@@ -1,5 +1,9 @@
 import { selectObservedTemporalProjection } from "@do-soul/alaya-soul";
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import {
+  parseDefaultOnFlag,
+  parseEnvBoolean,
+  type CandidateMemorySignal
+} from "@do-soul/alaya-protocol";
 import { processEnvLookup } from "../config/daemon-config-environment.js";
 import {
   ClaimService,
@@ -162,16 +166,16 @@ function createMaterializationMemoryService(
 export function isRetainUnroutedFactsEnabled(
   raw: string | undefined = processEnvLookup().ALAYA_RETAIN_UNROUTED_FACTS
 ): boolean {
-  const normalized = raw?.trim().toLowerCase();
-  return normalized === "1" || normalized === "true";
+  return parseEnvBoolean(raw, "ALAYA_RETAIN_UNROUTED_FACTS");
 }
 
 function readMaterializationRouterOptions() {
   return {
     retainUnroutedHighConfidenceFacts: isRetainUnroutedFactsEnabled(),
-    fullTurnEvidenceExcerpt:
-      processEnvLookup().ALAYA_EVIDENCE_FULL_TURN !== "0" &&
-      processEnvLookup().ALAYA_EVIDENCE_FULL_TURN !== "false",
+    fullTurnEvidenceExcerpt: parseDefaultOnFlag(
+      processEnvLookup().ALAYA_EVIDENCE_FULL_TURN,
+      "ALAYA_EVIDENCE_FULL_TURN"
+    ),
     materializationConfidenceFloor: readMaterializationConfidenceFloor()
   };
 }

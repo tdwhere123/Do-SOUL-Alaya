@@ -225,11 +225,16 @@ describe("applyBenchFastPragmaIfRequested", () => {
     // One migrated DB is enough: the gate only reads env. Opening five fresh
     // file DBs on Windows CI exceeds the default 5s timeout under load.
     const dataDir = await newDataDir();
-    for (const spelling of ["false", "FALSE", "off", "no", " 0 "]) {
+    for (const spelling of ["false", "FALSE", "off", "no", "disabled", " 0 "]) {
       process.env.ALAYA_BENCH_FAST_PRAGMA = spelling;
       const result = applyBenchFastPragmaIfRequested(dataDir);
       expect(result.applied).toBe(false);
     }
+  });
+
+  it("rejects 2 instead of treating it as truthy", () => {
+    process.env.ALAYA_BENCH_FAST_PRAGMA = "2";
+    expect(() => applyBenchFastPragmaIfRequested("/unused")).toThrow(/ALAYA_BENCH_FAST_PRAGMA/);
   });
 
   it("does not weaken production hardening (WAL + synchronous=NORMAL stay set)", async () => {

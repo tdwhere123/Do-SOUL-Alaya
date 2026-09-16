@@ -11,6 +11,7 @@ import {
   EXTERNAL_DAEMON_REQUEST_TOKEN_ENV,
   DEFAULT_INSPECTOR_PORT
 } from "./inspect-constants.js";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 import { defaultOpenUrl, openCommandCandidates, openUrlWithSpawn } from "./inspect-browser.js";
 import {
   defaultGenerateLaunchCode,
@@ -406,6 +407,5 @@ interface InspectorLaunch {
 }
 
 function fixedTokenOverrideAllowed(env: NodeJS.ProcessEnv): boolean {
-  const value = env[ALLOW_FIXED_TOKEN_ENV]?.trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes";
+  return parseEnvBoolean(env[ALLOW_FIXED_TOKEN_ENV], ALLOW_FIXED_TOKEN_ENV);
 }

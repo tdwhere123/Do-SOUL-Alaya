@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { readPublicStructuredErrorEnvelope } from "@do-soul/alaya-protocol";
+import { readPublicStructuredErrorEnvelope, parseEnvBoolean } from "@do-soul/alaya-protocol";
 import {
   DEFAULT_INSPECTOR_DAEMON_TIMEOUT_MS,
   INSPECTOR_CORRELATION_ID_HEADER,
@@ -39,7 +39,7 @@ export function assertInspectorDaemonUrl(
   if (LOOPBACK_DAEMON_HOSTS.has(host)) {
     return;
   }
-  if (env.ALAYA_ALLOW_REMOTE_DAEMON === "1") {
+  if (parseEnvBoolean(env.ALAYA_ALLOW_REMOTE_DAEMON, "ALAYA_ALLOW_REMOTE_DAEMON")) {
     return;
   }
   throw new Error("inspector_daemon_url_not_loopback");

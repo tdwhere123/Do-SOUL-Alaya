@@ -1,4 +1,4 @@
-import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { parseEnvBoolean, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -76,7 +76,10 @@ const currentPostFillProofRoots = new WeakMap<
 export function assertCacheOnlyEnvironment(
   env: Readonly<Record<string, string | undefined>>
 ): void {
-  const live = env.ALAYA_BENCH_ALLOW_LIVE_EXTRACTION?.trim().toLowerCase();
+  const live = parseEnvBoolean(
+    env.ALAYA_BENCH_ALLOW_LIVE_EXTRACTION,
+    "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION"
+  );
   const credential = env.ALAYA_OFFICIAL_GARDEN_SECRET_REF?.trim() ||
     env.ALAYA_OFFICIAL_GARDEN_API_KEY?.trim() ||
     env.OFFICIAL_API_GARDEN_API_KEY?.trim() ||
@@ -84,7 +87,7 @@ export function assertCacheOnlyEnvironment(
     env.ALAYA_QA_API_KEY?.trim();
   const conflictCredential = env.ALAYA_CONFLICT_LLM_PROVIDER_URL?.trim() ||
     env.ALAYA_CONFLICT_LLM_API_KEY?.trim();
-  if (credential || conflictCredential || live === "1" || live === "true") {
+  if (credential || conflictCredential || live) {
     throw new Error("post-fill benchmark stages must be credentialless and cache-only");
   }
 }

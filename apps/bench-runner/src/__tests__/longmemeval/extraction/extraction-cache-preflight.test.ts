@@ -224,6 +224,21 @@ describe("preflightExtractionCache", () => {
         ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST: "false"
       } as NodeJS.ProcessEnv)
     ).toBe(false);
+    expect(
+      resolveBenchRequireExtractionCacheManifest({
+        ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST: "off"
+      } as NodeJS.ProcessEnv)
+    ).toBe(false);
+    expect(
+      resolveBenchRequireExtractionCacheManifest({
+        ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST: "on"
+      } as NodeJS.ProcessEnv)
+    ).toBe(true);
+    expect(() =>
+      resolveBenchRequireExtractionCacheManifest({
+        ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST: "2"
+      } as NodeJS.ProcessEnv)
+    ).toThrow(/ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST/);
   });
 
   it("requires full coverage when minimumCoverage is 1", () => {

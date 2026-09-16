@@ -22,6 +22,6 @@ describe("isEnvFlagDisabled", () => {
 
   it("throws on an illegal token", () => {
     expect(() => isEnvFlagDisabled("maybe", "ALAYA_SQLITE_WRITE_QUEUE"))
-      .toThrow(/ALAYA_SQLITE_WRITE_QUEUE must be on, off, true, false, 1, or 0/);
+      .toThrow(/ALAYA_SQLITE_WRITE_QUEUE must be true, false, 1, 0, on, off, yes, no, enabled, or disabled/);
   });
 });

@@ -1,4 +1,5 @@
 import { createServer } from "node:net";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   DEFAULT_DAEMON_HOST,
@@ -144,7 +145,7 @@ export function assertInspectDaemonUrl(url: string, env: NodeJS.ProcessEnv = pro
   if (LOOPBACK_DAEMON_HOSTS.has(host)) {
     return;
   }
-  if (env.ALAYA_ALLOW_REMOTE_DAEMON === "1") {
+  if (parseEnvBoolean(env.ALAYA_ALLOW_REMOTE_DAEMON, "ALAYA_ALLOW_REMOTE_DAEMON")) {
     return;
   }
   throw new Error(
