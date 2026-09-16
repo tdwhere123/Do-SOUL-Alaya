@@ -1,4 +1,10 @@
 import type { GlobalMemoryEntry } from "@do-soul/alaya-protocol";
+import { isCjkSegmentationCandidate } from "@do-soul/alaya-cjk-segmentation";
+import {
+  compileRecallQueryProbes,
+  isAdmittedLexicalTerm,
+  splitLexicalTokens
+} from "../../query/recall-query-probes.js";
 import { selectBoundedTopK } from "./bounded-top-k.js";
 import type { GlobalMemoryRecallSourcePort } from "../global-memory-recall-service.js";
 
@@ -47,6 +53,32 @@ async function selectPagedGlobalMemoryEntries(
   return selected;
 }
 
+export function normalizeGlobalMemoryQuery(queryText: string | null): readonly string[] | null {
+  if (queryText === null) {
+    return null;
+  }
+  const trimmed = queryText.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  return dropCoveredCjkSurfaces(compileRecallQueryProbes(trimmed).lexical_terms);
+}
+
+function dropCoveredCjkSurfaces(terms: readonly string[]): readonly string[] {
+  // FTS keeps the unsliced CJK surface plus jieba pieces; AND membership
+  // cannot require that surface as a document token.
+  return terms.filter(
+    (term) =>
+      !terms.some(
+        (piece) =>
+          piece !== term &&
+          isCjkSegmentationCandidate(piece) &&
+          term.includes(piece) &&
+          piece.length < term.length
+      )
+  );
+}
+
 function filterGlobalRecallEntries(
   entries: readonly Readonly<GlobalMemoryEntry>[],
   queryTokens: readonly string[] | null
@@ -60,16 +92,17 @@ function matchesGlobalMemoryQuery(
   entry: Readonly<GlobalMemoryEntry>,
   queryTokens: readonly string[]
 ): boolean {
-  const haystack = [
-    entry.canonical_identity,
-    entry.content,
-    entry.provenance,
-    ...entry.domain_tags
-  ]
-    .join(" ")
-    .toLowerCase();
+  if (queryTokens.length === 0) {
+    return false;
+  }
+  const documentTokens = new Set(
+    splitLexicalTokens(joinGlobalMemoryLexicalSurface(entry)).filter(isAdmittedLexicalTerm)
+  );
+  return queryTokens.every((token) => documentTokens.has(token));
+}
 
-  return queryTokens.every((token) => haystack.includes(token));
+function joinGlobalMemoryLexicalSurface(entry: Readonly<GlobalMemoryEntry>): string {
+  return [entry.canonical_identity, entry.content, entry.provenance, ...entry.domain_tags].join(" ");
 }
 
 function compareGlobalMemoryRecallEntries(
