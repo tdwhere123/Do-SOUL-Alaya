@@ -22,6 +22,7 @@ function headersFor(token: string): Record<string, string> {
   return {
     "x-request-token": token,
     "x-alaya-desktop": "1",
+    origin: "http://localhost:5173",
     "content-type": "application/json"
   };
 }
@@ -118,7 +119,8 @@ describe("request token workspace scope", () => {
       requestProtection: {
         allowedOrigin: "http://localhost:5173",
         requestToken: PROCESS_TOKEN,
-        boundWorkspaceIds: ["wsA"]
+        boundWorkspaceIds: ["wsA"],
+        allowDesktopOriginlessRequests: true
       },
       routes: {
         globalMemory: globalMemoryRouteServices({
@@ -182,7 +184,8 @@ describe("request token workspace scope", () => {
       requestProtection: {
         allowedOrigin: "http://localhost:5173",
         requestToken: PROCESS_TOKEN,
-        boundWorkspaceIds: ["wsA"]
+        boundWorkspaceIds: ["wsA"],
+        allowDesktopOriginlessRequests: true
       },
       routes: {
         overrides: routeServices<OverrideRouteServices>({
