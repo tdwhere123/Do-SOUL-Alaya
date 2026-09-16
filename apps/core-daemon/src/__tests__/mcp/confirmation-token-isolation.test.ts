@@ -126,14 +126,16 @@ describe("confirmation token isolation", () => {
     stdout.on("data", (chunk) => stdoutChunks.push(chunk.toString("utf8")));
     const bridge = createAlayaCliBridge(
       {
-        startupSteps: [
-          "database",
-          "repositories",
-          "core-services",
-          "garden-runtime",
-          "mcp-tooling",
-          "http-app"
-        ].map((step) => ({ step, completedAt: "2026-05-05T00:00:00.000Z" }))
+        startupSteps: (
+          [
+            "database",
+            "repositories",
+            "core-services",
+            "garden-runtime",
+            "mcp-tooling",
+            "http-app"
+          ] as const
+        ).map((step) => ({ step, completedAt: "2026-05-05T00:00:00.000Z" }))
       },
       {
         env: {
