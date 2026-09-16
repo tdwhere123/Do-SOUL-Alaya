@@ -17,6 +17,12 @@ function tryReadFd(readFd: (fd: number) => string, fd: number): string | undefin
 }
 
 function readInheritedFd(fd: number): string {
+  // Forked Vitest workers keep IPC on fd 3. Reading that socket consumes the
+  // channel and the worker never exits. The inspect child has no IPC channel;
+  // its extra stdio pipe is also a socketpair, so socket type is not enough.
+  if (process.connected === true) {
+    throw Object.assign(new Error("inspector_launch_proof_fd_invalid"), { code: "EINVAL" });
+  }
   return readFileSync(fd, { encoding: "utf8" });
 }
 
