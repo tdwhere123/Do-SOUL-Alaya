@@ -198,18 +198,17 @@ describe("embedding treatment activation", () => {
     expect(() => assertEmbeddingTreatmentDiagnosticsPresent(undefined, {})).not.toThrow();
   });
 
-  it("rejects the retired local cross-encoder treatment", () => {
-    expect(() => requiresEmbeddingTreatmentDiagnostics({
+  it("ignores the retired local cross-encoder env key", () => {
+    expect(requiresEmbeddingTreatmentDiagnostics({
       ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true"
-    })).toThrow(/local cross-encoder reranking is retired/u);
+    })).toBe(false);
     expect(requiresEmbeddingTreatmentDiagnostics({
       ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
     })).toBe(false);
   });
 
   it.each([
-    ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "default"],
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "on"]
+    ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "default"]
   ] as const)("rejects invalid non-empty treatment override %s=%s", (name, value) => {
     expect(() => requiresEmbeddingTreatmentDiagnostics({ [name]: value }))
       .toThrow(new RegExp(name, "u"));

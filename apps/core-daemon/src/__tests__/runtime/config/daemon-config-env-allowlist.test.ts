@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
+  RETIRED_DAEMON_ENV_KEYS,
   listRegisteredDaemonEnvKeys,
   listUnregisteredPrefixedDaemonEnvKeys,
+  mergeDaemonEnvLookup,
   readDaemonProcessEnv,
   warnUnregisteredPrefixedDaemonEnvKeys
 } from "../../../runtime/config/daemon-config-environment.js";
@@ -71,6 +73,28 @@ describe("daemon env registry allowlist", () => {
     })).toEqual(["OFFICIAL_GARDEN_MODEL"]);
     expect(emitWarning).toHaveBeenCalledWith(
       expect.stringContaining("OFFICIAL_GARDEN_MODEL"),
+      expect.objectContaining({ code: "ALAYA_UNREGISTERED_ENV_KEYS" })
+    );
+  });
+
+  it("warns retired local cross-encoder keys through the same unregistered path", () => {
+    const emitWarning = vi.fn();
+    const configEnv = new Map([
+      ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "true"],
+      ["ALAYA_LOCAL_CROSS_ENCODER_MODEL", "legacy-model"]
+    ]);
+    const unknown = warnUnregisteredPrefixedDaemonEnvKeys(
+      mergeDaemonEnvLookup({}, configEnv),
+      emitWarning as typeof process.emitWarning
+    );
+    expect(unknown).toEqual([
+      "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
+      "ALAYA_LOCAL_CROSS_ENCODER_MODEL"
+    ]);
+    expect(listRegisteredDaemonEnvKeys()).not.toContain("ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK");
+    expect(RETIRED_DAEMON_ENV_KEYS).toContain("ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK");
+    expect(emitWarning).toHaveBeenCalledWith(
+      expect.stringContaining("ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK (retired)"),
       expect.objectContaining({ code: "ALAYA_UNREGISTERED_ENV_KEYS" })
     );
   });

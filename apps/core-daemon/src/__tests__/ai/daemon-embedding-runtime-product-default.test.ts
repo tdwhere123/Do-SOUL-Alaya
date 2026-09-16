@@ -7,7 +7,6 @@ import {
 } from "@do-soul/alaya-storage";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 import {
-  LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR,
   readEmbeddingRuntimeConfig
 } from "../../ai/daemon-embedding-runtime-config.js";
 
@@ -158,15 +157,18 @@ describe("daemon local embedding product default", () => {
   });
 
   it.each(["true", "1", "yes", "  TrUe  ", "on"])(
-    "fails loud when local cross-encoder rerank is set to %s",
+    "ignores retired local cross-encoder rerank set to %s",
     (value) => {
       expect(() => createRuntime(new Map([
         ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", value]
-      ]))).toThrow(LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR);
+      ]))).not.toThrow();
+      expect(createRuntime(new Map([
+        ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", value]
+      ]))).not.toHaveProperty("answerRerankService");
     }
   );
 
-  it("allows an explicit false local cross-encoder flag", () => {
+  it("ignores an explicit false local cross-encoder flag", () => {
     expect(() => readEmbeddingRuntimeConfig(new Map([
       ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "0"]
     ]), vi.fn())).not.toThrow();

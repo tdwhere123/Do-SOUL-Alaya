@@ -115,7 +115,7 @@ describe("answer relevance candidate diagnostics", () => {
     }).success).toBe(false);
   });
 
-  it("rejects the retired cross-encoder treatment before interpreting its diagnostics", () => {
+  it("rejects observed reranking even when the retired env key is still set", () => {
     expect(() => parseBenchRecallDiagnosticsForRun({
       ...baseDiagnostics,
       answer_rerank_status: "failed",
@@ -123,7 +123,7 @@ describe("answer relevance candidate diagnostics", () => {
       answer_rerank_failure_class: "service_error",
       candidates: [baseCandidate]
     }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" })).toThrow(
-      /local cross-encoder reranking is retired/u
+      /retired cross-encoder reranking was observed/u
     );
   });
 

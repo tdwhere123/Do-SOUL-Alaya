@@ -18,15 +18,29 @@ export function readOptionalTreatmentBoolean(
   throw new Error(`${key} must be true, false, 1, or 0`);
 }
 
+const RETIRED_CROSS_ENCODER_ENV_KEYS = [
+  "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
+  "ALAYA_LOCAL_CROSS_ENCODER_MODEL",
+  "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR"
+] as const;
+
 export function refuseRetiredLocalCrossEncoderTreatment(
-  env: Readonly<Record<string, string | undefined>>
+  env: Readonly<Record<string, string | undefined>>,
+  emitWarning: typeof process.emitWarning = process.emitWarning.bind(process)
 ): void {
-  if (readOptionalTreatmentBoolean(
-    env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-  ) === true) {
-    throw new Error("local cross-encoder reranking is retired");
-  }
+  const present = RETIRED_CROSS_ENCODER_ENV_KEYS.filter((key) => {
+    const raw = env[key];
+    return raw !== undefined && raw.trim().length > 0;
+  });
+  if (present.length === 0) return;
+  emitWarning(
+    `Unregistered or retired ALAYA_*/OFFICIAL_* environment keys are set and will be ignored: ${present.map((key) => `${key} (retired)`).join(", ")}`,
+    {
+      type: "AlayaUnregisteredEnvWarning",
+      code: "ALAYA_UNREGISTERED_ENV_KEYS",
+      detail: JSON.stringify({ keys: present, retired: present })
+    }
+  );
 }
 
 export function readOptionalOnnxThreadCount(raw: string | undefined): number | null {

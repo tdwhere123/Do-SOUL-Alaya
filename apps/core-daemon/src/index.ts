@@ -30,6 +30,7 @@ import { createAnswersWithCrystallizer } from "./runtime/garden-wiring/garden-an
 import { createGardenRuntimeWiring } from "./runtime/garden-wiring/garden-runtime-wiring.js";
 import {
   DAEMON_ONLY_CONFIG_ENV_KEYS,
+  mergeDaemonEnvLookup,
   warnUnregisteredPrefixedDaemonEnvKeys
 } from "./runtime/config/daemon-config-environment.js";
 import { closeDaemonStartupResourcesAfterFailure } from "./runtime/startup/cleanup.js";
@@ -110,7 +111,6 @@ export async function createAlayaDaemonRuntime(
 async function createRuntimeBootstrapContext() {
   const startupSteps: DaemonStartupStepRecord[] = [];
   const validatedEnv = validateDaemonEnv(process.env);
-  warnUnregisteredPrefixedDaemonEnvKeys(process.env);
   const warnLogger = createWarnLogger();
   startCjkSegmentationWarmup(warnLogger);
   installUnhandledRejectionHandler(warnLogger);
@@ -123,6 +123,7 @@ async function createRuntimeBootstrapContext() {
   const configEnvResult = await loadConfigEnv(configPaths.envPath, (message, meta) => {
     warnLogger.warn(message, meta ?? {});
   });
+  warnUnregisteredPrefixedDaemonEnvKeys(mergeDaemonEnvLookup(process.env, configEnvResult));
   // Core/recall config must read the full env; validatedEnv is only the daemon server key subset and would drop every ALAYA_RECALL_* flag.
   installCoreConfigFromProcessEnv(process.env, configEnvResult);
   warnLogger.info("effective recall runtime", {

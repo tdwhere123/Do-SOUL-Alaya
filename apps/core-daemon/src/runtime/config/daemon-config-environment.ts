@@ -14,8 +14,7 @@ export const DAEMON_ONLY_CONFIG_ENV_KEYS = Object.freeze({
     allowPrivateProviderUrl: "ALAYA_ALLOW_PRIVATE_PROVIDER_URL",
     localCacheDir: "ALAYA_LOCAL_EMBEDDING_CACHE_DIR",
     localModel: "ALAYA_LOCAL_EMBEDDING_MODEL",
-    d2q: "ALAYA_RECALL_D2Q",
-    localCrossEncoderRerank: "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
+    d2q: "ALAYA_RECALL_D2Q"
   }),
   mcp: Object.freeze({
     toolTimeoutMs: "ALAYA_MCP_TOOL_TIMEOUT_MS",
@@ -75,6 +74,15 @@ const DAEMON_ONLY_KEY_LIST: readonly string[] = Object.freeze(
   Object.values(DAEMON_ONLY_CONFIG_ENV_KEYS).flatMap((group) => Object.values(group))
 );
 
+/** Ignored keys that still share the unregistered-env warning. Remove after operators unset them. */
+export const RETIRED_DAEMON_ENV_KEYS = Object.freeze([
+  "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
+  "ALAYA_LOCAL_CROSS_ENCODER_MODEL",
+  "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR"
+] as const);
+
+const RETIRED_DAEMON_ENV_KEY_SET: ReadonlySet<string> = new Set(RETIRED_DAEMON_ENV_KEYS);
+
 const REGISTERED_DAEMON_ENV_KEYS: ReadonlySet<string> = new Set([
   ...resolveCoreConfigEnvironmentKeys(),
   ...DAEMON_ONLY_KEY_LIST
@@ -104,6 +112,19 @@ export function listUnregisteredPrefixedDaemonEnvKeys(
   return Object.freeze(unknown.sort());
 }
 
+export function mergeDaemonEnvLookup(
+  processEnv: EnvLookup = processEnvLookup(),
+  configEnv?: ReadonlyMap<string, string>
+): EnvLookup {
+  const merged: Record<string, string | undefined> = { ...processEnv };
+  if (configEnv !== undefined) {
+    for (const [key, value] of configEnv) {
+      if (merged[key] === undefined) merged[key] = value;
+    }
+  }
+  return merged;
+}
+
 export function warnUnregisteredPrefixedDaemonEnvKeys(
   env: EnvLookup = processEnvLookup(),
   emitWarning: typeof process.emitWarning = process.emitWarning.bind(process)
@@ -112,12 +133,16 @@ export function warnUnregisteredPrefixedDaemonEnvKeys(
   if (unknown.length === 0) {
     return unknown;
   }
+  const retired = unknown.filter((key) => RETIRED_DAEMON_ENV_KEY_SET.has(key));
+  const listed = unknown.map((key) =>
+    RETIRED_DAEMON_ENV_KEY_SET.has(key) ? `${key} (retired)` : key
+  );
   emitWarning(
-    `Unregistered ALAYA_*/OFFICIAL_* environment keys are set and will be ignored: ${unknown.join(", ")}`,
+    `Unregistered or retired ALAYA_*/OFFICIAL_* environment keys are set and will be ignored: ${listed.join(", ")}`,
     {
       type: "AlayaUnregisteredEnvWarning",
       code: "ALAYA_UNREGISTERED_ENV_KEYS",
-      detail: JSON.stringify({ keys: unknown })
+      detail: JSON.stringify({ keys: unknown, retired })
     }
   );
   return unknown;
