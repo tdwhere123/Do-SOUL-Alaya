@@ -164,13 +164,22 @@ function bindRestrictedOccurrences(
     const available = catalogs.filter((unit) => !claimed.has(unitKey(unit)));
     const hits = migrateRestrictedUnits(row, spec, available, input);
     const unassigned = slots.filter((item) => item === null).length;
-    if (hits.length > 1 && unassigned === 1) {
+    const corpora = new Set(hits.map((unit) => unit.binding.sourceCorpusIdentity));
+    if (corpora.size > 1) {
+      markRemainingAmbiguous(
+        slots, specs, "frozen occurrence matches current units in more than one source corpus"
+      );
+      break;
+    }
+    if (hits.length === 0) {
       slots[index] = occurrenceBinding(
-        spec, "ambiguous", "frozen occurrence matches more than one current unit", null
+        spec, "lost",
+        "frozen occurrence restriction has zero current hits; global same-text fallback is not used",
+        null
       );
       continue;
     }
-    if (hits.length >= 1) {
+    if (hits.length === 1 || hits.length === unassigned) {
       claimed.add(unitKey(hits[0]!));
       slots[index] = occurrenceBinding(
         spec, "bound", "frozen occurrence migrated through native source identity",
@@ -178,15 +187,25 @@ function bindRestrictedOccurrences(
       );
       continue;
     }
-    slots[index] = occurrenceBinding(
-      spec, "lost",
-      "frozen occurrence restriction has zero current hits; global same-text fallback is not used",
-      null
+    markRemainingAmbiguous(
+      slots, specs, "frozen occurrence matches more than one current unit"
     );
+    break;
   }
   return Object.freeze(slots.map((item, index) => item ?? occurrenceBinding(
     specs[index]!, "lost", "frozen occurrence restriction has zero current hits; global same-text fallback is not used", null
   )));
+}
+
+function markRemainingAmbiguous(
+  slots: Array<FrozenOccurrenceBinding | null>,
+  specs: readonly FrozenOccurrenceRestriction[],
+  reason: string
+): void {
+  for (const [index, spec] of specs.entries()) {
+    if (slots[index] !== null) continue;
+    slots[index] = occurrenceBinding(spec, "ambiguous", reason, null);
+  }
 }
 
 function unitKey(unit: FrozenCatalogUnit): string {
@@ -476,10 +495,12 @@ function freezeBinding(
   row: FrozenAssertion,
   occurrences: readonly FrozenOccurrenceBinding[]
 ): FrozenAssertionBinding {
-  const current = Object.freeze(occurrences.flatMap((item) => (
-    item.current === null ? [] : [item.current]
-  )));
   const aggregated = aggregateAssertionStatus(occurrences);
+  const current = Object.freeze(
+    aggregated.status === "ambiguous"
+      ? []
+      : occurrences.flatMap((item) => item.current === null ? [] : [item.current])
+  );
   return Object.freeze({
     row,
     status: aggregated.status,

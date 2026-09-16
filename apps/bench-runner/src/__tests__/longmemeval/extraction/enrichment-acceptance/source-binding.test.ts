@@ -294,30 +294,80 @@ describe("frozen source binding", () => {
     expect(new Set(binding.current.map((item) => item.occurrenceIdentity)).size).toBe(2);
   });
 
-  it("does not bind a foreign corpus when a request reuses the frozen message id", () => {
+  it("does not claim current when two stale identities match three same-text units", () => {
+    const units = twoOccurrenceUnits();
+    const extra = {
+      ...units[0]!,
+      assertionId: 3,
+      semanticKey: "ee".repeat(32),
+      binding: {
+        ...units[0]!.binding,
+        occurrenceIdentity: "33".padEnd(64, "0")
+      }
+    };
+    const stale = twoOccurrenceRow(units);
+    const rotated = [...units, extra].map((unit, index) => ({
+      ...unit,
+      binding: {
+        ...unit.binding,
+        occurrenceIdentity: `99${index}`.padEnd(64, "0")
+      }
+    }));
+    const binding = bindFrozenAssertionToCurrentSource(stale, {
+      catalogUnits: rotated,
+      requests: [{
+        key: "request-local",
+        source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+        message_ids: ["msg-1"],
+        source_assertions: rotated.map((unit) => ({
+          assertion_id: unit.assertionId,
+          text: unit.text
+        }))
+      }]
+    });
+    expect(binding.status).toBe("ambiguous");
+    expect(binding.current).toEqual([]);
+    expect(binding.occurrences.every((item) => item.status === "ambiguous")).toBe(true);
+  });
+
+  it("does not bind when two corpora claim the same message and locator", () => {
     const units = twoOccurrenceUnits();
     const foreign = {
       ...units[0]!,
       assertionId: 7,
+      semanticKey: "ee".repeat(32),
       binding: {
         ...units[0]!.binding,
         occurrenceIdentity: "foreign-occurrence",
-        sourceCorpusIdentity: "foreign-corpus",
-        locator: { start: 99, end: 120 }
+        sourceCorpusIdentity: "foreign-corpus"
+      }
+    };
+    const migrated = {
+      ...units[0]!,
+      binding: {
+        ...units[0]!.binding,
+        occurrenceIdentity: "migrated-occurrence",
+        sourceCorpusIdentity: "migrated-corpus"
       }
     };
     const binding = bindFrozenAssertionToCurrentSource(twoOccurrenceRow(units), {
-      catalogUnits: [foreign],
+      catalogUnits: [migrated, foreign],
       requests: [{
+        key: "migrated-request",
+        source_corpus_identity: "migrated-corpus",
+        message_ids: ["msg-1"],
+        source_assertions: [{ assertion_id: migrated.assertionId, text: migrated.text }]
+      }, {
         key: "foreign-request",
         source_corpus_identity: "foreign-corpus",
         message_ids: ["msg-1"],
         source_assertions: [{ assertion_id: 7, text: foreign.text }]
       }]
     });
+    expect(binding.status).toBe("ambiguous");
     expect(binding.status).not.toBe("bound");
+    expect(binding.status).not.toBe("partial");
     expect(binding.current).toEqual([]);
-    expect(binding.occurrences.every((item) => item.status === "lost")).toBe(true);
   });
 
   it("migrates a stale occurrence identity through message-local exact text", () => {

@@ -450,22 +450,18 @@ describe("enrichment preparation report", () => {
 
   it("does not join a pointerless native outcome by catalog assertion id alone", () => {
     const units = twoOccurrenceUnits();
-    const first = row(1, "optional", null);
-    const second = row(2, "required", "aspiration");
-    const bindings = bindFrozenPopulation([first, second], {
+    const frozen = twoOccurrenceRow([units[0]!]);
+    const bindings = bindFrozenPopulation([frozen], {
       catalogUnits: [units[0]!],
       requests: [{
         key: "req-a",
         source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
         source_assertions: [{ assertion_id: units[0]!.assertionId, text: units[0]!.text }]
-      }, {
-        key: "req-b",
-        source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
-        source_assertions: [{ assertion_id: units[0]!.assertionId, text: units[0]!.text }]
       }]
     });
+    expect(bindings.bindings[0]?.status).toBe("bound");
     const report = composeEnrichmentPreparationReport({
-      population: { rows: [first, second] },
+      population: { rows: [frozen] },
       bindings,
       preflight: null,
       nativeOutcomes: [{
@@ -476,7 +472,7 @@ describe("enrichment preparation report", () => {
         machine_admission: "rejected"
       }]
     });
-    expect(report.source_fidelity.rows.every((item) => item.raw_state === "missing")).toBe(true);
+    expect(report.source_fidelity.rows[0]?.raw_state).toBe("missing");
     expect(report.native_formation_publication.unmatched_native_outcomes).toHaveLength(1);
   });
 });

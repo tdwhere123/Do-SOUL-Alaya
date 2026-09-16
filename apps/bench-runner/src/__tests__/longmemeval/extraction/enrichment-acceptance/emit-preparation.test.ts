@@ -78,6 +78,25 @@ describe("enrichment preparation emit", () => {
     expect(report.transport_parse.attempted_fetches).toBe(0);
   });
 
+  it("refuses to overwrite existing preparation JSON", async () => {
+    root = mkdtempSync(join(tmpdir(), "enrichment-emit-wx-"));
+    writeMiniaturePopulation(root);
+    const outputDir = join(root, "out");
+    const input = {
+      regressionPath: join(root, "regression-source-review.json"),
+      canonicalPath: join(root, "canonical-source-review.json"),
+      outputDir,
+      cacheRoot: join(root, "cache"),
+      turns: [TURN],
+      datasetRevision: "synthetic-revision"
+    };
+    await emitEnrichmentPreparation(input);
+    await expect(emitEnrichmentPreparation({
+      ...input,
+      cacheRoot: join(root, "cache-2")
+    })).rejects.toMatchObject({ code: "EEXIST" });
+  });
+
   it("refuses to emit when annotation paths are missing", async () => {
     root = mkdtempSync(join(tmpdir(), "enrichment-emit-missing-"));
     await expect(emitEnrichmentPreparation({
