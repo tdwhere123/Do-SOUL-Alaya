@@ -36,6 +36,23 @@ interface NeighborAnalysis {
   readonly ambiguous: NeighborCandidate[];
 }
 
+interface ReconciliationLlmCandidateSnapshot {
+  readonly objectId: string;
+  readonly content: string;
+  readonly updatedAt: string;
+}
+
+export type PreparedReconciliation =
+  | { readonly kind: "ready"; readonly decision: ReconciliationDecision }
+  | {
+      readonly kind: "needs_llm";
+      readonly incomingContent: string;
+      readonly candidates: readonly { readonly objectId: string; readonly content: string }[];
+      readonly snapshots: readonly ReconciliationLlmCandidateSnapshot[];
+      readonly bestSimilarity: number;
+      readonly sawConflictNeighbor: boolean;
+    };
+
 export interface ReconciliationDeciderDependencies {
   readonly preWriteRecall: PreWriteRecallPort;
   readonly llmDecision: ReconciliationLlmDecisionPort;
@@ -49,36 +66,59 @@ export class ReconciliationDecider {
   public constructor(private readonly deps: ReconciliationDeciderDependencies) {}
 
   public async decide(input: ReconciliationInput): Promise<ReconciliationDecision> {
+    const prepared = await this.prepare(input);
+    if (prepared.kind === "ready") {
+      return prepared.decision;
+    }
+    return await this.finishWithLlm(input, prepared);
+  }
+
+  public async prepare(input: ReconciliationInput): Promise<PreparedReconciliation> {
     const incomingContent = input.incomingContent.trim();
     if (incomingContent.length === 0) {
-      return addDecision(0, false, "empty incoming content — no reconciliation");
+      return ready(addDecision(0, false, "empty incoming content — no reconciliation"));
     }
 
     const recall = await this.retrievePreWriteRecall(input);
     if (recall.candidates.length === 0) {
-      return addDecision(0, false, "pre-write recall found no related existing memory");
+      return ready(addDecision(0, false, "pre-write recall found no related existing memory"));
     }
 
     const analysis = this.analyzeNeighbors(input, incomingContent, recall.candidates);
 
     if (analysis.best === null) {
-      return addDecision(0, analysis.sawConflictNeighbor, "no comparable neighbor content");
+      return ready(addDecision(0, analysis.sawConflictNeighbor, "no comparable neighbor content"));
     }
 
     if (analysis.identical !== null) {
-      return buildIdenticalDecision(analysis.identical, analysis.best.similarity);
+      return ready(buildIdenticalDecision(analysis.identical, analysis.best.similarity));
     }
 
     if (analysis.ambiguous.length > 0) {
-      return await this.decideWithAmbiguousNeighbors(input, incomingContent, analysis);
+      return this.prepareAmbiguousNeighbors(incomingContent, analysis);
     }
 
-    return addDecision(
-      analysis.best.similarity,
-      analysis.sawConflictNeighbor,
-      analysis.sawConflictNeighbor
-        ? "distinct fact with a same-topic divergent neighbor"
-        : "distinct fact"
+    return ready(
+      addDecision(
+        analysis.best.similarity,
+        analysis.sawConflictNeighbor,
+        analysis.sawConflictNeighbor
+          ? "distinct fact with a same-topic divergent neighbor"
+          : "distinct fact"
+      )
+    );
+  }
+
+  public async finishWithLlm(
+    input: ReconciliationInput,
+    prepared: Extract<PreparedReconciliation, { kind: "needs_llm" }>
+  ): Promise<ReconciliationDecision> {
+    return await this.decideWithLlm(
+      input,
+      prepared.incomingContent,
+      prepared.candidates,
+      prepared.bestSimilarity,
+      prepared.sawConflictNeighbor
     );
   }
 
@@ -166,11 +206,10 @@ export class ReconciliationDecider {
     );
   }
 
-  private async decideWithAmbiguousNeighbors(
-    input: ReconciliationInput,
+  private prepareAmbiguousNeighbors(
     incomingContent: string,
     analysis: NeighborAnalysis
-  ): Promise<ReconciliationDecision> {
+  ): Extract<PreparedReconciliation, { kind: "needs_llm" }> {
     analysis.ambiguous.sort(
       (left, right) =>
         right.similarity - left.similarity ||
@@ -183,15 +222,24 @@ export class ReconciliationDecider {
           right.neighbor.entry.object_id
         )
     );
-    const candidates = selectLlmCandidates(analysis.ambiguous, this.deps.maxLlmCandidates)
-      .map((item) => ({ objectId: item.neighbor.entry.object_id, content: item.neighbor.entry.content }));
-    return await this.decideWithLlm(
-      input,
+    const selected = selectLlmCandidates(analysis.ambiguous, this.deps.maxLlmCandidates);
+    const candidates = selected.map((item) => ({
+      objectId: item.neighbor.entry.object_id,
+      content: item.neighbor.entry.content
+    }));
+    const snapshots = selected.map((item) => ({
+      objectId: item.neighbor.entry.object_id,
+      content: item.neighbor.entry.content,
+      updatedAt: item.neighbor.entry.updated_at
+    }));
+    return {
+      kind: "needs_llm",
       incomingContent,
       candidates,
-      analysis.best!.similarity,
-      analysis.sawConflictNeighbor
-    );
+      snapshots,
+      bestSimilarity: analysis.best!.similarity,
+      sawConflictNeighbor: analysis.sawConflictNeighbor
+    };
   }
 
   private async decideWithLlm(
@@ -282,6 +330,10 @@ export class ReconciliationDecider {
       }
     );
   }
+}
+
+function ready(decision: ReconciliationDecision): Extract<PreparedReconciliation, { kind: "ready" }> {
+  return { kind: "ready", decision };
 }
 
 function buildIdenticalDecision(
