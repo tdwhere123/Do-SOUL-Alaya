@@ -198,21 +198,35 @@ describe("createApp", () => {
     expect(limited.headers.get("retry-after")).toBe("60");
   });
 
-  it("does not consume rate limit quota for requests rejected by token authentication", async () => {
+  it("rate limits failed token authentication by peer identity without consuming the valid-token quota", async () => {
     const app = createProtectedTestApp({
       rateLimit: {
-        maxRequests: 1,
+        maxRequests: 2,
         windowMs: 60_000,
         nowMs: () => 1_000
       }
     });
 
-    const badHeaders = { "x-request-token": "wrong-token", "x-alaya-desktop": "1" };
-    expect((await app.request("/unknown", { headers: badHeaders })).status).toBe(403);
-    expect((await app.request("/unknown", { headers: badHeaders })).status).toBe(403);
+    expect(
+      (await app.request("/unknown", { headers: { "x-request-token": "bad-one", "x-alaya-desktop": "1" } })).status
+    ).toBe(403);
+    expect(
+      (await app.request("/unknown", { headers: { "x-request-token": "bad-two", "x-alaya-desktop": "1" } })).status
+    ).toBe(403);
+
+    const limited = await app.request("/unknown", {
+      headers: { "x-request-token": "bad-three", "x-alaya-desktop": "1" }
+    });
+    expect(limited.status).toBe(429);
+    await expect(limited.json()).resolves.toEqual({
+      success: false,
+      error: "Rate limit exceeded"
+    });
 
     const goodHeaders = withTestAuthHeaders();
     expect((await app.request("/unknown", { headers: goodHeaders })).status).toBe(404);
+    expect((await app.request("/unknown", { headers: goodHeaders })).status).toBe(404);
+    expect((await app.request("/unknown", { headers: goodHeaders })).status).toBe(429);
   });
 
   it("accepts trimmed allowed-origin values after startup normalization", async () => {
