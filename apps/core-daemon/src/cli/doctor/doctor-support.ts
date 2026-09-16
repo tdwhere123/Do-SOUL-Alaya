@@ -8,7 +8,7 @@ import type { GardenCredentialProvenance } from "../../services/config/config-se
 import type { GraphHealthWarning } from "../../services/status/graph-health-service.js";
 import type { AlayaCliArgsSchema } from "../bridge.js";
 import { writeDoctorAuditSummary } from "./doctor-audit.js";
-import { ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW } from "../../attach/index.js";
+import { ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW } from "../../attach/profile-mutation/profile-mutation.js";
 import type {
   DoctorArgs,
   DoctorBootstrapReconcileSummary,

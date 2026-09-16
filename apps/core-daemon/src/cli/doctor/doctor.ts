@@ -8,7 +8,8 @@ import type { DaemonStartupStepRecord } from "../../runtime/daemon/lifecycle/dae
 import type { PathPlasticityLookupTelemetrySnapshot } from "../../garden/path-plasticity/path-plasticity-runtime.js";
 import type { GardenCredentialProvenance } from "../../services/config/config-service.js";
 import type { ResolveSecretError } from "../../secrets/index.js";
-import { detectAttachedProfileInstructionsDrift, ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW, type ProfileInstructionsDriftReport, type ProfileTarget } from "../../attach/index.js";
+import { detectAttachedProfileInstructionsDrift, type ProfileInstructionsDriftReport, type ProfileTarget } from "../../attach/index.js";
+import { ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW } from "../../attach/profile-mutation/profile-mutation.js";
 import { attachedAgentEnvHoldsConfirmationToken } from "../../attach/attached-agent-mcp-child-env.js";
 import { ALAYA_SYSEXITS, type AlayaCliContext, type AlayaCliResult, type AlayaSubcommandSpec } from "../bridge.js";
 import { resolveCliWorkspaceContext } from "../support/workspace-context.js";
