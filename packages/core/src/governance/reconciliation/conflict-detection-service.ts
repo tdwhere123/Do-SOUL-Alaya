@@ -7,6 +7,7 @@ import {
   type PathMintOutcome,
 } from "../../relations/edge-proposals/path-relation-proposal-service.js";
 import { CoreError } from "../../shared/errors.js";
+import { readCandidateQuery } from "./candidate-query-result.js";
 import {
   DEFAULT_LLM_MAX_PAIRS,
   TAG_OVERLAP_CONTRADICTS_THRESHOLD,
@@ -165,30 +166,29 @@ export class ConflictDetectionService {
     }
   }
 
-  // invariant: candidate-query fetch with mode-dependent failure handling.
-  // In strict no-drop mode a repository throw rethrows so the bulk-enrich
-  // worker releases the claim (a query failure must NOT silently become an
-  // empty candidate set, dropping every owed conflict edge for this memory).
-  // In best-effort inline mode it warns and degrades to an empty set, keeping
-  // a detection failure from breaking a successful memory creation.
+  // Candidate reads share readCandidateQuery with pre-write recall so a
+  // repository throw is never silently an empty list at the query layer.
+  // Strict no-drop rethrows so bulk-enrich can retry; best-effort inline
+  // still refuses to break an already-created memory, but that conversion
+  // to empty is explicit here rather than a private catch.
   private async fetchCandidates(
     fetch: () => Promise<readonly Readonly<MemoryEntry>[]>,
     warnMessage: string,
     workspaceId: string,
     strictNoDrop: boolean
   ): Promise<readonly Readonly<MemoryEntry>[]> {
-    try {
-      return await fetch();
-    } catch (err) {
-      if (strictNoDrop) {
-        throw err;
-      }
-      this.warn(warnMessage, {
-        workspace_id: workspaceId,
-        error: errorMessage(err)
-      });
-      return [] as readonly Readonly<MemoryEntry>[];
+    const result = await readCandidateQuery(fetch);
+    if (result.availability === "ok") {
+      return result.items;
     }
+    if (strictNoDrop) {
+      throw result.error;
+    }
+    this.warn(warnMessage, {
+      workspace_id: workspaceId,
+      error: errorMessage(result.error)
+    });
+    return [] as readonly Readonly<MemoryEntry>[];
   }
 
   private async writeEdge(

@@ -78,6 +78,7 @@ export function createDeps(
     })
   );
   const preWriteRecall = vi.fn<RecallFn>(async (input) => ({
+    availability: "ok" as const,
     candidates: neighbors
       .filter((entry) => entry.workspace_id === input.workspaceId && entry.lifecycle_state !== "archived")
       .map((entry) => {
@@ -146,7 +147,7 @@ export function drive(
   let evidenceCounter = 0;
   const applyVerdict: ReconciliationVerdictApplier = async (verdict) => {
     appliedVerdicts.push(verdict.kind);
-    if (verdict.kind === "noop") {
+    if (verdict.kind === "noop" || verdict.kind === "deferred") {
       return {};
     }
     evidenceCounter += 1;

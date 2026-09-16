@@ -75,6 +75,7 @@ describe("ReconciliationDecider candidate permutation invariance", () => {
     const decider1 = new ReconciliationDecider({
       preWriteRecall: {
         recall: async () => ({
+          availability: "ok" as const,
           candidates: [candidateA, candidateB],
           uncertainty: 0.2,
           auditFeatures: {}
@@ -91,6 +92,7 @@ describe("ReconciliationDecider candidate permutation invariance", () => {
     const decider2 = new ReconciliationDecider({
       preWriteRecall: {
         recall: async () => ({
+          availability: "ok" as const,
           candidates: [candidateB, candidateA],
           uncertainty: 0.2,
           auditFeatures: {}
@@ -126,6 +128,7 @@ describe("ReconciliationDecider candidate permutation invariance", () => {
     const decider1 = new ReconciliationDecider({
       preWriteRecall: {
         recall: async () => ({
+          availability: "ok" as const,
           candidates: [candidateA, candidateB],
           uncertainty: 0.1,
           auditFeatures: {}
@@ -149,6 +152,7 @@ describe("ReconciliationDecider candidate permutation invariance", () => {
     const decider2 = new ReconciliationDecider({
       preWriteRecall: {
         recall: async () => ({
+          availability: "ok" as const,
           candidates: [candidateB, candidateA],
           uncertainty: 0.1,
           auditFeatures: {}
@@ -195,7 +199,7 @@ describe("ReconciliationDecider candidate permutation invariance", () => {
     const decide = async (candidates: readonly PreWriteCandidateNeighbor[]) => {
       const decider = new ReconciliationDecider({
         preWriteRecall: {
-          recall: async () => ({ candidates, uncertainty: 0, auditFeatures: {} })
+          recall: async () => ({ availability: "ok" as const, candidates, uncertainty: 0, auditFeatures: {} })
         },
         llmDecision: { decide: vi.fn() },
         similarityFloor: 0.35,

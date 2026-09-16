@@ -11,6 +11,7 @@ import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from 
 import { ReconciliationDecider } from "./reconciliation-decider.js";
 import {
   addDecision,
+  deferredDecision,
   auditDroppedContent,
   errorMessage,
   DEFAULT_CONFLICT_TAG_OVERLAP_THRESHOLD,
@@ -33,12 +34,14 @@ export {
   compareCandidateContent,
   AUDIT_DROPPED_CONTENT_MAX_CHARS,
   RECONCILE_LEASE_TTL_MS,
-  createRuleOnlyReconciliationDecisionPort
+  createRuleOnlyReconciliationDecisionPort,
+  deferredDecision
 } from "./reconciliation-service-internal.js";
 
 export type {
   ReconciliationDecision,
   ReconciliationDecisionKind,
+  ReconciliationDeferral,
   ReconciliationEventLogPort,
   ReconciliationInput,
   ReconciliationKeywordSearchPort,
@@ -242,18 +245,14 @@ export class ReconciliationService {
         new Date(nowDate.getTime() + this.leaseTtlMs).toISOString()
       );
       if (acquired === null) {
-        // another process holds this workspace's reconcile — degrade, don't block.
-        this.warn("reconciliation lease busy — degrading to ADD", {
+        this.warn("reconciliation lease busy — not adding", {
           workspace_id: input.workspaceId,
           signal_id: input.signalId
         });
-        const degraded = addDecision(
-          0,
-          true,
-          "reconciliation lease held by another process — added with conflict scan"
+        return deferredDecision(
+          "lease_busy",
+          "reconciliation lease held by another process — not added"
         );
-        await applyVerdict(degraded);
-        return degraded;
       }
       try {
         return await this.runDecisionSection(input, applyVerdict);
@@ -273,6 +272,9 @@ export class ReconciliationService {
 
   private async runDecisionSection(input: ReconciliationInput, applyVerdict: ReconciliationVerdictApplier): Promise<ReconciliationDecision> {
     const decision = await this.decider.decide(input);
+    if (decision.kind === "deferred") {
+      return decision;
+    }
 
     if (decision.kind === "update" && decision.survivingObjectId !== undefined) {
       return await this.applyUpdateDecision(

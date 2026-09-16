@@ -379,6 +379,9 @@ export interface ConflictDetectionPort {
 //               then rewrites the target row and relinks that fresh
 //               evidence ref so durable content keeps matching evidence
 //   - noop   -> the router creates nothing; the drop is audited
+//   - deferred -> neighbor scan or lease was unavailable; the router
+//               creates nothing and reports failure so the caller can retry
+
 // NOOP creating no object is what makes a re-seed of the same haystack
 // idempotent — no fresh capsule is minted to accumulate on the surviving
 // row. `survivingObjectId` is the row that ends up holding the fact for
@@ -386,11 +389,13 @@ export interface ConflictDetectionPort {
 // turn through it.
 // see also: packages/core/src/governance/reconciliation-service.ts
 export interface ReconciliationDecisionView {
-  readonly kind: "add" | "update" | "noop";
+  readonly kind: "add" | "update" | "noop" | "deferred";
   /** The row that ends up holding the fact for UPDATE / NOOP. */
   readonly survivingObjectId?: string;
   readonly runConflictScan: boolean;
   readonly reason: string;
+  readonly deferral?: "prewrite_unavailable" | "lease_busy";
+  readonly retryable?: boolean;
 }
 
 export interface ReconciliationPort {

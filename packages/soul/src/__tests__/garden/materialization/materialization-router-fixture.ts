@@ -153,10 +153,12 @@ export function createDeps(): TestDeps {
 
 export function fakeReconciliationPort(
   verdict: {
-    readonly kind: "add" | "update" | "noop";
+    readonly kind: "add" | "update" | "noop" | "deferred";
     readonly survivingObjectId?: string;
     readonly runConflictScan?: boolean;
     readonly reason?: string;
+    readonly deferral?: "prewrite_unavailable" | "lease_busy";
+    readonly retryable?: boolean;
   },
   options: { readonly updateFails?: boolean } = {}
 ): {
@@ -171,8 +173,13 @@ export function fakeReconciliationPort(
         ? {}
         : { survivingObjectId: verdict.survivingObjectId }),
       runConflictScan: verdict.runConflictScan ?? false,
-      reason: verdict.reason ?? "verdict"
+      reason: verdict.reason ?? "verdict",
+      ...(verdict.deferral === undefined ? {} : { deferral: verdict.deferral }),
+      ...(verdict.retryable === undefined ? {} : { retryable: verdict.retryable })
     } as const;
+    if (verdict.kind === "deferred") {
+      return decisionView;
+    }
     appliedVerdicts.push(decisionView.kind);
     await applyVerdict(decisionView);
     if (verdict.kind === "update" && options.updateFails) {

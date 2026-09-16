@@ -1,5 +1,6 @@
 import {
   addDecision,
+  deferredDecision,
   compareCandidateContent,
   errorMessage,
   jaccardIndex,
@@ -55,6 +56,12 @@ export class ReconciliationDecider {
     }
 
     const recall = await this.retrievePreWriteRecall(input);
+    if (recall.availability === "unavailable") {
+      return deferredDecision(
+        "prewrite_unavailable",
+        "pre-write recall unavailable — not added"
+      );
+    }
     if (recall.candidates.length === 0) {
       return addDecision(0, false, "pre-write recall found no related existing memory");
     }
@@ -84,14 +91,23 @@ export class ReconciliationDecider {
 
   private async retrievePreWriteRecall(input: ReconciliationInput): Promise<Awaited<ReturnType<PreWriteRecallPort["recall"]>>> {
     try {
-      return await this.deps.preWriteRecall.recall(input);
+      const recall = await this.deps.preWriteRecall.recall(input);
+      if (recall.availability === "unavailable") {
+        return recall;
+      }
+      return { ...recall, availability: "ok" };
     } catch (error) {
       this.deps.warn("pre-write recall failed", {
         workspace_id: input.workspaceId,
         signal_id: input.signalId,
         error: errorMessage(error)
       });
-      return { candidates: [], uncertainty: 1, auditFeatures: { failed: true } };
+      return {
+        availability: "unavailable",
+        candidates: [],
+        uncertainty: 1,
+        auditFeatures: { failed: true }
+      };
     }
   }
 

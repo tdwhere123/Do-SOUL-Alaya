@@ -12,6 +12,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   SqliteMemoryEntryRepo,
+  SqliteReconciliationLeaseRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo,
   initDatabase
@@ -25,12 +26,16 @@ const databases = new Set<ReturnType<typeof initDatabase>>();
 
 export function closeReconciliationTestDatabases(): void {
   for (const database of databases) {
-    database.close();
+    try {
+      database.close();
+    } catch {
+      // A test may close the connection to surface a real driver throw.
+    }
   }
   databases.clear();
 }
 
-export async function createReconciliationMemoryRepo(): Promise<SqliteMemoryEntryRepo> {
+function openReconciliationDatabase(): ReturnType<typeof initDatabase> {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
   new SqliteWorkspaceRepo(database).create({
@@ -52,7 +57,24 @@ export async function createReconciliationMemoryRepo(): Promise<SqliteMemoryEntr
     run_state: RunState.IDLE,
     current_surface_id: null
   });
-  return new SqliteMemoryEntryRepo(database);
+  return database;
+}
+
+export async function createReconciliationMemoryRepo(): Promise<SqliteMemoryEntryRepo> {
+  return new SqliteMemoryEntryRepo(openReconciliationDatabase());
+}
+
+export async function createReconciliationSqliteHarness(): Promise<{
+  readonly database: ReturnType<typeof initDatabase>;
+  readonly memoryRepo: SqliteMemoryEntryRepo;
+  readonly leaseRepo: SqliteReconciliationLeaseRepo;
+}> {
+  const database = openReconciliationDatabase();
+  return {
+    database,
+    memoryRepo: new SqliteMemoryEntryRepo(database),
+    leaseRepo: new SqliteReconciliationLeaseRepo(database)
+  };
 }
 
 export function seedReconciliationEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {

@@ -230,6 +230,18 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
 
     try {
       const decision = await this.runReconciledDecision(signal, port, state, context);
+      if (decision.kind === "deferred") {
+        return materializationFailure(
+          {
+            signal_id: signal.signal_id,
+            target_kind: target.kind,
+            route_target: target.route_target,
+            routing_reason: `${target.routing_reason} — reconciliation unavailable`,
+            created_objects: state.createdObjects
+          },
+          decision.reason
+        );
+      }
       await this.finalizeReconciledAppend(signal, state, context);
       return this.buildReconciledMaterializationResult(signal, target, decision, state);
     } catch (error) {
@@ -265,11 +277,11 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
 
   protected async applyReconciledVerdict(
     signal: CandidateMemorySignal,
-    verdict: { readonly kind: "add" | "update" | "noop" },
+    verdict: { readonly kind: "add" | "update" | "noop" | "deferred" },
     state: ReconciledMaterializationState,
     context: MaterializationContext
   ): Promise<{ readonly incomingEvidenceRef?: string }> {
-    if (verdict.kind === "noop") {
+    if (verdict.kind === "noop" || verdict.kind === "deferred") {
       return {};
     }
     const evidenceRef = await this.ensureReconciledEvidence(signal, state, context);
@@ -343,7 +355,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   protected buildReconciledMaterializationResult(
     signal: CandidateMemorySignal,
     target: MaterializationTarget,
-    decision: { readonly kind: "add" | "update" | "noop"; readonly reason: string; readonly survivingObjectId?: string },
+    decision: { readonly kind: "add" | "update" | "noop" | "deferred"; readonly reason: string; readonly survivingObjectId?: string },
     state: ReconciledMaterializationState
   ): MaterializationResult {
     const createdObjects =
@@ -368,17 +380,23 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   protected async handleReconciledMaterializationFailure(
     signal: CandidateMemorySignal,
     target: MaterializationTarget,
-    context: MaterializationContext,
+    _context: MaterializationContext,
     error: unknown
   ): Promise<MaterializationResult> {
-    // A reconciliation backend failure must never drop the fact: fall back to
-    // the unchanged blind-append path. A partial applyVerdict can orphan at
-    // most one evidence capsule, but it cannot lose the fact.
     diagnosticWarn("materialization-router: reconciliation failed", {
       signalId: signal.signal_id,
       error: error instanceof Error ? error.message : String(error)
     });
-    return await this.materializeMemoryEntryAppend(signal, target, context);
+    return materializationFailure(
+      {
+        signal_id: signal.signal_id,
+        target_kind: target.kind,
+        route_target: target.route_target,
+        routing_reason: `${target.routing_reason} — reconciliation unavailable`,
+        created_objects: []
+      },
+      error
+    );
   }
 
   // invariant: write-path/enrich-path decouple (S3c). The durable enrich_pending
