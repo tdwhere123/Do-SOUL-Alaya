@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,11 +7,11 @@ import {
   FrozenPopulationMembershipError,
   loadFrozenEnrichmentPopulation
 } from "../../../../runs/extraction/enrichment-acceptance/frozen-population.js";
-
-const FROZEN_ROOT = "/home/tdwhere/vibe/Do-SOUL-Alaya/.do-it/bench-runs/associative-field-gemini-source-scope-20260914";
-const FROZEN_REGRESSION_PATH = join(FROZEN_ROOT, "regression-source-review.json");
-const FROZEN_CANONICAL_PATH = join(FROZEN_ROOT, "canonical-source-review.json");
-const FROZEN_ANNOTATIONS_AVAILABLE = existsSync(FROZEN_REGRESSION_PATH) && existsSync(FROZEN_CANONICAL_PATH);
+import {
+  FROZEN_ENRICHMENT_ANNOTATIONS_AVAILABLE,
+  FROZEN_ENRICHMENT_CANONICAL_PATH,
+  FROZEN_ENRICHMENT_REGRESSION_PATH
+} from "../enrichment-frozen-annotation-files.js";
 
 const REGRESSION_REQUIRED = new Set([2, 4, 8, 9, 10, 12, 13, 14, 16]);
 const REGRESSION_UNRESOLVED = new Set([5, 15]);
@@ -179,12 +179,12 @@ describe("frozen enrichment population", () => {
     expect((thrown as Error).name).toBe("FrozenPopulationMembershipError");
   });
 
-  it.skipIf(!FROZEN_ANNOTATIONS_AVAILABLE)(
+  it.skipIf(!FROZEN_ENRICHMENT_ANNOTATIONS_AVAILABLE)(
     "loads frozen annotations with unique 1-16 membership, first-eight IDs, and canonical 12/2 review dimensions",
     () => {
       const loaded = loadFrozenEnrichmentPopulation({
-        regressionPath: FROZEN_REGRESSION_PATH,
-        canonicalPath: FROZEN_CANONICAL_PATH
+        regressionPath: FROZEN_ENRICHMENT_REGRESSION_PATH,
+        canonicalPath: FROZEN_ENRICHMENT_CANONICAL_PATH
       });
       expect(loaded.counts).toEqual({ total: 38, required: 15, optional: 21, unresolved: 2 });
       expect(loaded.rows).toHaveLength(38);
