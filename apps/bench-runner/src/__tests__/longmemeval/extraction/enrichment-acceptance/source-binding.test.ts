@@ -375,6 +375,63 @@ describe("frozen source binding", () => {
     expect(binding.occurrences[1]?.status).toBe("lost");
   });
 
+  it("does not 1:1-bind a peer group that overlaps a tighter sibling hit", () => {
+    const units = twoOccurrenceUnits();
+    const u1 = {
+      ...units[0]!,
+      assertionId: 1,
+      semanticKey: "a1".padEnd(64, "0"),
+      binding: {
+        ...units[0]!.binding,
+        occurrenceIdentity: "n1".padEnd(64, "0"),
+        locator: { start: 0, end: 10 }
+      }
+    };
+    const u2 = {
+      ...units[1]!,
+      assertionId: 2,
+      semanticKey: "a2".padEnd(64, "0"),
+      binding: {
+        ...units[1]!.binding,
+        occurrenceIdentity: "n2".padEnd(64, "0"),
+        locator: { start: 11, end: 18 }
+      }
+    };
+    const stale = row({
+      occurrence: {
+        source_message_ids: ["msg-1"],
+        source_locator: null,
+        source_occurrence_identity: null,
+        occurrence_bindings: [{
+          occurrenceIdentity: "oldA".padEnd(64, "0"),
+          sourceCorpusIdentity: u1.binding.sourceCorpusIdentity
+        }, {
+          occurrenceIdentity: "oldB".padEnd(64, "0"),
+          sourceCorpusIdentity: u1.binding.sourceCorpusIdentity
+        }, {
+          occurrenceIdentity: "oldC".padEnd(64, "0"),
+          sourceCorpusIdentity: u1.binding.sourceCorpusIdentity,
+          locator: u1.binding.locator
+        }]
+      }
+    });
+    const binding = bindFrozenAssertionToCurrentSource(stale, {
+      catalogUnits: [u1, u2],
+      requests: [{
+        key: "request-local",
+        source_corpus_identity: u1.binding.sourceCorpusIdentity,
+        message_ids: ["msg-1"],
+        source_assertions: [
+          { assertion_id: 1, text: u1.text },
+          { assertion_id: 2, text: u2.text }
+        ]
+      }]
+    });
+    expect(binding.status).toBe("ambiguous");
+    expect(binding.current).toEqual([]);
+    expect(binding.occurrences.every((item) => item.current === null)).toBe(true);
+  });
+
   it("does not claim current when two stale identities match one unit", () => {
     const units = twoOccurrenceUnits();
     const stale = twoOccurrenceRow(units);

@@ -179,7 +179,7 @@ function bindRestrictedOccurrences(
       continue;
     }
     const peers = countPeerUnassigned(row, hits, specs, slots, available, input);
-    if (hits.length === peers) {
+    if (hits.length === peers && !hitsOverlapOtherUnassigned(row, hits, specs, slots, available, input)) {
       claimed.add(unitKey(hits[0]!));
       slots[index] = occurrenceBinding(
         spec, "bound", "frozen occurrence migrated through native source identity",
@@ -241,6 +241,24 @@ function markPeerAmbiguous(
       slots[index] = occurrenceBinding(spec, "ambiguous", reason, null);
     }
   }
+}
+
+function hitsOverlapOtherUnassigned(
+  row: FrozenAssertion,
+  hits: readonly FrozenCatalogUnit[],
+  specs: readonly FrozenOccurrenceRestriction[],
+  slots: ReadonlyArray<FrozenOccurrenceBinding | null>,
+  available: readonly FrozenCatalogUnit[],
+  input: FrozenSourceBindingInput
+): boolean {
+  const keys = new Set(hits.map(unitKey));
+  for (const [index, spec] of specs.entries()) {
+    if (slots[index] !== null) continue;
+    const otherHits = migrateRestrictedUnits(row, spec, available, input);
+    if (sameHitKeys(hits, otherHits)) continue;
+    if (otherHits.some((unit) => keys.has(unitKey(unit)))) return true;
+  }
+  return false;
 }
 
 function sameHitKeys(
