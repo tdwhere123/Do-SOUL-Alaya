@@ -1,13 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  ClaimLifecycleState,
   GovernanceResolutionEventType,
   ObjectLifecycleState,
-  SoulResolutionKind
-} from "@do-soul/alaya-protocol";
-import {
+  SoulResolutionKind,
   FIXED_NOW,
-  buildClaim,
   buildMemory,
   context,
   createHarness

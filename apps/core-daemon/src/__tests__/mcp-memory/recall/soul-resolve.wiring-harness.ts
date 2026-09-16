@@ -13,6 +13,13 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 
+export {
+  ClaimLifecycleState,
+  GovernanceResolutionEventType,
+  ObjectLifecycleState,
+  SoulResolutionKind
+} from "@do-soul/alaya-protocol";
+
 import { ResolutionService } from "@do-soul/alaya-core";
 
 import {
