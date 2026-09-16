@@ -818,6 +818,7 @@
     "apps/bench-runner/src/bench/extraction/fill",
     "apps/bench-runner/src/bench/extraction/fill/catalog-refill",
     "apps/bench-runner/src/bench/extraction/fill/catalog-refill/resume-failpoint",
+    "apps/bench-runner/src/runs/extraction/fill/catalog-refill/resume-failpoint",
     "apps/bench-runner/src/bench/extraction/fill/catalog-refill/runtime",
     "apps/bench-runner/src/bench/extraction/fill/catalog-refill/supplemental",
     "apps/bench-runner/src/bench/extraction/fill/execution",

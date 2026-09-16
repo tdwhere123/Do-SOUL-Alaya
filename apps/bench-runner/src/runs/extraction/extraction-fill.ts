@@ -48,11 +48,10 @@ import { createExtractionExecutionAuthority } from "./fill/execution-authority.j
 import {
   hasSettledCatalogRefillLedger,
   reconcileSettledCatalogRefillCompletion,
-  recordCatalogRefillResumeManifest
+  recordCatalogRefillResumeManifest,
+  type CatalogRefillResumeFailpoint
 } from "./fill/catalog-refill/runtime.js";
 import { finishPreparedExtractionFill } from "./fill/execution/finalization.js";
-import { triggerCatalogRefillResumeTestSigkillAfter } from
-  "./fill/catalog-refill/resume-failpoint.js";
 import { assertCatalogRefillTransportReadiness } from
   "./fill/catalog-refill/supplemental.js";
 import { isBoundedExistingCacheRepair } from
@@ -133,8 +132,38 @@ export interface ExtractionFillResult extends FillRetryTelemetry {
   readonly lazySemanticRunReceipt?: import("./fill/semantic-fill-receipt.js").LazySemanticRunReceipt;
   readonly lazySemanticRunReceiptHandle?: import("./fill/semantic-fill-receipt.js").VerifiedLazySemanticRunReceipt;
 }
+
+export const CATALOG_REFILL_TEST_FAILPOINT_ENV =
+  "ALAYA_TEST_CATALOG_REFILL_SIGKILL_AFTER";
+
+export function assertCatalogRefillTestFailpointUnreachable(
+  env: NodeJS.ProcessEnv = process.env
+): void {
+  if (env[CATALOG_REFILL_TEST_FAILPOINT_ENV] === undefined) {
+    return;
+  }
+  throw new Error(
+    "catalog refill test failpoint is unreachable from the production entry"
+  );
+}
+
 export async function runExtractionFill(
   options: ExtractionFillOptions
+): Promise<ExtractionFillResult> {
+  assertCatalogRefillTestFailpointUnreachable();
+  return runExtractionFillBody(options, undefined);
+}
+
+export async function runExtractionFillWithDurableFailpoint(
+  options: ExtractionFillOptions,
+  durableFailpoint: CatalogRefillResumeFailpoint | undefined
+): Promise<ExtractionFillResult> {
+  return runExtractionFillBody(options, durableFailpoint);
+}
+
+async function runExtractionFillBody(
+  options: ExtractionFillOptions,
+  durableFailpoint: CatalogRefillResumeFailpoint | undefined
 ): Promise<ExtractionFillResult> {
   const fill = freezeExtractionFillOptions(options);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(fill.cacheRoot);
@@ -183,7 +212,8 @@ export async function runExtractionFill(
   return withExtractionCacheWriteLease(
     lease,
     () => runLockedExtractionFill(
-      fill, cacheRoot, lease, expansion, concurrency, initialConcurrency, authority
+      fill, cacheRoot, lease, expansion, concurrency, initialConcurrency, authority,
+      durableFailpoint
     )
   );
 }
@@ -240,7 +270,8 @@ async function runLockedExtractionFill(
   expansion: PreparedExpansionFillAuthority | undefined,
   concurrency: number,
   initialConcurrency: number,
-  authority: ReceiptBoundExtractionAuthority | undefined
+  authority: ReceiptBoundExtractionAuthority | undefined,
+  durableFailpoint: CatalogRefillResumeFailpoint | undefined
 ): Promise<ExtractionFillResult> {
   const log = options.log ?? ((message: string) => process.stderr.write(`${message}\n`));
   const executionAuthority = authority === undefined
@@ -271,7 +302,7 @@ async function runLockedExtractionFill(
     stats.cacheHits = prepared.requestedTurns;
     return finishPreparedExtractionFill(
       prepared, cacheRoot, stats, log, writeLease, executionAuthority,
-      tolerateProviderTaskFailures
+      tolerateProviderTaskFailures, durableFailpoint
     );
   }
   const watchdog = executionAuthority === undefined
@@ -282,7 +313,7 @@ async function runLockedExtractionFill(
     });
   return executeLockedExtractionFill({
     options, prepared, cacheRoot, concurrency, initialConcurrency, stats, log, writeLease,
-    executionAuthority, tolerateProviderTaskFailures, watchdog
+    executionAuthority, tolerateProviderTaskFailures, watchdog, durableFailpoint
   });
 }
 
@@ -321,6 +352,7 @@ async function executeLockedExtractionFill(input: {
   readonly executionAuthority: import("./fill/fill-execution.js").ExecutionExtractionAuthority | undefined;
   readonly tolerateProviderTaskFailures: boolean;
   readonly watchdog: ReturnType<typeof createExtractionNoProgressWatchdog> | undefined;
+  readonly durableFailpoint: CatalogRefillResumeFailpoint | undefined;
 }): Promise<ExtractionFillResult> {
   try {
     const semanticReport = await executePreparedExtractionFill({ ...input,
@@ -337,7 +369,7 @@ async function executeLockedExtractionFill(input: {
     }
     return finishPreparedExtractionFill(
       input.prepared, input.cacheRoot, input.stats, input.log, input.writeLease,
-      input.executionAuthority, input.tolerateProviderTaskFailures
+      input.executionAuthority, input.tolerateProviderTaskFailures, input.durableFailpoint
     );
   } catch (cause) {
     if (input.options.ingestionMode !== "lazy_field") {
@@ -351,14 +383,14 @@ async function executeLockedExtractionFill(input: {
 
 function refreshFailedExtractionFill(
   input: Pick<Parameters<typeof executeLockedExtractionFill>[0],
-    "prepared" | "cacheRoot" | "writeLease" | "executionAuthority">,
+    "prepared" | "cacheRoot" | "writeLease" | "executionAuthority" | "durableFailpoint">,
   cause: unknown
 ): void {
   try {
     const manifestSha256 = refreshIncompleteFill(
       input.prepared, input.cacheRoot, input.writeLease
     );
-    triggerCatalogRefillResumeTestSigkillAfter("failure-manifest-published");
+    input.durableFailpoint?.("failure-manifest-published");
     recordCatalogRefillResumeManifest(
       input.executionAuthority, input.cacheRoot, manifestSha256
     );

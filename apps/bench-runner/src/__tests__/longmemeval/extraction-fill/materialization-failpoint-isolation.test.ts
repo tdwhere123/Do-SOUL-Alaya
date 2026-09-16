@@ -7,9 +7,11 @@ import {
   MATERIALIZATION_TEST_FAILPOINT_ENV,
   materializeAuditedExtractionCacheTarget
 } from "../../../runs/extraction/cache-audit/target-materializer.js";
+import * as materializationTransaction from
+  "../../../runs/extraction/cache-audit/materialization/transaction.js";
 import {
   installMaterializationDurableFailpoint,
-  installedMaterializationDurableFailpoint
+  runMaterializationTransactionForTests
 } from "../test-support/materialization-failpoint.js";
 
 const repoSrc = dirname(fileURLToPath(import.meta.url));
@@ -18,6 +20,7 @@ describe("materialization failpoint isolation", () => {
   afterEach(() => {
     installMaterializationDurableFailpoint(undefined);
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it("keeps the production write path free of the module-level failpoint hook", () => {
@@ -36,12 +39,17 @@ describe("materialization failpoint isolation", () => {
     expect(materializer).toMatch(/durableFailpoint:\s*undefined/u);
   });
 
-  it("lets tests inject a failpoint without a production module hook", () => {
+  it("lets tests inject a failpoint into the transaction write path", () => {
     const seen: string[] = [];
     installMaterializationDurableFailpoint((boundary) => {
       seen.push(boundary);
     });
-    installedMaterializationDurableFailpoint()?.("journal-published");
+    vi.spyOn(materializationTransaction, "runMaterializationTransaction")
+      .mockImplementation((input) => {
+        input.durableFailpoint?.("journal-published");
+        return {} as never;
+      });
+    runMaterializationTransactionForTests({} as never);
     expect(seen).toEqual(["journal-published"]);
   });
 

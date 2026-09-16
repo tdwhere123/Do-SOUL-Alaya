@@ -1,5 +1,4 @@
 // @ts-nocheck
-import "../../../test-support/durable-failpoints.js";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,6 +9,8 @@ import { extractionCacheManifestPath } from
   "../../../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { runExtractionFill } from
   "../../../../../runs/extraction/extraction-fill.js";
+import { runExtractionFillForTests } from
+  "../../../test-support/catalog-refill-failpoint.js";
 import type { LongMemEvalQuestion } from
   "../../../../../datasets/longmemeval/ingestion/dataset.js";
 import { providerBackedExtractionResult } from "../../fixture.js";
@@ -157,7 +158,7 @@ export function registerCatalogRefillCrashChild(
       if (input.mode === "provider-failure" && calls === 2) throw providerTimeoutFailure();
       return providerBackedExtractionResult(groundedResponse(request.userPrompt));
     };
-    await runExtractionFill({
+    await runExtractionFillForTests({
       variant, concurrency: 1, cacheRoot: input.cacheRoot, dataDir: input.dataDir,
       pinnedMetaRoot: input.pinnedMetaRoot,
       authorityReceiptPath: input.authorityReceiptPath,

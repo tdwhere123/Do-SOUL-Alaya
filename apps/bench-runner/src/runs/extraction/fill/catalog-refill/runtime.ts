@@ -17,8 +17,13 @@ import type { SupplementalSourceReceipt } from "../../cache/supplemental-source-
 import { prepareCatalogRefillSupplementalReceipt } from "./supplemental.js";
 import type { ExtractionFillResult } from "../../extraction-fill.js";
 import { newFillStats, readFillRetryTelemetry } from "../fill-stats.js";
-import { triggerCatalogRefillResumeTestSigkillAfter } from
-  "./resume-failpoint.js";
+
+export type CatalogRefillResumeDurableBoundary =
+  | "failure-manifest-published"
+  | "in-progress-result-manifest-published";
+
+export type CatalogRefillResumeFailpoint =
+  (boundary: CatalogRefillResumeDurableBoundary) => void;
 
 export function catalogRefillTurnsThisRun(
   authority: ExecutionExtractionAuthority | undefined,
@@ -64,7 +69,8 @@ export function finalizeCatalogRefillSuccess(
   authority: ExecutionExtractionAuthority | undefined,
   cacheRoot: string,
   manifest: ExtractionCacheManifest,
-  supplementalSourceReceipt: SupplementalSourceReceipt | undefined = undefined
+  supplementalSourceReceipt: SupplementalSourceReceipt | undefined = undefined,
+  durableFailpoint?: CatalogRefillResumeFailpoint
 ): void {
   if (authority?.receipt.catalog_refill === undefined) return;
   const ledger = authority.snapshot();
@@ -74,7 +80,7 @@ export function finalizeCatalogRefillSuccess(
     throw new ExtractionCacheInvariantError("catalog refill completion identity is unavailable");
   }
   if (manifest.fill_status !== "complete") {
-    triggerCatalogRefillResumeTestSigkillAfter("in-progress-result-manifest-published");
+    durableFailpoint?.("in-progress-result-manifest-published");
     writeCatalogRefillResumeManifest({
       cacheRoot, receipt: authority.receipt, ledger,
       manifestSha256: identity.manifestSha256
