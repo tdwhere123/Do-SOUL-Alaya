@@ -117,6 +117,61 @@ describe("HealthJournalService", () => {
     });
   });
 
+  it("delegates phase-scoped recent queries to the repo", async () => {
+    const repo = {
+      append: vi.fn(async (entry: { entry_id?: string; created_at?: string }) =>
+        createHealthEntry({
+          entry_id: entry.entry_id ?? "entry-1",
+          created_at: entry.created_at ?? "2026-03-27T00:00:00.000Z"
+        })
+      ),
+      findByWorkspace: vi.fn(async () => [])
+    };
+    const service = new HealthJournalService({
+      eventLogRepo: {
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
+        queryByEntity: vi.fn(async () => [])
+      },
+      repo
+    });
+
+    await service.getRecentEvents("workspace-1", {
+      kind: HealthEventKind.GARDEN_BACKLOG,
+      phase: "compile_enqueue",
+      limit: 50
+    });
+
+    expect(repo.findByWorkspace).toHaveBeenCalledWith("workspace-1", {
+      kind: HealthEventKind.GARDEN_BACKLOG,
+      phase: "compile_enqueue",
+      limit: 50
+    });
+  });
+
+  it("rejects a phase filter without an event kind", async () => {
+    const repo = {
+      append: vi.fn(async (entry: { entry_id?: string; created_at?: string }) =>
+        createHealthEntry({
+          entry_id: entry.entry_id ?? "entry-1",
+          created_at: entry.created_at ?? "2026-03-27T00:00:00.000Z"
+        })
+      ),
+      findByWorkspace: vi.fn(async () => [])
+    };
+    const service = new HealthJournalService({
+      eventLogRepo: {
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => createEventLogEntry(entry)),
+        queryByEntity: vi.fn(async () => [])
+      },
+      repo
+    });
+
+    await expect(
+      service.getRecentEvents("workspace-1", { phase: "compile_enqueue" })
+    ).rejects.toMatchObject({ name: "CoreError", code: "VALIDATION" });
+    expect(repo.findByWorkspace).not.toHaveBeenCalled();
+  });
+
   it("caps direct service queries to the shared maximum limit", async () => {
     const repo = {
       append: vi.fn(async (entry: { entry_id?: string; created_at?: string }) =>

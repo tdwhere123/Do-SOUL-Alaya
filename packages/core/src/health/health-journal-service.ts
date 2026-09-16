@@ -27,6 +27,7 @@ export interface HealthJournalServiceRepoPort {
     params?: {
       readonly kind?: HealthJournalEntry["event_kind"];
       readonly limit?: number;
+      readonly phase?: string;
     }
   ): Promise<readonly Readonly<HealthJournalEntry>[]>;
 }
@@ -107,14 +108,21 @@ export class HealthJournalService implements HealthJournalRecordPort {
     params: {
       readonly kind?: HealthJournalEntry["event_kind"];
       readonly limit?: number;
+      readonly phase?: string;
     } = {}
   ): Promise<readonly Readonly<HealthJournalEntry>[]> {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspaceId");
     const normalizedKind = params.kind === undefined ? undefined : normalizeEventKind(params.kind);
     const normalizedLimit = normalizeLimit(params.limit);
+    const normalizedPhase =
+      params.phase === undefined ? undefined : parseNonEmptyString(params.phase, "phase");
+    if (normalizedPhase !== undefined && normalizedKind === undefined) {
+      throw new CoreError("VALIDATION", "phase requires kind");
+    }
     const normalizedParams = {
       ...(normalizedKind === undefined ? {} : { kind: normalizedKind }),
-      ...(normalizedLimit === undefined ? {} : { limit: normalizedLimit })
+      ...(normalizedLimit === undefined ? {} : { limit: normalizedLimit }),
+      ...(normalizedPhase === undefined ? {} : { phase: normalizedPhase })
     };
 
     return await this.dependencies.repo.findByWorkspace(parsedWorkspaceId, normalizedParams);

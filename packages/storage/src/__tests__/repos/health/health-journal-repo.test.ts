@@ -100,6 +100,48 @@ describe("SqliteHealthJournalRepo", () => {
     expect(rows).toHaveLength(5);
   });
 
+  it("scopes a kind+phase window so other backlog phases cannot bury a miss", async () => {
+    const { repo } = createRepo();
+
+    await repo.append(createEntryInput({
+      entry_id: "compile-miss",
+      event_kind: HealthEventKind.GARDEN_BACKLOG,
+      created_at: "2026-03-27T00:00:00.000Z",
+      summary: "Garden compile enqueue failed.",
+      detail_json: { phase: "compile_enqueue", status: "failed" }
+    }));
+    for (let index = 0; index < 50; index += 1) {
+      await repo.append(createEntryInput({
+        entry_id: `other-${index}`,
+        event_kind: HealthEventKind.GARDEN_BACKLOG,
+        created_at: `2026-03-27T00:01:${String(index).padStart(2, "0")}.000Z`,
+        summary: "Garden background pass completed",
+        detail_json: { service_count: 1 }
+      }));
+    }
+
+    const kindWindow = await repo.findByWorkspace("workspace-1", {
+      kind: HealthEventKind.GARDEN_BACKLOG,
+      limit: 50
+    });
+    const phaseWindow = await repo.findByWorkspace("workspace-1", {
+      kind: HealthEventKind.GARDEN_BACKLOG,
+      phase: "compile_enqueue",
+      limit: 50
+    });
+
+    expect(kindWindow.map((row) => row.entry_id)).not.toContain("compile-miss");
+    expect(phaseWindow.map((row) => row.entry_id)).toEqual(["compile-miss"]);
+  });
+
+  it("rejects a phase filter without an event kind", async () => {
+    const { repo } = createRepo();
+
+    await expect(
+      repo.findByWorkspace("workspace-1", { phase: "compile_enqueue" })
+    ).rejects.toMatchObject({ name: "StorageError", code: "VALIDATION_FAILED" });
+  });
+
   it("returns deeply frozen entries", async () => {
     const { repo } = createRepo();
 

@@ -38,7 +38,7 @@ type GardenCompileSnapshotExports = Readonly<{
   readonly healthJournalService?: Readonly<{
     getRecentEvents(
       workspaceId: string,
-      params?: { readonly kind?: string; readonly limit?: number }
+      params?: { readonly kind?: string; readonly limit?: number; readonly phase?: string }
     ): Promise<readonly { readonly event_kind: string; readonly detail_json: Record<string, unknown> }[]>;
   }>;
 }>;
@@ -195,6 +195,7 @@ function createGardenStatusService(serviceExports: GardenCompileSnapshotExports)
       }
       const entries = await serviceExports.healthJournalService.getRecentEvents(workspaceId, {
         kind: HealthEventKind.GARDEN_BACKLOG,
+        phase: GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE,
         limit: RECENT_GARDEN_COMPILE_TURN_LIMIT
       });
       return entries.filter(isCompileEnqueueFailure).length;
