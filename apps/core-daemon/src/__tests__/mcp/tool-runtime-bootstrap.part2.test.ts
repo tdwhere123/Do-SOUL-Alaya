@@ -114,7 +114,7 @@ describe("daemon tool runtime bootstrap", () => {
     }
   });
 
-  it("reports degraded embedding status when supplement is enabled but the secret env is missing", async () => {
+  it("does not report embedding enabled when the local extra is missing even if the supplement flag is on", async () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-missing-embedding-status-"));
     isolatedConfigDirs.push(configDir);
     await writeFile(
@@ -143,11 +143,12 @@ describe("daemon tool runtime bootstrap", () => {
       };
     };
 
+    // Leftover openai secret-ref is not an enabled path when the default extra cannot resolve.
     await expect(runtime.services.embeddingStatusService.getStatus("workspace-1")).resolves.toMatchObject({
-      embedding_enabled: true,
+      embedding_enabled: false,
       provider_configured: false,
-      effective_mode: "degraded",
-      degraded_reason: "provider_unconfigured"
+      effective_mode: "keyword_only",
+      degraded_reason: null
     });
   }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
