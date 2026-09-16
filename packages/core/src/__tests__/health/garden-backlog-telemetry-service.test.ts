@@ -112,6 +112,7 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
 
   it("maps a non-Error poll throw to unknown_error", async () => {
     const warn = vi.fn();
+    let peekCalls = 0;
     const service = new GardenBacklogTelemetryService({
       scheduler: {
         getBacklogSnapshot: () => ({
@@ -123,7 +124,11 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
           warning_active: false
         }),
         peekBacklogWarningTransition: () => {
-          throw "poll boom";
+          peekCalls += 1;
+          if (peekCalls === 1) {
+            throw "poll boom";
+          }
+          return null;
         },
         peekLastBacklogWarningTransitionId: () => null,
         acknowledgeBacklogWarningTransition: () => false
