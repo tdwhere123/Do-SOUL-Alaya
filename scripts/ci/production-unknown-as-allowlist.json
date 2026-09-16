@@ -1,0 +1,82 @@
+{
+  "apps/bench-runner/src/artifacts/artifact-json-reader.ts": {
+    "max": 1,
+    "reason": "linkedom Document construction still double-asserts the parser return"
+  },
+  "apps/bench-runner/src/cli/merge/command/merge-command-shards.ts": {
+    "max": 1,
+    "reason": "diagnostic shard map still erases the typed diagnostic to a record"
+  },
+  "apps/bench-runner/src/cli/provider-preflight/replay-request-manifest.ts": {
+    "max": 1,
+    "reason": "replay manifest parse still double-asserts JSON as the contract type"
+  },
+  "apps/bench-runner/src/diagnostics/schema/field/diagnostic-field-readers.ts": {
+    "max": 1,
+    "reason": "omit helper still double-asserts the remaining diagnostic field bag"
+  },
+  "apps/bench-runner/src/harness/daemon/runtime/daemon-embedding-readiness.ts": {
+    "max": 1,
+    "reason": "sqlite embedding-readiness rows still double-assert query results"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/attempt-ledger/contract.ts": {
+    "max": 4,
+    "reason": "attempt-ledger JSON records still double-assert parsed values"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/catalog-refill/completion-witness.ts": {
+    "max": 1,
+    "reason": "catalog refill witness still double-asserts parsed JSON"
+  },
+  "apps/bench-runner/src/runs/extraction/authority/continuation/child-claim.ts": {
+    "max": 1,
+    "reason": "continuation child claim still double-asserts parsed JSON"
+  },
+  "apps/bench-runner/src/runs/extraction/cache-audit/materialization/preflight-inventory.ts": {
+    "max": 1,
+    "reason": "cached extraction inspect still double-asserts the entry shape"
+  },
+  "apps/bench-runner/src/runs/extraction/fill/manifest/writer-lock.ts": {
+    "max": 1,
+    "reason": "writer-lock owner parse still double-asserts JSON"
+  },
+  "apps/bench-runner/src/runs/provenance/contract/frozen-code-contract.ts": {
+    "max": 1,
+    "reason": "frozen contract snapshot_reuse still double-asserts a record bag"
+  },
+  "apps/bench-runner/src/runs/snapshot/current/assertion-receipt-integrity.ts": {
+    "max": 1,
+    "reason": "assertion receipt row still double-asserts sqlite results"
+  },
+  "apps/bench-runner/src/runs/snapshot/current/snapshot-graph-preflight.ts": {
+    "max": 2,
+    "reason": "snapshot graph preflight still double-asserts sqlite rows"
+  },
+  "apps/bench-runner/src/runs/snapshot/seed-ledger/direct-source-evidence-proof.ts": {
+    "max": 3,
+    "reason": "direct source evidence proof still double-asserts sqlite rows"
+  },
+  "apps/bench-runner/src/runs/snapshot/seed-ledger/seed-ledger-materialization-proof.ts": {
+    "max": 5,
+    "reason": "seed-ledger materialization proof still double-asserts sqlite rows"
+  },
+  "apps/bench-runner/src/runs/snapshot/seed-ledger/source-observation-proof.ts": {
+    "max": 1,
+    "reason": "source observation proof still double-asserts sqlite rows"
+  },
+  "apps/bench-runner/src/runs/snapshot/substrate-binding.ts": {
+    "max": 2,
+    "reason": "substrate binding still double-asserts sqlite object and evidence rows"
+  },
+  "apps/core-daemon/src/cli/bridge.ts": {
+    "max": 1,
+    "reason": "subcommand spec still erases the typed command to unknown"
+  },
+  "apps/core-daemon/src/cli/register.ts": {
+    "max": 2,
+    "reason": "CLI stdin/stdout still double-assert Node stream types"
+  },
+  "apps/inspector/web/src/pages/graph-page/graph-renderer.tsx": {
+    "max": 1,
+    "reason": "lazy 3D force-graph import still double-asserts the component type"
+  }
+}

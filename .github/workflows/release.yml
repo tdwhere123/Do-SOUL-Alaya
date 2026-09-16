@@ -88,8 +88,19 @@ jobs:
           pnpm run ci:test-as-any -- --self-test
           pnpm run ci:test-as-any
 
+      - name: Guard production as-unknown-as
+        run: |
+          pnpm run ci:production-unknown-as -- --self-test
+          pnpm run ci:production-unknown-as
+
       - name: Guard env docs
         run: pnpm run ci:env-docs
+
+      - name: Guard changelog version
+        run: pnpm run ci:changelog-version
+
+      - name: Guard process.env call sites
+        run: pnpm run hygiene:process-env
 
       - name: Guard doc links
         run: pnpm run ci:doc-links

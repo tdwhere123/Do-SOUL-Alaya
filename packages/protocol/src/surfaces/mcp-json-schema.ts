@@ -1,3 +1,8 @@
+/**
+ * Derives MCP JSON Schema from Zod. Tool catalogs must publish this output
+ * so clients see the same bounds the runtime parsers enforce. Do not
+ * hand-write a second MCP schema dialect.
+ */
 import { z } from "zod";
 
 export function deriveJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {

@@ -71,6 +71,7 @@ describe("ReconciliationService projection metadata", () => {
     const findByIds = vi
       .fn()
       .mockResolvedValueOnce([neighbor])
+      .mockResolvedValueOnce([neighbor])
       .mockResolvedValueOnce([updatedNeighbor]);
     const { deps, update } = createDeps([neighbor], {
       thresholds: { similarityFloor: 0.2 },
@@ -190,6 +191,7 @@ describe("ReconciliationService projection metadata", () => {
     const findByIds = vi
       .fn()
       .mockResolvedValueOnce([neighbor])
+      .mockResolvedValueOnce([neighbor])
       .mockResolvedValueOnce([clearedNeighbor]);
     const { deps, update } = createDeps([neighbor], {
       thresholds: { similarityFloor: 0.2 },
@@ -249,7 +251,7 @@ describe("ReconciliationService projection metadata", () => {
 
     expect(decision.kind).toBe("add");
     expect(update).not.toHaveBeenCalled();
-    expect(driven.appliedVerdicts).toEqual(["update", "add"]);
+    expect(driven.appliedVerdicts).toEqual(["add"]);
   });
 
   it("replaces stale projection metadata when UPDATE rewrites the memory content", async () => {

@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
+  isHumanReviewerAgentTarget,
+  isHumanReviewOnlyMemoryTool
+} from "../mcp-memory/tool/attach-profile-tool-allowlist.js";
+import {
   listAlayaMemoryTools
 } from "../mcp-memory/tool/tool-catalog.js";
 import type {
@@ -92,7 +96,7 @@ async function callToolsCommand(
   }
   const callContext = callContextResult.context;
   if (
-    isHumanReviewerOnlyTool(args.toolName) &&
+    isHumanReviewOnlyMemoryTool(args.toolName) &&
     isHumanReviewerAgentTarget(callContext.agentTarget)
   ) {
     ctx.stderr.write(
@@ -129,15 +133,6 @@ function renderToolCallResult(
     exitCode: ALAYA_SYSEXITS.OK,
     json: result.output
   };
-}
-
-function isHumanReviewerOnlyTool(toolName: string): boolean {
-  return toolName === "soul.review_memory_proposal" ||
-    toolName === "soul.batch_review_edge_proposals";
-}
-
-function isHumanReviewerAgentTarget(agentTarget: string): boolean {
-  return agentTarget === "cli" || agentTarget === "inspector";
 }
 
 function toolsArgsSchema(): AlayaCliArgsSchema<ToolsArgs> {

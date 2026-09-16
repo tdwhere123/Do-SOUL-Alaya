@@ -134,8 +134,18 @@ function buildVitestArgs(project) {
     "--project",
     project,
     ...extraArgs,
-    ...buildCoverageArgs(project)
+    ...buildCoverageArgs(project),
+    ...windowsStorageWorkerArgs(project)
   ];
+}
+
+function windowsStorageWorkerArgs(project) {
+  // Two forks still saturate NTFS on file-backed schema upgrades, so the
+  // Quality windows-node24 storage project must run one file at a time.
+  if (isWindows && project === "@do-soul/alaya-storage") {
+    return ["--maxWorkers=1"];
+  }
+  return [];
 }
 
 function buildCoverageArgs(project) {

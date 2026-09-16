@@ -362,6 +362,33 @@ describe("inspector routes", () => {
   });
 
 
+  it("accepts chunked inspector mutation bodies below the 10 MB limit", async () => {
+    let called = false;
+    let forwardedBody: string | null = null;
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async (_input, init) => {
+        called = true;
+        forwardedBody = init?.body === undefined ? null : String(init.body);
+        return Response.json({ success: true, data: { ok: true } });
+      }
+    });
+
+    const response = await app.request(
+      createChunkedJsonRequest(
+        "http://localhost/api/proposals/ws1/memory/mem-1/rewrite",
+        JSON.stringify({ new_content: "rewritten memory" })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, data: { ok: true } });
+    expect(called).toBe(true);
+    expect(forwardedBody).toBe(JSON.stringify({ new_content: "rewritten memory" }));
+  });
+
   it("rejects oversized inspector mutation bodies before proxying", async () => {
     let called = false;
     const app = createInspectorApp({
