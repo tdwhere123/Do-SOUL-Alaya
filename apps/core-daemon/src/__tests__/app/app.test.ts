@@ -11,7 +11,8 @@ import { createRequestProtection } from "../../runtime/daemon/lifecycle/daemon-r
 import { appConfigServiceStub } from "../support/app-config-service-stub.js";
 import {
   configRouteServices,
-  conflictMatrixRouteServices
+  conflictMatrixRouteServices,
+  workspaceRouteServices
 } from "../support/route-service-stubs.js";
 
 const testRequestProtection = {
@@ -213,6 +214,25 @@ describe("createApp", () => {
 
     const goodHeaders = withTestAuthHeaders();
     expect((await app.request("/unknown", { headers: goodHeaders })).status).toBe(404);
+  });
+
+  it("rejects oversized path ids before handlers that still read raw params", async () => {
+    const getById = vi.fn(async () => ({ workspace_id: "ws-1" }));
+    const app = createProtectedTestApp({
+      routes: {
+        workspaces: workspaceRouteServices({
+          workspaceService: { getById }
+        })
+      }
+    });
+
+    const response = await app.request(`/workspaces/${"a".repeat(257)}`, {
+      headers: withTestAuthHeaders()
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ success: false, error: "Invalid id" });
+    expect(getById).not.toHaveBeenCalled();
   });
 
   it("accepts trimmed allowed-origin values after startup normalization", async () => {

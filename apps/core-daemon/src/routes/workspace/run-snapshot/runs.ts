@@ -87,17 +87,17 @@ export function registerRunRoutes(app: Hono, services: RunRouteServices): void {
 }
 
 function registerRunCollectionRoutes(app: Hono, services: RunRouteServices): void {
-  app.post("/workspaces/:id/runs", async (context) => {
+  app.post("/workspaces/:id/runs", boundedPathParams("id"), async (context) => {
     const run = await services.runService.create(
-      context.req.param("id"),
+      readBoundedPathParam(context, "id"),
       await parseJsonBody(context.req.json.bind(context.req))
     );
 
     return context.json({ success: true, data: run }, 201);
   });
 
-  app.get("/workspaces/:id/runs", async (context) => {
-    const workspaceId = context.req.param("id");
+  app.get("/workspaces/:id/runs", boundedPathParams("id"), async (context) => {
+    const workspaceId = readBoundedPathParam(context, "id");
     const pagination = parseListPagination(context);
     const [runs, totalCount] = await resolveListAndCount(
       services.runService.listByWorkspace(workspaceId, pagination),
@@ -107,8 +107,8 @@ function registerRunCollectionRoutes(app: Hono, services: RunRouteServices): voi
     return context.json({ success: true, data: runs }, 200);
   });
 
-  app.get("/runs/:id", async (context) => {
-    const runId = context.req.param("id");
+  app.get("/runs/:id", boundedPathParams("id"), async (context) => {
+    const runId = readBoundedPathParam(context, "id");
     const asserted = await assertRunWorkspace(context, services, runId);
     if (asserted instanceof Response) return asserted;
     const run = await services.runService.getById(runId);
@@ -117,8 +117,8 @@ function registerRunCollectionRoutes(app: Hono, services: RunRouteServices): voi
 }
 
 function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
-  app.get("/runs/:id/messages", async (context) => {
-    const runId = context.req.param("id");
+  app.get("/runs/:id/messages", boundedPathParams("id"), async (context) => {
+    const runId = readBoundedPathParam(context, "id");
     const asserted = await assertRunWorkspace(context, services, runId);
     if (asserted instanceof Response) return asserted;
     const pagination = parseListPagination(context);
@@ -130,8 +130,8 @@ function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
     return context.json({ success: true, data: messages }, 200);
   });
 
-  app.post("/runs/:id/messages", async (context) => {
-    const runId = context.req.param("id");
+  app.post("/runs/:id/messages", boundedPathParams("id"), async (context) => {
+    const runId = readBoundedPathParam(context, "id");
     const asserted = await assertRunWorkspace(context, services, runId);
     if (asserted instanceof Response) return asserted;
     const response = await services.conversationService.sendMessage(
@@ -142,8 +142,8 @@ function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
     return context.json({ success: true, data: response }, 201);
   });
 
-  app.post("/runs/:id/messages/stream", async (context) => {
-    const runId = context.req.param("id");
+  app.post("/runs/:id/messages/stream", boundedPathParams("id"), async (context) => {
+    const runId = readBoundedPathParam(context, "id");
     const asserted = await assertRunWorkspace(context, services, runId);
     if (asserted instanceof Response) return asserted;
     const response = await services.conversationService.sendMessageStreaming(
@@ -170,10 +170,10 @@ async function resolveListAndCount<T>(
 }
 
 function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void {
-  app.post("/runs/:id/interrupt", async (context) => {
+  app.post("/runs/:id/interrupt", boundedPathParams("id"), async (context) => {
     const unexpectedBody = await rejectUnexpectedRequestBody(context);
     if (unexpectedBody !== null) return unexpectedBody;
-    const runId = context.req.param("id");
+    const runId = readBoundedPathParam(context, "id");
     const asserted = await assertRunWorkspace(context, services, runId);
     if (asserted instanceof Response) return asserted;
     const result = await services.conversationService.interruptRun(runId);
@@ -185,8 +185,8 @@ function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void
     return await getRunSnapshot(context, services);
   });
 
-  app.patch("/runs/:id", async (context) => {
-    const runId = context.req.param("id");
+  app.patch("/runs/:id", boundedPathParams("id"), async (context) => {
+    const runId = readBoundedPathParam(context, "id");
     const body = parseRunRenameInput(runId, await parseJsonBody(context.req.json.bind(context.req)));
     const asserted = await assertRunWorkspace(context, services, runId);
     if (asserted instanceof Response) return asserted;

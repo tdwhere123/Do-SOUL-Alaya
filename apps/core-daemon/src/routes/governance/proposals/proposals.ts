@@ -31,8 +31,8 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
 }
 
 function registerProposalListRoutes(app: Hono, services: ProposalRouteServices): void {
-  app.get("/workspaces/:wsId/proposals", async (context) => {
-    const workspaceId = context.req.param("wsId");
+  app.get("/workspaces/:wsId/proposals", boundedPathParams("wsId"), async (context) => {
+    const workspaceId = readBoundedPathParam(context, "wsId");
     await services.workspaceService.getById(workspaceId);
 
     const state = parseProposalListState(context.req.query("state"));
@@ -51,8 +51,8 @@ function registerProposalListRoutes(app: Hono, services: ProposalRouteServices):
     return context.json({ success: true, data: proposals }, 200);
   });
 
-  app.get("/workspaces/:wsId/proposals/pending", async (context) => {
-    const workspaceId = context.req.param("wsId");
+  app.get("/workspaces/:wsId/proposals/pending", boundedPathParams("wsId"), async (context) => {
+    const workspaceId = readBoundedPathParam(context, "wsId");
     await services.workspaceService.getById(workspaceId);
     const since = context.req.query("since") ?? undefined;
     const limit = parsePendingListLimit(context.req.query("limit"));

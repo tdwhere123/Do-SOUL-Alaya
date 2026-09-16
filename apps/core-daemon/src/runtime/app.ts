@@ -24,6 +24,7 @@ import { applyLazyRequestBodyLimit } from "../middleware/lazy-request-body-limit
 import { createWarnLogger } from "./daemon/lifecycle/daemon-runtime-helpers.js";
 import { DEFAULT_DAEMON_ALLOWED_ORIGIN } from "./daemon/support/daemon-defaults.js";
 import { registerErrorHandler, type ErrorLoggerPort } from "../middleware/error-handler.js";
+import { boundedPathParams } from "../middleware/bounded-path-params.js";
 import { registerBudgetRoutes, type BudgetRouteServices } from "../routes/governance/matrix/budget.js";
 import { registerClaimRoutes, type ClaimRouteServices } from "../routes/governance/matrix/claims.js";
 import { registerConfigRoutes, type ConfigRouteServices } from "../routes/workspace/config.js";
@@ -168,6 +169,7 @@ export function createApp(
   const bodyLimits = createRequestBodyLimits();
 
   registerRequestIdMiddleware(app);
+  app.use("*", boundedPathParams());
   registerDrainMiddleware(app, lifecycle);
   registerSecurityHeadersMiddleware(app);
   registerCorsMiddleware(app, requestProtection.allowedOrigin);
