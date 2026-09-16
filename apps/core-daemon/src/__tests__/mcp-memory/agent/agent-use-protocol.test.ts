@@ -48,6 +48,7 @@ import {
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
 
+import { ATTACHED_AGENT_MEMORY_TOOL_NAMES } from "../../../mcp-memory/tool/attach-profile-tool-allowlist.js";
 import { ALAYA_MEMORY_TOOL_NAMES } from "../../../mcp-memory/tool/tool-catalog.js";
 
 import { createAlayaCliBridge } from "../../../cli/bridge.js";
@@ -143,7 +144,8 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
       const toolsList = await client.listTools();
       const mcpToolNames = toolsList.tools.map((tool) => tool.name);
       transcript.push({ step: "MCP tools/list", evidence: mcpToolNames });
-      expect(mcpToolNames).toEqual([...ALAYA_MEMORY_TOOL_NAMES]);
+      expect(mcpToolNames).toEqual([...ATTACHED_AGENT_MEMORY_TOOL_NAMES]);
+      expect(mcpToolNames).not.toContain("soul.review_memory_proposal");
 
       const cliToolsList = await dispatchCli(runtime, ["tools", "list", "--json"]);
       const cliToolNames = (cliToolsList.json as { tools: readonly { name: string }[] }).tools.map(
@@ -151,7 +153,8 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
       );
       transcript.push({ step: "alaya tools list --json", evidence: cliToolNames });
       expect(cliToolsList.exitCode).toBe(0);
-      expect(cliToolNames).toEqual(mcpToolNames);
+      expect(cliToolNames).toEqual([...ALAYA_MEMORY_TOOL_NAMES]);
+      expect(cliToolNames).toContain("soul.review_memory_proposal");
 
       const recall = await callTool<SoulMemorySearchResponse>(client, "soul.recall", {
         protocol_version: 1,

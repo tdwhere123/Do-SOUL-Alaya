@@ -31,7 +31,8 @@ describe("public env boolean vocabulary", () => {
     expect(
       shouldEnableE2eEventTriggers({
         NODE_ENV: "test",
-        ALAYA_ENABLE_E2E_EVENT_TRIGGERS: token
+        ALAYA_ENABLE_E2E_EVENT_TRIGGERS: token,
+        ALAYA_E2E_EVENT_TRIGGER_TOKEN: "e2e-token"
       })
     ).toBe(true);
     expect(
@@ -55,7 +56,8 @@ describe("public env boolean vocabulary", () => {
     expect(
       shouldEnableE2eEventTriggers({
         NODE_ENV: "test",
-        ALAYA_ENABLE_E2E_EVENT_TRIGGERS: token
+        ALAYA_ENABLE_E2E_EVENT_TRIGGERS: token,
+        ALAYA_E2E_EVENT_TRIGGER_TOKEN: "e2e-token"
       })
     ).toBe(false);
     expect(

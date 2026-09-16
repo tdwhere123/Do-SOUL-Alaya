@@ -378,6 +378,7 @@ function createSoulRouteServices(input: CreateCoreDaemonAppInput) {
 }
 
 function createOptionalRouteServices(input: CreateCoreDaemonAppInput) {
+  const e2eTriggerToken = readE2eEventTriggerToken(input.env);
   return {
     ...(input.globalMemoryService === undefined
       ? {}
@@ -387,13 +388,14 @@ function createOptionalRouteServices(input: CreateCoreDaemonAppInput) {
             globalMemoryService: input.globalMemoryService
           }
         }),
-    ...(shouldEnableE2eEventTriggers(input.env)
+    ...(shouldEnableE2eEventTriggers(input.env) && e2eTriggerToken !== null
       ? {
           e2eEventTriggers: {
             runService: input.runService,
             workspaceService: input.workspaceService,
             eventLogRepo: createE2eEventLogRepo(input.eventLogRepo),
-            runtimeNotifier: input.runtimeNotifier
+            runtimeNotifier: input.runtimeNotifier,
+            triggerToken: e2eTriggerToken
           }
         }
       : {})
@@ -401,10 +403,18 @@ function createOptionalRouteServices(input: CreateCoreDaemonAppInput) {
 }
 
 export function shouldEnableE2eEventTriggers(env: NodeJS.ProcessEnv): boolean {
-  if (env.NODE_ENV?.trim().toLowerCase() === "production") {
+  if (env.NODE_ENV?.trim().toLowerCase() !== "test") {
     return false;
   }
-  return parseEnvBoolean(env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS, "ALAYA_ENABLE_E2E_EVENT_TRIGGERS");
+  if (!parseEnvBoolean(env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS, "ALAYA_ENABLE_E2E_EVENT_TRIGGERS")) {
+    return false;
+  }
+  return readE2eEventTriggerToken(env) !== null;
+}
+
+function readE2eEventTriggerToken(env: NodeJS.ProcessEnv): string | null {
+  const token = env.ALAYA_E2E_EVENT_TRIGGER_TOKEN?.trim();
+  return token === undefined || token.length === 0 ? null : token;
 }
 
 function createE2eEventLogRepo(eventLogRepo: E2eEventLogInputPort): E2eEventLogRepo {

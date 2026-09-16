@@ -8,8 +8,11 @@ import {
   type EventLogEntry,
   type SoulApprovalRequestedPayload
 } from "@do-soul/alaya-protocol";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
+import { constantTimeTokenEqual } from "../../shared/constant-time-token.js";
 import { parseJsonBody } from "../shared/shared.js";
+
+export const E2E_EVENT_TRIGGER_TOKEN_HEADER = "x-alaya-e2e-token";
 
 export interface E2eEventTriggerRouteServices {
   readonly runService: {
@@ -31,6 +34,7 @@ export interface E2eEventTriggerRouteServices {
   readonly runtimeNotifier: {
     notifyEntry(entry: EventLogEntry): void | Promise<void>;
   };
+  readonly triggerToken: string;
   readonly now?: () => string;
 }
 
@@ -38,21 +42,29 @@ export function registerE2eEventTriggerRoutes(
   app: Hono,
   services: E2eEventTriggerRouteServices
 ): void {
-  // Loud at startup: these unauthenticated event-injection routes append real
-  // EventLog entries and must never reach production (double-gated in wiring).
+  const triggerToken = services.triggerToken.trim();
+  if (triggerToken.length === 0) {
+    throw new Error("e2e_event_trigger_token_missing");
+  }
+  // Test-only EventLog inject; these routes require a dedicated trigger token.
   process.emitWarning(
-    "E2E event-trigger routes (/__e2e/events/*) are ENABLED — inject arbitrary EventLog entries. Never enable in production.",
+    "E2E event-trigger routes (/__e2e/events/*) are ENABLED — inject EventLog entries for tests only.",
     { type: "AlayaSecurityWarning", code: "ALAYA_E2E_EVENT_TRIGGERS_ENABLED" }
   );
-  registerSoulApprovalRequestedRoute(app, services);
-  registerDirtyStatePanicRoute(app, services);
+  registerSoulApprovalRequestedRoute(app, services, triggerToken);
+  registerDirtyStatePanicRoute(app, services, triggerToken);
 }
 
 function registerSoulApprovalRequestedRoute(
   app: Hono,
-  services: E2eEventTriggerRouteServices
+  services: E2eEventTriggerRouteServices,
+  triggerToken: string
 ): void {
   app.post("/__e2e/events/soul-approval-requested", async (context) => {
+    const unauthorized = rejectUnlessE2eTriggerToken(context, triggerToken);
+    if (unauthorized !== null) {
+      return unauthorized;
+    }
     const body = await parseBodyRecord(context.req.json.bind(context.req));
     const run = await loadTriggeredRun(services, body);
     const payload = createSoulApprovalRequestedEvent(body, run.run_id);
@@ -80,9 +92,14 @@ function registerSoulApprovalRequestedRoute(
 
 function registerDirtyStatePanicRoute(
   app: Hono,
-  services: E2eEventTriggerRouteServices
+  services: E2eEventTriggerRouteServices,
+  triggerToken: string
 ): void {
   app.post("/__e2e/events/dirty-state-panic", async (context) => {
+    const unauthorized = rejectUnlessE2eTriggerToken(context, triggerToken);
+    if (unauthorized !== null) {
+      return unauthorized;
+    }
     const body = await parseBodyRecord(context.req.json.bind(context.req));
     const run = await loadTriggeredRun(services, body);
     const payload = createDirtyStatePanicEvent(body, run.run_id);
@@ -106,6 +123,14 @@ function registerDirtyStatePanicRoute(
       }
     }, 201);
   });
+}
+
+function rejectUnlessE2eTriggerToken(context: Context, expectedToken: string): Response | null {
+  const provided = context.req.header(E2E_EVENT_TRIGGER_TOKEN_HEADER)?.trim() ?? "";
+  if (provided.length === 0 || !constantTimeTokenEqual(provided, expectedToken)) {
+    return context.json({ success: false, error: "E2E trigger token is required" }, 403);
+  }
+  return null;
 }
 
 async function loadTriggeredRun(
