@@ -116,7 +116,7 @@ export interface EnrichmentPreflight {
     readonly unresolved_native_bound: boolean;
   };
   readonly semantic_fill: EnrichmentSemanticFillCapture;
-  readonly annotation_interpolation: "absent";
+  readonly annotation_interpolation: "absent" | "unknown";
   readonly attempted_fetches: number;
   readonly nonempty_request_count: number;
   readonly deterministic_empty_request_count: number;
@@ -174,7 +174,10 @@ export async function runCurrentEnrichmentPreflight(options: {
         occurrenceExtractionTurns: occurrenceTurns
       }
     });
-    assertNoAnnotationInterpolation(workset.requests.map((item) => item.line), options.frozenRows);
+    const annotationInterpolation = scanAnnotationInterpolation(
+      workset.requests.map((item) => item.line),
+      options.frozenRows
+    );
     const packs = planCurrentPacks(workset.units, packing);
     const bounds = sizeWorksetLines(workset.lines);
     const semanticFill = captureSemanticFill(options, executionTurns);
@@ -223,7 +226,7 @@ export async function runCurrentEnrichmentPreflight(options: {
         unresolved_native_bound: bounds.some((line) => line.status === "unresolved")
       }),
       semantic_fill: semanticFill,
-      annotation_interpolation: "absent",
+      annotation_interpolation: annotationInterpolation,
       attempted_fetches: attemptedFetches,
       nonempty_request_count: workset.lines.length,
       deterministic_empty_request_count: workset.deterministicEmptyRequests.length,
@@ -234,11 +237,11 @@ export async function runCurrentEnrichmentPreflight(options: {
   }
 }
 
-function assertNoAnnotationInterpolation(
+function scanAnnotationInterpolation(
   lines: readonly { readonly systemPrompt: string; readonly userPrompt: string }[],
   frozenRows: readonly FrozenAssertion[] | undefined
-): void {
-  if (frozenRows === undefined) return;
+): "absent" | "unknown" {
+  if (frozenRows === undefined) return "unknown";
   const annotations = frozenRows.flatMap((row) => [...row.obligations, ...row.forbidden]);
   for (const line of lines) {
     const payload = `${line.systemPrompt}\n${line.userPrompt}`;
@@ -248,6 +251,7 @@ function assertNoAnnotationInterpolation(
       }
     }
   }
+  return "absent";
 }
 
 function planCurrentPacks(

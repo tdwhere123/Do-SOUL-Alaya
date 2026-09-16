@@ -266,11 +266,12 @@ function refreshPendingAfterPayload(
 ): void {
   const current = pending[0];
   if (current === undefined) return;
-  const updated = incompleteSources(response).find((row) => row.root_id === current.root_id);
-  if (complete.get(current.root_id) === true || updated === undefined) {
+  if (complete.get(current.root_id) === true) {
     pending.shift();
     return;
   }
+  const updated = incompleteSources(response).find((row) => row.root_id === current.root_id);
+  if (updated === undefined) return;
   const used = expansionsByTarget.get(current.root_id) ?? 0;
   if (used >= PUBLIC_CONSUMPTION_PROTOCOL.max_payload_expansions_per_target) {
     pending.shift();

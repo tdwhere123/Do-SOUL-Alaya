@@ -121,6 +121,7 @@ describe("current enrichment preflight", () => {
     expect(nonempty.nonempty_request_count).toBeGreaterThan(0);
     expect(nonempty.deterministic_empty_request_count).toBe(0);
     expect(nonempty.attempted_fetches).toBe(0);
+    expect(nonempty.annotation_interpolation).toBe("unknown");
 
     const empty = await runCurrentEnrichmentPreflight({
       cacheRoot,
