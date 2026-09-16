@@ -200,10 +200,20 @@ function createShutdownHandler(
     }
 
     state.shuttingDown = (async () => {
-      await drainInFlightRequests(input);
-      const backgroundStop = await stopBackgroundServices(input, state);
-      await closeRuntimeResources(input, state);
-      await closeSqliteAfterBackgroundStop(input, backgroundStop);
+      try {
+        await drainInFlightRequests(input);
+        const backgroundStop = await stopBackgroundServices(input, state);
+        await closeRuntimeResources(input, state);
+        await closeSqliteAfterBackgroundStop(input, backgroundStop);
+      } finally {
+        // Unregister only after sqlite close so a hung whenIdle() still has
+        // the 60s SIGTERM backstop and second-signal force-exit.
+        unregisterSignalShutdownHandlers(
+          state,
+          input.processPort ?? process,
+          input.timerPort ?? defaultLifecycleTimerPort
+        );
+      }
     })();
 
     return await state.shuttingDown;
@@ -429,7 +439,6 @@ async function closeRuntimeResources(
 ): Promise<void> {
   const processPort = input.processPort ?? process;
   const timerPort = input.timerPort ?? defaultLifecycleTimerPort;
-  unregisterSignalShutdownHandlers(state, processPort, timerPort);
   closeRuntimeResourceStep(input, "security status shutdown failed", () => {
     input.securityStatusService.close();
   });

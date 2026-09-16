@@ -403,6 +403,72 @@ describe("createDaemonLifecycleControls", () => {
     expect(database.close).toHaveBeenCalledTimes(1);
   });
 
+  it("force-exits at the signal timeout while garden drain is still waiting", async () => {
+    vi.useFakeTimers();
+    const processPort = createFakeSignalProcess();
+    let reachedIdle = false;
+    const { controls, warn } = createControls("env", {
+      processPort,
+      backgroundManagerStop: vi.fn(async () => "timed_out"),
+      backgroundManagerWhenIdle: vi.fn(
+        () =>
+          new Promise<void>(() => {
+            reachedIdle = true;
+          })
+      ),
+      serverFactory: vi.fn(() => ({
+        close(callback?: (error?: Error) => void) {
+          callback?.();
+        }
+      }))
+    });
+
+    await controls.startHttpServer({ port: 0 });
+    processPort.emitSignal("SIGTERM");
+    for (let i = 0; i < 50 && !reachedIdle; i += 1) {
+      await Promise.resolve();
+    }
+    expect(reachedIdle).toBe(true);
+    expect(warn).toHaveBeenCalledWith("waiting for garden background drain before sqlite close", {});
+    expect(processPort.listenerCount("SIGTERM")).toBeGreaterThan(0);
+    expect(processPort.exit).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(processPort.exitCode).toBe(1);
+    expect(processPort.exit).toHaveBeenCalledWith(1);
+    expect(warn).toHaveBeenCalledWith(
+      "daemon shutdown timed out after SIGTERM",
+      expect.objectContaining({ timeout_ms: 60_000 })
+    );
+  });
+
+  it("force-exits on a second signal while garden drain is still waiting", async () => {
+    const processPort = createFakeSignalProcess();
+    const { controls, warn } = createControls("env", {
+      processPort,
+      backgroundManagerStop: vi.fn(async () => "timed_out"),
+      backgroundManagerWhenIdle: vi.fn(() => new Promise<void>(() => undefined)),
+      serverFactory: vi.fn(() => ({
+        close(callback?: (error?: Error) => void) {
+          callback?.();
+        }
+      }))
+    });
+
+    await controls.startHttpServer({ port: 0 });
+    processPort.emitSignal("SIGINT");
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith("waiting for garden background drain before sqlite close", {});
+    });
+    expect(processPort.exit).not.toHaveBeenCalled();
+    expect(processPort.listenerCount("SIGINT")).toBeGreaterThan(0);
+
+    processPort.emitSignal("SIGINT");
+    expect(processPort.exit).toHaveBeenCalledWith(1);
+    expect(warn).toHaveBeenCalledWith("received second SIGINT, forcing immediate exit", {});
+  });
+
   it("forces idle and all connection shutdown when server close stalls", async () => {
     vi.useFakeTimers();
     const processPort = createFakeSignalProcess();
