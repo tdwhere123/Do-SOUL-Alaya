@@ -1,5 +1,5 @@
 import type { GlobalMemoryEntry } from "@do-soul/alaya-protocol";
-import { isCjkSegmentationCandidate } from "@do-soul/alaya-cjk-segmentation";
+import { isCjkSegmentationCandidate, segmentCjkRun } from "@do-soul/alaya-cjk-segmentation";
 import {
   compileRecallQueryProbes,
   isAdmittedLexicalTerm,
@@ -67,16 +67,16 @@ export function normalizeGlobalMemoryQuery(queryText: string | null): readonly s
 function dropCoveredCjkSurfaces(terms: readonly string[]): readonly string[] {
   // FTS keeps the unsliced CJK surface plus jieba pieces; AND membership
   // cannot require that surface as a document token.
-  return terms.filter(
-    (term) =>
-      !terms.some(
-        (piece) =>
-          piece !== term &&
-          isCjkSegmentationCandidate(piece) &&
-          term.includes(piece) &&
-          piece.length < term.length
-      )
-  );
+  const termSet = new Set(terms);
+  return terms.filter((term) => {
+    if (!isCjkSegmentationCandidate(term)) {
+      return true;
+    }
+    return !segmentCjkRun(term).some((piece) => {
+      const normalized = piece.trim().toLocaleLowerCase();
+      return normalized.length > 0 && normalized !== term && termSet.has(normalized);
+    });
+  });
 }
 
 function filterGlobalRecallEntries(
