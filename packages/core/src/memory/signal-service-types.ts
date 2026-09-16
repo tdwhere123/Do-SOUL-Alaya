@@ -1,6 +1,8 @@
 import type {
   CandidateMemorySignal,
   EventLogEntry,
+  ReconciliationDeferral,
+  SignalDeferClass,
   SignalState as SignalStateValue,
   SourceGroundingDeferReason
 } from "@do-soul/alaya-protocol";
@@ -99,7 +101,8 @@ export interface SignalMaterializationResultFields {
   readonly routing_reason: string;
   readonly created_objects: readonly SignalMaterializedObject[];
   readonly defer_reason?: SourceGroundingDeferReason;
-  readonly defer_class?: "source_grounding";
+  readonly defer_class?: SignalDeferClass;
+  readonly deferral?: ReconciliationDeferral;
 }
 
 export interface SignalMaterializationSuccessResult extends SignalMaterializationResultFields {

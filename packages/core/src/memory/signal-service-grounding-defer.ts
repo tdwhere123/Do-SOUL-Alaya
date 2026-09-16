@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 import {
   IsoDatetimeStringSchema,
+  ReconciliationDeferralSchema,
+  SignalDeferClass,
   SignalEventType,
   SignalState,
   SoulSignalMaterializedPayloadSchema,
   SoulSignalNormalizedPayloadSchema,
   SoulSignalTriagedPayloadSchema,
-  type CandidateMemorySignal
+  type CandidateMemorySignal,
+  type ReconciliationDeferral
 } from "@do-soul/alaya-protocol";
 import {
   buildEventLogRawPayloadSummary,
@@ -137,7 +140,7 @@ export function buildSourceGroundingDeferEvent(input: {
 
 function buildDeferredTriageEvent(
   signal: CandidateMemorySignal,
-  meta: ReturnType<typeof readSourceGroundingDeferMeta>
+  meta: ReturnType<typeof readSourceGroundingDeferMeta> | ReturnType<typeof readWritePathDeferMeta>
 ): SourceGroundingDeferEventInput {
   return {
     event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
@@ -151,12 +154,45 @@ function buildDeferredTriageEvent(
       workspace_id: signal.workspace_id,
       run_id: signal.run_id,
       triage_result: "deferred",
-      ...(meta === null ? {} : {
-        defer_reason: meta.defer_reason,
-        defer_class: meta.defer_class
-      })
+      ...(meta === null ? {} : deferredTriagePayload(meta))
     })
   };
+}
+
+function deferredTriagePayload(
+  meta: NonNullable<
+    ReturnType<typeof readSourceGroundingDeferMeta> | ReturnType<typeof readWritePathDeferMeta>
+  >
+):
+  | {
+      readonly defer_class: "source_grounding";
+      readonly defer_reason: string;
+    }
+  | {
+      readonly defer_class: "write_path";
+      readonly deferral: ReconciliationDeferral;
+    } {
+  if (meta.defer_class === SignalDeferClass.WRITE_PATH) {
+    return { defer_class: meta.defer_class, deferral: meta.deferral };
+  }
+  return { defer_class: meta.defer_class, defer_reason: meta.defer_reason };
+}
+
+function readWritePathDeferMeta(materialization: {
+  readonly defer_class?: string;
+  readonly deferral?: string;
+}): {
+  readonly defer_class: typeof SignalDeferClass.WRITE_PATH;
+  readonly deferral: ReconciliationDeferral;
+} | null {
+  if (materialization.defer_class !== SignalDeferClass.WRITE_PATH) {
+    return null;
+  }
+  const parsed = ReconciliationDeferralSchema.safeParse(materialization.deferral);
+  if (!parsed.success) {
+    return null;
+  }
+  return { defer_class: SignalDeferClass.WRITE_PATH, deferral: parsed.data };
 }
 
 export function buildRedrivePatchAuditEvent(
@@ -272,7 +308,7 @@ async function completeGenericDeferredMaterialization(input: {
     eventLogRepo: input.dependencies.eventLogRepo,
     runtimeNotifier: input.dependencies.runtimeNotifier,
     purpose: "SignalService"
-  }).publish(buildDeferredTriageEvent(input.signal, null));
+  }).publish(buildDeferredTriageEvent(input.signal, readWritePathDeferMeta(input.materialization)));
   return {
     signal,
     triage_result: "deferred",

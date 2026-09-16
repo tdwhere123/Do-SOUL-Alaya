@@ -8,6 +8,7 @@ import { buildGardenTurnEvidenceFallback } from "@do-soul/alaya-soul";
 import { buildGardenTaskEvidenceFallbackSignalId } from "../support/task-signal-id.js";
 import {
   receivedEvidenceCapsule,
+  isWritePathMaterializationDeferral,
   type PostTurnSignalReceiver
 } from "./signal-receiver.js";
 
@@ -69,7 +70,11 @@ async function receiveCandidateSignals(
   for (const candidate of input.candidates) {
     const signal = bindSourceObservation(candidate, input.sourceObservation);
     await input.beforeReceive?.();
-    const received = await input.signalReceiver.receiveSignal(signal);
+    let received = await input.signalReceiver.receiveSignal(signal);
+    if (isWritePathMaterializationDeferral(received)) {
+      await input.beforeReceive?.();
+      received = await input.signalReceiver.receiveSignal(signal);
+    }
     signalIds.push(received.signal.signal_id);
     createdEvidence ||= receivedEvidenceCapsule(received) ||
       await input.signalReceiver.hasCreatedEvidence(received);

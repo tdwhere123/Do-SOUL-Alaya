@@ -132,6 +132,24 @@ describe("SignalEventSchema", () => {
     expect(SignalEventSchema.parse(event)).toEqual(event);
   });
 
+  it("accepts a write-path deferred triage payload with reconciliation deferral", () => {
+    const event = {
+      ...signalEventBase,
+      event_id: "event-7c",
+      event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
+      payload: {
+        signal_id: "signal-1",
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        triage_result: "deferred",
+        defer_class: "write_path",
+        deferral: "lease_busy"
+      }
+    };
+
+    expect(SignalEventSchema.parse(event)).toEqual(event);
+  });
+
   it("rejects a mismatched payload", () => {
     const result = SignalEventSchema.safeParse({
       ...signalEventBase,

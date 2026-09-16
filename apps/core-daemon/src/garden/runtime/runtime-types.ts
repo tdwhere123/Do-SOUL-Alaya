@@ -7,7 +7,8 @@ import type {
   RuntimeGardenComputeConfig,
   CandidateMemorySignal,
   SemanticExtractionProfile,
-  SoulConfig
+  SoulConfig,
+  QueryAvailability
 } from "@do-soul/alaya-protocol";
 import type {
   DynamicsService,
@@ -116,7 +117,7 @@ export interface BulkEnrichConflictDetectionPort {
     readonly workspaceId: string;
     readonly runId: string;
     readonly strictNoDrop?: boolean;
-  }): Promise<void>;
+  }): Promise<{ readonly availability: QueryAvailability }>;
 }
 
 export interface BulkEnrichEdgeProducerPort {

@@ -5,7 +5,32 @@ import { ReconciliationService, createRuleOnlyReconciliationDecisionPort, type R
 import { authorizedDurableRewrite, DecideFn, UpdateFn, baseInput, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
 
 describe("ReconciliationService", () => {
-it("degrades to ADD when pre-write recall throws", async () => {
+it("does not ADD when pre-write recall reports unavailable", async () => {
+    const { deps } = createDeps([], {
+      preWriteRecall: {
+        recall: async () => ({
+          availability: "unavailable",
+          candidates: [],
+          uncertainty: 1,
+          auditFeatures: { failed: true }
+        })
+      }
+    });
+    const service = new ReconciliationService(deps);
+
+    const driven = drive(service, {
+      incomingContent: "The user lives in Berlin.",
+      incomingDomainTags: ["bench-seed"]
+    });
+    const decision = await driven.decision;
+
+    expect(decision.kind).toBe("deferred");
+    expect(decision.deferral).toBe("prewrite_unavailable");
+    expect(driven.appliedVerdicts).toEqual([]);
+    expect(driven.evidenceMinted()).toBe(0);
+  });
+
+it("does not ADD when pre-write recall throws", async () => {
     const { deps } = createDeps([], {
       preWriteRecall: {
         recall: async () => {
@@ -15,12 +40,17 @@ it("degrades to ADD when pre-write recall throws", async () => {
     });
     const service = new ReconciliationService(deps);
 
-    const decision = await drive(service, {
+    const driven = drive(service, {
       incomingContent: "The user lives in Berlin.",
       incomingDomainTags: ["bench-seed"]
-    }).decision;
+    });
+    const decision = await driven.decision;
 
-    expect(decision.kind).toBe("add");
+    expect(decision.kind).toBe("deferred");
+    expect(decision.deferral).toBe("prewrite_unavailable");
+    expect(decision.retryable).toBe(true);
+    expect(driven.appliedVerdicts).toEqual([]);
+    expect(driven.evidenceMinted()).toBe(0);
   });
 
 it("serializes concurrent reconciles for the same workspace", async () => {
@@ -34,7 +64,7 @@ it("serializes concurrent reconciles for the same workspace", async () => {
           maxActive = Math.max(maxActive, active);
           await new Promise((resolve) => setTimeout(resolve, 5));
           active -= 1;
-          return { candidates: [], uncertainty: 1, auditFeatures: { candidate_count: 0 } };
+          return { availability: "ok" as const, candidates: [], uncertainty: 1, auditFeatures: { candidate_count: 0 } };
         }
       }
     });
@@ -238,9 +268,7 @@ describe("ReconciliationService storage-level lease", () => {
     expect(releaseCalls).toEqual(acquireCalls);
   });
 
-  it("degrades to ADD with a conflict scan when the lease is held by another process", async () => {
-    // A neighbor that would normally NOOP — proving the lease-busy path
-    // short-circuits BEFORE the decision so it never reaches the gate.
+  it("does not ADD when the lease is held by another process", async () => {
     const neighbor = createMemoryEntry({ content: "The user lives in Berlin." });
     const { deps, decide, preWriteRecall } = createDeps([neighbor]);
     const lease = {
@@ -255,13 +283,13 @@ describe("ReconciliationService storage-level lease", () => {
     });
     const decision = await driven.decision;
 
-    expect(decision.kind).toBe("add");
-    expect(decision.runConflictScan).toBe(true);
-    expect(driven.appliedVerdicts).toEqual(["add"]);
-    // The decide path was never entered — no retrieval, no LLM judge.
+    expect(decision.kind).toBe("deferred");
+    expect(decision.deferral).toBe("lease_busy");
+    expect(decision.retryable).toBe(true);
+    expect(driven.appliedVerdicts).toEqual([]);
+    expect(driven.evidenceMinted()).toBe(0);
     expect(preWriteRecall).not.toHaveBeenCalled();
     expect(decide).not.toHaveBeenCalled();
-    // A lease that was never acquired is never released.
     expect(lease.release).not.toHaveBeenCalled();
   });
 
@@ -409,7 +437,7 @@ describe("ReconciliationService rule-only (zero-cloud) basis", () => {
           maxActive = Math.max(maxActive, active);
           await new Promise((resolve) => setTimeout(resolve, 5));
           active -= 1;
-          return { candidates: [], uncertainty: 1, auditFeatures: { candidate_count: 0 } };
+          return { availability: "ok" as const, candidates: [], uncertainty: 1, auditFeatures: { candidate_count: 0 } };
         }
       }
     });
@@ -439,10 +467,9 @@ describe("ReconciliationService rule-only (zero-cloud) basis", () => {
     });
     const decision = await driven.decision;
 
-    // Lease busy short-circuits to ADD before the decide path — the
-    // both-ADD race guard is load-bearing in rule-only mode too.
-    expect(decision.kind).toBe("add");
-    expect(decision.runConflictScan).toBe(true);
+    expect(decision.kind).toBe("deferred");
+    expect(decision.deferral).toBe("lease_busy");
+    expect(driven.appliedVerdicts).toEqual([]);
     expect(ruleOnlyDecide).not.toHaveBeenCalled();
     expect(lease.release).not.toHaveBeenCalled();
   });

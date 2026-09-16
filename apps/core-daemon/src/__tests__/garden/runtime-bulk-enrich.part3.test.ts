@@ -211,6 +211,38 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     ).toBe(false);
   });
 
+  it("treats an unavailable conflict scan result as a retryable drain failure", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-1", "memory-owed");
+
+    const recordFailedAttempt = vi.spyOn(enrichPendingRepo, "recordFailedAttempt");
+    const markProcessed = vi.spyOn(enrichPendingRepo, "markProcessed");
+    const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => ({
+      availability: "unavailable"
+    }));
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        produceForNewMemory,
+        detectAndLinkConflicts
+      })
+    );
+
+    await dispatchBulkEnrich(runtime);
+
+    expect(detectAndLinkConflicts).toHaveBeenCalled();
+    expect(recordFailedAttempt).toHaveBeenCalledWith(
+      "workspace-1",
+      "memory-owed",
+      DYNAMICS_CONSTANTS.enrich.max_attempts,
+      expect.any(String)
+    );
+    expect(markProcessed).not.toHaveBeenCalled();
+    expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
+  });
+
   // invariant: the transient-retry seam is BOUNDED. A sink that ALWAYS
   // throws transient `failed` dead-letters its marker after exactly MAX_ATTEMPTS
   // failed attempts, emits the SOUL_ENRICH_ABANDONED audit event (governance/
@@ -322,7 +354,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
         enrichPendingRepo,
         findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
         produceForNewMemory: vi.fn<ProduceFn>(async () => undefined),
-        detectAndLinkConflicts: vi.fn<DetectFn>(async () => undefined),
+        detectAndLinkConflicts: vi.fn<DetectFn>(async () => ({ availability: "ok" })),
         publish
       })
     );
@@ -355,7 +387,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     // The governed services swallow a permanent "rejected" outcome as settled
     // (audited via path.relation_rejected) and resolve without throwing.
     const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
-    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => ({ availability: "ok" }));
     const runtime = createGardenRuntime(
       createRuntimeInput({
         enrichPendingRepo,

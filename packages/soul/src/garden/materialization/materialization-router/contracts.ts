@@ -10,6 +10,7 @@ import {
   type OpenSemanticFactorFormationAdmission,
   type PathGovernanceClass as PathGovernanceClassValue,
   type PathRelation,
+  type QueryAvailability,
   type RelationValidity,
   type SourceGroundingDeferReason,
   type SourceInterpretationSignal,
@@ -44,7 +45,8 @@ export interface MaterializationTarget {
   readonly routing_reason: string;
   /** Structured fail-closed reason when kind is deferred for source grounding. */
   readonly defer_reason?: SourceGroundingDeferReason;
-  readonly defer_class?: "source_grounding";
+  readonly defer_class?: "source_grounding" | "write_path";
+  readonly deferral?: "prewrite_unavailable" | "lease_busy";
 }
 
 /** Immutable admission envelope plus separately trusted source observation. */
@@ -69,7 +71,8 @@ export interface MaterializationResultFields {
   readonly routing_reason: string;
   readonly created_objects: readonly MaterializationCreatedObject[];
   readonly defer_reason?: SourceGroundingDeferReason;
-  readonly defer_class?: "source_grounding";
+  readonly defer_class?: "source_grounding" | "write_path";
+  readonly deferral?: "prewrite_unavailable" | "lease_busy";
 }
 
 export interface MaterializationSuccessResult extends MaterializationResultFields {
@@ -348,7 +351,7 @@ export interface ConflictDetectionPort {
     readonly newMemoryDomainTags: readonly string[];
     readonly workspaceId: string;
     readonly runId: string;
-  }): Promise<void>;
+  }): Promise<{ readonly availability: QueryAvailability }>;
   evaluate?(params: {
     readonly signalId: string;
     readonly workspaceId: string;
@@ -379,6 +382,10 @@ export interface ConflictDetectionPort {
 //               then rewrites the target row and relinks that fresh
 //               evidence ref so durable content keeps matching evidence
 //   - noop   -> the router creates nothing; the drop is audited
+//   - deferred -> neighbor scan or lease was unavailable; the router
+//               creates nothing and reports success with target_kind
+//               deferred plus write_path defer_class so the caller can retry
+
 // NOOP creating no object is what makes a re-seed of the same haystack
 // idempotent — no fresh capsule is minted to accumulate on the surviving
 // row. `survivingObjectId` is the row that ends up holding the fact for
@@ -386,11 +393,13 @@ export interface ConflictDetectionPort {
 // turn through it.
 // see also: packages/core/src/governance/reconciliation-service.ts
 export interface ReconciliationDecisionView {
-  readonly kind: "add" | "update" | "noop";
+  readonly kind: "add" | "update" | "noop" | "deferred";
   /** The row that ends up holding the fact for UPDATE / NOOP. */
   readonly survivingObjectId?: string;
   readonly runConflictScan: boolean;
   readonly reason: string;
+  readonly deferral?: "prewrite_unavailable" | "lease_busy";
+  readonly retryable?: boolean;
 }
 
 export interface ReconciliationPort {

@@ -1,7 +1,10 @@
 import {
   PREFERENCE_FACT_MAX_CHARS,
+  ReconciliationDecisionKind,
   type EventLogEntry,
-  type MemoryEntry
+  type MemoryEntry,
+  type ReconciliationDecisionKind as ReconciliationDecisionKindValue,
+  type ReconciliationDeferral
 } from "@do-soul/alaya-protocol";
 
 export type { EventLogEntry, MemoryEntry };
@@ -10,15 +13,17 @@ import { KeyedMutex } from "@do-soul/alaya-protocol";
 import type { GovernanceRunWorkspaceLookup } from "../policy/run-workspace-guard.js";
 import type { PreWriteRecallPort } from "./pre-write-recall-service.js";
 
-export type ReconciliationDecisionKind = "add" | "update" | "noop";
+export type { ReconciliationDecisionKindValue as ReconciliationDecisionKind, ReconciliationDeferral };
 
 export interface ReconciliationDecision {
-  readonly kind: ReconciliationDecisionKind;
+  readonly kind: ReconciliationDecisionKindValue;
   readonly survivingObjectId?: string;
   readonly targetObjectId?: string;
   readonly runConflictScan: boolean;
   readonly reason: string;
   readonly bestSimilarity: number;
+  readonly deferral?: ReconciliationDeferral;
+  readonly retryable?: boolean;
 }
 
 export interface ReconciliationInput {
@@ -120,7 +125,7 @@ export interface ReconciliationLlmDecisionPort {
       readonly content: string;
     }[];
   }): Promise<{
-    readonly kind: ReconciliationDecisionKind;
+    readonly kind: Exclude<ReconciliationDecisionKindValue, "deferred">;
     /** Required for `update` / `noop`: the neighbor objectId acted on. */
     readonly targetObjectId?: string;
     readonly reason?: string;
@@ -260,7 +265,21 @@ export function addDecision(
   runConflictScan: boolean,
   reason: string
 ): ReconciliationDecision {
-  return { kind: "add", runConflictScan, reason, bestSimilarity };
+  return { kind: ReconciliationDecisionKind.ADD, runConflictScan, reason, bestSimilarity };
+}
+
+export function deferredDecision(
+  deferral: ReconciliationDeferral,
+  reason: string
+): ReconciliationDecision {
+  return {
+    kind: ReconciliationDecisionKind.DEFERRED,
+    deferral,
+    retryable: true,
+    runConflictScan: false,
+    reason,
+    bestSimilarity: 0
+  };
 }
 
 export function tokenize(text: string): Set<string> {

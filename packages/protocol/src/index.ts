@@ -104,6 +104,7 @@ export * from "./governance/green-status.js";
 export * from "./governance/security-status.js";
 export * from "./governance/governance-snapshot.js";
 export * from "./governance/governance-lease.js";
+export * from "./governance/reconciliation-decision.js";
 export * from "./governance/bankruptcy.js";
 export * from "./lifecycle/budget-snapshot.js";
 export * from "./garden/garden-backlog-snapshot.js";

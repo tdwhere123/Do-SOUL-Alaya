@@ -1153,8 +1153,8 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 2501,
-      "expected_sha256": "6b624b959fb32b001f022e31e95c9ba36eecb66509345da161ab75f6a2ab9514"
+      "expected_count": 2509,
+      "expected_sha256": "df8477fb8932f715b0a0c431849196445f7717480df7033c3a7c90af646105f0"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
@@ -1171,8 +1171,8 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 916,
-      "expected_sha256": "24086366186937abf2fb0330e0678ae5fb653a24a21a1745a0d8556a64843b01"
+      "expected_count": 919,
+      "expected_sha256": "bb6c2db6b97bb9f38fc36c38707e42f8afa18767bfb81b8940e2cba1d596de15"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",

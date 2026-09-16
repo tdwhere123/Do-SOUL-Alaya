@@ -14,6 +14,7 @@ import {
 } from "./reconciliation-decider.js";
 import {
   addDecision,
+  deferredDecision,
   auditDroppedContent,
   errorMessage,
   DEFAULT_CONFLICT_TAG_OVERLAP_THRESHOLD,
@@ -36,12 +37,14 @@ export {
   compareCandidateContent,
   AUDIT_DROPPED_CONTENT_MAX_CHARS,
   RECONCILE_LEASE_TTL_MS,
-  createRuleOnlyReconciliationDecisionPort
+  createRuleOnlyReconciliationDecisionPort,
+  deferredDecision
 } from "./reconciliation-service-internal.js";
 
 export type {
   ReconciliationDecision,
   ReconciliationDecisionKind,
+  ReconciliationDeferral,
   ReconciliationEventLogPort,
   ReconciliationInput,
   ReconciliationKeywordSearchPort,
@@ -240,10 +243,10 @@ export class ReconciliationService {
         }
         return next;
       },
-      async () => {
-        const degraded = await this.applyLeaseBusyAdd(input, applyVerdict, 0);
-        return { kind: "ready" as const, decision: degraded };
-      }
+      async () => ({
+        kind: "ready" as const,
+        decision: this.leaseBusyDecision(input)
+      })
     );
     if (prepared.kind === "ready") {
       return prepared.decision;
@@ -257,7 +260,7 @@ export class ReconciliationService {
         const decision = await this.casLlmTarget(input.workspaceId, prepared, nominated);
         return await this.applyDecision(input, decision, applyVerdict);
       },
-      async () => await this.applyLeaseBusyAdd(input, applyVerdict, nominated.bestSimilarity)
+      async () => this.leaseBusyDecision(input)
     );
   }
 
@@ -298,22 +301,15 @@ export class ReconciliationService {
     });
   }
 
-  private async applyLeaseBusyAdd(
-    input: ReconciliationInput,
-    applyVerdict: ReconciliationVerdictApplier,
-    bestSimilarity: number
-  ): Promise<ReconciliationDecision> {
-    this.warn("reconciliation lease busy — degrading to ADD", {
+  private leaseBusyDecision(input: ReconciliationInput): ReconciliationDecision {
+    this.warn("reconciliation lease busy — not adding", {
       workspace_id: input.workspaceId,
       signal_id: input.signalId
     });
-    const degraded = addDecision(
-      bestSimilarity,
-      true,
-      "reconciliation lease held by another process — added with conflict scan"
+    return deferredDecision(
+      "lease_busy",
+      "reconciliation lease held by another process — not added"
     );
-    await applyVerdict(degraded);
-    return degraded;
   }
 
   private async casLlmTarget(
@@ -355,6 +351,9 @@ export class ReconciliationService {
     decision: ReconciliationDecision,
     applyVerdict: ReconciliationVerdictApplier
   ): Promise<ReconciliationDecision> {
+    if (decision.kind === "deferred") {
+      return decision;
+    }
     if (decision.kind === "update" && decision.survivingObjectId !== undefined) {
       return await this.applyUpdateDecision(
         input,

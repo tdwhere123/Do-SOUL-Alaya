@@ -5,7 +5,8 @@ import {
   GardenTaskKind,
   GardenTier,
   type CandidateMemorySignal,
-  type GardenTaskDescriptor
+  type GardenTaskDescriptor,
+  type QueryAvailability
 } from "@do-soul/alaya-protocol";
 import type { EventPublisher } from "@do-soul/alaya-core";
 import type { SqliteGardenTaskRepo, SqliteWorkspaceRepo } from "@do-soul/alaya-storage";
@@ -86,7 +87,7 @@ export type CreateBulkEnrichRuntimeSupportInput = Readonly<{
       readonly workspaceId: string;
       readonly runId: string | null;
       readonly strictNoDrop?: boolean;
-    }): Promise<void>;
+    }): Promise<{ readonly availability: QueryAvailability }>;
   };
   readonly enrichEdgeProducerPort?: {
     produceForNewMemory(input: {
