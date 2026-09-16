@@ -19,6 +19,7 @@ import {
   rejectUnexpectedRequestBody,
   writeListPaginationHeaders
 } from "../../shared/shared.js";
+import { boundedPathParams, readBoundedPathParam } from "../../../middleware/bounded-path-params.js";
 import {
   type EventLogEntry,
   RunInterruptResultSchema,
@@ -180,7 +181,7 @@ function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void
     return context.json({ success: true, data: RunInterruptResultSchema.parse(result) }, 200);
   });
 
-  app.get("/runs/:id/snapshot", async (context) => {
+  app.get("/runs/:id/snapshot", boundedPathParams("id"), async (context) => {
     return await getRunSnapshot(context, services);
   });
 
@@ -193,13 +194,13 @@ function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void
     return context.json({ success: true, data: run }, 200);
   });
 
-  app.delete("/runs/:id", async (context) => {
+  app.delete("/runs/:id", boundedPathParams("id"), async (context) => {
     return await deleteRun(context, services);
   });
 }
 
 async function getRunSnapshot(context: Context, services: RunRouteServices): Promise<Response> {
-  const runId = context.req.param("id")!;
+  const runId = readBoundedPathParam(context, "id");
   const workspaceId = await assertRunWorkspace(context, services, runId);
   if (workspaceId instanceof Response) return workspaceId;
   const snapshot = await services.runHotStateService.getSnapshot(runId);
@@ -256,7 +257,7 @@ async function snapshotCompactionFailure(
 async function deleteRun(context: Context, services: RunRouteServices): Promise<Response> {
   const unexpectedBody = await rejectUnexpectedRequestBody(context);
   if (unexpectedBody !== null) return unexpectedBody;
-  const runId = context.req.param("id")!;
+  const runId = readBoundedPathParam(context, "id");
   const asserted = await assertRunWorkspace(context, services, runId);
   if (asserted instanceof Response) return asserted;
   const run = await services.runService.delete(runId);

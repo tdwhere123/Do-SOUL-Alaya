@@ -1,4 +1,5 @@
 import type { Context, Hono } from "hono";
+import { boundedPathParams, readBoundedPathParam } from "../../../middleware/bounded-path-params.js";
 import { CoreError } from "@do-soul/alaya-core";
 import { parseWorkspaceGitLogLimit } from "@do-soul/alaya-protocol";
 import {
@@ -26,7 +27,7 @@ export function registerWorkspaceFileRoutes(
 }
 
 function registerChangedFilesRoute(app: Hono, services: WorkspaceFilesRouteServices): void {
-  app.get("/workspaces/:id/files/changed", async (context) => {
+  app.get("/workspaces/:id/files/changed", boundedPathParams("id"), async (context) => {
     return await listChangedFiles(context, services);
   });
 }
@@ -36,7 +37,7 @@ function registerFileDiffRoute(
   services: WorkspaceFilesRouteServices,
   gitRateLimiter: { allow(workspaceId: string): boolean }
 ): void {
-  app.get("/workspaces/:id/files/diff", async (context) => {
+  app.get("/workspaces/:id/files/diff", boundedPathParams("id"), async (context) => {
     return await getFileDiff(context, services, gitRateLimiter);
   });
 }
@@ -46,14 +47,14 @@ function registerGitLogRoute(
   services: WorkspaceFilesRouteServices,
   gitRateLimiter: { allow(workspaceId: string): boolean }
 ): void {
-  app.get("/workspaces/:id/git/log", async (context) => {
+  app.get("/workspaces/:id/git/log", boundedPathParams("id"), async (context) => {
     return await listGitLog(context, services, gitRateLimiter);
   });
 }
 
 async function listChangedFiles(context: Context, services: WorkspaceFilesRouteServices): Promise<Response> {
   assertToolExecutionRecordRepo(services);
-  const workspaceId = context.req.param("id")!;
+  const workspaceId = readBoundedPathParam(context, "id");
   const workspace = await services.workspaceService.getById(workspaceId);
   const includeExec = parseIncludeExecQuery(context);
   if (includeExec instanceof Response) return includeExec;
@@ -155,7 +156,7 @@ function requireGitLogService(services: WorkspaceFilesRouteServices) {
 }
 
 async function resolveBoundWorkspace(context: Context, services: WorkspaceFilesRouteServices) {
-  const workspace = await services.workspaceService.getById(context.req.param("id")!);
+  const workspace = await services.workspaceService.getById(readBoundedPathParam(context, "id"));
   const status = await getWorkspaceGitBindingStatus(workspace.repo_path, services.gitBindingValidation);
   if (status.status !== "bound" || status.repo_path === null) return workspaceNotBound(context, status.status);
   return { workspaceId: workspace.workspace_id, repoPath: status.repo_path };
