@@ -140,23 +140,6 @@ export interface MemoryTurnOrchestrationResult extends MemoryContextAssemblyResu
   readonly workspace: Readonly<Workspace>;
 }
 
-export interface GardenMaterializationBatchStats {
-  readonly total_signals: number;
-  readonly memory_and_claim: number;
-  readonly synthesis: number;
-  readonly handoff_gap: number;
-  readonly evidence_only: number;
-  readonly deferred: number;
-}
-
-export interface GardenProviderCallTelemetry {
-  readonly callId: string;
-  readonly startedAt: string;
-  readonly startedAtEpochMs: number;
-  readonly modelId: string;
-  readonly startedEventId: string;
-}
-
 export const MAX_RECALLED_CONTEXT_CHARS = 4_000;
 
 export const CONVERSATION_EVENT_SCAN_PAGE_LIMIT = 500;
@@ -175,69 +158,6 @@ export function buildRecalledContextSection(workingProjection: Readonly<WorkingP
   }
 
   return `<recalled_context>\n${recalledBody}\n</recalled_context>`;
-}
-
-export function createGardenMaterializationBatchStats(): GardenMaterializationBatchStats {
-  return {
-    total_signals: 0,
-    memory_and_claim: 0,
-    synthesis: 0,
-    handoff_gap: 0,
-    evidence_only: 0,
-    deferred: 0
-  };
-}
-
-export function recordSignalResult(
-  stats: GardenMaterializationBatchStats,
-  result: SignalServiceReceiveResult | unknown
-): GardenMaterializationBatchStats {
-  const next = {
-    ...stats,
-    total_signals: stats.total_signals + 1
-  };
-
-  if (!isSignalServiceReceiveResult(result)) {
-    return {
-      ...next,
-      deferred: next.deferred + 1
-    };
-  }
-
-  if (result.triage_result === "dropped" || result.triage_result === "deferred") {
-    return {
-      ...next,
-      deferred: next.deferred + 1
-    };
-  }
-
-  switch (result.materialization?.target_kind) {
-    case "memory_and_claim":
-      return {
-        ...next,
-        memory_and_claim: next.memory_and_claim + 1
-      };
-    case "synthesis":
-      return {
-        ...next,
-        synthesis: next.synthesis + 1
-      };
-    case "handoff_gap":
-      return {
-        ...next,
-        handoff_gap: next.handoff_gap + 1
-      };
-    case "evidence_only":
-      return {
-        ...next,
-        evidence_only: next.evidence_only + 1
-      };
-    default:
-      return {
-        ...next,
-        deferred: next.deferred + 1
-      };
-  }
 }
 
 export function getGardenProviderFailureKind(error: unknown): string {
@@ -290,22 +210,4 @@ export function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
-}
-
-function isSignalServiceReceiveResult(value: unknown): value is SignalServiceReceiveResult {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const candidate = value as {
-    readonly triage_result?: unknown;
-    readonly signal?: { readonly signal_id?: unknown };
-  };
-
-  return (
-    (candidate.triage_result === "accepted" ||
-      candidate.triage_result === "dropped" ||
-      candidate.triage_result === "deferred") &&
-    typeof candidate.signal?.signal_id === "string"
-  );
 }
