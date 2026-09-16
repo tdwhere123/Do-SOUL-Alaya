@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createFixedWindowRateLimitMiddleware } from "../../middleware/rate-limit.js";
+import {
+  createFixedWindowRateLimitMiddleware,
+  createFixedWindowRateLimiter,
+  resolvePeerRateLimitKey
+} from "../../middleware/rate-limit.js";
 import { createApiSecurityHeadersMiddleware } from "../../middleware/security-headers.js";
 import {
   isProtectedRequest,
@@ -72,6 +76,39 @@ describe("security middleware", () => {
     expect((await app.request("/api/example", { headers: headersB })).status).toBe(200);
     expect((await app.request("/api/example", { headers: headersA })).status).toBe(429);
     expect((await app.request("/api/example", { headers: headersB })).status).toBe(429);
+  });
+
+  it("keys failed-auth rate limits by peer identity, not by the attacker-chosen token", async () => {
+    mockedGetConnInfo.mockReturnValue({ remote: { address: "203.0.113.10" } } as never);
+    const limiter = createFixedWindowRateLimiter({
+      maxRequests: 1,
+      windowMs: 60_000,
+      nowMs: () => 1_000
+    });
+    const app = new Hono();
+    app.use("*", async (context, next) => {
+      const key = resolvePeerRateLimitKey(context, false);
+      const token = context.req.header("x-request-token");
+      if (token !== "good") {
+        const decision = limiter.consume(key);
+        if (decision.kind !== "allow") {
+          return context.json({ success: false, error: "Rate limit exceeded" }, 429);
+        }
+        return context.json({ success: false, error: "Invalid X-Request-Token" }, 403);
+      }
+      await next();
+    });
+    app.get("/api/example", (context) => context.json({ ok: true }));
+
+    expect((await app.request("/api/example", { headers: { "x-request-token": "bad-a" } })).status).toBe(
+      403
+    );
+    expect((await app.request("/api/example", { headers: { "x-request-token": "bad-b" } })).status).toBe(
+      429
+    );
+    expect((await app.request("/api/example", { headers: { "x-request-token": "good" } })).status).toBe(
+      200
+    );
   });
 
   it("skips rate limiting for health checks and OPTIONS requests", () => {

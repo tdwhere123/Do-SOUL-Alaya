@@ -13,12 +13,13 @@ import {
 import { StorageError } from "../../shared/errors.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
-import { parseOptionalRow } from "../shared/parse-row.js";
+import { CountRowParser, parseOptionalRow } from "../shared/parse-row.js";
 import { verifyPersistedEffect, verifyPersistedUsage } from "./identity.js";
 import {
   fieldCausalUsageParser,
   fieldProofEffectParser,
-  insertIdempotent
+  insertIdempotent,
+  persistFieldTransaction
 } from "./mappers/mappers.js";
 import type {
   FieldCausalUsageRepo,
@@ -109,27 +110,29 @@ export class SqliteFieldProofEffectRepo implements FieldProofEffectRepo {
 
   public insert(row: FieldProofEffectRow): FieldProofEffectRow {
     verifyPersistedEffect(row, this.sha256);
-    const existing = this.findById(row.workspace_id, row.request_digest);
-    if (existing !== null) {
-      if (!sameEffectDecision(existing, row)) {
-        throw new StorageError("CONFLICT", "proof effect decision replay conflict");
+    return persistFieldTransaction(this.database, () => {
+      const existing = this.findById(row.workspace_id, row.request_digest);
+      if (existing !== null) {
+        if (!sameEffectDecision(existing, row)) {
+          throw new StorageError("CONFLICT", "proof effect decision replay conflict");
+        }
+        return existing;
       }
-      return existing;
-    }
-    this.verifyCommitWitnesses(row);
-    return insertIdempotent(
-      () => this.statements.active().insertStatement.run(
-        row.schema_version, row.request_digest, row.workspace_id, row.actor_id,
-        row.run_id, row.delivery_id, row.action, row.target, row.scope,
-        row.effective_as_of, row.decision, row.supporting_receipt_ids_json,
-        row.supporting_proof_witnesses_json, row.governance_frontier,
-        row.policy_operator_id, row.policy_operator_version,
-        row.recorded_at
-      ),
-      () => this.findById(row.workspace_id, row.request_digest),
-      (existing) => sameEffectDecision(existing, row),
-      "proof effect decision"
-    );
+      this.verifyCommitWitnesses(row);
+      return insertIdempotent(
+        () => this.statements.active().insertStatement.run(
+          row.schema_version, row.request_digest, row.workspace_id, row.actor_id,
+          row.run_id, row.delivery_id, row.action, row.target, row.scope,
+          row.effective_as_of, row.decision, row.supporting_receipt_ids_json,
+          row.supporting_proof_witnesses_json, row.governance_frontier,
+          row.policy_operator_id, row.policy_operator_version,
+          row.recorded_at
+        ),
+        () => this.findById(row.workspace_id, row.request_digest),
+        (existingRow) => sameEffectDecision(existingRow, row),
+        "proof effect decision"
+      );
+    }, "proof effect decision");
   }
 
   public findById(workspaceId: string, requestDigest: string): FieldProofEffectRow | null {
@@ -147,12 +150,20 @@ export class SqliteFieldProofEffectRepo implements FieldProofEffectRepo {
       witness.kind === "actor_authority" && witness.authority_event_id === null)) {
       throw new StorageError("VALIDATION_FAILED", "actor proof lacks a durable authority event");
     }
-    for (const witness of witnesses.filter(hasSourceWitness)) {
-      if (this.statements.active().sourceWitnessStatement.get(
-        row.workspace_id,
-        witness.source_record_id,
-        witness.source_content_digest
-      ) === undefined) {
+    const sourceWitnesses = witnesses.filter(hasSourceWitness);
+    if (sourceWitnesses.length > 0) {
+      const matched = parseOptionalRow(
+        this.statements.active().sourceWitnessesStatement.get(
+          JSON.stringify(sourceWitnesses.map((witness) => ({
+            source_record_id: witness.source_record_id,
+            source_content_digest: witness.source_content_digest
+          }))),
+          row.workspace_id
+        ),
+        CountRowParser,
+        "source witness match count"
+      )?.total ?? 0;
+      if (matched !== sourceWitnesses.length) {
         throw new StorageError("VALIDATION_FAILED", "proof effect source witness is stale");
       }
     }
@@ -379,17 +390,24 @@ function prepareEffectStatements(database: StorageDatabase) {
              governance_frontier, policy_operator_id, policy_operator_version, recorded_at
       FROM proof_effect_decisions WHERE workspace_id = ? AND request_digest = ? LIMIT 1
     `),
-    sourceWitnessStatement: database.connection.prepare(`
-      SELECT 1 FROM source_records AS source
-      WHERE source.workspace_id = ? AND source.record_id = ?
-        AND source.content_digest = ?
-        AND NOT EXISTS (
-          SELECT 1 FROM projection_erase_barriers AS barrier
-          WHERE barrier.workspace_id = source.workspace_id
-            AND barrier.subject_kind = 'source_record'
-            AND barrier.subject_id = source.record_id
-        )
-      LIMIT 1
+    sourceWitnessesStatement: database.connection.prepare(`
+      WITH requested AS (
+        SELECT json_extract(value, '$.source_record_id') AS source_record_id,
+               json_extract(value, '$.source_content_digest') AS source_content_digest
+        FROM json_each(?)
+      )
+      SELECT COUNT(*) AS total
+      FROM requested
+      INNER JOIN source_records AS source
+        ON source.workspace_id = ?
+       AND source.record_id = requested.source_record_id
+       AND source.content_digest = requested.source_content_digest
+       AND NOT EXISTS (
+         SELECT 1 FROM projection_erase_barriers AS barrier
+         WHERE barrier.workspace_id = source.workspace_id
+           AND barrier.subject_kind = 'source_record'
+           AND barrier.subject_id = source.record_id
+       )
     `)
   };
 }

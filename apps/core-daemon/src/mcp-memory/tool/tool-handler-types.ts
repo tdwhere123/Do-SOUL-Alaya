@@ -229,7 +229,7 @@ export interface McpMemoryToolHandlerDependencies {
   };
   readonly gardenTaskRepo?: {
     enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
-    findById(taskId: string): GardenTaskRow | null;
+    findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
     peekPending(
       role: GardenRoleValue,
       workspace_id?: string,
@@ -245,7 +245,8 @@ export interface McpMemoryToolHandlerDependencies {
       taskId: string,
       result: GardenTaskCompletionResult,
       events: readonly GardenTaskEventInput[],
-      claimedBy: string
+      claimedBy: string,
+      workspaceId: string
     ): Promise<void>;
     beginCompletionAttempt(
       taskId: string,

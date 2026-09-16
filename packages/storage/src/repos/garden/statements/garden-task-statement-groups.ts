@@ -12,6 +12,7 @@ type StatementMap<T extends object> = { -readonly [K in keyof T]: GardenTaskSqli
 export interface GardenTaskQueueStatements {
   readonly enqueueStatement: GardenTaskSqliteStatement;
   readonly findByIdStatement: GardenTaskSqliteStatement;
+  readonly findByIdInWorkspaceStatement: GardenTaskSqliteStatement;
   readonly peekPendingStatement: GardenTaskSqliteStatement;
   readonly peekPendingByWorkspaceStatement: GardenTaskSqliteStatement;
 }
@@ -94,6 +95,12 @@ const GARDEN_TASK_QUEUE_SQL: SqlDefinitionMap<GardenTaskQueueStatements> = {
       WHERE id = ?
       LIMIT 1
     `,
+  findByIdInWorkspaceStatement: `
+      SELECT${GARDEN_TASK_SELECT_COLUMNS}
+      FROM garden_tasks
+      WHERE id = ? AND workspace_id = ?
+      LIMIT 1
+    `,
   peekPendingStatement: `
       SELECT${GARDEN_TASK_SELECT_COLUMNS}
       FROM garden_tasks
@@ -150,7 +157,7 @@ const GARDEN_TASK_CLAIM_SQL: SqlDefinitionMap<GardenTaskClaimStatements> = {
   completeStatement: `
       UPDATE garden_tasks
       SET status = ?, completed_at = ?, last_error_text = ?
-      WHERE id = ? AND status = 'claimed' AND claimed_by = ?
+      WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND workspace_id = ?
     `
 };
 

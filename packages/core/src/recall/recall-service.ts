@@ -1,3 +1,7 @@
+/**
+ * Live recall entry. `recall()` is the conditional-field route; do not add a
+ * parallel flood or slice implementation beside this class.
+ */
 import { randomUUID } from "node:crypto";
 import {
   type AssociationCapContract,

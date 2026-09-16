@@ -355,6 +355,10 @@ const soulToolRequestSchemas: Record<SoulToolName, z.ZodTypeAny> = {
   "garden.complete_task": GardenCompleteTaskRequestSchema
 };
 
+/**
+ * Published MCP tool input schemas. Derived from `soulToolRequestSchemas`
+ * through `deriveJsonSchema`; do not hand-write a second dialect.
+ */
 export const soulToolJsonSchemas: Readonly<Record<SoulToolName, Readonly<Record<string, unknown>>>> =
   Object.freeze(
     Object.fromEntries(
