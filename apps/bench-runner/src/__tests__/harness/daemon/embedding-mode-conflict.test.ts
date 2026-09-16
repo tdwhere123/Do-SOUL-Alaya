@@ -22,6 +22,13 @@ describe("bench embeddingMode vs effective supplement", () => {
       ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false"
     })).not.toThrow();
   });
+
+  it("rejects disabled when openai supplement is on", () => {
+    expect(() => assertBenchEmbeddingModeMatchesEffective("disabled", {
+      ALAYA_EMBEDDING_PROVIDER: "openai",
+      ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true"
+    })).toThrow(/embeddingMode=disabled but effective embedding supplement is on/);
+  });
 });
 
 describe("resolveSourceRefRobust", () => {
