@@ -9,6 +9,7 @@ import {
   rejectUnexpectedRequestBody,
   writeListPaginationHeaders
 } from "../../shared/shared.js";
+import { boundedPathParams, readBoundedPathParam } from "../../../middleware/bounded-path-params.js";
 export type {
   PromoteStrictlyGovernedProposalRepoPort,
   PromoteStrictlyGovernedRuntimeNotifier,
@@ -30,8 +31,8 @@ export function registerProposalRoutes(app: Hono, services: ProposalRouteService
 }
 
 function registerProposalListRoutes(app: Hono, services: ProposalRouteServices): void {
-  app.get("/workspaces/:wsId/proposals", async (context) => {
-    const workspaceId = context.req.param("wsId");
+  app.get("/workspaces/:wsId/proposals", boundedPathParams("wsId"), async (context) => {
+    const workspaceId = readBoundedPathParam(context, "wsId");
     await services.workspaceService.getById(workspaceId);
 
     const state = parseProposalListState(context.req.query("state"));
@@ -50,8 +51,8 @@ function registerProposalListRoutes(app: Hono, services: ProposalRouteServices):
     return context.json({ success: true, data: proposals }, 200);
   });
 
-  app.get("/workspaces/:wsId/proposals/pending", async (context) => {
-    const workspaceId = context.req.param("wsId");
+  app.get("/workspaces/:wsId/proposals/pending", boundedPathParams("wsId"), async (context) => {
+    const workspaceId = readBoundedPathParam(context, "wsId");
     await services.workspaceService.getById(workspaceId);
     const since = context.req.query("since") ?? undefined;
     const limit = parsePendingListLimit(context.req.query("limit"));
@@ -95,22 +96,23 @@ async function resolveListAndCount<T>(
 }
 
 function registerProposalReviewRoutes(app: Hono, services: ProposalRouteServices): void {
-  app.post("/workspaces/:wsId/proposals/:proposalId/review", async (context) => {
+  app.post("/workspaces/:wsId/proposals/:proposalId/review", boundedPathParams("wsId", "proposalId"), async (context) => {
     return await reviewProposal(context, services);
   });
 }
 
 function registerMemoryActionProposalRoutes(app: Hono, services: ProposalRouteServices): void {
-  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/keep", (context) => keepMemoryProposal(context, services));
-  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/rewrite", (context) => rewriteMemoryProposal(context, services));
-  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/downgrade", (context) => downgradeMemoryProposal(context, services));
+  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/keep", boundedPathParams("wsId", "memoryId"), (context) => keepMemoryProposal(context, services));
+  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/rewrite", boundedPathParams("wsId", "memoryId"), (context) => rewriteMemoryProposal(context, services));
+  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/downgrade", boundedPathParams("wsId", "memoryId"), (context) => downgradeMemoryProposal(context, services));
 
   app.post(
     "/workspaces/:wsId/soul/memory/:memoryId/proposals/promote-strictly-governed",
+    boundedPathParams("wsId", "memoryId"),
     (context) => promoteStrictlyGovernedProposal(context, services)
   );
 
-  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/retire", (context) => retireMemoryProposal(context, services));
+  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/retire", boundedPathParams("wsId", "memoryId"), (context) => retireMemoryProposal(context, services));
 }
 
 async function keepMemoryProposal(context: Context, services: ProposalRouteServices): Promise<Response> {
@@ -170,8 +172,8 @@ async function prepareExistingMemoryAction(
     const unexpectedBody = await rejectUnexpectedRequestBody(context);
     if (unexpectedBody !== null) return unexpectedBody;
   }
-  const workspaceId = context.req.param("wsId")!;
-  const memoryId = context.req.param("memoryId")!;
+  const workspaceId = readBoundedPathParam(context, "wsId");
+  const memoryId = readBoundedPathParam(context, "memoryId");
   await services.workspaceService.getById(workspaceId);
   const memory = await services.memoryService.findByIdScoped(memoryId, workspaceId);
   if (memory === null) return memoryNotFound(context);
@@ -183,8 +185,8 @@ function memoryNotFound(context: Context): Response {
 }
 
 async function reviewProposal(context: Context, services: ProposalRouteServices): Promise<Response> {
-  const workspaceId = context.req.param("wsId")!;
-  const proposalId = context.req.param("proposalId")!;
+  const workspaceId = readBoundedPathParam(context, "wsId");
+  const proposalId = readBoundedPathParam(context, "proposalId");
   await services.workspaceService.getById(workspaceId);
   const body = await readJsonObject(context);
   if (body === null) return context.json({ success: false, error: "invalid JSON body" }, 400);

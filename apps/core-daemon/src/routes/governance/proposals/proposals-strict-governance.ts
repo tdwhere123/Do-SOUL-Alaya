@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Context } from "hono";
+import { readBoundedPathParam } from "../../../middleware/bounded-path-params.js";
 import type { PathRelationProposalPayload } from "@do-soul/alaya-storage";
 import { reportAsyncSideEffectFailure } from "@do-soul/alaya-core";
 import {
@@ -24,8 +25,8 @@ export async function promoteStrictlyGovernedProposal(
   context: Context,
   services: ProposalRouteServices
 ): Promise<Response> {
-  const workspaceId = context.req.param("wsId")!;
-  const memoryId = context.req.param("memoryId")!;
+  const workspaceId = readBoundedPathParam(context, "wsId");
+  const memoryId = readBoundedPathParam(context, "memoryId");
   await services.workspaceService.getById(workspaceId);
   const missing = await rejectMissingMemory(context, services, memoryId, workspaceId);
   if (missing !== null) return missing;

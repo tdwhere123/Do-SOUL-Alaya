@@ -22,6 +22,7 @@ import {
   WORKSPACE_TOKEN_DENIED_MESSAGE,
   type RequestTokenGrant
 } from "../../../runtime/request-token-binding.js";
+import { boundedPathParams, readBoundedPathParam } from "../../../middleware/bounded-path-params.js";
 
 export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
@@ -127,7 +128,7 @@ export function registerFileRoutes(app: Hono, services: FileRouteServices): void
     return await uploadFile(context, services);
   });
 
-  app.get("/files/:id", async (context) => {
+  app.get("/files/:id", boundedPathParams("id"), async (context) => {
     return await downloadFile(context, services);
   });
 }
@@ -214,7 +215,7 @@ function buildFileRecord(
 }
 
 async function downloadFile(context: Context, services: FileRouteServices): Promise<Response> {
-  const fileId = context.req.param("id")!.trim();
+  const fileId = readBoundedPathParam(context, "id");
   const workspaceId = context.req.query("workspace_id")?.trim();
   if (workspaceId === undefined || workspaceId.length === 0) {
     return context.json({ success: false, error: "workspace_id is required" }, 400);
