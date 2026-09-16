@@ -1,10 +1,12 @@
 export function buildAttachedAgentMcpChildEnv(agentTarget: string): Readonly<Record<string, string>> {
-  // Review credentials stay on human reviewer surfaces; attached MCP must not inherit them.
+  // Attach profiles stamp identity only; HTTP tokens stay on the daemon HTTP listener.
   return Object.freeze({ ALAYA_AGENT_TARGET: agentTarget });
 }
 
 export function stripReviewerCredentialsFromAgentMcpEnv(env: NodeJS.ProcessEnv): void {
-  // Attached agents must not inherit reviewer credentials; review is human-surface only.
+  // Stdio trust is the process; reviewer and HTTP tokens must not ride along.
   delete env.ALAYA_REVIEWER_TOKEN;
   delete env.ALAYA_REVIEWER_IDENTITY;
+  delete env.ALAYA_REQUEST_TOKEN;
+  delete env.ALAYA_REQUEST_TOKEN_WORKSPACES;
 }

@@ -201,7 +201,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(toolNames).toContain("soul.recall");
       expect(toolNames).toContain("soul.emit_candidate_signal");
       expect(toolNames).toContain("soul.propose_memory_update");
-      expect(toolNames).toContain("soul.review_memory_proposal");
+      expect(toolNames).not.toContain("soul.review_memory_proposal");
 
       // Drive the full propose+review chain.
       const content = "Use pnpm for all workspace commands in this monorepo.";
