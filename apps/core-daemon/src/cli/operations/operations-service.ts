@@ -192,7 +192,7 @@ async function finishImportAudit(
     artifact_path: null,
     bundle_path: audit.bundlePath,
     partial_state: restoredPaths,
-    error: error === null ? null : readErrorMessage(error, "unknown_error")
+    error: error === null ? null : readOperationAuditError(error)
   });
 }
 
@@ -310,7 +310,7 @@ async function failArtifactOperationAudit(
     artifact_path: input.artifactPath,
     bundle_path: null,
     partial_state: [],
-    error: readErrorMessage(error, "unknown_error")
+    error: readOperationAuditError(error)
   });
 }
 
@@ -350,6 +350,11 @@ async function readOptionalBuffer(filePath: string): Promise<Buffer | null> {
     }
     throw new AlayaOperationError("NOINPUT", `Unable to read file: ${filePath}`);
   }
+}
+
+function readOperationAuditError(error: unknown): string {
+  const message = readErrorMessage(error, "unknown_error").trim();
+  return message.length > 0 ? message : "unknown_error";
 }
 
 function normalizeOptionalPath(value: string | null | undefined): string | null {
