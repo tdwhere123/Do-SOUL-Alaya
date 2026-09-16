@@ -202,6 +202,7 @@
     }
   },
   "retired_import_paths": [
+    "apps/inspector/web/src/utils/parse-search-query",
     "packages/protocol/src/shared/cjk-segmentation",
     "packages/core/src/recall/shadow",
     "packages/core/src/recall/decision/prefix-capture/envelope",
@@ -1150,8 +1151,8 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 2497,
-      "expected_sha256": "a429fdfdace469b1fe87790828159cc4c3a158700ae011992a00e6d29a5b18c2"
+      "expected_count": 2496,
+      "expected_sha256": "fdd20b8f0dddcae7bfe12b4949ef868d5c429527a403a61e53d4e8cefd164d6f"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",

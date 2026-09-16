@@ -29,10 +29,16 @@ export function fallbackCjkRunPieces(text: string): readonly string[] {
 
 type CjkRunSegmenter = (text: string) => readonly string[];
 
-let boundCjkRunSegmenter: CjkRunSegmenter | null = null;
+const UNBOUND_CJK_RUN_FALLBACK_WARNING_CODE = "ALAYA_CJK_RUN_UNBOUND_FALLBACK";
+const UNBOUND_CJK_RUN_FALLBACK_WARNING_MESSAGE =
+  "[CjkRunPolicy] no native CJK segmenter bound; using interrogative-atom fallback";
 
-/** Native CJK owner registers here so source-frame can use jieba without a protocol native dep. */
+let boundCjkRunSegmenter: CjkRunSegmenter | null = null;
+let emittedUnboundFallbackWarning = false;
+
+/** First writer wins so source-frame cannot diverge from FTS/memory/recall. */
 export function bindCjkRunSegmenter(segmenter: CjkRunSegmenter): void {
+  if (boundCjkRunSegmenter !== null) return;
   boundCjkRunSegmenter = segmenter;
 }
 
@@ -43,7 +49,23 @@ export function applyBoundCjkRunSegmenter(text: string): readonly string[] {
   if (boundCjkRunSegmenter !== null) {
     return boundCjkRunSegmenter(text);
   }
+  emitUnboundCjkRunFallbackWarning();
   return fallbackCjkRunPieces(text);
+}
+
+function emitUnboundCjkRunFallbackWarning(): void {
+  if (emittedUnboundFallbackWarning) return;
+  emittedUnboundFallbackWarning = true;
+  process.emitWarning(UNBOUND_CJK_RUN_FALLBACK_WARNING_MESSAGE, {
+    code: UNBOUND_CJK_RUN_FALLBACK_WARNING_CODE,
+    detail: JSON.stringify({ layer: "protocol", state: "unbound" })
+  });
+}
+
+/** Protocol tests must not leak a bound stub into later cases. */
+export function __resetBoundCjkRunSegmenterForTests(): void {
+  boundCjkRunSegmenter = null;
+  emittedUnboundFallbackWarning = false;
 }
 
 function lexemeAt(text: string, index: number): string | null {

@@ -64,6 +64,7 @@ if (violations.length > 0) {
 const protocolPkg = JSON.parse(
   readFileSync(path.join(repoRoot, "packages/protocol/package.json"), "utf8")
 );
+const protocolDepSections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
 const protocolDeps = Object.keys(protocolPkg.dependencies ?? {});
 if (protocolDeps.length !== 1 || protocolDeps[0] !== "zod") {
   console.error(
@@ -71,20 +72,30 @@ if (protocolDeps.length !== 1 || protocolDeps[0] !== "zod") {
   );
   process.exit(1);
 }
+for (const section of protocolDepSections) {
+  const deps = protocolPkg[section] ?? {};
+  if (deps["@node-rs/jieba"] !== undefined || deps["@do-soul/alaya-cjk-segmentation"] !== undefined) {
+    console.error(`protocol ${section} must not include native CJK segmentation`);
+    process.exit(1);
+  }
+}
 
-const inspectorWebPkg = JSON.parse(
-  readFileSync(path.join(repoRoot, "apps/inspector/web/package.json"), "utf8")
-);
-const inspectorWebDeps = {
-  ...(inspectorWebPkg.dependencies ?? {}),
-  ...(inspectorWebPkg.devDependencies ?? {})
-};
-if (
-  inspectorWebDeps["@node-rs/jieba"] !== undefined ||
-  inspectorWebDeps["@do-soul/alaya-cjk-segmentation"] !== undefined
-) {
-  console.error("Inspector SPA must not depend on native CJK segmentation");
-  process.exit(1);
+const inspectorManifests = ["apps/inspector/package.json", "apps/inspector/web/package.json"];
+for (const rel of inspectorManifests) {
+  const pkg = JSON.parse(readFileSync(path.join(repoRoot, rel), "utf8"));
+  const inspectorDeps = {
+    ...(pkg.dependencies ?? {}),
+    ...(pkg.devDependencies ?? {}),
+    ...(pkg.optionalDependencies ?? {}),
+    ...(pkg.peerDependencies ?? {})
+  };
+  if (
+    inspectorDeps["@node-rs/jieba"] !== undefined ||
+    inspectorDeps["@do-soul/alaya-cjk-segmentation"] !== undefined
+  ) {
+    console.error(`${rel} must not depend on native CJK segmentation`);
+    process.exit(1);
+  }
 }
 
 console.log("check-inspector-dep-isolation: ok (React/Vite deps confined to apps/inspector/web; protocol zod-only)");

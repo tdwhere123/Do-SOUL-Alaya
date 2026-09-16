@@ -1,9 +1,9 @@
 import {
-  bindCjkRunSegmenter,
   fallbackCjkRunPieces,
   isCjkSegmentationCandidate,
   readErrorMessage
 } from "@do-soul/alaya-protocol";
+import { bindCjkRunSegmenter } from "@do-soul/alaya-protocol/node/source-frame";
 
 export { isCjkSegmentationCandidate };
 

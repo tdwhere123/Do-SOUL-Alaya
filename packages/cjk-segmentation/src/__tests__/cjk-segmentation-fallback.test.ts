@@ -5,6 +5,7 @@ import {
   segmentCjkRun,
   warmCjkSegmentation
 } from "../index.js";
+import { tokenizeFactFrameSource, bindCjkRunSegmenter } from "@do-soul/alaya-protocol/node/source-frame";
 
 afterEach(() => {
   __resetCjkSegmentationStateForTests();
@@ -60,7 +61,13 @@ describe("CJK segmentation native owner", () => {
     if (!ready) {
       throw new Error("jieba unavailable in test env; native binding missing");
     }
-    expect(segmentCjkRun("我喜欢咖啡").length).toBeGreaterThan(0);
+    const sample = "我喜欢咖啡";
+    const pieces = Array.from(segmentCjkRun(sample));
+    expect(pieces).toEqual(expect.arrayContaining(["喜欢", "咖啡"]));
+    expect(tokenizeFactFrameSource(sample).map((token) => token.text)).toEqual(pieces);
+    bindCjkRunSegmenter(() => ["hijacked"]);
+    expect(segmentCjkRun(sample)).toEqual(pieces);
+    expect(tokenizeFactFrameSource(sample).map((token) => token.text)).toEqual(pieces);
     expect(segmentCjkRun("")).toEqual([]);
   });
 });

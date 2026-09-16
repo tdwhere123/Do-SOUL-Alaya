@@ -32,11 +32,11 @@ quality gate remains on hold.
 
 Native CJK segmentation (`@node-rs/jieba`) moves off `@do-soul/alaya-protocol`
 onto Node-only `@do-soul/alaya-cjk-segmentation`. Protocol keeps interrogative
-fallback atoms, the CJK-candidate predicate, and a bind seam for
-`node/source-frame`. Core and storage consume the helper directly and no longer
-re-export it. This restores invariant 1 (protocol depends only on `zod`).
-Inspector SPA does not depend on the helper. Workspace-internal; not a §25
-MCP/EventLog/config change.
+fallback atoms, the CJK-candidate predicate, and a once-only bind seam on
+`node/source-frame` (not the browser root). Core and storage consume the helper
+directly and no longer re-export it. This restores invariant 1 (protocol
+depends only on `zod`). Inspector SPA and Inspector server do not depend on
+the helper. Workspace-internal; not a §25 MCP/EventLog/config change.
 
 TypeScript 7.0.2 is the workspace `tsc` (native compiler). The repository
 structure guard keeps the TypeScript 6 Compiler API via `@typescript/typescript6`
