@@ -83,7 +83,7 @@ export class GardenBacklogTelemetryService {
       await Promise.all([this.ensureCaptureRunner(), this.ensureSnapshotRunner()]);
     } catch (error) {
       this.warn("garden backlog telemetry poll failed", {
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
     }
   }
@@ -415,7 +415,7 @@ export class GardenBacklogTelemetryService {
       this.snapshotRequestedVersion += 1;
       void this.ensureSnapshotRunner().catch((error) => {
         this.warn("garden backlog snapshot retry failed", {
-          error: toErrorMessage(error)
+          error: readErrorMessage(error, "unknown_error")
         });
       });
     });

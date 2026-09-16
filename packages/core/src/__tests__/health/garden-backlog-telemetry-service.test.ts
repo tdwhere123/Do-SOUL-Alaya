@@ -109,4 +109,46 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
     await service.stop();
     process.off("unhandledRejection", unhandled);
   });
+
+  it("maps a non-Error poll throw to unknown_error", async () => {
+    const warn = vi.fn();
+    const service = new GardenBacklogTelemetryService({
+      scheduler: {
+        getBacklogSnapshot: () => ({
+          workspace_id: null,
+          observed_at: "2026-08-18T00:00:00.000Z",
+          queue_depth_total: 0,
+          queue_depth_by_tier: { tier_0: 0, tier_1: 0, tier_2: 0 },
+          in_flight_total: 0,
+          warning_active: false
+        }),
+        peekBacklogWarningTransition: () => {
+          throw "poll boom";
+        },
+        peekLastBacklogWarningTransitionId: () => null,
+        acknowledgeBacklogWarningTransition: () => false
+      },
+      eventLogRepo: {
+        append: vi.fn(async () => {
+          throw new Error("unused");
+        }),
+        queryByEntity: vi.fn(async () => [])
+      },
+      warn,
+      thresholds: {
+        warning_queue_depth: 10,
+        warning_rearm_depth: 7,
+        snapshot_interval_ms: 1_000
+      }
+    });
+
+    service.start();
+    await service.poll();
+
+    expect(warn).toHaveBeenCalledWith(
+      "garden backlog telemetry poll failed",
+      expect.objectContaining({ error: "unknown_error" })
+    );
+    await service.stop();
+  });
 });
