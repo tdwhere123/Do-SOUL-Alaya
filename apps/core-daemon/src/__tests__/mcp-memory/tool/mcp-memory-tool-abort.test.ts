@@ -12,6 +12,7 @@ import {
   createRecallCandidate,
   stubRecallIndex
 } from "./mcp-memory-tool-handler-fixture.js";
+import { createDeferred } from "../../support/deferred.js";
 
 const HANDLER_TIMEOUT = {
   error_code: "handler_timeout",
@@ -32,7 +33,7 @@ function createStartedGate<T>(work: (release: () => void) => Promise<T>): {
   readonly started: Promise<void>;
   readonly run: () => Promise<T>;
 } {
-  const started = Promise.withResolvers<void>();
+  const started = createDeferred<void>();
   return {
     started: started.promise,
     run: async () => await work(() => started.resolve())
