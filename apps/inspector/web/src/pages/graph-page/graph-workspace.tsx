@@ -10,7 +10,7 @@ import GraphOverlays from "./graph-overlays";
 import GraphRenderer from "./graph-renderer";
 import GraphToolbar from "./graph-toolbar";
 import { probeWebgl } from "./support";
-import type { GraphData, ViewMode } from "./types";
+import { DEFAULT_GRAPH_VIEW_MODE, type GraphData, type ViewMode } from "./types";
 import { useGraphActions } from "./useGraphActions";
 import { useGraphData } from "./useGraphData";
 import { useGraphKeyboardShortcuts, type GraphKeyboardState } from "./useGraphKeyboardShortcuts";
@@ -23,12 +23,12 @@ export default function GraphWorkspace({ workspaceId }: { readonly workspaceId: 
   const { showToast } = useToasts();
   const refs = useGraphRefs();
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("2d");
+  const [viewMode, setViewMode] = useState<ViewMode>(DEFAULT_GRAPH_VIEW_MODE);
   const [webglSupported] = useState(() => probeWebgl());
   const viewport = useViewportSize(refs.viewportRef);
   const { data, error, loading } = useGraphData(workspaceId);
   const spotlight = useGraphSpotlight({ data, workspaceId });
-  const effectiveMode: ViewMode = webglSupported ? viewMode : "2d";
+  const effectiveMode: ViewMode = webglSupported ? viewMode : DEFAULT_GRAPH_VIEW_MODE;
   const largeGraphMode = effectiveMode === "3d" && (data?.nodes.length ?? 0) > LARGE_GRAPH_NODE_THRESHOLD;
   const lowFpsDetected = useFpsMonitor({ enabled: largeGraphMode });
   const { handleGraphEngineTick } = useGraphPhysics({

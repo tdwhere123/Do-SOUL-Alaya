@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,6 +63,20 @@ describe("GraphPage (react-force-graph driven)", () => {
     );
     expect(stub.getAttribute("data-node-count")).toBe("3");
     expect(stub.getAttribute("data-link-count")).toBe("2");
+    expect(screen.queryByTestId("force-graph-3d")).not.toBeTruthy();
+  });
+
+  it("does not mount 3D until the view-mode toggle is pressed", async () => {
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+    expect(screen.queryByTestId("force-graph-3d")).not.toBeTruthy();
+    expect(screen.getByRole("button", { name: /2D/i }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("loads 3D through a dynamic graph-renderer module", () => {
+    const src = readFileSync(new URL("../../pages/graph-page/graph-renderer.tsx", import.meta.url), "utf8");
+    expect(src).not.toMatch(/import\(["']react-force-graph-3d["']\)/u);
+    expect(src).toMatch(/lazy\(\(\) => import\("\.\/graph-renderer-3d"\)\)/u);
   });
 
   it("renders no-workspace alert and never fetches when workspaceId is null", async () => {
