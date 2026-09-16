@@ -24,6 +24,7 @@ function headersFor(token: string): Record<string, string> {
     origin: "http://localhost:5173",
     "x-request-token": token,
     "x-alaya-desktop": "1",
+    origin: "http://localhost:5173",
     "content-type": "application/json"
   };
 }
