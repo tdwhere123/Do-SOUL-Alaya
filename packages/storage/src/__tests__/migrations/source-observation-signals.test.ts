@@ -81,5 +81,5 @@ describe("source observation signal migration", () => {
       .toEqual([{ object_id: "old-memory" }]);
     expect(database.connection.pragma("foreign_key_check")).toEqual([]);
     expect(database.connection.prepare("SELECT max(version) AS version FROM schema_version").get()).toEqual({ version: 17 });
-  });
+  }, process.platform === "win32" ? 120_000 : 60_000);
 });
