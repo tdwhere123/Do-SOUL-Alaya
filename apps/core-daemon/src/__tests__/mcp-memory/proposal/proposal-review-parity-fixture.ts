@@ -76,7 +76,8 @@ export async function runReviewParityScenario(
   const daemonApp = createApp({
     requestProtection: {
       allowedOrigin: "http://localhost:5173",
-      requestToken: "daemon-request-token"
+      requestToken: "daemon-request-token",
+      allowDesktopOriginlessRequests: true
     },
     routes: {
       proposals: {
