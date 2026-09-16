@@ -1151,8 +1151,8 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 2496,
-      "expected_sha256": "fdd20b8f0dddcae7bfe12b4949ef868d5c429527a403a61e53d4e8cefd164d6f"
+      "expected_count": 2497,
+      "expected_sha256": "e42c5149271894bab80dc252a8f6c70bf32c797f9fbd7830b2b01286c9601d72"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
