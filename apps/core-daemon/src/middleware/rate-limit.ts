@@ -25,7 +25,6 @@ export type RateLimitDecision =
   | { readonly kind: "identity_unavailable" };
 
 export interface FixedWindowRateLimiter {
-  inspect(key: string): RateLimitDecision;
   consume(key: string): RateLimitDecision;
 }
 
@@ -57,11 +56,8 @@ export function createFixedWindowRateLimiter(
   };
 
   return {
-    inspect(key: string): RateLimitDecision {
-      return decide(buckets, key, sweep(), options.windowMs, options.maxRequests, maxBuckets, false);
-    },
     consume(key: string): RateLimitDecision {
-      return decide(buckets, key, sweep(), options.windowMs, options.maxRequests, maxBuckets, true);
+      return decide(buckets, key, sweep(), options.windowMs, options.maxRequests, maxBuckets);
     }
   };
 }
@@ -116,17 +112,18 @@ export function readUnixPeerCredentials(context: Context): string | undefined {
   try {
     const incoming = (context.env as { incoming?: { socket?: NodeJS.Socket } } | undefined)
       ?.incoming;
-    const handle = (
-      incoming?.socket as { _handle?: { getPeerCredentials?: () => UnixPeerCredentials } } | undefined
-    )?._handle;
-    const creds = handle?.getPeerCredentials?.();
-    if (creds === undefined || !Number.isInteger(creds.uid) || !Number.isInteger(creds.pid)) {
-      return undefined;
-    }
-    return `${creds.uid}:${creds.pid}`;
+    return readUnixPeerCredentialsFromSocket(incoming?.socket);
   } catch {
     return undefined;
   }
+}
+
+function readUnixPeerCredentialsFromSocket(socket: unknown): string | undefined {
+  const creds = unixPeerCredentialsFromLibuv(socket);
+  if (creds === undefined || !Number.isInteger(creds.uid) || !Number.isInteger(creds.pid)) {
+    return undefined;
+  }
+  return `${creds.uid}:${creds.pid}`;
 }
 
 type UnixPeerCredentials = {
@@ -134,6 +131,14 @@ type UnixPeerCredentials = {
   readonly uid: number;
   readonly gid?: number;
 };
+
+function unixPeerCredentialsFromLibuv(socket: unknown): UnixPeerCredentials | undefined {
+  // Node does not publish SO_PEERCRED on net.Socket; libuv Pipe#getPeerCredentials
+  // is the only credentials handle the runtime exposes.
+  const handle = (socket as { _handle?: { getPeerCredentials?: () => UnixPeerCredentials } } | undefined)
+    ?._handle;
+  return handle?.getPeerCredentials?.();
+}
 
 function cleanupExpiredBuckets(
   buckets: LruCache<string, Bucket>,
@@ -158,21 +163,10 @@ function decide(
   now: number,
   windowMs: number,
   maxRequests: number,
-  maxBuckets: number,
-  consume: boolean
+  maxBuckets: number
 ): RateLimitDecision {
   if (key === UNKNOWN_SOCKET_KEY) {
     return { kind: "identity_unavailable" };
-  }
-  if (!consume) {
-    const existing = buckets.get(key);
-    if (existing === undefined || now - existing.startedAtMs >= windowMs) {
-      return { kind: "allow" };
-    }
-    if (existing.count >= maxRequests) {
-      return limitedDecision(windowMs, now, existing.startedAtMs);
-    }
-    return { kind: "allow" };
   }
   const bucket = readBucket(buckets, key, now, windowMs, maxBuckets);
   if (bucket === null) {
