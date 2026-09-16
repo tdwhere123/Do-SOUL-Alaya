@@ -7,7 +7,7 @@ export const MCP_TOOL_CONFIRMATION_TOKEN_ENV_KEY =
   DAEMON_ONLY_CONFIG_ENV_KEYS.mcp.toolConfirmationToken;
 
 export function buildAttachedAgentMcpChildEnv(agentTarget: string): Readonly<Record<string, string>> {
-  // Review credentials and confirmation tokens stay off attached MCP child env.
+  // Attach stamps identity only; HTTP and confirmation tokens stay off attached MCP child env.
   return Object.freeze({ ALAYA_AGENT_TARGET: agentTarget });
 }
 
@@ -29,9 +29,11 @@ export function attachedAgentEnvHoldsConfirmationToken(
 }
 
 export function stripReviewerCredentialsFromAgentMcpEnv(env: NodeJS.ProcessEnv): void {
-  // Attached MCP stdio is the executor; confirmer secrets must not ride along.
+  // Stdio is the executor; reviewer, HTTP, and confirmer secrets must not ride along.
   delete env.ALAYA_REVIEWER_TOKEN;
   delete env.ALAYA_REVIEWER_IDENTITY;
+  delete env.ALAYA_REQUEST_TOKEN;
+  delete env.ALAYA_REQUEST_TOKEN_WORKSPACES;
   delete env[MCP_TOOL_CONFIRMATION_TOKEN_ENV_KEY];
 }
 
