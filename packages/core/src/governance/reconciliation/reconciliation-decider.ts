@@ -36,7 +36,7 @@ interface NeighborAnalysis {
   readonly ambiguous: NeighborCandidate[];
 }
 
-export interface ReconciliationLlmCandidateSnapshot {
+interface ReconciliationLlmCandidateSnapshot {
   readonly objectId: string;
   readonly content: string;
   readonly updatedAt: string;
