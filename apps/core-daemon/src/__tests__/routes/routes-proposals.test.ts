@@ -38,6 +38,7 @@ import { EventPublisher, PathRelationProposalService, ProposalService } from "@d
 
 import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal/proposal-workflow.js";
 
+import { registerErrorHandler } from "../../middleware/error-handler.js";
 import { registerProposalRoutes } from "../../routes/governance/proposals/proposals.js";
 import { proposalRouteServices } from "../support/route-service-stubs.js";
 
@@ -162,6 +163,17 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       offset: 0
     });
     expect(proposalService.countPending).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("rejects oversized workspace ids on proposal list", async () => {
+    const { app, workspaceService } = buildApp();
+    registerErrorHandler(app, { error: vi.fn() });
+
+    const response = await app.request(`/workspaces/${"a".repeat(257)}/proposals`);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ success: false, error: "Invalid wsId" });
+    expect(workspaceService.getById).not.toHaveBeenCalled();
   });
 
   it("passes pagination to GET /workspaces/:wsId/proposals without handler-level slicing", async () => {

@@ -204,9 +204,9 @@ describe("post-turn extract Garden task", () => {
       status: "failed",
       last_error_text: expect.stringContaining("provider blew up")
     });
-    const completedEvents = await harness.eventLogRepo.queryByType(
+    const completedEvents = (await harness.eventLogRepo.queryByType(
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-    );
+    )).events;
     expect(completedEvents.at(-1)?.payload_json).toMatchObject({
       task_kind: GardenTaskKind.POST_TURN_EXTRACT,
       success: false,
@@ -500,7 +500,9 @@ describe("post-turn extract Garden task", () => {
     });
     await expect(
       harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)
-    ).resolves.toEqual([
+    ).resolves.toEqual({
+      truncated: false,
+      events: [
       expect.objectContaining({
         entity_id: "post-turn-task-1",
         payload_json: expect.objectContaining({
@@ -508,7 +510,8 @@ describe("post-turn extract Garden task", () => {
           stale_after_ms: 10 * 60 * 1000
         })
       })
-    ]);
+      ]
+    });
   });
 
   it("records compiled candidate signals in the signal review queue", async () => {

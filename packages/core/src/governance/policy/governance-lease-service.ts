@@ -51,6 +51,7 @@ export interface GovernanceLeaseServiceEventLogPort {
 export interface GovernanceLeaseServiceDependencies {
   readonly eventLogRepo: GovernanceLeaseServiceEventLogPort;
   readonly eventPublisher?: EventPublisher;
+  readonly runtimeNotifier: { notifyEntry(entry: EventLogEntry): void | Promise<void> };
   readonly runLookup: GovernanceRunWorkspaceLookup;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
@@ -98,6 +99,7 @@ export class GovernanceLeaseService {
     await bindEventPublisher({
       eventPublisher: this.dependencies.eventPublisher,
       eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "GovernanceLeaseService"
     }).publish({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
@@ -132,6 +134,7 @@ export class GovernanceLeaseService {
     await bindEventPublisher({
       eventPublisher: this.dependencies.eventPublisher,
       eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "GovernanceLeaseService"
     }).publish({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
@@ -170,6 +173,7 @@ export class GovernanceLeaseService {
     await bindEventPublisher({
       eventPublisher: this.dependencies.eventPublisher,
       eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "GovernanceLeaseService"
     }).publish({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED,

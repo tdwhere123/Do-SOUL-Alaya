@@ -86,7 +86,7 @@ export function createDependencies(overrides: Partial<ProjectMappingServiceDepen
     readonly acceptedBy: ProjectMappingAnchor["accepted_by"];
     readonly transitionedAt: string;
   }> = [];
-  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+  const appendSpy = vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
     appendedEventCount += 1;
     return {
       event_id: `event-${event.entity_id}-${appendedEventCount}`,
@@ -101,7 +101,7 @@ export function createDependencies(overrides: Partial<ProjectMappingServiceDepen
     now: () => "2026-03-28T01:00:00.000Z",
     generateObjectId: () => "mapping-generated",
     projectMappingRepo: {
-      create: vi.fn(async (anchor) => {
+      create: vi.fn((anchor) => {
         anchors.set(anchor.object_id, anchor);
         createdAnchors.push(anchor);
       }),
@@ -126,7 +126,7 @@ export function createDependencies(overrides: Partial<ProjectMappingServiceDepen
         ) ?? null
       ),
       updateState: vi.fn(
-        async (
+        (
           objectId: string,
           newState: ProjectMappingAnchor["mapping_state"],
           acceptedBy: ProjectMappingAnchor["accepted_by"],
@@ -170,7 +170,11 @@ export function createDependencies(overrides: Partial<ProjectMappingServiceDepen
     },
     eventLogRepo: {
       append: appendSpy,
-      queryByEntity: queryByEntitySpy
+      queryByEntity: queryByEntitySpy,
+      transactional: identityTxn
+    },
+    runtimeNotifier: {
+      notifyEntry: () => undefined
     },
     ...overrides
   };
@@ -182,4 +186,8 @@ export function createDependencies(overrides: Partial<ProjectMappingServiceDepen
     createdAnchors,
     stateUpdates
   };
+}
+
+export function identityTxn<T>(fn: () => T): T {
+  return fn();
 }

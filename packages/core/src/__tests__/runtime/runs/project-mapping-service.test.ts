@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { AcceptedBy, ConfirmationPolicy, MemoryDimension, ObjectLifecycleState, ProjectMappingEventType, ProjectMappingState, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { ProjectMappingService, StrictConfirmationRequired } from "../../../runtime/runs/project-mapping-service.js";
-import { createAnchor, createDependencies, createMemoryEntry } from "./project-mapping-service-test-fixtures.js";
+import { createAnchor, createDependencies, createMemoryEntry, identityTxn } from "./project-mapping-service-test-fixtures.js";
 
 describe("ProjectMappingService", () => {
 it("suggests a new anchor and appends the suggestion event before persisting it", async () => {
     const order: string[] = [];
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+    const append = vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       order.push("event_log");
       return {
         event_id: "event-suggested",
@@ -21,11 +21,12 @@ it("suggests a new anchor and appends the suggestion event before persisting it"
         queryByEntity: vi.fn(async () => {
           order.push("event_query");
           return [];
-        })
+        }),
+        transactional: identityTxn
       },
       projectMappingRepo: {
         ...createDependencies().dependencies.projectMappingRepo,
-        create: vi.fn(async (anchor) => {
+        create: vi.fn((anchor) => {
           order.push("repo_create");
           createdAnchors.push(anchor);
         })
@@ -71,8 +72,8 @@ it("re-suggests a rejected anchor instead of creating a duplicate", async () => 
         accepted_by: AcceptedBy.REVIEW
       })
     );
-    const updateState = vi.fn(async () => {});
-    const create = vi.fn(async () => {});
+    const updateState = vi.fn(() => {});
+    const create = vi.fn(() => {});
     const { dependencies, appendSpy } = createDependencies({
       projectMappingRepo: {
         create,
@@ -124,10 +125,10 @@ it("re-suggests a rejected anchor instead of creating a duplicate", async () => 
 
 it("transitions a suggested anchor to probationary", async () => {
     const suggestedAnchor = Object.freeze(createAnchor({ object_id: "mapping-probationary" }));
-    const updateState = vi.fn(async () => {});
+    const updateState = vi.fn(() => {});
     const { dependencies, appendSpy } = createDependencies({
       projectMappingRepo: {
-        create: vi.fn(async () => {}),
+        create: vi.fn(() => {}),
         findById: vi.fn(async (objectId: string) =>
           objectId === suggestedAnchor.object_id
             ? Object.freeze({
@@ -176,8 +177,8 @@ it("blocks batch acceptance when any anchor requires strict confirmation", async
     const strictAnchor = Object.freeze(
       createAnchor({ object_id: "mapping-strict", global_object_id: "memory-strict" })
     );
-    const updateState = vi.fn(async () => {});
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+    const updateState = vi.fn(() => {});
+    const append = vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${event.entity_id}`,
       created_at: "2026-03-28T01:00:00.000Z",
       revision: 0,
@@ -185,7 +186,7 @@ it("blocks batch acceptance when any anchor requires strict confirmation", async
     }));
     const { dependencies } = createDependencies({
       projectMappingRepo: {
-        create: vi.fn(async () => {}),
+        create: vi.fn(() => {}),
         findById: vi.fn(async (objectId: string) => {
           if (objectId === safeAnchor.object_id) {
             return safeAnchor;
@@ -243,7 +244,8 @@ it("blocks batch acceptance when any anchor requires strict confirmation", async
       },
       eventLogRepo: {
         append,
-        queryByEntity: vi.fn(async () => [])
+        queryByEntity: vi.fn(async () => []),
+        transactional: identityTxn
       }
     });
     const service = new ProjectMappingService(dependencies);
@@ -274,10 +276,10 @@ it("treats missing and tombstoned memories as per-item safe defaults for batch a
           last_transition_at: "2026-03-28T01:00:00.000Z"
         })
       );
-    const updateState = vi.fn(async () => {});
+    const updateState = vi.fn(() => {});
     const { dependencies } = createDependencies({
       projectMappingRepo: {
-        create: vi.fn(async () => {}),
+        create: vi.fn(() => {}),
         findById: vi.fn(async (objectId: string) => {
           if (objectId === missingAnchor.object_id) {
             return acceptedAnchor(objectId);
@@ -377,7 +379,7 @@ it("derives strict policy from the underlying memory dimension and defaults tomb
     );
     const { dependencies } = createDependencies({
       projectMappingRepo: {
-        create: vi.fn(async () => {}),
+        create: vi.fn(() => {}),
         findById: vi.fn(async (objectId: string) => {
           if (objectId === strictAnchor.object_id) {
             return strictAnchor;
@@ -404,7 +406,7 @@ it("derives strict policy from the underlying memory dimension and defaults tomb
         ),
         findByWorkspace: vi.fn(async () => []),
         findByGlobalObjectId: vi.fn(async () => null),
-        updateState: vi.fn(async () => {}),
+        updateState: vi.fn(() => {}),
         listPending: vi.fn(async () => [])
       },
       memoryRepo: {
@@ -456,10 +458,10 @@ it("derives strict policy from the underlying memory dimension and defaults tomb
 
   it("reject returns NOT_FOUND for an anchor bound to a different workspace and does not transition", async () => {
     const anchor = Object.freeze(createAnchor({ object_id: "mapping-foreign", workspace_id: "workspace-1" }));
-    const updateState = vi.fn(async () => {});
+    const updateState = vi.fn(() => {});
     const { dependencies, appendSpy } = createDependencies({
       projectMappingRepo: {
-        create: vi.fn(async () => {}),
+        create: vi.fn(() => {}),
         findById: vi.fn(async (objectId: string) => (objectId === anchor.object_id ? anchor : null)),
         findByIds: vi.fn(async () => []),
         findByWorkspace: vi.fn(async () => []),

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ALAYA_MCP_SERVER_INSTRUCTIONS,
   callAlayaMcpMemoryTool,
@@ -10,6 +10,10 @@ import { readRuntimeVersion } from "../../runtime/daemon/support/build-info.js";
 import type { McpMemoryToolHandler } from "../../mcp-memory/tool/tool-handler.js";
 
 describe("mcp server", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("lists the Alaya memory tools as MCP tools", () => {
     const result = createAlayaMcpToolsResult();
 
@@ -140,5 +144,101 @@ describe("mcp server", () => {
       version: readRuntimeVersion()
     });
     expect(createAlayaMcpServerInfo().version).not.toBe("0.0.1");
+  });
+
+  it("does not start a handler write after the MCP tool timeout aborts", async () => {
+    const writes: string[] = [];
+    const handler: McpMemoryToolHandler = {
+      call: async ({ context }) => {
+        const signal = context.abortSignal;
+        await new Promise<void>((resolve) => {
+          if (signal === undefined || signal.aborted) {
+            resolve();
+            return;
+          }
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        if (context.abortSignal?.aborted) {
+          throw context.abortSignal.reason;
+        }
+        writes.push("signal-row");
+        return {
+          ok: true,
+          tool_name: "soul.emit_candidate_signal",
+          output: { signal_id: "late", status: "emitted" }
+        };
+      }
+    };
+
+    const result = await callAlayaMcpMemoryTool(
+      {
+        memoryToolHandler: handler,
+        contextProvider: () => ({
+          workspaceId: "ws1",
+          runId: "run-1",
+          agentTarget: "codex",
+          sessionId: "session-1"
+        }),
+        toolTimeoutMs: 20
+      },
+      "soul.emit_candidate_signal",
+      { signal_kind: "potential_claim" }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      ok: false,
+      error: { code: "UNAVAILABLE", message: "MCP tool execution timed out." }
+    });
+    expect(writes).toEqual([]);
+  });
+
+  it("applies ALAYA_MCP_TOOL_TIMEOUT_MS from process env when options omit timeout", async () => {
+    vi.stubEnv("ALAYA_MCP_TOOL_TIMEOUT_MS", "20");
+    const writes: string[] = [];
+    const handler: McpMemoryToolHandler = {
+      call: async ({ context }) => {
+        const signal = context.abortSignal;
+        await new Promise<void>((resolve) => {
+          if (signal === undefined || signal.aborted) {
+            resolve();
+            return;
+          }
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        if (context.abortSignal?.aborted) {
+          throw context.abortSignal.reason;
+        }
+        writes.push("signal-row");
+        return {
+          ok: true,
+          tool_name: "soul.emit_candidate_signal",
+          output: { signal_id: "late", status: "emitted" }
+        };
+      }
+    };
+
+    const result = await callAlayaMcpMemoryTool(
+      {
+        memoryToolHandler: handler,
+        contextProvider: () => ({
+          workspaceId: "ws1",
+          runId: "run-1",
+          agentTarget: "codex",
+          sessionId: "session-1"
+        })
+      },
+      "soul.emit_candidate_signal",
+      { signal_kind: "potential_claim" }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      ok: false,
+      error: { code: "UNAVAILABLE", message: "MCP tool execution timed out." }
+    });
+    expect(writes).toEqual([]);
   });
 });

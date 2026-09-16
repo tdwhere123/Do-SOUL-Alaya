@@ -11,12 +11,15 @@ import { createRequestProtection } from "../../runtime/daemon/lifecycle/daemon-r
 import { appConfigServiceStub } from "../support/app-config-service-stub.js";
 import {
   configRouteServices,
-  conflictMatrixRouteServices
+  conflictMatrixRouteServices,
+  workspaceRouteServices
 } from "../support/route-service-stubs.js";
 
 const testRequestProtection = {
   allowedOrigin: "http://localhost",
   requestToken: "test-token",
+  boundWorkspaceIds: "*" as const,
+  allowProcessSecretPatch: true,
   allowDesktopOriginlessRequests: true
 } as const;
 
@@ -233,6 +236,25 @@ describe("createApp", () => {
     expect((await app.request("/unknown", { headers: goodHeaders })).status).toBe(429);
   });
 
+  it("rejects oversized path ids before handlers that still read raw params", async () => {
+    const getById = vi.fn(async () => ({ workspace_id: "ws-1" }));
+    const app = createProtectedTestApp({
+      routes: {
+        workspaces: workspaceRouteServices({
+          workspaceService: { getById }
+        })
+      }
+    });
+
+    const response = await app.request(`/workspaces/${"a".repeat(257)}`, {
+      headers: withTestAuthHeaders()
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ success: false, error: "Invalid id" });
+    expect(getById).not.toHaveBeenCalled();
+  });
+
   it("accepts trimmed allowed-origin values after startup normalization", async () => {
     const app = createApp({
       requestProtection: createRequestProtection({
@@ -278,6 +300,28 @@ describe("createApp", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ status: "ok" });
+  });
+
+  it("rejects process-level secret patch when the process grant is unconfigured", async () => {
+    const app = createApp({
+      requestProtection: {
+        allowedOrigin: "http://localhost",
+        requestToken: "test-token",
+        allowDesktopOriginlessRequests: true
+      }
+    });
+
+    const response = await app.request("/config/runtime/embedding-supplement", {
+      method: "PATCH",
+      headers: withTestAuthHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ embedding_enabled: true })
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Process-level secret patch is not allowed"
+    });
   });
 
   it("registers typed route service bags on the Hono app", async () => {

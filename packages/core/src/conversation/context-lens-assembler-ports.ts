@@ -17,6 +17,7 @@ import {
   type WorkingProjection
 } from "@do-soul/alaya-protocol";
 
+import type { RuntimeNotifier } from "../runtime/event-publisher.js";
 import type { RecallResult } from "../recall/recall-service.js";
 import type { NodeStrategy } from "./task-surface-builder.js";
 
@@ -103,6 +104,7 @@ export interface LensAssemblerDependencies {
   readonly claimRepo: LensAssemblerClaimRepoPort;
   readonly memoryRepo: LensAssemblerMemoryRepoPort;
   readonly eventLogRepo: LensAssemblerEventLogRepoPort;
+  readonly runtimeNotifier: Pick<RuntimeNotifier, "notifyEntry">;
   readonly overrideService?: LensAssemblerOverridePort;
   readonly degradationPipeline?: LensAssemblerDegradationPort;
   readonly bankruptcyService?: LensAssemblerBankruptcyPort;

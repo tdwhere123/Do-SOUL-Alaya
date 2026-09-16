@@ -25,9 +25,13 @@
  */
 export type { EnvLookup } from "./config/env-lookup.js";
 export {
+  ENV_BOOLEAN_FALSE_TOKENS,
+  ENV_BOOLEAN_TRUE_TOKENS,
+  ENV_BOOLEAN_VOCABULARY_ERROR,
   isEnvFlagDisabled,
   parseDefaultOnFlag,
   parseEnvBoolean,
+  parseEnvOptionalBoolean,
   parseEnvOptionalNonNegativeSafeInt,
   parseEnvOptionalNumber,
   parseEnvPositiveInt,
@@ -100,6 +104,7 @@ export * from "./governance/green-status.js";
 export * from "./governance/security-status.js";
 export * from "./governance/governance-snapshot.js";
 export * from "./governance/governance-lease.js";
+export * from "./governance/reconciliation-decision.js";
 export * from "./governance/bankruptcy.js";
 export * from "./lifecycle/budget-snapshot.js";
 export * from "./garden/garden-backlog-snapshot.js";
@@ -210,6 +215,7 @@ export {
 export {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_JSON_OBJECT_MAX_CHARS,
+  BoundedIdSchema,
   BoundedJsonObjectSchema,
   compareUtcInstants,
   IsoDatetimeStringSchema,

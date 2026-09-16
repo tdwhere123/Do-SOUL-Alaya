@@ -1,4 +1,4 @@
-import type { ToolProvider } from "@do-soul/alaya-protocol";
+import { parseEnvBoolean, type ToolProvider } from "@do-soul/alaya-protocol";
 import type { CoreConfig } from "@do-soul/alaya-core";
 import { vi } from "vitest";
 
@@ -53,12 +53,8 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       conflictDetectionEnabled: true,
       gardenProviderKindWithoutSecret: "host_worker"
     }),
-    resolveProductFormationEnabled: (value: string | undefined, defaultValue = true) => {
-      const normalized = value?.trim().toLowerCase();
-      return normalized === undefined || normalized === ""
-        ? defaultValue
-        : normalized !== "0" && normalized !== "false";
-    },
+    resolveProductFormationEnabled: (value: string | undefined, defaultValue = true) =>
+      parseEnvBoolean(value, "product formation flag", defaultValue),
     ArbitrationService: makeClass(),
     ApprovalSink: vi.fn().mockImplementation(function ApprovalSink() {
       return { requestApproval: vi.fn(async () => "approved") };
@@ -80,7 +76,7 @@ export function buildToolRuntimeWiringCoreMocks(params: {
     }),
     ClaimService: hoisted.claimServiceCtor,
     ConflictDetectionService: makeClass({
-      detectAndLinkConflicts: vi.fn(async () => undefined)
+      detectAndLinkConflicts: vi.fn(async () => ({ availability: "ok" as const }))
     }),
     ConsolidationExecutor: makeClass({
       runCycle: vi.fn(async () => ({

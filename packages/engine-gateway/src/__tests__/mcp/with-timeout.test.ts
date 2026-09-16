@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { withTimeout } from "../../mcp/with-timeout.js";
+import { throwIfAborted, withTimeout } from "../../mcp/with-timeout.js";
 
 const handlerTimeoutError = {
   error_code: "handler_timeout",
@@ -75,6 +75,19 @@ describe("withTimeout", () => {
       expect(unhandled).not.toHaveBeenCalled();
     } finally {
       process.off("unhandledRejection", unhandled);
+    }
+  });
+
+  it("throwIfAborted is a no-op until the signal aborts", () => {
+    const controller = new AbortController();
+    expect(() => throwIfAborted(undefined)).not.toThrow();
+    expect(() => throwIfAborted(controller.signal)).not.toThrow();
+    controller.abort(handlerTimeoutError);
+    expect(() => throwIfAborted(controller.signal)).toThrow();
+    try {
+      throwIfAborted(controller.signal);
+    } catch (error) {
+      expect(error).toEqual(handlerTimeoutError);
     }
   });
 });

@@ -1,5 +1,5 @@
 import { CoreError } from "@do-soul/alaya-core";
-import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
+import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import {
   ExecShellToolInputSchema,
   ExecShellToolResultSchema,
@@ -11,11 +11,11 @@ import {
   SearchFilesToolResultSchema,
   WriteFileToolInputSchema,
   WriteFileToolResultSchema,
+  AlayaError,
   type ConversationRuntimeContext,
   type ToolUseBlock,
 } from "@do-soul/alaya-protocol";
 import { createWarnLogger } from "../../runtime/daemon/lifecycle/daemon-runtime-helpers.js";
-import { constantTimeTokenEqual } from "../../shared/constant-time-token.js";
 import {
   builtinConversationToolRequiresConfirmation,
   isBuiltinConversationToolId
@@ -27,6 +27,7 @@ import {
   type GitBindingValidationOptions,
   type ValidatedBuiltinConversationToolCall
 } from "./tool-runtime-files.js";
+import { authorizeConfirmedBuiltinTool } from "./tool-confirmation.js";
 
 export type { GitBindingValidationOptions } from "./tool-runtime-files.js";
 export { registerConversationToolSpecs } from "./registration.js";
@@ -73,6 +74,7 @@ type ConversationToolExecutionRequest = Readonly<{
   readonly runtimeContext: Readonly<ConversationRuntimeContext>;
   readonly workspaceRoot: string;
   readonly affectedPathRoots?: readonly string[];
+  readonly abortSignal?: AbortSignal;
   readonly handler: (
     context: ConversationToolExecutionContext,
     rawInput?: unknown
@@ -95,6 +97,7 @@ export interface ExternalConversationToolExecutor {
     readonly rawInput: unknown;
     readonly runtimeContext: Readonly<ConversationRuntimeContext>;
     readonly writableRoots: readonly string[];
+    readonly abortSignal?: AbortSignal;
   }): Promise< unknown>;
 }
 
@@ -107,6 +110,7 @@ export async function handleConversationToolUse(
     readonly externalToolExecutor?: ExternalConversationToolExecutor;
     readonly gitBindingValidation?: GitBindingValidationOptions;
     readonly confirmationToken?: string;
+    readonly abortSignal?: AbortSignal;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   } = {}
 ): Promise<ToolResultBlock> {
@@ -148,6 +152,7 @@ export async function handleConversationToolUse(
       runtimeContext,
       workspaceRoot: workspace.root_path,
       affectedPathRoots,
+      abortSignal: options.abortSignal,
       warn: options.warn ?? defaultWarn
     });
 
@@ -161,63 +166,27 @@ export async function handleConversationToolUse(
   }
 }
 
-function authorizeConfirmedBuiltinTool(
-  toolUse: ToolUseBlock,
-  configuredToken: string | undefined
-): { readonly ok: true; readonly input: Record<string, unknown> } | StructuredToolErrorResult {
-  const token = normalizeConfirmationToken(configuredToken ?? processEnvLookup().ALAYA_MCP_TOOL_CONFIRMATION_TOKEN);
-  if (token === null) {
-    return {
-      ok: false,
-      code: "CONFIRMATION_REQUIRED",
-      message:
-        `Tool ${toolUse.name} requires server-verifiable confirmation, but ` +
-        "ALAYA_MCP_TOOL_CONFIRMATION_TOKEN is not configured."
-    };
-  }
-
-  const input = isRecord(toolUse.input) ? toolUse.input : {};
-  const receipt = isRecord(input["_alaya_confirmation"]) ? input["_alaya_confirmation"] : null;
-  const confirmed = receipt?.["confirmed"] === true;
-  const providedToken = normalizeConfirmationToken(
-    typeof receipt?.["token"] === "string" ? receipt["token"] : undefined
-  );
-  if (!confirmed || providedToken === null || !constantTimeTokenEqual(providedToken, token)) {
-    return {
-      ok: false,
-      code: "CONFIRMATION_REQUIRED",
-      message: `Tool ${toolUse.name} requires a valid server-verifiable confirmation receipt.`
-    };
-  }
-
-  const { _alaya_confirmation: _confirmation, ...strippedInput } = input;
-  void _confirmation;
-  return { ok: true, input: strippedInput };
-}
-
-function normalizeConfirmationToken(value: string | undefined): string | null {
-  const trimmed = value?.trim() ?? "";
-  return trimmed.length === 0 ? null : trimmed;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 export async function executeConversationTool(
   toolId: string,
   input: unknown,
-  writableRoots: readonly string[]
+  writableRoots: readonly string[],
+  abortSignal?: AbortSignal
 ): Promise< unknown> {
-  return await executeValidatedConversationTool(validateConversationToolInput(toolId, input), writableRoots);
+  throwIfAborted(abortSignal);
+  return await executeValidatedConversationTool(
+    validateConversationToolInput(toolId, input),
+    writableRoots,
+    abortSignal
+  );
 }
 
 export async function executeConversationToolOrThrow(
   toolId: string,
   input: unknown,
   writableRoots: readonly string[],
-  options: { readonly confirmationToken?: string } = {}
+  options: { readonly confirmationToken?: string; readonly abortSignal?: AbortSignal } = {}
 ): Promise< unknown> {
+  throwIfAborted(options.abortSignal);
   let effectiveInput = input;
   if (builtinConversationToolRequiresConfirmation(toolId)) {
     const confirmation = authorizeConfirmedBuiltinTool(
@@ -225,7 +194,9 @@ export async function executeConversationToolOrThrow(
         type: "tool_use",
         id: "catalog-exec",
         name: toolId,
-        input: isRecord(input) ? input : {}
+        input: (typeof input === "object" && input !== null && !Array.isArray(input)
+          ? { ...(input as Record<string, unknown>) }
+          : {}) as Record<string, unknown>
       },
       options.confirmationToken
     );
@@ -235,7 +206,8 @@ export async function executeConversationToolOrThrow(
     effectiveInput = confirmation.input;
   }
 
-  const result = await executeConversationTool(toolId, effectiveInput, writableRoots);
+  throwIfAborted(options.abortSignal);
+  const result = await executeConversationTool(toolId, effectiveInput, writableRoots, options.abortSignal);
 
   if (isStructuredToolError(result)) {
     throw new StructuredToolExecutionError(result);
@@ -272,7 +244,7 @@ export function validateConversationToolInput(toolId: string, value: unknown): V
         input: parseToolInput(toolId, ExecShellToolInputSchema, value)
       };
     default:
-      throw new Error(`Unsupported tool: ${toolId}`);
+      throw new AlayaError("UNKNOWN_TOOL", `Unsupported tool: ${toolId}`);
   }
 }
 
@@ -284,7 +256,7 @@ export function parseToolInput<TOutput>(
   const parsed = schema.safeParse(value);
 
   if (!parsed.success) {
-    throw new Error(`Invalid input for ${toolId}: ${formatSchemaIssues(parsed.error.issues)}`);
+    throw new CoreError("VALIDATION", `Invalid input for ${toolId}: ${formatSchemaIssues(parsed.error.issues)}`);
   }
 
   return parsed.data;
@@ -298,7 +270,7 @@ export function parseToolResult<TOutput>(
   const parsed = schema.safeParse(value);
 
   if (!parsed.success) {
-    throw new Error(`Invalid result for ${toolId}: ${formatSchemaIssues(parsed.error.issues)}`);
+    throw new CoreError("VALIDATION", `Invalid result for ${toolId}: ${formatSchemaIssues(parsed.error.issues)}`);
   }
 
   return parsed.data;
@@ -355,7 +327,7 @@ export function readErrorMessage(
     return "Invalid MCP tool payload.";
   }
 
-  if (error instanceof Error && error.message.startsWith("Unsupported tool: ")) {
+  if (error instanceof AlayaError && error.code === "UNKNOWN_TOOL") {
     return error.message;
   }
 
@@ -364,9 +336,10 @@ export function readErrorMessage(
 
 async function executeValidatedConversationTool(
   validatedCall: ValidatedBuiltinConversationToolCall,
-  writableRoots: readonly string[]
+  writableRoots: readonly string[],
+  abortSignal?: AbortSignal
 ): Promise< unknown> {
-  const result = await executeBuiltinConversationTool(validatedCall, writableRoots);
+  const result = await executeBuiltinConversationTool(validatedCall, writableRoots, abortSignal);
 
   switch (validatedCall.toolId) {
     case "tools.read_file":
@@ -442,10 +415,11 @@ async function executeExternalConversationTool(input: {
   readonly runtimeContext: Readonly<ConversationRuntimeContext>;
   readonly workspaceRoot: string;
   readonly affectedPathRoots?: readonly string[];
+  readonly abortSignal?: AbortSignal;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }) {
   if (input.externalToolExecutor === undefined) {
-    throw new Error(`Unsupported tool: ${input.toolUse.name}`);
+    throw new AlayaError("UNKNOWN_TOOL", `Unsupported tool: ${input.toolUse.name}`);
   }
   const builtinTool = isBuiltinConversationToolId(input.toolUse.name);
   const validatedInput = builtinTool
@@ -463,7 +437,7 @@ async function executeExternalConversationTool(input: {
     }
 
     if (!externalToolExecutor.hasTool(input.toolUse.name)) {
-      throw new Error(`Unsupported tool: ${input.toolUse.name}`);
+      throw new AlayaError("UNKNOWN_TOOL", `Unsupported tool: ${input.toolUse.name}`);
     }
   }
 
@@ -473,12 +447,14 @@ async function executeExternalConversationTool(input: {
     runtimeContext: input.runtimeContext,
     workspaceRoot: input.workspaceRoot,
     affectedPathRoots: input.affectedPathRoots,
+    abortSignal: input.abortSignal,
     handler: async (context: ConversationToolExecutionContext, rawInput?: unknown) =>
       await externalToolExecutor.executeTool({
         toolId: input.toolUse.name,
         rawInput: builtinTool ? validatedInput : (rawInput ?? validatedInput),
         runtimeContext: input.runtimeContext,
-        writableRoots: context.writableRoots
+        writableRoots: context.writableRoots,
+        ...(input.abortSignal === undefined ? {} : { abortSignal: input.abortSignal })
       })
   });
 }

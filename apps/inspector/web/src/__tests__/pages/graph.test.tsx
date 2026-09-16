@@ -57,7 +57,7 @@ describe("GraphPage (react-force-graph driven)", () => {
       "/api/graph/ws-1",
       expect.objectContaining({
         method: "GET",
-        headers: expect.objectContaining({ "X-Alaya-Inspector-Token": "test-token" })
+        credentials: "include"
       })
     );
     expect(stub.getAttribute("data-node-count")).toBe("3");

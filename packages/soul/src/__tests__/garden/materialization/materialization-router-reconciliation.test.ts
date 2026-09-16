@@ -54,6 +54,50 @@ describe("MaterializationRouter ingest reconciliation", () => {
     );
   });
 
+  it("does not append when reconciliation defers because the neighbor scan is unavailable", async () => {
+    const deps = createDeps();
+    const { reconciliationPort, appliedVerdicts } = fakeReconciliationPort({
+      kind: "deferred",
+      deferral: "prewrite_unavailable",
+      retryable: true,
+      reason: "pre-write recall unavailable — not added"
+    });
+    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+
+    const result = await router.materializeSignal(factSignal());
+
+    expect(result.success).toBe(true);
+    expect(result.target_kind).toBe("deferred");
+    expect(result.route_target).toBe("deferred");
+    expect(result.defer_class).toBe("write_path");
+    expect(result.deferral).toBe("prewrite_unavailable");
+    expect(appliedVerdicts).toEqual([]);
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.evidenceService.create).not.toHaveBeenCalled();
+  });
+
+  it("does not append when reconciliation defers because the reconcile lease is held", async () => {
+    const deps = createDeps();
+    const { reconciliationPort, appliedVerdicts } = fakeReconciliationPort({
+      kind: "deferred",
+      deferral: "lease_busy",
+      retryable: true,
+      reason: "reconcile lease held — not added"
+    });
+    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+
+    const result = await router.materializeSignal(factSignal());
+
+    expect(result.success).toBe(true);
+    expect(result.target_kind).toBe("deferred");
+    expect(result.route_target).toBe("deferred");
+    expect(result.defer_class).toBe("write_path");
+    expect(result.deferral).toBe("lease_busy");
+    expect(appliedVerdicts).toEqual([]);
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.evidenceService.create).not.toHaveBeenCalled();
+  });
+
 
   it("memory_entry_only append branch enqueues enrichment after creating a memory", async () => {
     const deps = createDeps();

@@ -167,9 +167,9 @@ describe("Garden MCP tools", () => {
         .get() as { readonly n: number }
     ).n;
     expect(signalRows).toBe(1);
-    const completedEvents = await harness.eventLogRepo.queryByType(
+    const completedEvents = (await harness.eventLogRepo.queryByType(
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-    );
+    )).events;
     expect(completedEvents).toHaveLength(1);
     expect(completedEvents[0]?.payload_json).toMatchObject({
       task_id: "task-partial-retry",

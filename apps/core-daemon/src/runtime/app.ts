@@ -29,6 +29,7 @@ import {
 } from "../middleware/register-security-middleware.js";
 import { createWarnLogger } from "./daemon/lifecycle/daemon-runtime-helpers.js";
 import { registerErrorHandler, type ErrorLoggerPort } from "../middleware/error-handler.js";
+import { boundedPathParams } from "../middleware/bounded-path-params.js";
 import { DEFAULT_DAEMON_ALLOWED_ORIGIN } from "./daemon/support/daemon-defaults.js";
 import { registerBudgetRoutes, type BudgetRouteServices } from "../routes/governance/matrix/budget.js";
 import { registerClaimRoutes, type ClaimRouteServices } from "../routes/governance/matrix/claims.js";
@@ -93,7 +94,8 @@ export interface RequestProtectionConfig {
   readonly requestToken: string;
   readonly allowDesktopOriginlessRequests?: boolean;
   readonly tokenSource?: "env" | "ephemeral" | "rotated";
-  readonly boundWorkspaceIds?: readonly string[];
+  readonly boundWorkspaceIds?: readonly string[] | "*";
+  readonly liveWorkspaceGrant?: { boundWorkspaceIds: readonly string[] | "*" };
   readonly allowProcessSecretPatch?: boolean;
   readonly workspaceTokens?: readonly WorkspaceTokenBinding[];
 }
@@ -177,6 +179,7 @@ export function createApp(
   const authFailureLimiter = createFixedWindowRateLimiter(rateLimitSettings);
 
   registerRequestIdMiddleware(app);
+  app.use("*", boundedPathParams());
   registerDrainMiddleware(app, lifecycle);
   registerSecurityHeadersMiddleware(app);
   registerCorsMiddleware(app, requestProtection.allowedOrigin);

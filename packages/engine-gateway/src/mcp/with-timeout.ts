@@ -1,15 +1,33 @@
-interface TimeoutError {
+export interface HandlerTimeoutError {
   readonly error_code: "handler_timeout";
   readonly message: string;
   readonly error_type: "TimeoutError";
 }
 
-function makeTimeoutError(): TimeoutError {
+function makeTimeoutError(): HandlerTimeoutError {
   return {
     error_code: "handler_timeout",
     message: "MCP tool execution timed out.",
     error_type: "TimeoutError"
   };
+}
+
+export function isHandlerTimeoutError(error: unknown): error is HandlerTimeoutError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { error_code?: unknown }).error_code === "handler_timeout"
+  );
+}
+
+export function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal === undefined || !signal.aborted) {
+    return;
+  }
+  if (signal.reason !== undefined) {
+    throw signal.reason;
+  }
+  throw makeTimeoutError();
 }
 
 export async function withTimeout<T>(

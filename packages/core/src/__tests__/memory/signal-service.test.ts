@@ -57,8 +57,8 @@ it("writes emitted/triaged events in order and moves accepted signals to triaged
     expect(result.materialization).toBeNull();
     expect(order).toEqual([
       "event:soul.signal.emitted",
-      "repo:create",
       "notify:soul.signal.emitted",
+      "repo:create",
       "event:soul.signal.triaged",
       "repo:update:triaged",
       "notify:soul.signal.triaged"

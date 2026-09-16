@@ -142,8 +142,8 @@ export class GreenService {
         occurred_at: timestamp
       })
     };
-    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async () =>
-      await this.dependencies.greenStatusRepo.upsert(status)
+    return await this.eventPublisher().appendManyWithMutation([eventInput], () =>
+      this.dependencies.greenStatusRepo.upsert(status)
     );
   }
 
@@ -193,8 +193,8 @@ export class GreenService {
         occurred_at: timestamp
       })
     };
-    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async () =>
-      await this.dependencies.greenStatusRepo.upsert(next)
+    return await this.eventPublisher().appendManyWithMutation([eventInput], () =>
+      this.dependencies.greenStatusRepo.upsert(next)
     );
   }
 
@@ -243,8 +243,8 @@ export class GreenService {
         occurred_at: timestamp
       })
     };
-    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async () =>
-      await this.dependencies.greenStatusRepo.upsert(next)
+    return await this.eventPublisher().appendManyWithMutation([eventInput], () =>
+      this.dependencies.greenStatusRepo.upsert(next)
     );
   }
 

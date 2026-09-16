@@ -4,6 +4,7 @@ import { basename, extname, join } from "node:path";
 import type { Context, Hono } from "hono";
 import {
   FileApprovalEventType,
+  AlayaError,
   type EventLogEntry,
   type FileRecord,
   type FileUploadResponse,
@@ -22,6 +23,7 @@ import {
   WORKSPACE_TOKEN_DENIED_MESSAGE,
   type RequestTokenGrant
 } from "../../../runtime/request-token-binding.js";
+import { boundedPathParams, readBoundedPathParam } from "../../../middleware/bounded-path-params.js";
 
 export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
@@ -127,7 +129,7 @@ export function registerFileRoutes(app: Hono, services: FileRouteServices): void
     return await uploadFile(context, services);
   });
 
-  app.get("/files/:id", async (context) => {
+  app.get("/files/:id", boundedPathParams("id"), async (context) => {
     return await downloadFile(context, services);
   });
 }
@@ -214,7 +216,7 @@ function buildFileRecord(
 }
 
 async function downloadFile(context: Context, services: FileRouteServices): Promise<Response> {
-  const fileId = context.req.param("id")!.trim();
+  const fileId = readBoundedPathParam(context, "id");
   const workspaceId = context.req.query("workspace_id")?.trim();
   if (workspaceId === undefined || workspaceId.length === 0) {
     return context.json({ success: false, error: "workspace_id is required" }, 400);
@@ -350,7 +352,10 @@ async function persistFileRecord(
   record: FileRecord
 ): Promise<Readonly<{ record: Readonly<FileRecord>; event: EventLogEntry }>> {
   if (record.workspace_id === null) {
-    throw new Error("Invariant violation: workspace_id must be resolved before persisting a file");
+    throw new AlayaError(
+      "INTERNAL",
+      "Invariant violation: workspace_id must be resolved before persisting a file"
+    );
   }
 
   const created = await services.fileRepo.createWithEvent(record, {

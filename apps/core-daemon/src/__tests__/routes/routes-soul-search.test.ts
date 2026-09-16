@@ -88,6 +88,11 @@ describe("POST /workspaces/:wsId/soul/search", () => {
       body: JSON.stringify({ text: "anything", since: 12345 })
     });
     expect(badSince.status).toBe(400);
+    await expect(badSince.json()).resolves.toEqual({
+      success: false,
+      error: "invalid datetime",
+      error_code: "VALIDATION"
+    });
     const badField = await app.request("/workspaces/ws-1/soul/search", {
       method: "POST",
       headers: { "content-type": "application/json" },

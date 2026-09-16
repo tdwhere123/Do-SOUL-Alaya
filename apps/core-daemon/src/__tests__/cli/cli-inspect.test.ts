@@ -9,6 +9,7 @@ import {
   createInspectCommand,
   openCommandCandidates,
   openUrlWithSpawn,
+  writeInheritedLaunchProof,
   type BrowserOpenerChildProcess,
   type InspectorChildProcess
 } from "../../cli/inspect/inspect.js";
@@ -128,8 +129,10 @@ describe("cli inspect", () => {
 
     expect(result.exitCode).toBe(0);
     expect(stdoutChunks.join("")).toBe(
-      "http://127.0.0.1:5174/?workspaceId=ws-1#launch=cccccccccccccccccccccccccccccccc\n"
+      "http://127.0.0.1:5174/?workspaceId=ws-1\n"
     );
+    expect(stdoutChunks.join("")).not.toContain("#launch=");
+    expect(stdoutChunks.join("")).not.toContain("c".repeat(32));
     expect(stdoutChunks.join("")).not.toContain("#token=");
     expect(stdoutChunks.join("")).not.toContain("a".repeat(64));
   });
@@ -224,8 +227,9 @@ describe("cli inspect", () => {
       }
     ]);
     expect(opened).toEqual([
-      "http://127.0.0.1:5175/?workspaceId=ws-1#launch=dddddddddddddddddddddddddddddddd"
+      "http://127.0.0.1:5175/?workspaceId=ws-1"
     ]);
+    expect(opened[0]).not.toContain("#launch=");
     expect(opened[0]).not.toContain("#token=");
   });
 
@@ -262,6 +266,7 @@ describe("cli inspect", () => {
     const child = new FakeInspectorChild();
     const daemonStarts: unknown[] = [];
     const daemonCloses: string[] = [];
+    const boundWorkspaces: string[][] = [];
     const spawned: unknown[] = [];
     const command = createInspectCommand({
       checkPortAvailable: async () => true,
@@ -271,6 +276,9 @@ describe("cli inspect", () => {
         return {
           hostname: "127.0.0.1",
           port: 5173,
+          bindProcessWorkspaceIds: (workspaceIds) => {
+            boundWorkspaces.push([...workspaceIds]);
+          },
           close: async () => {
             daemonCloses.push("closed");
           }
@@ -305,6 +313,7 @@ describe("cli inspect", () => {
       }
     ]);
     expect(daemonCloses).toEqual(["closed"]);
+    expect(boundWorkspaces).toEqual([["ws-1"]]);
   });
 
   it("passes the managed daemon request token to the inspector child", async () => {
@@ -429,5 +438,20 @@ describe("cli inspect", () => {
         }
       }
     ]);
+  });
+
+  it("throws when the inherited launch-proof stream is missing", () => {
+    expect(() => writeInheritedLaunchProof(undefined, "launch-code")).toThrow(
+      "inspector launch proof fd is unavailable"
+    );
+    expect(() => writeInheritedLaunchProof(null, "launch-code")).toThrow(
+      "inspector launch proof fd is unavailable"
+    );
+  });
+
+  it("writes the launch proof to an inherited stream", () => {
+    const chunks: string[] = [];
+    writeInheritedLaunchProof({ end: (chunk: string) => chunks.push(chunk) }, "launch-code");
+    expect(chunks).toEqual(["launch-code\n"]);
   });
 });

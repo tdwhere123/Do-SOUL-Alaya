@@ -67,6 +67,7 @@ describe("RecallReadWorkerClient", () => {
     );
   });
 
+  // 900 file-backed inserts plus worker open regularly exceed 30s on NTFS.
   it("keeps the daemon event loop available during a file-backed SQLite recall read", async () => {
     assertBuiltWorker();
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-test-"));
@@ -122,7 +123,7 @@ describe("RecallReadWorkerClient", () => {
       closeCachedDatabase(databasePath);
       removeTempDirectorySync(directory);
     }
-  }, 30_000);
+  }, process.platform === "win32" ? 120_000 : 30_000);
 
   it("rejects worker page requests above the bounded read limit", async () => {
     assertBuiltWorker();

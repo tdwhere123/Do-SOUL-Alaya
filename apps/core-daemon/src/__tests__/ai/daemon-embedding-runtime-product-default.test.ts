@@ -7,7 +7,6 @@ import {
 } from "@do-soul/alaya-storage";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 import {
-  LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR,
   readEmbeddingRuntimeConfig
 } from "../../ai/daemon-embedding-runtime-config.js";
 
@@ -27,6 +26,7 @@ function createRuntime(
     database,
     configEnv,
     eventLogRepo: new SqliteEventLogRepo(database),
+    runtimeNotifier: { notifyEntry: () => undefined },
     memoryEntryRepo: new SqliteMemoryEntryRepo(database),
     healthJournalService: {
       getRecentEvents: vi.fn(async () => Object.freeze([])),
@@ -93,7 +93,7 @@ describe("daemon local embedding product default", () => {
     }
   });
 
-  it.each([undefined, "true", "  TrUe  ", "1", " 1 "])(
+  it.each([undefined, "true", "  TrUe  ", "1", " 1 ", "yes", "on", "enabled"])(
     "enables the local provider after verified warmup for %s",
     async (configuredValue) => {
       const config = new Map<string, string>([["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]]);
@@ -126,7 +126,7 @@ describe("daemon local embedding product default", () => {
     }
   });
 
-  it.each(["false", "  FaLsE  ", "0", " 0 "])(
+  it.each(["false", "  FaLsE  ", "0", " 0 ", "off", "no", "disabled"])(
     "honors the explicit local opt-out %s",
     async (configuredValue) => {
       const embedTexts = vi.fn(async () => [new Float32Array([1])]);
@@ -147,26 +147,29 @@ describe("daemon local embedding product default", () => {
   it("rejects an invalid embedding boolean instead of silently changing posture", () => {
     expect(() => createRuntime(new Map([
       ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"],
-      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "yes"]
+      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "2"]
     ]))).toThrow(/ALAYA_ENABLE_EMBEDDING_SUPPLEMENT/);
   });
 
   it.each([
-    ["ALAYA_RECALL_D2Q", "enabled"]
+    ["ALAYA_RECALL_D2Q", "2"]
   ])("rejects invalid %s boolean configuration", (name, value) => {
     expect(() => createRuntime(new Map([[name, value]]))).toThrow(new RegExp(name));
   });
 
   it.each(["true", "1", "yes", "  TrUe  ", "on"])(
-    "fails loud when local cross-encoder rerank is set to %s",
+    "ignores retired local cross-encoder rerank set to %s",
     (value) => {
       expect(() => createRuntime(new Map([
         ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", value]
-      ]))).toThrow(LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR);
+      ]))).not.toThrow();
+      expect(createRuntime(new Map([
+        ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", value]
+      ]))).not.toHaveProperty("answerRerankService");
     }
   );
 
-  it("allows an explicit false local cross-encoder flag", () => {
+  it("ignores an explicit false local cross-encoder flag", () => {
     expect(() => readEmbeddingRuntimeConfig(new Map([
       ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "0"]
     ]), vi.fn())).not.toThrow();
@@ -177,7 +180,10 @@ describe("daemon local embedding product default", () => {
 
   it.each([
     ["ALAYA_RECALL_D2Q", "1", "d2qEnabled", true],
-    ["ALAYA_RECALL_D2Q", "  FaLsE  ", "d2qEnabled", false]
+    ["ALAYA_RECALL_D2Q", "yes", "d2qEnabled", true],
+    ["ALAYA_RECALL_D2Q", "enabled", "d2qEnabled", true],
+    ["ALAYA_RECALL_D2Q", "  FaLsE  ", "d2qEnabled", false],
+    ["ALAYA_RECALL_D2Q", "off", "d2qEnabled", false]
   ] as const)("parses strict %s=%s", (name, value, field, expected) => {
     const config = readEmbeddingRuntimeConfig(new Map([[name, value]]), vi.fn());
     expect(config[field]).toBe(expected);
@@ -204,12 +210,14 @@ describe("daemon local embedding product default", () => {
           ["ALAYA_LOCAL_EMBEDDING_CACHE_DIR", "/nonexistent/alaya-test-model-cache"]
         ]),
         eventLogRepo: new SqliteEventLogRepo(database),
+        runtimeNotifier: { notifyEntry: () => undefined },
         memoryEntryRepo: new SqliteMemoryEntryRepo(database),
         healthJournalService: {
           getRecentEvents: vi.fn(async () => Object.freeze([])),
           record: vi.fn(async () => undefined)
         },
-        warn: vi.fn()
+        warn: vi.fn(),
+        localOnnxTransformersProbe: () => ({ availability: "available" })
       });
 
       await runtime.providerWarmup;
@@ -429,6 +437,51 @@ describe("daemon local embedding product default", () => {
       expect(ready.fine_assessment).not.toHaveProperty("max_candidates");
       expect(runtime.defaultPolicyDecorator!(ready).fine_assessment)
         .not.toHaveProperty("max_candidates");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not report the supplement enabled when the local extra is ERR_MODULE_NOT_FOUND", async () => {
+    const embedTexts = vi.fn(async () => [new Float32Array([1])]);
+    const database = initDatabase({ filename: ":memory:" });
+    const warn = vi.fn();
+    const runtime = createDaemonEmbeddingRuntime({
+      database,
+      configEnv: new Map([
+        ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"],
+        ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"]
+      ]),
+      eventLogRepo: new SqliteEventLogRepo(database),
+      runtimeNotifier: { notifyEntry: () => undefined },
+      memoryEntryRepo: new SqliteMemoryEntryRepo(database),
+      healthJournalService: {
+        getRecentEvents: vi.fn(async () => Object.freeze([])),
+        record: vi.fn(async () => undefined)
+      },
+      warn,
+      localOnnxTransformersProbe: () => ({
+        availability: "unavailable",
+        code: "ERR_MODULE_NOT_FOUND"
+      })
+    });
+    try {
+      await expect(runtime.providerWarmup).resolves.toBe("not_requested");
+      expect(runtime.embeddingRecallService).toBeUndefined();
+      expect(runtime.defaultPolicyDecorator).toBeUndefined();
+      expect(isPolicyEnabled(runtime)).toBe(false);
+      expect(embedTexts).not.toHaveBeenCalled();
+      await expect(runtime.embeddingStatusService.getStatus("workspace-1")).resolves.toMatchObject({
+        embedding_enabled: false,
+        provider_configured: false,
+        effective_mode: "keyword_only",
+        degraded_reason: null
+      });
+      expect(warn).toHaveBeenCalledWith("effective embedding runtime", {
+        provider_kind: "off",
+        embedding_supplement_enabled: false,
+        local_onnx_availability: "unavailable"
+      });
     } finally {
       database.close();
     }

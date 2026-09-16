@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { RuntimeMode, WorkspaceRunEventType, type CandidateMemorySignal, type EventLogEntry } from "@do-soul/alaya-protocol";
+import { HealthEventKind, RuntimeMode, WorkspaceRunEventType } from "@do-soul/alaya-protocol";
 
-import { createContextLens, createMessage, createService, createSignal, createWorkingProjection, flushBackgroundTasks } from "./conversation-service.test-support.js";
+import { createContextLens, createMessage, createService, createWorkingProjection, flushBackgroundTasks } from "./conversation-service.test-support.js";
 
 describe("ConversationService", () => {
   it("conversation fails closed for chat execution surfaces and keeps interrupt unsupported", async () => {
@@ -114,25 +114,10 @@ describe("ConversationService", () => {
     );
   });
 
-  it("memory orchestration routes Garden signal materialization under governance lease after memory context assembly", async () => {
-    const signal = createSignal();
-    const eventLogEntries: EventLogEntry[] = [];
+  it("memory orchestration enqueues Garden compile under a governance lease and does not compile inline", async () => {
     const governanceLeaseService = {
       acquire: vi.fn(async () => undefined),
       release: vi.fn(async () => undefined)
-    };
-    const signalReceiver = {
-      receiveSignal: vi.fn(async (receivedSignal: CandidateMemorySignal) => ({
-        signal: receivedSignal,
-        triage_result: "accepted" as const,
-        materialization: {
-          signal_id: receivedSignal.signal_id,
-          target_kind: "memory_and_claim" as const,
-          routing_reason: "test",
-          created_objects: [],
-          success: true
-        }
-      }))
     };
     const contextLensAssembler = {
       assemble: vi.fn(async () => ({
@@ -140,40 +125,17 @@ describe("ConversationService", () => {
         workingProjection: createWorkingProjection()
       }))
     };
-    const queryConversationMessageEventsByRun = vi.fn(async () => []);
-    const eventLogRepo = {
-      queryConversationMessageEventsByRun,
-      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
-        const saved = {
-          event_id: `event-${eventLogEntries.length + 1}`,
-          created_at: "2026-04-29T00:00:00.000Z",
-          revision: 0,
-          ...entry
-        };
-        eventLogEntries.push(saved);
-        return saved;
-      })
-    };
-    const gardenComputeProvider = {
-      provider_kind: "official_api" as const,
-      compile: vi.fn(async () => [signal])
-    };
-    const sessionOverridePromotion = {
-      evaluateActiveForRun: vi.fn(async () => undefined)
+    const gardenCompileQueue = {
+      enqueue: vi.fn(() => ({ status: "enqueued" as const }))
     };
     const healthJournalRecorder = {
       record: vi.fn(async () => undefined)
     };
-    const warn = vi.fn();
     const { service } = createService({
-      eventLogRepo,
       governanceLeaseService,
-      signalReceiver,
       contextLensAssembler,
-      gardenComputeProvider,
-      sessionOverridePromotion,
-      healthJournalRecorder,
-      warn
+      gardenCompileQueue,
+      healthJournalRecorder
     });
 
     const result = await service.orchestrateMemoryTurn({
@@ -189,263 +151,29 @@ describe("ConversationService", () => {
       runId: "run-1",
       workspaceId: "workspace-1"
     });
-    expect(gardenComputeProvider.compile).toHaveBeenCalledWith(
-      "remember explicit evidence",
-      expect.objectContaining({
-        workspace_id: "workspace-1",
-        run_id: "run-1",
-        surface_id: "surface://cli/main",
-        source_observed_at: "2026-04-29T00:00:00.000Z"
-      })
-    );
-    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith({
-      ...signal,
-      source_observation: {
-        authority: "trusted_host_event",
-        source_event_id: "event-2",
-        observed_at: "2026-04-29T00:00:00.000Z"
-      }
-    });
-    expect(sessionOverridePromotion.evaluateActiveForRun).toHaveBeenCalledWith({
+    expect(gardenCompileQueue.enqueue).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
       runId: "run-1",
-      workspaceId: "workspace-1"
+      userMessage: expect.objectContaining({ message_id: "msg-user" }),
+      assistantMessage: expect.objectContaining({ message_id: "msg-assistant" })
     });
+    expect(healthJournalRecorder.record).not.toHaveBeenCalled();
     expect(governanceLeaseService.release).toHaveBeenCalledWith("run-1");
-    expect(eventLogEntries.map((entry) => entry.event_type)).toEqual([
-      "compute.provider.call_started",
-      "compute.provider.call_completed"
-    ]);
-    expect(healthJournalRecorder.record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event_kind: "provider_call",
-        workspace_id: "workspace-1",
-        run_id: "run-1"
-      })
-    );
-    expect(warn).toHaveBeenCalledWith(
-      "Garden materialization batch processed.",
-      expect.objectContaining({
-        total_signals: 1,
-        memory_and_claim: 1
-      })
-    );
   });
 
-  it("binds daemon-owned local Garden compiles to a host completion receipt", async () => {
-    const signalReceiver = {
-      receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
-        signal,
-        triage_result: "deferred" as const,
-        materialization: null
-      }))
-    };
-    const { service } = createService({
-      signalReceiver,
-      gardenComputeProvider: {
-        provider_kind: "local_heuristics",
-        compile: vi.fn(async () => [createSignal({
-          source_observation: {
-            authority: "trusted_host_event",
-            observed_at: "2020-01-01T00:00:00.000Z",
-            source_event_id: "provider-controlled-event"
-          }
-        })])
-      }
-    });
-
-    await service.orchestrateMemoryTurn({
-      runId: "run-1",
-      userMessage: createMessage("msg-user", "user", "source receipt"),
-      assistantMessage: createMessage("msg-assistant", "assistant", "received")
-    });
-    await flushBackgroundTasks();
-
-    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith(expect.objectContaining({
-      source_observation: {
-        authority: "trusted_host_event",
-        source_event_id: "event-1",
-        observed_at: "2026-04-29T00:00:00.000Z"
-      }
-    }));
-  });
-
-  it("binds evidence occurred_at to the user message time instead of provider completion", async () => {
-    const sourceTime = "2026-04-01T10:00:00.000Z";
-    const signalReceiver = {
-      receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
-        signal,
-        triage_result: "deferred" as const,
-        materialization: null
-      }))
-    };
-    const { service } = createService({
-      signalReceiver,
-      gardenComputeProvider: {
-        provider_kind: "official_api",
-        compile: vi.fn(async () => [createSignal()])
-      }
-    });
-
-    await service.orchestrateMemoryTurn({
-      runId: "run-1",
-      userMessage: createMessage("msg-user", "user", "remember this at T", sourceTime),
-      assistantMessage: createMessage("msg-assistant", "assistant", "noted")
-    });
-    await flushBackgroundTasks();
-
-    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith(expect.objectContaining({
-      source_observation: {
-        authority: "trusted_host_event",
-        source_event_id: "event-1",
-        observed_at: sourceTime
-      }
-    }));
-  });
-
-  it("leaves source observation unknown when the user message has no source time", async () => {
-    const signalReceiver = {
-      receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
-        signal,
-        triage_result: "deferred" as const,
-        materialization: null
-      }))
-    };
-    const { service } = createService({
-      signalReceiver,
-      gardenComputeProvider: {
-        provider_kind: "official_api",
-        compile: vi.fn(async () => [createSignal()])
-      }
-    });
-
-    await service.orchestrateMemoryTurn({
-      runId: "run-1",
-      userMessage: createMessage("msg-user", "user", "no source time", null),
-      assistantMessage: createMessage("msg-assistant", "assistant", "noted")
-    });
-    await flushBackgroundTasks();
-
-    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith(expect.objectContaining({
-      source_observation: null
-    }));
-  });
-
-  it("fails Garden compile when EventLog append is missing instead of silently dropping receipts", async () => {
-    const signalReceiver = {
-      receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
-        signal,
-        triage_result: "deferred" as const,
-        materialization: null
-      }))
-    };
-    const { service, dependencies } = createService({
-      eventLogRepo: {
-        queryConversationMessageEventsByRun: vi.fn(async () => [])
-      },
-      signalReceiver,
-      gardenComputeProvider: {
-        provider_kind: "local_heuristics",
-        compile: vi.fn(async () => [createSignal({
-          source_observation: {
-            authority: "trusted_host_event",
-            observed_at: "2020-01-01T00:00:00.000Z",
-            source_event_id: "provider-controlled-event"
-          }
-        })])
-      }
-    });
-
-    await service.orchestrateMemoryTurn({
-      runId: "run-1",
-      userMessage: createMessage("msg-user", "user", "source receipt"),
-      assistantMessage: createMessage("msg-assistant", "assistant", "received")
-    });
-    await flushBackgroundTasks();
-
-    expect(signalReceiver.receiveSignal).not.toHaveBeenCalled();
-    expect(dependencies.warn).toHaveBeenCalledWith(
-      "Garden compile failed.",
-      expect.objectContaining({
-        error: expect.objectContaining({
-          message: expect.stringContaining("event publisher")
-        })
-      })
-    );
-  });
-
-  it("drops a Garden receipt when completion event append fails", async () => {
-    let appendCount = 0;
-    const completionError = new Error("completion append failed");
-    const eventLogRepo = {
-      queryConversationMessageEventsByRun: vi.fn(async () => []),
-      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
-        appendCount += 1;
-        if (appendCount === 2) throw completionError;
-        return {
-          event_id: "event-1",
-          created_at: "2026-04-29T00:00:00.000Z",
-          revision: 0,
-          ...entry
-        };
-      })
-    };
-    const signalReceiver = {
-      receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
-        signal,
-        triage_result: "deferred" as const,
-        materialization: null
-      }))
-    };
-    const { service } = createService({
-      eventLogRepo,
-      signalReceiver,
-      gardenComputeProvider: {
-        provider_kind: "local_heuristics",
-        compile: vi.fn(async () => [createSignal({
-          source_observation: {
-            authority: "trusted_host_event",
-            observed_at: "2020-01-01T00:00:00.000Z",
-            source_event_id: "provider-controlled-event"
-          }
-        })])
-      }
-    });
-
-    await service.orchestrateMemoryTurn({
-      runId: "run-1",
-      userMessage: createMessage("msg-user", "user", "source receipt"),
-      assistantMessage: createMessage("msg-assistant", "assistant", "received")
-    });
-    await flushBackgroundTasks();
-
-    expect(eventLogRepo.append).toHaveBeenCalledTimes(2);
-    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith(expect.objectContaining({
-      source_observation: null
-    }));
-  });
-
-  it("memory orchestration releases governance lease when Garden provider resolution fails", async () => {
+  it("records health and still returns the turn when Garden compile enqueue is unavailable", async () => {
     const governanceLeaseService = {
       acquire: vi.fn(async () => undefined),
       release: vi.fn(async () => undefined)
     };
-    const contextLensAssembler = {
-      assemble: vi.fn(async () => ({
-        contextLens: createContextLens(),
-        workingProjection: createWorkingProjection()
-      }))
-    };
-    const providerError = new Error("provider resolver failed");
-    const resolveGardenComputeProvider = {
-      resolve: vi.fn(async () => {
-        throw providerError;
-      })
+    const healthJournalRecorder = {
+      record: vi.fn(async () => undefined)
     };
     const warn = vi.fn();
     const { service } = createService({
       governanceLeaseService,
-      contextLensAssembler,
-      resolveGardenComputeProvider,
+      gardenCompileQueue: undefined,
+      healthJournalRecorder,
       warn
     });
 
@@ -456,48 +184,76 @@ describe("ConversationService", () => {
         assistantMessage: createMessage("msg-assistant", "assistant", "I will use evidence.")
       })
     ).resolves.toMatchObject({
-      contextLens: expect.objectContaining({ runtime_id: "lens-runtime-1" })
+      run: expect.objectContaining({ run_id: "run-1" })
     });
     await flushBackgroundTasks();
 
-    expect(resolveGardenComputeProvider.resolve).toHaveBeenCalledTimes(1);
-    expect(governanceLeaseService.release).toHaveBeenCalledWith("run-1");
-    expect(warn).toHaveBeenCalledWith(
-      "Garden compile failed.",
+    expect(healthJournalRecorder.record).toHaveBeenCalledWith(
       expect.objectContaining({
-        workspace_id: "workspace-1",
-        run_id: "run-1",
-        provider_kind: "unresolved",
-        error: providerError
+        event_kind: HealthEventKind.GARDEN_BACKLOG,
+        summary: "Garden compile enqueue unavailable.",
+        detail_json: expect.objectContaining({
+          phase: "compile_enqueue",
+          status: "unavailable"
+        })
       })
     );
+    expect(governanceLeaseService.release).toHaveBeenCalledWith("run-1");
   });
 
-  it("re-resolves the current default Garden provider when the requested model ref does not match", async () => {
-    const currentDefaultProvider = {
-      provider_kind: "official_api" as const,
-      compile: vi.fn(async () => [])
+  it("records health when Garden compile enqueue throws and does not compile inline", async () => {
+    const persistError = new Error("garden_tasks locked");
+    const healthJournalRecorder = {
+      record: vi.fn(async () => undefined)
     };
-    const resolve = vi
-      .fn()
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(currentDefaultProvider);
-    const { service, dependencies } = createService({
-      resolveGardenComputeProvider: { resolve }
+    const { service } = createService({
+      gardenCompileQueue: {
+        enqueue: vi.fn(() => {
+          throw persistError;
+        })
+      },
+      healthJournalRecorder
     });
 
     await service.orchestrateMemoryTurn({
       runId: "run-1",
       userMessage: createMessage("msg-user", "user", "remember this"),
-      assistantMessage: createMessage("msg-assistant", "assistant", "noted"),
-      modelRef: { provider: "openai", model_id: "stale-model" }
+      assistantMessage: createMessage("msg-assistant", "assistant", "noted")
     });
     await flushBackgroundTasks();
 
-    expect(resolve).toHaveBeenNthCalledWith(1, { provider: "openai", model_id: "stale-model" });
-    expect(resolve).toHaveBeenNthCalledWith(2, null);
-    expect(currentDefaultProvider.compile).toHaveBeenCalledTimes(1);
-    expect(dependencies.gardenComputeProvider.compile).not.toHaveBeenCalled();
+    expect(healthJournalRecorder.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_kind: HealthEventKind.GARDEN_BACKLOG,
+        summary: "Garden compile enqueue failed.",
+        detail_json: expect.objectContaining({
+          phase: "compile_enqueue",
+          status: "failed",
+          error_message: "garden_tasks locked"
+        })
+      })
+    );
+  });
+
+  it("treats a duplicate Garden compile enqueue as success", async () => {
+    const healthJournalRecorder = {
+      record: vi.fn(async () => undefined)
+    };
+    const { service } = createService({
+      gardenCompileQueue: {
+        enqueue: vi.fn(() => ({ status: "duplicate" as const }))
+      },
+      healthJournalRecorder
+    });
+
+    await service.orchestrateMemoryTurn({
+      runId: "run-1",
+      userMessage: createMessage("msg-user", "user", "remember this"),
+      assistantMessage: createMessage("msg-assistant", "assistant", "noted")
+    });
+    await flushBackgroundTasks();
+
+    expect(healthJournalRecorder.record).not.toHaveBeenCalled();
   });
 
   it("conversation lists stored messages without executing a chat turn", async () => {

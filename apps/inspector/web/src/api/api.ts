@@ -2,7 +2,7 @@
  * api.ts - Thin fetch wrapper for Alaya Inspector
  *
  * Single source of every HTTP call; pages MUST go through
- * `apiFetch`. Adds: token injection, workspaceId path interpolation, GET 5xx
+ * `apiFetch`. Adds: credentials cookie session, workspaceId path interpolation, GET 5xx
  * retry-once with exponential backoff, and a global 401 handler for the
  * SessionExpired surface.
  */
@@ -16,30 +16,36 @@ import {
 } from "@do-soul/alaya-protocol";
 import { unrefTimeout } from "./unref-timeout";
 
-let inspectorToken: string | null = null;
+let inspectorSessionReady = false;
 let currentWorkspaceId: string | null = null;
 let onUnauthorized: (() => void) | null = null;
 const workspaceIdListeners = new Set<() => void>();
 
-const INSPECTOR_TOKEN_STORAGE_KEY = "alaya-inspector-token";
+const INSPECTOR_SESSION_READY_STORAGE_KEY = "alaya-inspector-session-ready";
 const INSPECTOR_WORKSPACE_STORAGE_KEY = "alaya-inspector-workspace-id";
 
 export const setInspectorToken = (token: string) => {
-  inspectorToken = token;
   if (token.trim().length === 0) {
-    sessionStorage.removeItem(INSPECTOR_TOKEN_STORAGE_KEY);
-    return;
+    inspectorSessionReady = false;
+    sessionStorage.removeItem(INSPECTOR_SESSION_READY_STORAGE_KEY);
   }
-  sessionStorage.setItem(INSPECTOR_TOKEN_STORAGE_KEY, token);
 };
 
-export const getInspectorToken = () => {
-  if (inspectorToken !== null && inspectorToken.trim().length > 0) {
-    return inspectorToken;
+export const markInspectorSessionReady = (): void => {
+  persistInspectorSessionReady();
+};
+
+function persistInspectorSessionReady(): void {
+  inspectorSessionReady = true;
+  sessionStorage.setItem(INSPECTOR_SESSION_READY_STORAGE_KEY, "1");
+}
+
+export const hasInspectorSession = (): boolean => {
+  if (inspectorSessionReady || sessionStorage.getItem(INSPECTOR_SESSION_READY_STORAGE_KEY) === "1") {
+    inspectorSessionReady = true;
+    return true;
   }
-  const stored = sessionStorage.getItem(INSPECTOR_TOKEN_STORAGE_KEY);
-  inspectorToken = stored;
-  return stored;
+  return false;
 };
 
 export const setWorkspaceId = (id: string | null) => {
@@ -180,13 +186,12 @@ function buildRequestInit(
   headers: HeadersInit | undefined,
   body: unknown
 ): RequestInit {
-  const token = getInspectorToken();
   return {
     ...rest,
     method,
+    credentials: "include",
     headers: {
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { "X-Alaya-Inspector-Token": token } : {}),
       ...(headers ?? {})
     },
     body: body === undefined ? undefined : JSON.stringify(body)
@@ -276,7 +281,7 @@ function resolveConfigResponseSchema(path: string, method: string): ApiSchema | 
 function unauthorizedError(): ApiError {
   onUnauthorized?.();
   const error = new Error(
-    "Unauthorized: Please re-run `alaya inspect` to get a fresh token."
+    "Unauthorized: Please re-run `alaya inspect` to get a fresh session."
   ) as ApiError;
   error.status = 401;
   return error;

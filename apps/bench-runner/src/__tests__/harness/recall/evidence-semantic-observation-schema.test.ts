@@ -75,7 +75,8 @@ async function scoreAttributedReceipt(): Promise<EvidenceCandidateScoringReceipt
         revision: 1
       }),
       queryByEntity: async () => []
-    }
+    },
+    runtimeNotifier: { notifyEntry: () => undefined }
   });
   const result = await service.scoreEvidenceCandidates({
     workspaceId: "workspace-1",

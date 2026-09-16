@@ -4,6 +4,7 @@ import {
   type SoulResolveResponse
 } from "@do-soul/alaya-protocol";
 import type { ResolutionService } from "@do-soul/alaya-core";
+import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import {
   matchesDeliveryContext,
   resolveDeliveredTargetSources
@@ -21,6 +22,7 @@ export interface SoulResolveCallContext {
   readonly runId: string | null;
   readonly agentTarget: string;
   readonly sessionId: string;
+  readonly abortSignal?: AbortSignal;
 }
 
 export interface SoulResolveHandlerDependencies {
@@ -91,6 +93,7 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
         request.target_object_id,
         context
       );
+      throwIfAborted(context.abortSignal);
       const outcome = await deps.resolutionService.resolve({
         targetObjectId: request.target_object_id,
         resolution: request.resolution,
@@ -107,6 +110,7 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
           : { policyClassification: request.policy_classification })
       });
       if (isPositiveGovernedAdoption(outcome)) {
+        throwIfAborted(context.abortSignal);
         await recordResolvedCausalUsage(deps, context, outcome.auditEventId, usedObjectIds);
       }
       return SoulResolveResponseSchema.parse({

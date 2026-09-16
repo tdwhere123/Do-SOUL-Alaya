@@ -286,7 +286,7 @@ describe("MaterializationRouter ingest reconciliation", () => {
     for (const runConflictScan of [true, false]) {
       const deps = createDeps();
       const { reconciliationPort } = fakeReconciliationPort({ kind: "add", runConflictScan });
-      const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+      const detectAndLinkConflicts = vi.fn<DetectFn>(async () => ({ availability: "ok" }));
       const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
       const router = new MaterializationRouter({
         ...deps,
@@ -371,7 +371,7 @@ describe("MaterializationRouter ingest reconciliation", () => {
   });
 
 
-  it("degrades to the blind-append path when the reconciliationPort throws", async () => {
+  it("does not append when the reconciliationPort throws", async () => {
     const deps = createDeps();
     const runWithDecision = vi.fn<RunWithDecisionFn>(async () => {
       throw new Error("reconciliation backend unavailable");
@@ -383,7 +383,7 @@ describe("MaterializationRouter ingest reconciliation", () => {
 
     const result = await router.materializeSignal(factSignal());
 
-    expect(result.success).toBe(true);
-    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
   });
 });

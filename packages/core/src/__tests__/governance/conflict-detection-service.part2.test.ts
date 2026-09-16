@@ -334,10 +334,42 @@ it("ruleEnabled=false with no llmPort produces no edges", async () => {
         workspaceId: "workspace-1",
         runId: "run-1"
       })
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ availability: "unavailable" });
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "memoryRepo.findByDimension failed",
       expect.objectContaining({ workspace_id: "workspace-1" })
     );
+  });
+
+  it("best-effort mode returns unavailable and does not link when the shared-tag query fails", async () => {
+    const existing = createMemoryEntry({
+      object_id: "mem-A",
+      content: "I prefer dark roast coffee."
+    });
+    const warn = vi.fn();
+    const memoryRepo = {
+      findByDimension: vi.fn(async () => [existing]),
+      findBySharedDomainTags: vi.fn(async () => {
+        throw new Error("findBySharedDomainTags db error");
+      })
+    };
+    const pathCandidatePort = {
+      submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied")
+    };
+    const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort, warn });
+
+    await expect(
+      service.detectAndLinkConflicts({
+        newMemoryId: "mem-B",
+        newMemoryDimension: MemoryDimension.PREFERENCE,
+        newMemoryScopeClass: ScopeClass.PROJECT,
+        newMemoryContent: "I prefer light roast tea instead.",
+        newMemoryDomainTags: ["coffee", "preference"],
+        workspaceId: "workspace-1",
+        runId: "run-1"
+      })
+    ).resolves.toEqual({ availability: "unavailable" });
+    expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
   });
 });

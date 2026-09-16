@@ -292,7 +292,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     enrichPendingRepo.enqueue("workspace-1", "memory-stranded");
 
     const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
-    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => ({ availability: "ok" }));
     const runtime = createGardenRuntime(
       createRuntimeInput({
         enrichPendingRepo,

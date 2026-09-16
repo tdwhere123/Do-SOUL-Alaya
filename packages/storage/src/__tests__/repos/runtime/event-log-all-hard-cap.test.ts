@@ -14,7 +14,7 @@ describe("enforceEventLogAllHardCap", () => {
 
   it("rejects histories above the hard cap", () => {
     const rows = Array.from({ length: EVENT_LOG_ALL_QUERY_HARD_MAX + 1 }, (_, index) => index);
-    expect(() => enforceEventLogAllHardCap(rows, "run", "run-1")).toThrowError(
+    expect(() => enforceEventLogAllHardCap(rows, "type", "run.created")).toThrowError(
       /exceeds the hard cap/
     );
   });

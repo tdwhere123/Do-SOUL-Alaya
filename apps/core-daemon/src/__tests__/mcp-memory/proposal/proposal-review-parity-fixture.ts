@@ -38,6 +38,10 @@ import {
 } from "../../../mcp-memory/tool/tool-handler.js";
 
 import { createInspectorApp } from "../../../../../inspector/src/runtime/app.js";
+import {
+  INSPECTOR_SESSION_COOKIE,
+  INSPECTOR_VITEST_SESSION_ID
+} from "../../../../../inspector/src/launch/launch-session-store.js";
 
 export const reviewerArgs = {
   proposal_id: "prop-1",
@@ -77,6 +81,7 @@ export async function runReviewParityScenario(
     requestProtection: {
       allowedOrigin: "http://localhost:5173",
       requestToken: "daemon-request-token",
+      boundWorkspaceIds: ["ws1"],
       allowDesktopOriginlessRequests: true
     },
     routes: {
@@ -115,7 +120,7 @@ export async function runReviewParityScenario(
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-alaya-inspector-token": "inspector-token"
+        cookie: `${INSPECTOR_SESSION_COOKIE}=${INSPECTOR_VITEST_SESSION_ID}`
       },
       body: JSON.stringify({
         verdict: reviewerArgs.verdict,

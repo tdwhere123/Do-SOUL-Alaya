@@ -17,7 +17,7 @@ type ProjectMappingAnchorRecord = ProjectMappingAnchor & {
 };
 
 interface ProjectMappingAnchorRepoLike {
-  create(anchor: ProjectMappingAnchorRecord): Promise<void>;
+  create(anchor: ProjectMappingAnchorRecord): void;
   findById(objectId: string): Promise<Readonly<ProjectMappingAnchorRecord> | null>;
   findByIds(objectIds: readonly string[]): Promise<readonly Readonly<ProjectMappingAnchorRecord>[]>;
   findByWorkspace(
@@ -33,7 +33,7 @@ interface ProjectMappingAnchorRepoLike {
     newState: ProjectMappingStateValue,
     acceptedBy: AcceptedByValue | null,
     transitionedAt: string
-  ): Promise<void>;
+  ): void;
   listPending(workspaceId: string): Promise<readonly Readonly<ProjectMappingAnchorRecord>[]>;
 }
 
@@ -71,7 +71,7 @@ describe("SqliteProjectMappingAnchorRepo", () => {
     const { repo } = await createRepo();
     const anchor = createAnchor();
 
-    await expect(repo.create(anchor)).resolves.toBeUndefined();
+    expect(repo.create(anchor)).toBeUndefined();
     await expect(repo.findById(anchor.object_id)).resolves.toEqual(anchor);
     await expect(repo.findByGlobalObjectId(anchor.global_object_id, anchor.workspace_id)).resolves.toEqual(anchor);
   });
@@ -81,15 +81,17 @@ describe("SqliteProjectMappingAnchorRepo", () => {
 
     await repo.create(createAnchor());
 
-    await expect(
+    expect(() =>
       repo.create(
         createAnchor({
           object_id: "22222222-2222-4222-8222-222222222222"
         })
       )
-    ).rejects.toMatchObject({
-      code: "QUERY_FAILED"
-    });
+    ).toThrow(
+      expect.objectContaining({
+        code: "QUERY_FAILED"
+      })
+    );
   });
 
   it("lists anchors by workspace and optional state filter", async () => {
@@ -209,16 +211,18 @@ describe("SqliteProjectMappingAnchorRepo", () => {
   it("throws not found when updating a missing anchor", async () => {
     const { repo } = await createRepo();
 
-    await expect(
+    expect(() =>
       repo.updateState(
         "missing-anchor",
         ProjectMappingState.REJECTED,
         null,
         "2026-03-29T04:00:00.000Z"
       )
-    ).rejects.toMatchObject({
-      code: "NOT_FOUND"
-    });
+    ).toThrow(
+      expect.objectContaining({
+        code: "NOT_FOUND"
+      })
+    );
   });
 
   it("returns immutable anchors", async () => {

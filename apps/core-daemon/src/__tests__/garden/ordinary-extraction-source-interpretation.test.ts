@@ -40,9 +40,9 @@ import {
 } from "../../runtime/recall-materialization/recall-materialization-router.js";
 import { createSourceGroundingDeferTransitions } from "../../runtime/source-grounding-defer/transitions.js";
 
+import { createConversationGardenCompileQueue } from "../../garden/conversation-compile-queue-adapter.js";
 import { GardenComputeCoordinator } from "../../../../../packages/core/src/conversation/garden-compute-coordinator.js";
 import { createMessage, createRun, createWorkspace } from "../../../../../packages/core/src/__tests__/conversation/conversation-service.test-support.js";
-import { createCompileSourceRetainer } from "../../runtime/startup/recall-core-wiring.js";
 import { enqueuePostTurnExtractTask } from "../../mcp-memory/garden-task/post-turn-extract-queue.js";
 import { createDeliveryRecord } from "../mcp-memory/garden/post-turn-extract-task-record-fixture.js";
 
@@ -93,6 +93,7 @@ describe("ordinary extraction source interpretation adapters", () => {
           claimService: { create: async () => { throw new Error("unexpected claim route"); } },
           fieldComposition: field,
           eventLogRepo,
+          runtimeNotifier: notifier,
           enqueueEnrichPending: () => undefined
         },
         pathRelationProposalPort: {
@@ -193,10 +194,16 @@ describe("ordinary extraction source interpretation adapters", () => {
       } else {
         const completed = vi.fn(async () => undefined);
         const warn = vi.fn();
-        const coordinator = new GardenComputeCoordinator({ eventLogRepo, eventPublisher,
-          retainCompileSource: createCompileSourceRetainer({ fieldComposition: field, eventLogRepo }),
-          gardenComputeProvider: provider, signalReceiver: signalService,
-          releaseGovernanceLeaseSafely: completed, warn });
+        const coordinator = new GardenComputeCoordinator({
+          gardenCompileQueue: createConversationGardenCompileQueue({
+            gardenTaskRepo,
+            now: () => CLOCK,
+            sourceAdmission
+          }),
+          healthJournalRecorder: { record: async () => undefined },
+          releaseGovernanceLeaseSafely: completed,
+          warn
+        });
         const input = { run: createRun(), workspace: createWorkspace(), modelRef: null,
           userMessage: createMessage("user-1", "user", LONG_ASSERTION),
           assistantMessage: createMessage("assistant-1", "assistant", "Acknowledged.") };
@@ -205,6 +212,9 @@ describe("ordinary extraction source interpretation adapters", () => {
         coordinator.triggerCompile(input);
         await vi.waitFor(() => expect(completed).toHaveBeenCalledTimes(2));
         expect(warn.mock.calls.filter(([message]) => String(message).includes("failed"))).toEqual([]);
+        const compileTaskId = gardenTaskRepo.peekPending(GardenRole.LIBRARIAN, "workspace-1", 10)[0]?.id;
+        await process();
+        expect(gardenTaskRepo.findById(compileTaskId!)?.status).toBe("completed");
       }
       const sourceRows = database.connection.prepare("SELECT source_body FROM source_records WHERE source_id LIKE 'post-turn:%' OR source_id LIKE 'garden-compile:%'").all() as { source_body: string }[];
       expect(sourceRows).toHaveLength(1);

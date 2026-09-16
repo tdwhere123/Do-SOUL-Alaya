@@ -10,12 +10,13 @@ import {
   defaultLocalOnnxCacheDir,
   EMBEDDING_INJECTION_SIMILARITY_FLOOR,
   EMBEDDING_MAX_INJECTED_DELIVERY,
+  probeLocalOnnxTransformersPackage,
   type EmbeddingProviderPort,
   type EmbeddingRecallEventLogPort,
   type EmbeddingRecallServiceDependencies,
   type HqProvider
 } from "@do-soul/alaya-core";
-import type { RecallPolicy } from "@do-soul/alaya-protocol";
+import { parseEnvBoolean, type RecallPolicy } from "@do-soul/alaya-protocol";
 import {
   RecallQualifiedEvidenceReader,
   type SqliteMemoryEntryRepo,
@@ -36,8 +37,9 @@ import {
 import {
   isD2qActive,
   readEmbeddingRuntimeConfig,
-  type EmbeddingProviderKind,
-  type EmbeddingRuntimeConfig
+  type EffectiveEmbeddingProviderKind,
+  type EmbeddingRuntimeConfig,
+  type LocalOnnxTransformersProbe
 } from "./daemon-embedding-runtime-config.js";
 import {
   createEmbeddingProviderReadiness,
@@ -51,13 +53,19 @@ export function createDaemonEmbeddingRuntime(input: {
   readonly configEnv: ReadonlyMap<string, string>;
   readonly eventLogRepo: EmbeddingRecallEventLogPort;
   readonly eventPublisher?: EmbeddingRecallServiceDependencies["eventPublisher"];
+  readonly runtimeNotifier: EmbeddingRecallServiceDependencies["runtimeNotifier"];
   readonly healthJournalService: EmbeddingStatusDegradationSource &
     NonNullable<EmbeddingRecallServiceDependencies["healthJournalRecorder"]>;
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
   readonly embeddingProviderOverride?: EmbeddingProviderPort | null;
+  readonly localOnnxTransformersProbe?: LocalOnnxTransformersProbe;
 }) {
-  const runtimeConfig = readEmbeddingRuntimeConfig(input.configEnv, input.warn);
+  const runtimeConfig = readEmbeddingRuntimeConfig(
+    input.configEnv,
+    input.warn,
+    resolveLocalOnnxTransformersProbe(input)
+  );
   const providerState = createEmbeddingProviderState(input, runtimeConfig);
   const services = createEmbeddingRuntimeServices(input, runtimeConfig, providerState);
 
@@ -166,6 +174,7 @@ function createEmbeddingRecallService(
     provider: providerState.embeddingProvider,
     eventLogRepo: input.eventLogRepo,
     ...(input.eventPublisher === undefined ? {} : { eventPublisher: input.eventPublisher }),
+    runtimeNotifier: input.runtimeNotifier,
     healthJournalRecorder: input.healthJournalService,
     warn: input.warn
   });
@@ -293,8 +302,20 @@ function createProviderWarmup(
 }
 
 
+function resolveLocalOnnxTransformersProbe(
+  input: Parameters<typeof createDaemonEmbeddingRuntime>[0]
+): LocalOnnxTransformersProbe {
+  if (input.localOnnxTransformersProbe !== undefined) {
+    return input.localOnnxTransformersProbe;
+  }
+  if (input.embeddingProviderOverride != null) {
+    return () => ({ availability: "available" });
+  }
+  return probeLocalOnnxTransformersPackage;
+}
+
 function resolveEmbeddingProvider(input: {
-  readonly providerKind: EmbeddingProviderKind;
+  readonly providerKind: EffectiveEmbeddingProviderKind;
   readonly storageAvailable: boolean;
   readonly optInEnabled: boolean;
   readonly apiKey: string | null;
@@ -305,7 +326,7 @@ function resolveEmbeddingProvider(input: {
   readonly localSchemaVersion: number | null;
   readonly providerOverride?: EmbeddingProviderPort | null;
 }): EmbeddingProviderPort | null {
-  if (!input.storageAvailable || !input.optInEnabled) {
+  if (!input.storageAvailable || !input.optInEnabled || input.providerKind === "off") {
     return null;
   }
   if (input.providerOverride !== undefined) {
@@ -334,7 +355,10 @@ function resolveEmbeddingProvider(input: {
     apiKey: input.apiKey,
     model: input.openAiModel ?? undefined,
     baseUrl: input.openAiBaseUrl ?? undefined,
-    allowPrivateProviderUrl: processEnvLookup().ALAYA_ALLOW_PRIVATE_PROVIDER_URL === "1"
+    allowPrivateProviderUrl: parseEnvBoolean(
+      processEnvLookup().ALAYA_ALLOW_PRIVATE_PROVIDER_URL,
+      "ALAYA_ALLOW_PRIVATE_PROVIDER_URL"
+    )
   });
 }
 

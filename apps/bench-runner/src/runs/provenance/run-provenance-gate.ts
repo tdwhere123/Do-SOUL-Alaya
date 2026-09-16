@@ -112,9 +112,5 @@ function hasConsistentEmbeddingSupplementProvenance(
 function hasConsistentAnswerRerankProvenance(
   runtime: LongMemEvalRunProvenance["runtime"]
 ): boolean {
-  const pairedEnabled = readOptionalTreatmentBoolean(
-    runtime.paired_env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-  );
-  return runtime.answer_rerank?.enabled === false && pairedEnabled === null;
+  return runtime.answer_rerank?.enabled === false;
 }

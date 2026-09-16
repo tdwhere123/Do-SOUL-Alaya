@@ -23,15 +23,19 @@ describe("apiFetch", () => {
     vi.unstubAllGlobals();
   });
 
-  it("injects X-Alaya-Inspector-Token header on every request", async () => {
+  it("does not inject an Inspector process-token header", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: true }), { status: 200 })
     );
     await apiFetch("/status");
     const [, init] = fetchMock.mock.calls[0];
-    expect((init as RequestInit).headers).toMatchObject({
+    expect((init as RequestInit).credentials).toBe("include");
+    expect((init as RequestInit).headers).not.toMatchObject({
       "X-Alaya-Inspector-Token": "test-token"
     });
+    expect(
+      ((init as RequestInit).headers as Record<string, string>)["X-Alaya-Inspector-Token"]
+    ).toBeUndefined();
   });
 
   it("interpolates :workspaceId placeholder", async () => {
@@ -163,15 +167,15 @@ describe("apiFetch", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("sends the sessionStorage inspector token when the in-memory copy is empty", async () => {
+  it("does not treat a leftover sessionStorage process token as a session", async () => {
     setInspectorToken("");
     sessionStorage.setItem("alaya-inspector-token", "stored-token");
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     await apiFetch("/status");
     const [, init] = fetchMock.mock.calls[0];
-    expect((init as RequestInit).headers).toMatchObject({
-      "X-Alaya-Inspector-Token": "stored-token"
-    });
+    expect(
+      ((init as RequestInit).headers as Record<string, string>)["X-Alaya-Inspector-Token"]
+    ).toBeUndefined();
   });
 
   it("throws a friendly schema error instead of surfacing raw ZodError", async () => {

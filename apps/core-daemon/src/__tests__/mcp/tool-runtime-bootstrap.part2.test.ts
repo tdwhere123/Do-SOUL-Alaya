@@ -24,19 +24,6 @@ const isolatedConfigDirs: string[] = [];
 
 const BOOTSTRAP_TEST_TIMEOUT_MS = 15_000;
 
-async function resolveBootGardenProvider(): Promise<unknown> {
-  const provider = hoisted.conversationServiceDeps?.gardenComputeProvider as
-    | { getProvider?: () => Promise<unknown> }
-    | undefined;
-  if (provider === undefined) {
-    throw new Error("ConversationService gardenComputeProvider was not wired.");
-  }
-  if (typeof provider.getProvider === "function") {
-    return await provider.getProvider();
-  }
-  return provider;
-}
-
 async function bootDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const { createAlayaDaemonRuntime } = await import("../../index.js");
   const runtime = await createAlayaDaemonRuntime();
@@ -114,7 +101,7 @@ describe("daemon tool runtime bootstrap", () => {
     }
   });
 
-  it("reports degraded embedding status when supplement is enabled but the secret env is missing", async () => {
+  it("does not report embedding enabled when the local extra is missing even if the supplement flag is on", async () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-missing-embedding-status-"));
     isolatedConfigDirs.push(configDir);
     await writeFile(
@@ -143,11 +130,12 @@ describe("daemon tool runtime bootstrap", () => {
       };
     };
 
+    // Leftover openai secret-ref is not an enabled path when the default extra cannot resolve.
     await expect(runtime.services.embeddingStatusService.getStatus("workspace-1")).resolves.toMatchObject({
-      embedding_enabled: true,
+      embedding_enabled: false,
       provider_configured: false,
-      effective_mode: "degraded",
-      degraded_reason: "provider_unconfigured"
+      effective_mode: "keyword_only",
+      degraded_reason: null
     });
   }, BOOTSTRAP_TEST_TIMEOUT_MS);
 

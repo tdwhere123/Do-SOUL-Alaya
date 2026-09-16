@@ -1,4 +1,4 @@
-import { ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, parseDefaultOnFlag, parseEnvBoolean, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSecretRef } from "@do-soul/alaya";
@@ -60,17 +60,11 @@ const ALLOW_LIVE_EXTRACTION_ENV = "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION";
  * Single source for the operator opt-in that relaxes the run-start coverage
  * gate so a run may deliberately live-extract the uncovered cache gap. Shared
  * by the three LongMemEval entrypoints so the flag is resolved one way.
- * Truthy values: "1" / "true" (case-insensitive).
  */
 export function resolveBenchAllowLiveExtraction(
   env: NodeJS.ProcessEnv = process.env
 ): boolean {
-  const value = env[ALLOW_LIVE_EXTRACTION_ENV];
-  if (value === undefined) {
-    return false;
-  }
-  const normalized = value.trim().toLowerCase();
-  return normalized === "1" || normalized === "true";
+  return parseEnvBoolean(env[ALLOW_LIVE_EXTRACTION_ENV], ALLOW_LIVE_EXTRACTION_ENV);
 }
 
 export function toSeedExtractionPathKpi(
@@ -217,12 +211,10 @@ export function resolveBenchExtractionCacheMinCoverage(
 export function resolveBenchRequireExtractionCacheManifest(
   env: NodeJS.ProcessEnv = process.env
 ): boolean {
-  const value = env[REQUIRE_EXTRACTION_CACHE_MANIFEST_ENV];
-  if (value === undefined) {
-    return true;
-  }
-  const normalized = value.trim().toLowerCase();
-  return !(normalized === "0" || normalized === "false");
+  return parseDefaultOnFlag(
+    env[REQUIRE_EXTRACTION_CACHE_MANIFEST_ENV],
+    REQUIRE_EXTRACTION_CACHE_MANIFEST_ENV
+  );
 }
 
 export function normalizeBaseUrl(url: string): string {

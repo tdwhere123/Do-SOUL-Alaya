@@ -1,4 +1,4 @@
-import { bindEventPublisher } from "@do-soul/alaya-core";
+import { bindEventPublisher, type RuntimeNotifier } from "@do-soul/alaya-core";
 import {
   GraphAuditorEventType,
   parseGraphAuditorEventPayload,
@@ -12,6 +12,7 @@ export interface SoulTopologyAuditEventLogRepo {
 
 export interface SoulTopologyAuditServiceDependencies {
   readonly eventLogRepo: SoulTopologyAuditEventLogRepo;
+  readonly runtimeNotifier: Pick<RuntimeNotifier, "notifyEntry">;
 }
 
 export class SoulTopologyAuditService {
@@ -24,6 +25,7 @@ export class SoulTopologyAuditService {
 
     return await bindEventPublisher({
       eventLogRepo: this.deps.eventLogRepo,
+      runtimeNotifier: this.deps.runtimeNotifier,
       purpose: "SoulTopologyAuditService"
     }).publish({
       event_type: GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,

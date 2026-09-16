@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  AlayaError,
   CandidateMemorySignalInputSchema,
   CandidateMemorySignalSchema,
   SoulApplyOverrideRequestSchema,
@@ -68,10 +69,11 @@ export class SoulSignalHandler {
 
   public async handleToolUse(
     toolUse: ToolUseBlock,
-    runtimeContext?: Readonly<ConversationRuntimeContext>
+    runtimeContext?: Readonly<ConversationRuntimeContext>,
+    abortSignal?: AbortSignal
   ): Promise<ToolResultBlock> {
     try {
-      return await this.dispatchToolUse(toolUse, runtimeContext);
+      return await this.dispatchToolUse(toolUse, runtimeContext, abortSignal);
     } catch (error) {
       return createErrorToolResult(toolUse.id, readErrorMessage(error, "Invalid candidate signal payload."));
     }
@@ -79,15 +81,16 @@ export class SoulSignalHandler {
 
   private async dispatchToolUse(
     toolUse: ToolUseBlock,
-    runtimeContext?: Readonly<ConversationRuntimeContext>
+    runtimeContext: Readonly<ConversationRuntimeContext> | undefined,
+    abortSignal: AbortSignal | undefined
   ): Promise<ToolResultBlock> {
     switch (toolUse.name) {
       case "soul.emit_candidate_signal":
-        return await this.handleEmitCandidateSignal(toolUse, runtimeContext);
+        return await this.handleEmitCandidateSignal(toolUse, runtimeContext, abortSignal);
       case "soul.apply_override":
-        return await this.handleApplyOverride(toolUse, runtimeContext);
+        return await this.handleApplyOverride(toolUse, runtimeContext, abortSignal);
       case "soul.explore_graph":
-        return await this.handleExploreGraph(toolUse, runtimeContext);
+        return await this.handleExploreGraph(toolUse, runtimeContext, abortSignal);
       default:
         return createErrorToolResult(toolUse.id, `Unsupported soul tool: ${toolUse.name}`);
     }
@@ -95,7 +98,8 @@ export class SoulSignalHandler {
 
   private async handleEmitCandidateSignal(
     toolUse: ToolUseBlock,
-    runtimeContext?: Readonly<ConversationRuntimeContext>
+    runtimeContext: Readonly<ConversationRuntimeContext> | undefined,
+    abortSignal: AbortSignal | undefined
   ): Promise<ToolResultBlock> {
     const context = requireRuntimeContext(runtimeContext);
     const signal = materializeCandidateSignal({
@@ -109,6 +113,7 @@ export class SoulSignalHandler {
         surface_id: context.surface_id
       }
     });
+    throwIfAborted(abortSignal);
     await this.dependencies.receiveSignal(signal);
     return createSuccessToolResult(
       toolUse.id,
@@ -121,13 +126,15 @@ export class SoulSignalHandler {
 
   private async handleApplyOverride(
     toolUse: ToolUseBlock,
-    runtimeContext?: Readonly<ConversationRuntimeContext>
+    runtimeContext: Readonly<ConversationRuntimeContext> | undefined,
+    abortSignal: AbortSignal | undefined
   ): Promise<ToolResultBlock> {
     if (this.dependencies.applyOverride === undefined) {
       return createErrorToolResult(toolUse.id, "Unsupported soul tool: soul.apply_override");
     }
     const context = requireRuntimeContext(runtimeContext);
     const input = SoulApplyOverrideRequestSchema.parse(toolUse.input);
+    throwIfAborted(abortSignal);
     const override = await this.dependencies.applyOverride({
       runId: context.run_id,
       workspaceId: context.workspace_id,
@@ -148,13 +155,15 @@ export class SoulSignalHandler {
 
   private async handleExploreGraph(
     toolUse: ToolUseBlock,
-    runtimeContext?: Readonly<ConversationRuntimeContext>
+    runtimeContext: Readonly<ConversationRuntimeContext> | undefined,
+    abortSignal: AbortSignal | undefined
   ): Promise<ToolResultBlock> {
     if (this.dependencies.graphExplorePort === undefined) {
       return createErrorToolResult(toolUse.id, "Graph explore not available");
     }
     const context = requireRuntimeContext(runtimeContext);
     const input = SoulExploreGraphRequestSchema.parse(toolUse.input);
+    throwIfAborted(abortSignal);
     const neighbors = await this.dependencies.graphExplorePort.exploreOneHop(
       input.memory_id,
       context.workspace_id,
@@ -297,4 +306,14 @@ function requireRuntimeContext(
   }
 
   return runtimeContext;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal === undefined || !signal.aborted) {
+    return;
+  }
+  if (signal.reason !== undefined) {
+    throw signal.reason;
+  }
+  throw new AlayaError("ABORTED", "Aborted");
 }

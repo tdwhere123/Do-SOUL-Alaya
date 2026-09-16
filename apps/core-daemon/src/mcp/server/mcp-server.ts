@@ -14,6 +14,11 @@ import {
   type Tool
 } from "@modelcontextprotocol/sdk/types.js";
 import {
+  isHandlerTimeoutError,
+  resolveMcpToolTimeoutMs,
+  withTimeout
+} from "@do-soul/alaya-engine-gateway";
+import {
   isMemoryToolAllowedForAgentTarget,
   listAlayaMemoryToolsForAgentTarget
 } from "../../mcp-memory/tool/attach-profile-tool-allowlist.js";
@@ -22,6 +27,7 @@ import {
   type AlayaMemoryToolDefinition
 } from "../../mcp-memory/tool/tool-catalog.js";
 import { fail } from "../../mcp-memory/tool/tool-handler-support.js";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import { readRuntimeVersion } from "../../runtime/daemon/support/build-info.js";
 import type {
   McpMemoryToolCallContext,
@@ -34,6 +40,8 @@ export interface AlayaMcpServerOptions {
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly tools?: readonly AlayaMemoryToolDefinition[];
   readonly version?: string;
+  readonly toolTimeoutMs?: number;
+  readonly toolTimeoutEnv?: string;
 }
 
 export interface AlayaMcpStdioServer {
@@ -97,23 +105,47 @@ export function createAlayaMcpToolsResult(tools: readonly AlayaMemoryToolDefinit
 }
 
 export async function callAlayaMcpMemoryTool(
-  options: Pick<AlayaMcpServerOptions, "memoryToolHandler" | "contextProvider" | "warn">,
+  options: Pick<
+    AlayaMcpServerOptions,
+    "memoryToolHandler" | "contextProvider" | "warn" | "toolTimeoutMs" | "toolTimeoutEnv"
+  >,
   toolName: string,
   rawArguments: unknown
 ): Promise<CallToolResult> {
+  const timeoutMs =
+    options.toolTimeoutMs ??
+    resolveMcpToolTimeoutMs(
+      options.toolTimeoutEnv ?? processEnvLookup().ALAYA_MCP_TOOL_TIMEOUT_MS
+    );
   let result: Awaited<ReturnType<McpMemoryToolHandler["call"]>>;
   const context = options.contextProvider();
   try {
     if (!isMemoryToolAllowedForAgentTarget(toolName, context.agentTarget)) {
       result = fail(toolName, "UNKNOWN_TOOL", `Unsupported Alaya memory tool: ${toolName}`);
     } else {
-      result = await options.memoryToolHandler.call({
-        toolName,
-        arguments: rawArguments,
-        context
-      });
+      result = await withTimeout(async (signal) => {
+        return await options.memoryToolHandler.call({
+          toolName,
+          arguments: rawArguments,
+          context: { ...context, abortSignal: signal }
+        });
+      }, timeoutMs);
     }
   } catch (error) {
+    if (isHandlerTimeoutError(error)) {
+      const payload = {
+        ok: false as const,
+        error: {
+          code: "UNAVAILABLE" as const,
+          message: error.message
+        }
+      };
+      return {
+        isError: true,
+        content: [{ type: "text", text: JSON.stringify(payload) }],
+        structuredContent: payload
+      };
+    }
     options.warn?.("MCP memory tool handler rejected", {
       error: error instanceof Error ? error.message : String(error),
       toolName

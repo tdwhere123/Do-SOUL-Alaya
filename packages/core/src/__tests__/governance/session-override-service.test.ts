@@ -27,6 +27,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -75,6 +76,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo({ append: appendSpy }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: {
         getById: vi.fn(async () => ({ workspace_id: "workspace-2" }))
       }
@@ -98,6 +100,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
       eventLogRepo: createEventLogRepo(),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -133,6 +136,7 @@ describe("SessionOverrideService", () => {
       now: () => now,
       generateRuntimeId: createRuntimeIdGenerator(),
       eventLogRepo: createEventLogRepo(),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -162,6 +166,7 @@ describe("SessionOverrideService", () => {
       now: () => now,
       generateRuntimeId: createRuntimeIdGenerator(),
       eventLogRepo: createEventLogRepo(),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -211,6 +216,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
       eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -243,6 +249,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
       eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -258,6 +265,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
       eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -297,6 +305,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
       eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -318,6 +327,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: createRuntimeIdGenerator(),
       eventLogRepo: createEventLogRepo({ queryByRunAndEntityType }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -341,6 +351,7 @@ describe("SessionOverrideService", () => {
       eventLogRepo: createEventLogRepo({
         queryByRunAndEntityType: vi.fn(async () => await queryDeferred.promise)
       }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -369,6 +380,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo(),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -405,6 +417,7 @@ describe("SessionOverrideService", () => {
           })
         )
       }),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 
@@ -423,6 +436,7 @@ describe("SessionOverrideService", () => {
       now: () => "2026-03-24T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111",
       eventLogRepo: createEventLogRepo(),
+      runtimeNotifier: { notifyEntry: () => undefined },
       runLookup: createRunLookup()
     });
 

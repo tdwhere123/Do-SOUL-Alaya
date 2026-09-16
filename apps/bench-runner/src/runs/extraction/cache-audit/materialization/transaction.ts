@@ -48,7 +48,16 @@ import {
   reconcileCommittedMaterializationJournal,
   type PersistedMaterializationTransaction
 } from "./transaction-recovery.js";
-import { triggerMaterializationTestSigkillAfter } from "./transaction-failpoint.js";
+
+export type MaterializationDurableBoundary =
+  | "journal-published"
+  | "stage-entry-published"
+  | "manifest-published"
+  | "commit-published-before-journal-unlink"
+  | "journal-unlinked";
+
+export type MaterializationDurableFailpoint =
+  (boundary: MaterializationDurableBoundary) => void;
 
 export function runMaterializationTransaction(input: {
   readonly sourceRoot: string;
@@ -60,6 +69,7 @@ export function runMaterializationTransaction(input: {
   readonly sourceLease: ExtractionCacheWriteLease;
   readonly targetLease: ExtractionCacheWriteLease;
   readonly now: () => string;
+  readonly durableFailpoint?: MaterializationDurableFailpoint;
 }): ExtractionCacheMaterializationCommit {
   const targetRoot = input.targetLease.stableRootPath;
   const boundInput = {
@@ -77,7 +87,8 @@ export function runMaterializationTransaction(input: {
   const committed = existingCommit(boundInput, binding, persisted);
   if (committed !== undefined) return committed;
   const journal = openOrResumeJournal(
-    targetRoot, expectedJournal, binding, persisted.journal, dirname(input.targetRoot)
+    targetRoot, expectedJournal, binding, persisted.journal, dirname(input.targetRoot),
+    input.durableFailpoint
   );
   assertRecoverableTargetTree(targetRoot, journal.shards, journal.max_shard_bytes);
   assertRecoverableManifest(boundInput, journal);
@@ -88,7 +99,7 @@ export function runMaterializationTransaction(input: {
     existsSync(extractionCacheManifestPath(targetRoot)) ? "manifest" : "open"
   );
   const manifestSha256 = publishOrVerifyManifest(boundInput, journal, dirname(input.targetRoot));
-  triggerMaterializationTestSigkillAfter("manifest-published");
+  boundInput.durableFailpoint?.("manifest-published");
   return commitMaterializationTransaction({
     input, binding, journal, manifestSha256, targetRoot
   });
@@ -130,10 +141,10 @@ function commitMaterializationTransaction(input: {
     join(input.targetRoot, MATERIALIZATION_COMMIT_NAME), commit,
     dirname(input.input.targetRoot)
   );
-  triggerMaterializationTestSigkillAfter("commit-published-before-journal-unlink");
+  input.input.durableFailpoint?.("commit-published-before-journal-unlink");
   unlinkSync(join(input.targetRoot, MATERIALIZATION_JOURNAL_NAME));
   fsyncDirectory(input.targetRoot);
-  triggerMaterializationTestSigkillAfter("journal-unlinked");
+  input.input.durableFailpoint?.("journal-unlinked");
   assertExactTargetTree(input.targetRoot, input.binding.shards, "committed");
   return commit;
 }
@@ -221,13 +232,14 @@ function openOrResumeJournal(
   expected: ExtractionCacheMaterializationJournal,
   binding: Omit<MaterializationBinding, "operation_id">,
   existing: ExtractionCacheMaterializationJournal | undefined,
-  temporaryDirectory: string
+  temporaryDirectory: string,
+  durableFailpoint: MaterializationDurableFailpoint | undefined
 ): ExtractionCacheMaterializationJournal {
   const path = join(targetRoot, MATERIALIZATION_JOURNAL_NAME);
   if (existing === undefined) {
     assertExactTargetTree(targetRoot, binding.shards, "fresh");
     writeExclusiveMaterializationRecord(path, expected, temporaryDirectory);
-    triggerMaterializationTestSigkillAfter("journal-published");
+    durableFailpoint?.("journal-published");
     return expected;
   }
   if (existing.operation_id !== expected.operation_id || !matchesBinding(existing, binding)) {
@@ -266,7 +278,7 @@ function publishDescriptors(
     }
     assertRealDirectory(prefix, "target shard prefix");
     linkFileExclusiveDurable(stagePath, targetPath);
-    triggerMaterializationTestSigkillAfter("stage-entry-published");
+    input.durableFailpoint?.("stage-entry-published");
     unlinkSync(stagePath);
     fsyncDirectory(stageRoot);
   }

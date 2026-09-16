@@ -296,6 +296,56 @@ describe("doctor CLI", () => {
     );
   });
 
+  it("writes a garden compile failure line when POST_TURN_EXTRACT tasks have failed", async () => {
+    const harness = createDoctorHarness({
+      getGardenCompute: async () => ({
+        provider_kind: "local_heuristics",
+        model_id: null,
+        provider_url: null,
+        credential_source: { kind: "none" },
+        routing_decision: "local_heuristics",
+        failed_post_turn_extract_tasks: 3
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--json"]);
+    const humanResult = await harness.bridge.dispatch(["doctor"]);
+    expect(jsonResult.exitCode).toBe(75);
+    expect(jsonResult.json).toMatchObject({
+      checks: { garden: "fail" },
+      garden_compute: {
+        failed_post_turn_extract_tasks: 3
+      }
+    });
+    expect(humanResult.exitCode).toBe(75);
+    expect(harness.stdoutText()).toContain(
+      "garden compile failures: 3 failed POST_TURN_EXTRACT; 0 enqueue never queued"
+    );
+  });
+
+  it("writes a garden compile enqueue failure line when compile never queued", async () => {
+    const harness = createDoctorHarness({
+      getGardenCompute: async () => ({
+        provider_kind: "local_heuristics",
+        model_id: null,
+        provider_url: null,
+        credential_source: { kind: "none" },
+        routing_decision: "local_heuristics",
+        compile_enqueue_failures: 2
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--json"]);
+    expect(jsonResult.json).toMatchObject({
+      checks: { garden: "fail" },
+      garden_compute: { compile_enqueue_failures: 2 }
+    });
+    expect((await harness.bridge.dispatch(["doctor"])).exitCode).toBe(75);
+    expect(harness.stdoutText()).toContain(
+      "garden compile failures: 0 failed POST_TURN_EXTRACT; 2 enqueue never queued"
+    );
+  });
+
   it("reports a successful Garden keychain check only when a keychain ref is configured", async () => {
     const harness = createDoctorHarness({
       getGardenCompute: async () => ({

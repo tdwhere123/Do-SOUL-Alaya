@@ -8,7 +8,14 @@ import {
   type EventLogDraftInput
 } from "../runtime/writes/event-log-writer.js";
 import { parseNonEmptyString } from "../shared/validators.js";
-import { parseRows } from "../shared/parse-row.js";
+import {
+  parseOptionalRow,
+  parseRows,
+  readPositiveIntField,
+  readRecord,
+  readStringField,
+  type RowParser
+} from "../shared/parse-row.js";
 
 export interface SurfaceAnchorRepo {
   create(anchor: Readonly<SurfaceAnchor>): Promise<Readonly<SurfaceAnchor>>;
@@ -40,19 +47,9 @@ const SURFACE_ANCHOR_SELECT_COLUMNS = `
         workspace_id
 `;
 
-interface SurfaceAnchorRow {
-  readonly object_id: string;
-  readonly object_kind: string;
-  readonly schema_version: number;
-  readonly lifecycle_state: string;
-  readonly created_at: string;
-  readonly updated_at: string;
-  readonly created_by: string;
-  readonly surface_id: string;
-  readonly anchor_kind: string;
-  readonly anchor_value: string;
-  readonly workspace_id: string;
-}
+const SurfaceAnchorRowParser: RowParser<Readonly<SurfaceAnchor>> = {
+  parse: parseSurfaceAnchorRow
+};
 
 export class SqliteSurfaceAnchorRepo implements SurfaceAnchorRepo {
   private readonly createStatement;
@@ -170,9 +167,12 @@ export class SqliteSurfaceAnchorRepo implements SurfaceAnchorRepo {
     const parsedObjectId = parseNonEmptyString(objectId, "surface anchor object id");
 
     try {
-      const row = this.findByIdStatement.get(parsedObjectId) as SurfaceAnchorRow | undefined;
-      return row === undefined ? null : parseSurfaceAnchorRow(row);
+      return parseOptionalRow(this.findByIdStatement.get(parsedObjectId), SurfaceAnchorRowParser, "surface anchor row");
     } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
       throw new StorageError("QUERY_FAILED", `Failed to load surface anchor ${parsedObjectId}.`, error);
     }
   }
@@ -185,9 +185,16 @@ export class SqliteSurfaceAnchorRepo implements SurfaceAnchorRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = parseRows(this.findBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId), { parse: (value: unknown) => value as SurfaceAnchorRow }, "surface anchor row");
-      return rows.map((row) => parseSurfaceAnchorRow(row));
+      return parseRows(
+        this.findBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
+        SurfaceAnchorRowParser,
+        "surface anchor row"
+      );
     } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list surface anchors for surface ${parsedSurfaceId}.`,
@@ -200,9 +207,16 @@ export class SqliteSurfaceAnchorRepo implements SurfaceAnchorRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = parseRows(this.findByWorkspaceStatement.all(parsedWorkspaceId), { parse: (value: unknown) => value as SurfaceAnchorRow }, "surface anchor row");
-      return rows.map((row) => parseSurfaceAnchorRow(row));
+      return parseRows(
+        this.findByWorkspaceStatement.all(parsedWorkspaceId),
+        SurfaceAnchorRowParser,
+        "surface anchor row"
+      );
     } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list surface anchors for workspace ${parsedWorkspaceId}.`,
@@ -264,24 +278,29 @@ function parseSurfaceAnchor(value: SurfaceAnchor): Readonly<SurfaceAnchor> {
   }
 }
 
-function parseSurfaceAnchorRow(row: SurfaceAnchorRow): Readonly<SurfaceAnchor> {
+export function parseSurfaceAnchorRow(value: unknown): Readonly<SurfaceAnchor> {
+  const row = readRecord(value, "surface anchor row");
   try {
     return deepFreeze(
       SurfaceAnchorSchema.parse({
-        object_id: row.object_id,
-        object_kind: row.object_kind,
-        schema_version: row.schema_version,
-        lifecycle_state: row.lifecycle_state,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        created_by: row.created_by,
-        surface_id: row.surface_id,
-        anchor_kind: row.anchor_kind,
-        anchor_value: row.anchor_value,
-        workspace_id: row.workspace_id
+        object_id: readStringField(row, "object_id"),
+        object_kind: readStringField(row, "object_kind"),
+        schema_version: readPositiveIntField(row, "schema_version"),
+        lifecycle_state: readStringField(row, "lifecycle_state"),
+        created_at: readStringField(row, "created_at"),
+        updated_at: readStringField(row, "updated_at"),
+        created_by: readStringField(row, "created_by"),
+        surface_id: readStringField(row, "surface_id"),
+        anchor_kind: readStringField(row, "anchor_kind"),
+        anchor_value: readStringField(row, "anchor_value"),
+        workspace_id: readStringField(row, "workspace_id")
       })
     );
   } catch (error) {
+    if (error instanceof StorageError) {
+      throw error;
+    }
+
     throw new StorageError("VALIDATION_FAILED", "Failed to validate surface anchor row.", error);
   }
 }

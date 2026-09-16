@@ -24,7 +24,7 @@ describe("SqliteToolExecutionRecordRepo", () => {
       post_effect_refs: []
     });
 
-    await expect(repo.insert(record)).resolves.toEqual(record);
+    expect(repo.insert(record)).toEqual(record);
 
     const rawRow = database.connection
       .prepare(
@@ -73,7 +73,7 @@ describe("SqliteToolExecutionRecordRepo", () => {
       post_effect_refs: ["effect://worker/1", "effect://worker/2"]
     });
 
-    await expect(repo.insert(record)).resolves.toEqual(record);
+    expect(repo.insert(record)).toEqual(record);
 
     const rawRow = database.connection
       .prepare(
@@ -131,9 +131,9 @@ describe("SqliteToolExecutionRecordRepo", () => {
       post_effect_refs: []
     });
 
-    await expect(repo.insert(nullRecord)).resolves.toEqual(nullRecord);
-    await expect(repo.insert(emptyRecord)).resolves.toEqual(emptyRecord);
-    await expect(repo.insert(nonEmptyRecord)).resolves.toEqual(nonEmptyRecord);
+    expect(repo.insert(nullRecord)).toEqual(nullRecord);
+    expect(repo.insert(emptyRecord)).toEqual(emptyRecord);
+    expect(repo.insert(nonEmptyRecord)).toEqual(nonEmptyRecord);
 
     const rows = database.connection
       .prepare(

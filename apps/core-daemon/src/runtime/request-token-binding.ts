@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Context } from "hono";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
 import {
   isLoopbackHost,
@@ -24,10 +25,15 @@ export type WorkspaceTokenBinding = {
   readonly allowProcessSecretPatch?: boolean;
 };
 
+export type LiveWorkspaceGrant = {
+  boundWorkspaceIds: readonly string[] | "*";
+};
+
 export type RequestTokenProtection = {
   readonly requestToken: string;
   readonly tokenSource?: "env" | "ephemeral" | "rotated";
-  readonly boundWorkspaceIds?: readonly string[];
+  readonly boundWorkspaceIds?: readonly string[] | "*";
+  readonly liveWorkspaceGrant?: LiveWorkspaceGrant;
   readonly allowProcessSecretPatch?: boolean;
   readonly workspaceTokens?: readonly WorkspaceTokenBinding[];
 };
@@ -130,11 +136,9 @@ export function resolveRequestTokenGrants(
 ): readonly RequestTokenGrant[] {
   const processGrant: RequestTokenGrant = {
     token: protection.requestToken,
-    workspaceIds:
-      protection.boundWorkspaceIds === undefined
-        ? "*"
-        : protection.boundWorkspaceIds,
-    allowProcessSecretPatch: protection.allowProcessSecretPatch ?? true
+    // Unbound process tokens must not inherit all-workspace access.
+    workspaceIds: resolveBoundWorkspaceIds(protection),
+    allowProcessSecretPatch: protection.allowProcessSecretPatch ?? false
   };
   const workspaceGrants = (protection.workspaceTokens ?? []).map((binding) => ({
     token: binding.token,
@@ -234,29 +238,77 @@ function rejectLongLivedStaticTokenOnRemoteBind(
   );
 }
 
+export function resolveBoundWorkspaceIds(
+  protection: RequestTokenProtection
+): readonly string[] | "*" {
+  return protection.liveWorkspaceGrant?.boundWorkspaceIds ?? protection.boundWorkspaceIds ?? [];
+}
+
+export function ensureLiveWorkspaceGrant<T extends RequestTokenProtection>(protection: T): T {
+  if (protection.liveWorkspaceGrant !== undefined) {
+    return protection;
+  }
+  const liveWorkspaceGrant: LiveWorkspaceGrant = {
+    boundWorkspaceIds: protection.boundWorkspaceIds ?? []
+  };
+  return Object.freeze({ ...protection, liveWorkspaceGrant }) as T;
+}
+
+export function bindProcessWorkspaceIds(
+  protection: RequestTokenProtection,
+  workspaceIds: readonly string[]
+): void {
+  const live = protection.liveWorkspaceGrant;
+  if (live === undefined) {
+    throw new AlayaError("INTERNAL", "process workspace grant cannot be bound on a snapshot");
+  }
+  live.boundWorkspaceIds = Object.freeze(
+    workspaceIds.map((id) => id.trim()).filter((id) => id.length > 0)
+  );
+}
+
 function applyDefaultWorkspaceBinding<T extends RequestTokenProtection>(
   protection: T,
   envLike: RequestProtectionEnvLike
 ): T {
   if (protection.boundWorkspaceIds !== undefined) {
+    syncLiveWorkspaceGrant(protection, protection.boundWorkspaceIds);
     return protection;
   }
   const boundWorkspaceIds = workspaceIdsFromEnv(envLike);
   if (boundWorkspaceIds === undefined) {
     return protection;
   }
+  syncLiveWorkspaceGrant(protection, boundWorkspaceIds);
   return Object.freeze({
     ...protection,
     boundWorkspaceIds
   }) as T;
 }
 
-function workspaceIdsFromEnv(envLike: RequestProtectionEnvLike): readonly string[] | undefined {
+function syncLiveWorkspaceGrant(
+  protection: RequestTokenProtection,
+  boundWorkspaceIds: readonly string[] | "*"
+): void {
+  if (protection.liveWorkspaceGrant !== undefined) {
+    protection.liveWorkspaceGrant.boundWorkspaceIds = boundWorkspaceIds;
+  }
+}
+
+function workspaceIdsFromEnv(envLike: RequestProtectionEnvLike): readonly string[] | "*" | undefined {
+  const listedRaw = envLike.ALAYA_REQUEST_TOKEN_WORKSPACES?.trim();
+  if (listedRaw === "*") {
+    return "*";
+  }
   const listed = envLike.ALAYA_REQUEST_TOKEN_WORKSPACES?.split(",")
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
   if (listed !== undefined && listed.length > 0) {
     return listed;
+  }
+  const current = envLike.ALAYA_WORKSPACE_ID?.trim();
+  if (current !== undefined && current.length > 0) {
+    return [current];
   }
   return undefined;
 }

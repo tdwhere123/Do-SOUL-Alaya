@@ -69,6 +69,7 @@ describe("embedding seed-or-seal", () => {
     const neighbors = ["seed-a", "seed-b", "seed-c"].map((objectId) =>
       createMemoryEntry({ object_id: objectId, content: objectId }));
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByWorkspace: vi.fn(async () => [
           createEmbeddingRecord({

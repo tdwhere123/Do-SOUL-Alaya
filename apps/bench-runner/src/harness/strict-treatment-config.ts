@@ -1,32 +1,17 @@
 import { D2Q_SCHEMA_VERSION } from "@do-soul/alaya-core";
+import { parseEnvOptionalBoolean } from "@do-soul/alaya-protocol";
 
 const RAW_EMBEDDING_SCHEMA_VERSION = 1;
 
 export type TreatmentBooleanKey =
   | "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT"
-  | "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
   | "ALAYA_RECALL_D2Q";
 
 export function readOptionalTreatmentBoolean(
   raw: string | undefined,
   key: TreatmentBooleanKey
 ): boolean | null {
-  const value = raw?.trim().toLowerCase();
-  if (value === undefined || value.length === 0) return null;
-  if (value === "1" || value === "true") return true;
-  if (value === "0" || value === "false") return false;
-  throw new Error(`${key} must be true, false, 1, or 0`);
-}
-
-export function refuseRetiredLocalCrossEncoderTreatment(
-  env: Readonly<Record<string, string | undefined>>
-): void {
-  if (readOptionalTreatmentBoolean(
-    env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-  ) === true) {
-    throw new Error("local cross-encoder reranking is retired");
-  }
+  return parseEnvOptionalBoolean(raw, key) ?? null;
 }
 
 export function readOptionalOnnxThreadCount(raw: string | undefined): number | null {

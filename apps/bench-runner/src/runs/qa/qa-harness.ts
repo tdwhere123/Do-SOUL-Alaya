@@ -24,6 +24,7 @@
  * see also: apps/bench-runner/src/diagnostics/abstention.ts — `_abs` semantics
  */
 import type { QaChatFn } from "./qa-chat.js";
+import { isEnvFlagDisabled, parseDefaultOnFlag, parseEnvBoolean } from "@do-soul/alaya-protocol";
 
 /** Max chars of stitched memory context handed to the answer model. Override
  * with ALAYA_BENCH_QA_CONTEXT_CHARS to test wider aggregation delivery. */
@@ -205,17 +206,11 @@ function positiveIntEnv(name: string): number | null {
 }
 
 function envEnabled(name: string): boolean {
-  const raw = process.env[name];
-  if (raw === undefined) return false;
-  const normalized = raw.trim().toLowerCase();
-  return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "off";
+  return parseEnvBoolean(process.env[name], name);
 }
 
 function envExplicitlyDisabled(name: string): boolean {
-  const raw = process.env[name];
-  if (raw === undefined) return false;
-  const normalized = raw.trim().toLowerCase();
-  return normalized === "0" || normalized === "false" || normalized === "off";
+  return isEnvFlagDisabled(process.env[name], name);
 }
 
 export function buildQaDeliverySettings(): QaDeliverySettings {
@@ -275,8 +270,7 @@ export function judgeIsCorrect(verdict: string): boolean {
  * needs license to compute from dates. Abstention always keeps the default
  * (those questions must be recognized as unanswerable, not computed through). */
 function v2PromptsEnabled(): boolean {
-  const raw = process.env.ALAYA_BENCH_QA_V2_PROMPTS;
-  return raw !== undefined && raw !== "0" && raw.toLowerCase() !== "false" && raw.toLowerCase() !== "off";
+  return envEnabled("ALAYA_BENCH_QA_V2_PROMPTS");
 }
 
 export function answerSystemFor(questionType: string, isAbstention: boolean): string {
@@ -306,8 +300,10 @@ export function answerSystemFor(questionType: string, isAbstention: boolean): st
   if (
     (questionType === "multi-session" ||
       questionType === "locomo-aggregation") &&
-    process.env.ALAYA_BENCH_QA_AGG_PROMPT !== "0" &&
-    process.env.ALAYA_BENCH_QA_AGG_PROMPT !== "off"
+    parseDefaultOnFlag(
+      process.env.ALAYA_BENCH_QA_AGG_PROMPT,
+      "ALAYA_BENCH_QA_AGG_PROMPT"
+    )
   ) {
     return ANSWER_SYSTEM_AGGREGATION;
   }

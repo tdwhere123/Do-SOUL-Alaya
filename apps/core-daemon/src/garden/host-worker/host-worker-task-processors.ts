@@ -1,3 +1,4 @@
+import type { EventPublisher } from "@do-soul/alaya-core";
 import {
   CandidateMemorySignalSchema,
   GardenEventType,
@@ -6,9 +7,9 @@ import {
   GardenTier,
   parseGardenEventPayload,
   type CandidateMemorySignal,
+  type EventLogEntry,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
-import type { EventPublisher } from "@do-soul/alaya-core";
 import {
   normalizeSchemaGroundedSignal,
   OfficialApiGardenCompileIncompleteError,
@@ -20,7 +21,6 @@ import type {
   SqliteGardenTaskRepo
 } from "@do-soul/alaya-storage";
 import { buildGardenTaskSignalId } from "../support/task-signal-id.js";
-import type { VerifiedDeliverySourceObservation } from "../../runtime/recall-materialization/recall-materialization-source-receipt.js";
 import type { PostTurnSignalReceiver } from "../post-turn-extract/signal-receiver.js";
 import {
   finalizePostTurnEvidence,
@@ -140,11 +140,13 @@ async function processClaimedPostTurnExtractTask(
     throw error;
   }
   try {
-    await publishPostTurnExtractDispatch(task, payload, input.eventPublisher);
+    const dispatch = await publishPostTurnExtractDispatch(task, payload, input.eventPublisher);
+    const sourceObservation = resolvePostTurnCompileSourceObservation(payload, dispatch);
     const emittedSignalIds = await emitPostTurnExtractSignals(
       task.row,
       payload,
       task.provider,
+      sourceObservation,
       input
     );
     await completePostTurnExtractTask(
@@ -198,8 +200,8 @@ async function publishPostTurnExtractDispatch(
   task: PostTurnExtractTaskRow,
   payload: PostTurnExtractTaskPayload,
   eventPublisher: EventPublisher
-): Promise<void> {
-  await eventPublisher.publish({
+): Promise<EventLogEntry> {
+  return await eventPublisher.publish({
     event_type: GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
     entity_type: "garden_task",
     entity_id: task.row.id,
@@ -218,10 +220,28 @@ async function publishPostTurnExtractDispatch(
   });
 }
 
+function resolvePostTurnCompileSourceObservation(
+  payload: PostTurnExtractTaskPayload,
+  dispatch: EventLogEntry
+): NonNullable<CandidateMemorySignal["source_observation"]> | null {
+  if (payload.source_observation !== null) {
+    return payload.source_observation;
+  }
+  if (payload.source_observed_at === undefined) {
+    return null;
+  }
+  return {
+    observed_at: payload.source_observed_at,
+    authority: "trusted_host_event",
+    source_event_id: dispatch.event_id
+  };
+}
+
 async function emitPostTurnExtractSignals(
   row: GardenTaskRow,
   payload: PostTurnExtractTaskPayload,
   provider: GardenComputeProvider,
+  sourceObservation: NonNullable<CandidateMemorySignal["source_observation"]> | null,
   input: PostTurnExtractRuntimeInput & {
     readonly gardenTaskRepo: SqliteGardenTaskRepo;
     readonly signalReceiver: NonNullable<PostTurnExtractRuntimeInput["signalReceiver"]>;
@@ -234,7 +254,7 @@ async function emitPostTurnExtractSignals(
     createdAt: payload.created_at ?? row.created_at,
     turnContent: buildPostTurnContent(payload),
     turnMessages: buildPostTurnConversationMessages(payload),
-    sourceObservation: payload.source_observation,
+    sourceObservation,
     signalReceiver: input.signalReceiver,
     ...(payload.admitted_source_root_id === undefined
       ? {}
@@ -253,7 +273,7 @@ async function emitPostTurnExtractSignals(
   const candidateSignals = await compilePostTurnExtractTask(
     provider,
     payload,
-    payload.source_observation,
+    sourceObservation,
     row.id
   );
   const extraIds = await receivePostTurnCandidates({
@@ -262,7 +282,7 @@ async function emitPostTurnExtractSignals(
       CandidateMemorySignalSchema.parse({
         ...signal,
         signal_id: buildGardenTaskSignalId(row.id, index),
-        source_observation: payload.source_observation ?? signal.source_observation
+        source_observation: sourceObservation ?? signal.source_observation
       })
     )
   });
@@ -370,7 +390,7 @@ function buildPostTurnExtractCompletionPayload(
 async function compilePostTurnExtractTask(
   provider: GardenComputeProvider,
   payload: PostTurnExtractTaskPayload,
-  sourceObservation: VerifiedDeliverySourceObservation | null,
+  sourceObservation: NonNullable<CandidateMemorySignal["source_observation"]> | null,
   taskId: string
 ): Promise<readonly CandidateMemorySignal[]> {
   const context: GardenCompileContext = {

@@ -1,3 +1,4 @@
+import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import {
   type ExecShellToolInput,
   type ListDirectoryToolInput,
@@ -41,7 +42,8 @@ export type ValidatedBuiltinConversationToolCall =
 
 export async function executeBuiltinConversationTool(
   validatedCall: ValidatedBuiltinConversationToolCall,
-  writableRoots: readonly string[]
+  writableRoots: readonly string[],
+  abortSignal?: AbortSignal
 ): Promise<unknown> {
   switch (validatedCall.toolId) {
     case "tools.read_file":
@@ -51,8 +53,10 @@ export async function executeBuiltinConversationTool(
     case "tools.search_files":
       return await searchFiles(validatedCall.input, writableRoots);
     case "tools.write_file":
+      throwIfAborted(abortSignal);
       return await writeFile(validatedCall.input, writableRoots);
     case "tools.exec_shell":
+      throwIfAborted(abortSignal);
       return await execShell(validatedCall.input, writableRoots);
   }
 }

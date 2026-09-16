@@ -1,7 +1,5 @@
 import { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
-import { createAuditedSourceAdmission, fieldContractSha256, deriveAddressableSpanViews, retainedSourceSpeaker,
-  type ConversationServiceDependencies } from "@do-soul/alaya-core";
-import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
+import { createSourceAdmissionPort, fieldContractSha256 } from "@do-soul/alaya-core";
 import { createDaemonServiceFoundation } from "../daemon/wiring/daemon-service-foundation.js";
 import {
   createDaemonCoreServices,
@@ -145,7 +143,6 @@ function buildCoreServiceInput(
 ) {
   const { bootstrap, foundation, repositories } = input;
   return {
-    retainCompileSource: createCompileSourceRetainer(repositories),
     rawConfigService: foundation.rawConfigService,
     eventLogRepo: repositories.eventLogRepo,
     runtimeNotifier: bootstrap.runtimeNotifier,
@@ -161,25 +158,11 @@ function buildCoreServiceInput(
     budgetBankruptcyService: foundation.budgetBankruptcyService,
     healthJournalService: foundation.healthJournalService,
     warn: bootstrap.warnLogger.warn,
-    isPrincipalCodingEngineAvailable: () => foundation.principalCodingAvailability.available
-  };
-}
-
-/** Interactive compilation awaits retained source admission and its audit. */
-export function createCompileSourceRetainer(
-  repositories: Pick<Repositories, "fieldComposition" | "eventLogRepo">
-): NonNullable<ConversationServiceDependencies["retainCompileSource"]> {
-  const admission = createAuditedSourceAdmission({ sha256: fieldContractSha256,
-    stores: repositories.fieldComposition.stores, eventLogRepo: repositories.eventLogRepo });
-  return async (turnContent, context) => {
-    if (context.artifact_key === undefined) throw new Error("compile source identity missing");
-    const content = buildOfficialApiSourceCorpus(turnContent, context.turn_messages);
-    const speaker = retainedSourceSpeaker(context.turn_messages.map((message) => message.role));
-    await admission.admit({ workspace_id: context.workspace_id, source_id: context.artifact_key,
-      source_version: "1", content_bytes: content, evidence_object_id: null,
-      recorded_at: new Date().toISOString(), event_time: context.source_observed_at ?? null,
-      valid_from: null, valid_to: null, scope_class: "project",
-      ...(speaker === undefined ? {} : { speaker }), spans: deriveAddressableSpanViews(content)
-    }, { workspaceId: context.workspace_id });
+    isPrincipalCodingEngineAvailable: () => foundation.principalCodingAvailability.available,
+    database: bootstrap.database,
+    sourceAdmission: createSourceAdmissionPort({
+      stores: repositories.fieldComposition.stores,
+      sha256: fieldContractSha256
+    })
   };
 }

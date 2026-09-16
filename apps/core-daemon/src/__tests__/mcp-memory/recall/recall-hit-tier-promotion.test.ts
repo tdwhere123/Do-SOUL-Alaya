@@ -261,9 +261,9 @@ async function expectNoMutation(
   expect(memory?.storage_tier).toBe(expectedTier);
   expect(memory?.activation_score).toBe(expectedActivation);
 
-  const events = await harness.eventLogRepo.queryByType(
+  const events = (await harness.eventLogRepo.queryByType(
     MemoryGovernanceEventType.SOUL_MEMORY_TIER_PROMOTED
-  );
+  )).events;
   expect(events).toHaveLength(0);
 }
 
@@ -271,9 +271,9 @@ async function expectUsageTelemetry(
   harness: Awaited<ReturnType<typeof createHarness>>,
   expectedCount: number
 ) {
-  const events = await harness.eventLogRepo.queryByType(
+  const events = (await harness.eventLogRepo.queryByType(
     RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED
-  );
+  )).events;
   expect(events).toHaveLength(expectedCount);
   expect(events).toEqual(expect.arrayContaining([
     expect.objectContaining({

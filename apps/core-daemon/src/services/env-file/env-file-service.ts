@@ -5,6 +5,7 @@ import {
   assertPublicHttpProviderUrl,
   formatFileSecretRef,
   isContainedFileSecretPath,
+  parseEnvBoolean,
   parseSecretRefKeychainTarget,
   type RuntimeEmbeddingConfig,
   type RuntimeGardenComputeConfig
@@ -405,7 +406,10 @@ function assertPatchedProviderUrl(providerUrl: string | null, invalidPatch: () =
   }
   try {
     assertPublicHttpProviderUrl(providerUrl, {
-      allowPrivate: processEnvLookup().ALAYA_ALLOW_PRIVATE_PROVIDER_URL === "1"
+      allowPrivate: parseEnvBoolean(
+        processEnvLookup().ALAYA_ALLOW_PRIVATE_PROVIDER_URL,
+        "ALAYA_ALLOW_PRIVATE_PROVIDER_URL"
+      )
     });
   } catch {
     throw invalidPatch();

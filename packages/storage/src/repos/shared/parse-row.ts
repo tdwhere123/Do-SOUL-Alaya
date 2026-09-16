@@ -30,6 +30,7 @@ export function parseRow<T>(value: unknown, parser: RowParser<T>, label: string)
   }
 }
 
+/** Maps unknown query rows through a field parser. Identity `value as Row` hides missing columns. */
 export function parseRows<T>(
   values: unknown,
   parser: RowParser<T>,
@@ -123,6 +124,20 @@ export function readIntegerField(record: Record<string, unknown>, field: string)
     throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
   }
   return value;
+}
+
+export function readSqliteAggregateCountField(
+  record: Record<string, unknown>,
+  field: string
+): number {
+  const value = record[field];
+  if (value === null || value === undefined) {
+    return 0;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
+  }
+  return Math.trunc(value);
 }
 
 export function readFiniteNumberField(record: Record<string, unknown>, field: string): number {

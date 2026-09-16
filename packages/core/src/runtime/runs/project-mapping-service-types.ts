@@ -9,10 +9,11 @@ import type {
 export interface ProjectMappingServiceEventLogRepoPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  transactional<T>(fn: () => T): T;
 }
 
 export interface ProjectMappingServiceProjectMappingRepoPort {
-  create(anchor: ProjectMappingAnchor): Promise<void>;
+  create(anchor: ProjectMappingAnchor): void;
   findById(id: string): Promise<Readonly<ProjectMappingAnchor> | null>;
   findByIds(ids: readonly string[]): Promise<readonly Readonly<ProjectMappingAnchor>[]>;
   findByWorkspace(
@@ -28,7 +29,7 @@ export interface ProjectMappingServiceProjectMappingRepoPort {
     newState: ProjectMappingStateType,
     acceptedBy: AcceptedByType | null,
     at: string
-  ): Promise<void>;
+  ): void;
   listPending(workspaceId: string): Promise<readonly Readonly<ProjectMappingAnchor>[]>;
 }
 
@@ -48,7 +49,7 @@ export interface ProjectMappingServiceDependencies {
   readonly projectMappingRepo: ProjectMappingServiceProjectMappingRepoPort;
   readonly memoryRepo: ProjectMappingServiceMemoryRepoPort;
   readonly eventLogRepo: ProjectMappingServiceEventLogRepoPort;
-  readonly runtimeNotifier?: ProjectMappingServiceRuntimeNotifierPort;
+  readonly runtimeNotifier: ProjectMappingServiceRuntimeNotifierPort;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
 }

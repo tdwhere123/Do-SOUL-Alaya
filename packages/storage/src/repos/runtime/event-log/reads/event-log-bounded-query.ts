@@ -2,13 +2,14 @@ import { StorageError } from "../../../../shared/errors.js";
 import {
   enforceEventLogAllHardCap,
   parseEventLogEntryRow,
+  type EventLogAllScopeKind,
   type EventLogRow
 } from "../mappers/event-log-rows.js";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
 
 export function queryBoundedAll(
   loadRows: () => EventLogRow[],
-  scopeKind: "entity" | "run" | "workspace",
+  scopeKind: EventLogAllScopeKind,
   scopeId: string
 ): readonly EventLogEntry[] {
   const rows = loadRows();
@@ -16,7 +17,7 @@ export function queryBoundedAll(
 }
 
 export function wrapBoundedQueryError(
-  scopeKind: "entity" | "run" | "workspace",
+  scopeKind: EventLogAllScopeKind,
   error: unknown
 ): never {
   if (error instanceof StorageError) {

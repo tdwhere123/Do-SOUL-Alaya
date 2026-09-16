@@ -393,7 +393,9 @@ describe("prepareRecallEvalDataDir", () => {
     await expect(buildRecallEvalRuntimeAttribution(disabledProducer, {
       ...env,
       ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true"
-    })).rejects.toThrow(/cross-encoder reranking is retired/u);
+    })).resolves.toMatchObject({
+      answer_rerank: { enabled: false }
+    });
 
     await expect(buildRecallEvalRuntimeAttribution({
       ...disabledProducer,

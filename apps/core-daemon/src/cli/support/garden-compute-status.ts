@@ -21,7 +21,8 @@ type GardenSecretRefResolution = ResolvedSecret | ResolveSecretError;
  * degrade to local_heuristics when credentials are missing.
  */
 export async function resolveGardenComputeStatus(
-  runtime: AlayaDaemonRuntime
+  runtime: AlayaDaemonRuntime,
+  workspaceId: string
 ): Promise<GardenComputeStatus> {
   const config = await runtime.services.configService.getRuntimeGardenComputeConfig();
   const provenance = await runtime.services.configService.getGardenCredentialProvenance();
@@ -43,7 +44,26 @@ export async function resolveGardenComputeStatus(
     credential_source: credential,
     routing_decision: deriveGardenRoutingDecision(config, resolved),
     ...keychainCheckField(config.secret_ref, resolved),
-    ...hostWorkerAdvisoryField(config.provider_kind, runtime)
+    ...hostWorkerAdvisoryField(config.provider_kind, runtime, workspaceId),
+    ...(await compileFailureFields(runtime, workspaceId))
+  };
+}
+
+async function compileFailureFields(
+  runtime: AlayaDaemonRuntime,
+  workspaceId: string
+): Promise<
+  Pick<GardenComputeStatus, "failed_post_turn_extract_tasks" | "compile_enqueue_failures">
+> {
+  const backlog = runtime.services.gardenStatus?.getHostWorkerExtractBacklog?.(workspaceId) ?? null;
+  const enqueueFailures =
+    (await runtime.services.gardenStatus?.getRecentCompileEnqueueFailures?.(workspaceId)) ?? 0;
+  if (backlog === null && enqueueFailures === 0) {
+    return {};
+  }
+  return {
+    ...(backlog === null ? {} : { failed_post_turn_extract_tasks: backlog.failed }),
+    compile_enqueue_failures: enqueueFailures
   };
 }
 
@@ -54,12 +74,13 @@ export async function resolveGardenComputeStatus(
 // task repo is wired (non-sqlite harness).
 function hostWorkerAdvisoryField(
   providerKind: GardenComputeStatus["provider_kind"],
-  runtime: AlayaDaemonRuntime
+  runtime: AlayaDaemonRuntime,
+  workspaceId: string
 ): Pick<GardenComputeStatus, "host_worker_advisory"> {
   if (providerKind !== "host_worker") {
     return {};
   }
-  const backlog = runtime.services.gardenStatus.getHostWorkerExtractBacklog();
+  const backlog = runtime.services.gardenStatus.getHostWorkerExtractBacklog(workspaceId);
   if (backlog === null) {
     return {};
   }

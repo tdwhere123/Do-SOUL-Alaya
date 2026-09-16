@@ -1,3 +1,4 @@
+import { readErrorMessage } from "@do-soul/alaya-protocol";
 import {
   NO_STORED_VECTORS_DEGRADATION_REASON,
   resolveEmbeddingWorkspaceScanCap
@@ -11,8 +12,7 @@ import {
   createCosineBatchScorer,
   isFiniteNonzeroVector,
   isProviderMatchedEmbedding,
-  isUsableEmbeddingRecordVector,
-  toErrorMessage
+  isUsableEmbeddingRecordVector
 } from "../helpers.js";
 import type { QueryEmbeddingEngine } from "../query-embedding-engine.js";
 import { resolveEmbeddingRecallTiers } from "../tier-config.js";
@@ -204,7 +204,7 @@ export class RequestScoreSnapshotBuilder {
         : initial;
       return resolveQuerySnapshot(handle, snapshot);
     } catch (error) {
-      const message = toErrorMessage(error);
+      const message = readErrorMessage(error, "unknown_error");
       this.deps.warn("embedding request score snapshot failed", {
         workspace_id: params.workspaceId,
         run_id: params.runId,
@@ -352,7 +352,7 @@ export class RequestScoreSnapshotBuilder {
       workspace_id: params.workspaceId,
       run_id: params.runId,
       reason: "local_vector_lookup_failed",
-      error: toErrorMessage(error)
+      error: readErrorMessage(error, "unknown_error")
     });
   }
 }

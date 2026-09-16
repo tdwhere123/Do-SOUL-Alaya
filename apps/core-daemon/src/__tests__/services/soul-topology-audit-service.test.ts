@@ -18,7 +18,8 @@ describe("SoulTopologyAuditService", () => {
     const service = new SoulTopologyAuditService({
       eventLogRepo: {
         append
-      }
+      },
+      runtimeNotifier: { notifyEntry: () => undefined }
     });
 
     await service.appendPathTopologyExploreCompleted(createTopologyFixture());

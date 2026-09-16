@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AcceptedBy, MemoryDimension, ProjectMappingEventType, type EventLogEntry, type ProjectMappingAnchor } from "@do-soul/alaya-protocol";
+import { AcceptedBy, MemoryDimension, type EventLogEntry, type ProjectMappingAnchor } from "@do-soul/alaya-protocol";
 import { ProjectMappingService } from "../../../runtime/runs/project-mapping-service.js";
 import { createAnchor, createDependencies, createMemoryEntry } from "./project-mapping-service-test-fixtures.js";
 
@@ -106,64 +106,81 @@ it("fails batchAccept when a requested anchor is missing from the batch lookup",
     });
   });
 
-it("keeps the suggestion event when persistence fails after EventLog append", async () => {
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-      event_id: "event-suggested",
-      created_at: "2026-03-28T01:00:00.000Z",
-      revision: 0,
-      ...event
-    }));
+it("rolls back the suggestion EventLog row when mapping create throws", async () => {
+    const appended: EventLogEntry[] = [];
     const { dependencies } = createDependencies({
       eventLogRepo: {
-        append,
-        queryByEntity: vi.fn(async () => [] as readonly EventLogEntry[])
+        append: (event) => {
+          const entry = {
+            event_id: `event-${appended.length + 1}`,
+            created_at: "2026-03-28T01:00:00.000Z",
+            revision: appended.length,
+            ...event
+          };
+          appended.push(entry);
+          return entry;
+        },
+        queryByEntity: vi.fn(async () => appended),
+        transactional: <T>(fn: () => T): T => {
+          const snapshot = appended.length;
+          try {
+            return fn();
+          } catch (error) {
+            appended.length = snapshot;
+            throw error;
+          }
+        }
       },
       projectMappingRepo: {
         ...createDependencies().dependencies.projectMappingRepo,
-        create: vi.fn(async () => {
+        create: () => {
           throw new Error("insert failed");
-        })
+        }
       }
     });
     const service = new ProjectMappingService(dependencies);
 
     await expect(service.suggest("memory-1", "workspace-1", "user_action")).rejects.toThrow("insert failed");
-    expect(append).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event_type: ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED
-      })
-    );
+    expect(appended).toEqual([]);
   });
 
-it("keeps the transition event when state persistence fails after EventLog append", async () => {
+it("rolls back the transition EventLog row when mapping update throws", async () => {
     const anchor = Object.freeze(createAnchor({ object_id: "mapping-transition-fail" }));
-    const append = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-      event_id: "event-transition",
-      created_at: "2026-03-28T01:00:00.000Z",
-      revision: 0,
-      ...event
-    }));
+    const appended: EventLogEntry[] = [];
     const { dependencies } = createDependencies({
       eventLogRepo: {
-        append,
-        queryByEntity: vi.fn(async () => [] as readonly EventLogEntry[])
+        append: (event) => {
+          const entry = {
+            event_id: `event-${appended.length + 1}`,
+            created_at: "2026-03-28T01:00:00.000Z",
+            revision: appended.length,
+            ...event
+          };
+          appended.push(entry);
+          return entry;
+        },
+        queryByEntity: vi.fn(async () => appended),
+        transactional: <T>(fn: () => T): T => {
+          const snapshot = appended.length;
+          try {
+            return fn();
+          } catch (error) {
+            appended.length = snapshot;
+            throw error;
+          }
+        }
       },
       projectMappingRepo: {
         ...createDependencies().dependencies.projectMappingRepo,
         findById: vi.fn(async (objectId: string) => (objectId === anchor.object_id ? anchor : null)),
-        updateState: vi.fn(async () => {
+        updateState: () => {
           throw new Error("update failed");
-        })
+        }
       }
     });
     const service = new ProjectMappingService(dependencies);
 
     await expect(service.reject(anchor.object_id)).rejects.toThrow("update failed");
-    expect(append).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event_type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED,
-        entity_id: anchor.object_id
-      })
-    );
+    expect(appended).toEqual([]);
   });
 });

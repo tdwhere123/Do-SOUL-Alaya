@@ -1,6 +1,7 @@
-import type {
-  MemorySearchResult,
-  SoulMemorySearchDegradationReason
+import {
+  parseEnvBoolean,
+  type MemorySearchResult,
+  type SoulMemorySearchDegradationReason
 } from "@do-soul/alaya-protocol";
 import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
 import type {
@@ -170,6 +171,5 @@ export function dedupeDeliveredObjects(
 export function shouldRunBenchEdgePlane(
   env: Readonly<Record<string, string | undefined>> = process.env
 ): boolean {
-  const raw = env[BENCH_EDGE_PLANE_ENV]?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+  return parseEnvBoolean(env[BENCH_EDGE_PLANE_ENV], BENCH_EDGE_PLANE_ENV);
 }

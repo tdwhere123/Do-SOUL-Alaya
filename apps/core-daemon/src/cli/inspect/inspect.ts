@@ -11,6 +11,7 @@ import {
   EXTERNAL_DAEMON_REQUEST_TOKEN_ENV,
   DEFAULT_INSPECTOR_PORT
 } from "./inspect-constants.js";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 import { defaultOpenUrl, openCommandCandidates, openUrlWithSpawn } from "./inspect-browser.js";
 import {
   defaultGenerateLaunchCode,
@@ -19,7 +20,8 @@ import {
   defaultSpawnInspector,
   waitForChildExitOrSignal,
   waitForInspectorReady,
-  buildInspectorChildEnv
+  buildInspectorChildEnv,
+  writeInheritedLaunchProof
 } from "./inspect-child-process.js";
 import {
   defaultCheckPortAvailable,
@@ -53,7 +55,7 @@ export type {
   WorkspaceLookupResult,
   WorkspaceSummary
 } from "./inspect-types.js";
-export { buildInspectorChildEnv, openCommandCandidates, openUrlWithSpawn };
+export { buildInspectorChildEnv, openCommandCandidates, openUrlWithSpawn, writeInheritedLaunchProof };
 
 export function createInspectCommand(deps: InspectCommandDependencies = {}): AlayaSubcommandSpec<InspectArgs> {
   return {
@@ -84,11 +86,10 @@ async function executeInspect(
       return launchResult.result;
     }
     launch = launchResult.launch;
-    const opened = await maybeOpenInspectorUrl(args.open, launch.url, deps, ctx);
-    const printedUrl = opened ? inspectorUrlWithoutLaunchCode(launch.url) : launch.url;
-    ctx.stdout.write(`${printedUrl}\n`);
+    await maybeOpenInspectorUrl(args.open, launch.url, deps, ctx);
+    ctx.stdout.write(`${launch.url}\n`);
     await waitForChildExitOrSignal(launch.child);
-    return { exitCode: ALAYA_SYSEXITS.OK, json: { url: printedUrl, port: args.port } };
+    return { exitCode: ALAYA_SYSEXITS.OK, json: { url: launch.url, port: args.port } };
   } catch (error) {
     launch?.child.kill("SIGTERM");
     ctx.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -151,11 +152,15 @@ async function launchInspector(
     getRequestToken: deps.getRequestToken,
     externalRequestToken: externalDaemonRequestToken
   });
+  if (args.workspace !== null) {
+    bindInspectStartedDaemonWorkspace(daemon.startedDaemon, args.workspace.trim());
+  }
   const workspaceResolution = await resolveWorkspaceForInspector(ctx, deps, daemon.url, args.workspace, daemonRequestAuth);
   if (workspaceResolution.status !== "ok") {
     return { ok: false, result: { exitCode: workspaceResolution.exitCode } };
   }
-  const url = buildInspectorUrl(args.port, workspaceResolution.workspaceId, launchCode);
+  bindInspectStartedDaemonWorkspace(daemon.startedDaemon, workspaceResolution.workspaceId);
+  const url = buildInspectorUrl(args.port, workspaceResolution.workspaceId);
   const child = (deps.spawnInspector ?? defaultSpawnInspector)({
     port: args.port,
     token,
@@ -351,14 +356,8 @@ function applyInspectOption(
   return { ok: true, handled: false, consumed: 0, nextState: state };
 }
 
-function buildInspectorUrl(port: number, workspaceId: string, launchCode: string): string {
-  return `http://127.0.0.1:${port}/?workspaceId=${encodeURIComponent(workspaceId)}#launch=${encodeURIComponent(launchCode)}`;
-}
-
-function inspectorUrlWithoutLaunchCode(url: string): string {
-  const parsed = new URL(url);
-  parsed.hash = "";
-  return parsed.toString();
+function buildInspectorUrl(port: number, workspaceId: string): string {
+  return `http://127.0.0.1:${port}/?workspaceId=${encodeURIComponent(workspaceId)}`;
 }
 
 function buildInspectorEnv(daemonUrl: string, daemonRequestAuth?: DaemonRequestAuth): NodeJS.ProcessEnv {
@@ -405,7 +404,13 @@ interface InspectorLaunch {
   readonly startedDaemon: InspectDaemonServer | null;
 }
 
+function bindInspectStartedDaemonWorkspace(
+  startedDaemon: InspectDaemonServer | null,
+  workspaceId: string
+): void {
+  startedDaemon?.bindProcessWorkspaceIds?.([workspaceId]);
+}
+
 function fixedTokenOverrideAllowed(env: NodeJS.ProcessEnv): boolean {
-  const value = env[ALLOW_FIXED_TOKEN_ENV]?.trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes";
+  return parseEnvBoolean(env[ALLOW_FIXED_TOKEN_ENV], ALLOW_FIXED_TOKEN_ENV);
 }

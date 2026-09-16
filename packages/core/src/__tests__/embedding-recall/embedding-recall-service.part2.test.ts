@@ -15,6 +15,7 @@ it("records degraded fallback when the prepared query embedding is not ready by 
       record: vi.fn(async (_entry: HealthJournalRecordInput) => undefined)
     };
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [
           createEmbeddingRecord({
@@ -89,6 +90,7 @@ it("records no_stored_vectors when querySupplement finds an empty vector table",
       record: vi.fn(async (_entry: HealthJournalRecordInput) => undefined)
     };
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [])
       },
@@ -143,6 +145,7 @@ it("degrades to keyword-only recall when the embedding provider is unavailable",
       record: vi.fn(async (_entry: HealthJournalRecordInput) => undefined)
     };
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [])
       },
@@ -203,6 +206,7 @@ it("degrades to keyword-only recall when query embedding generation fails", asyn
     };
     const warn = vi.fn();
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [
           createEmbeddingRecord({
@@ -281,6 +285,7 @@ it("keeps successful supplement recall on the lexical path when queried/merged t
       });
     const warn = vi.fn();
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [
           createEmbeddingRecord({
@@ -343,6 +348,7 @@ it("keeps degraded keyword-only recall when degrade telemetry and health journal
     };
     const warn = vi.fn();
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [])
       },

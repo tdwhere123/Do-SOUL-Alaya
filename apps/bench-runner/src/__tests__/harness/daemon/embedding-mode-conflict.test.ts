@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
+import { resolveEffectiveEmbeddingPosture } from "@do-soul/alaya";
 import {
   assertBenchEmbeddingModeMatchesEffective,
   resolveSourceRefRobust
 } from "../../../harness/daemon/daemon-environment.js";
 
 describe("bench embeddingMode vs effective supplement", () => {
-  it("rejects disabled when local_onnx default would leave supplement on", () => {
-    expect(() => assertBenchEmbeddingModeMatchesEffective("disabled", {
+  it("rejects disabled only when the probed local_onnx supplement is on", () => {
+    const environment: Readonly<Record<string, string | undefined>> = {
       ALAYA_EMBEDDING_PROVIDER: "local_onnx"
-    })).toThrow(/embeddingMode=disabled but effective embedding supplement is on/);
+    };
+    const run = () => assertBenchEmbeddingModeMatchesEffective("disabled", environment);
+    if (resolveEffectiveEmbeddingPosture((key) => environment[key]).embeddingSupplementEnabled) {
+      expect(run).toThrow(/embeddingMode=disabled but effective embedding supplement is on/);
+      return;
+    }
+    expect(run).not.toThrow();
   });
 
   it("accepts disabled when supplement is explicitly off", () => {
@@ -16,6 +23,13 @@ describe("bench embeddingMode vs effective supplement", () => {
       ALAYA_EMBEDDING_PROVIDER: "local_onnx",
       ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false"
     })).not.toThrow();
+  });
+
+  it("rejects disabled when openai supplement is on", () => {
+    expect(() => assertBenchEmbeddingModeMatchesEffective("disabled", {
+      ALAYA_EMBEDDING_PROVIDER: "openai",
+      ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true"
+    })).toThrow(/embeddingMode=disabled but effective embedding supplement is on/);
   });
 });
 

@@ -317,7 +317,7 @@ describe("LongMemEval run provenance", () => {
           ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
         }
       }
-    })).toBe(false);
+    })).toBe(true);
     expect(isLongMemEvalRunProvenanceGateEligible({
       ...currentProvenance,
       runtime: {
@@ -354,7 +354,7 @@ describe("LongMemEval run provenance", () => {
         }
       }
     })).toThrow(/ALAYA_RECALL_D2Q/u);
-    expect(() => isLongMemEvalRunProvenanceGateEligible({
+    expect(isLongMemEvalRunProvenanceGateEligible({
       ...currentProvenance,
       runtime: {
           ...currentProvenance.runtime,
@@ -363,7 +363,7 @@ describe("LongMemEval run provenance", () => {
           ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "sometimes"
         }
       }
-    })).toThrow(/ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK/u);
+    })).toBe(true);
     expect(isLongMemEvalRunProvenanceGateEligible({
       ...currentProvenance,
       runtime: {

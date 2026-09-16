@@ -1,7 +1,6 @@
-import {
-  readOptionalTreatmentBoolean,
-  refuseRetiredLocalCrossEncoderTreatment
-} from "../strict-treatment-config.js";
+import { readOptionalTreatmentBoolean } from "../strict-treatment-config.js";
+import { warnRetiredLocalCrossEncoderTreatment } from
+  "../daemon/daemon-environment.js";
 
 export interface BiEncoderCandidateDiagnostics {
   readonly capture_receipt?: Readonly<{
@@ -67,7 +66,7 @@ export function assertBiEncoderRunActivation(
 export function requiresEmbeddingTreatmentDiagnostics(
   env: Readonly<Record<string, string | undefined>>
 ): boolean {
-  refuseRetiredLocalCrossEncoderTreatment(env);
+  warnRetiredLocalCrossEncoderTreatment(env);
   return readOptionalTreatmentBoolean(
     env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT,
     "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT"

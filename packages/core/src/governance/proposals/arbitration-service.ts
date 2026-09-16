@@ -68,9 +68,9 @@ export class ArbitrationService {
     const { sourceClaim } = await this.requireClaimsForEdge(parsedInput, parsedWorkspaceId);
     const timestamp = this.now();
     const edge = buildConflictMatrixEdge(this.generateObjectId, parsedInput, sourceClaim.workspace_id, timestamp);
-    return await this.eventPublisher().appendApplyThenPropagate(
-      buildConflictMatrixEdgeCreatedEntry(edge),
-      async () => await this.dependencies.conflictMatrixRepo.create(edge)
+    return await this.eventPublisher().appendManyWithMutation(
+      [buildConflictMatrixEdgeCreatedEntry(edge)],
+      () => this.dependencies.conflictMatrixRepo.create(edge)
     );
   }
 
@@ -265,9 +265,9 @@ export class ArbitrationService {
     await this.transitionIncumbentClaimIfNeeded(incumbentClaim, winnerClaimId, options);
     await this.transitionWinnerClaimIfNeeded(winnerClaim, options);
     const timestamp = this.now();
-    return await this.eventPublisher().appendApplyThenPropagate(
-      buildWinnerChangedEntry(slot, winnerClaimId, options, timestamp),
-      async () => await this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, timestamp, timestamp)
+    return await this.eventPublisher().appendManyWithMutation(
+      [buildWinnerChangedEntry(slot, winnerClaimId, options, timestamp)],
+      () => this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, timestamp, timestamp)
     );
   }
 

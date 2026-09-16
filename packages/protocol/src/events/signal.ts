@@ -5,6 +5,7 @@ import {
   SignalKindSchema,
   SignalSourceSchema
 } from "../signals/candidate-memory-signal.js";
+import { ReconciliationDeferralSchema } from "../governance/reconciliation-decision.js";
 import {
   BoundedIdSchema,
   BoundedJsonObjectSchema,
@@ -25,6 +26,7 @@ const signalEventTypeValues = [
 ] as const;
 
 const triageResultValues = ["accepted", "dropped", "deferred"] as const;
+const signalDeferClassValues = ["source_grounding", "write_path"] as const;
 const SourceDeliveryIdsSchema = z.array(BoundedIdSchema).min(1).max(32).readonly();
 
 export const SignalEventType = {
@@ -36,6 +38,14 @@ export const SignalEventType = {
 } as const;
 
 export const SignalEventTypeSchema = z.enum(signalEventTypeValues);
+
+export const SignalDeferClass = {
+  SOURCE_GROUNDING: "source_grounding",
+  WRITE_PATH: "write_path"
+} as const;
+
+export const SignalDeferClassSchema = z.enum(signalDeferClassValues);
+export type SignalDeferClass = z.infer<typeof SignalDeferClassSchema>;
 
 export const SoulSignalEmittedPayloadSchema = z.object({
   signal_id: BoundedIdSchema,
@@ -71,7 +81,8 @@ export const SoulSignalTriagedPayloadSchema = z.object({
   // Governance/audit only (invariant §14): which fail-closed rule deferred
   // materialization. Never implies durable memory creation.
   defer_reason: BoundedLabelSchema.optional(),
-  defer_class: z.literal("source_grounding").optional()
+  defer_class: SignalDeferClassSchema.optional(),
+  deferral: ReconciliationDeferralSchema.optional()
 }).strict().readonly();
 
 export const SoulSignalMaterializedPayloadSchema = z

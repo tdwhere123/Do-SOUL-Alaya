@@ -1,4 +1,5 @@
 import { PassThrough } from "node:stream";
+import { parseDefaultOnFlag } from "@do-soul/alaya-protocol";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { type AlayaDaemonRuntime } from "@do-soul/alaya";
 import { createAlayaCliBridge } from "@do-soul/alaya/cli/bridge";
@@ -54,10 +55,9 @@ export async function callMcpTool<TOutput>(
 }
 
 export function benchSessionSurfacesEnabled(): boolean {
-  const raw = process.env.ALAYA_BENCH_SESSION_SURFACES?.trim().toLowerCase();
-  if (raw === undefined || raw === "") {
-    return true;
-  }
-  return !(raw === "0" || raw === "false" || raw === "off" || raw === "no");
+  return parseDefaultOnFlag(
+    process.env.ALAYA_BENCH_SESSION_SURFACES,
+    "ALAYA_BENCH_SESSION_SURFACES"
+  );
 }
 

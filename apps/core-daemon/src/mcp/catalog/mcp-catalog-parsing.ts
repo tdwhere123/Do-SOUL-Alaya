@@ -1,7 +1,8 @@
 import {
   ToolProviderToolSpecSchema,
   type EnvLookup,
-  type ToolProviderToolSpec
+  type ToolProviderToolSpec,
+  AlayaError
 } from "@do-soul/alaya-protocol";
 
 export type { EnvLookup };
@@ -79,11 +80,14 @@ export function parseDaemonMcpServerRuntimeConfigs(
   try {
     parsed = JSON.parse(rawValue);
   } catch (error) {
-    throw new Error("ALAYA_MCP_SERVER_CONFIG_JSON is not valid JSON", { cause: error });
+    throw new AlayaError("VALIDATION", "ALAYA_MCP_SERVER_CONFIG_JSON is not valid JSON", { cause: error });
   }
   const envelope = JsonObjectRecordSchema.safeParse(parsed);
   if (!envelope.success) {
-    throw new Error("ALAYA_MCP_SERVER_CONFIG_JSON must be a JSON object of server configs");
+    throw new AlayaError(
+      "VALIDATION",
+      "ALAYA_MCP_SERVER_CONFIG_JSON must be a JSON object of server configs"
+    );
   }
 
   const runtimeConfigs: Record<string, DaemonMcpServerRuntimeConfig> = {};
@@ -148,7 +152,7 @@ function parseDaemonMcpServerRuntimeConfig(
   try {
     const url = new URL(endpoint);
     if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new Error("unsupported protocol");
+      throw new AlayaError("VALIDATION", "unsupported protocol");
     }
     if (!isLoopbackMcpEndpoint(url)) {
       warn("dropping MCP HTTP runtime config with non-local endpoint", {
@@ -222,7 +226,7 @@ function parseMcpToolCatalogByServer(
 
     return byServer;
   } catch (error) {
-    throw new Error("ALAYA_MCP_TOOL_CATALOG_JSON is not valid JSON", { cause: error });
+    throw new AlayaError("VALIDATION", "ALAYA_MCP_TOOL_CATALOG_JSON is not valid JSON", { cause: error });
   }
 }
 

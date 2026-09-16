@@ -2,16 +2,17 @@ import {
   ComputeRecallGardenEventType,
   HealthEventKind,
   RecallEmbeddingSupplementDegradedPayloadSchema,
-  type EventLogEntry
+  type EventLogEntry,
+  readErrorMessage
 } from "@do-soul/alaya-protocol";
 
 import { bindEventPublisher } from "../runtime/event-publisher.js";
-import { toErrorMessage } from "./helpers.js";
 import type { EmbeddingRecallServiceDependencies } from "./types.js";
 
 export interface EmbeddingRecallTelemetryDependencies {
   readonly eventLogRepo: EmbeddingRecallServiceDependencies["eventLogRepo"];
   readonly eventPublisher?: EmbeddingRecallServiceDependencies["eventPublisher"];
+  readonly runtimeNotifier: EmbeddingRecallServiceDependencies["runtimeNotifier"];
   readonly healthJournalRecorder: EmbeddingRecallServiceDependencies["healthJournalRecorder"];
   readonly provider: EmbeddingRecallServiceDependencies["provider"];
   readonly now: () => string;
@@ -34,6 +35,7 @@ export class EmbeddingRecallTelemetry {
       await bindEventPublisher({
         eventPublisher: this.deps.eventPublisher,
         eventLogRepo: this.deps.eventLogRepo,
+        runtimeNotifier: this.deps.runtimeNotifier,
         purpose: "EmbeddingRecallTelemetry"
       }).publish({
         event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
@@ -58,7 +60,7 @@ export class EmbeddingRecallTelemetry {
         run_id: params.runId,
         query_id: params.queryId,
         stage: "event_log",
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
     }
 
@@ -84,7 +86,7 @@ export class EmbeddingRecallTelemetry {
         run_id: params.runId,
         query_id: params.queryId,
         stage: "health_journal",
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
     }
   }
@@ -98,7 +100,9 @@ export class EmbeddingRecallTelemetry {
   }): Promise<void> {
     try {
       await bindEventPublisher({
+        eventPublisher: this.deps.eventPublisher,
         eventLogRepo: this.deps.eventLogRepo,
+        runtimeNotifier: this.deps.runtimeNotifier,
         purpose: "EmbeddingRecallTelemetry"
       }).publish(params.entry);
     } catch (error) {
@@ -107,7 +111,7 @@ export class EmbeddingRecallTelemetry {
         run_id: params.runId,
         query_id: params.queryId,
         stage: params.stage,
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
     }
   }

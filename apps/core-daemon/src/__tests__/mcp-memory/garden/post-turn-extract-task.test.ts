@@ -391,9 +391,9 @@ describe("post-turn extract Garden task", () => {
       status: "completed",
       claimed_by: "in-process"
     });
-    const completedEvents = await harness.eventLogRepo.queryByType(
+    const completedEvents = (await harness.eventLogRepo.queryByType(
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-    );
+    )).events;
     expect(completedEvents.at(-1)?.payload_json).toMatchObject({
       task_kind: GardenTaskKind.POST_TURN_EXTRACT,
       success: true,

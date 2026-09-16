@@ -219,7 +219,7 @@ surfaces are:
   diagnostics, and MCP-memory-tool fallback.
 - **Memory Inspector** (`apps/inspector`) — local-only memory-tooling
   surface, started on demand via `alaya inspect`. Listens on
-  `127.0.0.1:5174` with a per-launch random token; serves seven primary
+  `127.0.0.1:5174` with a per-launch httpOnly session; serves seven primary
   routes (`/overview`, `/governance`, `/memory-browser`, `/graph`,
   `/system`, `/recall`, `/bench-trend`) plus legacy redirects into
   those pages. Inspector writes are
@@ -241,8 +241,8 @@ surfaces are:
 
 The MCP server and CLI fallback share one runtime contract; CLI
 fallback parity with MCP is enforced by tests. The Inspector consumes
-daemon HTTP routes only and has its own contract surface (token-based
-auth + JSON over HTTP, no SSE / WebSocket).
+daemon HTTP routes only and has its own contract surface (httpOnly session cookie
+  + JSON over HTTP, no SSE / WebSocket).
 
 Persistent daemon HTTP authentication has an explicit operator-owned
 lifecycle: `ALAYA_REQUEST_TOKEN` remains stable across restarts, and changing
@@ -263,10 +263,13 @@ high-confidence facts only when the env is `1` or `true`.
 
 ## Runtime Write Model
 
-EventPublisher-owned runtime transitions stay EventLog-first:
+EventPublisher-owned runtime transitions stay EventLog-first. The
+durable pair shares one SQLite transaction
+(`appendManyWithMutation`): EventLog append and the owned mutate
+commit together. In-process notification runs after that commit.
 
 ```text
-EventLog append -> DB update -> audit row -> in-process notification
+EventLog append + DB mutate (one transaction) -> in-process notification
                                               (RuntimeNotifier listeners)
 ```
 
@@ -294,16 +297,13 @@ do not need the full envelope). Daemon wiring instantiates one
 concrete `RuntimeNotifier` and registers it on `EventPublisher` at
 startup step 3 of `Daemon Startup Ordering` below.
 
-Production services take a fully wired `EventPublisher`. Legacy call
-sites may still pass a raw EventLog repo through
-`bindEventPublisher({ purpose, eventLogRepo })`. That adapter emits
-`ALAYA_EVENT_PUBLISHER_ADAPTER_FALLBACK` when `runtimeNotifier` or
-`runHotStateService` is omitted, then falls back to inert ports so
-EventLog rows commit without waking subscribers. **Removal gate:**
-delete `bindEventPublisher`'s inert fallback once every production
-call site injects `runtimeNotifier` and `runHotStateService` (or an
-already-constructed `eventPublisher`). Until then, inert success
-without the warning is a regression.
+Production services take a fully wired `EventPublisher`. Remaining
+call sites that still pass a raw EventLog repo through
+`bindEventPublisher({ purpose, eventLogRepo, runtimeNotifier })` must
+supply `notifyEntry`. A missing notifier is a wiring defect and fails
+startup rather than falling back to an inert stub. Tests that need a
+silent subscriber pass an explicit no-op notifier. Run hot-state
+apply may be omitted on adapters that never mutate run rows.
 
 **No SSE.** Alaya does not expose an SSE stream because no surface
 consumes one. The agent-attach surfaces (MCP server + CLI fallback)

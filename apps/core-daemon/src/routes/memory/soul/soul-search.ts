@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
-import { capableRecallConsumerDeclaration, type WorkspaceService } from "@do-soul/alaya-core";
+import { capableRecallConsumerDeclaration, CoreError, type WorkspaceService } from "@do-soul/alaya-core";
 import { toPublicToolError } from "@do-soul/alaya-protocol";
 import type { McpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { isRequestBodyTooLargeError, throwInvalidRequestBody } from "../../shared/shared.js";
@@ -52,8 +52,14 @@ export function registerSoulSearchRoutes(app: Hono, services: SoulSearchRouteSer
     try {
       since = parseOptionalIsoDatetime(body.since);
       until = parseOptionalIsoDatetime(body.until);
-    } catch {
-      return context.json({ success: false, error: "invalid datetime" }, 400);
+    } catch (error) {
+      if (error instanceof CoreError && error.code === "VALIDATION") {
+        return context.json(
+          { success: false, error: "invalid datetime", error_code: error.code },
+          400
+        );
+      }
+      throw error;
     }
     let timeField: "created_at" | "last_used_at" | undefined;
     if (body.time_field === undefined) {
@@ -118,7 +124,7 @@ function parseOptionalIsoDatetime(raw: unknown): string | null | undefined {
   if (raw === null) return null;
   if (raw === undefined) return undefined;
   if (typeof raw !== "string") {
-    throw new Error("invalid datetime");
+    throw new CoreError("VALIDATION", "invalid datetime");
   }
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;

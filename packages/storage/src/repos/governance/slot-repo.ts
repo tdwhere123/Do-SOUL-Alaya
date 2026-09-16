@@ -6,7 +6,7 @@ import { parseRows, readJsonColumn, readNonEmptyStringField, readNullableStringF
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../shared/validators.js";
 
 export interface SlotRepo {
-  create(slot: Slot): Promise<Readonly<Slot>>;
+  create(slot: Slot): Readonly<Slot>;
   findById(objectId: string): Promise<Readonly<Slot> | null>;
   findByUniqueKey(
     canonicalKey: string,
@@ -21,7 +21,7 @@ export interface SlotRepo {
     winnerClaimId: string | null,
     incumbentSince: string | null,
     updatedAt: string
-  ): Promise<Readonly<Slot>>;
+  ): Readonly<Slot>;
 }
 
 const SLOT_SELECT_COLUMNS = `
@@ -124,7 +124,7 @@ export class SqliteSlotRepo implements SlotRepo {
     `);
   }
 
-  public async create(slot: Slot): Promise<Readonly<Slot>> {
+  public create(slot: Slot): Readonly<Slot> {
     const parsedSlot = parseSlot(slot);
 
     try {
@@ -153,8 +153,7 @@ export class SqliteSlotRepo implements SlotRepo {
 
   public async findById(objectId: string): Promise<Readonly<Slot> | null> {
     try {
-      const row = this.findByIdStatement.get(objectId) as SlotRow | undefined;
-      return row === undefined ? null : parseSlotRow(row);
+      return this.loadById(objectId);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load slot ${objectId}.`, error);
     }
@@ -215,12 +214,12 @@ export class SqliteSlotRepo implements SlotRepo {
     }
   }
 
-  public async updateWinner(
+  public updateWinner(
     objectId: string,
     winnerClaimId: string | null,
     incumbentSince: string | null,
     updatedAt: string
-  ): Promise<Readonly<Slot>> {
+  ): Readonly<Slot> {
     const parsedObjectId = parseNonEmptyString(objectId, "slot object id");
     const parsedWinnerClaimId = parseNullableString(winnerClaimId, "winner claim id");
     const parsedIncumbentSince = incumbentSince === null ? null : parseTimestamp(incumbentSince);
@@ -238,7 +237,7 @@ export class SqliteSlotRepo implements SlotRepo {
         throw new StorageError("NOT_FOUND", `Slot ${parsedObjectId} was not found.`);
       }
 
-      const updated = await this.findById(parsedObjectId);
+      const updated = this.loadById(parsedObjectId);
 
       if (updated === null) {
         throw new StorageError("NOT_FOUND", `Slot ${parsedObjectId} was not found after update.`);
@@ -252,6 +251,11 @@ export class SqliteSlotRepo implements SlotRepo {
 
       throw new StorageError("QUERY_FAILED", `Failed to update winner for slot ${parsedObjectId}.`, error);
     }
+  }
+
+  private loadById(objectId: string): Readonly<Slot> | null {
+    const row = this.findByIdStatement.get(objectId) as SlotRow | undefined;
+    return row === undefined ? null : parseSlotRow(row);
   }
 }
 

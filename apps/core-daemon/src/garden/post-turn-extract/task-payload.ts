@@ -8,6 +8,7 @@ export interface PostTurnExtractTaskPayload {
   readonly run_id: string;
   readonly workspace_id: string;
   readonly created_at?: string;
+  readonly source_observed_at?: string;
   readonly source_observation: VerifiedDeliverySourceObservation | null;
   readonly turn_index: number;
   readonly admitted_source_root_id?: string;
@@ -15,6 +16,7 @@ export interface PostTurnExtractTaskPayload {
     readonly last_messages: readonly Readonly<{
       readonly role: string;
       readonly content_excerpt: string;
+      readonly message_id?: string;
     }>[];
   }>;
 }
@@ -25,10 +27,12 @@ export function parsePostTurnExtractTaskPayload(payload: unknown): PostTurnExtra
   }
   const createdAt = parseOptionalStringField(payload, "created_at");
   const admittedSourceRootId = parseOptionalStringField(payload, "admitted_source_root_id");
+  const sourceObservedAt = parseOptionalStringField(payload, "source_observed_at");
   return {
     run_id: parseStringField(payload, "run_id"),
     workspace_id: parseStringField(payload, "workspace_id"),
     ...(createdAt === undefined ? {} : { created_at: createdAt }),
+    ...(sourceObservedAt === undefined ? {} : { source_observed_at: sourceObservedAt }),
     source_observation: readVerifiedDeliverySourceObservation(payload.source_observation),
     turn_index: parsePostTurnIndex(payload.turn_index),
     ...(admittedSourceRootId === undefined
@@ -49,7 +53,7 @@ export function buildPostTurnConversationMessages(
 ): readonly ConversationMessage[] {
   return Object.freeze(
     payload.turn_digest.last_messages.map((message, index) => ({
-      message_id: `post-turn-${payload.run_id}-${payload.turn_index}-${index}`,
+      message_id: message.message_id ?? `post-turn-${payload.run_id}-${payload.turn_index}-${index}`,
       role: message.role as ConversationMessage["role"],
       content: message.content_excerpt
     }))
@@ -65,7 +69,11 @@ function parsePostTurnIndex(turnIndex: unknown): number {
 
 function parsePostTurnMessages(
   turnDigest: unknown
-): readonly Readonly<{ readonly role: string; readonly content_excerpt: string }>[] {
+): readonly Readonly<{
+  readonly role: string;
+  readonly content_excerpt: string;
+  readonly message_id?: string;
+}>[] {
   if (!isRecord(turnDigest) || !Array.isArray(turnDigest.last_messages)) {
     throw new Error("Invalid post-turn extract task payload.");
   }
@@ -75,13 +83,18 @@ function parsePostTurnMessages(
 function parsePostTurnDigestMessage(value: unknown): {
   readonly role: string;
   readonly content_excerpt: string;
+  readonly message_id?: string;
 } {
   if (!isRecord(value)) {
     throw new Error("Invalid post-turn extract task payload.");
   }
+  const messageId = value.message_id === undefined
+    ? undefined
+    : parseStringField(value, "message_id");
   return {
     role: parseStringField(value, "role"),
-    content_excerpt: parseStringField(value, "content_excerpt")
+    content_excerpt: parseStringField(value, "content_excerpt"),
+    ...(messageId === undefined ? {} : { message_id: messageId })
   };
 }
 

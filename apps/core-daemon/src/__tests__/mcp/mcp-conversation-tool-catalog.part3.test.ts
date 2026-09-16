@@ -175,7 +175,9 @@ describe("daemon conversation tool catalog", () => {
       )
     );
 
-    await expect(eventLogRepo.queryByType(RuntimeGovernanceEventType.EXTENSION_TOOL_DISCOVERED)).resolves.toEqual([
+    await expect(eventLogRepo.queryByType(RuntimeGovernanceEventType.EXTENSION_TOOL_DISCOVERED)).resolves.toEqual({
+      truncated: false,
+      events: [
       expect.objectContaining({
         workspace_id: "system",
         entity_type: "extension_provider",
@@ -186,7 +188,8 @@ describe("daemon conversation tool catalog", () => {
           source: "mcp_external"
         })
       })
-    ]);
+      ]
+    });
     expect(tooling.conversationToolCatalog.getSpecs()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

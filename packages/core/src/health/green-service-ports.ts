@@ -44,7 +44,7 @@ export interface GreenServiceGreenStatusRepoPort {
   findEligible(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   findGrace(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
-  upsert(greenStatus: Readonly<GreenStatus>): Promise<Readonly<GreenStatus>>;
+  upsert(greenStatus: Readonly<GreenStatus>): Readonly<GreenStatus>;
 }
 
 export interface GreenServiceMemoryRepoPort {
@@ -54,8 +54,8 @@ export interface GreenServiceMemoryRepoPort {
 export interface GreenServiceEventLogRepoPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  transactional<T>(fn: () => T): T;
   queryByWorkspace(workspaceId: string): Promise<readonly EventLogEntry[]>;
-  queryByType(eventType: string): Promise<readonly EventLogEntry[]>;
   hasOpenSessionOverrideCorrection(query: {
     readonly workspaceId: string;
     readonly targetObjectId: string;

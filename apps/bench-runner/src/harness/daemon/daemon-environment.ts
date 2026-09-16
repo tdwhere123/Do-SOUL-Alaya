@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  RETIRED_DAEMON_ENV_KEYS,
   resolveEffectiveEmbeddingPosture,
   resolveSecretRef,
+  warnUnregisteredPrefixedDaemonEnvKeys,
   type ResolveSecretError
 } from "@do-soul/alaya";
 import { parseSourceRefRobust, resolveCoreConfigEnvironmentKeys } from "@do-soul/alaya-core";
@@ -14,8 +16,7 @@ import type {
 import { emitBenchHarnessWarning } from "./runtime/daemon-warnings.js";
 import {
   readOptionalOnnxThreadCount,
-  readOptionalTreatmentBoolean,
-  refuseRetiredLocalCrossEncoderTreatment
+  readOptionalTreatmentBoolean
 } from "../strict-treatment-config.js";
 import { planBenchDaemonConfigDirectory } from "./daemon-config-directory.js";
 
@@ -180,10 +181,21 @@ function buildBenchDaemonEnvironment(input: {
   return Object.freeze(environment);
 }
 
+export function warnRetiredLocalCrossEncoderTreatment(
+  env: Readonly<Record<string, string | undefined>>,
+  emitWarning: typeof process.emitWarning = process.emitWarning.bind(process)
+): void {
+  const retired: Record<string, string | undefined> = {};
+  for (const key of RETIRED_DAEMON_ENV_KEYS) {
+    if (env[key] !== undefined) retired[key] = env[key];
+  }
+  warnUnregisteredPrefixedDaemonEnvKeys(retired, emitWarning);
+}
+
 function validateSavedTreatmentEnvironment(
   savedEnv: Partial<Record<string, string | undefined>>
 ): void {
-  refuseRetiredLocalCrossEncoderTreatment(savedEnv);
+  warnRetiredLocalCrossEncoderTreatment(savedEnv);
   readOptionalTreatmentBoolean(savedEnv.ALAYA_RECALL_D2Q, "ALAYA_RECALL_D2Q");
   readOptionalOnnxThreadCount(savedEnv.ALAYA_LOCAL_ONNX_THREADS);
 }

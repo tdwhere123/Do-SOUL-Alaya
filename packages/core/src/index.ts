@@ -41,6 +41,16 @@ export {
 export * from "./embedding-recall/embed-text-resolver.js";
 export * from "./embedding-recall/local-onnx-embedding-client.js";
 export * from "./embedding-recall/local-onnx-host-single-flight.js";
+export {
+  importLocalOnnxTransformers,
+  isLocalOnnxTransformersModuleNotFound,
+  localOnnxTransformersMissingCode,
+  probeLocalOnnxTransformersPackage,
+  type LocalOnnxTransformersAvailability,
+  type LocalOnnxTransformersProbe,
+  type LocalOnnxTransformersProbeResult,
+  type LocalOnnxTransformersSpecifierResolver
+} from "./embedding-recall/local-onnx.js";
 export * from "./runtime/runs/engine-binding-service.js";
 export * from "./shared/errors.js";
 export { fieldContractSha256 } from "./shared/field-hash.js";

@@ -81,6 +81,6 @@ describe("source observation signal migration", () => {
       .toEqual([{ object_id: "old-memory" }]);
     expect(database.connection.pragma("foreign_key_check")).toEqual([]);
     expect(database.connection.prepare("SELECT max(version) AS version FROM schema_version").get()).toEqual({ version: 17 });
-    // File-backed upgrade-and-reopen on NTFS can exceed the 60s storage budget.
-  }, process.platform === "win32" ? 180_000 : 5_000);
+    // File-backed upgrade-and-reopen exceeds 5s under coverage remap and on NTFS.
+  }, process.platform === "win32" ? 180_000 : 60_000);
 });

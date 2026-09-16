@@ -1,4 +1,5 @@
 import { bindEventPublisher } from "@do-soul/alaya-core";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 import {
   createApp,
   type CoreDaemonLifecycleState,
@@ -392,7 +393,7 @@ function createOptionalRouteServices(input: CreateCoreDaemonAppInput) {
           e2eEventTriggers: {
             runService: input.runService,
             workspaceService: input.workspaceService,
-            eventLogRepo: createE2eEventLogRepo(input.eventLogRepo),
+            eventLogRepo: createE2eEventLogRepo(input.eventLogRepo, input.runtimeNotifier),
             runtimeNotifier: input.runtimeNotifier,
             triggerToken: e2eTriggerToken
           }
@@ -405,7 +406,7 @@ export function shouldEnableE2eEventTriggers(env: NodeJS.ProcessEnv): boolean {
   if (env.NODE_ENV?.trim().toLowerCase() !== "test") {
     return false;
   }
-  if (env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS !== "1") {
+  if (!parseEnvBoolean(env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS, "ALAYA_ENABLE_E2E_EVENT_TRIGGERS")) {
     return false;
   }
   return readE2eEventTriggerToken(env) !== null;
@@ -416,9 +417,13 @@ function readE2eEventTriggerToken(env: NodeJS.ProcessEnv): string | null {
   return token === undefined || token.length === 0 ? null : token;
 }
 
-function createE2eEventLogRepo(eventLogRepo: E2eEventLogInputPort): E2eEventLogRepo {
+function createE2eEventLogRepo(
+  eventLogRepo: E2eEventLogInputPort,
+  runtimeNotifier: { notifyEntry(entry: import("@do-soul/alaya-protocol").EventLogEntry): void | Promise<void> }
+): E2eEventLogRepo {
   const publisher = bindEventPublisher({
     eventLogRepo,
+    runtimeNotifier,
     purpose: "e2eEventTriggers"
   });
   return {

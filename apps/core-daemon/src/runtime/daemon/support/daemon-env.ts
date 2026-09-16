@@ -1,4 +1,6 @@
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 import { processEnvLookup } from "../../config/daemon-config-environment.js";
+
 const ALLOWED_LOG_LEVELS = new Set([
   "trace",
   "debug",
@@ -113,9 +115,7 @@ function validateRemoteOptIn(remoteOptIn: string | undefined): void {
 }
 
 function validateFlagOptIn(label: string, value: string | undefined): void {
-  if (value !== undefined && value !== "0" && value !== "1") {
-    throw new Error(`Invalid daemon env ${label}: expected "0" or "1", got ${value}`);
-  }
+  parseEnvBoolean(value, label);
 }
 
 function validateReviewerPair(

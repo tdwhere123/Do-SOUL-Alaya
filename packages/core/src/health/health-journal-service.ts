@@ -21,12 +21,13 @@ export interface HealthJournalServiceRepoPort {
     readonly summary: string;
     readonly detail_json: Record<string, unknown>;
     readonly created_at: string;
-  }): Promise<Readonly<HealthJournalEntry>>;
+  }): Readonly<HealthJournalEntry>;
   findByWorkspace(
     workspaceId: string,
     params?: {
       readonly kind?: HealthJournalEntry["event_kind"];
       readonly limit?: number;
+      readonly phase?: string;
     }
   ): Promise<readonly Readonly<HealthJournalEntry>[]>;
 }
@@ -34,6 +35,7 @@ export interface HealthJournalServiceRepoPort {
 export interface HealthJournalServiceEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  transactional<T>(fn: () => T): T;
 }
 
 export interface HealthJournalServiceRuntimeNotifierPort {
@@ -44,7 +46,7 @@ export interface HealthJournalServiceDependencies {
   readonly repo: HealthJournalServiceRepoPort;
   readonly eventLogRepo: HealthJournalServiceEventLogPort;
   readonly eventPublisher?: EventPublisher;
-  readonly runtimeNotifier?: HealthJournalServiceRuntimeNotifierPort;
+  readonly runtimeNotifier: HealthJournalServiceRuntimeNotifierPort;
   readonly generateEntryId?: () => string;
   readonly now?: () => string;
 }
@@ -82,15 +84,10 @@ export class HealthJournalService implements HealthJournalRecordPort {
     await bindEventPublisher({
       eventPublisher: this.dependencies.eventPublisher,
       eventLogRepo: this.dependencies.eventLogRepo,
-      runtimeNotifier: this.dependencies.runtimeNotifier === undefined
-        ? undefined
-        : {
-            notify: () => undefined,
-            notifyEntry: (entry) => this.dependencies.runtimeNotifier!.notifyEntry(entry)
-          },
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "HealthJournalService"
-    }).appendApplyThenPropagate(eventInput, async () => {
-      await this.dependencies.repo.append({
+    }).appendManyWithMutation([eventInput], () => {
+      this.dependencies.repo.append({
         entry_id: entryId,
         event_kind: normalizedEntry.event_kind,
         workspace_id: normalizedEntry.workspace_id,
@@ -107,14 +104,21 @@ export class HealthJournalService implements HealthJournalRecordPort {
     params: {
       readonly kind?: HealthJournalEntry["event_kind"];
       readonly limit?: number;
+      readonly phase?: string;
     } = {}
   ): Promise<readonly Readonly<HealthJournalEntry>[]> {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspaceId");
     const normalizedKind = params.kind === undefined ? undefined : normalizeEventKind(params.kind);
     const normalizedLimit = normalizeLimit(params.limit);
+    const normalizedPhase =
+      params.phase === undefined ? undefined : parseNonEmptyString(params.phase, "phase");
+    if (normalizedPhase !== undefined && normalizedKind === undefined) {
+      throw new CoreError("VALIDATION", "phase requires kind");
+    }
     const normalizedParams = {
       ...(normalizedKind === undefined ? {} : { kind: normalizedKind }),
-      ...(normalizedLimit === undefined ? {} : { limit: normalizedLimit })
+      ...(normalizedLimit === undefined ? {} : { limit: normalizedLimit }),
+      ...(normalizedPhase === undefined ? {} : { phase: normalizedPhase })
     };
 
     return await this.dependencies.repo.findByWorkspace(parsedWorkspaceId, normalizedParams);

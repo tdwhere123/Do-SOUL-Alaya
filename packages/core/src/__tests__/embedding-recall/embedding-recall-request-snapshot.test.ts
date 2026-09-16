@@ -150,6 +150,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
       content: "Positive neighbor."
     });
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
       provider: createProvider(),
       eventLogRepo: { append: createEventAppendSpy(), queryByEntity: vi.fn(async () => []) }
@@ -221,6 +222,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
     const append = createEventAppendSpy();
     const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => {
           throw new Error("exact lookup unavailable");
@@ -257,6 +259,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
     const missing = createMemoryEntry({ object_id: "pool-missing", content: "Missing memory." });
     const append = createEventAppendSpy();
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByWorkspace: vi.fn(async () => [createEmbeddingRecord({
           object_id: scored.object_id,
@@ -298,6 +301,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
     const memory = createMemoryEntry({ object_id: "pool-query-failed", content: "Failed query." });
     const append = createEventAppendSpy();
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [createEmbeddingRecord({
           object_id: memory.object_id,
@@ -332,6 +336,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
     const memory = createMemoryEntry({ object_id: "pool-without-vector", content: "No vector." });
     const append = createEventAppendSpy();
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
       provider: createProvider(),
       eventLogRepo: { append, queryByEntity: vi.fn(async () => []) }
@@ -375,6 +380,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
     const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
     const append = createEventAppendSpy();
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByWorkspace, listByObjectIds },
       provider: createProvider({ isAvailable: false, embedTexts }),
       eventLogRepo: { append, queryByEntity: vi.fn(async () => []) }
@@ -423,6 +429,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
     ]);
     const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByWorkspace, listByObjectIds },
       provider: createProvider({ embedTexts }),
       eventLogRepo: { append: createEventAppendSpy(), queryByEntity: vi.fn(async () => []) }
@@ -508,6 +515,7 @@ function createHydrationFixture() {
   const append = createEventAppendSpy();
   const warn = vi.fn();
   const service = new EmbeddingRecallService({
+    runtimeNotifier: { notifyEntry: () => undefined },
     embeddingRepo: { listByWorkspace, listByObjectIds },
     provider: createProvider({ embedTexts }),
     eventLogRepo: { append, queryByEntity: vi.fn(async () => []) },
@@ -544,6 +552,7 @@ async function preparePoolScanFallback(scanState: "missing" | "failed") {
   const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
   const append = createEventAppendSpy();
   const service = new EmbeddingRecallService({
+    runtimeNotifier: { notifyEntry: () => undefined },
     embeddingRepo: {
       listByObjectIds,
       ...(scanState === "failed" ? { listByWorkspace } : {})

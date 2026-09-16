@@ -405,7 +405,7 @@ it("default mode warns and degrades when the LLM classifier fails", async () => 
         workspaceId: "workspace-1",
         runId: "run-1"
       })
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ availability: "ok" });
     expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "conflict detection llm pair classify failed",
@@ -476,6 +476,6 @@ it("does not throw when memoryRepo fails to read same-dimension peers", async ()
         workspaceId: "workspace-1",
         runId: "run-1"
       })
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ availability: "unavailable" });
   });
 });

@@ -18,6 +18,7 @@ import {
   recallEvalEmbeddingMode,
   recallEvalEmbeddingProviderKind
 } from "../../../runs/lifecycle/recall-eval/recall-eval-runtime.js";
+import { resolveEffectiveEmbeddingPosture } from "@do-soul/alaya";
 
 describe("embedding treatment activation", () => {
   it("accepts an observed finite zero similarity", () => {
@@ -198,18 +199,23 @@ describe("embedding treatment activation", () => {
     expect(() => assertEmbeddingTreatmentDiagnosticsPresent(undefined, {})).not.toThrow();
   });
 
-  it("rejects the retired local cross-encoder treatment", () => {
-    expect(() => requiresEmbeddingTreatmentDiagnostics({
+  it("ignores the retired local cross-encoder env key", () => {
+    expect(requiresEmbeddingTreatmentDiagnostics({
       ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true"
-    })).toThrow(/local cross-encoder reranking is retired/u);
+    })).toBe(false);
+    expect(requiresEmbeddingTreatmentDiagnostics({
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "on"
+    })).toBe(false);
     expect(requiresEmbeddingTreatmentDiagnostics({
       ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
+    })).toBe(false);
+    expect(requiresEmbeddingTreatmentDiagnostics({
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "sometimes"
     })).toBe(false);
   });
 
   it.each([
-    ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "default"],
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "on"]
+    ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "default"]
   ] as const)("rejects invalid non-empty treatment override %s=%s", (name, value) => {
     expect(() => requiresEmbeddingTreatmentDiagnostics({ [name]: value }))
       .toThrow(new RegExp(name, "u"));
@@ -218,21 +224,24 @@ describe("embedding treatment activation", () => {
   it("derives the persisted embedding schema from the production D2Q switch", () => {
     expect(resolveBenchEmbeddingSchemaVersion("local_onnx", { ALAYA_RECALL_D2Q: "true" })).toBe(2);
     expect(resolveBenchEmbeddingSchemaVersion("local_onnx", { ALAYA_RECALL_D2Q: "1" })).toBe(2);
+    expect(resolveBenchEmbeddingSchemaVersion("local_onnx", { ALAYA_RECALL_D2Q: "enabled" })).toBe(2);
     expect(resolveBenchEmbeddingSchemaVersion("local_onnx", { ALAYA_RECALL_D2Q: "false" })).toBe(1);
     expect(resolveBenchEmbeddingSchemaVersion("local_onnx", {})).toBe(1);
     expect(resolveBenchEmbeddingSchemaVersion("openai", { ALAYA_RECALL_D2Q: "true" })).toBe(1);
     expect(() => resolveBenchEmbeddingSchemaVersion(
-      "local_onnx", { ALAYA_RECALL_D2Q: "enabled" }
+      "local_onnx", { ALAYA_RECALL_D2Q: "2" }
     ))
       .toThrow(/ALAYA_RECALL_D2Q/u);
   });
 
   it("follows product local_onnx admission when recall-eval mode is unset", () => {
-    expect(recallEvalEmbeddingMode({})).toBe("env");
+    const extraPresent = resolveEffectiveEmbeddingPosture(() => undefined)
+      .embeddingSupplementEnabled;
+    expect(recallEvalEmbeddingMode({})).toBe(extraPresent ? "env" : "disabled");
     expect(recallEvalEmbeddingMode({ ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false" }))
       .toBe("disabled");
     expect(recallEvalEmbeddingMode({ ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true" }))
-      .toBe("env");
+      .toBe(extraPresent ? "env" : "disabled");
   });
 
   it("honors explicit recall-eval embedding modes", () => {
@@ -248,8 +257,9 @@ describe("embedding treatment activation", () => {
   });
 
   it("opens the product local_onnx supplement when recall-eval follows admission", () => {
+    const posture = resolveEffectiveEmbeddingPosture(() => undefined);
     const embeddingMode = recallEvalEmbeddingMode({});
-    expect(embeddingMode).toBe("env");
+    expect(embeddingMode).toBe(posture.embeddingSupplementEnabled ? "env" : "disabled");
     const launch = createBenchDaemonLaunchConfig({
       dataDir: "/tmp/bench-product-embed-admission",
       embeddingMode,
@@ -258,8 +268,11 @@ describe("embedding treatment activation", () => {
       reviewerToken: "test-token",
       ambientEnv: {}
     });
-    expect(launch.environment.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT).toBe("true");
-    expect(launch.environment.ALAYA_EMBEDDING_PROVIDER).toBe("local_onnx");
+    expect(launch.environment.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT)
+      .toBe(posture.embeddingSupplementEnabled ? "true" : "false");
+    if (posture.embeddingSupplementEnabled) {
+      expect(launch.environment.ALAYA_EMBEDDING_PROVIDER).toBe("local_onnx");
+    }
   });
 
   it("pins OpenAI explicitly and rejects invalid threads before mutation", () => {

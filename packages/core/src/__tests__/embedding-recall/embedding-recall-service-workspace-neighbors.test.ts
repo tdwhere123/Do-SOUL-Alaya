@@ -29,6 +29,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     ) => Promise<readonly EmbeddingVectorRecord[]>;
   }): EmbeddingRecallService {
     return new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => []),
         listByWorkspace:
@@ -74,6 +75,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
   it("surfaces workspace-neighbor query embedding inference accounting and reuses the cache", async () => {
     const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => []),
         listByWorkspace: vi.fn(async () => [
@@ -133,6 +135,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     );
     const listByWorkspace = vi.fn(async () => listed);
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds, listByWorkspace, listIdsByWorkspace },
       provider: createProvider({
         embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
@@ -241,6 +244,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
       }
     };
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo,
       provider: createProvider({
         embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
@@ -269,6 +273,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
 
   it("returns an empty result when the repo cannot scan the whole workspace", async () => {
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [])
       },
@@ -388,6 +393,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
   it("skips the workspace scan entirely when the provider is unavailable", async () => {
     const listByWorkspace = vi.fn(async () => []);
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => []),
         listByWorkspace
@@ -447,6 +453,43 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
       expect.objectContaining({
         reason: "query_embedding_failed",
         error: "query engine exploded"
+      })
+    );
+  });
+
+  it("maps a non-Error query-embedding throw to unknown_error", async () => {
+    const warn = vi.fn();
+    const scanner = new WorkspaceNeighborScanner({
+      provider: createProvider({}),
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => []),
+        listByWorkspace: vi.fn(async () => [
+          createEmbeddingRecord({ object_id: "near", embedding: new Float32Array([0.05, 0.99]) })
+        ])
+      },
+      queryEngine: {
+        prepareQueryEmbedding: vi.fn(() => {
+          throw "provider down";
+        })
+      } as unknown as QueryEmbeddingEngine,
+      queryTimeoutMs: 1000,
+      warn
+    });
+
+    const result = await scanner.collectWorkspaceNeighborsWithMetadata({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "query",
+      excludeObjectIds: [],
+      maxNeighbors: 5
+    });
+
+    expect(result.hits).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(
+      "embedding workspace neighbor scan failed",
+      expect.objectContaining({
+        reason: "query_embedding_failed",
+        error: "unknown_error"
       })
     );
   });

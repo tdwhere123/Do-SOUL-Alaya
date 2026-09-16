@@ -10,7 +10,7 @@ import {
   type SessionOverride
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
-import { bindEventPublisher } from "../../runtime/event-publisher.js";
+import { bindEventPublisher, type RuntimeNotifier } from "../../runtime/event-publisher.js";
 import { isExpired } from "../../shared/time.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import { VersionedBoundedCache } from "../../runtime/versioned-bounded-cache.js";
@@ -28,6 +28,7 @@ export interface SessionOverrideServiceEventLogPort {
 export interface SessionOverrideServiceDependencies {
   readonly eventLogRepo: SessionOverrideServiceEventLogPort;
   readonly runLookup: GovernanceRunWorkspaceLookup;
+  readonly runtimeNotifier: Pick<RuntimeNotifier, "notifyEntry">;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
 }
@@ -127,6 +128,7 @@ export class SessionOverrideService {
   ): Promise<void> {
     await bindEventPublisher({
       eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "SessionOverrideService"
     }).publish({
       event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,

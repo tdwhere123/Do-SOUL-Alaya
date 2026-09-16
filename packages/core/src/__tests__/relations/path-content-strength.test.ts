@@ -32,17 +32,19 @@ afterEach(() => {
 });
 
 describe("path-content-strength flag", () => {
-  it("parses on/1/true and treats everything else as off", () => {
-    for (const on of ["on", "1", "true"]) {
+  it("parses the shared boolean vocabulary", () => {
+    for (const on of ["on", "yes", "1", "true", "enabled"]) {
       process.env[FLAG] = on;
       expect(pathRelContentStrengthEnabled()).toBe(true);
     }
-    for (const off of ["off", "0", "false", ""]) {
+    for (const off of ["off", "0", "false", "no", "disabled", ""]) {
       process.env[FLAG] = off;
       expect(pathRelContentStrengthEnabled()).toBe(false);
     }
     delete process.env[FLAG];
     expect(pathRelContentStrengthEnabled()).toBe(false);
+    process.env[FLAG] = "2";
+    expect(() => pathRelContentStrengthEnabled()).toThrow(/ALAYA_PATHREL_CONTENT_STRENGTH/);
   });
 });
 

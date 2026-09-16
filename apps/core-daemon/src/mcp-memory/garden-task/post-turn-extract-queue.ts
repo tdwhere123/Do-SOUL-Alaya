@@ -7,7 +7,11 @@ import {
   type SoulReportContextUsageRequest,
   type SourceAdmissionPort
 } from "@do-soul/alaya-protocol";
-import { retainedSourceSpeaker } from "@do-soul/alaya-core";
+import {
+  retainedSourceSpeaker,
+  type ConversationGardenCompileEnqueueInput,
+  type ConversationGardenCompileEnqueueResult
+} from "@do-soul/alaya-core";
 import { isDuplicateKeyError } from "@do-soul/alaya-storage";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import {
@@ -83,6 +87,82 @@ export function enqueuePostTurnExtractTask(
     }
     // report_context_usage is caller-driven; enqueue failure must surface
     // rather than drop an explicit post-turn signal.
+    throw error;
+  }
+}
+
+export function enqueueConversationGardenCompileTask(
+  params: Readonly<{
+    readonly gardenTaskRepo: {
+      enqueue(input: Parameters<NonNullable<RecallUsageHandlerDependencies["gardenTaskRepo"]>["enqueue"]>[0]): {
+        readonly task_id: string;
+      };
+      findById(taskId: string): { readonly id: string } | null;
+    };
+    readonly now: () => string;
+    readonly sourceAdmission?: SourceAdmissionPort;
+  }>,
+  input: ConversationGardenCompileEnqueueInput
+): ConversationGardenCompileEnqueueResult {
+  const taskId = buildConversationCompileTaskId(
+    input.workspaceId,
+    input.runId,
+    input.userMessage.message_id,
+    input.assistantMessage.message_id
+  );
+  if (params.gardenTaskRepo.findById(taskId) !== null) {
+    return { status: "duplicate" };
+  }
+
+  const createdAt = params.now();
+  const lastMessages = Object.freeze([
+    Object.freeze({
+      role: input.userMessage.role,
+      content_excerpt: input.userMessage.content,
+      message_id: input.userMessage.message_id
+    }),
+    Object.freeze({
+      role: input.assistantMessage.role,
+      content_excerpt: input.assistantMessage.content,
+      message_id: input.assistantMessage.message_id
+    })
+  ]);
+  const admittedSourceRootId = persistAdmittedTurnRoot(params.sourceAdmission, {
+    taskId,
+    workspaceId: input.workspaceId,
+    createdAt,
+    lastMessages,
+    eventTime: input.userMessage.created_at ?? null
+  });
+
+  try {
+    params.gardenTaskRepo.enqueue({
+      id: taskId,
+      workspace_id: input.workspaceId,
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.POST_TURN_EXTRACT,
+      payload: buildPostTurnExtractPayload({
+        taskId,
+        workspaceId: input.workspaceId,
+        runId: input.runId,
+        deliveredObjectIds: [],
+        createdAt,
+        sourceObservation: null,
+        sourceObservedAt: input.userMessage.created_at,
+        turnIndex: buildConversationCompileTurnIndex(
+          input.userMessage.message_id,
+          input.assistantMessage.message_id
+        ),
+        lastMessages,
+        admittedSourceRootId
+      }),
+      created_at: createdAt
+    });
+    return { status: "enqueued" };
+  } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      return { status: "duplicate" };
+    }
     throw error;
   }
 }
@@ -166,8 +246,13 @@ function buildPostTurnExtractPayload(input: {
   readonly deliveredObjectIds: readonly string[];
   readonly createdAt: string;
   readonly sourceObservation: VerifiedDeliverySourceObservation | null;
+  readonly sourceObservedAt?: string;
   readonly turnIndex: number;
-  readonly lastMessages: readonly { readonly role: string; readonly content_excerpt: string }[];
+  readonly lastMessages: readonly {
+    readonly role: string;
+    readonly content_excerpt: string;
+    readonly message_id?: string;
+  }[];
   readonly admittedSourceRootId: string | undefined;
 }) {
   return Object.freeze({
@@ -179,6 +264,7 @@ function buildPostTurnExtractPayload(input: {
     priority: 20 as const,
     created_at: input.createdAt,
     ...(input.sourceObservation === null ? {} : { source_observation: input.sourceObservation }),
+    ...(input.sourceObservedAt === undefined ? {} : { source_observed_at: input.sourceObservedAt }),
     ...(input.admittedSourceRootId === undefined
       ? {}
       : { admitted_source_root_id: input.admittedSourceRootId }),
@@ -207,4 +293,37 @@ function buildPostTurnExtractTaskId(
     .digest("hex")
     .slice(0, 32);
   return `post_turn_extract_${digest}`;
+}
+
+function buildConversationCompileTaskId(
+  workspaceId: string,
+  runId: string,
+  userMessageId: string,
+  assistantMessageId: string
+): string {
+  const digest = createHash("sha256")
+    .update(workspaceId)
+    .update("\0")
+    .update(runId)
+    .update("\0")
+    .update("conversation_compile")
+    .update("\0")
+    .update(userMessageId)
+    .update("\0")
+    .update(assistantMessageId)
+    .digest("hex")
+    .slice(0, 32);
+  return `post_turn_extract_${digest}`;
+}
+
+function buildConversationCompileTurnIndex(
+  userMessageId: string,
+  assistantMessageId: string
+): number {
+  const digest = createHash("sha256")
+    .update(userMessageId)
+    .update("\0")
+    .update(assistantMessageId)
+    .digest("hex");
+  return Number.parseInt(digest.slice(0, 7), 16);
 }

@@ -72,6 +72,18 @@ function readActiveBucket(
   return existing;
 }
 
+export function isLoopbackInspectorClient(
+  context: Context,
+  resolveClientAddress?: (context: Context) => string | undefined
+): boolean {
+  const address = resolveClientAddress?.(context) ?? readSocketRemoteAddress(context);
+  if (address === undefined) {
+    // Inspector HTTP only listens on 127.0.0.1; missing conninfo is still that listener.
+    return true;
+  }
+  return address === "127.0.0.1" || address === "::1" || address === "localhost";
+}
+
 function readSocketRemoteAddress(context: Context): string | undefined {
   try {
     const address = getConnInfo(context).remote.address;

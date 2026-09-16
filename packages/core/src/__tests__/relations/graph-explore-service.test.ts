@@ -89,6 +89,7 @@ describe("GraphExploreService", () => {
       createEventLogEntry(event)
     );
     const service = new GraphExploreService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       pathRepo: createPathRepo([
         createPath({ pathId: "path-out", sourceMemoryId: "memory-a", targetMemoryId: "memory-b" }),
         createPath({ pathId: "path-in", sourceMemoryId: "memory-c", targetMemoryId: "memory-a" })
@@ -131,6 +132,7 @@ describe("GraphExploreService", () => {
 
   it("projects non-enum relation_kind (co_recalled) onto the recalls edge_type", async () => {
     const service = new GraphExploreService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       pathRepo: createPathRepo([
         createPath({
           pathId: "path-corecall",
@@ -150,6 +152,7 @@ describe("GraphExploreService", () => {
 
   it("excludes non-active paths and filters by edge_type", async () => {
     const service = new GraphExploreService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       pathRepo: createPathRepo([
         createPath({ pathId: "path-active", sourceMemoryId: "memory-a", targetMemoryId: "memory-b", relationKind: "supports" }),
         createPath({ pathId: "path-supersedes", sourceMemoryId: "memory-a", targetMemoryId: "memory-c", relationKind: "supersedes" }),
@@ -171,6 +174,7 @@ describe("GraphExploreService", () => {
       createEventLogEntry(event)
     );
     const service = new GraphExploreService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       pathRepo: createPathRepo(),
       eventLogRepo: { append }
     });
@@ -182,6 +186,7 @@ describe("GraphExploreService", () => {
   it("translates invalid edge_types into a validation error", async () => {
     const pathRepo = createPathRepo();
     const service = new GraphExploreService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       pathRepo,
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) }
     });
@@ -206,6 +211,7 @@ describe("GraphExploreService countInbound* on the path plane", () => {
 
   function createServiceWithInboundPaths(paths: readonly PathRelation[]): GraphExploreService {
     return new GraphExploreService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       pathRepo: createPathRepo(paths),
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) }
     });
@@ -328,6 +334,7 @@ describe("GraphExploreService countInbound* on the path plane", () => {
       createPath({ pathId: "p-outbound", sourceMemoryId: TARGET, targetMemoryId: "other", relationKind: "supports" })
     ]);
     const service = new GraphExploreService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       pathRepo,
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) }
     });
@@ -352,6 +359,7 @@ describe("GraphExploreService countInbound* on the path plane", () => {
   it("returns empty bulk metrics without reading paths", async () => {
     const pathRepo = createPathRepo();
     const service = new GraphExploreService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       pathRepo,
       eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) }
     });
@@ -401,6 +409,7 @@ describe("GraphExploreService countInbound* on the path plane", () => {
     const legacy = createServiceWithInboundPaths(paths);
     const repo = createPathRepo(paths);
     const fallback = new GraphExploreService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       pathRepo: {
         findByAnchors: repo.findByAnchors,
         findByBackingObjectId: repo.findByBackingObjectId,

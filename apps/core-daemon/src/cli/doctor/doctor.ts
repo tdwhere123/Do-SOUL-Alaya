@@ -1,4 +1,4 @@
-import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
+import { parseEnvBoolean, type EmbeddingStatus, type ToolchainStatus } from "@do-soul/alaya-protocol";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import type {
   EmbeddingQueryWarmupSummary,
@@ -9,6 +9,8 @@ import type { PathPlasticityLookupTelemetrySnapshot } from "../../garden/path-pl
 import type { GardenCredentialProvenance } from "../../services/config/config-service.js";
 import type { ResolveSecretError } from "../../secrets/index.js";
 import { detectAttachedProfileInstructionsDrift, type ProfileInstructionsDriftReport, type ProfileTarget } from "../../attach/index.js";
+import { ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW } from "../../attach/profile-mutation/profile-mutation.js";
+import { attachedAgentEnvHoldsConfirmationToken } from "../../attach/attached-agent-mcp-child-env.js";
 import { ALAYA_SYSEXITS, type AlayaCliContext, type AlayaCliResult, type AlayaSubcommandSpec } from "../bridge.js";
 import { resolveCliWorkspaceContext } from "../support/workspace-context.js";
 import {
@@ -73,6 +75,11 @@ export interface GardenComputeStatus {
     readonly stale_claimed_edge_classify_tasks: number;
     readonly attach_worker_recommended: boolean;
   }>;
+  // Durable recent compile outcomes. Present when the garden task repo can
+  // count failed rows so a silent extract miss is visible in doctor.
+  readonly failed_post_turn_extract_tasks?: number;
+  // GARDEN_BACKLOG compile_enqueue records that never became a queue row.
+  readonly compile_enqueue_failures?: number;
 }
 
 export type GardenKeychainCheck =
@@ -120,7 +127,7 @@ export interface DoctorCommandDependencies {
    * the deprecated embedding-fallback. When omitted, doctor reports a
    * conservative "local_heuristics + none" snapshot.
    */
-  readonly getGardenCompute?: () => Promise<GardenComputeStatus> | GardenComputeStatus;
+  readonly getGardenCompute?: (workspaceId: string) => Promise<GardenComputeStatus> | GardenComputeStatus;
   readonly getPathPlasticityLookupTelemetry?: () =>
     | Readonly<PathPlasticityLookupTelemetrySnapshot>
     | Promise<Readonly<PathPlasticityLookupTelemetrySnapshot>>;
@@ -245,6 +252,7 @@ export interface DoctorReport {
   }>;
   readonly attached_profiles: ReadonlyArray<ProfileInstructionsDriftReport>;
   readonly audit: DoctorAuditSnapshot;
+  readonly confirmation_token_isolation: "ok" | "executor_holds_token";
   // Present only when --reconcile-bootstrap is requested.
   readonly bootstrap_reconcile?: DoctorBootstrapReconcileSummary;
   readonly checks: Readonly<Record<DoctorCheckName, DoctorCheckStatus>>;
@@ -309,7 +317,14 @@ async function buildDoctorReport(
     : null;
   const attachedProfiles = await readAttachedProfileDrift();
   const audit = readDoctorAuditSnapshot(services.storage.db_path);
-  const checks = buildDoctorChecks(startup.ready, services, bootstrapReconcileSummary, attachedProfiles, audit);
+  const checks = buildDoctorChecks(
+    startup.ready,
+    services,
+    bootstrapReconcileSummary,
+    attachedProfiles,
+    audit,
+    ctx.env
+  );
   return {
     checked_at: now(),
     overall: Object.values(checks).every((status) => status === "pass") ? "green" : "degraded",
@@ -337,6 +352,9 @@ async function buildDoctorReport(
     storage_growth: services.storageGrowth,
     attached_profiles: attachedProfiles,
     audit,
+    confirmation_token_isolation: attachedAgentEnvHoldsConfirmationToken(ctx.env)
+      ? "executor_holds_token"
+      : "ok",
     ...(bootstrapReconcileSummary === null ? {} : { bootstrap_reconcile: bootstrapReconcileSummary }),
     checks
   };
@@ -350,7 +368,7 @@ function resolveRuntimeWiringFromEnv(env: NodeJS.ProcessEnv): RuntimeWiringStatu
     request_token_source:
       requestToken !== undefined && requestToken.length > 0 ? "env" : "ephemeral",
     daemon_socket: daemonSocket !== undefined && daemonSocket.length > 0 ? daemonSocket : null,
-    wildcard_bind_opt_in: env.ALAYA_ALLOW_WILDCARD_BIND === "1",
+    wildcard_bind_opt_in: parseEnvBoolean(env.ALAYA_ALLOW_WILDCARD_BIND, "ALAYA_ALLOW_WILDCARD_BIND"),
     request_token_workspaces:
       tokenWorkspaces !== undefined && tokenWorkspaces.length > 0 ? tokenWorkspaces : null
   };
@@ -383,7 +401,7 @@ async function readDoctorServices(
     await deps.getMcpHealth(),
     await deps.getGardenHealth(),
     deps.getGardenCredentialProvenance ? await deps.getGardenCredentialProvenance() : ({ kind: "none" } as const),
-    deps.getGardenCompute ? await deps.getGardenCompute() : defaultDoctorGardenCompute(),
+    deps.getGardenCompute ? await deps.getGardenCompute(workspaceId) : defaultDoctorGardenCompute(),
     (await deps.getPathPlasticityLookupTelemetry?.()) ?? defaultPathPlasticityLookupTelemetry(),
     (await deps.getGraphHealth?.(workspaceId)) ?? createEmptyGraphHealthSnapshot(workspaceId)
   ]);
@@ -482,7 +500,8 @@ function buildDoctorChecks(
   services: Awaited<ReturnType<typeof readDoctorServices>>,
   bootstrapReconcileSummary: DoctorBootstrapReconcileSummary | null,
   attachedProfiles: readonly ProfileInstructionsDriftReport[],
-  audit: DoctorAuditSnapshot
+  audit: DoctorAuditSnapshot,
+  env: NodeJS.ProcessEnv
 ): Record<DoctorCheckName, DoctorCheckStatus> {
   return {
     runtime: daemonReady ? "pass" : "fail",
@@ -498,13 +517,19 @@ function buildDoctorChecks(
     garden:
       services.garden.status === "healthy" &&
       services.gardenCompute.keychain_check?.ok !== false &&
-      services.gardenCompute.schema_ok !== false
+      services.gardenCompute.schema_ok !== false &&
+      (services.gardenCompute.failed_post_turn_extract_tasks ?? 0) === 0 &&
+      (services.gardenCompute.compile_enqueue_failures ?? 0) === 0
         ? "pass"
         : "fail",
     bootstrap_reconcile: resolveBootstrapReconcileCheck(bootstrapReconcileSummary),
     config:
       doctorAuditCheckStatus(audit) === "pass" &&
-      attachedProfiles.every((profile) => profile.status !== "error")
+      attachedProfiles.every((profile) => profile.status !== "error") &&
+      attachedProfiles.every(
+        (profile) => profile.attached_preview !== ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW
+      ) &&
+      !attachedAgentEnvHoldsConfirmationToken(env)
         ? "pass"
         : "fail"
   };

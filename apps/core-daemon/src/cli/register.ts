@@ -15,7 +15,8 @@ import type { AlayaDaemonRuntime } from "../index.js";
 import { stripReviewerCredentialsFromAgentMcpEnv } from "../attach/attached-agent-mcp-child-env.js";
 import { createAttachClaudeCommandSpec, createAttachCodexCommandSpec, createDetachCommandSpec } from "./attach/index.js";
 import { runAlayaMcpStdioServer } from "../mcp/server/mcp-server.js";
-import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
+import { processEnvLookup, DAEMON_ONLY_CONFIG_ENV_KEYS } from "../runtime/config/daemon-config-environment.js";
 import {
   ALAYA_SYSEXITS,
   type AlayaCliArgsSchema,
@@ -252,13 +253,16 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
       return {
         request_token_source: runtime.requestProtection.tokenSource ?? "ephemeral",
         daemon_socket: daemonSocket !== undefined && daemonSocket.length > 0 ? daemonSocket : null,
-        wildcard_bind_opt_in: processEnvLookup().ALAYA_ALLOW_WILDCARD_BIND === "1",
+        wildcard_bind_opt_in: parseEnvBoolean(
+          processEnvLookup().ALAYA_ALLOW_WILDCARD_BIND,
+          "ALAYA_ALLOW_WILDCARD_BIND"
+        ),
         request_token_workspaces:
           tokenWorkspaces !== undefined && tokenWorkspaces.length > 0 ? tokenWorkspaces : null
       };
     },
-    getGardenCompute: async () => {
-      const status = await resolveGardenComputeStatus(runtime);
+    getGardenCompute: async (workspaceId) => {
+      const status = await resolveGardenComputeStatus(runtime, workspaceId);
       const config = await runtime.services.configService.getRuntimeGardenComputeConfig();
       const degradedReason =
         "degraded_reason" in config && typeof config.degraded_reason === "string"
@@ -441,6 +445,7 @@ async function startMcpStdioSession(
     warn: (message, meta) => {
       ctx.stderr.write(`${message}: ${JSON.stringify(meta)}\n`);
     },
+    toolTimeoutEnv: ctx.env[DAEMON_ONLY_CONFIG_ENV_KEYS.mcp.toolTimeoutMs],
     stdin: ctx.stdin as unknown as Readable,
     stdout: ctx.stdout as unknown as Writable
   });

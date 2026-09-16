@@ -1,5 +1,9 @@
 import { selectObservedTemporalProjection } from "@do-soul/alaya-soul";
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import {
+  parseDefaultOnFlag,
+  parseEnvBoolean,
+  type CandidateMemorySignal
+} from "@do-soul/alaya-protocol";
 import { processEnvLookup } from "../config/daemon-config-environment.js";
 import {
   ClaimService,
@@ -36,7 +40,9 @@ export type SignalMaterializationRuntimeInput = Readonly<{
 type RouterOptions = ConstructorParameters<typeof MaterializationRouter>[0];
 type RouterWiring = Pick<CreateRecallMaterializationWiringInput,
   "evidenceService" | "memoryService" | "fieldComposition" | "eventLogRepo" | "enqueueEnrichPending"> &
-  Pick<RouterOptions, "synthesisService" | "claimService">;
+  Pick<RouterOptions, "synthesisService" | "claimService"> & {
+    readonly runtimeNotifier: { notifyEntry(entry: import("@do-soul/alaya-protocol").EventLogEntry): void | Promise<void> };
+  };
 type MaterializationRouterInput = Omit<SignalMaterializationRuntimeInput, "wiring" | "handoffGapHandler"> & {
   readonly wiring: RouterWiring;
   readonly handoffGapHandler: RouterOptions["handoffGapHandler"];
@@ -116,7 +122,8 @@ function createSourceObservationPublicationPort(
     sourceAdmission: createAuditedSourceAdmission({
       sha256: fieldContractSha256,
       stores: wiring.fieldComposition.stores,
-      eventLogRepo: wiring.eventLogRepo
+      eventLogRepo: wiring.eventLogRepo,
+      runtimeNotifier: wiring.runtimeNotifier
     }),
     evidenceService: wiring.evidenceService,
     memoryService: wiring.memoryService,
@@ -162,16 +169,16 @@ function createMaterializationMemoryService(
 export function isRetainUnroutedFactsEnabled(
   raw: string | undefined = processEnvLookup().ALAYA_RETAIN_UNROUTED_FACTS
 ): boolean {
-  const normalized = raw?.trim().toLowerCase();
-  return normalized === "1" || normalized === "true";
+  return parseEnvBoolean(raw, "ALAYA_RETAIN_UNROUTED_FACTS");
 }
 
 function readMaterializationRouterOptions() {
   return {
     retainUnroutedHighConfidenceFacts: isRetainUnroutedFactsEnabled(),
-    fullTurnEvidenceExcerpt:
-      processEnvLookup().ALAYA_EVIDENCE_FULL_TURN !== "0" &&
-      processEnvLookup().ALAYA_EVIDENCE_FULL_TURN !== "false",
+    fullTurnEvidenceExcerpt: parseDefaultOnFlag(
+      processEnvLookup().ALAYA_EVIDENCE_FULL_TURN,
+      "ALAYA_EVIDENCE_FULL_TURN"
+    ),
     materializationConfidenceFloor: readMaterializationConfidenceFloor()
   };
 }

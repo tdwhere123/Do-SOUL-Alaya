@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type { ExtractionTargetSelectionReceipt } from
   "../authority/target-selection/receipt.js";
 import {
@@ -18,6 +19,21 @@ import type { ExtractionCacheMaterializationCommit } from
 export type { ExtractionCacheMaterializationReceipt } from
   "./materialization/receipt.js";
 
+export const MATERIALIZATION_TEST_FAILPOINT_ENV =
+  "ALAYA_TEST_MATERIALIZATION_SIGKILL_AFTER";
+
+export function assertMaterializationTestFailpointUnreachable(
+  env: NodeJS.ProcessEnv = process.env
+): void {
+  if (env[MATERIALIZATION_TEST_FAILPOINT_ENV] === undefined) {
+    return;
+  }
+  throw new AlayaError(
+    "INTERNAL",
+    "materialization test failpoint is unreachable from the production entry"
+  );
+}
+
 export function materializeAuditedExtractionCacheTarget(input: {
   readonly sourceRoot: string;
   readonly targetRoot: string;
@@ -29,6 +45,7 @@ export function materializeAuditedExtractionCacheTarget(input: {
   readonly maxShardBytes?: number;
   readonly onCommitted?: (receipt: ExtractionCacheMaterializationReceipt) => void;
 }): ExtractionCacheMaterializationReceipt {
+  assertMaterializationTestFailpointUnreachable();
   let leases: ExtractionCacheWriteLeaseSet;
   try {
     leases = acquireOrderedExtractionCacheWriteLeases([input.sourceRoot, input.targetRoot]);
@@ -45,7 +62,7 @@ export function materializeAuditedExtractionCacheTarget(input: {
     const targetLease = leases.leaseFor(input.targetRoot);
     const preflight = preflightMaterialization({ ...input, sourceLease, targetLease });
     const commit = runMaterializationTransaction({
-      ...input, preflight, sourceLease, targetLease
+      ...input, preflight, sourceLease, targetLease, durableFailpoint: undefined
     });
     const receipt = materializationReceiptFromCommit(commit);
     input.onCommitted?.(receipt);

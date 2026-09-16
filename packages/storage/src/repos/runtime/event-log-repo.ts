@@ -34,9 +34,13 @@ import {
   wrapGovernanceQueryError
 } from "./event-log/reads/event-log-governance-queries.js";
 import { queryEventLogScopeAll } from "./event-log/reads/event-log-scope-queries.js";
-import type { EventLogAppendInput, EventLogPageOptions, EventLogRepo } from "./event-log-types.js";
+import type {
+  EventLogAppendInput, EventLogPageOptions, EventLogRepo, EventLogTypePage
+} from "./event-log-types.js";
 
-export type { EventLogAppendInput, EventLogPageOptions, EventLogRepo } from "./event-log-types.js";
+export type {
+  EventLogAppendInput, EventLogPageOptions, EventLogRepo, EventLogTypePage
+} from "./event-log-types.js";
 
 export class SqliteEventLogRepo implements EventLogRepo {
   private readonly statementHolder: RefreshableStatementHolder<EventLogStatements>;
@@ -374,15 +378,31 @@ export class SqliteEventLogRepo implements EventLogRepo {
     );
   }
 
-  public async queryByType(eventType: string): Promise<readonly EventLogEntry[]> {
-    return queryEventLogRows(
+  public async queryByType(eventType: string): Promise<EventLogTypePage> {
+    return await this.queryByTypePage(eventType, DEFAULT_EVENT_LOG_PAGE);
+  }
+
+  public async queryByTypePage(
+    eventType: string,
+    page: EventLogPageOptions
+  ): Promise<EventLogTypePage> {
+    const parsedPage = parseEventLogPage(page);
+    const rows = queryEventLogRows(
       this.activeStatements().queryByTypeStatement.all(
         eventType,
-        DEFAULT_EVENT_LOG_PAGE.limit,
-        DEFAULT_EVENT_LOG_PAGE.offset
+        parsedPage.limit + 1,
+        parsedPage.offset
       ),
-      "Failed to query event log by type."
+      "Failed to query paged event log by type."
     );
+    return {
+      events: rows.slice(0, parsedPage.limit),
+      truncated: rows.length > parsedPage.limit
+    };
+  }
+
+  public async queryByTypeAll(eventType: string): Promise<readonly EventLogEntry[]> {
+    return await queryEventLogScopeAll(() => this.activeStatements(), { kind: "type", eventType });
   }
 
   public async getLatestEventId(runId: string): Promise<string | null> {

@@ -11,7 +11,7 @@ import {
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { readNow } from "@do-soul/alaya-core";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { McpServerInfo } from "@do-soul/alaya-protocol";
+import { AlayaError, type McpServerInfo } from "@do-soul/alaya-protocol";
 import { readRuntimeVersion } from "../../runtime/daemon/support/build-info.js";
 import { parseNodeTimerDelayMs } from "../../runtime/timing/node-timer-delay.js";
 import { formatMcpToolResult } from "../runtime/tool-result-formatting.js";
@@ -280,7 +280,7 @@ async function callRuntimeTool(
 }
 
 function assertOpen(state: DaemonMcpRuntimeRegistryState): void {
-  if (state.closed) throw new Error("Daemon MCP runtime registry is closed.");
+  if (state.closed) throw new AlayaError("UNAVAILABLE", "Daemon MCP runtime registry is closed.");
 }
 
 async function getHandleLease(
@@ -293,7 +293,12 @@ async function getHandleLease(
     return { handle: await existing, pendingHandle: existing };
   }
   const config = state.input.serverConfigs[serverName];
-  if (config === undefined) throw new Error(`MCP server ${serverName} is not configured for daemon execution.`);
+  if (config === undefined) {
+    throw new AlayaError(
+      "NOT_FOUND",
+      `MCP server ${serverName} is not configured for daemon execution.`
+    );
+  }
   const pending = connectServer(state, config);
   state.clientHandles.set(serverName, pending);
   try {
@@ -468,7 +473,7 @@ function resolveWarn(warn: WarnPort | undefined): (message: string, meta: Record
     return warn.warn.bind(warn);
   }
 
-  throw new Error("createDaemonMcpRuntimeRegistry requires an explicit warn handler.");
+  throw new AlayaError("VALIDATION", "createDaemonMcpRuntimeRegistry requires an explicit warn handler.");
 }
 
 async function closeHandle(

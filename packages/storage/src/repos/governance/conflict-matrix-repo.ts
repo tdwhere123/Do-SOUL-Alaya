@@ -17,7 +17,7 @@ import {
 import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface ConflictMatrixRepo {
-  create(edge: Readonly<ConflictMatrixEdge>): Promise<Readonly<ConflictMatrixEdge>>;
+  create(edge: Readonly<ConflictMatrixEdge>): Readonly<ConflictMatrixEdge>;
   findById(objectId: string): Promise<Readonly<ConflictMatrixEdge> | null>;
   findBySourceClaim(claimId: string): Promise<readonly Readonly<ConflictMatrixEdge>[]>;
   findByTargetClaim(claimId: string): Promise<readonly Readonly<ConflictMatrixEdge>[]>;
@@ -125,7 +125,7 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
     `);
   }
 
-  public async create(edge: Readonly<ConflictMatrixEdge>): Promise<Readonly<ConflictMatrixEdge>> {
+  public create(edge: Readonly<ConflictMatrixEdge>): Readonly<ConflictMatrixEdge> {
     const parsedEdge = parseConflictMatrixEdge(edge);
 
     try {

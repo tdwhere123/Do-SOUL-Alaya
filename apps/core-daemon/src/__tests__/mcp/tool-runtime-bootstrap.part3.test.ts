@@ -24,19 +24,6 @@ const isolatedConfigDirs: string[] = [];
 
 const BOOTSTRAP_TEST_TIMEOUT_MS = 15_000;
 
-async function resolveBootGardenProvider(): Promise<unknown> {
-  const provider = hoisted.conversationServiceDeps?.gardenComputeProvider as
-    | { getProvider?: () => Promise<unknown> }
-    | undefined;
-  if (provider === undefined) {
-    throw new Error("ConversationService gardenComputeProvider was not wired.");
-  }
-  if (typeof provider.getProvider === "function") {
-    return await provider.getProvider();
-  }
-  return provider;
-}
-
 async function bootDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const { createAlayaDaemonRuntime } = await import("../../index.js");
   const runtime = await createAlayaDaemonRuntime();
@@ -237,9 +224,8 @@ describe("daemon tool runtime bootstrap", () => {
   });
 
   it("leaves an operator off-switch: ALAYA_INGEST_RECONCILIATION_ENABLED=false skips reconciliation construction", async () => {
-    // The second documented disable token alongside "0" (index.ts checks
-    // raw !== "0" && raw !== "false"). Asserting it explicitly pins both
-    // off-switch spellings so a future single-token parse regresses loudly.
+    // The second documented disable token alongside "0". The shared
+    // boolean vocabulary also accepts off/no/disabled.
     process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = "false";
 
     await bootDaemonRuntime();

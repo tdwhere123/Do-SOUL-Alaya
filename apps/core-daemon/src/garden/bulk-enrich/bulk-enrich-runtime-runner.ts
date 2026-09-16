@@ -1,5 +1,6 @@
 import type { SourceEnrichmentCapability } from "./source-enrichment-runtime.js";
 import {
+  AlayaError,
   DYNAMICS_CONSTANTS,
   GardenEventType,
   GardenRole,
@@ -353,7 +354,7 @@ async function detectBulkEnrichConflicts(
   if (ports.conflictDetection === undefined) {
     return;
   }
-  await ports.conflictDetection.detectAndLinkConflicts({
+  const scan = await ports.conflictDetection.detectAndLinkConflicts({
     newMemoryId: memory.object_id,
     newMemoryDimension: memory.dimension,
     newMemoryScopeClass: memory.scope_class,
@@ -363,6 +364,9 @@ async function detectBulkEnrichConflicts(
     runId: memory.run_id,
     strictNoDrop: true
   });
+  if (scan.availability === "unavailable") {
+    throw new AlayaError("UNAVAILABLE", "conflict candidate scan unavailable");
+  }
 }
 
 async function handleBulkEnrichFailure(

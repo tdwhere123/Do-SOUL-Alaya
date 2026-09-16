@@ -1,9 +1,9 @@
 import { spawn as spawnChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   INSPECTOR_CHILD_ENV_KEYS,
-  INSPECTOR_LAUNCH_CODE_ENV,
   INSPECTOR_STDERR_CAPTURE_LIMIT,
   READY_LINE,
   SHUTDOWN_TIMEOUT_MS
@@ -23,11 +23,16 @@ export function defaultInspectorEntryPath(): string {
   return fileURLToPath(import.meta.resolve("@do-soul/alaya-inspector"));
 }
 
+export const INSPECTOR_LAUNCH_PROOF_FD = 3;
+
 export function defaultSpawnInspector(input: SpawnInspectorInput): InspectorChildProcess {
-  return spawnChildProcess(process.execPath, [input.inspectorEntryPath], {
+  const child = spawnChildProcess(process.execPath, [input.inspectorEntryPath], {
     env: buildInspectorChildEnv(input),
-    stdio: ["ignore", "pipe", "pipe"]
+    // Inherited fd 3 carries the launch proof so it is not in argv or the child environment.
+    stdio: ["ignore", "pipe", "pipe", "pipe"]
   });
+  writeInheritedLaunchProof(child.stdio[INSPECTOR_LAUNCH_PROOF_FD], input.launchCode);
+  return child;
 }
 
 export function buildInspectorChildEnv(input: SpawnInspectorInput): NodeJS.ProcessEnv {
@@ -38,11 +43,20 @@ export function buildInspectorChildEnv(input: SpawnInspectorInput): NodeJS.Proce
       env[key] = value;
     }
   }
-  env.ALAYA_INSPECTOR_TOKEN = input.token;
-  env[INSPECTOR_LAUNCH_CODE_ENV] = input.launchCode;
   env.ALAYA_INSPECTOR_PORT = String(input.port);
   env.ALAYA_INSPECTOR_WORKSPACE_ID = input.workspaceId;
   return env;
+}
+
+export function writeInheritedLaunchProof(stream: unknown, launchCode: string): void {
+  if (stream === null || stream === undefined || typeof stream !== "object") {
+    throw new AlayaError("INTERNAL", "inspector launch proof fd is unavailable");
+  }
+  const writable = stream as { end?: (chunk: string) => void };
+  if (typeof writable.end !== "function") {
+    throw new AlayaError("INTERNAL", "inspector launch proof fd is unavailable");
+  }
+  writable.end(`${launchCode}\n`);
 }
 
 export async function waitForInspectorReady(child: InspectorChildProcess, ctx: AlayaCliContext): Promise<void> {

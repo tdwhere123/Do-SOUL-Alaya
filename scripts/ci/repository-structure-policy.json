@@ -787,6 +787,7 @@
     "apps/bench-runner/src/bench/extraction/cache-audit/materialization/target-tree",
     "apps/bench-runner/src/bench/extraction/cache-audit/materialization/transaction",
     "apps/bench-runner/src/bench/extraction/cache-audit/materialization/transaction-failpoint",
+    "apps/bench-runner/src/runs/extraction/cache-audit/materialization/transaction-failpoint",
     "apps/bench-runner/src/bench/extraction/cache-audit/materialization/transaction-recovery",
     "apps/bench-runner/src/bench/extraction/cache-audit/occurrence-index",
     "apps/bench-runner/src/bench/extraction/cache-audit/quarantine",
@@ -817,6 +818,7 @@
     "apps/bench-runner/src/bench/extraction/fill",
     "apps/bench-runner/src/bench/extraction/fill/catalog-refill",
     "apps/bench-runner/src/bench/extraction/fill/catalog-refill/resume-failpoint",
+    "apps/bench-runner/src/runs/extraction/fill/catalog-refill/resume-failpoint",
     "apps/bench-runner/src/bench/extraction/fill/catalog-refill/runtime",
     "apps/bench-runner/src/bench/extraction/fill/catalog-refill/supplemental",
     "apps/bench-runner/src/bench/extraction/fill/execution",
@@ -1151,8 +1153,8 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 2496,
-      "expected_sha256": "fdd20b8f0dddcae7bfe12b4949ef868d5c429527a403a61e53d4e8cefd164d6f"
+      "expected_count": 2509,
+      "expected_sha256": "df8477fb8932f715b0a0c431849196445f7717480df7033c3a7c90af646105f0"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
@@ -1169,14 +1171,14 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 910,
-      "expected_sha256": "782758781bb6aa7c3a68ae09ec280cfea84b0dee1a183e6afa7d48b94e564e7c"
+      "expected_count": 927,
+      "expected_sha256": "d9501b70a1823b233dc1a2bb152813b0c989f17b6b27b821ac3567d4cc9c9c09"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",
       "path": "packages/engine-gateway/src/index.ts",
-      "expected_count": 44,
-      "expected_sha256": "7c2c020a5c8db30f6fee6c9ebb7e4c7026b3803428c570d67c756295f4567371"
+      "expected_count": 49,
+      "expected_sha256": "6064ee1d6c300ff996dcad305ff9427163316d2a09500880e2befd639859cfee"
     },
     {
       "specifier": "@do-soul/alaya-eval",
@@ -1205,14 +1207,14 @@
     {
       "specifier": "@do-soul/alaya-storage",
       "path": "packages/storage/src/index.ts",
-      "expected_count": 315,
-      "expected_sha256": "0c7ca18f302038163f76654c593f7797fd84d417fc6197974c581fd20dd91e39"
+      "expected_count": 316,
+      "expected_sha256": "50b1699dadd4e5bc29b6b2093f4f3ce86438cf27767bdf5a7ca9d30a68750077"
     },
     {
       "specifier": "@do-soul/alaya",
       "path": "apps/core-daemon/src/index.ts",
-      "expected_count": 21,
-      "expected_sha256": "b7f0cf892c94de40092cefccd726d99943faef518e5d2f1b730bd40ecbead2e6"
+      "expected_count": 24,
+      "expected_sha256": "8011185b565fc8a2005516aec15ed332b83b5ca3cfa5cb8b315ad8b6aa996e68"
     },
     {
       "specifier": "@do-soul/alaya/mcp-server",

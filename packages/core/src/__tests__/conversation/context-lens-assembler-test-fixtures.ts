@@ -109,6 +109,9 @@ export function createDependencies(
       findById: vi.fn(async (objectId: string) => memories.get(objectId) ?? null)
     },
     eventLogRepo,
+    runtimeNotifier: {
+      notifyEntry: () => undefined
+    },
     warn: vi.fn(),
     generateRuntimeId: createRuntimeIdGenerator(),
     now: () => NOW

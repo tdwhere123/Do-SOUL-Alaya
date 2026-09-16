@@ -13,6 +13,7 @@ import type {
   GardenTaskEventInput,
   GardenTaskRow
 } from "@do-soul/alaya-storage";
+import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
 import { buildGardenTaskSignalId } from "../../garden/support/task-signal-id.js";
 import {
@@ -179,6 +180,7 @@ async function completeCandidateSignalTask(
   const completionClaimedBy = completionEnvelopeJson === null
     ? context.agentTarget
     : `${context.agentTarget}:complete:${params.generateId()}`;
+  throwIfAborted(context.abortSignal);
   beginCompletionAttemptIfNeeded(repo, row, completionClaimedBy, completionEnvelopeJson, params.now);
 
   try {
@@ -211,9 +213,11 @@ async function commitCandidateSignalCompletion(
     params, contentOnlySignals, row.id, context.workspaceId, resolvedRunId,
     postTurnPayload?.source_observation ?? resolveGardenTaskSourceObservation(row)
   );
+  throwIfAborted(context.abortSignal);
   const emittedSignalIds = await emitTaskCandidateSignals(
     params, request, row, postTurnPayload, candidateSignals, completionClaimedBy
   );
+  throwIfAborted(context.abortSignal);
   await requireGardenTaskRepo(params.deps).completeWithEvents(
     row.id,
     {
@@ -328,6 +332,7 @@ async function completeEdgeClassifyTask(
     verdict
   );
 
+  throwIfAborted(context.abortSignal);
   await requireGardenTaskRepo(params.deps).completeWithEvents(
     row.id,
     {

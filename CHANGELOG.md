@@ -8,17 +8,30 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 4.12.0
+## Unreleased — protocol 4.13.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 4.12.0 can move
+heading (currently `## v0.3.11` below). Protocol 4.13.0 can move
 independently of the app semver.
+
+Protocol 4.13.0 is an additive minor under handbook invariant §25.
+Optional `SoulSignalTriagedPayloadSchema.deferral` records write-path
+reconciliation deferral (`lease_busy` | `prewrite_unavailable`) on the
+EventLog triage payload. Existing triage fields remain parseable;
+unavailable still must not ADD.
 
 `SoulMemorySearchResponse.ranking_authority` stays parseable in app 0.3.x.
 Live ranking ignores it. Do not delete the field in this series; removal
 waits for a protocol major after the compatibility ledger expires.
+
+Retired local cross-encoder env keys (`ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK`,
+`ALAYA_LOCAL_CROSS_ENCODER_MODEL`, `ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR`) are
+ignored. Daemon startup emits the shared unregistered/retired env warning.
+Unset them; they no longer change ranking. A later release will drop the
+warning once operators have migrated. Do not add a throw tombstone for this
+deleted feature.
 
 Protocol 4.12.0 is an additive minor under handbook invariant §25.
 MCP-reachable `MemoryDimensionSchema` admits `observation`. Optional
@@ -76,7 +89,7 @@ modality, trailing source tokens, and unsupported dependent scope. Extraction
 catalog version 3 requires demonstrated fragment independence, including
 adjacent dependent continuations. MCP, EventLog and config schemas are unchanged.
 
-Source `@do-soul/alaya-protocol` is **4.12.0** (`packages/protocol/package.json`).
+Source `@do-soul/alaya-protocol` is **4.13.0** (`packages/protocol/package.json`).
 `AlayaStatusSchema.mcp.catalog_health` is an additive optional field.
 GitHub `releases/latest` is a published tarball and is **not** this source tree;
 pin `ALAYA_VERSION` or install from a checkout. Local ONNX embeddings

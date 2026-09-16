@@ -1,42 +1,39 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { constantTimeTokenEqual, createInspectorAuthMiddleware } from "../../middleware/auth.js";
+import { createInspectorAuthMiddleware } from "../../middleware/auth.js";
 
 describe("inspector auth", () => {
-  it("rejects missing and wrong tokens", async () => {
+  it("rejects missing cookies and process-token headers", async () => {
     const app = createApp();
 
     await expectStatus(app, "/", 401);
-    await expectStatus(app, "/?token=wrong", 401);
     await expectStatus(app, "/?token=secret-token", 401);
-    await expectStatus(app, "/", 401, { "x-alaya-inspector-token": "wrong" });
+    await expectStatus(app, "/", 401, { "x-alaya-inspector-token": "secret-token" });
+    await expectStatus(app, "/", 401, { authorization: "Bearer secret-token" });
   });
 
-  it("accepts header or bearer tokens without echoing them", async () => {
-    const app = createApp();
+  it("accepts a valid inspector session cookie", async () => {
+    const sessions = new Set(["session-1"]);
+    const app = new Hono();
+    app.use("*", createInspectorAuthMiddleware({
+      hasSession: (sessionId) => sessions.has(sessionId)
+    }));
+    app.get("/", (context) => context.json({ ok: true }));
 
-    const headerResponse = await app.request("/", {
-      headers: { "x-alaya-inspector-token": "secret-token" }
+    const allowed = await app.request("/", {
+      headers: { cookie: "alaya_inspector_session=session-1" }
     });
-    const bearerResponse = await app.request("/", {
-      headers: { authorization: "Bearer secret-token" }
+    const expired = await app.request("/", {
+      headers: { cookie: "alaya_inspector_session=missing" }
     });
 
-    expect(headerResponse.status).toBe(200);
-    expect(bearerResponse.status).toBe(200);
-    expect(await headerResponse.text()).not.toContain("secret-token");
-    expect(await bearerResponse.text()).not.toContain("secret-token");
-  });
-
-  it("uses length-safe constant-time comparison", () => {
-    expect(constantTimeTokenEqual("secret-token", "secret-token")).toBe(true);
-    expect(constantTimeTokenEqual("secret-token", "secret-token-2")).toBe(false);
-    expect(constantTimeTokenEqual("short", "a-much-longer-token")).toBe(false);
+    expect(allowed.status).toBe(200);
+    expect(expired.status).toBe(401);
   });
 
   it("allows only an exact public path and method", async () => {
     const app = new Hono();
-    app.use("*", createInspectorAuthMiddleware("secret-token", {
+    app.use("*", createInspectorAuthMiddleware({
       publicRoutes: [{ path: "/api/launch-session", method: "POST" }]
     }));
     app.all("*", (context) => context.json({ ok: true }));
@@ -52,7 +49,7 @@ describe("inspector auth", () => {
 
 function createApp(): Hono {
   const app = new Hono();
-  app.use("*", createInspectorAuthMiddleware("secret-token"));
+  app.use("*", createInspectorAuthMiddleware());
   app.get("/", (context) => context.json({ ok: true }));
   return app;
 }

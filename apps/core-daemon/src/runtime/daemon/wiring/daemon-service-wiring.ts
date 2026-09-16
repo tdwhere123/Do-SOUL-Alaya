@@ -4,7 +4,8 @@ import {
   HealthIssueResolutionState,
   HealthIssueSeverity,
   HealthIssueSuggestedAction,
-  type HealthIssueGroup
+  type HealthIssueGroup,
+  type SourceAdmissionPort
 } from "@do-soul/alaya-protocol";
 import {
   ConversationService,
@@ -20,12 +21,14 @@ import {
   type HealthJournalService
 } from "@do-soul/alaya-core";
 import {
+  SqliteGardenTaskRepo,
   SqliteHealthIssueGroupRepo,
   type SqliteEngineBindingRepo,
   type SqliteEventLogRepo,
   type SqliteRunRepo,
   type SqliteTrustStateRepo,
-  type SqliteWorkspaceRepo
+  type SqliteWorkspaceRepo,
+  type StorageDatabase
 } from "@do-soul/alaya-storage";
 import {
   ComputeRoutingService,
@@ -33,6 +36,7 @@ import {
   OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
 import { createOfficialGardenExtractor } from "../../garden-wiring/official-garden-extractor.js";
+import { createConversationGardenCompileQueue } from "../../../garden/conversation-compile-queue-adapter.js";
 import { GardenComputeProviderResolver } from "../../../services/support/garden-compute-provider-resolver.js";
 import type { AppConfigService } from "../../../services/config/config-service.js";
 import { createSoulApprovalService } from "../../../services/soul/soul-approval-service.js";
@@ -89,20 +93,21 @@ export async function createDaemonCoreServices(
     readonly eventPublisher: EventPublisher;
     readonly trustStateRepo: SqliteTrustStateRepo;
     readonly signalService: SignalService;
-    readonly retainCompileSource: NonNullable<ConversationServiceDependencies["retainCompileSource"]>;
     readonly contextLensAssembler: ConversationContextLensAssemblerPort;
     readonly governanceLeaseService: GovernanceLeaseService;
     readonly budgetBankruptcyService: BudgetBankruptcyService;
     readonly healthJournalService: HealthJournalService;
     readonly warn: (message: string, meta: Record<string, unknown>) => void;
     readonly isPrincipalCodingEngineAvailable: () => boolean;
+    readonly database: StorageDatabase;
+    readonly sourceAdmission?: SourceAdmissionPort;
   },
   prebuiltGardenComputeRuntime?: Awaited<ReturnType<typeof createGardenComputeRuntime>>
 ) {
   const gardenComputeRuntime = prebuiltGardenComputeRuntime ??
     await createGardenComputeRuntime(input);
   const conversationService = new ConversationService(
-    createConversationServiceDependencies(input, gardenComputeRuntime.computeRoutingService)
+    createConversationServiceDependencies(input)
   );
   const runService = createRunService(input);
   const engineBindingService = createEngineBindingService(input);
@@ -195,37 +200,51 @@ function createHotReloadingConfigService(
 
 function createConversationServiceDependencies(
   input: {
-    readonly retainCompileSource: NonNullable<ConversationServiceDependencies["retainCompileSource"]>;
     readonly runRepo: SqliteRunRepo;
     readonly workspaceRepo: SqliteWorkspaceRepo;
     readonly eventLogRepo: SqliteEventLogRepo;
     readonly eventPublisher: EventPublisher;
+    readonly runtimeNotifier: AlayaRuntimeNotifier;
     readonly signalService: SignalService;
     readonly contextLensAssembler: ConversationContextLensAssemblerPort;
     readonly governanceLeaseService: GovernanceLeaseService;
     readonly budgetBankruptcyService: BudgetBankruptcyService;
     readonly healthJournalService: HealthJournalService;
     readonly warn: (message: string, meta: Record<string, unknown>) => void;
-  },
-  computeRoutingService: ComputeRoutingService
+    readonly database: StorageDatabase;
+    readonly sourceAdmission?: SourceAdmissionPort;
+  }
 ) {
+  const gardenCompileQueue = createConversationGardenCompileQueueFromDatabase(input);
   return {
     runRepo: input.runRepo,
     workspaceRepo: input.workspaceRepo,
     eventLogRepo: input.eventLogRepo,
     eventPublisher: input.eventPublisher,
-    gardenComputeProvider: computeRoutingService.getDefaultProvider(),
-    retainCompileSource: input.retainCompileSource,
-    resolveGardenComputeProvider: {
-      resolve: (modelRef) => computeRoutingService.resolveProvider(modelRef)
-    },
     signalReceiver: input.signalService,
     contextLensAssembler: input.contextLensAssembler,
     governanceLeaseService: input.governanceLeaseService,
     budgetBankruptcyService: input.budgetBankruptcyService,
     healthJournalRecorder: input.healthJournalService,
+    ...(gardenCompileQueue === undefined ? {} : { gardenCompileQueue }),
     warn: input.warn
   } satisfies ConversationServiceDependencies;
+}
+
+function createConversationGardenCompileQueueFromDatabase(input: {
+  readonly database: StorageDatabase;
+  readonly eventPublisher: EventPublisher;
+  readonly sourceAdmission?: SourceAdmissionPort;
+}): ConversationServiceDependencies["gardenCompileQueue"] {
+  const connection = input.database.connection;
+  if (typeof (connection as { readonly prepare?: unknown }).prepare !== "function") {
+    return undefined;
+  }
+  return createConversationGardenCompileQueue({
+    gardenTaskRepo: new SqliteGardenTaskRepo(connection, input.eventPublisher),
+    now: () => new Date().toISOString(),
+    ...(input.sourceAdmission === undefined ? {} : { sourceAdmission: input.sourceAdmission })
+  });
 }
 
 function createRunService(input: {
@@ -271,7 +290,8 @@ function createDaemonCoreSupportServices(
       runtimeNotifier: input.runtimeNotifier
     }),
     topologyAuditService: new SoulTopologyAuditService({
-      eventLogRepo: input.eventLogRepo
+      eventLogRepo: input.eventLogRepo,
+      runtimeNotifier: input.runtimeNotifier
     })
   };
 }
