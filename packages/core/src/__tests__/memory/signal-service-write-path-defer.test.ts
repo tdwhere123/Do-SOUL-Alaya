@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CandidateMemorySignal, EventLogEntry } from "@do-soul/alaya-protocol";
-import { SignalService } from "../../memory/signal-service.js";
+import { SignalService, type SignalServicePostTriageMaterializer } from "../../memory/signal-service.js";
 import { buildSignalEmittedEventInput } from "../../memory/signal-service-helpers.js";
 import { atomicUpdateState, createSignal } from "./signal-service.test-support.js";
 
@@ -68,6 +68,7 @@ function createResumeService(input: {
   readonly materialize: ReturnType<typeof vi.fn>;
 }): SignalService {
   const storedEvents = [...input.events];
+  const materializePort = input.materialize as unknown as SignalServicePostTriageMaterializer["materialize"];
   return new SignalService({
     eventLogRepo: {
       append: vi.fn((event) => {
@@ -97,7 +98,7 @@ function createResumeService(input: {
       notifyEntry: vi.fn(async () => {})
     },
     postTriageMaterializer: {
-      materialize: input.materialize
+      materialize: async (signal, context) => await materializePort(signal, context)
     }
   });
 }
@@ -225,7 +226,7 @@ describe("SignalService write-path deferred resume", () => {
         notifyEntry: vi.fn(async () => {})
       },
       postTriageMaterializer: {
-        materialize: vi.fn(async (signal: CandidateMemorySignal) => ({
+        materialize: async (signal) => ({
           signal_id: signal.signal_id,
           target_kind: "deferred" as const,
           routing_reason: "reconciliation deferred: lease held",
@@ -233,7 +234,7 @@ describe("SignalService write-path deferred resume", () => {
           success: true as const,
           defer_class: "write_path" as const,
           deferral: "lease_busy" as const
-        }))
+        })
       }
     });
 
