@@ -1,3 +1,10 @@
+/**
+ * EventLog-first write owner. Prefer `appendManyWithMutation` when apply can
+ * share the SQLite transaction. `appendApplyThenPropagate` is the leftover
+ * path when apply cannot join that transaction — an EventLog row can then
+ * exist without ontology. `bindEventPublisher` must receive a real notifier;
+ * an inert adapter hides "never wired" as "no subscribers".
+ */
 import {
   AlayaError,
   WorkspaceRunEventSchema,
