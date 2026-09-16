@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import { createApp } from "../../runtime/app.js";
 import { shouldEnableE2eEventTriggers } from "../../runtime/daemon/wiring/daemon-app-composition.js";
 import { E2E_EVENT_TRIGGER_TOKEN_HEADER } from "../../routes/workspace/e2e-event-triggers.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("e2e EventLog inject composition", () => {
   it("returns 404 outside NODE_ENV=test even when the opt-in flag is set", async () => {
