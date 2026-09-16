@@ -74,7 +74,8 @@ describe("source observation publication wiring", () => {
         })
       });
       const sourceAdmission = createAuditedSourceAdmission({
-        stores: field.stores, eventLogRepo, sha256: fieldContractSha256
+        stores: field.stores, eventLogRepo, sha256: fieldContractSha256,
+        runtimeNotifier: notifier
       });
       const admitted = await sourceAdmission.admit({
         workspace_id: "workspace-1", source_id: "artifact-1", source_version: "1",
@@ -92,6 +93,7 @@ describe("source observation publication wiring", () => {
           },
           fieldComposition: field,
           eventLogRepo,
+          runtimeNotifier: notifier,
           enqueueEnrichPending: () => undefined
         },
         pathRelationProposalPort: {
@@ -307,7 +309,8 @@ describe("source observation publication wiring", () => {
         })
       });
       const sourceAdmission = createAuditedSourceAdmission({
-        stores: field.stores, eventLogRepo, sha256: fieldContractSha256
+        stores: field.stores, eventLogRepo, sha256: fieldContractSha256,
+        runtimeNotifier: notifier
       });
       await sourceAdmission.admit({
         workspace_id: "workspace-1", source_id: "artifact-1", source_version: "1",
@@ -331,6 +334,7 @@ describe("source observation publication wiring", () => {
           synthesisService: { create: async () => { throw new Error("unexpected synthesis route"); } },
           claimService: { create: async () => { throw new Error("unexpected claim route"); } },
           fieldComposition: field, eventLogRepo,
+          runtimeNotifier: notifier,
           enqueueEnrichPending: () => undefined
         },
         pathRelationProposalPort: {

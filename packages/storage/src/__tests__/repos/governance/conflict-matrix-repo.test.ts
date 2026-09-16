@@ -86,7 +86,7 @@ describe("SqliteConflictMatrixRepo", () => {
     const { repo } = await createRepo();
     const edge = createEdge();
 
-    await expect(repo.create(edge)).resolves.toEqual(edge);
+    expect(repo.create(edge)).toEqual(edge);
     await expect(repo.findById(edge.object_id)).resolves.toEqual(edge);
   });
 
@@ -95,15 +95,17 @@ describe("SqliteConflictMatrixRepo", () => {
 
     await repo.create(createEdge({ object_id: EDGE_ID_1 }));
 
-    await expect(
+    expect(() =>
       repo.create(
         createEdge({
           object_id: EDGE_ID_2
         })
       )
-    ).rejects.toMatchObject({
-      code: "QUERY_FAILED"
-    });
+    ).toThrow(
+      expect.objectContaining({
+        code: "QUERY_FAILED"
+      })
+    );
   });
 
   it("finds edges between claims in both directions", async () => {

@@ -23,7 +23,7 @@ export type ProjectMappingAnchorRecord = Readonly<
 >;
 
 export interface ProjectMappingAnchorRepo {
-  create(anchor: ProjectMappingAnchorRecord): Promise<void>;
+  create(anchor: ProjectMappingAnchorRecord): void;
   findById(objectId: string): Promise<Readonly<ProjectMappingAnchorRecord> | null>;
   findByIds(objectIds: readonly string[]): Promise<readonly Readonly<ProjectMappingAnchorRecord>[]>;
   findByWorkspace(
@@ -39,7 +39,7 @@ export interface ProjectMappingAnchorRepo {
     newState: ProjectMappingState,
     acceptedBy: AcceptedBy | null,
     transitionedAt: string
-  ): Promise<void>;
+  ): void;
   listPending(workspaceId: string): Promise<readonly Readonly<ProjectMappingAnchorRecord>[]>;
 }
 
@@ -145,7 +145,7 @@ export class SqliteProjectMappingAnchorRepo implements ProjectMappingAnchorRepo 
     `);
   }
 
-  public async create(anchor: ProjectMappingAnchorRecord): Promise<void> {
+  public create(anchor: ProjectMappingAnchorRecord): void {
     const parsedAnchor = parseProjectMappingAnchor(anchor);
 
     try {
@@ -260,12 +260,12 @@ export class SqliteProjectMappingAnchorRepo implements ProjectMappingAnchorRepo 
     }
   }
 
-  public async updateState(
+  public updateState(
     objectId: string,
     newState: ProjectMappingState,
     acceptedBy: AcceptedBy | null,
     transitionedAt: string
-  ): Promise<void> {
+  ): void {
     const parsedObjectId = parseObjectId(objectId);
     const parsedState = parseProjectMappingState(newState);
     const parsedAcceptedBy = parseAcceptedBy(acceptedBy);

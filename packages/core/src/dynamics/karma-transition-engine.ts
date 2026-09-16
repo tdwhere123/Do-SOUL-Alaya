@@ -9,7 +9,6 @@ import { bindEventPublisher } from "../runtime/event-publisher.js";
 import { CoreError } from "../shared/errors.js";
 
 import {
-  broadcastEvents,
   buildManifestationChangedEventInput,
   buildRetentionUpdatedEventInput,
   buildStateChangedEventInput
@@ -79,8 +78,8 @@ export class KarmaTransitionEngine {
     // (daemon); this ordering-safe, non-atomic path serves fakes lacking the sync ports.
     const plan = await this.computeKarmaTransitionPlanFromParsed(parsedEvent, context);
     const applied = await this.applyKarmaTransitionPlan(plan);
-    const events = await this.auditKarmaTransition(applied, plan);
-    await this.notifyKarmaTransition(applied.updated, events);
+    await this.auditKarmaTransition(applied, plan);
+    this.scheduleGreenReevaluation(applied.updated);
   }
 
   // invariant (§7 + §31): the karma write and its EventLog audit rows commit in
@@ -268,14 +267,6 @@ export class KarmaTransitionEngine {
     return await this.buildKarmaTransitionAuditEntries(applyResult, plan);
   }
 
-  public async notifyKarmaTransition(
-    updated: Readonly<MemoryEntry>,
-    events: readonly EventLogEntry[]
-  ): Promise<void> {
-    await broadcastEvents(this.deps.runtimeNotifier, events);
-    this.scheduleGreenReevaluation(updated);
-  }
-
   public computeKarmaTransition(
     memory: Readonly<MemoryEntry>,
     parsedEvent: Readonly<KarmaEvent>,
@@ -344,6 +335,7 @@ export class KarmaTransitionEngine {
       entries.push(
         await bindEventPublisher({
           eventLogRepo: this.deps.eventLogRepo,
+          runtimeNotifier: this.deps.runtimeNotifier,
           purpose: "KarmaTransitionEngine"
         }).publish(input)
       );

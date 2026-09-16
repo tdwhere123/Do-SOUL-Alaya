@@ -40,7 +40,9 @@ export type SignalMaterializationRuntimeInput = Readonly<{
 type RouterOptions = ConstructorParameters<typeof MaterializationRouter>[0];
 type RouterWiring = Pick<CreateRecallMaterializationWiringInput,
   "evidenceService" | "memoryService" | "fieldComposition" | "eventLogRepo" | "enqueueEnrichPending"> &
-  Pick<RouterOptions, "synthesisService" | "claimService">;
+  Pick<RouterOptions, "synthesisService" | "claimService"> & {
+    readonly runtimeNotifier: { notifyEntry(entry: import("@do-soul/alaya-protocol").EventLogEntry): void | Promise<void> };
+  };
 type MaterializationRouterInput = Omit<SignalMaterializationRuntimeInput, "wiring" | "handoffGapHandler"> & {
   readonly wiring: RouterWiring;
   readonly handoffGapHandler: RouterOptions["handoffGapHandler"];
@@ -120,7 +122,8 @@ function createSourceObservationPublicationPort(
     sourceAdmission: createAuditedSourceAdmission({
       sha256: fieldContractSha256,
       stores: wiring.fieldComposition.stores,
-      eventLogRepo: wiring.eventLogRepo
+      eventLogRepo: wiring.eventLogRepo,
+      runtimeNotifier: wiring.runtimeNotifier
     }),
     evidenceService: wiring.evidenceService,
     memoryService: wiring.memoryService,

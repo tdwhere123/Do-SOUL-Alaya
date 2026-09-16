@@ -61,7 +61,7 @@ describe("SqliteSlotRepo", () => {
     const { repo } = await createRepo();
     const slot = createSlot();
 
-    await expect(repo.create(slot)).resolves.toEqual(slot);
+    expect(repo.create(slot)).toEqual(slot);
     await expect(repo.findById(slot.object_id)).resolves.toEqual(slot);
   });
 
@@ -70,15 +70,17 @@ describe("SqliteSlotRepo", () => {
 
     await repo.create(createSlot({ object_id: SLOT_ID_1 }));
 
-    await expect(
+    expect(() =>
       repo.create(
         createSlot({
           object_id: SLOT_ID_2
         })
       )
-    ).rejects.toMatchObject({
-      code: "QUERY_FAILED"
-    });
+    ).toThrow(
+      expect.objectContaining({
+        code: "QUERY_FAILED"
+      })
+    );
   });
 
   it("finds slot by unique key", async () => {

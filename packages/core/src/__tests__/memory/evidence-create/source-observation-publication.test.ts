@@ -49,7 +49,8 @@ async function openFixture(filename = ":memory:") {
   const stores = createInMemoryFieldStores();
   const notify = { notifyEntry: vi.fn(async () => undefined) };
   const sourceAdmission = createAuditedSourceAdmission({
-    stores, eventLogRepo, sha256: fieldContractSha256
+    stores, eventLogRepo, sha256: fieldContractSha256,
+    runtimeNotifier: notify
   });
   const evidenceService = new EvidenceService({
     evidenceCapsuleRepo, eventLogRepo, runtimeNotifier: notify

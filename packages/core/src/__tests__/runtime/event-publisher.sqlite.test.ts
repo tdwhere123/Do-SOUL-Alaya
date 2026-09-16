@@ -94,4 +94,44 @@ describe("EventPublisher + SqliteEventLogRepo", () => {
     database.close();
     databases.delete(database);
   });
+
+  it("rolls back the EventLog row when apply throws", async () => {
+    const database = initDatabase({ filename: ":memory:" });
+    databases.add(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const publisher = new EventPublisher({
+      eventLogRepo,
+      runHotStateService: { apply: () => undefined },
+      runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined }
+    });
+
+    await expect(
+      publisher.appendManyWithMutation(
+        [
+          {
+            event_type: WorkspaceRunEventType.RUN_CREATED,
+            entity_type: "run",
+            entity_id: "run_apply_throw",
+            workspace_id: "ws_publisher",
+            run_id: "run_apply_throw",
+            caused_by: "user_action",
+            payload_json: RunCreatedPayloadSchema.parse({
+              run_id: "run_apply_throw",
+              workspace_id: "ws_publisher",
+              run_mode: RunMode.CHAT,
+              title: "apply throw"
+            })
+          }
+        ],
+        () => {
+          throw new Error("apply failed");
+        }
+      )
+    ).rejects.toThrow("apply failed");
+
+    expect(await eventLogRepo.queryByEntity("run", "run_apply_throw")).toEqual([]);
+
+    database.close();
+    databases.delete(database);
+  });
 });

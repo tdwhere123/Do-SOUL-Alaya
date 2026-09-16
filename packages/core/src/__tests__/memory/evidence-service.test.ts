@@ -70,7 +70,8 @@ describe("EvidenceService", () => {
     };
     const created = await service.create(createEvidenceInput(), [projection]);
 
-    expect(order).toEqual(["event_log", "repo_create", "event_log", "notify"]);
+    // EventPublisher notifies on source_record.admitted before evidence.created.
+    expect(order).toEqual(["event_log", "repo_create", "event_log", "notify", "notify"]);
     expect(created.object_id).toBe("85b3671a-d8d8-4848-9e5c-07d0a89f5ae9");
     expect(create).toHaveBeenCalledWith(
       expect.any(Object),

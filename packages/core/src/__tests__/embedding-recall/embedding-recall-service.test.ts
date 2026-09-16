@@ -15,6 +15,7 @@ it("queries the local vector table, emits telemetry, and returns additive candid
       record: vi.fn(async (_entry: HealthJournalRecordInput) => undefined)
     };
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [
           createEmbeddingRecord({
@@ -113,6 +114,7 @@ it("keeps valid zero evidence for the base pool without admitting zero or invali
       ...entry
     }));
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => vectors.map(([objectId, content, embedding]) =>
           createEmbeddingRecord({
@@ -156,6 +158,7 @@ it("uses a prepared query embedding when it is ready by merge time", async () =>
       ...entry
     }));
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [
           createEmbeddingRecord({
@@ -212,6 +215,7 @@ it("uses a prepared query embedding when it is ready by merge time", async () =>
 
 it("preserves provider error context on failed prepared query embeddings", async () => {
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [])
       },
@@ -256,6 +260,7 @@ it("reports no_stored_vectors when prepareQuerySupplement finds an empty vector 
       record: vi.fn(async (_entry: HealthJournalRecordInput) => undefined)
     };
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [])
       },
@@ -314,6 +319,7 @@ it("reuses prepared stored vectors instead of reading the vector table twice", a
       })
     ]);
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds },
       provider: createProvider({
         embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
@@ -364,6 +370,7 @@ it("uses warmed query embeddings without calling the provider during recall prep
       texts.map(() => new Float32Array([0, 1]))
     );
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [
           createEmbeddingRecord({
@@ -433,6 +440,7 @@ it("keeps partial query warmup evidence when one provider batch fails", async ()
       return texts.map(() => new Float32Array([0, 1]));
     });
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
       provider: createProvider({ embedTexts }),
       eventLogRepo: {
@@ -468,6 +476,7 @@ it("waits briefly for a prepared query embedding before degrading", async () => 
       ...entry
     }));
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [
           createEmbeddingRecord({

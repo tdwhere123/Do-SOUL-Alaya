@@ -52,6 +52,16 @@ export class StubEventPublisher extends EventPublisher {
   }
 }
 
+export function inertRuntimeNotifier(): {
+  notify(): void;
+  notifyEntry(): void;
+} {
+  return {
+    notify: () => undefined,
+    notifyEntry: () => undefined
+  };
+}
+
 export function fakeAppendManyWithMutation(
   publishedEvents?: EventPublisherInput[]
 ): AppendManyWithMutationMock {

@@ -14,7 +14,7 @@ import {
   type TransitionCausedBy as TransitionCausedByType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
-import { bindEventPublisher } from "../runtime/event-publisher.js";
+import { bindEventPublisher, type EventPublisher } from "../runtime/event-publisher.js";
 import { parseObjectId } from "../shared/validators.js";
 
 export type SlotElectionDecision = "new_slot_created" | "auto_won" | "contested" | "no_change";
@@ -26,7 +26,7 @@ export type SlotElectionResult = {
 };
 
 export interface SlotServiceSlotRepoPort {
-  create(slot: Readonly<Slot>): Promise<Readonly<Slot>>;
+  create(slot: Readonly<Slot>): Readonly<Slot>;
   findById(objectId: string): Promise<Readonly<Slot> | null>;
   findByUniqueKey(
     canonicalKey: string,
@@ -41,12 +41,13 @@ export interface SlotServiceSlotRepoPort {
     winnerClaimId: string | null,
     incumbentSince: string | null,
     updatedAt: string
-  ): Promise<Readonly<Slot>>;
+  ): Readonly<Slot>;
 }
 
 export interface SlotServiceEventLogRepoPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  transactional<T>(fn: () => T): T;
 }
 
 
@@ -73,6 +74,7 @@ export interface SlotRuntimeNotifierPort {
 export interface SlotServiceDependencies {
   readonly slotRepo: SlotServiceSlotRepoPort;
   readonly eventLogRepo: SlotServiceEventLogRepoPort;
+  readonly eventPublisher?: EventPublisher;
   readonly runtimeNotifier: SlotRuntimeNotifierPort;
   readonly arbitrationService?: SlotServiceArbitrationServicePort;
   readonly generateObjectId?: () => string;
@@ -334,9 +336,12 @@ export class SlotService {
         winner_claim_id: slot.winner_claim_id
       })
     };
-    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async (event) => {
-      const created = await this.dependencies.slotRepo.create(slot);
-      deferredNotifyEvents?.push(event);
+    return await this.eventPublisher().appendManyWithMutation([eventInput], (entries) => {
+      const created = this.dependencies.slotRepo.create(slot);
+      const event = entries[0];
+      if (event !== undefined) {
+        deferredNotifyEvents?.push(event);
+      }
       return created;
     });
   }
@@ -370,15 +375,19 @@ export class SlotService {
         occurred_at: now
       })
     };
-    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async (event) => {
-      const updated = await this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, now, now);
-      deferredNotifyEvents?.push(event);
+    return await this.eventPublisher().appendManyWithMutation([eventInput], (entries) => {
+      const updated = this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, now, now);
+      const event = entries[0];
+      if (event !== undefined) {
+        deferredNotifyEvents?.push(event);
+      }
       return updated;
     });
   }
 
   private eventPublisher() {
     return bindEventPublisher({
+      eventPublisher: this.dependencies.eventPublisher,
       eventLogRepo: this.dependencies.eventLogRepo,
       runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "SlotService"

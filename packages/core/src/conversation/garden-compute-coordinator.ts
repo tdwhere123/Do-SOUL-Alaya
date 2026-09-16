@@ -52,6 +52,7 @@ export interface GardenComputeCoordinatorDependencies {
   readonly retainCompileSource?: (turnContent: string, context: Parameters<ConversationGardenComputeProviderPort["compile"]>[1]) => Promise<void>;
   readonly eventLogRepo: ConversationEventLogRepoPort;
   readonly eventPublisher?: EventPublisher;
+  readonly runtimeNotifier?: { notifyEntry(entry: EventLogEntry): void | Promise<void> };
   readonly gardenComputeProvider: ConversationGardenComputeProviderPort;
   readonly resolveGardenComputeProvider?: ConversationGardenComputeProviderResolverPort;
   readonly signalReceiver: ConversationSignalReceiverPort;
@@ -405,6 +406,7 @@ export class GardenComputeCoordinator {
     return await bindEventPublisher({
       eventPublisher: this.deps.eventPublisher,
       eventLogRepo: this.deps.eventLogRepo,
+      runtimeNotifier: this.deps.runtimeNotifier,
       purpose: "GardenComputeCoordinator"
     }).publish(event);
   }

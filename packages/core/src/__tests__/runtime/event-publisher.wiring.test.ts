@@ -8,7 +8,6 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   EventPublisher,
-  EVENT_PUBLISHER_ADAPTER_FALLBACK_CODE,
   bindEventPublisher,
   type EventPublisherEventLogRepoPort,
   type EventPublisherInput
@@ -410,8 +409,7 @@ describe("EventPublisher wiring (fake EventLog repo)", () => {
     expect(() => bindEventPublisher({ purpose: "TestService" })).toThrow(/requires an event publisher/);
   });
 
-  it("emits an adapter-fallback diagnostic when notifier or hot state is omitted", async () => {
-    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+  it("bindEventPublisher throws when a runtime notifier is omitted", () => {
     const entry = createEventLogEntry({
       event_type: "worker.state_changed",
       entity_type: "worker_run",
@@ -425,19 +423,41 @@ describe("EventPublisher wiring (fake EventLog repo)", () => {
         previousState: "init"
       })
     });
-    bindEventPublisher({
-      eventLogRepo: createSingleEntryRepo(entry, []),
+    expect(() =>
+      bindEventPublisher({
+        eventLogRepo: createSingleEntryRepo(entry, []),
+        purpose: "TestService"
+      })
+    ).toThrow(/requires a runtime notifier/);
+  });
+
+  it("bindEventPublisher refuses EventLog mutate when transactional is omitted", async () => {
+    const entry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: WorkerStateChangedPayloadSchema.parse({
+        workerId: "worker-1",
+        state: "active",
+        previousState: "init"
+      })
+    });
+    const publisher = bindEventPublisher({
+      eventLogRepo: {
+        append: () => entry
+      },
+      runtimeNotifier: { notifyEntry: () => undefined },
       purpose: "TestService"
     });
-    expect(emitWarning).toHaveBeenCalledWith(
-      expect.stringContaining("inert notifier/hot-state"),
-      expect.objectContaining({ code: EVENT_PUBLISHER_ADAPTER_FALLBACK_CODE })
-    );
-    emitWarning.mockRestore();
+    await expect(
+      publisher.appendManyWithMutation([toEventInput(entry)], () => "saved")
+    ).rejects.toThrow(/requires transactional/);
   });
 
   it("wakes an injected notifier when the adapter is given a subscriber", async () => {
-    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
     const notifyEntry = vi.fn(async () => undefined);
     const entry = createEventLogEntry({
       event_type: "worker.state_changed",
@@ -460,11 +480,6 @@ describe("EventPublisher wiring (fake EventLog repo)", () => {
     });
     await publisher.publish(toEventInput(entry));
     expect(notifyEntry).toHaveBeenCalledWith(entry);
-    expect(emitWarning).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ code: EVENT_PUBLISHER_ADAPTER_FALLBACK_CODE })
-    );
-    emitWarning.mockRestore();
   });
 
   it("bindEventPublisher keeps class-instance EventLog `this` across append", async () => {
@@ -495,13 +510,46 @@ describe("EventPublisher wiring (fake EventLog repo)", () => {
     }
     const publisher = bindEventPublisher({
       eventLogRepo: new ClassEventLogRepo(entry),
+      runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined },
       purpose: "TestService"
     });
     await expect(publisher.publish(toEventInput(entry))).resolves.toEqual(entry);
     expect(recorded).toEqual(["bound:evt_worker-1"]);
   });
 
-  it("appendApplyThenPropagate appends, applies, then notifies", async () => {
+  it("bindEventPublisher keeps class-instance notifier `this` across notifyEntry", async () => {
+    const entry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: WorkerStateChangedPayloadSchema.parse({
+        workerId: "worker-1",
+        state: "active",
+        previousState: "init"
+      })
+    });
+    class ClassNotifier {
+      public readonly seen: string[] = [];
+      private readonly tag = "bound";
+      public notify(): void {}
+      public notifyEntry(received: EventLogEntry): void {
+        this.seen.push(`${this.tag}:${received.event_id}`);
+      }
+    }
+    const notifier = new ClassNotifier();
+    const publisher = bindEventPublisher({
+      eventLogRepo: createSingleEntryRepo(entry, []),
+      runtimeNotifier: notifier,
+      purpose: "TestService"
+    });
+    await expect(publisher.publish(toEventInput(entry))).resolves.toEqual(entry);
+    expect(notifier.seen).toEqual(["bound:evt_worker-1"]);
+  });
+
+  it("appendManyWithMutation appends, applies, then notifies", async () => {
     const recorded: string[] = [];
     const entry = createEventLogEntry({
       event_type: "worker.state_changed",
@@ -520,13 +568,13 @@ describe("EventPublisher wiring (fake EventLog repo)", () => {
       eventLogRepo: createSingleEntryRepo(entry, recorded),
       runtimeNotifier: {
         notify: vi.fn(),
-        notifyEntry: vi.fn(async () => {
+        notifyEntry: vi.fn(() => {
           recorded.push("notify");
         })
       },
       purpose: "TestService"
     });
-    const result = await publisher.appendApplyThenPropagate(toEventInput(entry), async () => {
+    const result = await publisher.appendManyWithMutation([toEventInput(entry)], () => {
       recorded.push("apply");
       return "saved";
     });

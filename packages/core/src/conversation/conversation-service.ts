@@ -49,6 +49,9 @@ export class ConversationService {
       ...(dependencies.eventPublisher === undefined
         ? {}
         : { eventPublisher: dependencies.eventPublisher }),
+      ...(dependencies.runtimeNotifier === undefined
+        ? {}
+        : { runtimeNotifier: dependencies.runtimeNotifier }),
       gardenComputeProvider: dependencies.gardenComputeProvider,
       ...(dependencies.retainCompileSource === undefined ? {} : { retainCompileSource: dependencies.retainCompileSource }),
       resolveGardenComputeProvider: dependencies.resolveGardenComputeProvider,

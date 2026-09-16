@@ -145,7 +145,7 @@ function buildCoreServiceInput(
 ) {
   const { bootstrap, foundation, repositories } = input;
   return {
-    retainCompileSource: createCompileSourceRetainer(repositories),
+    retainCompileSource: createCompileSourceRetainer(repositories, bootstrap.runtimeNotifier),
     rawConfigService: foundation.rawConfigService,
     eventLogRepo: repositories.eventLogRepo,
     runtimeNotifier: bootstrap.runtimeNotifier,
@@ -167,10 +167,12 @@ function buildCoreServiceInput(
 
 /** Interactive compilation awaits retained source admission and its audit. */
 export function createCompileSourceRetainer(
-  repositories: Pick<Repositories, "fieldComposition" | "eventLogRepo">
+  repositories: Pick<Repositories, "fieldComposition" | "eventLogRepo">,
+  runtimeNotifier: { notifyEntry(entry: import("@do-soul/alaya-protocol").EventLogEntry): void | Promise<void> }
 ): NonNullable<ConversationServiceDependencies["retainCompileSource"]> {
   const admission = createAuditedSourceAdmission({ sha256: fieldContractSha256,
-    stores: repositories.fieldComposition.stores, eventLogRepo: repositories.eventLogRepo });
+    stores: repositories.fieldComposition.stores, eventLogRepo: repositories.eventLogRepo,
+    runtimeNotifier });
   return async (turnContent, context) => {
     if (context.artifact_key === undefined) throw new Error("compile source identity missing");
     const content = buildOfficialApiSourceCorpus(turnContent, context.turn_messages);

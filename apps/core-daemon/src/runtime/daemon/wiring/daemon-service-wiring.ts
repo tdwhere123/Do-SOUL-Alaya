@@ -200,6 +200,7 @@ function createConversationServiceDependencies(
     readonly workspaceRepo: SqliteWorkspaceRepo;
     readonly eventLogRepo: SqliteEventLogRepo;
     readonly eventPublisher: EventPublisher;
+    readonly runtimeNotifier: AlayaRuntimeNotifier;
     readonly signalService: SignalService;
     readonly contextLensAssembler: ConversationContextLensAssemblerPort;
     readonly governanceLeaseService: GovernanceLeaseService;
@@ -214,6 +215,7 @@ function createConversationServiceDependencies(
     workspaceRepo: input.workspaceRepo,
     eventLogRepo: input.eventLogRepo,
     eventPublisher: input.eventPublisher,
+    runtimeNotifier: input.runtimeNotifier,
     gardenComputeProvider: computeRoutingService.getDefaultProvider(),
     retainCompileSource: input.retainCompileSource,
     resolveGardenComputeProvider: {
@@ -271,7 +273,8 @@ function createDaemonCoreSupportServices(
       runtimeNotifier: input.runtimeNotifier
     }),
     topologyAuditService: new SoulTopologyAuditService({
-      eventLogRepo: input.eventLogRepo
+      eventLogRepo: input.eventLogRepo,
+      runtimeNotifier: input.runtimeNotifier
     })
   };
 }

@@ -25,7 +25,7 @@ export interface ArbitrationServiceSlotRepoPort {
     winnerClaimId: string | null,
     incumbentSince: string | null,
     updatedAt: string
-  ): Promise<Readonly<Slot>>;
+  ): Readonly<Slot>;
 }
 
 export interface ArbitrationServiceClaimRepoPort {
@@ -34,7 +34,7 @@ export interface ArbitrationServiceClaimRepoPort {
 }
 
 export interface ArbitrationServiceConflictMatrixRepoPort {
-  create(edge: Readonly<ConflictMatrixEdge>): Promise<Readonly<ConflictMatrixEdge>>;
+  create(edge: Readonly<ConflictMatrixEdge>): Readonly<ConflictMatrixEdge>;
   findById(objectId: string): Promise<Readonly<ConflictMatrixEdge> | null>;
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<ConflictMatrixEdge>[]>;
   findBetweenClaims(
@@ -59,6 +59,7 @@ export interface ArbitrationServiceClaimServicePort {
 export interface ArbitrationServiceEventLogRepoPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  transactional<T>(fn: () => T): T;
 }
 
 export interface ArbitrationRuntimeNotifierPort {

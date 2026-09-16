@@ -128,7 +128,7 @@ export class BudgetBankruptcyService {
 
     const resolutionState =
       action === "accept" ? ProposalResolutionState.ACCEPTED : ProposalResolutionState.REJECTED;
-    const resolvedEvent = await this.appendResolvedEvent(
+    await this.appendResolvedEvent(
       entry,
       proposal.proposal_id,
       action === "accept" ? option.option_id : null,
@@ -151,7 +151,6 @@ export class BudgetBankruptcyService {
         entry.pressureRatio
       )
     );
-    await this.dependencies.runtimeNotifier.notifyEntry(resolvedEvent);
     return updatedProposal;
   }
 
@@ -246,7 +245,7 @@ export class BudgetBankruptcyService {
     }
 
     const artifacts = this.buildDeclarationArtifacts(params, effectiveMode, occurredAt);
-    const declaredEvent = await this.appendDeclaredEvent(artifacts, runId, workspaceId, occurredAt);
+    await this.appendDeclaredEvent(artifacts, runId, workspaceId, occurredAt);
     const proposal = await this.dependencies.proposalService.create({
       workspaceId,
       runId,
@@ -258,11 +257,10 @@ export class BudgetBankruptcyService {
     const entry = createStoreEntry(artifacts.initialState, artifacts.dossier, proposal.proposal_id, artifacts.pressureRatio);
 
     if (artifacts.kind === BankruptcyKind.SOFT) {
-      return await this.autoResolveSoftDeclaration(entry, proposal, runId, workspaceId, declaredEvent);
+      return await this.autoResolveSoftDeclaration(entry, proposal, runId, workspaceId);
     }
 
     this.setStateStoreEntry(runId, entry);
-    await this.dependencies.runtimeNotifier.notifyEntry(declaredEvent);
     return { state: entry.state, dossier: entry.dossier, proposal };
   }
 
@@ -310,8 +308,7 @@ export class BudgetBankruptcyService {
     entry: BankruptcyStoreEntry,
     proposal: Readonly<Proposal>,
     runId: string,
-    workspaceId: string,
-    declaredEvent: EventLogEntry
+    workspaceId: string
   ): Promise<BudgetBankruptcyDeclareResult> {
     const autoOption = getAutoApplicableOption(proposal);
     if (autoOption === null) {
@@ -319,7 +316,7 @@ export class BudgetBankruptcyService {
     }
 
     const resolvedAt = ensureIsoDatetime(this.now(), "now");
-    const resolvedEvent = await this.appendResolvedEvent(
+    await this.appendResolvedEvent(
       entry,
       proposal.proposal_id,
       autoOption.option_id,
@@ -340,8 +337,6 @@ export class BudgetBankruptcyService {
       entry.pressureRatio
     );
     this.setStateStoreEntry(runId, updatedEntry);
-    await this.dependencies.runtimeNotifier.notifyEntry(declaredEvent);
-    await this.dependencies.runtimeNotifier.notifyEntry(resolvedEvent);
     return { state: updatedEntry.state, dossier: updatedEntry.dossier, proposal: updatedProposal };
   }
 
@@ -402,6 +397,7 @@ export class BudgetBankruptcyService {
   ): Promise<EventLogEntry> {
     return await bindEventPublisher({
       eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "BudgetBankruptcyService"
     }).publish({
       event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
@@ -442,6 +438,7 @@ export class BudgetBankruptcyService {
   ): Promise<EventLogEntry> {
     return await bindEventPublisher({
       eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "BudgetBankruptcyService"
     }).publish({
       event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED,

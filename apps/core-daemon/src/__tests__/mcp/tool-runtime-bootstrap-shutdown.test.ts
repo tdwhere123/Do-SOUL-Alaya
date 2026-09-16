@@ -187,6 +187,7 @@ describe("daemon tool runtime bootstrap shutdown", () => {
       const telemetryService = new GardenBacklogTelemetryService({
         scheduler,
         eventLogRepo,
+        runtimeNotifier: { notifyEntry: () => undefined },
         healthJournal,
         thresholds: {
           warning_queue_depth: 10,

@@ -43,6 +43,7 @@ export function createKnowledgeFoundation(
   const governanceLeaseService = new GovernanceLeaseService({
     eventLogRepo: input.eventLogRepo,
     eventPublisher,
+    runtimeNotifier: input.runtimeNotifier,
     runLookup: input.runRepo
   });
   const healthJournalService = createHealthJournalService(input, eventPublisher);
@@ -273,7 +274,8 @@ function createKnowledgeInteractionRuntime(
   return {
     graphExploreService: new GraphExploreService({
       pathRepo: input.pathRelationRepo,
-      eventLogRepo: input.eventLogRepo
+      eventLogRepo: input.eventLogRepo,
+      runtimeNotifier: input.runtimeNotifier
     }),
     pathRelationProposalServiceRef,
     healthIssueGroupRepo,

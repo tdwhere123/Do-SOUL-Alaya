@@ -233,6 +233,7 @@ function createRecallContextLensAssembler(
     claimRepo: input.claimFormRepo,
     memoryRepo: input.memoryEntryRepo,
     eventLogRepo: input.eventLogRepo,
+    runtimeNotifier: input.runtimeNotifier,
     overrideService: input.sessionOverrideService,
     degradationPipeline: new DegradationPipeline(),
     bankruptcyService: input.budgetBankruptcyService,

@@ -6,7 +6,7 @@ import { toSqliteBoolean } from "../shared/sqlite-utils.js";
 import { parseRows } from "../shared/parse-row.js";
 
 export interface ToolExecutionRecordRepo {
-  insert(record: ToolExecutionRecord): Promise<Readonly<ToolExecutionRecord>>;
+  insert(record: ToolExecutionRecord): Readonly<ToolExecutionRecord>;
   findById(executionId: string): Promise<Readonly<ToolExecutionRecord> | null>;
   listByRunId(
     runId: string,
@@ -99,7 +99,7 @@ export class SqliteToolExecutionRecordRepo implements ToolExecutionRecordRepo {
     `);
   }
 
-  public async insert(record: ToolExecutionRecord): Promise<Readonly<ToolExecutionRecord>> {
+  public insert(record: ToolExecutionRecord): Readonly<ToolExecutionRecord> {
     const parsedRecord = parseToolExecutionRecord(record);
     const requestingPrincipalRunId =
       parsedRecord.requested_by === "principal" ? parsedRecord.requesting_run_id : null;
@@ -132,7 +132,7 @@ export class SqliteToolExecutionRecordRepo implements ToolExecutionRecordRepo {
       );
     }
 
-    const inserted = await this.findById(parsedRecord.execution_id);
+    const inserted = this.loadById(parsedRecord.execution_id);
 
     if (inserted === null) {
       throw new StorageError(
@@ -146,8 +146,7 @@ export class SqliteToolExecutionRecordRepo implements ToolExecutionRecordRepo {
 
   public async findById(executionId: string): Promise<Readonly<ToolExecutionRecord> | null> {
     try {
-      const row = this.findByIdStatement.get(executionId) as ToolExecutionRecordRow | undefined;
-      return row === undefined ? null : parseToolExecutionRecordRow(row);
+      return this.loadById(executionId);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -159,6 +158,11 @@ export class SqliteToolExecutionRecordRepo implements ToolExecutionRecordRepo {
         error
       );
     }
+  }
+
+  private loadById(executionId: string): Readonly<ToolExecutionRecord> | null {
+    const row = this.findByIdStatement.get(executionId) as ToolExecutionRecordRow | undefined;
+    return row === undefined ? null : parseToolExecutionRecordRow(row);
   }
 
   public async listByRunId(

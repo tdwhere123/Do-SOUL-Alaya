@@ -17,6 +17,7 @@ describe("TaskSurfaceBuilder", () => {
     const builder = new TaskSurfaceBuilder({
       now: () => "2026-03-23T00:00:00.000Z",
       generateRuntimeId: () => "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      runtimeNotifier: { notifyEntry: () => undefined },
       eventLogRepo: {
         append: appendSpy,
         queryByEntity: vi.fn(async () => [])
@@ -68,6 +69,7 @@ describe("TaskSurfaceBuilder", () => {
     const builder = new TaskSurfaceBuilder({
       now: () => "2026-03-23T00:00:00.000Z",
       generateRuntimeId: () => "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      runtimeNotifier: { notifyEntry: () => undefined },
       eventLogRepo: {
         append: vi.fn(async (event) => createEventLogEntry(event)),
         queryByEntity: vi.fn(async () => [])
@@ -122,6 +124,7 @@ describe("TaskSurfaceBuilder", () => {
 
   it("resolves build strategy from code-editor surface kind", () => {
     const builder = new TaskSurfaceBuilder({
+      runtimeNotifier: { notifyEntry: () => undefined },
       eventLogRepo: {
         append: vi.fn(async (event) => createEventLogEntry(event)),
         queryByEntity: vi.fn(async () => [])

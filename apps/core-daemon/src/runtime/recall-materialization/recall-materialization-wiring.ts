@@ -258,6 +258,7 @@ function createEmbeddingRuntimeWithWarmupObserver(input: CreateRecallMaterializa
     configEnv: input.configEnv,
     eventLogRepo: input.eventLogRepo,
     eventPublisher: input.eventPublisher,
+    runtimeNotifier: input.runtimeNotifier,
     healthJournalService: input.healthJournalService,
     memoryEntryRepo: input.memoryEntryRepo,
     warn: input.warn

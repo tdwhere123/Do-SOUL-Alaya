@@ -106,12 +106,13 @@ describe("DynamicsService karma transition failure invariants", () => {
 
     expect(updateDynamicsSpy).toHaveBeenCalledTimes(1);
     expect(notifyEntrySpy.mock.calls.length).toBeGreaterThan(0);
-    // invariant: the durable mutation and every audit append precede the first
-    // broadcast, so a subscriber never observes an event before it is persisted.
+    expect(appendSpy).toHaveBeenCalledTimes(notifyEntrySpy.mock.calls.length);
+    // Each subscriber wake follows that event's append; later events may
+    // append after an earlier event has already notified.
     const firstNotifyOrder = expectDefined(requireAt(notifyEntrySpy.mock.invocationCallOrder, 0), "invocationCallOrder");
     expect(expectDefined(requireAt(updateDynamicsSpy.mock.invocationCallOrder, 0), "invocationCallOrder")).toBeLessThan(firstNotifyOrder);
-    for (const appendOrder of appendSpy.mock.invocationCallOrder) {
-      expect(appendOrder).toBeLessThan(firstNotifyOrder);
+    for (const [index, notifyOrder] of notifyEntrySpy.mock.invocationCallOrder.entries()) {
+      expect(expectDefined(requireAt(appendSpy.mock.invocationCallOrder, index), "invocationCallOrder")).toBeLessThan(notifyOrder);
     }
   });
 

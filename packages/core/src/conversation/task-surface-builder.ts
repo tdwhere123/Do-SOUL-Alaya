@@ -16,7 +16,7 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
-import { bindEventPublisher } from "../runtime/event-publisher.js";
+import { bindEventPublisher, type RuntimeNotifier } from "../runtime/event-publisher.js";
 
 export type NodeStrategy = "chat" | "analyze" | "build" | "govern";
 
@@ -32,6 +32,7 @@ export interface TaskSurfaceBuilderEventLogRepoPort {
 export interface TaskSurfaceBuilderDependencies {
   readonly surfaceRepo?: TaskSurfaceBuilderSurfaceRepoPort;
   readonly eventLogRepo: TaskSurfaceBuilderEventLogRepoPort;
+  readonly runtimeNotifier: Pick<RuntimeNotifier, "notifyEntry">;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
 }
@@ -190,6 +191,7 @@ export class TaskSurfaceBuilder {
     });
     await bindEventPublisher({
       eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
       purpose: "TaskSurfaceBuilder"
     }).publish({
       event_type: RecallContextEventType.SOUL_TASK_SURFACE_CREATED,

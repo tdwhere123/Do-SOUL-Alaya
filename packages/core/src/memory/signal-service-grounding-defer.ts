@@ -259,20 +259,20 @@ async function completeGenericDeferredMaterialization(input: {
   readonly signal: CandidateMemorySignal;
   readonly materialization: SignalMaterializationResult;
 }): Promise<SignalServiceReceiveResult> {
-  const materializedEvent = await bindEventPublisher({
+  await bindEventPublisher({
     eventLogRepo: input.dependencies.eventLogRepo,
+    runtimeNotifier: input.dependencies.runtimeNotifier,
     purpose: "SignalService"
   }).publish(buildSignalMaterializationEvent(input.signal, input.materialization));
   const signal = await input.dependencies.signalRepo.updateState(
     input.signal.signal_id,
     SignalState.DEFERRED
   );
-  await notifyCommittedEventBestEffort(materializedEvent, input.dependencies, input.warn);
-  const deferredEvent = await bindEventPublisher({
+  await bindEventPublisher({
     eventLogRepo: input.dependencies.eventLogRepo,
+    runtimeNotifier: input.dependencies.runtimeNotifier,
     purpose: "SignalService"
   }).publish(buildDeferredTriageEvent(input.signal, null));
-  await notifyCommittedEventBestEffort(deferredEvent, input.dependencies, input.warn);
   return {
     signal,
     triage_result: "deferred",

@@ -14,6 +14,7 @@ function buildService(input: {
   readonly embedTexts?: (texts: readonly string[]) => Promise<readonly Float32Array[]>;
 }): EmbeddingRecallService {
   return new EmbeddingRecallService({
+    runtimeNotifier: { notifyEntry: () => undefined },
     embeddingRepo: {
       listByObjectIds: vi.fn(async () => input.storedVectors),
       listByWorkspace: vi.fn(async () => [])
@@ -189,6 +190,7 @@ describe("EmbeddingRecallService.scorePoolCandidates", () => {
       ...entry
     }));
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => []),
         listByWorkspace: vi.fn(async () => [])
@@ -228,6 +230,7 @@ describe("EmbeddingRecallService.scorePoolCandidates", () => {
       ...entry
     }));
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => {
           throw new Error("sqlite busy");
@@ -271,6 +274,7 @@ describe("EmbeddingRecallService.coherentPairKeys quiet degradation", () => {
       ...entry
     }));
     const service = new EmbeddingRecallService({
+      runtimeNotifier: { notifyEntry: () => undefined },
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => []),
         listByWorkspace: vi.fn(async () => [])

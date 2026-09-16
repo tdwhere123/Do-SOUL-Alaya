@@ -11,10 +11,12 @@ export async function appendSourceRecordAdmitted(
     append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">):
       EventLogEntry | Promise<EventLogEntry>;
   },
-  record: SourceRecordIdentity
+  record: SourceRecordIdentity,
+  runtimeNotifier: { notifyEntry(entry: EventLogEntry): void | Promise<void> }
 ): Promise<void> {
   await bindEventPublisher({
     eventLogRepo,
+    runtimeNotifier,
     purpose: "source-admission-audit"
   }).publish({
     event_type: FieldGenerationEventType.SOUL_FIELD_SOURCE_RECORD_ADMITTED,

@@ -206,7 +206,8 @@ function createGovernanceAndSurfaceFoundation(
   const surfaceService = createSurfaceService(input, eventPublisher, healthJournalService);
   const taskSurfaceBuilder = new TaskSurfaceBuilder({
     surfaceRepo: input.surfaceIdentityRepo,
-    eventLogRepo: input.eventLogRepo
+    eventLogRepo: input.eventLogRepo,
+    runtimeNotifier: input.runtimeNotifier
   });
 
   return {
@@ -248,6 +249,7 @@ function createSlotClaimRuntime(
   const slotService = new SlotService({
     slotRepo: input.slotRepo,
     eventLogRepo: input.eventLogRepo,
+    eventPublisher,
     runtimeNotifier: input.runtimeNotifier,
     arbitrationService: {
       arbitrateSlot: async (slotId, options) => await arbitrationService.arbitrateSlot(slotId, options)
@@ -299,7 +301,8 @@ function createSurfaceService(
 function createGovernanceServices(input: DaemonServiceFoundationInput) {
   const sessionOverrideService = new SessionOverrideService({
     eventLogRepo: input.eventLogRepo,
-    runLookup: input.runRepo
+    runLookup: input.runRepo,
+    runtimeNotifier: input.runtimeNotifier
   });
   const proposalService = new ProposalService({
     proposalRepo: input.proposalRepo,

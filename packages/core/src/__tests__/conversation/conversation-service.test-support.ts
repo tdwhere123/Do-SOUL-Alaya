@@ -26,6 +26,7 @@ export function createService(
         ...entry
       }))
     },
+    runtimeNotifier: { notifyEntry: () => undefined },
     gardenComputeProvider: {
       provider_kind: "local_heuristics" as const,
       compile: vi.fn(async () => [])
