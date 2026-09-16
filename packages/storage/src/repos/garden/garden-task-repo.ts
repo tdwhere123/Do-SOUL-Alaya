@@ -22,12 +22,13 @@ import {
   roleRank,
   stringifyPayload,
   resolveDuplicateGardenEnqueue,
+  GardenTaskDbRowParser,
+  GardenTaskBacklogCountDbRowParser,
+  GardenTaskKindCountDbRowParser,
   type GardenTaskDbRow
 } from "./mappers/garden-task-rows.js";
 import type { GardenTaskBacklogCount, GardenTaskClaimResult, GardenTaskCompletionResult, GardenTaskEnqueueInput, GardenTaskEventInput, GardenTaskEventPublisherPort, GardenTaskExpiryInput, GardenTaskKindBacklogCount, GardenTaskReclaimInput, GardenTaskRepoPort, GardenTaskRow } from "./garden-task-types.js";
-import { parseRows } from "../shared/parse-row.js";
-import { GardenTaskDbRowParser } from "./mappers/garden-task-rows.js";
-import { GardenTaskBacklogCountDbRowParser } from "./mappers/garden-task-rows.js";
+import { CountRowParser, parseOptionalRow, parseRows } from "../shared/parse-row.js";
 
 export type * from "./garden-task-types.js";
 
@@ -48,6 +49,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   private readonly expireUnclaimedStatement;
   private readonly countByKindStatement;
   private readonly countByKindByWorkspaceStatement;
+  private readonly countRecentFailedStatement;
   private readonly countByRoleStatusStatement;
 
   public constructor(
@@ -72,6 +74,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     this.countByRoleStatusStatement = statements.countByRoleStatusStatement;
     this.countByKindStatement = statements.countByKindStatement;
     this.countByKindByWorkspaceStatement = statements.countByKindByWorkspaceStatement;
+    this.countRecentFailedStatement = statements.countRecentFailedStatement;
   }
 
   public enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string } {
@@ -432,33 +435,53 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   public countByKind(
     kind: GardenTaskKindValue,
     staleBeforeIso: string,
-    workspace_id?: string
+    workspace_id?: string,
+    recentFailedLimit?: number
   ): GardenTaskKindBacklogCount {
     const parsedKind = GardenTaskKindSchema.parse(kind);
     const staleBefore = parseTimestamp(staleBeforeIso);
     try {
-      const row = (
+      const row = parseOptionalRow(
         workspace_id === undefined
           ? this.countByKindStatement.get(staleBefore, parsedKind)
           : this.countByKindByWorkspaceStatement.get(
               staleBefore,
               parsedKind,
               parseNonEmptyString(workspace_id, "garden_task.workspace_id")
-            )
-      ) as {
-        readonly pending: number | null;
-        readonly stale: number | null;
-        readonly failed: number | null;
-      } | undefined;
+            ),
+        GardenTaskKindCountDbRowParser,
+        "garden task kind count row"
+      );
       return {
         kind: parsedKind,
         pending: row?.pending ?? 0,
         stale: row?.stale ?? 0,
-        failed: row?.failed ?? 0
+        failed:
+          recentFailedLimit === undefined
+            ? (row?.failed ?? 0)
+            : this.countRecentFailed(parsedKind, recentFailedLimit, workspace_id)
       };
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to count Garden task backlog by kind.", error);
     }
+  }
+
+  private countRecentFailed(
+    kind: GardenTaskKindValue,
+    limit: number,
+    workspace_id?: string
+  ): number {
+    const parsedLimit = parseLimit(limit);
+    const workspaceId =
+      workspace_id === undefined
+        ? null
+        : parseNonEmptyString(workspace_id, "garden_task.workspace_id");
+    const row = parseOptionalRow(
+      this.countRecentFailedStatement.get(kind, workspaceId, workspaceId, parsedLimit),
+      CountRowParser,
+      "garden task recent failed count row"
+    );
+    return row?.total ?? 0;
   }
 
   private completeClaimedTask(

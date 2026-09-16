@@ -24,19 +24,6 @@ const isolatedConfigDirs: string[] = [];
 
 const BOOTSTRAP_TEST_TIMEOUT_MS = 15_000;
 
-async function resolveBootGardenProvider(): Promise<unknown> {
-  const provider = hoisted.conversationServiceDeps?.gardenComputeProvider as
-    | { getProvider?: () => Promise<unknown> }
-    | undefined;
-  if (provider === undefined) {
-    throw new Error("ConversationService gardenComputeProvider was not wired.");
-  }
-  if (typeof provider.getProvider === "function") {
-    return await provider.getProvider();
-  }
-  return provider;
-}
-
 async function bootDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const createAlayaDaemonRuntime = await loadDaemonRuntimeFactory();
   const runtime = await createAlayaDaemonRuntime();

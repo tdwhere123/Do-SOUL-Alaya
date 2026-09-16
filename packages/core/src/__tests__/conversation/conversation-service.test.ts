@@ -131,7 +131,7 @@ describe("ConversationService", () => {
     const healthJournalRecorder = {
       record: vi.fn(async () => undefined)
     };
-    const { service, dependencies } = createService({
+    const { service } = createService({
       governanceLeaseService,
       contextLensAssembler,
       gardenCompileQueue,
@@ -157,8 +157,6 @@ describe("ConversationService", () => {
       userMessage: expect.objectContaining({ message_id: "msg-user" }),
       assistantMessage: expect.objectContaining({ message_id: "msg-assistant" })
     });
-    expect(dependencies.gardenComputeProvider.compile).not.toHaveBeenCalled();
-    expect(dependencies.signalReceiver.receiveSignal).not.toHaveBeenCalled();
     expect(healthJournalRecorder.record).not.toHaveBeenCalled();
     expect(governanceLeaseService.release).toHaveBeenCalledWith("run-1");
   });
@@ -172,7 +170,7 @@ describe("ConversationService", () => {
       record: vi.fn(async () => undefined)
     };
     const warn = vi.fn();
-    const { service, dependencies } = createService({
+    const { service } = createService({
       governanceLeaseService,
       gardenCompileQueue: undefined,
       healthJournalRecorder,
@@ -190,7 +188,6 @@ describe("ConversationService", () => {
     });
     await flushBackgroundTasks();
 
-    expect(dependencies.gardenComputeProvider.compile).not.toHaveBeenCalled();
     expect(healthJournalRecorder.record).toHaveBeenCalledWith(
       expect.objectContaining({
         event_kind: HealthEventKind.GARDEN_BACKLOG,
@@ -209,7 +206,7 @@ describe("ConversationService", () => {
     const healthJournalRecorder = {
       record: vi.fn(async () => undefined)
     };
-    const { service, dependencies } = createService({
+    const { service } = createService({
       gardenCompileQueue: {
         enqueue: vi.fn(() => {
           throw persistError;
@@ -225,7 +222,6 @@ describe("ConversationService", () => {
     });
     await flushBackgroundTasks();
 
-    expect(dependencies.gardenComputeProvider.compile).not.toHaveBeenCalled();
     expect(healthJournalRecorder.record).toHaveBeenCalledWith(
       expect.objectContaining({
         event_kind: HealthEventKind.GARDEN_BACKLOG,
@@ -243,7 +239,7 @@ describe("ConversationService", () => {
     const healthJournalRecorder = {
       record: vi.fn(async () => undefined)
     };
-    const { service, dependencies } = createService({
+    const { service } = createService({
       gardenCompileQueue: {
         enqueue: vi.fn(() => ({ status: "duplicate" as const }))
       },
@@ -257,7 +253,6 @@ describe("ConversationService", () => {
     });
     await flushBackgroundTasks();
 
-    expect(dependencies.gardenComputeProvider.compile).not.toHaveBeenCalled();
     expect(healthJournalRecorder.record).not.toHaveBeenCalled();
   });
 

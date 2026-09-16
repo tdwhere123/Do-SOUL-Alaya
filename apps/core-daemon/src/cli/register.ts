@@ -257,8 +257,8 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
           tokenWorkspaces !== undefined && tokenWorkspaces.length > 0 ? tokenWorkspaces : null
       };
     },
-    getGardenCompute: async () => {
-      const status = await resolveGardenComputeStatus(runtime);
+    getGardenCompute: async (workspaceId) => {
+      const status = await resolveGardenComputeStatus(runtime, workspaceId);
       const config = await runtime.services.configService.getRuntimeGardenComputeConfig();
       const degradedReason =
         "degraded_reason" in config && typeof config.degraded_reason === "string"

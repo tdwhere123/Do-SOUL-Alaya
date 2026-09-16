@@ -127,6 +127,7 @@ export interface GardenTaskRepoPort {
   countByKind(
     kind: GardenTaskKindValue,
     staleBeforeIso: string,
-    workspace_id?: string
+    workspace_id?: string,
+    recentFailedLimit?: number
   ): GardenTaskKindBacklogCount;
 }

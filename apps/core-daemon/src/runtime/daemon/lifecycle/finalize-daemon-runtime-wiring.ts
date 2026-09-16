@@ -272,6 +272,7 @@ function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
     principalCodingEngineAvailable: input.principalCodingAvailability.available,
     gardenRuntime: input.gardenRuntime,
     initialGardenLastPassAt: input.initialGardenLastPassAt,
-    gardenTaskRepo: input.gardenTaskRepo
+    gardenTaskRepo: input.gardenTaskRepo,
+    healthJournalService: input.healthJournalService
   };
 }

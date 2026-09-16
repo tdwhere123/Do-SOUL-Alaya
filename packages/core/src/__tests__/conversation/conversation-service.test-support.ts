@@ -26,10 +26,6 @@ export function createService(
         ...entry
       }))
     },
-    gardenComputeProvider: {
-      provider_kind: "local_heuristics" as const,
-      compile: vi.fn(async () => [])
-    },
     gardenCompileQueue: {
       enqueue: vi.fn(() => ({ status: "enqueued" as const }))
     },

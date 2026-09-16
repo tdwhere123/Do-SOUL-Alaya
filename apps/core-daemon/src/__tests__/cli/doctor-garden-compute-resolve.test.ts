@@ -33,7 +33,7 @@ describe("resolveGardenComputeStatus dedups secret resolution", () => {
       providerKind: "official_api"
     });
 
-    const status = await resolveGardenComputeStatus(runtime);
+    const status = await resolveGardenComputeStatus(runtime, "workspace-1");
 
     expect(hoisted.resolveSecretRef).toHaveBeenCalledTimes(1);
     expect(hoisted.resolveSecretRef).toHaveBeenCalledWith("keychain:alaya:openai");
@@ -57,7 +57,7 @@ describe("resolveGardenComputeStatus dedups secret resolution", () => {
       providerKind: "official_api"
     });
 
-    const status = await resolveGardenComputeStatus(runtime);
+    const status = await resolveGardenComputeStatus(runtime, "workspace-1");
 
     // A locked keychain must not cost two subprocesses per doctor pass.
     expect(hoisted.resolveSecretRef).toHaveBeenCalledTimes(1);
@@ -79,7 +79,7 @@ describe("resolveGardenComputeStatus dedups secret resolution", () => {
       providerKind: "official_api"
     });
 
-    const status = await resolveGardenComputeStatus(runtime);
+    const status = await resolveGardenComputeStatus(runtime, "workspace-1");
 
     expect(hoisted.resolveSecretRef).not.toHaveBeenCalled();
     expect(status).toMatchObject({
@@ -103,7 +103,7 @@ describe("resolveGardenComputeStatus dedups secret resolution", () => {
       reason: "Keychain secret ref must match keychain:<service>:<account> with each segment limited to [A-Za-z0-9._-]+."
     });
 
-    const status = await resolveGardenComputeStatus(runtime);
+    const status = await resolveGardenComputeStatus(runtime, "workspace-1");
 
     expect(hoisted.resolveSecretRef).toHaveBeenCalledTimes(1);
     expect(status).toMatchObject({
@@ -116,11 +116,48 @@ describe("resolveGardenComputeStatus dedups secret resolution", () => {
       }
     });
   });
+  it("reads recent extract failures and enqueue-never-queued counts from garden status", async () => {
+    const getHostWorkerExtractBacklog = vi.fn((workspaceId?: string) => ({
+      pending: 0,
+      stale: 0,
+      failed: workspaceId === "workspace-1" ? 4 : 99,
+      edgeClassifyPending: 0,
+      edgeClassifyStale: 0
+    }));
+    const getRecentCompileEnqueueFailures = vi.fn(async (workspaceId: string) =>
+      workspaceId === "workspace-1" ? 2 : 7
+    );
+    const runtime = createRuntime({
+      secretRef: null,
+      providerKind: "local_heuristics",
+      gardenStatus: {
+        getHostWorkerExtractBacklog,
+        getRecentCompileEnqueueFailures
+      }
+    });
+
+    const status = await resolveGardenComputeStatus(runtime, "workspace-1");
+
+    expect(getHostWorkerExtractBacklog).toHaveBeenCalledWith("workspace-1");
+    expect(getRecentCompileEnqueueFailures).toHaveBeenCalledWith("workspace-1");
+    expect(status.failed_post_turn_extract_tasks).toBe(4);
+    expect(status.compile_enqueue_failures).toBe(2);
+  });
 });
 
 function createRuntime(input: {
   readonly secretRef: string | null;
   readonly providerKind: "official_api" | "local_heuristics" | "host_worker";
+  readonly gardenStatus?: {
+    getHostWorkerExtractBacklog: (workspaceId?: string) => {
+      readonly pending: number;
+      readonly stale: number;
+      readonly failed: number;
+      readonly edgeClassifyPending: number;
+      readonly edgeClassifyStale: number;
+    } | null;
+    getRecentCompileEnqueueFailures: (workspaceId: string) => Promise<number>;
+  };
 }): AlayaDaemonRuntime {
   return {
     services: {
@@ -133,7 +170,8 @@ function createRuntime(input: {
           enabled: true
         }),
         getGardenCredentialProvenance: async () => ({ kind: input.secretRef === null ? "none" : "keychain" })
-      }
+      },
+      ...(input.gardenStatus === undefined ? {} : { gardenStatus: input.gardenStatus })
     }
   } as unknown as AlayaDaemonRuntime;
 }

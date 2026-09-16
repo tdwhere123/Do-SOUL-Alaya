@@ -10,6 +10,7 @@ import {
 import {
   getErrorMessage,
   getGardenProviderFailureKind,
+  GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE,
   type ConversationGardenCompileEnqueueResult,
   type ConversationGardenCompileQueuePort,
   type ConversationWarnPort
@@ -116,7 +117,7 @@ export class GardenComputeCoordinator {
             ? "Garden compile enqueue unavailable."
             : "Garden compile enqueue failed.",
         detail_json: {
-          phase: "compile_enqueue",
+          phase: GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE,
           status,
           ...(error === undefined
             ? {}

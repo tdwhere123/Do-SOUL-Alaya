@@ -27,14 +27,11 @@ export type {
   ConversationGardenCompileEnqueueInput,
   ConversationGardenCompileEnqueueResult,
   ConversationGardenCompileQueuePort,
-  ConversationGardenComputeProviderPort,
-  ConversationGardenComputeProviderResolverPort,
   ConversationGovernanceLeasePort,
   ConversationListPageOptions,
   ConversationRunRepoPort,
   ConversationServiceDependencies,
   ConversationSignalReceiverPort,
-  ConversationSessionOverridePromotionPort,
   ConversationWarnPort,
   ConversationWorkspaceRepoPort,
   MemoryContextAssemblyInput,
@@ -42,6 +39,7 @@ export type {
   MemoryTurnOrchestrationInput,
   MemoryTurnOrchestrationResult
 } from "./conversation-service-ports.js";
+export { GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE } from "./conversation-service-ports.js";
 
 export class ConversationService {
   private readonly gardenComputeCoordinator: GardenComputeCoordinator;

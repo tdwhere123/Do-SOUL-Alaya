@@ -29,6 +29,7 @@ export class BackgroundServiceManager {
   private readonly inFlight = new Set<Promise<void>>();
   private executionLocks: Map<string, boolean> = new Map();
   private started = false;
+  private drainAfterStop: Promise<void> | null = null;
 
   public constructor(services: BackgroundServiceConfig[], options: BackgroundServiceManagerOptions = {}) {
     this.services = services;
@@ -76,18 +77,18 @@ export class BackgroundServiceManager {
   public async stop(options: BackgroundServiceStopOptions = {}): Promise<BackgroundServiceStopResult> {
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
+    this.started = false;
     const drainPromise = Promise.allSettled([...this.inFlight]).then(() => undefined);
-    if (options.timeoutMs === null) {
-      await drainPromise;
+    this.drainAfterStop = drainPromise.then(() => {
       this.inFlight.clear();
-      this.started = false;
+    });
+    if (options.timeoutMs === null) {
+      await this.drainAfterStop;
       return "drained";
     }
     const timeoutMs = options.timeoutMs ?? 10_000;
     if (timeoutMs <= 0) {
-      await drainPromise;
-      this.inFlight.clear();
-      this.started = false;
+      await this.drainAfterStop;
       return "drained";
     }
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -101,13 +102,15 @@ export class BackgroundServiceManager {
         resolve();
       }, timeoutMs);
     });
-    await Promise.race([drainPromise, timeoutPromise]);
+    await Promise.race([this.drainAfterStop, timeoutPromise]);
     if (timeoutHandle !== undefined) {
       clearTimeout(timeoutHandle);
     }
-    this.inFlight.clear();
-    this.started = false;
     return timedOut ? "timed_out" : "drained";
+  }
+
+  public whenIdle(): Promise<void> {
+    return this.drainAfterStop ?? Promise.resolve();
   }
 }
 

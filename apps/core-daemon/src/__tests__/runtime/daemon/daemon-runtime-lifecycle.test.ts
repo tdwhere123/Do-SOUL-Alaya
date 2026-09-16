@@ -39,7 +39,8 @@ function createControls(
     closeEmbeddingProvider: () => Promise<void>;
     database: { close(): void };
     temporalRuntimeLease: { release(): Promise<void> };
-    backgroundManagerStop: () => Promise<void>;
+    backgroundManagerStop: () => Promise<unknown>;
+    backgroundManagerWhenIdle: () => Promise<void>;
     gardenBacklogTelemetryStop: () => Promise<unknown>;
     processPort: FakeSignalProcess;
     serverFactory: (...args: unknown[]) => {
@@ -63,6 +64,8 @@ function createControls(
   };
   const backgroundManagerStop =
     overrides.backgroundManagerStop ?? vi.fn(async () => undefined);
+  const backgroundManagerWhenIdle =
+    overrides.backgroundManagerWhenIdle ?? vi.fn(async () => undefined);
   const gardenBacklogTelemetryStop =
     overrides.gardenBacklogTelemetryStop ?? vi.fn(async () => undefined);
   const controls = createDaemonLifecycleControls({
@@ -76,7 +79,8 @@ function createControls(
     gardenRuntime: {
       backgroundManager: {
         start: vi.fn(),
-        stop: backgroundManagerStop
+        stop: backgroundManagerStop,
+        whenIdle: backgroundManagerWhenIdle
       },
       setBacklogTelemetryObserver: vi.fn(),
       runBackgroundPass,
@@ -371,6 +375,32 @@ describe("createDaemonLifecycleControls", () => {
       "garden background manager shutdown failed",
       expect.objectContaining({ error: "background-stop-failed" })
     );
+  });
+
+  it("waits for remaining garden drain before sqlite close after stop timed out", async () => {
+    let releaseIdle!: () => void;
+    const database = { close: vi.fn() };
+    const { controls, warn } = createControls("env", {
+      backgroundManagerStop: vi.fn(async () => "timed_out"),
+      backgroundManagerWhenIdle: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseIdle = resolve;
+          })
+      ),
+      database
+    });
+
+    controls.startBackgroundServices();
+    const shutdown = controls.shutdown();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(database.close).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith("garden background manager shutdown timed out", {});
+    expect(warn).toHaveBeenCalledWith("waiting for garden background drain before sqlite close", {});
+    releaseIdle();
+    await shutdown;
+    expect(database.close).toHaveBeenCalledTimes(1);
   });
 
   it("forces idle and all connection shutdown when server close stalls", async () => {

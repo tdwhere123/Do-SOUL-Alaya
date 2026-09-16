@@ -27,7 +27,7 @@ export type MockMcpBridgeDeps = Readonly<{
 
 export type MockConversationServiceDeps = Pick<
   ConversationServiceDependencies,
-  "contextLensAssembler" | "gardenComputeProvider" | "resolveGardenComputeProvider"
+  "contextLensAssembler" | "gardenCompileQueue"
 >;
 
 const hoisted = vi.hoisted(() => {
@@ -289,7 +289,7 @@ const hoisted = vi.hoisted(() => {
     });
     hoisted.computeRoutingServiceDeps = { ...deps, providers: currentProviders };
     hoisted.computeRoutingServiceSetProviders = setProviders;
-    return {
+    const instance = {
       route: hoisted.computeRoutingRoute,
       toModelRef: hoisted.computeRoutingToModelRef,
       getDefaultProvider: vi.fn(() => currentProviders[0]?.provider ?? localHeuristicsInstance),
@@ -314,6 +314,8 @@ const hoisted = vi.hoisted(() => {
       }),
       setProviders
     };
+    hoisted.computeRoutingServiceInstance = instance;
+    return instance;
   });
   const extensionProviders: Readonly<ToolProvider>[] = [];
   const runtimeConversationToolSpecs = [...conversationToolSpecs];
@@ -417,6 +419,9 @@ const hoisted = vi.hoisted(() => {
     computeRoutingServiceCtor,
     computeRoutingServiceDeps: null as null | Record<string, unknown>,
     computeRoutingServiceSetProviders: null as null | ReturnType<typeof vi.fn>,
+    computeRoutingServiceInstance: null as null | {
+      getDefaultProvider: () => { getProvider?: () => Promise<unknown> } | unknown;
+    },
     createApp: vi.fn(() => ({ fetch: vi.fn() })),
     createEnvironmentStatusService: vi.fn(() => ({
       getStatus: vi.fn(async () => ({

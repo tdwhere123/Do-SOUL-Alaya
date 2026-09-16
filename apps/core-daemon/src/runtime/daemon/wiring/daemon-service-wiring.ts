@@ -93,7 +93,6 @@ export async function createDaemonCoreServices(
     readonly eventPublisher: EventPublisher;
     readonly trustStateRepo: SqliteTrustStateRepo;
     readonly signalService: SignalService;
-    readonly retainCompileSource: NonNullable<ConversationServiceDependencies["retainCompileSource"]>;
     readonly contextLensAssembler: ConversationContextLensAssemblerPort;
     readonly governanceLeaseService: GovernanceLeaseService;
     readonly budgetBankruptcyService: BudgetBankruptcyService;
@@ -108,7 +107,7 @@ export async function createDaemonCoreServices(
   const gardenComputeRuntime = prebuiltGardenComputeRuntime ??
     await createGardenComputeRuntime(input);
   const conversationService = new ConversationService(
-    createConversationServiceDependencies(input, gardenComputeRuntime.computeRoutingService)
+    createConversationServiceDependencies(input)
   );
   const runService = createRunService(input);
   const engineBindingService = createEngineBindingService(input);
@@ -201,7 +200,6 @@ function createHotReloadingConfigService(
 
 function createConversationServiceDependencies(
   input: {
-    readonly retainCompileSource: NonNullable<ConversationServiceDependencies["retainCompileSource"]>;
     readonly runRepo: SqliteRunRepo;
     readonly workspaceRepo: SqliteWorkspaceRepo;
     readonly eventLogRepo: SqliteEventLogRepo;
@@ -214,8 +212,7 @@ function createConversationServiceDependencies(
     readonly warn: (message: string, meta: Record<string, unknown>) => void;
     readonly database: StorageDatabase;
     readonly sourceAdmission?: SourceAdmissionPort;
-  },
-  computeRoutingService: ComputeRoutingService
+  }
 ) {
   const gardenCompileQueue = createConversationGardenCompileQueueFromDatabase(input);
   return {
@@ -223,11 +220,6 @@ function createConversationServiceDependencies(
     workspaceRepo: input.workspaceRepo,
     eventLogRepo: input.eventLogRepo,
     eventPublisher: input.eventPublisher,
-    gardenComputeProvider: computeRoutingService.getDefaultProvider(),
-    retainCompileSource: input.retainCompileSource,
-    resolveGardenComputeProvider: {
-      resolve: (modelRef) => computeRoutingService.resolveProvider(modelRef)
-    },
     signalReceiver: input.signalService,
     contextLensAssembler: input.contextLensAssembler,
     governanceLeaseService: input.governanceLeaseService,

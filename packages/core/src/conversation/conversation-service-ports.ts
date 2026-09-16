@@ -5,7 +5,6 @@ import {
   type ConversationMessage,
   type EventLogEntry,
   type ExecutionStanceModelRef,
-  type GardenProviderKind,
   type HealthJournalRecordPort,
   type Run,
   type RunInterruptResult,
@@ -24,7 +23,6 @@ export type {
   ConversationMessage,
   EventLogEntry,
   ExecutionStanceModelRef,
-  GardenProviderKind,
   HealthJournalRecordPort,
   Run,
   RunInterruptResult,
@@ -55,28 +53,6 @@ export interface ConversationListPageOptions {
   readonly offset: number;
 }
 
-export interface ConversationGardenComputeProviderPort {
-  readonly provider_kind: GardenProviderKind;
-  compile(
-    turnContent: string,
-    context: {
-      readonly workspace_id: string;
-      readonly run_id: string;
-      readonly surface_id: string | null;
-      readonly turn_messages: readonly ConversationMessage[];
-      readonly artifact_key?: string;
-      readonly source_observed_at?: string;
-      readonly source_observation?: NonNullable<CandidateMemorySignal["source_observation"]>;
-    }
-  ): Promise<readonly CandidateMemorySignal[]>;
-}
-
-export interface ConversationGardenComputeProviderResolverPort {
-  resolve(
-    modelRef: Readonly<ExecutionStanceModelRef> | null
-  ): Promise<ConversationGardenComputeProviderPort | null> | ConversationGardenComputeProviderPort | null;
-}
-
 export interface ConversationSignalReceiverPort {
   receiveSignal(signal: CandidateMemorySignal): Promise<SignalServiceReceiveResult | unknown>;
 }
@@ -84,6 +60,8 @@ export interface ConversationSignalReceiverPort {
 export interface ConversationWarnPort {
   (message: string, meta: Record<string, unknown>): void;
 }
+
+export const GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE = "compile_enqueue";
 
 export interface ConversationGardenCompileEnqueueInput {
   readonly workspaceId: string;
@@ -108,13 +86,6 @@ export interface ConversationGovernanceLeasePort {
   release(runId: string): Promise<void>;
 }
 
-export interface ConversationSessionOverridePromotionPort {
-  evaluateActiveForRun(params: {
-    readonly runId: string;
-    readonly workspaceId: string;
-  }): Promise<void>;
-}
-
 export interface ConversationContextLensAssemblerPort {
   assemble(params: {
     readonly run: Pick<Run, "run_id" | "workspace_id" | "run_mode" | "title">;
@@ -132,16 +103,12 @@ export interface ConversationBudgetBankruptcyPort {
 }
 
 export interface ConversationServiceDependencies {
-  readonly retainCompileSource?: (turnContent: string, context: Parameters<ConversationGardenComputeProviderPort["compile"]>[1]) => Promise<void>;
   readonly runRepo: ConversationRunRepoPort;
   readonly workspaceRepo: ConversationWorkspaceRepoPort;
   readonly eventLogRepo: ConversationEventLogRepoPort;
   readonly eventPublisher?: EventPublisher;
-  readonly gardenComputeProvider: ConversationGardenComputeProviderPort;
-  readonly resolveGardenComputeProvider?: ConversationGardenComputeProviderResolverPort;
   readonly signalReceiver: ConversationSignalReceiverPort;
   readonly governanceLeaseService?: ConversationGovernanceLeasePort;
-  readonly sessionOverridePromotion?: ConversationSessionOverridePromotionPort;
   readonly contextLensAssembler?: ConversationContextLensAssemblerPort;
   readonly budgetBankruptcyService?: ConversationBudgetBankruptcyPort;
   readonly healthJournalRecorder?: HealthJournalRecordPort;

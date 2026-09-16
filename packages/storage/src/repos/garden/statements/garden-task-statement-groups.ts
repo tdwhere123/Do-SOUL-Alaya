@@ -36,6 +36,7 @@ export interface GardenTaskCountStatements {
   readonly countByRoleStatusStatement: GardenTaskSqliteStatement;
   readonly countByKindStatement: GardenTaskSqliteStatement;
   readonly countByKindByWorkspaceStatement: GardenTaskSqliteStatement;
+  readonly countRecentFailedStatement: GardenTaskSqliteStatement;
 }
 
 const GARDEN_TASK_SELECT_COLUMNS = `
@@ -203,6 +204,18 @@ const GARDEN_TASK_COUNT_SQL: SqlDefinitionMap<GardenTaskCountStatements> = {
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
       FROM garden_tasks
       WHERE kind = ? AND workspace_id = ?
+    `,
+  countRecentFailedStatement: `
+      SELECT COUNT(*) AS total
+      FROM (
+        SELECT status
+        FROM garden_tasks
+        WHERE kind = ?
+          AND (? IS NULL OR workspace_id = ?)
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+      ) recent
+      WHERE status = 'failed'
     `
 };
 

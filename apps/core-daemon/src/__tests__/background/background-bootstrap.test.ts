@@ -79,7 +79,15 @@ describe("BackgroundServiceManager", () => {
         "background service stop draining timed out",
         { inFlight: 1 }
       );
+      let idleSettled = false;
+      const idle = manager.whenIdle().then(() => {
+        idleSettled = true;
+      });
+      await Promise.resolve();
+      expect(idleSettled).toBe(false);
       releaseTask();
+      await idle;
+      expect(idleSettled).toBe(true);
       expect(task).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
