@@ -43,6 +43,7 @@ export async function consumePublicSources(input: Readonly<{
   const expansionsByTarget = new Map<string, number>();
   const pending: PendingSource[] = [];
   const discardedCapped = new Set<string>();
+  const assemblyGaps = new Set<string>();
   const steps: ConsumptionStep[] = [];
   const base = membershipBase(input.request);
   const parsedInitial = SoulMemorySearchRequestSchema.parse(base);
@@ -65,7 +66,7 @@ export async function consumePublicSources(input: Readonly<{
     visits = addCost(visits, actual?.native_visits);
     bytes = addCost(bytes, actual?.native_bytes);
     const retained = observedCost(actual?.retained_bytes_current);
-    applyPublicPayloads(response, bodies, complete);
+    applyPublicPayloads(response, bodies, complete, assemblyGaps);
     const identities = publicIdentities(response);
     const purpose = response.page_purpose ?? response.index?.page_purpose ?? "membership";
     const payloadRequest = request.payload_continuation !== undefined;
@@ -97,6 +98,7 @@ export async function consumePublicSources(input: Readonly<{
       complete,
       response,
       public_exchange: capturePublicExchange(turn, request, response, added),
+      assembly_gap: [...assemblyGaps],
       stop_reason: undefined
     });
     const invalidated = response.index?.completeness.logical_index === "invalidated";
@@ -125,6 +127,7 @@ export async function consumePublicSources(input: Readonly<{
         steps,
         termination: recorded,
         discardedCapped,
+        assemblyGaps,
         expansionsByTarget
       });
     }
@@ -145,6 +148,7 @@ export async function consumePublicSources(input: Readonly<{
     steps: [...steps.slice(0, -1), termination],
     termination,
     discardedCapped,
+    assemblyGaps,
     expansionsByTarget
   });
 }
@@ -158,13 +162,21 @@ export function publicIdentities(response: SoulMemorySearchResponse): string[] {
 }
 
 export function applyPublicPayloads(
-  response: SoulMemorySearchResponse,
+  response: Readonly<{ readonly results: readonly Readonly<{
+    readonly target?: Readonly<{ kind?: string; root_id?: string; span?: Readonly<{
+      content_start?: number;
+      content_complete?: boolean;
+    }> }>;
+    readonly content_preview: string;
+  }>[] }>,
   bodies: Map<string, string>,
-  complete: Map<string, boolean>
+  complete: Map<string, boolean>,
+  assemblyGaps: Set<string>
 ): void {
   for (const row of response.results) {
     if (row.target?.kind !== "source_evidence") continue;
     const rootId = row.target.root_id;
+    if (rootId === undefined) continue;
     const preview = row.content_preview;
     const span = row.target.span;
     if (preview !== "[payload omitted]") {
@@ -173,7 +185,13 @@ export function applyPublicPayloads(
       if (start === 0) bodies.set(rootId, preview);
       else if (start === prior.length) {
         bodies.set(rootId, Buffer.concat([prior, Buffer.from(preview, "utf8")]).toString("utf8"));
+      } else {
+        assemblyGaps.add(rootId);
       }
+    }
+    if (assemblyGaps.has(rootId)) {
+      complete.set(rootId, false);
+      continue;
     }
     complete.set(rootId, span?.content_complete === true && preview !== "[payload omitted]");
   }
@@ -306,6 +324,7 @@ function consumptionStep(input: Readonly<{
   readonly complete: Map<string, boolean>;
   readonly response: SoulMemorySearchResponse;
   readonly public_exchange: PublicStepExchange;
+  readonly assembly_gap: readonly string[];
   readonly stop_reason: ConsumptionStopReason | undefined;
 }>): ConsumptionStep {
   return {
@@ -321,6 +340,7 @@ function consumptionStep(input: Readonly<{
     logical_index: input.response.index?.completeness.logical_index,
     payload_completeness: input.response.index?.completeness.payload,
     public_exchange: input.public_exchange,
+    assembly_gap: input.assembly_gap,
     ...(input.stop_reason === undefined ? {} : { stop_reason: input.stop_reason })
   };
 }
@@ -346,6 +366,7 @@ function finishTrace(input: Readonly<{
   readonly steps: readonly ConsumptionStep[];
   readonly termination: ConsumptionStep;
   readonly discardedCapped: ReadonlySet<string>;
+  readonly assemblyGaps: ReadonlySet<string>;
   readonly expansionsByTarget: ReadonlyMap<string, number>;
 }>): ConsumptionTrace {
   const discarded = [...input.discardedCapped];
@@ -357,6 +378,7 @@ function finishTrace(input: Readonly<{
     termination: input.termination,
     discarded_capped_incomplete_root_ids: discarded,
     cap_remainder: capRemainder(discarded),
+    assembly_gap: [...input.assemblyGaps],
     expansions_by_target: Object.fromEntries(input.expansionsByTarget)
   };
 }

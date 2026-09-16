@@ -132,11 +132,13 @@ export async function withPublicOrderedPairWorker(
         planted.database.close();
         closeCachedDatabase(planted.filename);
         await client.ready();
+        const probeAt = receipts.length;
         const firstPage = await handler(
           publicSearchRequest(canary, "proposal", "source_only", "canonical"),
           { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" }
         );
         lastObserved = publicIdentities(firstPage)[0] ?? "unavailable";
+        receipts.length = probeAt;
         if (lastObserved !== planted.public_first_id) return;
         matched = true;
         await run(planted, handler, receipts, client);

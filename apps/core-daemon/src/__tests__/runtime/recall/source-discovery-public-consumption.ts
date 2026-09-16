@@ -152,6 +152,7 @@ export type ConsumptionStep = Readonly<{
   readonly logical_index: string | undefined;
   readonly payload_completeness: string | undefined;
   readonly public_exchange: PublicStepExchange;
+  readonly assembly_gap: readonly string[];
   readonly stop_reason?: ConsumptionStopReason;
   readonly discarded_capped_incomplete_root_ids?: readonly string[];
   readonly cap_remainder?: CapRemainder;
@@ -165,6 +166,7 @@ export type ConsumptionTrace = Readonly<{
   readonly termination: ConsumptionStep;
   readonly discarded_capped_incomplete_root_ids: readonly string[];
   readonly cap_remainder: CapRemainder;
+  readonly assembly_gap: readonly string[];
   readonly expansions_by_target: Readonly<Record<string, number>>;
 }>;
 
