@@ -257,7 +257,8 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
                   occurredAt: "2026-05-07T00:01:00.000Z"
                 })
               ],
-              `agent-target-${claimerIndex + 1}`
+              `agent-target-${claimerIndex + 1}`,
+              "workspace-race"
             );
           }
         })
@@ -398,7 +399,8 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
             occurredAt: "2026-05-07T00:12:00.000Z"
           })
         ],
-        "agent-target-a"
+        "agent-target-a",
+        "workspace-cas"
       )
     ).rejects.toMatchObject({ code: "CONFLICT" });
     expect(getGardenTask(database, "task-claimant-cas")).toMatchObject({

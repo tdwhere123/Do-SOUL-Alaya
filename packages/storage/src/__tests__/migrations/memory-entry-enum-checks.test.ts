@@ -156,5 +156,6 @@ describe("memory_entries enum CHECKs", () => {
     `);
     expect(() => insert.run("mem-illegal-dimension", "not-a-dimension", "hot")).toThrow(/CHECK/i);
     insert.run("mem-legal", "fact", "hot");
-  }, process.platform === "win32" ? 120_000 : 60_000);
+    // File-backed upgrade-and-reopen on NTFS can exceed the 60s storage budget.
+  }, process.platform === "win32" ? 180_000 : 5_000);
 });

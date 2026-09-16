@@ -49,7 +49,7 @@ export const COMPATIBILITY_LEDGER: readonly CompatibilityLedgerRow[] = Object.fr
   Object.freeze({
     field: "ranking_authority",
     disposition: "freeze-live",
-    note: "deprecated historical response parsing retained under invariant 25; rejected as a request selector"
+    note: "deprecated historical response parsing retained under invariant 25; live ranking ignores it; do not delete in 0.3.x"
   }),
   Object.freeze({
     field: "host_context",
