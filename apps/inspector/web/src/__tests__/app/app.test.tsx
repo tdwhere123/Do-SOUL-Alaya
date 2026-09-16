@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AppContent } from "../../app/app";
 import { ToastProvider } from "../../components/toast";
@@ -138,7 +138,9 @@ describe("AppContent", () => {
 
     expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
     expect(await screen.findByTestId("overview-card-proposals")).toBeTruthy();
-    expect(screen.getByTestId("overview-card-proposals").textContent).toContain("5");
+    await waitFor(() =>
+      expect(screen.getByTestId("overview-card-proposals").textContent).toContain("5")
+    );
     expect(screen.getByTestId("inspector-sidebar")).toBeTruthy();
     expect(screen.queryByText("No session found. Please run `alaya inspect` to open this tool.")).toBeNull();
     expect(launchRedeemBodies(fetchMock)).toEqual([{ code: "launch-code" }]);
