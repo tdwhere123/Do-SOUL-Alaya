@@ -330,6 +330,127 @@ describe("frozen source binding", () => {
     expect(binding.occurrences.every((item) => item.status === "ambiguous")).toBe(true);
   });
 
+  it("does not 1:1-bind a mixed-locator surplus using unrelated empty slots", () => {
+    const units = twoOccurrenceUnits();
+    const locatorB = { start: 99, end: 120 };
+    const stale = row({
+      occurrence: {
+        source_message_ids: ["msg-1"],
+        source_locator: null,
+        source_occurrence_identity: units[0]!.binding.occurrenceIdentity ?? null,
+        occurrence_bindings: [
+          units[0]!.binding,
+          {
+            ...units[1]!.binding,
+            occurrenceIdentity: "old2".padEnd(64, "0"),
+            locator: locatorB
+          }
+        ]
+      }
+    });
+    const rotated = units.map((unit, index) => ({
+      ...unit,
+      assertionId: index + 1,
+      semanticKey: `${index}`.padEnd(64, "a"),
+      binding: {
+        ...unit.binding,
+        occurrenceIdentity: `99${index}`.padEnd(64, "0")
+      }
+    }));
+    const binding = bindFrozenAssertionToCurrentSource(stale, {
+      catalogUnits: rotated,
+      requests: [{
+        key: "request-local",
+        source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+        message_ids: ["msg-1"],
+        source_assertions: rotated.map((unit) => ({
+          assertion_id: unit.assertionId,
+          text: unit.text
+        }))
+      }]
+    });
+    expect(binding.status).toBe("ambiguous");
+    expect(binding.current).toEqual([]);
+    expect(binding.occurrences[0]?.status).toBe("ambiguous");
+    expect(binding.occurrences[1]?.status).toBe("lost");
+  });
+
+  it("does not claim current when two stale identities match one unit", () => {
+    const units = twoOccurrenceUnits();
+    const stale = twoOccurrenceRow(units);
+    const rotated = [{
+      ...units[0]!,
+      binding: {
+        ...units[0]!.binding,
+        occurrenceIdentity: "99".padEnd(64, "0")
+      }
+    }];
+    const binding = bindFrozenAssertionToCurrentSource(stale, {
+      catalogUnits: rotated,
+      requests: [{
+        key: "request-local",
+        source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+        message_ids: ["msg-1"],
+        source_assertions: [{
+          assertion_id: rotated[0]!.assertionId,
+          text: rotated[0]!.text
+        }]
+      }]
+    });
+    expect(binding.status).toBe("ambiguous");
+    expect(binding.current).toEqual([]);
+    expect(binding.occurrences.every((item) => item.current === null)).toBe(true);
+  });
+
+  it("clears nested occurrence current when pass-1 bind meets pass-2 surplus", () => {
+    const units = twoOccurrenceUnits();
+    const extra = {
+      ...units[0]!,
+      assertionId: 3,
+      semanticKey: "ee".repeat(32),
+      binding: {
+        ...units[0]!.binding,
+        occurrenceIdentity: "33".padEnd(64, "0")
+      }
+    };
+    const mixed = row({
+      occurrence: {
+        source_message_ids: ["msg-1"],
+        source_locator: null,
+        source_occurrence_identity: units[0]!.binding.occurrenceIdentity ?? null,
+        occurrence_bindings: [
+          units[0]!.binding,
+          {
+            ...units[1]!.binding,
+            occurrenceIdentity: "old2".padEnd(64, "0")
+          }
+        ]
+      }
+    });
+    const catalog = [units[0]!, {
+      ...units[1]!,
+      binding: {
+        ...units[1]!.binding,
+        occurrenceIdentity: "n2".padEnd(64, "0")
+      }
+    }, extra];
+    const binding = bindFrozenAssertionToCurrentSource(mixed, {
+      catalogUnits: catalog,
+      requests: [{
+        key: "request-local",
+        source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+        message_ids: ["msg-1"],
+        source_assertions: catalog.map((unit) => ({
+          assertion_id: unit.assertionId,
+          text: unit.text
+        }))
+      }]
+    });
+    expect(binding.status).toBe("ambiguous");
+    expect(binding.current).toEqual([]);
+    expect(binding.occurrences.every((item) => item.current === null)).toBe(true);
+  });
+
   it("does not bind when two corpora claim the same message and locator", () => {
     const units = twoOccurrenceUnits();
     const foreign = {

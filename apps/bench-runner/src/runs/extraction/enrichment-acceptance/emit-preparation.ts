@@ -74,6 +74,7 @@ export async function emitEnrichmentPreparation(
     }
   }
   mkdirSync(input.outputDir, { recursive: true });
+  assertPreparationOutputWritable(input.outputDir);
   mkdirSync(input.cacheRoot, { recursive: true });
   const previousFetch = globalThis.fetch;
   let attemptedFetches = 0;
@@ -373,6 +374,27 @@ function maxNumber(values: readonly (number | undefined)[]): number | null {
 function sumNumber(values: readonly (number | undefined)[]): number | null {
   const present = values.filter((item): item is number => item !== undefined);
   return present.length === 0 ? null : present.reduce((sum, item) => sum + item, 0);
+}
+
+const PREPARATION_OUTPUT_FILES = [
+  "source-map.json",
+  "preflight.json",
+  "preparation-report.json"
+] as const;
+
+function assertPreparationOutputWritable(outputDir: string): void {
+  const existing = PREPARATION_OUTPUT_FILES.filter((name) => existsSync(resolve(outputDir, name)));
+  if (existing.length === 0) return;
+  if (existing.length === PREPARATION_OUTPUT_FILES.length) {
+    const error = new Error(
+      `enrichment preparation output already exists: ${PREPARATION_OUTPUT_FILES.join(", ")}`
+    );
+    (error as NodeJS.ErrnoException).code = "EEXIST";
+    throw error;
+  }
+  throw new Error(
+    `enrichment preparation output is incomplete and must not be overwritten: ${existing.join(", ")}`
+  );
 }
 
 function requireExistingFile(path: string, label: string): void {

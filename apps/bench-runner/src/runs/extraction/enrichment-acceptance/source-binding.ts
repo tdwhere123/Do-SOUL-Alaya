@@ -163,7 +163,6 @@ function bindRestrictedOccurrences(
     if (slots[index] !== null) continue;
     const available = catalogs.filter((unit) => !claimed.has(unitKey(unit)));
     const hits = migrateRestrictedUnits(row, spec, available, input);
-    const unassigned = slots.filter((item) => item === null).length;
     const corpora = new Set(hits.map((unit) => unit.binding.sourceCorpusIdentity));
     if (corpora.size > 1) {
       markRemainingAmbiguous(
@@ -179,7 +178,8 @@ function bindRestrictedOccurrences(
       );
       continue;
     }
-    if (hits.length === 1 || hits.length === unassigned) {
+    const peers = countPeerUnassigned(row, hits, specs, slots, available, input);
+    if (hits.length === peers) {
       claimed.add(unitKey(hits[0]!));
       slots[index] = occurrenceBinding(
         spec, "bound", "frozen occurrence migrated through native source identity",
@@ -187,10 +187,10 @@ function bindRestrictedOccurrences(
       );
       continue;
     }
-    markRemainingAmbiguous(
-      slots, specs, "frozen occurrence matches more than one current unit"
+    markPeerAmbiguous(
+      row, hits, specs, slots, available, input,
+      "frozen occurrence matches more than one current unit"
     );
-    break;
   }
   return Object.freeze(slots.map((item, index) => item ?? occurrenceBinding(
     specs[index]!, "lost", "frozen occurrence restriction has zero current hits; global same-text fallback is not used", null
@@ -206,6 +206,50 @@ function markRemainingAmbiguous(
     if (slots[index] !== null) continue;
     slots[index] = occurrenceBinding(spec, "ambiguous", reason, null);
   }
+}
+
+function countPeerUnassigned(
+  row: FrozenAssertion,
+  hits: readonly FrozenCatalogUnit[],
+  specs: readonly FrozenOccurrenceRestriction[],
+  slots: ReadonlyArray<FrozenOccurrenceBinding | null>,
+  available: readonly FrozenCatalogUnit[],
+  input: FrozenSourceBindingInput
+): number {
+  let peers = 0;
+  for (const [index, spec] of specs.entries()) {
+    if (slots[index] !== null) continue;
+    const otherHits = migrateRestrictedUnits(row, spec, available, input);
+    if (sameHitKeys(hits, otherHits)) peers += 1;
+  }
+  return peers;
+}
+
+function markPeerAmbiguous(
+  row: FrozenAssertion,
+  hits: readonly FrozenCatalogUnit[],
+  specs: readonly FrozenOccurrenceRestriction[],
+  slots: Array<FrozenOccurrenceBinding | null>,
+  available: readonly FrozenCatalogUnit[],
+  input: FrozenSourceBindingInput,
+  reason: string
+): void {
+  for (const [index, spec] of specs.entries()) {
+    if (slots[index] !== null) continue;
+    const otherHits = migrateRestrictedUnits(row, spec, available, input);
+    if (sameHitKeys(hits, otherHits)) {
+      slots[index] = occurrenceBinding(spec, "ambiguous", reason, null);
+    }
+  }
+}
+
+function sameHitKeys(
+  left: readonly FrozenCatalogUnit[],
+  right: readonly FrozenCatalogUnit[]
+): boolean {
+  if (left.length !== right.length) return false;
+  const keys = new Set(left.map(unitKey));
+  return right.every((unit) => keys.has(unitKey(unit)));
 }
 
 function unitKey(unit: FrozenCatalogUnit): string {
@@ -496,16 +540,20 @@ function freezeBinding(
   occurrences: readonly FrozenOccurrenceBinding[]
 ): FrozenAssertionBinding {
   const aggregated = aggregateAssertionStatus(occurrences);
+  const wiped = aggregated.status === "ambiguous";
+  const published = wiped
+    ? occurrences.map((item) => item.current === null
+      ? item
+      : occurrenceBinding(item.frozen, item.status, item.reason, null))
+    : occurrences;
   const current = Object.freeze(
-    aggregated.status === "ambiguous"
-      ? []
-      : occurrences.flatMap((item) => item.current === null ? [] : [item.current])
+    wiped ? [] : published.flatMap((item) => item.current === null ? [] : [item.current])
   );
   return Object.freeze({
     row,
     status: aggregated.status,
     reason: aggregated.reason,
-    occurrences: Object.freeze([...occurrences]),
+    occurrences: Object.freeze([...published]),
     current
   });
 }

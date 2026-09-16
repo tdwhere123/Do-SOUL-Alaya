@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -95,6 +95,24 @@ describe("enrichment preparation emit", () => {
       ...input,
       cacheRoot: join(root, "cache-2")
     })).rejects.toMatchObject({ code: "EEXIST" });
+  });
+
+  it("refuses to write over an incomplete preparation prefix", async () => {
+    root = mkdtempSync(join(tmpdir(), "enrichment-emit-prefix-"));
+    writeMiniaturePopulation(root);
+    const outputDir = join(root, "out");
+    mkdirSync(outputDir);
+    writeFileSync(join(outputDir, "source-map.json"), "{}\n");
+    await expect(emitEnrichmentPreparation({
+      regressionPath: join(root, "regression-source-review.json"),
+      canonicalPath: join(root, "canonical-source-review.json"),
+      outputDir,
+      cacheRoot: join(root, "cache"),
+      turns: [TURN],
+      datasetRevision: "synthetic-revision"
+    })).rejects.toThrow(/incomplete and must not be overwritten/u);
+    expect(existsSync(join(outputDir, "preflight.json"))).toBe(false);
+    expect(existsSync(join(outputDir, "preparation-report.json"))).toBe(false);
   });
 
   it("refuses to emit when annotation paths are missing", async () => {
