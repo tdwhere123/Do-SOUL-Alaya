@@ -182,7 +182,7 @@ export class WorkspaceNeighborScanner {
         : initialSnapshot;
       return resolveWorkspaceNeighborQuerySnapshot(snapshot, { queryEmbeddingCacheHit });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = readErrorMessage(error, "unknown_error");
       this.deps.warn("embedding workspace neighbor scan failed", {
         workspace_id: params.workspaceId,
         run_id: params.runId,

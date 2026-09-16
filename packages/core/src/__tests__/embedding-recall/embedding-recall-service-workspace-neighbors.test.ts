@@ -451,6 +451,43 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     );
   });
 
+  it("maps a non-Error query-embedding throw to unknown_error", async () => {
+    const warn = vi.fn();
+    const scanner = new WorkspaceNeighborScanner({
+      provider: createProvider({}),
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => []),
+        listByWorkspace: vi.fn(async () => [
+          createEmbeddingRecord({ object_id: "near", embedding: new Float32Array([0.05, 0.99]) })
+        ])
+      },
+      queryEngine: {
+        prepareQueryEmbedding: vi.fn(() => {
+          throw "provider down";
+        })
+      } as unknown as QueryEmbeddingEngine,
+      queryTimeoutMs: 1000,
+      warn
+    });
+
+    const result = await scanner.collectWorkspaceNeighborsWithMetadata({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "query",
+      excludeObjectIds: [],
+      maxNeighbors: 5
+    });
+
+    expect(result.hits).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(
+      "embedding workspace neighbor scan failed",
+      expect.objectContaining({
+        reason: "query_embedding_failed",
+        error: "unknown_error"
+      })
+    );
+  });
+
   it("names a ready unusable query vector instead of stretching provider_returned", async () => {
     const scanner = new WorkspaceNeighborScanner({
       provider: createProvider({}),
