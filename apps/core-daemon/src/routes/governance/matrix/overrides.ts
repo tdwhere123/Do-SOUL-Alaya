@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { CoreError } from "@do-soul/alaya-core";
 import { parseJsonBody } from "../../shared/shared.js";
 import { SoulApplyOverrideRequestSchema, type Run, type SessionOverride } from "@do-soul/alaya-protocol";
+import { respondIfWorkspaceGrantDenied } from "../../../runtime/request-token-binding.js";
 
 interface OverrideRouteRunServicePort {
   getById(runId: string): Promise<Pick<Run, "run_id" | "workspace_id">>;
@@ -26,6 +27,10 @@ export function registerOverrideRoutes(app: Hono, services: OverrideRouteService
   app.post("/runs/:runId/overrides", async (context) => {
     const runId = context.req.param("runId");
     const run = await services.runService.getById(runId);
+    const denied = respondIfWorkspaceGrantDenied(context, run.workspace_id);
+    if (denied !== undefined) {
+      return denied;
+    }
     const body = parseApplyOverrideBody(await parseJsonBody(context.req.json.bind(context.req)));
 
     const override = await services.sessionOverrideService.apply({

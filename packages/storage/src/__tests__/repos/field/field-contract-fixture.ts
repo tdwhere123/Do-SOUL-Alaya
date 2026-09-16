@@ -225,12 +225,24 @@ export function hashedUsage(
 }
 
 export function hashedEffect(workspaceId: string, record: ReturnType<typeof hashedRecord>) {
+  return hashedEffectFromRecords(workspaceId, [record]);
+}
+
+export function hashedEffectFromRecords(
+  workspaceId: string,
+  records: readonly ReturnType<typeof hashedRecord>[]
+) {
   const supporting_proof_witnesses = [
     { receipt_id: "actor-proof-1", kind: "actor_authority",
       authority_event_id: "delivery-event-1", source_record_id: null,
       source_content_digest: null },
-    { receipt_id: "source-proof-1", kind: "source_grounding", authority_event_id: null,
-      source_record_id: record.record_id, source_content_digest: record.content_digest }
+    ...records.map((record, index) => ({
+      receipt_id: `source-proof-${index + 1}`,
+      kind: "source_grounding" as const,
+      authority_event_id: null,
+      source_record_id: record.record_id,
+      source_content_digest: record.content_digest
+    }))
   ];
   const request = {
     schema_version: 2 as const,

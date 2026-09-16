@@ -13,7 +13,8 @@ describe("daemon readiness vs liveness", () => {
       {
         requestProtection: {
           allowedOrigin: "http://localhost:5173",
-          requestToken: "token"
+          requestToken: "token",
+          allowDesktopOriginlessRequests: true
         },
         routes: {
           status: {

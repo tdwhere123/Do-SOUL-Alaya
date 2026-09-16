@@ -11,3 +11,5 @@ export interface GraphData {
 }
 
 export type ViewMode = "2d" | "3d";
+
+export const DEFAULT_GRAPH_VIEW_MODE: ViewMode = "2d";
