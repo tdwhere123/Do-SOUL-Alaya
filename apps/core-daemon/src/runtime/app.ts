@@ -486,12 +486,13 @@ function hasDeclaredOversizeBody(contentLengthHeader: string | undefined, maxByt
 }
 
 function isLocalOperatorRequest(header: string | undefined): boolean {
+  // Client-supplied; not peercred or spawn proof. Token remains the HTTP gate.
   return header?.trim() === "1";
 }
 
-// The origin gate only defends against browser CSRF; the X-Request-Token is the
-// sole real authentication. allowDesktopOriginlessRequests admits origin-less
-// desktop calls and should be disabled when ALAYA_ALLOW_REMOTE_DAEMON=1.
+// Origin only defends browser CSRF. X-Alaya-Desktop is not authentication.
+// Remote bind must keep allowDesktopOriginlessRequests off so this header cannot
+// admit origin-less requests.
 function isAllowedProtectedRequest(
   origin: string | undefined,
   allowedOrigin: string,
