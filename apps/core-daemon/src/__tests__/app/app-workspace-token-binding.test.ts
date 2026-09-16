@@ -22,6 +22,7 @@ function createBoundApp() {
       requestToken: PROCESS_TOKEN,
       boundWorkspaceIds: ["ws-default"],
       allowProcessSecretPatch: true,
+      allowDesktopOriginlessRequests: true,
       workspaceTokens: [
         { token: WORKSPACE_A_TOKEN, workspaceIds: ["ws-a"] },
         { token: WORKSPACE_B_TOKEN, workspaceIds: ["ws-b"] }

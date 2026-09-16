@@ -20,7 +20,7 @@ import { bindEventPublisher, type EventPublisher } from "../../runtime/event-pub
 import { SYSTEM_ACTOR } from "../../shared/actors.js";
 import { addDuration, isExpired, readNow } from "../../shared/time.js";
 import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../../shared/validators.js";
-import { EventLogBackedCache } from "../cache/event-log-backed-cache.js";
+import { VersionedBoundedCache } from "../../runtime/versioned-bounded-cache.js";
 import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "./run-workspace-guard.js";
 
 const LEASE_DURATION_MS = 5 * 60 * 1000;
@@ -63,7 +63,7 @@ export interface GovernanceLeaseServiceDependencies {
  * reconstructed after daemon restart.
  */
 export class GovernanceLeaseService {
-  private readonly cache = new EventLogBackedCache<StoredLease>();
+  private readonly cache = new VersionedBoundedCache<StoredLease>();
   private readonly generateRuntimeId: () => string;
 
   public constructor(private readonly dependencies: GovernanceLeaseServiceDependencies) {

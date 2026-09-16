@@ -254,8 +254,9 @@ persists a generated credential.
 
 Remote daemon bind (`ALAYA_ALLOW_REMOTE_DAEMON=1` with non-loopback
 `DAEMON_HOST`) is break-glass only: a single `ALAYA_REQUEST_TOKEN` is not
-sufficient for multi-host exposure, desktop originless bypass is disabled, and
-loopback remains the supported default.
+sufficient for multi-host exposure, `X-Alaya-Desktop` is not authentication,
+desktop originless bypass is hard-disabled, and loopback remains the supported
+default.
 
 `ALAYA_RETAIN_UNROUTED_FACTS` is default-off: Garden keeps unrouted
 high-confidence facts only when the env is `1` or `true`.
