@@ -265,6 +265,61 @@ describe("frozen source binding", () => {
     expect(binding.current[0]?.request_keys).not.toContain("different-assertion-same-text");
   });
 
+  it("assigns two stale-identity occurrences 1:1 instead of marking both ambiguous", () => {
+    const units = twoOccurrenceUnits();
+    const stale = twoOccurrenceRow(units);
+    const rotated = units.map((unit, index) => ({
+      ...unit,
+      binding: {
+        ...unit.binding,
+        occurrenceIdentity: `99${index}`.padEnd(64, "0")
+      }
+    }));
+    const binding = bindFrozenAssertionToCurrentSource(stale, {
+      catalogUnits: rotated,
+      requests: [{
+        key: "request-local",
+        source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+        message_ids: ["msg-1"],
+        source_assertions: units.map((unit) => ({
+          assertion_id: unit.assertionId,
+          text: unit.text
+        }))
+      }]
+    });
+    expect(binding.status).toBe("bound");
+    expect(binding.status).not.toBe("ambiguous");
+    expect(binding.occurrences.map((item) => item.status)).toEqual(["bound", "bound"]);
+    expect(binding.current).toHaveLength(2);
+    expect(new Set(binding.current.map((item) => item.occurrenceIdentity)).size).toBe(2);
+  });
+
+  it("does not bind a foreign corpus when a request reuses the frozen message id", () => {
+    const units = twoOccurrenceUnits();
+    const foreign = {
+      ...units[0]!,
+      assertionId: 7,
+      binding: {
+        ...units[0]!.binding,
+        occurrenceIdentity: "foreign-occurrence",
+        sourceCorpusIdentity: "foreign-corpus",
+        locator: { start: 99, end: 120 }
+      }
+    };
+    const binding = bindFrozenAssertionToCurrentSource(twoOccurrenceRow(units), {
+      catalogUnits: [foreign],
+      requests: [{
+        key: "foreign-request",
+        source_corpus_identity: "foreign-corpus",
+        message_ids: ["msg-1"],
+        source_assertions: [{ assertion_id: 7, text: foreign.text }]
+      }]
+    });
+    expect(binding.status).not.toBe("bound");
+    expect(binding.current).toEqual([]);
+    expect(binding.occurrences.every((item) => item.status === "lost")).toBe(true);
+  });
+
   it("migrates a stale occurrence identity through message-local exact text", () => {
     const workset = planOfficialApiSemanticWorkset(text, [{ role: "user", content: text }]);
     const unit = workset.units[0]!;

@@ -117,10 +117,10 @@ export function bindFrozenAssertionToCurrentSource(
 ): FrozenAssertionBinding {
   const catalogs = input.catalogUnits.map(asCatalogUnit);
   const specs = frozenOccurrenceSpecs(row);
-  const occurrences = specs.length > 0
-    ? specs.map((spec) => bindRestrictedOccurrence(row, spec, catalogs, input))
-    : [bindUnrestrictedOccurrence(row, catalogs, input)];
-  return freezeBinding(row, occurrences);
+  if (specs.length === 0) {
+    return freezeBinding(row, [bindUnrestrictedOccurrence(row, catalogs, input)]);
+  }
+  return freezeBinding(row, bindRestrictedOccurrences(row, specs, catalogs, input));
 }
 
 export function bindFrozenPopulation(
@@ -137,35 +137,66 @@ function stripLeadingRoleMarker(text: string): string {
   return text.replace(/^(?:User|Assistant): /u, "");
 }
 
-function bindRestrictedOccurrence(
+function bindRestrictedOccurrences(
   row: FrozenAssertion,
-  spec: FrozenOccurrenceRestriction,
+  specs: readonly FrozenOccurrenceRestriction[],
   catalogs: readonly FrozenCatalogUnit[],
   input: FrozenSourceBindingInput
-): FrozenOccurrenceBinding {
-  const identityHits = selectRestrictedUnits(row, spec, catalogs);
-  const hits = identityHits.length > 0
-    ? identityHits
-    : migrateRestrictedUnits(row, spec, catalogs, input);
-  if (hits.length > 1) {
-    return occurrenceBinding(spec, "ambiguous", "frozen occurrence matches more than one current unit", null);
+): readonly FrozenOccurrenceBinding[] {
+  const claimed = new Set<string>();
+  const slots: Array<FrozenOccurrenceBinding | null> = specs.map(() => null);
+  for (const [index, spec] of specs.entries()) {
+    const hits = selectRestrictedUnits(row, spec, catalogs).filter((unit) => !claimed.has(unitKey(unit)));
+    if (hits.length === 1) {
+      claimed.add(unitKey(hits[0]!));
+      slots[index] = occurrenceBinding(
+        spec, "bound", "frozen occurrence matches one current unit",
+        boundCurrent(hits[0]!, input.requests)
+      );
+    } else if (hits.length > 1) {
+      slots[index] = occurrenceBinding(
+        spec, "ambiguous", "frozen occurrence matches more than one current unit", null
+      );
+    }
   }
-  if (hits.length === 1) {
-    return occurrenceBinding(
-      spec,
-      "bound",
-      identityHits.length === 1
-        ? "frozen occurrence matches one current unit"
-        : "frozen occurrence migrated through native source identity",
-      boundCurrent(hits[0]!, input.requests)
+  for (const [index, spec] of specs.entries()) {
+    if (slots[index] !== null) continue;
+    const available = catalogs.filter((unit) => !claimed.has(unitKey(unit)));
+    const hits = migrateRestrictedUnits(row, spec, available, input);
+    const unassigned = slots.filter((item) => item === null).length;
+    if (hits.length > 1 && unassigned === 1) {
+      slots[index] = occurrenceBinding(
+        spec, "ambiguous", "frozen occurrence matches more than one current unit", null
+      );
+      continue;
+    }
+    if (hits.length >= 1) {
+      claimed.add(unitKey(hits[0]!));
+      slots[index] = occurrenceBinding(
+        spec, "bound", "frozen occurrence migrated through native source identity",
+        boundCurrent(hits[0]!, input.requests)
+      );
+      continue;
+    }
+    slots[index] = occurrenceBinding(
+      spec, "lost",
+      "frozen occurrence restriction has zero current hits; global same-text fallback is not used",
+      null
     );
   }
-  return occurrenceBinding(
-    spec,
-    "lost",
-    "frozen occurrence restriction has zero current hits; global same-text fallback is not used",
-    null
-  );
+  return Object.freeze(slots.map((item, index) => item ?? occurrenceBinding(
+    specs[index]!, "lost", "frozen occurrence restriction has zero current hits; global same-text fallback is not used", null
+  )));
+}
+
+function unitKey(unit: FrozenCatalogUnit): string {
+  return [
+    unit.binding.occurrenceIdentity ?? "",
+    unit.binding.sourceCorpusIdentity,
+    String(unit.binding.locator.start),
+    String(unit.binding.locator.end),
+    unit.semanticKey
+  ].join("\u0000");
 }
 
 function bindUnrestrictedOccurrence(
@@ -224,37 +255,21 @@ function migrateRestrictedUnits(
   input: FrozenSourceBindingInput
 ): FrozenCatalogUnit[] {
   const needle = stripLeadingRoleMarker(row.exact_text);
-  const siblingIdentities = siblingOccurrenceIdentities(row, spec);
-  const textHits = catalogs.filter((unit) => {
-    if (stripLeadingRoleMarker(unit.text) !== needle) return false;
-    const identity = unit.binding.occurrenceIdentity;
-    return identity === undefined || !siblingIdentities.has(identity);
-  });
+  let hits = catalogs.filter((unit) => stripLeadingRoleMarker(unit.text) === needle);
+  if (spec.locator !== null) {
+    hits = hits.filter((unit) =>
+      unit.binding.locator.start === spec.locator!.start &&
+      unit.binding.locator.end === spec.locator!.end);
+  }
   if (spec.sourceCorpusIdentity !== null) {
-    const corpusHits = textHits.filter((unit) =>
+    const corpusHits = hits.filter((unit) =>
       unit.binding.sourceCorpusIdentity === spec.sourceCorpusIdentity);
     if (corpusHits.length > 0) return corpusHits;
   }
-  if (spec.source_message_id !== null) {
-    const local = corporaForMessage(spec.source_message_id, input);
-    if (local === null) return [];
-    return textHits.filter((unit) => local.has(unit.binding.sourceCorpusIdentity));
-  }
-  return [];
-}
-
-function siblingOccurrenceIdentities(
-  row: FrozenAssertion,
-  spec: FrozenOccurrenceRestriction
-): ReadonlySet<string> {
-  const identities = new Set<string>();
-  for (const other of frozenOccurrenceSpecs(row)) {
-    if (other.occurrenceIdentity === null) continue;
-    if (other.occurrenceIdentity === spec.occurrenceIdentity &&
-        other.sourceCorpusIdentity === spec.sourceCorpusIdentity) continue;
-    identities.add(other.occurrenceIdentity);
-  }
-  return identities;
+  if (spec.source_message_id === null) return [];
+  const local = corporaForMessage(spec.source_message_id, input);
+  if (local === null) return [];
+  return hits.filter((unit) => local.has(unit.binding.sourceCorpusIdentity));
 }
 
 function corporaForMessage(

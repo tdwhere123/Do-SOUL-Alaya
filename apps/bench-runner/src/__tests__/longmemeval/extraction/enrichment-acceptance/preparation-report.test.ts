@@ -447,4 +447,36 @@ describe("enrichment preparation report", () => {
     expect(report.source_fidelity.rows[0]?.candidate_ordinal).toBe(1);
     expect(report.source_fidelity.rows[0]?.current_request_keys).toEqual(["correct-request"]);
   });
+
+  it("does not join a pointerless native outcome by catalog assertion id alone", () => {
+    const units = twoOccurrenceUnits();
+    const first = row(1, "optional", null);
+    const second = row(2, "required", "aspiration");
+    const bindings = bindFrozenPopulation([first, second], {
+      catalogUnits: [units[0]!],
+      requests: [{
+        key: "req-a",
+        source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+        source_assertions: [{ assertion_id: units[0]!.assertionId, text: units[0]!.text }]
+      }, {
+        key: "req-b",
+        source_corpus_identity: units[0]!.binding.sourceCorpusIdentity,
+        source_assertions: [{ assertion_id: units[0]!.assertionId, text: units[0]!.text }]
+      }]
+    });
+    const report = composeEnrichmentPreparationReport({
+      population: { rows: [first, second] },
+      bindings,
+      preflight: null,
+      nativeOutcomes: [{
+        current_assertion_id: units[0]!.assertionId,
+        request_ordinal: 1,
+        candidate_ordinal: 0,
+        raw_state: "rejected",
+        machine_admission: "rejected"
+      }]
+    });
+    expect(report.source_fidelity.rows.every((item) => item.raw_state === "missing")).toBe(true);
+    expect(report.native_formation_publication.unmatched_native_outcomes).toHaveLength(1);
+  });
 });

@@ -68,7 +68,7 @@ describe("enrichment preparation emit", () => {
     };
     expect(sourceMap.attempted_fetches).toBe(0);
     expect(sourceMap.bindings).toHaveLength(38);
-    expect(sourceMap.identity_note).toMatch(/HEAD until the repair commit/u);
+    expect(sourceMap.identity_note).toBe("Candidate HEAD tree HEAD");
     expect(preflight.dispatch_authorized).toBe(false);
     expect(preflight.native_fill_readiness).toBe("not_run");
     expect(preflight.semantic_fill.status).toBe("not_run");

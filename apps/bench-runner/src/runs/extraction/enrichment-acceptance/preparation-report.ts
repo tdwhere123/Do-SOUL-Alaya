@@ -272,17 +272,13 @@ function nativeOutcomeMatches(
     return pointerFieldsKey(outcome.annotation_pointer) === pointerFieldsKey(row.annotation_pointer);
   }
   if (binding === null) return false;
-  if (outcome.current_assertion_id !== undefined &&
-      binding.current.some((item) => item.assertion_id === outcome.current_assertion_id)) {
-    return true;
+  if (outcome.request_key === undefined || outcome.current_assertion_id === undefined) {
+    return false;
   }
-  if (outcome.request_key !== undefined &&
-      binding.current.some((item) => (
-        item.request_keys !== null && item.request_keys.includes(outcome.request_key!)
-      ))) {
-    return true;
-  }
-  return false;
+  return binding.current.some((item) =>
+    item.assertion_id === outcome.current_assertion_id &&
+    item.request_keys !== null &&
+    item.request_keys.includes(outcome.request_key!));
 }
 
 function indexBindings(
@@ -379,8 +375,7 @@ function publicationDomainState(
   // Fixture result is test success or failure; cell_state is the domain outcome.
   const fromFixtures = fixtureDomainStates(fixtures);
   if (fromFixtures.length > 0) return domainCellState(fromFixtures);
-  const bound = rowStates.filter((state) => state !== "missing");
-  if (bound.length > 0) return domainCellState(bound);
+  if (rowStates.length > 0) return domainCellState(rowStates);
   if (fixtures.some((item) => item.result === "not_run" || item.result === "not_verified")) {
     return "unknown";
   }

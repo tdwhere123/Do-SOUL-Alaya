@@ -18,8 +18,12 @@ import {
 import { composeEnrichmentPreparationReport } from "./preparation-report.js";
 
 export const ENRICHMENT_PREPARATION_CANDIDATE_PLACEHOLDER = "HEAD";
-export const ENRICHMENT_PREPARATION_IDENTITY_NOTE =
-  "Candidate identity is HEAD until the repair commit; parent pins SHA after commit.";
+export function enrichmentPreparationIdentityNote(
+  candidate: string,
+  codeTree: string
+): string {
+  return `Candidate ${candidate} tree ${codeTree}`;
+}
 
 export interface EnrichmentPreparationEmitInput {
   readonly regressionPath: string;
@@ -188,7 +192,7 @@ function serializeSourceMap(input: {
   return {
     candidate: input.candidate,
     code_tree: input.codeTree,
-    identity_note: ENRICHMENT_PREPARATION_IDENTITY_NOTE,
+    identity_note: enrichmentPreparationIdentityNote(input.candidate, input.codeTree),
     provider_calls: 0,
     query_calls: 0,
     attempted_fetches: input.preflight.attempted_fetches,
@@ -221,7 +225,7 @@ function serializePreflightDocument(input: {
   return {
     candidate: input.candidate,
     code_tree: input.codeTree,
-    identity_note: ENRICHMENT_PREPARATION_IDENTITY_NOTE,
+    identity_note: enrichmentPreparationIdentityNote(input.candidate, input.codeTree),
     status: input.preflight.bounds.unresolved_native_bound ? "unresolved" : "sized",
     reason: null,
     identities: input.preflight.identities,
@@ -378,7 +382,7 @@ function requireExistingFile(path: string, label: string): void {
 }
 
 function writeJson(path: string, value: unknown): void {
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
 }
 
 function readRequiredFlag(argv: readonly string[], name: string): string {
