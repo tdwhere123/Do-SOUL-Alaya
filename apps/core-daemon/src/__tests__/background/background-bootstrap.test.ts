@@ -48,7 +48,7 @@ describe("BackgroundServiceManager", () => {
     }
   });
 
-  it("waits for in-flight tasks after stop timeout instead of abandoning them", async () => {
+  it("returns timed_out without waiting forever after the stop timeout", async () => {
     vi.useFakeTimers();
     let releaseTask!: () => void;
     const task = vi.fn(
@@ -74,12 +74,12 @@ describe("BackgroundServiceManager", () => {
       await vi.advanceTimersByTimeAsync(100);
       const stopPromise = manager.stop({ timeoutMs: 50 });
       await vi.advanceTimersByTimeAsync(50);
+      await expect(stopPromise).resolves.toBe("timed_out");
       expect(logger.warn).toHaveBeenCalledWith(
-        "background service stop draining timed out; waiting for in-flight tasks",
+        "background service stop draining timed out",
         { inFlight: 1 }
       );
       releaseTask();
-      await stopPromise;
       expect(task).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();

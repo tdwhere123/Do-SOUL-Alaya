@@ -191,14 +191,16 @@ const GARDEN_TASK_COUNT_SQL: SqlDefinitionMap<GardenTaskCountStatements> = {
   countByKindStatement: `
       SELECT
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-        SUM(CASE WHEN status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ? THEN 1 ELSE 0 END) AS stale
+        SUM(CASE WHEN status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ? THEN 1 ELSE 0 END) AS stale,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
       FROM garden_tasks
       WHERE kind = ?
     `,
   countByKindByWorkspaceStatement: `
       SELECT
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-        SUM(CASE WHEN status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ? THEN 1 ELSE 0 END) AS stale
+        SUM(CASE WHEN status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ? THEN 1 ELSE 0 END) AS stale,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
       FROM garden_tasks
       WHERE kind = ? AND workspace_id = ?
     `

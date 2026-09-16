@@ -296,6 +296,25 @@ describe("doctor CLI", () => {
     );
   });
 
+  it("writes a garden compile failure line when POST_TURN_EXTRACT tasks have failed", async () => {
+    const harness = createDoctorHarness({
+      getGardenCompute: async () => ({
+        provider_kind: "local_heuristics",
+        model_id: null,
+        provider_url: null,
+        credential_source: { kind: "none" },
+        routing_decision: "local_heuristics",
+        failed_post_turn_extract_tasks: 3
+      })
+    });
+
+    const result = await harness.bridge.dispatch(["doctor"]);
+    expect(result.exitCode).toBe(75);
+    expect(harness.stdoutText()).toContain(
+      "garden compile failures: 3 failed POST_TURN_EXTRACT"
+    );
+  });
+
   it("reports a successful Garden keychain check only when a keychain ref is configured", async () => {
     const harness = createDoctorHarness({
       getGardenCompute: async () => ({

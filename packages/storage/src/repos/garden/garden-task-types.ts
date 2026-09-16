@@ -51,6 +51,7 @@ export interface GardenTaskKindBacklogCount {
   readonly kind: GardenTaskKindValue;
   readonly pending: number;
   readonly stale: number;
+  readonly failed: number;
 }
 
 export interface GardenTaskCompletionResult {

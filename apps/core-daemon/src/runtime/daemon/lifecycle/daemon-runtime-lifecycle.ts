@@ -372,9 +372,14 @@ async function stopBackgroundServices(
     return;
   }
 
-  try {
-    await input.gardenRuntime.backgroundManager.stop({ timeoutMs: BACKGROUND_STOP_TIMEOUT_MS });
-  } catch (error) {
+    try {
+      const stopResult = await input.gardenRuntime.backgroundManager.stop({
+        timeoutMs: BACKGROUND_STOP_TIMEOUT_MS
+      });
+      if (stopResult === "timed_out") {
+        input.warnLogger.warn("garden background manager shutdown timed out", {});
+      }
+    } catch (error) {
     input.warnLogger.warn("garden background manager shutdown failed", {
       error: error instanceof Error ? error.message : String(error)
     });

@@ -43,8 +43,19 @@ export async function resolveGardenComputeStatus(
     credential_source: credential,
     routing_decision: deriveGardenRoutingDecision(config, resolved),
     ...keychainCheckField(config.secret_ref, resolved),
-    ...hostWorkerAdvisoryField(config.provider_kind, runtime)
+    ...hostWorkerAdvisoryField(config.provider_kind, runtime),
+    ...postTurnExtractFailureField(runtime)
   };
+}
+
+function postTurnExtractFailureField(
+  runtime: AlayaDaemonRuntime
+): Pick<GardenComputeStatus, "failed_post_turn_extract_tasks"> {
+  const backlog = runtime.services.gardenStatus?.getHostWorkerExtractBacklog?.() ?? null;
+  if (backlog === null) {
+    return {};
+  }
+  return { failed_post_turn_extract_tasks: backlog.failed };
 }
 
 // Under the host_worker product default, surface whether recall-driven

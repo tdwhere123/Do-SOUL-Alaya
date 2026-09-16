@@ -85,6 +85,21 @@ export interface ConversationWarnPort {
   (message: string, meta: Record<string, unknown>): void;
 }
 
+export interface ConversationGardenCompileEnqueueInput {
+  readonly workspaceId: string;
+  readonly runId: string;
+  readonly userMessage: ConversationMessage;
+  readonly assistantMessage: ConversationMessage;
+}
+
+export type ConversationGardenCompileEnqueueResult =
+  | { readonly status: "enqueued" }
+  | { readonly status: "duplicate" };
+
+export interface ConversationGardenCompileQueuePort {
+  enqueue(input: ConversationGardenCompileEnqueueInput): ConversationGardenCompileEnqueueResult;
+}
+
 export interface ConversationGovernanceLeasePort {
   acquire(params: {
     readonly runId: string;
@@ -130,6 +145,7 @@ export interface ConversationServiceDependencies {
   readonly contextLensAssembler?: ConversationContextLensAssemblerPort;
   readonly budgetBankruptcyService?: ConversationBudgetBankruptcyPort;
   readonly healthJournalRecorder?: HealthJournalRecordPort;
+  readonly gardenCompileQueue?: ConversationGardenCompileQueuePort;
   readonly warn: ConversationWarnPort;
 }
 

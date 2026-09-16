@@ -49,7 +49,7 @@ export async function finalizeAlayaDaemonRuntime(input: {
           countByKind(
             taskKind: string,
             staleBefore: string
-          ): Readonly<{ readonly pending: number; readonly stale: number }>;
+          ): Readonly<{ readonly pending: number; readonly stale: number; readonly failed: number }>;
         }>
       | undefined;
   }>;
@@ -142,7 +142,7 @@ function createDaemonRuntimeServices(
             countByKind(
               taskKind: string,
               staleBefore: string
-            ): Readonly<{ readonly pending: number; readonly stale: number }>;
+            ): Readonly<{ readonly pending: number; readonly stale: number; readonly failed: number }>;
           }>
         | undefined;
     }>;
@@ -169,7 +169,7 @@ function createGardenStatusService(serviceExports: {
         countByKind(
           taskKind: string,
           staleBefore: string
-        ): Readonly<{ readonly pending: number; readonly stale: number }>;
+        ): Readonly<{ readonly pending: number; readonly stale: number; readonly failed: number }>;
       }>
     | undefined;
 }) {
@@ -196,6 +196,7 @@ function createGardenStatusService(serviceExports: {
       return {
         pending: extract.pending,
         stale: extract.stale,
+        failed: extract.failed,
         edgeClassifyPending: edgeClassify.pending,
         edgeClassifyStale: edgeClassify.stale
       };

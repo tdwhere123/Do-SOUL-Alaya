@@ -73,6 +73,9 @@ export interface GardenComputeStatus {
     readonly stale_claimed_edge_classify_tasks: number;
     readonly attach_worker_recommended: boolean;
   }>;
+  // Durable POST_TURN_EXTRACT compile outcomes. Present when the garden task
+  // repo can count failed rows so a silent extract miss is visible in doctor.
+  readonly failed_post_turn_extract_tasks?: number;
 }
 
 export type GardenKeychainCheck =

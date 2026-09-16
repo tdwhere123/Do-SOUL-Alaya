@@ -24,6 +24,9 @@ export type {
   ConversationBudgetBankruptcyPort,
   ConversationContextLensAssemblerPort,
   ConversationEventLogRepoPort,
+  ConversationGardenCompileEnqueueInput,
+  ConversationGardenCompileEnqueueResult,
+  ConversationGardenCompileQueuePort,
   ConversationGardenComputeProviderPort,
   ConversationGardenComputeProviderResolverPort,
   ConversationGovernanceLeasePort,
@@ -45,16 +48,12 @@ export class ConversationService {
 
   public constructor(public readonly dependencies: ConversationServiceDependencies) {
     this.gardenComputeCoordinator = new GardenComputeCoordinator({
-      eventLogRepo: dependencies.eventLogRepo,
-      ...(dependencies.eventPublisher === undefined
+      ...(dependencies.gardenCompileQueue === undefined
         ? {}
-        : { eventPublisher: dependencies.eventPublisher }),
-      gardenComputeProvider: dependencies.gardenComputeProvider,
-      ...(dependencies.retainCompileSource === undefined ? {} : { retainCompileSource: dependencies.retainCompileSource }),
-      resolveGardenComputeProvider: dependencies.resolveGardenComputeProvider,
-      signalReceiver: dependencies.signalReceiver,
-      sessionOverridePromotion: dependencies.sessionOverridePromotion,
-      healthJournalRecorder: dependencies.healthJournalRecorder,
+        : { gardenCompileQueue: dependencies.gardenCompileQueue }),
+      ...(dependencies.healthJournalRecorder === undefined
+        ? {}
+        : { healthJournalRecorder: dependencies.healthJournalRecorder }),
       warn: dependencies.warn,
       releaseGovernanceLeaseSafely: (runId, workspaceId, phase) =>
         this.releaseGovernanceLeaseSafely(runId, workspaceId, phase)

@@ -445,11 +445,16 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
               parsedKind,
               parseNonEmptyString(workspace_id, "garden_task.workspace_id")
             )
-      ) as { readonly pending: number | null; readonly stale: number | null } | undefined;
+      ) as {
+        readonly pending: number | null;
+        readonly stale: number | null;
+        readonly failed: number | null;
+      } | undefined;
       return {
         kind: parsedKind,
         pending: row?.pending ?? 0,
-        stale: row?.stale ?? 0
+        stale: row?.stale ?? 0,
+        failed: row?.failed ?? 0
       };
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to count Garden task backlog by kind.", error);

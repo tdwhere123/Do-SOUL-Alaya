@@ -367,6 +367,11 @@ function writeGardenComputeSummary(stream: NodeJS.WritableStream, report: Doctor
       );
     }
   }
+  if (report.garden_compute.failed_post_turn_extract_tasks !== undefined) {
+    stream.write(
+      `garden compile failures: ${report.garden_compute.failed_post_turn_extract_tasks} failed POST_TURN_EXTRACT\n`
+    );
+  }
 }
 
 function writeRecallGraphSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {

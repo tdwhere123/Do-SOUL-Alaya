@@ -154,6 +154,8 @@ export interface AlayaDaemonRuntimeServices {
     // attached CLI agent). `pending` counts unclaimed POST_TURN_EXTRACT tasks;
     // `stale` counts POST_TURN_EXTRACT tasks a worker CLAIMED but whose claim is
     // older than the wait window (claimed-and-aged, not pending-and-aged).
+    // `failed` counts POST_TURN_EXTRACT rows that finished as failed so doctor
+    // can tell compile-never-happened from empty-success.
     // edgeClassifyPending / edgeClassifyStale carry the same pending/stale split
     // for EDGE_CLASSIFY tasks so a no-agent deployment's unrefined heuristic-edge
     // backlog is visible too. Returns null when no garden task repo is wired
@@ -161,6 +163,7 @@ export interface AlayaDaemonRuntimeServices {
     getHostWorkerExtractBacklog(): Readonly<{
       readonly pending: number;
       readonly stale: number;
+      readonly failed: number;
       readonly edgeClassifyPending: number;
       readonly edgeClassifyStale: number;
     }> | null;

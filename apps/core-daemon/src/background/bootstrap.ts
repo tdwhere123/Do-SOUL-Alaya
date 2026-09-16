@@ -20,6 +20,8 @@ export interface BackgroundServiceManagerOptions {
   readonly logger?: BackgroundServiceLogger;
 }
 
+export type BackgroundServiceStopResult = "drained" | "timed_out";
+
 export class BackgroundServiceManager {
   private readonly services: readonly BackgroundServiceConfig[];
   private readonly logger: BackgroundServiceLogger;
@@ -71,39 +73,41 @@ export class BackgroundServiceManager {
     }
   }
 
-  public async stop(options: BackgroundServiceStopOptions = {}): Promise<void> {
+  public async stop(options: BackgroundServiceStopOptions = {}): Promise<BackgroundServiceStopResult> {
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     const drainPromise = Promise.allSettled([...this.inFlight]).then(() => undefined);
     if (options.timeoutMs === null) {
       await drainPromise;
-    } else {
-      const timeoutMs = options.timeoutMs ?? 10_000;
-      if (timeoutMs <= 0) {
-        await drainPromise;
-      } else {
-        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-        let timedOut = false;
-        const timeoutPromise = new Promise<void>((resolve) => {
-          timeoutHandle = setTimeout(() => {
-            timedOut = true;
-            this.logger.warn("background service stop draining timed out; waiting for in-flight tasks", {
-              inFlight: this.inFlight.size
-            });
-            resolve();
-          }, timeoutMs);
+      this.inFlight.clear();
+      this.started = false;
+      return "drained";
+    }
+    const timeoutMs = options.timeoutMs ?? 10_000;
+    if (timeoutMs <= 0) {
+      await drainPromise;
+      this.inFlight.clear();
+      this.started = false;
+      return "drained";
+    }
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    const timeoutPromise = new Promise<void>((resolve) => {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        this.logger.warn("background service stop draining timed out", {
+          inFlight: this.inFlight.size
         });
-        await Promise.race([drainPromise, timeoutPromise]);
-        if (timedOut) {
-          await drainPromise;
-        }
-        if (timeoutHandle !== undefined) {
-          clearTimeout(timeoutHandle);
-        }
-      }
+        resolve();
+      }, timeoutMs);
+    });
+    await Promise.race([drainPromise, timeoutPromise]);
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
     }
     this.inFlight.clear();
     this.started = false;
+    return timedOut ? "timed_out" : "drained";
   }
 }
 

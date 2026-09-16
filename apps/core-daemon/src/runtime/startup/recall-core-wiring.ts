@@ -1,5 +1,6 @@
 import { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
 import { createAuditedSourceAdmission, fieldContractSha256, deriveAddressableSpanViews, retainedSourceSpeaker,
+  createSourceAdmissionPort,
   type ConversationServiceDependencies } from "@do-soul/alaya-core";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { createDaemonServiceFoundation } from "../daemon/wiring/daemon-service-foundation.js";
@@ -161,7 +162,12 @@ function buildCoreServiceInput(
     budgetBankruptcyService: foundation.budgetBankruptcyService,
     healthJournalService: foundation.healthJournalService,
     warn: bootstrap.warnLogger.warn,
-    isPrincipalCodingEngineAvailable: () => foundation.principalCodingAvailability.available
+    isPrincipalCodingEngineAvailable: () => foundation.principalCodingAvailability.available,
+    database: bootstrap.database,
+    sourceAdmission: createSourceAdmissionPort({
+      stores: repositories.fieldComposition.stores,
+      sha256: fieldContractSha256
+    })
   };
 }
 
