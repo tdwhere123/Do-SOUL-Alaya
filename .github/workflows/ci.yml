@@ -94,6 +94,10 @@ jobs:
           pnpm run ci:test-as-any -- --self-test
           pnpm run ci:test-as-any
 
+      - name: Guard storage row casts
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run hygiene:storage-row-casts
+
       - name: Guard env docs
         if: ${{ matrix.run_hygiene }}
         run: pnpm run ci:env-docs
