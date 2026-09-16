@@ -16,6 +16,10 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol 4.12.0 can move
 independently of the app semver.
 
+`SoulMemorySearchResponse.ranking_authority` stays parseable in app 0.3.x.
+Live ranking ignores it. Do not delete the field in this series; removal
+waits for a protocol major after the compatibility ledger expires.
+
 Retired local cross-encoder env keys (`ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK`,
 `ALAYA_LOCAL_CROSS_ENCODER_MODEL`, `ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR`) are
 ignored. Daemon startup emits the shared unregistered/retired env warning.

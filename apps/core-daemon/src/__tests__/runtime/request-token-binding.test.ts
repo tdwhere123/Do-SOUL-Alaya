@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyRemoteBindTokenRotation,
   authorizeProtectedRequest,
+  extractWorkspaceIdFromUnknown,
   type RequestTokenProtection
 } from "../../runtime/request-token-binding.js";
 
@@ -18,6 +19,21 @@ const protection = {
     { token: WORKSPACE_B_TOKEN, workspaceIds: ["ws-b"] }
   ]
 };
+
+describe("extractWorkspaceIdFromUnknown", () => {
+  it("reads only a top-level workspace_id and ignores nested payload ids", () => {
+    expect(extractWorkspaceIdFromUnknown({ workspace_id: "ws-a" })).toBe("ws-a");
+    expect(extractWorkspaceIdFromUnknown({ workspace_id: "  ws-a  " })).toBe("ws-a");
+    expect(extractWorkspaceIdFromUnknown({ filter: { workspace_id: "ws-b" } })).toBeNull();
+    expect(
+      extractWorkspaceIdFromUnknown({ payload: { workspace_id: "ws-b" }, target: { workspace_id: "ws-c" } })
+    ).toBeNull();
+    expect(extractWorkspaceIdFromUnknown({ workspace_id: 12 })).toBeNull();
+    expect(extractWorkspaceIdFromUnknown({ workspace_id: "" })).toBeNull();
+    expect(extractWorkspaceIdFromUnknown([{ workspace_id: "ws-a" }])).toBeNull();
+    expect(extractWorkspaceIdFromUnknown(null)).toBeNull();
+  });
+});
 
 describe("request token workspace binding", () => {
   it("rejects a workspace A token against workspace B paths", () => {
@@ -88,6 +104,18 @@ describe("request token workspace binding", () => {
       ok: false,
       error: "Workspace is not authorized for this token"
     });
+  });
+
+  it("rejects a long-lived file token for remote TCP binds instead of reusing it", () => {
+    expect(() =>
+      applyRemoteBindTokenRotation(
+        { requestToken: "file-token", tokenSource: "env" as const },
+        {
+          DAEMON_HOST: "192.168.1.10",
+          ALAYA_ALLOW_REMOTE_DAEMON: "1"
+        }
+      )
+    ).toThrow(/Long-lived ALAYA_REQUEST_TOKEN cannot be used for remote binds/);
   });
 
   it("rotates a long-lived file token when unix-socket bind is configured", () => {

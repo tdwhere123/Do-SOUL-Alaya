@@ -7,6 +7,14 @@ export type ForceGraphWithForces = {
   d3ReheatSimulation?: () => unknown;
 };
 
+export type Graph3DHandle = ForceGraphWithForces & {
+  cameraPosition?: (
+    position: { x: number; y: number; z: number },
+    lookAt?: { x: number; y: number; z: number },
+    transitionMs?: number
+  ) => unknown;
+};
+
 export type TunedForceKey = "twoD" | "threeD";
 export type NodePositionCache = Map<string, { x?: number; y?: number; z?: number }>;
 
