@@ -30,7 +30,8 @@ const HOT_PATH_MANIFESTS = [
   "packages/engine-gateway/package.json",
   "packages/protocol/package.json",
   "packages/eval/package.json",
-  "packages/graph-algorithms/package.json"
+  "packages/graph-algorithms/package.json",
+  "packages/cjk-segmentation/package.json"
 ];
 
 const violations = [];
@@ -60,4 +61,41 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log("check-inspector-dep-isolation: ok (React/Vite deps confined to apps/inspector/web)");
+const protocolPkg = JSON.parse(
+  readFileSync(path.join(repoRoot, "packages/protocol/package.json"), "utf8")
+);
+const protocolDepSections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
+const protocolDeps = Object.keys(protocolPkg.dependencies ?? {});
+if (protocolDeps.length !== 1 || protocolDeps[0] !== "zod") {
+  console.error(
+    `protocol dependencies must be exactly zod (invariant 1); got ${JSON.stringify(protocolDeps)}`
+  );
+  process.exit(1);
+}
+for (const section of protocolDepSections) {
+  const deps = protocolPkg[section] ?? {};
+  if (deps["@node-rs/jieba"] !== undefined || deps["@do-soul/alaya-cjk-segmentation"] !== undefined) {
+    console.error(`protocol ${section} must not include native CJK segmentation`);
+    process.exit(1);
+  }
+}
+
+const inspectorManifests = ["apps/inspector/package.json", "apps/inspector/web/package.json"];
+for (const rel of inspectorManifests) {
+  const pkg = JSON.parse(readFileSync(path.join(repoRoot, rel), "utf8"));
+  const inspectorDeps = {
+    ...(pkg.dependencies ?? {}),
+    ...(pkg.devDependencies ?? {}),
+    ...(pkg.optionalDependencies ?? {}),
+    ...(pkg.peerDependencies ?? {})
+  };
+  if (
+    inspectorDeps["@node-rs/jieba"] !== undefined ||
+    inspectorDeps["@do-soul/alaya-cjk-segmentation"] !== undefined
+  ) {
+    console.error(`${rel} must not depend on native CJK segmentation`);
+    process.exit(1);
+  }
+}
+
+console.log("check-inspector-dep-isolation: ok (React/Vite deps confined to apps/inspector/web; protocol zod-only)");

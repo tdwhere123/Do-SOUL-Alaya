@@ -1,14 +1,14 @@
 {
-  "name": "@do-soul/alaya-core",
+  "name": "@do-soul/alaya-cjk-segmentation",
   "version": "0.3.11",
   "private": true,
-  "description": "Truth boundary services for Do-SOUL Alaya — EventPublisher, MemoryService, GardenRuntime.",
+  "description": "Node-only CJK word segmenter for Do-SOUL Alaya — lazy @node-rs/jieba with fail-soft fallback.",
   "license": "AGPL-3.0-only",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tdwhere123/Do-SOUL-Alaya.git",
-    "directory": "packages/core"
+    "directory": "packages/cjk-segmentation"
   },
   "files": [
     "dist/"
@@ -16,21 +16,22 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "engines": {
     "node": ">=24.0.0"
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "pnpm exec vitest run --project @do-soul/alaya-core",
+    "test": "pnpm exec vitest run --project @do-soul/alaya-cjk-segmentation",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
-    "@do-soul/alaya-cjk-segmentation": "workspace:*",
-    "@do-soul/alaya-graph-algorithms": "workspace:*",
-    "@do-soul/alaya-protocol": "workspace:*"
-  },
-  "devDependencies": {
-    "@do-soul/alaya-soul": "workspace:*",
-    "@do-soul/alaya-storage": "workspace:*"
+    "@do-soul/alaya-protocol": "workspace:*",
+    "@node-rs/jieba": "2.0.3"
   }
 }

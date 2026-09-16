@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 const PROJECTS = [
   "@do-soul/alaya-protocol",
   "@do-soul/alaya-graph-algorithms",
+  "@do-soul/alaya-cjk-segmentation",
   "@do-soul/alaya-storage",
   "@do-soul/alaya-core",
   "@do-soul/alaya-soul",
@@ -40,6 +41,10 @@ const PROJECT_COVERAGE = {
   "@do-soul/alaya-graph-algorithms": {
     include: "packages/graph-algorithms/src/**",
     statements: 78, lines: 79, functions: 83, branches: 69
+  },
+  "@do-soul/alaya-cjk-segmentation": {
+    include: "packages/cjk-segmentation/src/**",
+    statements: 91, lines: 91, functions: 89, branches: 83
   },
   "@do-soul/alaya-storage": {
     include: "packages/storage/src/**",

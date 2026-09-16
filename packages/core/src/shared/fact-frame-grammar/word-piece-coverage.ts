@@ -1,4 +1,4 @@
-import { isCjkSegmentationCandidate } from "@do-soul/alaya-protocol/cjk-segmentation";
+import { isCjkSegmentationCandidate } from "@do-soul/alaya-cjk-segmentation";
 
 const CJK_NEGATION_PREFIXES = ["不", "非", "没", "无"] as const;
 

@@ -5,7 +5,7 @@ import {
 import {
   isCjkSegmentationCandidate,
   segmentCjkRun
-} from "@do-soul/alaya-protocol/cjk-segmentation";
+} from "@do-soul/alaya-cjk-segmentation";
 import { parseRows } from "./parse-row.js";
 import { FtsLaneRankRowParser } from "./sqlite-row-schemas.js";
 

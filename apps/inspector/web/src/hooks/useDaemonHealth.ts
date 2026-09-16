@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { AlayaStatusSchema, type AlayaStatus } from "@do-soul/alaya-protocol";
 import { apiFetch, type ApiError } from "../api";
+import { unrefTimeout } from "../api/unref-timeout";
 import { useToasts } from "../components/toast";
 
 export type DaemonHealthState =
@@ -148,7 +149,7 @@ function useHealthPolling(tick: () => Promise<void>, refs: HealthRefs) {
       if (cancelled) return;
       const delay = refs.consecutiveFailuresRef.current > 0 ? POLL_BACKOFF_MS : POLL_OK_MS;
       timer = setTimeout(loop, delay);
-      timer.unref?.();
+      unrefTimeout(timer);
     };
     void loop();
     return () => {
@@ -182,7 +183,7 @@ function useHealthRefresh(
       refs.refreshLockRef.current = false;
       if (refs.isMountedRef.current) setRefreshing(false);
     }, REFRESH_COOLDOWN_MS);
-    refs.cooldownTimerRef.current.unref?.();
+    unrefTimeout(refs.cooldownTimerRef.current);
   }, [refs, setRefreshing, tick]);
 }
 

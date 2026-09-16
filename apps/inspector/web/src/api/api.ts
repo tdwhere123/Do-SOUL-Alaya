@@ -14,10 +14,12 @@ import {
   isZodValidationError,
   unwrapStandardResponseData
 } from "@do-soul/alaya-protocol";
+import { unrefTimeout } from "./unref-timeout";
 
 let inspectorToken: string | null = null;
 let currentWorkspaceId: string | null = null;
 let onUnauthorized: (() => void) | null = null;
+const workspaceIdListeners = new Set<() => void>();
 
 const INSPECTOR_TOKEN_STORAGE_KEY = "alaya-inspector-token";
 const INSPECTOR_WORKSPACE_STORAGE_KEY = "alaya-inspector-workspace-id";
@@ -41,22 +43,39 @@ export const getInspectorToken = () => {
 };
 
 export const setWorkspaceId = (id: string | null) => {
-  currentWorkspaceId = id;
-  if (id === null || id.trim().length === 0) {
+  const next = id === null || id.trim().length === 0 ? null : id;
+  const previous = getWorkspaceId();
+  currentWorkspaceId = next;
+  if (next === null) {
     sessionStorage.removeItem(INSPECTOR_WORKSPACE_STORAGE_KEY);
-    return;
+  } else {
+    sessionStorage.setItem(INSPECTOR_WORKSPACE_STORAGE_KEY, next);
   }
-  sessionStorage.setItem(INSPECTOR_WORKSPACE_STORAGE_KEY, id);
+  if (previous !== next) {
+    for (const listener of workspaceIdListeners) {
+      listener();
+    }
+  }
 };
 
-export const getWorkspaceId = () => {
+export const getWorkspaceId = (): string | null => {
   if (currentWorkspaceId !== null && currentWorkspaceId.trim().length > 0) {
     return currentWorkspaceId;
   }
   const stored = sessionStorage.getItem(INSPECTOR_WORKSPACE_STORAGE_KEY);
-  currentWorkspaceId = stored;
+  if (stored === null || stored.trim().length === 0) {
+    return null;
+  }
   return stored;
 };
+
+/** Launch binds workspace outside React; overview must subscribe or pendingCount stays null. */
+export function subscribeWorkspaceId(onStoreChange: () => void): () => void {
+  workspaceIdListeners.add(onStoreChange);
+  return () => {
+    workspaceIdListeners.delete(onStoreChange);
+  };
+}
 
 export const setUnauthorizedHandler = (handler: (() => void) | null) => {
   onUnauthorized = handler;
@@ -109,8 +128,7 @@ const RETRYABLE_METHODS = new Set(["GET", "HEAD"]);
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer?.unref?.();
+    unrefTimeout(setTimeout(resolve, ms));
   });
 }
 
@@ -144,8 +162,9 @@ export async function apiFetchWithHeaders<T>(
 
 function buildApiUrl(path: string, params: Record<string, string> | undefined): string {
   let resolvedPath = path;
-  if (currentWorkspaceId) {
-    resolvedPath = path.replace(":workspaceId", currentWorkspaceId);
+  const workspaceId = getWorkspaceId();
+  if (workspaceId) {
+    resolvedPath = path.replace(":workspaceId", workspaceId);
   }
   let url = resolvedPath.startsWith("http") ? resolvedPath : `/api${resolvedPath}`;
   if (params) {

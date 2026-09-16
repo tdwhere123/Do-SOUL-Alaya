@@ -150,15 +150,6 @@ export * from "./shared/event-utils.js";
 export {
   KeyedMutex
 } from "@do-soul/alaya-protocol";
-export {
-  CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
-  readCjkSegmentationStatus,
-  isCjkSegmentationCandidate,
-  segmentCjkRun,
-  warmCjkSegmentation
-} from "@do-soul/alaya-protocol/cjk-segmentation";
-export type { CjkSegmentationStatus } from "@do-soul/alaya-protocol/cjk-segmentation";
-
 export * from "./tooling/extension-descriptor-parsers.js";
 export * from "./manifestation/load-or-default-with-workspace-guard.js";
 export * from "./shared/recall-policy.js";

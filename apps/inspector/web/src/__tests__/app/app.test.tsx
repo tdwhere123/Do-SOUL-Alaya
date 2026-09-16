@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AppContent } from "../../app/app";
 import { ToastProvider } from "../../components/toast";
@@ -34,6 +34,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function stubInspectorFetch(options?: {
   readonly onLaunchRedeem?: (code: string) => Response;
+  readonly pendingDelayMs?: number;
 }): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn(async (input: FetchInput, init?: RequestInit) => {
     const url = urlOf(input);
@@ -52,6 +53,12 @@ function stubInspectorFetch(options?: {
     }
 
     if (url.includes("/proposals/ws1/pending")) {
+      const delayMs = options?.pendingDelayMs ?? 0;
+      if (delayMs > 0) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, delayMs);
+        });
+      }
       return jsonResponse({
         success: true,
         data: { proposals: [], total_count: 5 }
@@ -133,12 +140,17 @@ describe("AppContent", () => {
   });
 
   it("keeps the launch session after redirecting from / to the real overview surface", async () => {
-    const fetchMock = vi.mocked(fetch);
+    const fetchMock = stubInspectorFetch({ pendingDelayMs: 40 });
     renderApp({ pathname: "/", search: "?workspaceId=ws1", hash: "#launch=launch-code" });
 
     expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
     expect(await screen.findByTestId("overview-card-proposals")).toBeTruthy();
-    expect(screen.getByTestId("overview-card-proposals").textContent).toContain("5");
+    await waitFor(() =>
+      expect(screen.getByTestId("overview-card-proposals").textContent).toContain("5")
+    );
+    expect(
+      fetchMock.mock.calls.some(([input]) => urlOf(input as FetchInput).includes("/proposals/ws1/pending"))
+    ).toBe(true);
     expect(screen.getByTestId("inspector-sidebar")).toBeTruthy();
     expect(screen.queryByText("No session found. Please run `alaya inspect` to open this tool.")).toBeNull();
     expect(launchRedeemBodies(fetchMock)).toEqual([{ code: "launch-code" }]);

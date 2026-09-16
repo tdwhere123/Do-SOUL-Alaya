@@ -67,6 +67,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
+    "@do-soul/alaya-cjk-segmentation": "workspace:*",
     "@do-soul/alaya-core": "workspace:*",
     "@do-soul/alaya-engine-gateway": "workspace:*",
     "@do-soul/alaya-eval": "workspace:*",

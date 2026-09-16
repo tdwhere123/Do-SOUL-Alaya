@@ -4,6 +4,7 @@ import {
   setInspectorToken,
   setUnauthorizedHandler,
   setWorkspaceId,
+  subscribeWorkspaceId,
   type ApiError
 } from "../../api/api";
 
@@ -40,6 +41,25 @@ describe("apiFetch", () => {
     await apiFetch("/config/:workspaceId/soul");
     const [url] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/config/ws-1/soul");
+  });
+
+  it("interpolates :workspaceId from sessionStorage when memory is empty", async () => {
+    setWorkspaceId(null);
+    sessionStorage.setItem("alaya-inspector-workspace-id", "stored-ws");
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    await apiFetch("/config/:workspaceId/soul");
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/config/stored-ws/soul");
+  });
+
+  it("notifies subscribers when workspace id changes", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeWorkspaceId(listener);
+    setWorkspaceId("ws-2");
+    expect(listener).toHaveBeenCalledOnce();
+    unsubscribe();
+    setWorkspaceId("ws-3");
+    expect(listener).toHaveBeenCalledOnce();
   });
 
   it("invokes the global unauthorized handler and throws ApiError on 401", async () => {

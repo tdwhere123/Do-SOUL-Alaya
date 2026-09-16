@@ -154,6 +154,7 @@ live connectedness proof is `docs/handbook/recall.md`.
 apps/core-daemon         Hono HTTP/MCP daemon and wiring layer
 
 packages/protocol        zod schemas and shared domain types, grouped by schema domain
+packages/cjk-segmentation  Node-only CJK word segmenter (`@node-rs/jieba`)
 packages/storage         SQLite migrations and domainized repos
 packages/core            business logic, state transitions, EventLog
                          publishing, runtime adapters, ConversationService,
@@ -170,18 +171,20 @@ packages/eval            benchmark KPI schemas, history diff/report utilities,
 Dependency direction:
 
 ```text
-protocol        <- leaf, depends only on zod
-storage         -> protocol
-core            -> protocol, storage
-soul            -> protocol
-engine-gateway  -> protocol
-apps/core-daemon -> packages/* (all of the above)
+protocol              <- leaf, depends only on zod
+cjk-segmentation      -> protocol, @node-rs/jieba
+storage               -> protocol, cjk-segmentation
+core                  -> protocol, storage, cjk-segmentation
+soul                  -> protocol
+engine-gateway         -> protocol
+apps/core-daemon       -> packages/* (all of the above)
 ```
 
 Forbidden:
 
 - `core -> engine-gateway`
 - `protocol -> any workspace package other than zod`
+- `protocol -> @node-rs/jieba`
 - `packages/* -> apps/*`
 - business or governance logic in `engine-gateway`
 - direct package-to-package imports across the dependency direction

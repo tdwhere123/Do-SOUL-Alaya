@@ -1,8 +1,8 @@
 /**
  * @packageDocumentation
  * `@do-soul/alaya-protocol` is the zod-only schema leaf of Do-SOUL Alaya: the
- * shared contracts every other package depends on, with no runtime logic of its
- * own. Schemas are grouped by domain:
+ * shared contracts every other package depends on. Native CJK segmentation is
+ * not on this root. Schemas are grouped by domain:
  *
  * - `memory` — entries, capsules, claims, karma, graph, and status models.
  * - `evidence` — evidence capsules, fact frames, and formation completeness.
@@ -241,3 +241,7 @@ export { KeyedMutex } from "./shared/keyed-mutex.js";
 export {
   CJK_INTERROGATIVE_FALLBACK_ATOMS
 } from "./shared/cjk-interrogative-fallback-atoms.js";
+export {
+  fallbackCjkRunPieces,
+  isCjkSegmentationCandidate
+} from "./shared/cjk-run-policy.js";

@@ -9,8 +9,8 @@ catalog:
   "@types/better-sqlite3": ^9.6.0
   better-sqlite3: 13.0.3
   hono: ^4.13.7
-  # Vitest 5 and TypeScript 6/7 are separate migrations from this pin set.
-  typescript: 5.9.3
+  # Vitest 5 remains a separate migration from this pin set.
+  typescript: 7.0.2
   vitest: 4.1.11
   # 4.6.5 was incompatible with this tree; keep the last accepted 4.6 patch.
   zod: ^4.6.2

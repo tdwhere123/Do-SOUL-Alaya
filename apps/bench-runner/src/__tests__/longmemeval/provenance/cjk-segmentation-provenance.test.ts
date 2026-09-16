@@ -4,7 +4,7 @@ import {
   __resetCjkSegmentationStateForTests,
   __setCjkSegmentationLoaderForTests,
   warmCjkSegmentation
-} from "@do-soul/alaya-protocol/cjk-segmentation";
+} from "@do-soul/alaya-cjk-segmentation";
 import { collectCjkSegmentationProvenance } from
   "../../../runs/provenance/cjk-segmentation.js";
 

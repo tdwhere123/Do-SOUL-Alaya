@@ -7,8 +7,13 @@ These rules always win over lower-level docs and task-card convenience.
 1. `packages/protocol` is the domain leaf package and depends only on
    `zod`.
 1a. `packages/graph-algorithms` is a dependency-free pure algorithm helper
-   package. It may not define domain types, EventLog payloads, runtime
-   transitions, or storage contracts.
+    package. It may not define domain types, EventLog payloads, runtime
+    transitions, or storage contracts.
+1b. `packages/cjk-segmentation` is the Node-only CJK word-segmenter
+    owner (`@node-rs/jieba`). It may depend on protocol (shared atoms and
+    the bind seam) and `@node-rs/jieba` only. Protocol, Inspector, and
+    browser barrels must not depend on it. Core and storage must not
+    keep a second copy of the native segmenter.
 2. All domain types come from `@do-soul/alaya-protocol`; do not redefine
    business types in app or package-local code.
 3. `apps/core-daemon` is the wiring layer. Packages must not import

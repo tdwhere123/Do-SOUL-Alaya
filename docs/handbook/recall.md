@@ -121,7 +121,8 @@ normalizer export serves daemon configuration and benchmark replay/backfill
 consumers by exporting the same Protocol implementation. The Protocol browser
 root's receipt verifier proves historical frame-to-graph binding only; current
 source qualification must also use the source-frame contract. Native CJK
-segmentation stays outside the browser root.
+segmentation is owned by `@do-soul/alaya-cjk-segmentation` and stays outside the
+browser root and the protocol install graph.
 
 A source-qualified frame independently compiles its canonical graph through
 Protocol's Node source-frame owner. Missing, rejected or incompatible model

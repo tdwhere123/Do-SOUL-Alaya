@@ -132,7 +132,8 @@ architecture authority.
 
 ## Architecture
 
-`@do-soul/alaya-protocol` → leaf types; `@do-soul/alaya-core` → truth
+`@do-soul/alaya-protocol` → leaf types; `@do-soul/alaya-cjk-segmentation` →
+Node CJK; `@do-soul/alaya-core` → truth
 boundary; `apps/core-daemon` wires; Garden is fire-and-forget.
 EventPublisher-owned transitions are EventLog-first; receipt-first audit paths
 follow their own contract. Audit precedes notification. Detail:
