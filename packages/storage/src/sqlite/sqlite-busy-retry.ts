@@ -8,6 +8,22 @@ export interface SqliteBusyRetryOptions {
   readonly sleepMs?: number;
   /** Wall-clock cap so a nested busy_timeout cannot multiply retry attempts. */
   readonly budgetMs?: number;
+  /** Unit-interval source for retry jitter; production uses Math.random. */
+  readonly random?: () => number;
+}
+
+export function computeSqliteBusyRetryWaitMs(
+  sleepMs: number,
+  remainingMs: number,
+  random: () => number
+): number {
+  const cap = Math.min(sleepMs, Math.max(0, remainingMs));
+  if (cap <= 0) {
+    return 0;
+  }
+  const sample = random();
+  const unit = Number.isFinite(sample) ? Math.min(1, Math.max(0, sample)) : 0;
+  return Math.min(cap, Math.floor(unit * (cap + 1)));
 }
 
 export function withSqliteBusyRetry<T>(
@@ -16,6 +32,7 @@ export function withSqliteBusyRetry<T>(
 ): T {
   const sleepMs = options?.sleepMs ?? DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS;
   const retryLimit = options?.retryLimit ?? DEFAULT_SQLITE_BUSY_RETRY_LIMIT;
+  const random = options?.random ?? Math.random;
   const deadline = options?.budgetMs === undefined ? undefined : Date.now() + options.budgetMs;
   let lastError: unknown;
   for (let attempt = 0; attempt < retryLimit; attempt += 1) {
@@ -33,7 +50,11 @@ export function withSqliteBusyRetry<T>(
       if (deadline !== undefined && Date.now() >= deadline) {
         throw error;
       }
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, sleepMs);
+      const remainingMs = deadline === undefined ? sleepMs : deadline - Date.now();
+      const waitMs = computeSqliteBusyRetryWaitMs(sleepMs, remainingMs, random);
+      if (waitMs > 0) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+      }
     }
   }
   throw lastError;

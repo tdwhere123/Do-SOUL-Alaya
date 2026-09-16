@@ -63,9 +63,12 @@ vi.mock("../../ai/daemon-embedding-runtime.js", async () => {
 vi.mock("../../background/bootstrap.js", () => ({
   BackgroundServiceManager: vi.fn().mockImplementation(function BackgroundServiceManager(services) {
     const manager = {
-      services,
+      services: [...services],
       start: hoisted.backgroundManagerStart,
-      stop: hoisted.backgroundManagerStop
+      stop: hoisted.backgroundManagerStop,
+      addService(service: (typeof services)[number]) {
+        this.services.push(service);
+      }
     };
     hoisted.backgroundManagers.push(manager);
     return manager;

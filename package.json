@@ -21,6 +21,7 @@
     "ci:audit": "node ./scripts/ci/check-audit.mjs",
     "ci:test-as-any": "node ./scripts/ci/check-test-as-any.mjs",
     "ci:throw-new-error": "node ./scripts/ci/check-throw-new-error.mjs",
+    "ci:production-unknown-as": "node ./scripts/ci/check-production-unknown-as.mjs",
     "ci:env-docs": "node ./scripts/ci/check-env-docs.mjs",
     "ci:doc-links": "node ./scripts/ci/check-doc-links.mjs",
     "ci:install-scripts": "node --test ./scripts/ci/check-install-scripts.test.mjs",

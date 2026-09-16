@@ -7,6 +7,9 @@ export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 
 nvm install 24
 nvm use 24
+# Persist Node 24 as the nvm default so fresh agent shells (whose corepack/pnpm
+# resolve through nvm) satisfy the repo's engines.node >=24 with engine-strict.
+nvm alias default 24
 node --version
 
 corepack enable
