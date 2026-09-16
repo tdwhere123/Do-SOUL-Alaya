@@ -66,8 +66,8 @@ export interface EventLogRepo {
   }): Promise<boolean>;
   queryByRunAfterEventId(runId: string, lastEventId: string): Promise<readonly EventLogEntry[]>;
   queryByWorkspaceAfterEventId(workspaceId: string, lastEventId: string): Promise<readonly EventLogEntry[]>;
-  queryByType(eventType: string): Promise<readonly EventLogEntry[]>;
-  queryByTypePage?(eventType: string, page: EventLogPageOptions): Promise<readonly EventLogEntry[]>;
+  queryByType(eventType: string): Promise<EventLogTypePage>;
+  queryByTypePage?(eventType: string, page: EventLogPageOptions): Promise<EventLogTypePage>;
   queryByTypeAll(eventType: string): Promise<readonly EventLogEntry[]>;
   getLatestEventId(runId: string): Promise<string | null>;
   getLatestMessageTimestampByRun(runId: string): Promise<string | null>;
@@ -81,3 +81,9 @@ export interface EventLogPageOptions {
   readonly limit: number;
   readonly offset: number;
 }
+
+/** Default type query is a page, not complete history. Use queryByTypeAll for rebuild. */
+export type EventLogTypePage = Readonly<{
+  readonly events: readonly EventLogEntry[];
+  readonly truncated: boolean;
+}>;

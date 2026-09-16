@@ -266,8 +266,8 @@ export async function readGardenEvidence(dataDir: string): Promise<
   ]);
 
   return {
-    dispatched_events: dispatched.length,
-    completed_events: completed.length,
+    dispatched_events: dispatched.events.length,
+    completed_events: completed.events.length,
     health_journal_entries: healthEntries.length
   };
 }

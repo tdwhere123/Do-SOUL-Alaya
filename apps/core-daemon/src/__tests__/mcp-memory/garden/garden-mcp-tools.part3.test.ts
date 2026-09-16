@@ -95,7 +95,7 @@ describe("Garden MCP tools", () => {
         })
       );
       expect(harness.getGardenTask("edge-classify-apply")).toMatchObject({ status: "completed" });
-      const completed = await harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED);
+      const completed = (await harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)).events;
       expect(completed[0]?.payload_json).toMatchObject({
         task_id: "edge-classify-apply",
         task_kind: GardenTaskKind.EDGE_CLASSIFY,
@@ -199,9 +199,9 @@ describe("Garden MCP tools", () => {
       expect(harness.getGardenTask("edge-classify-missing-verdict")).toMatchObject({
         status: "claimed"
       });
-      const completed = await harness.eventLogRepo.queryByType(
+      const completed = (await harness.eventLogRepo.queryByType(
         GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-      );
+      )).events;
       expect(
         completed.some(
           (event) =>
@@ -253,9 +253,9 @@ describe("Garden MCP tools", () => {
       // A failure refines nothing; the inline heuristic edge stands.
       expect(applyVerdict).not.toHaveBeenCalled();
       expect(harness.getGardenTask("edge-classify-failed")).toMatchObject({ status: "failed" });
-      const completed = await harness.eventLogRepo.queryByType(
+      const completed = (await harness.eventLogRepo.queryByType(
         GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-      );
+      )).events;
       expect(
         completed.find(
           (event) =>
@@ -361,9 +361,9 @@ describe("Garden MCP tools", () => {
       expect(harness.getGardenTask("edge-classify-malformed-payload")).toMatchObject({
         status: "claimed"
       });
-      const completed = await harness.eventLogRepo.queryByType(
+      const completed = (await harness.eventLogRepo.queryByType(
         GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-      );
+      )).events;
       expect(
         completed.some(
           (event) =>

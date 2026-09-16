@@ -6,7 +6,8 @@ export {
   SqliteEventLogRepo,
   type EventLogAppendInput,
   type EventLogPageOptions,
-  type EventLogRepo
+  type EventLogRepo,
+  type EventLogTypePage
 } from "./event-log-repo.js";
 export {
   SqliteFileRepo,

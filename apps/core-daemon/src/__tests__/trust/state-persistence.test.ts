@@ -323,9 +323,9 @@ describe("trust state SQL persistence", () => {
 
     const telemetryDatabase = initDatabase({ filename: databasePath });
     try {
-      const telemetryEvents = await new SqliteEventLogRepo(telemetryDatabase).queryByType(
+      const telemetryEvents = (await new SqliteEventLogRepo(telemetryDatabase).queryByType(
         RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED
-      );
+      )).events;
       expect(telemetryEvents).toHaveLength(1);
       expect(telemetryEvents[0]).toMatchObject({
         workspace_id: "workspace-1",
