@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { chmod, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, rename, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { CoreError } from "@do-soul/alaya-core";
+
+export const PRIVATE_FILE_MODE = 0o600;
+
+export async function applyPrivateCreatedFileMode(handle: FileHandle): Promise<void> {
+  await handle.chmod(PRIVATE_FILE_MODE);
+}
 
 export async function ensurePrivateDirectory(directoryPath: string): Promise<void> {
   await mkdir(directoryPath, { recursive: true, mode: 0o700 });
@@ -34,6 +40,7 @@ export async function writePrivateTextAtomic(
   let closed = false;
   try {
     await handle.writeFile(content, "utf8");
+    await applyPrivateCreatedFileMode(handle);
     await handle.sync();
     await handle.close();
     closed = true;

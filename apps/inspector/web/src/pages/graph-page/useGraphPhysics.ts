@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { ForceGraphMethods as ForceGraphMethods2D } from "react-force-graph-2d";
-import type { ForceGraphMethods as ForceGraphMethods3D } from "react-force-graph-3d";
 import type { GraphLink, GraphNode } from "../../types/graph";
 import type { GraphData, ViewMode } from "./types";
 import {
@@ -11,6 +10,7 @@ import {
   restoreNodePositions,
   tuneGraphForceInstance,
   type ForceGraphWithForces,
+  type Graph3DHandle,
   type TunedForceKey
 } from "./graph-physics-support";
 
@@ -20,9 +20,7 @@ interface UseGraphPhysicsOptions {
   readonly fg2dRef: React.MutableRefObject<
     ForceGraphMethods2D<GraphNode, GraphLink> | undefined
   >;
-  readonly fg3dRef: React.MutableRefObject<
-    ForceGraphMethods3D<GraphNode, GraphLink> | undefined
-  >;
+  readonly fg3dRef: React.MutableRefObject<Graph3DHandle | undefined>;
   readonly focusedMatchId: string | undefined;
   readonly viewMode: ViewMode;
 }
@@ -56,7 +54,7 @@ export function useGraphPhysics({
 function useResetGraphForces(
   data: GraphData | null,
   fg2dRef: React.MutableRefObject<ForceGraphMethods2D<GraphNode, GraphLink> | undefined>,
-  fg3dRef: React.MutableRefObject<ForceGraphMethods3D<GraphNode, GraphLink> | undefined>,
+  fg3dRef: React.MutableRefObject<Graph3DHandle | undefined>,
   tunedForceRefs: React.MutableRefObject<Record<TunedForceKey, ForceGraphWithForces | null>>,
   viewMode: ViewMode
 ) {
@@ -96,7 +94,7 @@ function useFocusGraphNode(
   data: GraphData | null,
   effectiveMode: ViewMode,
   fg2dRef: React.MutableRefObject<ForceGraphMethods2D<GraphNode, GraphLink> | undefined>,
-  fg3dRef: React.MutableRefObject<ForceGraphMethods3D<GraphNode, GraphLink> | undefined>,
+  fg3dRef: React.MutableRefObject<Graph3DHandle | undefined>,
   focusedMatchId: string | undefined
 ) {
   useEffect(() => {

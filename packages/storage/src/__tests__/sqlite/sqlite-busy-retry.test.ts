@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SQLITE_BUSY_RETRY_LIMIT,
+  computeSqliteBusyRetryWaitMs,
   isSqliteBusyError,
   withSqliteBusyRetry
 } from "../../sqlite/sqlite-busy-retry.js";
@@ -57,5 +58,23 @@ describe("withSqliteBusyRetry", () => {
       throw sqliteBusyError("SQLITE_BUSY: database is locked");
     }, { budgetMs: 5_000, sleepMs: 0 })).toThrow(/SQLITE_BUSY/);
     expect(attempts).toBe(DEFAULT_SQLITE_BUSY_RETRY_LIMIT);
+  });
+
+  it("jitters sleep inside the remaining budget instead of a fixed 20ms tick", () => {
+    expect(computeSqliteBusyRetryWaitMs(20, 20, () => 0)).toBe(0);
+    expect(computeSqliteBusyRetryWaitMs(20, 20, () => 1)).toBe(20);
+    expect(computeSqliteBusyRetryWaitMs(20, 7, () => 1)).toBe(7);
+    expect(computeSqliteBusyRetryWaitMs(20, -3, () => 1)).toBe(0);
+  });
+
+  it("does not sleep past the busy budget when jitter would otherwise wait", () => {
+    let attempts = 0;
+    const started = performance.now();
+    expect(() => withSqliteBusyRetry(() => {
+      attempts += 1;
+      throw sqliteBusyError("SQLITE_BUSY: database is locked");
+    }, { budgetMs: 30, sleepMs: 500, random: () => 1 })).toThrow(/SQLITE_BUSY/);
+    expect(attempts).toBeLessThanOrEqual(DEFAULT_SQLITE_BUSY_RETRY_LIMIT);
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });

@@ -55,7 +55,7 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
     });
 
     service.start();
-    await vi.advanceTimersByTimeAsync(1_000);
+    await service.poll();
     await Promise.resolve();
     await Promise.resolve();
 
@@ -69,5 +69,45 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
     });
 
     await service.stop();
+  });
+
+  it("does not surface an unhandledRejection when a runner throws", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const warn = vi.fn();
+    const service = new GardenBacklogTelemetryService({
+      scheduler: {
+        getBacklogSnapshot: () => {
+          throw new Error("snapshot runner boom");
+        },
+        peekBacklogWarningTransition: () => null,
+        peekLastBacklogWarningTransitionId: () => null,
+        acknowledgeBacklogWarningTransition: () => false
+      },
+      eventLogRepo: {
+        append: vi.fn(async () => {
+          throw new Error("unused");
+        }),
+        queryByEntity: vi.fn(async () => [])
+      },
+      warn,
+      thresholds: {
+        warning_queue_depth: 10,
+        warning_rearm_depth: 7,
+        snapshot_interval_ms: 1_000
+      }
+    });
+
+    service.start();
+    await service.poll();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(unhandled).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "garden backlog snapshot publish failed",
+      expect.objectContaining({ error: "snapshot runner boom" })
+    );
+    await service.stop();
+    process.off("unhandledRejection", unhandled);
   });
 });

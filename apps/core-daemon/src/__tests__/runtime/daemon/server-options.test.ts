@@ -104,6 +104,20 @@ describe("core daemon server listen options", () => {
     ).toBe("long-lived-file-token");
   });
 
+  it("rejects a long-lived env token for remote TCP even when remote opt-in is set", () => {
+    const protection = {
+      allowedOrigin: "http://localhost:5173",
+      requestToken: "long-lived-file-token",
+      tokenSource: "env" as const
+    };
+    expect(() =>
+      applyRemoteBindTokenRotation(protection, {
+        DAEMON_HOST: "192.168.1.10",
+        ALAYA_ALLOW_REMOTE_DAEMON: "1"
+      })
+    ).toThrow(/Long-lived ALAYA_REQUEST_TOKEN cannot be used for remote binds/);
+  });
+
   it("reports remote-daemon opt-in only when ALAYA_ALLOW_REMOTE_DAEMON=1", () => {
     expect(isRemoteDaemonOptInEnabled({} as EnvLike)).toBe(false);
     expect(isRemoteDaemonOptInEnabled({ ALAYA_ALLOW_REMOTE_DAEMON: "0" } as EnvLike)).toBe(false);
