@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
-import { apiFetch, getWorkspaceId, subscribeWorkspaceId } from "../api";
+import { apiFetch, getWorkspaceId, subscribeWorkspaceId } from "../api/api";
 import { useApiQuery } from "../hooks/useApiQuery";
 
 export interface BenchSummaryShape {
