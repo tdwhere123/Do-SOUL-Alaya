@@ -178,7 +178,7 @@ function deferredTriagePayload(
   return { defer_class: meta.defer_class, defer_reason: meta.defer_reason };
 }
 
-export function readWritePathDeferMeta(materialization: {
+function readWritePathDeferMeta(materialization: {
   readonly defer_class?: string;
   readonly deferral?: string;
 }): {
