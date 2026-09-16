@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -74,7 +75,10 @@ describe("GraphPage (react-force-graph driven)", () => {
   });
 
   it("loads 3D through a dynamic graph-renderer module", () => {
-    const src = readFileSync(new URL("../../pages/graph-page/graph-renderer.tsx", import.meta.url), "utf8");
+    const webRoot = existsSync(path.join(process.cwd(), "apps/inspector/web/package.json"))
+      ? path.resolve(process.cwd(), "apps/inspector/web")
+      : process.cwd();
+    const src = readFileSync(path.join(webRoot, "src/pages/graph-page/graph-renderer.tsx"), "utf8");
     expect(src).not.toMatch(/import\(["']react-force-graph-3d["']\)/u);
     expect(src).toMatch(/lazy\(\(\) => import\("\.\/graph-renderer-3d"\)\)/u);
   });
