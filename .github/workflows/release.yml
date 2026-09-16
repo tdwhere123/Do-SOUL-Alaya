@@ -88,6 +88,11 @@ jobs:
           pnpm run ci:test-as-any -- --self-test
           pnpm run ci:test-as-any
 
+      - name: Guard production as-unknown-as
+        run: |
+          pnpm run ci:production-unknown-as -- --self-test
+          pnpm run ci:production-unknown-as
+
       - name: Guard env docs
         run: pnpm run ci:env-docs
 
