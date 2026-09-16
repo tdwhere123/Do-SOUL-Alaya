@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type MemoryEntry } from "@do-soul/alaya-protocol";
+import { type MemoryEntry, readErrorMessage } from "@do-soul/alaya-protocol";
 
 import {
   DEFAULT_EVIDENCE_DOCUMENT_EMBEDDING_CACHE_SIZE,
@@ -13,8 +13,7 @@ import { scoreTransientEvidenceCandidates } from "./evidence/evidence-candidate-
 import {
   EMPTY_SUPPLEMENT_RESULT,
   clampQueryEmbeddingCacheSize,
-  clampQueryTimeout,
-  toErrorMessage
+  clampQueryTimeout
 } from "./helpers.js";
 import {
   computeCoherentPairKeys,
@@ -226,7 +225,7 @@ export class EmbeddingRecallService {
         workspace_id: params.workspaceId,
         run_id: params.runId,
         reason: "local_vector_lookup_failed",
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
       await this.recordQuietVectorDegradation(params, "local_vector_lookup_failed");
       return empty;

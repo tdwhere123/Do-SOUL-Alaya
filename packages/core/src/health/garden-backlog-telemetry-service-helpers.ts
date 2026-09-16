@@ -1,9 +1,5 @@
 const DEFAULT_STOP_TIMEOUT_MS = 10_000;
 
-export function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 export function normalizeStopTimeoutMs(
   timeoutMs: number | null | undefined
 ): number | null {

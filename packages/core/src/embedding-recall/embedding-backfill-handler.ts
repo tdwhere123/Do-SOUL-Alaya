@@ -1,8 +1,8 @@
-import { type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
+import { type GardenTaskDescriptor, type MemoryEntry, readErrorMessage } from "@do-soul/alaya-protocol";
 import { getCoreConfig } from "../runtime/config/install-core-config.js";
 import { persistEmbeddedBackfillBatch } from "./backfill/persist-embedded-batch.js";
 import { resolveEmbedText } from "./embed-text-resolver.js";
-import { assertValidEmbeddingBatch, toErrorMessage } from "./helpers.js";
+import { assertValidEmbeddingBatch } from "./helpers.js";
 import { resolveEmbeddingRecallTiers } from "./tier-config.js";
 import {
   BACKFILL_ITEM_RETRY_ATTEMPTS,
@@ -296,7 +296,7 @@ export class EmbeddingBackfillHandler {
     try {
       return await this.embedBackfillBatch(batch, texts);
     } catch (error) {
-      const message = toErrorMessage(error);
+      const message = readErrorMessage(error, "unknown_error");
       const batchInputChars = texts.reduce((total, text) => total + text.length, 0);
 
       if (batch.length <= 1) {
@@ -382,7 +382,7 @@ export class EmbeddingBackfillHandler {
           errorMessage: lastError
         });
       } catch (error) {
-        lastError = toErrorMessage(error);
+        lastError = readErrorMessage(error, "unknown_error");
       }
     }
 

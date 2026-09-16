@@ -1,10 +1,10 @@
+import { readErrorMessage } from "@do-soul/alaya-protocol";
 import { resolveEmbeddingWorkspaceScanCap } from "./constants.js";
 import {
   clamp01,
   cosineSimilarity,
   emptyWorkspaceNeighborResult,
-  isFiniteNonzeroVector,
-  toErrorMessage
+  isFiniteNonzeroVector
 } from "./helpers.js";
 import type { QueryEmbeddingEngine } from "./query-embedding-engine.js";
 import { selectTopNeighborHits } from "./scoring/neighbor-top-k.js";
@@ -147,7 +147,7 @@ export class WorkspaceNeighborScanner {
         workspace_id: params.workspaceId,
         run_id: params.runId,
         reason: "local_vector_lookup_failed",
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
       return null;
     }

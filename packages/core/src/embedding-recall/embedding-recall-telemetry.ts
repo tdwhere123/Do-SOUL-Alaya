@@ -2,11 +2,11 @@ import {
   ComputeRecallGardenEventType,
   HealthEventKind,
   RecallEmbeddingSupplementDegradedPayloadSchema,
-  type EventLogEntry
+  type EventLogEntry,
+  readErrorMessage
 } from "@do-soul/alaya-protocol";
 
 import { bindEventPublisher } from "../runtime/event-publisher.js";
-import { toErrorMessage } from "./helpers.js";
 import type { EmbeddingRecallServiceDependencies } from "./types.js";
 
 export interface EmbeddingRecallTelemetryDependencies {
@@ -58,7 +58,7 @@ export class EmbeddingRecallTelemetry {
         run_id: params.runId,
         query_id: params.queryId,
         stage: "event_log",
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
     }
 
@@ -84,7 +84,7 @@ export class EmbeddingRecallTelemetry {
         run_id: params.runId,
         query_id: params.queryId,
         stage: "health_journal",
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
     }
   }
@@ -107,7 +107,7 @@ export class EmbeddingRecallTelemetry {
         run_id: params.runId,
         query_id: params.queryId,
         stage: params.stage,
-        error: toErrorMessage(error)
+        error: readErrorMessage(error, "unknown_error")
       });
     }
   }
