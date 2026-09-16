@@ -424,6 +424,7 @@ describe("trustworthy-loop-trace", () => {
     });
 
     const gardenSignals = (await harness.eventLogRepo.queryByType(SignalEventType.SOUL_SIGNAL_EMITTED))
+      .events
       .filter((entry) => (entry.payload_json as { source?: unknown }).source === "garden_compile");
     expect(gardenSignals.length).toBeGreaterThanOrEqual(1);
     for (const signal of gardenSignals) {

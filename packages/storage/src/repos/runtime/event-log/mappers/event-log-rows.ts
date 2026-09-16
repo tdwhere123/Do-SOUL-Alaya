@@ -61,9 +61,11 @@ export const DEFAULT_EVENT_LOG_PAGE = Object.freeze({
 /** Hard ceiling for explicit `*All` event-log reads; exceeds throw instead of OOM. */
 export const EVENT_LOG_ALL_QUERY_HARD_MAX = 10_000;
 
+export type EventLogAllScopeKind = "entity" | "run" | "workspace" | "type";
+
 export function enforceEventLogAllHardCap<T>(
   rows: readonly T[],
-  scopeKind: "entity" | "run" | "workspace",
+  scopeKind: EventLogAllScopeKind,
   scopeId: string
 ): readonly T[] {
   if (rows.length > EVENT_LOG_ALL_QUERY_HARD_MAX) {

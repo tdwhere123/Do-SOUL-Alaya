@@ -198,7 +198,7 @@ describe("trust state recorder", () => {
       ready: true
     });
     const eventLogReader = {
-      queryByType: vi.fn(async (eventType: string) => {
+      queryByTypeAll: vi.fn(async (eventType: string) => {
         switch (eventType) {
           case TrustStateEventType.TRUST_STATE_INSTALLED_RECORDED:
             return [

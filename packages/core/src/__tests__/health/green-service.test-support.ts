@@ -149,7 +149,6 @@ export function createHarness(options: {
       queryByWorkspace: vi.fn(async (workspaceId) =>
         events.filter((event) => event.workspace_id === workspaceId)
       ),
-      queryByType: vi.fn(async (eventType) => events.filter((event) => event.event_type === eventType)),
       hasOpenSessionOverrideCorrection: vi.fn(async (query) =>
         hasOpenSessionOverrideCorrection(events, query.workspaceId, query.targetObjectId, query.nowIso)
       ),

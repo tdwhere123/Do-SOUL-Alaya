@@ -68,7 +68,8 @@ export {
   SqliteEventLogRepo,
   type EventLogAppendInput,
   type EventLogPageOptions,
-  type EventLogRepo
+  type EventLogRepo,
+  type EventLogTypePage
 } from "./repos/runtime/index.js";
 export {
   SqliteSignalRepo,

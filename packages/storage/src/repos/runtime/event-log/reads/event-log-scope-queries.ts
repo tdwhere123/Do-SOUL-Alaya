@@ -11,7 +11,8 @@ import type { EventLogStatements } from "../statements/event-log-statements.js";
 type EventLogScope =
   | { readonly kind: "entity"; readonly entityType: string; readonly entityId: string }
   | { readonly kind: "run"; readonly runId: string }
-  | { readonly kind: "workspace"; readonly workspaceId: string };
+  | { readonly kind: "workspace"; readonly workspaceId: string }
+  | { readonly kind: "type"; readonly eventType: string };
 
 export function queryEventLogScopeAll(
   loadStatements: () => EventLogStatements,
@@ -37,13 +38,20 @@ export function queryEventLogScopeAll(
         0
       );
       scopeId = scope.runId;
-    } else {
+    } else if (scope.kind === "workspace") {
       rawRows = statements.queryByWorkspacePagedStatement.all(
         scope.workspaceId,
         EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
         0
       );
       scopeId = scope.workspaceId;
+    } else {
+      rawRows = statements.queryByTypeStatement.all(
+        scope.eventType,
+        EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
+        0
+      );
+      scopeId = scope.eventType;
     }
 
     return enforceEventLogAllHardCap(

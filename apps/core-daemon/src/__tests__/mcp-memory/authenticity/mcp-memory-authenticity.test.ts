@@ -409,8 +409,10 @@ describe("MCP memory authenticity proof", () => {
         const [delivery, usages, deliveredEvents, usageEvents] = await Promise.all([
           repos.trustStateRepo.findDeliveryById(recall.delivery_id),
           repos.trustStateRepo.listUsageByDeliveryIds([recall.delivery_id]),
-          repos.eventLogRepo.queryByType(RecallContextEventType.SOUL_RECALL_DELIVERED),
+          repos.eventLogRepo.queryByType(RecallContextEventType.SOUL_RECALL_DELIVERED)
+            .then((page) => page.events),
           repos.eventLogRepo.queryByType(RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED)
+            .then((page) => page.events)
         ]);
         return { delivery, usages, deliveredEvents, usageEvents };
       });

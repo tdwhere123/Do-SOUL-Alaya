@@ -86,7 +86,7 @@ describe("Garden MCP tools", () => {
     expect(receivedSignals).toBe(2);
     const completedEvent = (await harness.eventLogRepo.queryByType(
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-    ))[0];
+    )).events[0];
     const emittedId = (
       completedEvent?.payload_json as { readonly objects_affected?: readonly string[] }
     ).objects_affected?.[0];
@@ -172,9 +172,9 @@ describe("Garden MCP tools", () => {
       task_id: "task-shortened-envelope-retry",
       status: "completed"
     });
-    const completedEvents = await harness.eventLogRepo.queryByType(
+    const completedEvents = (await harness.eventLogRepo.queryByType(
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-    );
+    )).events;
     expect(completedEvents[0]?.payload_json).toMatchObject({
       task_id: "task-shortened-envelope-retry",
       candidate_signals_count: 2

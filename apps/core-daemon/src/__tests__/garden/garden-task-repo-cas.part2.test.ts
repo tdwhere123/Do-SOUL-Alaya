@@ -270,9 +270,9 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     expect(rows.filter((row) => row.status === "claimed")).toHaveLength(0);
     expect(new Set(rows.filter((row) => row.status === "completed").map((row) => row.id)).size).toBe(100);
 
-    const completionEvents = await eventLogRepo.queryByType(
+    const completionEvents = (await eventLogRepo.queryByType(
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-    );
+    )).events;
     expect(completionEvents).toHaveLength(100);
 
     // invariant: no double-claim means one completion event per task id.
@@ -335,7 +335,9 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     expect(row.status).toBe("pending");
     expect(row.claimed_by).toBeNull();
     expect(row.claimed_at).toBeNull();
-    await expect(eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)).resolves.toEqual([
+    await expect(eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)).resolves.toEqual({
+      truncated: false,
+      events: [
       expect.objectContaining({
         entity_id: "task-stale-claim",
         caused_by: "garden-task-repo-test",
@@ -344,7 +346,8 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
           stale_after_ms: 5 * 60 * 1000
         })
       })
-    ]);
+      ]
+    });
   });
 
   it("does not complete a task after another claimant reclaims the same id", async () => {

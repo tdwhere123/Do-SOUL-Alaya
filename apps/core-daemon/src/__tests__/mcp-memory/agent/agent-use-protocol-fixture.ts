@@ -223,11 +223,11 @@ export async function readPhase6Evidence(
     proposalRepo.findById(ids.proposalId),
     signalRepo.getById(ids.signalId),
     trustStateRepo.listUsageByDeliveryIds([ids.deliveryId]),
-    eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_REVIEW_CREATED),
-    eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED),
-    eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_MEMORY_UPDATED),
-    eventLogRepo.queryByType(RecallContextEventType.SOUL_RECALL_DELIVERED),
-    eventLogRepo.queryByType(RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED)
+    eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_REVIEW_CREATED).then((page) => page.events),
+    eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED).then((page) => page.events),
+    eventLogRepo.queryByType(MemoryGovernanceEventType.SOUL_MEMORY_UPDATED).then((page) => page.events),
+    eventLogRepo.queryByType(RecallContextEventType.SOUL_RECALL_DELIVERED).then((page) => page.events),
+    eventLogRepo.queryByType(RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED).then((page) => page.events)
   ]);
 
   const eventsByType = {

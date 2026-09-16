@@ -259,9 +259,9 @@ describe("Garden MCP tools", () => {
       status: "completed",
       events_appended: 1
     });
-    const completedEvents = await harness.eventLogRepo.queryByType(
+    const completedEvents = (await harness.eventLogRepo.queryByType(
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-    );
+    )).events;
     expect(completedEvents).toHaveLength(1);
     expect(completedEvents[0]?.payload_json).toMatchObject({
       task_id: "task-complete-signals",
@@ -314,9 +314,9 @@ describe("Garden MCP tools", () => {
         ]
       }
     });
-    const completedEvents = await harness.eventLogRepo.queryByType(
+    const completedEvents = (await harness.eventLogRepo.queryByType(
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-    );
+    )).events;
     const emittedId = (
       completedEvents[0]?.payload_json as { readonly objects_affected?: readonly string[] }
     ).objects_affected?.[0];
@@ -384,7 +384,7 @@ describe("Garden MCP tools", () => {
     });
     await expect(
       harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)
-    ).resolves.toHaveLength(0);
+    ).resolves.toEqual({ events: [], truncated: false });
   });
 
   it("rejects complete_task on a pending task without persisting any signal", async () => {
