@@ -1,7 +1,12 @@
 import { randomBytes } from "node:crypto";
+import type { Context } from "hono";
 import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
 import {
+  isLoopbackHost,
+  isRemoteDaemonOptInEnabled,
+  isUnixSocketPath,
   resolveDaemonListenPolicy,
+  resolveUnixSocketPath,
   type DaemonHostEnvLike,
   type DaemonListenPolicy
 } from "./server-options.js";
@@ -92,6 +97,17 @@ export function isWorkspaceGrantDenied(
   return grant !== undefined && !workspaceScopeAllows(grant, workspaceId);
 }
 
+export function respondIfWorkspaceGrantDenied(
+  context: Context,
+  workspaceId: string
+) {
+  const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
+  if (!isWorkspaceGrantDenied(grant, workspaceId)) {
+    return undefined;
+  }
+  return context.json({ success: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE }, 403);
+}
+
 export function extractWorkspaceIdFromQuery(value: string | undefined): string | null {
   const workspaceId = value?.trim();
   if (workspaceId === undefined || workspaceId.length === 0) {
@@ -101,6 +117,8 @@ export function extractWorkspaceIdFromQuery(value: string | undefined): string |
 }
 
 export function extractWorkspaceIdFromUnknown(value: unknown): string | null {
+  // Nested JSON is ignored: HTTP routes bind workspace from path, query,
+  // top-level body, or the resolved run — nested payload ids are not grants.
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
@@ -182,6 +200,7 @@ export function applyRemoteBindTokenRotation<T extends RequestTokenProtection>(
   generateToken: () => string = generateRotatedRequestToken
 ): T {
   const withWorkspaceBinding = applyDefaultWorkspaceBinding(protection, envLike);
+  rejectLongLivedStaticTokenOnRemoteBind(withWorkspaceBinding, envLike);
   if (withWorkspaceBinding.tokenSource === "rotated") {
     return withWorkspaceBinding;
   }
@@ -194,6 +213,28 @@ export function applyRemoteBindTokenRotation<T extends RequestTokenProtection>(
     requestToken: generateToken(),
     tokenSource: "rotated" as const
   }) as T;
+}
+
+function rejectLongLivedStaticTokenOnRemoteBind(
+  protection: RequestTokenProtection,
+  envLike: RequestProtectionEnvLike
+): void {
+  if (protection.tokenSource !== "env") {
+    return;
+  }
+  if (resolveUnixSocketPath(envLike) !== undefined) {
+    return;
+  }
+  const host = envLike.DAEMON_HOST?.trim() ?? "";
+  if (host.length === 0 || isLoopbackHost(host) || isUnixSocketPath(host)) {
+    return;
+  }
+  if (!isRemoteDaemonOptInEnabled(envLike)) {
+    return;
+  }
+  throw new Error(
+    "Long-lived ALAYA_REQUEST_TOKEN cannot be used for remote binds. Bind loopback or a unix socket, which rotates the token."
+  );
 }
 
 export function resolveBoundWorkspaceIds(

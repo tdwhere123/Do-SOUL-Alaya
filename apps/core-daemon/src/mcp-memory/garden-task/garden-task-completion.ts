@@ -97,8 +97,8 @@ function requireClaimedGardenTask(
   context: GardenTaskToolCallContext
 ): GardenTaskRow {
   const repo = requireGardenTaskRepo(deps);
-  const row = repo.findById(taskId);
-  if (row === null || row.workspace_id !== context.workspaceId) {
+  const row = repo.findByIdInWorkspace(taskId, context.workspaceId);
+  if (row === null) {
     throw new GardenTaskNotFoundError(`Garden task not found: ${taskId}`);
   }
   if (row.status !== "claimed") {
@@ -222,7 +222,8 @@ async function commitCandidateSignalCompletion(
       ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
     },
     [buildCompletedTaskEvent(row, context, resolvedRunId, request.status, emittedSignalIds, params.now())],
-    completionClaimedBy
+    completionClaimedBy,
+    context.workspaceId
   );
 }
 
@@ -335,7 +336,8 @@ async function completeEdgeClassifyTask(
       ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
     },
     [buildCompletedTaskEvent(row, context, resolvedRunId, request.status, [...objectsAffected], params.now())],
-    context.agentTarget
+    context.agentTarget,
+    context.workspaceId
   );
 
   emitEdgeClassifyBacklogDiagnostic(params.deps, context.workspaceId, params.warn);

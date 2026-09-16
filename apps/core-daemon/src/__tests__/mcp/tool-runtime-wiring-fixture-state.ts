@@ -457,17 +457,23 @@ const hoisted = vi.hoisted(() => {
     backgroundManagerStart: vi.fn(),
     backgroundManagerStop: vi.fn(),
     backgroundManagers: [] as Array<{
-      readonly services: readonly {
+      readonly services: {
         readonly name: string;
         readonly intervalMs: number;
         readonly task: () => Promise<void>;
       }[];
       readonly start: ReturnType<typeof vi.fn>;
       readonly stop: ReturnType<typeof vi.fn>;
+      addService(service: {
+        readonly name: string;
+        readonly intervalMs: number;
+        readonly task: () => Promise<void>;
+      }): void;
     }>,
     gardenBacklogTelemetryServices: [] as Array<{
       readonly start: ReturnType<typeof vi.fn>;
       readonly stop: ReturnType<typeof vi.fn>;
+      readonly poll: ReturnType<typeof vi.fn>;
       readonly capture: ReturnType<typeof vi.fn>;
       readonly getSnapshot: ReturnType<typeof vi.fn>;
     }>,

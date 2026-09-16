@@ -62,6 +62,14 @@ describe("GraphPage (react-force-graph driven)", () => {
     );
     expect(stub.getAttribute("data-node-count")).toBe("3");
     expect(stub.getAttribute("data-link-count")).toBe("2");
+    expect(screen.queryByTestId("force-graph-3d")).not.toBeTruthy();
+  });
+
+  it("defaults to 2D with the 2D control pressed", async () => {
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+    expect(screen.queryByTestId("force-graph-3d")).not.toBeTruthy();
+    expect(screen.getByRole("button", { name: /2D/i }).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("renders no-workspace alert and never fetches when workspaceId is null", async () => {

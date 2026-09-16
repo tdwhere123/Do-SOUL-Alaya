@@ -21,7 +21,7 @@ export interface BackgroundServiceManagerOptions {
 }
 
 export class BackgroundServiceManager {
-  private readonly services: readonly BackgroundServiceConfig[];
+  private readonly services: BackgroundServiceConfig[];
   private readonly logger: BackgroundServiceLogger;
   private timers: ReturnType<typeof setInterval>[] = [];
   private readonly inFlight = new Set<Promise<void>>();
@@ -29,8 +29,15 @@ export class BackgroundServiceManager {
   private started = false;
 
   public constructor(services: BackgroundServiceConfig[], options: BackgroundServiceManagerOptions = {}) {
-    this.services = services;
+    this.services = [...services];
     this.logger = options.logger ?? defaultBackgroundServiceLogger;
+  }
+
+  public addService(service: BackgroundServiceConfig): void {
+    if (this.started) {
+      throw new Error("background services cannot be added after start");
+    }
+    this.services.push(service);
   }
 
   public start(): void {

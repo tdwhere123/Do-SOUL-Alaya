@@ -101,6 +101,7 @@ export interface GardenMcpHarnessOptions {
     result: Parameters<SqliteGardenTaskRepo["completeWithEvents"]>[1],
     events: Parameters<SqliteGardenTaskRepo["completeWithEvents"]>[2],
     claimedBy: string,
+    workspaceId: string,
     original: SqliteGardenTaskRepo["completeWithEvents"]
   ) => Promise<void>;
   readonly applyVerdict?: NonNullable<
@@ -155,15 +156,22 @@ export async function createGardenMcpHarness(
   const originalCompleteWithEvents = gardenTaskRepo.completeWithEvents.bind(gardenTaskRepo);
   const handlerGardenTaskRepo: NonNullable<McpMemoryToolHandlerDependencies["gardenTaskRepo"]> = {
     enqueue: gardenTaskRepo.enqueue.bind(gardenTaskRepo),
-    findById: gardenTaskRepo.findById.bind(gardenTaskRepo),
+    findByIdInWorkspace: gardenTaskRepo.findByIdInWorkspace.bind(gardenTaskRepo),
     peekPending: gardenTaskRepo.peekPending.bind(gardenTaskRepo),
     claimAtomic: gardenTaskRepo.claimAtomic.bind(gardenTaskRepo),
-    completeWithEvents: async (taskId, result, events, claimedBy) => {
+    completeWithEvents: async (taskId, result, events, claimedBy, workspaceId) => {
       if (options.completeWithEvents !== undefined) {
-        await options.completeWithEvents(taskId, result, events, claimedBy, originalCompleteWithEvents);
+        await options.completeWithEvents(
+          taskId,
+          result,
+          events,
+          claimedBy,
+          workspaceId,
+          originalCompleteWithEvents
+        );
         return;
       }
-      await originalCompleteWithEvents(taskId, result, events, claimedBy);
+      await originalCompleteWithEvents(taskId, result, events, claimedBy, workspaceId);
     },
     beginCompletionAttempt: gardenTaskRepo.beginCompletionAttempt.bind(gardenTaskRepo),
     refreshClaim: gardenTaskRepo.refreshClaim.bind(gardenTaskRepo),

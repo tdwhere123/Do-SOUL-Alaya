@@ -13,6 +13,7 @@ import {
   fieldSha256,
   hashedFactor,
   hashedEffect,
+  hashedEffectFromRecords,
   hashedGeneration,
   hashedIncidence,
   hashedJob,
@@ -206,6 +207,45 @@ describe("field contract repos", () => {
     );
     expect(() => effects.insert(racedReceipt)).toThrow(/stale|witness/u);
     expect(effects.findById("workspace-1", racedReceipt.request_digest)).toBeNull();
+  });
+
+  it("verifies source witnesses with one statement regardless of witness count", () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
+    const pair = [
+      records.insert(hashedRecord("workspace-1", "alpha body", "src-a")),
+      records.insert(hashedRecord("workspace-1", "beta body", "src-b"))
+    ];
+    const crowd = [
+      ...pair,
+      ...Array.from({ length: 6 }, (_, index) =>
+        records.insert(hashedRecord("workspace-1", `crowd ${index}`, `src-crowd-${index}`))
+      )
+    ];
+
+    let witnessStatementRuns = 0;
+    const originalPrepare = database.connection.prepare.bind(database.connection);
+    database.connection.prepare = ((sql: string) => {
+      const statement = originalPrepare(sql);
+      if (!sql.includes("json_each") || !sql.includes("source_records")) {
+        return statement;
+      }
+      const originalGet = statement.get.bind(statement);
+      statement.get = (...args: unknown[]) => {
+        witnessStatementRuns += 1;
+        return originalGet(...args);
+      };
+      return statement;
+    }) as typeof database.connection.prepare;
+
+    const effects = new SqliteFieldProofEffectRepo(database, fieldSha256);
+    effects.insert(hashedEffectFromRecords("workspace-1", pair));
+    const pairRuns = witnessStatementRuns;
+    effects.insert(hashedEffectFromRecords("workspace-1", crowd));
+
+    expect(pairRuns).toBe(1);
+    expect(witnessStatementRuns).toBe(2);
   });
 
   it("pages source records with cursor and limit and skips erased bodies", () => {

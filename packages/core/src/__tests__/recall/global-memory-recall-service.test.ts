@@ -4,7 +4,9 @@ import {
   MemoryDimension,
   ScopeClass
 } from "@do-soul/alaya-protocol";
+import { warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
 import { createGlobalMemoryRecallPort } from "../../recall/runtime/global-memory-recall-service.js";
+import { normalizeGlobalMemoryQuery } from "../../recall/runtime/global-memory/selection.js";
 
 describe("createGlobalMemoryRecallPort", () => {
   it("selects the same bounded ranking across pages without using the full-load source", async () => {
@@ -127,6 +129,75 @@ describe("createGlobalMemoryRecallPort", () => {
         content: "Global alpha recall"
       })
     ]);
+  });
+
+  it("matches CJK global memory by the shared lexical family rather than whitespace", async () => {
+    await warmCjkSegmentation();
+    const list = vi.fn(async () => [
+      createSourceEntry({
+        global_object_id: "global-cn-hit",
+        canonical_identity: "饮品偏好",
+        content: "我喜欢咖啡",
+        domain_tags: ["偏好"]
+      }),
+      createSourceEntry({
+        global_object_id: "global-cn-miss",
+        canonical_identity: "无关记忆",
+        content: "仓库使用 pnpm 而不是 npm",
+        domain_tags: ["workflow"]
+      })
+    ]);
+    const port = createGlobalMemoryRecallPort({ globalMemorySource: { list } });
+
+    const result = await port.recall({
+      workspaceId: "workspace-1",
+      queryText: "喜欢咖啡",
+      limit: 5
+    });
+
+    expect(result.map((entry) => entry.global_object_id)).toEqual(["global-cn-hit"]);
+  });
+
+  it("drops a CJK query surface only when jieba emitted that surface's pieces", async () => {
+    await warmCjkSegmentation();
+    const coffeeTerms = normalizeGlobalMemoryQuery("喜欢咖啡");
+    const beijingTerms = normalizeGlobalMemoryQuery("北京 京");
+
+    expect(coffeeTerms).not.toBeNull();
+    expect(coffeeTerms).not.toContain("喜欢咖啡");
+    expect(beijingTerms).toEqual(expect.arrayContaining(["北京", "京"]));
+  });
+
+  it("does not match a short English token as a substring of a longer word", async () => {
+    const list = vi.fn(async () => [
+      createSourceEntry({
+        global_object_id: "global-foobar",
+        canonical_identity: "Foobar policy",
+        content: "Never enable foobar mode",
+        domain_tags: ["foobar"]
+      })
+    ]);
+    const port = createGlobalMemoryRecallPort({ globalMemorySource: { list } });
+
+    const shortToken = await port.recall({
+      workspaceId: "workspace-1",
+      queryText: "fo",
+      limit: 5
+    });
+    const substring = await port.recall({
+      workspaceId: "workspace-1",
+      queryText: "foo",
+      limit: 5
+    });
+    const exact = await port.recall({
+      workspaceId: "workspace-1",
+      queryText: "foobar",
+      limit: 5
+    });
+
+    expect(shortToken).toEqual([]);
+    expect(substring).toEqual([]);
+    expect(exact.map((entry) => entry.global_object_id)).toEqual(["global-foobar"]);
   });
 
   it("bounds the query cache with an LRU cap and recomputes evicted keys", async () => {
