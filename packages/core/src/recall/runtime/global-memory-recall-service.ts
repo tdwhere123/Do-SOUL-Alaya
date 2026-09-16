@@ -1,4 +1,5 @@
 import type { EventLogEntry, GlobalMemoryEntry } from "@do-soul/alaya-protocol";
+import { VersionedBoundedCache } from "../../runtime/versioned-bounded-cache.js";
 import type { GlobalMemoryRecallEntry, GlobalMemoryRecallPort } from "./global-memory-recall-port.js";
 import { selectGlobalMemoryRecallEntries, normalizeGlobalMemoryQuery } from "./global-memory/selection.js";
 
@@ -39,7 +40,9 @@ export function createGlobalMemoryRecallPort(params: {
 const GLOBAL_RECALL_QUERY_CACHE_SIZE = 512;
 
 class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
-  private readonly cacheByQuery = new Map<string, readonly Readonly<GlobalMemoryRecallEntry>[]>();
+  private readonly cache = new VersionedBoundedCache<readonly Readonly<GlobalMemoryRecallEntry>[]>({
+    maxEntries: GLOBAL_RECALL_QUERY_CACHE_SIZE
+  });
 
   public constructor(private readonly globalMemorySource: GlobalMemoryRecallSourcePort) {}
 
@@ -49,21 +52,36 @@ class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
     readonly limit: number;
   }): Promise<readonly Readonly<GlobalMemoryRecallEntry>[]> {
     const cacheKey = createRecallCacheKey(params);
-    const cached = this.cacheByQuery.get(cacheKey);
-    if (cached !== undefined) {
-      // Refresh recency: re-insert so the most-recently-read key is youngest.
-      this.cacheByQuery.delete(cacheKey);
-      this.cacheByQuery.set(cacheKey, cached);
-      return [...cached];
-    }
+    const resolved = await this.cache.resolve(
+      cacheKey,
+      async () => this.selectRecallEntries(params.queryText, params.limit),
+      (value) => value
+    );
+    return [...(resolved ?? [])];
+  }
 
-    const normalizedQuery = normalizeGlobalMemoryQuery(params.queryText);
+  public subscribeToInvalidations(
+    notifier: GlobalMemoryRecallInvalidationNotifier
+  ): GlobalMemoryRecallSubscription {
+    return notifier.subscribeEntries((entry) => {
+      if (parseMemoryInvalidationEntry(entry) === null) {
+        return;
+      }
+      // Creates and in-flight loads have no cached membership to walk.
+      this.cache.invalidate();
+    });
+  }
+
+  private async selectRecallEntries(
+    queryText: string | null,
+    limit: number
+  ): Promise<readonly Readonly<GlobalMemoryRecallEntry>[]> {
     const selectedEntries = await selectGlobalMemoryRecallEntries(
       this.globalMemorySource,
-      normalizedQuery,
-      params.limit
+      normalizeGlobalMemoryQuery(queryText),
+      limit
     );
-    const recallEntries = selectedEntries.map((entry) =>
+    return selectedEntries.map((entry) =>
       Object.freeze({
         global_object_id: entry.global_object_id,
         dimension: entry.dimension,
@@ -75,41 +93,6 @@ class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
         updated_at: entry.updated_at
       })
     );
-
-    this.cacheByQuery.delete(cacheKey);
-    this.cacheByQuery.set(cacheKey, recallEntries);
-    while (this.cacheByQuery.size > GLOBAL_RECALL_QUERY_CACHE_SIZE) {
-      const oldestKey = this.cacheByQuery.keys().next().value as string | undefined;
-      if (oldestKey === undefined) {
-        break;
-      }
-      this.cacheByQuery.delete(oldestKey);
-    }
-    return [...recallEntries];
-  }
-
-  public subscribeToInvalidations(
-    notifier: GlobalMemoryRecallInvalidationNotifier
-  ): GlobalMemoryRecallSubscription {
-    return notifier.subscribeEntries((entry) => {
-      const invalidation = parseMemoryInvalidationEntry(entry);
-      if (invalidation === null) {
-        return;
-      }
-
-      this.invalidateForMemory(invalidation.memoryId, invalidation.sourceWorkspaceId);
-    });
-  }
-
-  private invalidateForMemory(memoryId: string, sourceWorkspaceId: string): void {
-    void sourceWorkspaceId;
-    for (const [cacheKey, cachedEntries] of this.cacheByQuery.entries()) {
-      if (!cachedEntries.some((entry) => entry.global_object_id === memoryId)) {
-        continue;
-      }
-
-      this.cacheByQuery.delete(cacheKey);
-    }
   }
 }
 

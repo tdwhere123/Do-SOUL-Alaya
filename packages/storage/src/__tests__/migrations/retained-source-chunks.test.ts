@@ -48,5 +48,6 @@ describe("retained source representation migration", () => {
     expect(page.rows.map((row) => row.content)).toEqual(expect.arrayContaining(["original😀 retained", "capsule😀 retained"]));
     expect(readonly.connection.prepare("SELECT source_body FROM source_records WHERE record_id = ?").get(record.record_id))
       .toEqual({ source_body: "original😀 retained" });
-  }, process.platform === "win32" ? 120_000 : 60_000);
+    // File-backed upgrade-and-reopen on NTFS can exceed the 120s storage budget.
+  }, process.platform === "win32" ? 180_000 : 60_000);
 });

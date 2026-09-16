@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { Context } from "hono";
 import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
 import {
   isLoopbackHost,
@@ -91,6 +92,17 @@ export function isWorkspaceGrantDenied(
   return grant !== undefined && !workspaceScopeAllows(grant, workspaceId);
 }
 
+export function respondIfWorkspaceGrantDenied(
+  context: Context,
+  workspaceId: string
+) {
+  const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
+  if (!isWorkspaceGrantDenied(grant, workspaceId)) {
+    return undefined;
+  }
+  return context.json({ success: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE }, 403);
+}
+
 export function extractWorkspaceIdFromQuery(value: string | undefined): string | null {
   const workspaceId = value?.trim();
   if (workspaceId === undefined || workspaceId.length === 0) {
@@ -100,6 +112,8 @@ export function extractWorkspaceIdFromQuery(value: string | undefined): string |
 }
 
 export function extractWorkspaceIdFromUnknown(value: unknown): string | null {
+  // Nested JSON is ignored: HTTP routes bind workspace from path, query,
+  // top-level body, or the resolved run — nested payload ids are not grants.
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
