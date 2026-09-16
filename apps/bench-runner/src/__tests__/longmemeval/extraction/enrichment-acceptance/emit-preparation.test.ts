@@ -2,9 +2,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { planOfficialApiSemanticWorkset } from "@do-soul/alaya-soul";
 import {
-  emitEnrichmentPreparation
+  emitEnrichmentPreparation,
+  toBindingRequests
 } from "../../../../runs/extraction/enrichment-acceptance/emit-preparation.js";
+import { bindFrozenAssertionToCurrentSource } from "../../../../runs/extraction/enrichment-acceptance/source-binding.js";
 
 const REGRESSION_REQUIRED = new Set([2, 4, 8, 9, 10, 12, 13, 14, 16]);
 const REGRESSION_UNRESOLVED = new Set([5, 15]);
@@ -125,6 +128,79 @@ describe("enrichment preparation emit", () => {
       turns: [TURN],
       datasetRevision: "synthetic-revision"
     })).rejects.toThrow(/regressionPath is required and missing/u);
+  });
+
+  it("packs occurrence identity by corpus and assertion id so a foreign message is not substituted", () => {
+    const originalMessages = [{
+      role: "user" as const,
+      content: TEXT,
+      message_id: "original-message"
+    }];
+    const foreignMessages = [{
+      role: "user" as const,
+      content: TEXT,
+      message_id: "foreign-message"
+    }];
+    const original = planOfficialApiSemanticWorkset(TEXT, originalMessages, "synthetic-revision").units[0]!;
+    const foreign = planOfficialApiSemanticWorkset(TEXT, foreignMessages, "synthetic-revision").units[0]!;
+    expect(original.assertionId).toBe(foreign.assertionId);
+    expect(original.binding.sourceCorpusIdentity).toBe(foreign.binding.sourceCorpusIdentity);
+    expect(original.binding.occurrenceIdentity).not.toBe(foreign.binding.occurrenceIdentity);
+    const requests = toBindingRequests({
+      requests: [{
+        key: "original-request",
+        source_corpus_identity: original.binding.sourceCorpusIdentity,
+        assertion_ids: [original.assertionId],
+        assertion_texts: [original.text],
+        occurrence_identities: [original.binding.occurrenceIdentity ?? null],
+        user_prompt: TEXT,
+        unit_keys: [original.semanticKey],
+        message_ids: ["original-message"]
+      }]
+    });
+    expect(requests[0]?.source_assertions[0]?.occurrenceIdentity)
+      .toBe(original.binding.occurrenceIdentity);
+    expect(requests[0]?.source_assertions[0]?.occurrenceIdentity)
+      .not.toBe(foreign.binding.occurrenceIdentity);
+    const binding = bindFrozenAssertionToCurrentSource({
+      population: "regression",
+      annotation_pointer: {
+        file: "regression-source-review.json",
+        assertion_id: 1,
+        request_key: "aa".repeat(32),
+        canonical_index: null
+      },
+      original_ordinal: 1,
+      exact_text: original.text,
+      original_source: { exact_text: original.text },
+      occurrence: {
+        source_message_ids: ["original-message"],
+        source_locator: original.binding.locator,
+        source_occurrence_identity: original.binding.occurrenceIdentity ?? null,
+        occurrence_bindings: [{
+          ...original.binding,
+          source_message_id: "original-message"
+        }]
+      },
+      classification: "optional",
+      required_group_id: null,
+      first_stage_subset: true,
+      obligations: [],
+      forbidden: [],
+      duplicate_of: null,
+      participants: null,
+      source_role: null,
+      modality: null,
+      conditions: null,
+      scope: null,
+      time: null,
+      event_policy: null
+    }, {
+      catalogUnits: [foreign],
+      requests
+    });
+    expect(binding.status).toBe("unbound");
+    expect(binding.current).toEqual([]);
   });
 });
 

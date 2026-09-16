@@ -105,6 +105,27 @@ describe("frozen enrichment population", () => {
     expect((thrown as Error).name).toBe("FrozenPopulationMembershipError");
   });
 
+  it("rejects swapped canonical_index values even when keys and local membership stay 1-16", () => {
+    const population = validPopulation();
+    const left = population.canonical.requests[2]! as { canonical_index: number };
+    const right = population.canonical.requests[4]! as { canonical_index: number };
+    left.canonical_index = 5;
+    right.canonical_index = 3;
+    root = writePopulation(population);
+    let thrown: unknown;
+    try {
+      loadFrozenEnrichmentPopulation({
+        regressionPath: join(root, "regression-source-review.json"),
+        canonicalPath: join(root, "canonical-source-review.json")
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(FrozenPopulationMembershipError);
+    expect(thrown).not.toBeInstanceOf(FrozenPopulationCountError);
+    expect((thrown as Error).message).toMatch(/canonical_index/u);
+  });
+
   it("rejects swapped canonical request keys even when indexes and local membership stay 1-16", () => {
     const population = validPopulation();
     const left = population.canonical.requests[2]! as {

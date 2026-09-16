@@ -191,9 +191,17 @@ function readCanonicalRows(filePath: string, document: Record<string, unknown>):
   const file = basename(filePath);
   const rows: FrozenAssertion[] = [];
   const observedKeys: string[] = [];
+  let requestPosition = 0;
   for (const requestValue of requests) {
     const request = asRecord(requestValue, "canonical request");
+    const expectedIndex = requestPosition + 1;
+    requestPosition += 1;
     const canonicalIndex = readPositiveInt(request.canonical_index, "canonical_index");
+    if (canonicalIndex !== expectedIndex) {
+      throw new FrozenPopulationMembershipError(
+        `canonical request at position ${expectedIndex} has canonical_index ${canonicalIndex}`
+      );
+    }
     const requestKey = readString(request.key, "canonical key");
     observedKeys.push(requestKey);
     const reviews = request.assertion_reviews;

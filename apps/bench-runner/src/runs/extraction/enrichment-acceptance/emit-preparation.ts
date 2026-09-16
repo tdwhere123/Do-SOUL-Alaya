@@ -154,20 +154,21 @@ export async function emitEnrichmentPreparation(
   }
 }
 
-function toBindingRequests(preflight: EnrichmentPreflight): readonly FrozenBindingRequest[] {
-  const occurrenceByAssertion = new Map(
-    preflight.units.map((unit) => [unit.assertionId, unit.binding.occurrenceIdentity])
-  );
+export function toBindingRequests(
+  preflight: Pick<EnrichmentPreflight, "requests">
+): readonly FrozenBindingRequest[] {
   return Object.freeze(preflight.requests.map((request) => Object.freeze({
     key: request.key,
     source_corpus_identity: request.source_corpus_identity,
     message_ids: request.message_ids,
     source_assertions: Object.freeze(request.assertion_ids.map((assertionId, index) => {
-      const occurrenceIdentity = occurrenceByAssertion.get(assertionId);
+      const occurrenceIdentity = request.occurrence_identities[index];
       return Object.freeze({
         assertion_id: assertionId,
         text: request.assertion_texts[index] ?? "",
-        ...(occurrenceIdentity === undefined ? {} : { occurrenceIdentity })
+        ...(occurrenceIdentity === undefined || occurrenceIdentity === null
+          ? {}
+          : { occurrenceIdentity })
       });
     }))
   })));

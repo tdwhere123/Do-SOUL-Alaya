@@ -78,6 +78,7 @@ export interface EnrichmentPreflightRequest {
   readonly source_corpus_identity: string;
   readonly assertion_ids: readonly number[];
   readonly assertion_texts: readonly string[];
+  readonly occurrence_identities: readonly (string | null)[];
   readonly user_prompt: string;
   readonly unit_keys: readonly string[];
   readonly message_ids: readonly string[];
@@ -194,15 +195,23 @@ export async function runCurrentEnrichmentPreflight(options: {
         cache_key_algorithm: EXTRACTION_CACHE_KEY_ALGO,
         dataset_sha256: loaded?.sha256 ?? null
       }),
-      requests: Object.freeze(workset.requests.map((item) => Object.freeze({
-        key: item.line.key,
-        source_corpus_identity: item.request.source_corpus_identity,
-        assertion_ids: Object.freeze(item.request.source_assertions.map((row) => row.assertion_id)),
-        assertion_texts: Object.freeze(item.request.source_assertions.map((row) => row.text)),
-        user_prompt: item.line.userPrompt,
-        unit_keys: item.line.unitKeys,
-        message_ids: Object.freeze(item.sourceTurn.turnMessages.map((message) => message.message_id))
-      }))),
+      requests: Object.freeze(workset.requests.map((item) => {
+        const occurrenceByAssertion = new Map(
+          item.units.map((unit) => [unit.assertionId, unit.binding.occurrenceIdentity ?? null])
+        );
+        return Object.freeze({
+          key: item.line.key,
+          source_corpus_identity: item.request.source_corpus_identity,
+          assertion_ids: Object.freeze(item.request.source_assertions.map((row) => row.assertion_id)),
+          assertion_texts: Object.freeze(item.request.source_assertions.map((row) => row.text)),
+          occurrence_identities: Object.freeze(item.request.source_assertions.map((row) => (
+            occurrenceByAssertion.get(row.assertion_id) ?? null
+          ))),
+          user_prompt: item.line.userPrompt,
+          unit_keys: item.line.unitKeys,
+          message_ids: Object.freeze(item.sourceTurn.turnMessages.map((message) => message.message_id))
+        });
+      })),
       packs: packs.packs,
       units: workset.units,
       bounds: Object.freeze({
