@@ -93,7 +93,7 @@ describe("daemon local embedding product default", () => {
     }
   });
 
-  it.each([undefined, "true", "  TrUe  ", "1", " 1 "])(
+  it.each([undefined, "true", "  TrUe  ", "1", " 1 ", "yes", "on", "enabled"])(
     "enables the local provider after verified warmup for %s",
     async (configuredValue) => {
       const config = new Map<string, string>([["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]]);
@@ -126,7 +126,7 @@ describe("daemon local embedding product default", () => {
     }
   });
 
-  it.each(["false", "  FaLsE  ", "0", " 0 "])(
+  it.each(["false", "  FaLsE  ", "0", " 0 ", "off", "no", "disabled"])(
     "honors the explicit local opt-out %s",
     async (configuredValue) => {
       const embedTexts = vi.fn(async () => [new Float32Array([1])]);
@@ -147,12 +147,12 @@ describe("daemon local embedding product default", () => {
   it("rejects an invalid embedding boolean instead of silently changing posture", () => {
     expect(() => createRuntime(new Map([
       ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"],
-      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "yes"]
+      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "2"]
     ]))).toThrow(/ALAYA_ENABLE_EMBEDDING_SUPPLEMENT/);
   });
 
   it.each([
-    ["ALAYA_RECALL_D2Q", "enabled"]
+    ["ALAYA_RECALL_D2Q", "2"]
   ])("rejects invalid %s boolean configuration", (name, value) => {
     expect(() => createRuntime(new Map([[name, value]]))).toThrow(new RegExp(name));
   });
@@ -177,7 +177,10 @@ describe("daemon local embedding product default", () => {
 
   it.each([
     ["ALAYA_RECALL_D2Q", "1", "d2qEnabled", true],
-    ["ALAYA_RECALL_D2Q", "  FaLsE  ", "d2qEnabled", false]
+    ["ALAYA_RECALL_D2Q", "yes", "d2qEnabled", true],
+    ["ALAYA_RECALL_D2Q", "enabled", "d2qEnabled", true],
+    ["ALAYA_RECALL_D2Q", "  FaLsE  ", "d2qEnabled", false],
+    ["ALAYA_RECALL_D2Q", "off", "d2qEnabled", false]
   ] as const)("parses strict %s=%s", (name, value, field, expected) => {
     const config = readEmbeddingRuntimeConfig(new Map([[name, value]]), vi.fn());
     expect(config[field]).toBe(expected);

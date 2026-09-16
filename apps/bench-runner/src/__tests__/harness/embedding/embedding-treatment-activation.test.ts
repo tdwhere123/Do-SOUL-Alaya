@@ -202,6 +202,9 @@ describe("embedding treatment activation", () => {
     expect(() => requiresEmbeddingTreatmentDiagnostics({
       ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true"
     })).toThrow(/local cross-encoder reranking is retired/u);
+    expect(() => requiresEmbeddingTreatmentDiagnostics({
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "on"
+    })).toThrow(/local cross-encoder reranking is retired/u);
     expect(requiresEmbeddingTreatmentDiagnostics({
       ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
     })).toBe(false);
@@ -209,7 +212,7 @@ describe("embedding treatment activation", () => {
 
   it.each([
     ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "default"],
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "on"]
+    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "2"]
   ] as const)("rejects invalid non-empty treatment override %s=%s", (name, value) => {
     expect(() => requiresEmbeddingTreatmentDiagnostics({ [name]: value }))
       .toThrow(new RegExp(name, "u"));
@@ -218,11 +221,12 @@ describe("embedding treatment activation", () => {
   it("derives the persisted embedding schema from the production D2Q switch", () => {
     expect(resolveBenchEmbeddingSchemaVersion("local_onnx", { ALAYA_RECALL_D2Q: "true" })).toBe(2);
     expect(resolveBenchEmbeddingSchemaVersion("local_onnx", { ALAYA_RECALL_D2Q: "1" })).toBe(2);
+    expect(resolveBenchEmbeddingSchemaVersion("local_onnx", { ALAYA_RECALL_D2Q: "enabled" })).toBe(2);
     expect(resolveBenchEmbeddingSchemaVersion("local_onnx", { ALAYA_RECALL_D2Q: "false" })).toBe(1);
     expect(resolveBenchEmbeddingSchemaVersion("local_onnx", {})).toBe(1);
     expect(resolveBenchEmbeddingSchemaVersion("openai", { ALAYA_RECALL_D2Q: "true" })).toBe(1);
     expect(() => resolveBenchEmbeddingSchemaVersion(
-      "local_onnx", { ALAYA_RECALL_D2Q: "enabled" }
+      "local_onnx", { ALAYA_RECALL_D2Q: "2" }
     ))
       .toThrow(/ALAYA_RECALL_D2Q/u);
   });
