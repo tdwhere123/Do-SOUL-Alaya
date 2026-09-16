@@ -787,6 +787,7 @@
     "apps/bench-runner/src/bench/extraction/cache-audit/materialization/target-tree",
     "apps/bench-runner/src/bench/extraction/cache-audit/materialization/transaction",
     "apps/bench-runner/src/bench/extraction/cache-audit/materialization/transaction-failpoint",
+    "apps/bench-runner/src/runs/extraction/cache-audit/materialization/transaction-failpoint",
     "apps/bench-runner/src/bench/extraction/cache-audit/materialization/transaction-recovery",
     "apps/bench-runner/src/bench/extraction/cache-audit/occurrence-index",
     "apps/bench-runner/src/bench/extraction/cache-audit/quarantine",

@@ -1,5 +1,5 @@
 import { installMaterializationDurableFailpoint } from
-  "../../../runs/extraction/cache-audit/materialization/transaction-failpoint.js";
+  "./materialization-failpoint.js";
 import { installCatalogRefillResumeFailpoint } from
   "../../../runs/extraction/fill/catalog-refill/resume-failpoint.js";
 
