@@ -177,5 +177,6 @@ export interface AlayaDaemonListenOptions {
 export interface AlayaDaemonServer {
   readonly hostname: string;
   readonly port: number;
+  bindProcessWorkspaceIds(workspaceIds: readonly string[]): void;
   close(): Promise<void>;
 }

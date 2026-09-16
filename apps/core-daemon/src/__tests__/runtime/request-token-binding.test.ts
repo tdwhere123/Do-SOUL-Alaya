@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyRemoteBindTokenRotation,
   authorizeProtectedRequest,
+  bindProcessWorkspaceIds,
+  ensureLiveWorkspaceGrant,
   type RequestTokenProtection
 } from "../../runtime/request-token-binding.js";
 
@@ -182,6 +184,32 @@ describe("request token workspace binding", () => {
       path: "/workspaces/ws-default/memories"
     });
     expect(listed.ok).toBe(true);
+    expect(other.ok).toBe(false);
+  });
+
+  it("binds an inspect-started process grant after workspace resolve", () => {
+    const protection = ensureLiveWorkspaceGrant({ requestToken: PROCESS_TOKEN });
+    const before = authorizeProtectedRequest({
+      providedToken: PROCESS_TOKEN,
+      protection,
+      method: "GET",
+      path: "/workspaces/ws-1/memories"
+    });
+    bindProcessWorkspaceIds(protection, ["ws-1"]);
+    const after = authorizeProtectedRequest({
+      providedToken: PROCESS_TOKEN,
+      protection,
+      method: "GET",
+      path: "/workspaces/ws-1/memories"
+    });
+    const other = authorizeProtectedRequest({
+      providedToken: PROCESS_TOKEN,
+      protection,
+      method: "GET",
+      path: "/workspaces/ws-other/memories"
+    });
+    expect(before.ok).toBe(false);
+    expect(after.ok).toBe(true);
     expect(other.ok).toBe(false);
   });
 });

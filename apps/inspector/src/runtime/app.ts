@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { isZodValidationError } from "@do-soul/alaya-protocol";
 import { createInspectorAuthMiddleware } from "../middleware/auth.js";
 import { createApiSecurityHeadersMiddleware } from "../middleware/security-headers.js";
@@ -16,8 +16,12 @@ import { registerInspectorRecallStatsRoutes } from "../routes/recall-stats.js";
 import { registerInspectorSoulSearchRoutes } from "../routes/soul-search.js";
 import { registerInspectorStatusRoutes } from "../routes/status.js";
 import { registerInspectorStaticRoutes } from "../routes/static.js";
-import { createInspectorLaunchSessionStore } from "../launch/launch-session-store.js";
+import {
+  createInspectorLaunchSessionStore,
+  INSPECTOR_VITEST_SESSION_ID
+} from "../launch/launch-session-store.js";
 import { registerInspectorLaunchSessionRoutes } from "../routes/launch-session.js";
+import { createLoopbackAutoSessionMiddleware } from "../launch/loopback-auto-session.js";
 
 export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "GET /api/config/:workspaceId/soul",
@@ -72,15 +76,22 @@ export interface InspectorAppOptions {
   readonly fetchImpl?: typeof fetch;
   readonly env?: NodeJS.ProcessEnv;
   readonly clock?: () => string;
+  readonly resolveClientAddress?: (context: Context) => string | undefined;
 }
 
 export function createInspectorApp(options: InspectorAppOptions): Hono {
+  if (normalizeOptionalSecret(options.token) === undefined) {
+    throw new Error("inspector_token_missing");
+  }
   const app = new Hono();
   const env = options.env ?? process.env;
   const proxyOptions = createProxyOptions(options, env);
   const launchSessionStore = createInspectorLaunchSessionStore();
+  if (process.env.VITEST === "true") {
+    launchSessionStore.seedSession(INSPECTOR_VITEST_SESSION_ID);
+  }
   registerLaunchSession(app, options, launchSessionStore);
-  registerInspectorMiddleware(app, options.token, launchSessionStore);
+  registerInspectorMiddleware(app, options, launchSessionStore);
   registerInspectorApiRoutes(app, options, proxyOptions);
   return app;
 }
@@ -99,13 +110,21 @@ function registerLaunchSession(
 
 function registerInspectorMiddleware(
   app: Hono,
-  token: string,
+  options: InspectorAppOptions,
   launchSessionStore: ReturnType<typeof createInspectorLaunchSessionStore>
 ): void {
   registerRequestIdMiddleware(app);
   registerErrorHandler(app);
   app.use("*", createApiSecurityHeadersMiddleware());
-  app.use("/api/*", createInspectorAuthMiddleware(token, {
+  app.use(
+    "*",
+    createLoopbackAutoSessionMiddleware({
+      launchCode: normalizeOptionalSecret(options.launchCode),
+      launchSessionStore,
+      resolveClientAddress: options.resolveClientAddress
+    })
+  );
+  app.use("/api/*", createInspectorAuthMiddleware({
     publicRoutes: [{ path: "/api/launch-session", method: "POST" }],
     hasSession: (sessionId) => launchSessionStore.hasSession(sessionId)
   }));

@@ -1,8 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 
 // Length-independent constant-time compare: pads both sides to a common length
-// so the early return never leaks the expected token length (mirrors
-// apps/inspector/src/middleware/auth.ts constantTimeTokenEqual).
+// so the early return never leaks the expected token length.
 export function constantTimeTokenEqual(provided: string, expected: string): boolean {
   const providedBuffer = Buffer.from(provided, "utf8");
   const expectedBuffer = Buffer.from(expected, "utf8");

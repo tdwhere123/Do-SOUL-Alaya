@@ -50,7 +50,7 @@ export async function startInspectorServer(options: InspectorServerOptions = {})
     throw new Error("inspector_workspace_id_missing");
   }
 
-  const launchCode = readInspectorLaunchProof(env);
+  const launchCode = readInspectorLaunchProof();
   if (!launchCode) {
     stderr.write("inspector_launch_code_missing\n");
     process.exitCode = 2;

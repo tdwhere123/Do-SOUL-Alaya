@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiFetch, setInspectorToken, setUnauthorizedHandler, setWorkspaceId } from "../../api/api";
+import { apiFetch, markInspectorSessionReady, setUnauthorizedHandler, setWorkspaceId } from "../../api/api";
 import { useInspectorLaunchState } from "../../app/inspector-launch-state";
 
 function LaunchProbe() {
@@ -21,7 +21,7 @@ function LaunchProbe() {
 describe("useInspectorLaunchState", () => {
   beforeEach(() => {
     sessionStorage.clear();
-    setInspectorToken("test-token");
+    markInspectorSessionReady();
     setWorkspaceId("ws1");
     setUnauthorizedHandler(null);
     vi.stubGlobal(

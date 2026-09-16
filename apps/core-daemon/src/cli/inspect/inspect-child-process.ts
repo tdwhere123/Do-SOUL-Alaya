@@ -48,14 +48,15 @@ export function buildInspectorChildEnv(input: SpawnInspectorInput): NodeJS.Proce
   return env;
 }
 
-function writeInheritedLaunchProof(stream: unknown, launchCode: string): void {
+export function writeInheritedLaunchProof(stream: unknown, launchCode: string): void {
   if (stream === null || stream === undefined || typeof stream !== "object") {
-    return;
+    throw new Error("inspector launch proof fd is unavailable");
   }
-  const writable = stream as { end(chunk: string): void };
-  if (typeof writable.end === "function") {
-    writable.end(`${launchCode}\n`);
+  const writable = stream as { end?: (chunk: string) => void };
+  if (typeof writable.end !== "function") {
+    throw new Error("inspector launch proof fd is unavailable");
   }
+  writable.end(`${launchCode}\n`);
 }
 
 export async function waitForInspectorReady(child: InspectorChildProcess, ctx: AlayaCliContext): Promise<void> {

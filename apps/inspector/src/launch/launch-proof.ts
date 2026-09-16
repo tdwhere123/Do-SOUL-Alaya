@@ -3,15 +3,9 @@ import { readFileSync } from "node:fs";
 export const INSPECTOR_LAUNCH_PROOF_FD = 3;
 
 export function readInspectorLaunchProof(
-  env: NodeJS.ProcessEnv,
   readFd: (fd: number) => string = readInheritedFd
 ): string | undefined {
-  const fromFd = normalizeSecret(tryReadFd(readFd, INSPECTOR_LAUNCH_PROOF_FD));
-  if (fromFd !== undefined) {
-    return fromFd;
-  }
-  // Env is a last-resort for process-local tests that cannot inherit fd 3.
-  return normalizeSecret(env.ALAYA_INSPECTOR_LAUNCH_CODE);
+  return normalizeSecret(tryReadFd(readFd, INSPECTOR_LAUNCH_PROOF_FD));
 }
 
 function tryReadFd(readFd: (fd: number) => string, fd: number): string | undefined {

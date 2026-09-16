@@ -1,4 +1,8 @@
 import type { createInspectorApp } from "../../runtime/app.js";
+import {
+  INSPECTOR_SESSION_COOKIE,
+  INSPECTOR_VITEST_SESSION_ID
+} from "../../launch/launch-session-store.js";
 
 export async function authenticatedRequest(
   app: ReturnType<typeof createInspectorApp>,
@@ -10,8 +14,15 @@ export async function authenticatedRequest(
 
 export function withInspectorAuth(init: RequestInit = {}): RequestInit {
   const headers = new Headers(init.headers);
-  headers.set("x-alaya-inspector-token", "token");
+  headers.set("cookie", `${INSPECTOR_SESSION_COOKIE}=${INSPECTOR_VITEST_SESSION_ID}`);
   return { ...init, headers };
+}
+
+function inspectorTestAuthHeaders(): Record<string, string> {
+  return {
+    "content-type": "application/json",
+    cookie: `${INSPECTOR_SESSION_COOKIE}=${INSPECTOR_VITEST_SESSION_ID}`
+  };
 }
 
 export function createChunkedJsonRequest(url: string, bodyText: string): Request {
@@ -20,10 +31,7 @@ export function createChunkedJsonRequest(url: string, bodyText: string): Request
 
   return new Request(url, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-alaya-inspector-token": "token"
-    },
+    headers: inspectorTestAuthHeaders(),
     body: new ReadableStream<Uint8Array>({
       pull(controller) {
         if (sent) {
@@ -45,10 +53,7 @@ export function createNeverEndingChunkedJsonRequest(url: string, bodyText: strin
 
   return new Request(url, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-alaya-inspector-token": "token"
-    },
+    headers: inspectorTestAuthHeaders(),
     body: new ReadableStream<Uint8Array>({
       pull(controller) {
         if (sent) {
@@ -65,10 +70,7 @@ export function createNeverEndingChunkedJsonRequest(url: string, bodyText: strin
 export function createEmptyChunkedJsonRequest(url: string): Request {
   return new Request(url, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-alaya-inspector-token": "token"
-    },
+    headers: inspectorTestAuthHeaders(),
     body: new ReadableStream<Uint8Array>({
       pull(controller) {
         controller.close();

@@ -37,6 +37,10 @@ import {
 } from "../../../mcp-memory/tool/tool-handler.js";
 
 import { createInspectorApp } from "../../../../../inspector/src/runtime/app.js";
+import {
+  INSPECTOR_SESSION_COOKIE,
+  INSPECTOR_VITEST_SESSION_ID
+} from "../../../../../inspector/src/launch/launch-session-store.js";
 
 import {
   reviewerArgs,
@@ -119,7 +123,7 @@ describe("proposal review inspector cli parity", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-alaya-inspector-token": "inspector-token"
+        cookie: `${INSPECTOR_SESSION_COOKIE}=${INSPECTOR_VITEST_SESSION_ID}`
       },
       body: JSON.stringify({
         verdict: reviewerArgs.verdict,

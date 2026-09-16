@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 const DEFAULT_LAUNCH_CODE_TTL_MS = 5 * 60 * 1000;
 export const INSPECTOR_SESSION_TTL_MS = 15 * 60 * 1000;
 export const INSPECTOR_SESSION_COOKIE = "alaya_inspector_session";
+export const INSPECTOR_VITEST_SESSION_ID = "vitest-inspector-session";
 
 interface LaunchCodeEntry {
   readonly expiresAtMs: number;
@@ -16,6 +17,7 @@ export interface InspectorLaunchSessionStore {
   register(code: string, ttlMs?: number): void;
   redeem(code: string): string | null;
   hasSession(sessionId: string): boolean;
+  seedSession(sessionId: string): void;
 }
 
 export function createInspectorLaunchSessionStore(
@@ -61,6 +63,13 @@ export function createInspectorLaunchSessionStore(
         return false;
       }
       return true;
+    },
+    seedSession(sessionId: string): void {
+      const normalized = normalizeSecret(sessionId);
+      if (normalized === null) {
+        return;
+      }
+      sessions.set(normalized, { expiresAtMs: clock() + sessionTtlMs });
     }
   };
 }

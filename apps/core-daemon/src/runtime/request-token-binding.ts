@@ -19,10 +19,15 @@ export type WorkspaceTokenBinding = {
   readonly allowProcessSecretPatch?: boolean;
 };
 
+export type LiveWorkspaceGrant = {
+  boundWorkspaceIds: readonly string[] | "*";
+};
+
 export type RequestTokenProtection = {
   readonly requestToken: string;
   readonly tokenSource?: "env" | "ephemeral" | "rotated";
   readonly boundWorkspaceIds?: readonly string[] | "*";
+  readonly liveWorkspaceGrant?: LiveWorkspaceGrant;
   readonly allowProcessSecretPatch?: boolean;
   readonly workspaceTokens?: readonly WorkspaceTokenBinding[];
 };
@@ -113,7 +118,7 @@ export function resolveRequestTokenGrants(
   const processGrant: RequestTokenGrant = {
     token: protection.requestToken,
     // Unbound process tokens must not inherit all-workspace access.
-    workspaceIds: protection.boundWorkspaceIds ?? [],
+    workspaceIds: resolveBoundWorkspaceIds(protection),
     allowProcessSecretPatch: protection.allowProcessSecretPatch ?? false
   };
   const workspaceGrants = (protection.workspaceTokens ?? []).map((binding) => ({
@@ -191,21 +196,61 @@ export function applyRemoteBindTokenRotation<T extends RequestTokenProtection>(
   }) as T;
 }
 
+export function resolveBoundWorkspaceIds(
+  protection: RequestTokenProtection
+): readonly string[] | "*" {
+  return protection.liveWorkspaceGrant?.boundWorkspaceIds ?? protection.boundWorkspaceIds ?? [];
+}
+
+export function ensureLiveWorkspaceGrant<T extends RequestTokenProtection>(protection: T): T {
+  if (protection.liveWorkspaceGrant !== undefined) {
+    return protection;
+  }
+  const liveWorkspaceGrant: LiveWorkspaceGrant = {
+    boundWorkspaceIds: protection.boundWorkspaceIds ?? []
+  };
+  return Object.freeze({ ...protection, liveWorkspaceGrant }) as T;
+}
+
+export function bindProcessWorkspaceIds(
+  protection: RequestTokenProtection,
+  workspaceIds: readonly string[]
+): void {
+  const live = protection.liveWorkspaceGrant;
+  if (live === undefined) {
+    throw new Error("process workspace grant cannot be bound on a snapshot");
+  }
+  live.boundWorkspaceIds = Object.freeze(
+    workspaceIds.map((id) => id.trim()).filter((id) => id.length > 0)
+  );
+}
+
 function applyDefaultWorkspaceBinding<T extends RequestTokenProtection>(
   protection: T,
   envLike: RequestProtectionEnvLike
 ): T {
   if (protection.boundWorkspaceIds !== undefined) {
+    syncLiveWorkspaceGrant(protection, protection.boundWorkspaceIds);
     return protection;
   }
   const boundWorkspaceIds = workspaceIdsFromEnv(envLike);
   if (boundWorkspaceIds === undefined) {
     return protection;
   }
+  syncLiveWorkspaceGrant(protection, boundWorkspaceIds);
   return Object.freeze({
     ...protection,
     boundWorkspaceIds
   }) as T;
+}
+
+function syncLiveWorkspaceGrant(
+  protection: RequestTokenProtection,
+  boundWorkspaceIds: readonly string[] | "*"
+): void {
+  if (protection.liveWorkspaceGrant !== undefined) {
+    protection.liveWorkspaceGrant.boundWorkspaceIds = boundWorkspaceIds;
+  }
 }
 
 function workspaceIdsFromEnv(envLike: RequestProtectionEnvLike): readonly string[] | "*" | undefined {

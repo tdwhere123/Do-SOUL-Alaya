@@ -91,7 +91,8 @@ async function bootstrapInspectorSession(
     }
 
     // Single-use code already consumed by a prior mount that established the session.
-    if (hasInspectorSession()) {
+    if (hasInspectorSession() || (await probeInspectorSession())) {
+      markInspectorSessionReady();
       if (launchParams.workspaceId !== null) {
         setWorkspaceId(launchWorkspaceId(launchParams.workspaceId));
       }
@@ -112,7 +113,11 @@ async function bootstrapInspectorSession(
     return;
   }
 
-  if (hasInspectorSession()) {
+  if (hasInspectorSession() || (await probeInspectorSession())) {
+    markInspectorSessionReady();
+    if (launchParams.workspaceId !== null) {
+      setWorkspaceId(launchWorkspaceId(launchParams.workspaceId));
+    }
     if (callbacks.cancelled()) {
       return;
     }
@@ -126,6 +131,15 @@ async function bootstrapInspectorSession(
   }
   callbacks.setAuthError("No session found. Please run `alaya inspect` to open this tool.");
   callbacks.setReady(false);
+}
+
+async function probeInspectorSession(): Promise<boolean> {
+  try {
+    const response = await fetch("/api/status", { credentials: "include" });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 async function redeemLaunchCode(code: string): Promise<boolean> {

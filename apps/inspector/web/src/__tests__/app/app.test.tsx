@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { AppContent } from "../../app/app";
 import { ToastProvider } from "../../components/toast";
 import { LocaleProvider } from "../../i18n/locale";
-import { getWorkspaceId, setInspectorToken, setWorkspaceId } from "../../api";
+import { getWorkspaceId, markInspectorSessionReady, setInspectorToken, setWorkspaceId } from "../../api";
 
 const VALID_STATUS = {
   checked_at: "2026-05-14T12:00:00.000Z",
@@ -132,6 +132,16 @@ describe("AppContent", () => {
     setWorkspaceId(null);
   });
 
+  it("becomes ready from a loopback cookie session without a launch fragment", async () => {
+    const fetchMock = stubInspectorFetch();
+    renderApp({ pathname: "/", search: "?workspaceId=ws1" });
+
+    expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
+    expect(getWorkspaceId()).toBe("ws1");
+    expect(screen.queryByText("No session found. Please run `alaya inspect` to open this tool.")).toBeNull();
+    expect(launchRedeemBodies(fetchMock)).toEqual([]);
+  });
+
   it("redeems a launch code posted from the URL fragment", async () => {
     const fetchMock = vi.mocked(fetch);
     renderApp({ pathname: "/", search: "?workspaceId=ws1", hash: "#launch=fragment-code" });
@@ -185,8 +195,8 @@ describe("AppContent", () => {
     ).toBeTruthy();
   });
 
-  it("stays ready when a second redeem fails but an existing session token is present", async () => {
-    setInspectorToken("existing-token");
+  it("stays ready when a second redeem fails but an existing session is present", async () => {
+    markInspectorSessionReady();
     setWorkspaceId("old-ws");
     const fetchMock = stubInspectorFetch({
       onLaunchRedeem: () => jsonResponse({ error: "already redeemed" }, 410)
