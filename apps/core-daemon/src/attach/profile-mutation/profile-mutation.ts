@@ -33,6 +33,7 @@ import {
   type ResolveProfilePathsOptions
 } from "./profile-mutation-types.js";
 import { extractTomlBlock, indentBlock, isRecord, normalizeFileText, parseJsonObject } from "./profile-mutation-text.js";
+import { MCP_TOOL_CONFIRMATION_TOKEN_ENV_KEY, extractAttachedMcpEnvKeys } from "../attached-agent-mcp-child-env.js";
 
 export type {
   ProfileMutationApplyOptions,
@@ -80,6 +81,9 @@ export interface ProfileInstructionsDriftReport {
   readonly status: ProfileInstructionsDriftStatus;
   readonly attached_preview: string | null;
 }
+
+export const ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW =
+  "ALAYA_MCP_TOOL_CONFIRMATION_TOKEN present in MCP env";
 
 export function extractAttachedOperatorInstructions(
   target: ProfileTarget,
@@ -185,6 +189,14 @@ export async function detectAttachedProfileInstructionsDrift(
       profile_path: paths.mcpConfigPath,
       status: "drifted",
       attached_preview: `ALAYA_AGENT_TARGET=${attachedAgentTarget ?? "(missing)"}`
+    };
+  }
+  if (extractAttachedMcpEnvKeys(target, content).includes(MCP_TOOL_CONFIRMATION_TOKEN_ENV_KEY)) {
+    return {
+      target,
+      profile_path: paths.mcpConfigPath,
+      status: "drifted",
+      attached_preview: ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW
     };
   }
   return {

@@ -181,6 +181,7 @@ describe("profile mutation", () => {
     });
     const codexAfter = codexPlan.operations.find((op) => op.recordKind === "mcp_server_entry")?.after ?? "";
     expect(codexAfter).toContain('env = { ALAYA_AGENT_TARGET = "codex" }');
+    expect(codexAfter).not.toContain("ALAYA_MCP_TOOL_CONFIRMATION_TOKEN");
   });
 
   it("renders the slash alias through an absolute node launcher", async () => {
@@ -480,6 +481,26 @@ operator_instructions = ${JSON.stringify(stale)}
     const claudeReport = await detectAttachedProfileInstructionsDrift("claude-code", { env: createProfileTestEnv(), fs });
     expect(claudeReport.status).toBe("drifted");
     expect(claudeReport.attached_preview).toBe("ALAYA_AGENT_TARGET=(missing)");
+  });
+
+  it("reports drifted when the attached MCP env stamps ALAYA_MCP_TOOL_CONFIRMATION_TOKEN", async () => {
+    const fs = new MemoryProfileFs();
+    fs.files.set(
+      codexConfigPath(),
+      [
+        "[mcp_servers.alaya]",
+        'command = "node"',
+        "args = [\"x\"]",
+        `env = { ALAYA_AGENT_TARGET = "codex", ALAYA_MCP_TOOL_CONFIRMATION_TOKEN = "secret" }`,
+        `operator_instructions = ${JSON.stringify(ALAYA_OPERATOR_INSTRUCTIONS)}`
+      ].join("\n")
+    );
+    const report = await detectAttachedProfileInstructionsDrift("codex", {
+      env: createProfileTestEnv(),
+      fs
+    });
+    expect(report.status).toBe("drifted");
+    expect(report.attached_preview).toBe("ALAYA_MCP_TOOL_CONFIRMATION_TOKEN present in MCP env");
   });
 
   it("reports in_sync after a fresh attach (instructions + ALAYA_AGENT_TARGET stamp)", async () => {
