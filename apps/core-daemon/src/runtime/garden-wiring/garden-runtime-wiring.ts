@@ -122,6 +122,13 @@ export async function createGardenRuntimeWiring(input: GardenRuntimeWiringInput)
   bindGardenTaskQueueRepo(input, gardenTaskRepo);
   const gardenBacklogTelemetryService = createGardenBacklogTelemetryService(input, gardenRuntime);
   gardenRuntime.setBacklogTelemetryObserver(gardenBacklogTelemetryService);
+  gardenRuntime.backgroundManager.addService({
+    name: "garden-backlog-telemetry",
+    intervalMs: input.gardenBacklogThresholds.snapshot_interval_ms,
+    task: async () => {
+      await gardenBacklogTelemetryService.poll();
+    }
+  });
   const initialGardenLastPassAt = await resolvePersistedGardenLastPassAt({
     healthJournalRepo: input.healthJournalRepo,
     workspaceRepo: input.workspaceRepo,
