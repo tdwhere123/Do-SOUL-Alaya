@@ -1,7 +1,7 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   locateSourceInterpretation,
-  sourceEvidenceRootTarget,
+  SoulMemorySearchRequestSchema,
   sourceRecallTarget,
   type SoulMemorySearchRequest,
   type SoulMemorySearchResponse
@@ -23,7 +23,7 @@ import {
   SqliteSourceRootRecallReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { FirstExposureSession, type FirstExposurePage } from
+import type { FirstExposurePage } from
   "../../../../../../apps/bench-runner/src/runs/measurement/first-exposure-session.js";
 import { fieldContractSha256 } from "../../../../../../packages/core/src/shared/field-hash.js";
 import {
@@ -46,20 +46,37 @@ export const PUBLIC_CONSUMPTION_PROTOCOL = Object.freeze({
   base_sha: "dece964bde5b0cce993c9f3218dea04cc53b95e2",
   base_tree: "ec6ddf1279512cee6f5a4fead599bc974cd7f40b",
   primary_metric: "cumulative_native_visits_to_first_complete_required_context",
-  max_results: 8,
-  historical_max_results: 1,
+  max_results: 8 as number,
+  historical_max_results: 1 as number,
   payload_byte_budget: 4096,
   max_membership_pages: 16,
   max_payload_expansions_per_target: 16,
   native_observer_work_limit: 7,
   request_work_units: 10_000,
-  request_memory_bytes: 1_000_000
+  request_memory_bytes: 1_000_000,
+  turn_cap_formula: "max_membership_pages * (1 + max_results * max_payload_expansions_per_target)"
 });
 
 export type LookupMode = "proposal" | "source_text";
 export type ResultView = "source_only" | "mixed" | "memory_only";
 export type Enumeration = "canonical" | "associative";
 export type Cost = number | "unavailable";
+export type ConsumptionStopReason =
+  | "continuation_exhausted"
+  | "membership_page_cap"
+  | "index_invalidated"
+  | "declared_turn_cap";
+export type ConsumptionAttribution =
+  | "hit"
+  | "qualification"
+  | "resource"
+  | "payload"
+  | "unknown";
+export type FirstPageOmissionAttribution =
+  | "included"
+  | "order"
+  | "absent"
+  | "unknown";
 
 export type PublicConsumer = (
   request: SoulMemorySearchRequest,
@@ -78,6 +95,7 @@ export type ConsumptionStep = Readonly<{
   readonly preview_complete: Readonly<Record<string, boolean>>;
   readonly logical_index: string | undefined;
   readonly payload_completeness: string | undefined;
+  readonly stop_reason?: ConsumptionStopReason;
 }>;
 
 export type ConsumptionTrace = Readonly<{
@@ -127,10 +145,10 @@ export function publicSearchRequest(
   lookup: LookupMode,
   view: ResultView,
   enumeration: Enumeration,
-  maxResults = PUBLIC_CONSUMPTION_PROTOCOL.max_results
+  maxResults: number = PUBLIC_CONSUMPTION_PROTOCOL.max_results
 ): SoulMemorySearchRequest {
   const compiled = compileCanarySketch(canary, lookup, view, enumeration);
-  return {
+  return SoulMemorySearchRequestSchema.parse({
     query: canary.original_query,
     max_results: maxResults,
     scope_class: null,
@@ -144,7 +162,7 @@ export function publicSearchRequest(
     supports_source_evidence: true,
     supports_product_updates: true,
     ...(enumeration === "associative" ? { cap_contracts: [identityAssociationCap()] } : {})
-  };
+  });
 }
 
 export function tapRecallReceipts<T extends { recall: (...args: never[]) => Promise<unknown> }>(
@@ -160,92 +178,27 @@ export function tapRecallReceipts<T extends { recall: (...args: never[]) => Prom
   return service;
 }
 
-export async function consumePublicSources(input: Readonly<{
-  readonly handler: PublicConsumer;
-  readonly context: RecallUsageToolCallContext;
-  readonly request: SoulMemorySearchRequest;
-  readonly receipts: ConditionalFieldExecutionReceipt[];
-}>): Promise<ConsumptionTrace> {
-  const session = new FirstExposureSession();
-  const bodies = new Map<string, string>();
-  const complete = new Map<string, boolean>();
-  const expansionsByTarget = new Map<string, number>();
-  const steps: ConsumptionStep[] = [];
-  let membershipPage = 0;
-  let payloadExpansions = 0;
-  let visits: Cost = 0;
-  let bytes: Cost = 0;
-  let request: SoulMemorySearchRequest = input.request;
-  let firstExposure: FirstExposurePage | null = null;
-  let firstPageIdentities: string[] = [];
-  let firstPageComplete: Record<string, boolean> = {};
-
-  for (let turn = 0; turn < PUBLIC_CONSUMPTION_PROTOCOL.max_membership_pages * 4; turn++) {
-    const started = input.receipts.length;
-    const response = await input.handler(request, input.context);
-    const added = input.receipts.slice(started);
-    visits = addCost(visits, added.at(-1)?.actual?.native_visits);
-    bytes = addCost(bytes, added.at(-1)?.actual?.native_bytes);
-    const retained = added.at(-1)?.actual?.retained_bytes_current ?? "unavailable";
-    applyPublicPayloads(response, bodies, complete);
-    const identities = publicIdentities(response);
-    const purpose = response.page_purpose ?? response.index?.page_purpose ?? "membership";
-    if (request.payload_continuation === undefined && request.continuation === undefined) {
-      firstExposure = session.record(response);
-      firstPageIdentities = identities;
-      firstPageComplete = Object.fromEntries(complete);
-      membershipPage += 1;
-    } else if (request.payload_continuation !== undefined) {
-      payloadExpansions += 1;
-    } else {
-      membershipPage += 1;
-      session.record(response, request.continuation ?? null);
-    }
-    const step = {
-      purpose,
-      membership_page: membershipPage,
-      payload_expansions: payloadExpansions,
-      cumulative_native_visits: visits,
-      cumulative_native_bytes: bytes,
-      retained_bytes_current: retained,
-      public_identities: identities,
-      source_bodies: Object.fromEntries(bodies),
-      preview_complete: Object.fromEntries(complete),
-      logical_index: response.index?.completeness.logical_index,
-      payload_completeness: response.index?.completeness.payload
-    };
-    steps.push(step);
-    const next = nextPublicRequest(input.request, request, response, expansionsByTarget);
-    const done = next === undefined
-      || (membershipPage >= PUBLIC_CONSUMPTION_PROTOCOL.max_membership_pages
-        && next.payload_continuation === undefined);
-    if (done) {
-      return {
-        first_exposure: firstExposure,
-        first_page_identities: firstPageIdentities,
-        first_page_preview_complete: firstPageComplete,
-        steps,
-        termination: step
-      };
-    }
-    request = next!;
-  }
-  throw new Error("public consumption exceeded the declared turn cap");
-}
-
 export function scoreConsumption(
   canary: CanaryCase,
   intendedRootId: string,
   trace: ConsumptionTrace,
-  native?: NativeDiscovery,
   view?: ResultView
 ): Readonly<{
   readonly first_page_includes_intended: boolean;
   readonly first_page_position: number | null;
+  readonly first_page_omission: boolean;
+  readonly first_page_omission_attribution: FirstPageOmissionAttribution;
   readonly first_complete_step: number | null;
   readonly primary_native_visits: Cost | "miss";
+  readonly first_complete_costs: Readonly<{
+    readonly cumulative_native_visits: Cost;
+    readonly cumulative_native_bytes: Cost;
+    readonly retained_bytes_current: Cost;
+    readonly membership_page: number;
+    readonly payload_expansions: number;
+  }> | null;
   readonly content: ReturnType<typeof canaryContentScopeCheck>;
-  readonly attribution: string;
+  readonly consumption_attribution: ConsumptionAttribution;
 }> {
   const firstPosition = trace.first_page_identities.indexOf(intendedRootId);
   const firstPageIncludes = firstPosition >= 0;
@@ -257,27 +210,37 @@ export function scoreConsumption(
     }
   }
   const content = canaryContentScopeCheck(trace.termination.source_bodies[intendedRootId] ?? "", canary);
-  const seenLater = trace.steps.some((step) => step.public_identities.includes(intendedRootId)
+  const seenOnPublic = trace.steps.some((step) => step.public_identities.includes(intendedRootId)
     || Object.keys(step.source_bodies).includes(intendedRootId));
-  const discovered = native?.ids.includes(intendedRootId) === true;
-  let attribution = "unknown";
-  if (content.has_full_intended) attribution = "hit";
-  else if (view === "memory_only") attribution = "qualification";
-  else if (!discovered && !seenLater) attribution = "discovery";
-  else if (!seenLater) attribution = "qualification";
-  else if (!firstPageIncludes) attribution = "order";
-  else if (trace.termination.payload_completeness === "resource_rejected"
-    || trace.termination.logical_index === "resource_rejected") attribution = "resource";
-  else attribution = "payload";
+  const resourceRejected = publicRunResourceRejected(trace);
   return {
     first_page_includes_intended: firstPageIncludes,
     first_page_position: firstPageIncludes ? firstPosition + 1 : null,
+    first_page_omission: !firstPageIncludes,
+    first_page_omission_attribution: firstPageOmissionAttribution({
+      firstPageIncludes,
+      seenOnPublic,
+      view,
+      resourceRejected
+    }),
     first_complete_step: firstComplete,
     primary_native_visits: firstComplete === null
       ? "miss"
       : trace.steps[firstComplete]!.cumulative_native_visits,
+    first_complete_costs: firstComplete === null ? null : {
+      cumulative_native_visits: trace.steps[firstComplete]!.cumulative_native_visits,
+      cumulative_native_bytes: trace.steps[firstComplete]!.cumulative_native_bytes,
+      retained_bytes_current: trace.steps[firstComplete]!.retained_bytes_current,
+      membership_page: trace.steps[firstComplete]!.membership_page,
+      payload_expansions: trace.steps[firstComplete]!.payload_expansions
+    },
     content,
-    attribution
+    consumption_attribution: consumptionAttribution({
+      content,
+      view,
+      seenOnPublic,
+      resourceRejected
+    })
   };
 }
 
@@ -420,72 +383,33 @@ function sqliteObserverReaders(
   };
 }
 
-function publicIdentities(response: SoulMemorySearchResponse): string[] {
-  return response.results.map((row) => {
-    if (row.target?.kind === "source_evidence") return row.target.root_id;
-    if (row.target?.kind === "memory_entry") return row.target.object_id;
-    return row.object_id ?? "unknown";
-  });
+function publicRunResourceRejected(trace: ConsumptionTrace): boolean {
+  return trace.steps.some((step) =>
+    step.payload_completeness === "resource_rejected" || step.logical_index === "resource_rejected");
 }
 
-function applyPublicPayloads(
-  response: SoulMemorySearchResponse,
-  bodies: Map<string, string>,
-  complete: Map<string, boolean>
-): void {
-  for (const row of response.results) {
-    if (row.target?.kind !== "source_evidence") continue;
-    const rootId = row.target.root_id;
-    const preview = row.content_preview;
-    const span = row.target.span;
-    if (preview !== "[payload omitted]") {
-      const start = span?.content_start ?? 0;
-      const prior = Buffer.from(bodies.get(rootId) ?? "", "utf8");
-      if (start === 0) bodies.set(rootId, preview);
-      else if (start === prior.length) {
-        bodies.set(rootId, Buffer.concat([prior, Buffer.from(preview, "utf8")]).toString("utf8"));
-      }
-    }
-    complete.set(rootId, span?.content_complete === true && preview !== "[payload omitted]");
-  }
+function firstPageOmissionAttribution(input: Readonly<{
+  readonly firstPageIncludes: boolean;
+  readonly seenOnPublic: boolean;
+  readonly view: ResultView | undefined;
+  readonly resourceRejected: boolean;
+}>): FirstPageOmissionAttribution {
+  if (input.firstPageIncludes) return "included";
+  if (input.view === "memory_only") return "absent";
+  if (input.seenOnPublic) return "order";
+  if (input.resourceRejected) return "unknown";
+  return "unknown";
 }
 
-function nextPublicRequest(
-  base: SoulMemorySearchRequest,
-  current: SoulMemorySearchRequest,
-  response: SoulMemorySearchResponse,
-  expansionsByTarget: Map<string, number>
-): SoulMemorySearchRequest | undefined {
-  if (response.index?.completeness.logical_index === "invalidated") return undefined;
-  const incomplete = response.results.find((row) => {
-    if (row.target?.kind !== "source_evidence") return false;
-    if (row.content_preview === "[payload omitted]") return true;
-    return row.target.span?.content_complete === false;
-  });
-  if (incomplete?.target?.kind === "source_evidence") {
-    const key = incomplete.target.root_id;
-    const used = expansionsByTarget.get(key) ?? 0;
-    if (used < PUBLIC_CONSUMPTION_PROTOCOL.max_payload_expansions_per_target) {
-      expansionsByTarget.set(key, used + 1);
-      const start = incomplete.target.span?.content_end ?? 0;
-      return {
-        ...base,
-        continuation: response.index?.continuation ?? current.continuation,
-        payload_continuation: {
-          schema_version: 1,
-          purpose: "payload_expansion",
-          target: sourceEvidenceRootTarget(incomplete.target),
-          start_offset: start,
-          byte_budget: PUBLIC_CONSUMPTION_PROTOCOL.payload_byte_budget
-        }
-      };
-    }
-  }
-  if (response.index?.continuation == null) return undefined;
-  return { ...base, continuation: response.index.continuation };
-}
-
-function addCost(current: Cost, delta: number | undefined): Cost {
-  if (current === "unavailable" || delta === undefined) return "unavailable";
-  return current + delta;
+function consumptionAttribution(input: Readonly<{
+  readonly content: ReturnType<typeof canaryContentScopeCheck>;
+  readonly view: ResultView | undefined;
+  readonly seenOnPublic: boolean;
+  readonly resourceRejected: boolean;
+}>): ConsumptionAttribution {
+  if (input.content.has_full_intended) return "hit";
+  if (input.view === "memory_only") return "qualification";
+  if (input.resourceRejected) return "resource";
+  if (!input.seenOnPublic) return "unknown";
+  return "payload";
 }
