@@ -97,8 +97,8 @@ function requireClaimedGardenTask(
   context: GardenTaskToolCallContext
 ): GardenTaskRow {
   const repo = requireGardenTaskRepo(deps);
-  const row = repo.findById(taskId);
-  if (row === null || row.workspace_id !== context.workspaceId) {
+  const row = repo.findByIdInWorkspace(taskId, context.workspaceId);
+  if (row === null) {
     throw new GardenTaskNotFoundError(`Garden task not found: ${taskId}`);
   }
   if (row.status !== "claimed") {

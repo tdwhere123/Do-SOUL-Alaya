@@ -34,7 +34,7 @@ export interface GardenTaskToolCallContext {
 
 export interface GardenTaskHandlerDependencies {
   readonly gardenTaskRepo?: {
-    findById(taskId: string): GardenTaskRow | null;
+    findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
     peekPending(
       role: GardenRoleValue,
       workspace_id?: string,
@@ -133,8 +133,8 @@ function createClaimGardenTaskHandler(params: Readonly<{
       params.now(),
       context.workspaceId
     );
-    const row = repo.findById(request.task_id);
-    if (row === null || row.workspace_id !== context.workspaceId) {
+    const row = repo.findByIdInWorkspace(request.task_id, context.workspaceId);
+    if (row === null) {
       return toSilentAlreadyClaimed(request.task_id);
     }
     if (claimResult !== "claimed" && row.claimed_by !== context.agentTarget) {

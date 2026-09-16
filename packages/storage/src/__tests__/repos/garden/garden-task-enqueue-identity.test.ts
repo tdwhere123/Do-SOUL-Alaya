@@ -62,4 +62,37 @@ describe("garden task enqueue identity", () => {
       })
     ).toThrow(/different payload/);
   });
+
+  it("findByIdInWorkspace returns null for a task id owned by another workspace", () => {
+    const database = initDatabase({ filename: ":memory:" });
+    databases.add(database);
+    const repo = new SqliteGardenTaskRepo(database.connection, {
+      appendManyWithMutation: async (_events, mutate) => mutate([])
+    });
+    const payload = {
+      task_id: "task-ws-1",
+      task_kind: GardenTaskKind.BULK_ENRICH,
+      required_tier: GardenTier.TIER_2,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_refs: ["mem-1"],
+      priority: 20,
+      created_at: "2026-09-06T00:00:00.000Z",
+      source_object_id: "mem-1",
+      source_revision: 1,
+      enrichment_contract: "source_enrichment.v1"
+    };
+    repo.enqueue({
+      id: "task-ws-1",
+      workspace_id: "workspace-1",
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.BULK_ENRICH,
+      payload,
+      created_at: "2026-09-06T00:00:00.000Z"
+    });
+
+    expect(repo.findById("task-ws-1")?.workspace_id).toBe("workspace-1");
+    expect(repo.findByIdInWorkspace("task-ws-1", "workspace-1")?.id).toBe("task-ws-1");
+    expect(repo.findByIdInWorkspace("task-ws-1", "workspace-2")).toBeNull();
+  });
 });

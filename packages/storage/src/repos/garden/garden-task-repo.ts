@@ -34,6 +34,7 @@ export type * from "./garden-task-types.js";
 export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   private readonly enqueueStatement;
   private readonly findByIdStatement;
+  private readonly findByIdInWorkspaceStatement;
   private readonly peekPendingStatement;
   private readonly peekPendingByWorkspaceStatement;
   private readonly claimStatement;
@@ -57,6 +58,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     const statements = prepareGardenTaskStatements(connection);
     this.enqueueStatement = statements.enqueueStatement;
     this.findByIdStatement = statements.findByIdStatement;
+    this.findByIdInWorkspaceStatement = statements.findByIdInWorkspaceStatement;
     this.peekPendingStatement = statements.peekPendingStatement;
     this.peekPendingByWorkspaceStatement = statements.peekPendingByWorkspaceStatement;
     this.claimStatement = statements.claimStatement;
@@ -94,6 +96,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   }
 
   public findById(taskId: string): GardenTaskRow | null {
+    // Internal identity lookup (deterministic task ids, enqueue coalesce).
+    // Agent-facing Garden MCP must use findByIdInWorkspace.
     const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
 
     try {
@@ -105,6 +109,29 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       }
 
       throw new StorageError("QUERY_FAILED", `Failed to load Garden task ${parsedTaskId}.`, error);
+    }
+  }
+
+  public findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null {
+    const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "garden_task.workspace_id");
+
+    try {
+      const row = this.findByIdInWorkspaceStatement.get(
+        parsedTaskId,
+        parsedWorkspaceId
+      ) as GardenTaskDbRow | undefined;
+      return row === undefined ? null : parseGardenTaskRow(row);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to load Garden task ${parsedTaskId} in workspace ${parsedWorkspaceId}.`,
+        error
+      );
     }
   }
 
