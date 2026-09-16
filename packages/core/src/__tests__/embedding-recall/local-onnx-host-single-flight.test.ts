@@ -40,6 +40,12 @@ describe("local-onnx-host-single-flight", () => {
     expect(localOnnxHostSingleFlightEnabled({ ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT: "on" })).toBe(
       true
     );
+    expect(localOnnxHostSingleFlightEnabled({ ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT: "yes" })).toBe(
+      true
+    );
+    expect(() =>
+      localOnnxHostSingleFlightEnabled({ ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT: "2" })
+    ).toThrow(/ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT/);
   });
 
   it("resolves lock path from override or TMPDIR", () => {

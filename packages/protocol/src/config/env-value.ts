@@ -1,16 +1,34 @@
 const ENV_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/u;
 const ENV_POSITIVE_INT = /^[1-9][0-9]*$/u;
 const ENV_NON_NEGATIVE_SAFE_INT = /^[0-9]+$/u;
-const ENV_FLAG_OFF = new Set(["0", "false", "off", "no", "disabled"]);
-const ENV_FLAG_ON = new Set(["1", "true", "on", "yes", "enabled"]);
 
-export function parseEnvBoolean(raw: string | undefined, key: string): boolean {
-  if (raw === undefined) return false;
-  const normalized = raw.trim().toLowerCase();
-  if (normalized.length === 0) return false;
-  if (normalized === "true" || normalized === "1") return true;
-  if (normalized === "false" || normalized === "0") return false;
-  throw new Error(`${key} must be true, false, 1, or 0`);
+/** Shared public-flag vocabulary. `2` and other tokens are invalid, not truthy. */
+export const ENV_BOOLEAN_TRUE_TOKENS = ["1", "true", "on", "yes", "enabled"] as const;
+export const ENV_BOOLEAN_FALSE_TOKENS = ["0", "false", "off", "no", "disabled"] as const;
+export const ENV_BOOLEAN_VOCABULARY_ERROR =
+  "must be true, false, 1, 0, on, off, yes, no, enabled, or disabled";
+
+const ENV_FLAG_ON = new Set<string>(ENV_BOOLEAN_TRUE_TOKENS);
+const ENV_FLAG_OFF = new Set<string>(ENV_BOOLEAN_FALSE_TOKENS);
+
+export function parseEnvBoolean(
+  raw: string | undefined,
+  key: string,
+  unset = false
+): boolean {
+  const normalized = normalizeEnvFlag(raw);
+  if (normalized === undefined) return unset;
+  if (ENV_FLAG_ON.has(normalized)) return true;
+  if (ENV_FLAG_OFF.has(normalized)) return false;
+  throw new Error(`${key} ${ENV_BOOLEAN_VOCABULARY_ERROR}`);
+}
+
+export function parseEnvOptionalBoolean(
+  raw: string | undefined,
+  key: string
+): boolean | undefined {
+  if (normalizeEnvFlag(raw) === undefined) return undefined;
+  return parseEnvBoolean(raw, key);
 }
 
 export function parseEnvOptionalNumber(
@@ -63,20 +81,20 @@ export function parseSourceRefRobust(raw: string | undefined): boolean {
 }
 
 export function parseDefaultOnFlag(raw: string | undefined, key: string): boolean {
-  if (raw === undefined) return true;
-  const normalized = raw.trim().toLowerCase();
-  if (normalized.length === 0) return true;
-  if (ENV_FLAG_OFF.has(normalized)) return false;
-  if (ENV_FLAG_ON.has(normalized)) return true;
-  throw new Error(`${key} must be on, off, true, false, 1, or 0`);
+  return parseEnvBoolean(raw, key, true);
 }
 
 /** True when the raw env value is an explicit disable token. Unset/empty is not disabled. */
 export function isEnvFlagDisabled(raw: string | undefined, key = "env flag"): boolean {
-  if (raw === undefined) return false;
-  const normalized = raw.trim().toLowerCase();
-  if (normalized.length === 0) return false;
+  const normalized = normalizeEnvFlag(raw);
+  if (normalized === undefined) return false;
   if (ENV_FLAG_OFF.has(normalized)) return true;
   if (ENV_FLAG_ON.has(normalized)) return false;
-  throw new Error(`${key} must be on, off, true, false, 1, or 0`);
+  throw new Error(`${key} ${ENV_BOOLEAN_VOCABULARY_ERROR}`);
+}
+
+function normalizeEnvFlag(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  return normalized.length === 0 ? undefined : normalized;
 }

@@ -1,4 +1,5 @@
 import { DEFAULT_DAEMON_HOST } from "./daemon/support/daemon-defaults.js";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 
 export type DaemonHostEnvLike = {
   DAEMON_HOST?: string;
@@ -12,11 +13,11 @@ export type DaemonListenPolicy =
   | { readonly kind: "unix"; readonly path: string; readonly tcpHost: string };
 
 export function isRemoteDaemonOptInEnabled(envLike: DaemonHostEnvLike): boolean {
-  return envLike.ALAYA_ALLOW_REMOTE_DAEMON === "1";
+  return parseEnvBoolean(envLike.ALAYA_ALLOW_REMOTE_DAEMON, "ALAYA_ALLOW_REMOTE_DAEMON");
 }
 
 export function isWildcardBindOptInEnabled(envLike: DaemonHostEnvLike): boolean {
-  return envLike.ALAYA_ALLOW_WILDCARD_BIND === "1";
+  return parseEnvBoolean(envLike.ALAYA_ALLOW_WILDCARD_BIND, "ALAYA_ALLOW_WILDCARD_BIND");
 }
 
 function readOptionalEnvValue(value: string | undefined): string | undefined {

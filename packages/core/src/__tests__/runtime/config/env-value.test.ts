@@ -31,7 +31,7 @@ describe("parseSourceRefRobust", () => {
 
   it("throws on a written invalid value", () => {
     expect(() => parseSourceRefRobust("maybe")).toThrow(
-      /ALAYA_RECALL_SOURCE_REF_ROBUST must be true, false, 1, or 0/
+      /ALAYA_RECALL_SOURCE_REF_ROBUST must be true, false, 1, 0, on, off, yes, no, enabled, or disabled/
     );
   });
 });
@@ -89,7 +89,7 @@ describe("parseEnvPositiveInt", () => {
 });
 
 describe("env-value primitives stay consistent across former modules", () => {
-  it.each(["1", "true", "TRUE", " 1 "] as const)("boolean synonyms parse %j", (raw) => {
+  it.each(["1", "true", "TRUE", "on", "yes", "enabled", " 1 "] as const)("boolean synonyms parse %j", (raw) => {
     expect(parseEnvBoolean(raw, "FLAG")).toBe(true);
   });
 
@@ -98,7 +98,12 @@ describe("env-value primitives stay consistent across former modules", () => {
   });
 
   it("rejects illegal boolean tokens", () => {
-    expect(() => parseEnvBoolean("maybe", "FLAG")).toThrow(/FLAG must be true, false, 1, or 0/);
+    expect(() => parseEnvBoolean("maybe", "FLAG")).toThrow(
+      /FLAG must be true, false, 1, 0, on, off, yes, no, enabled, or disabled/
+    );
+    expect(() => parseEnvBoolean("2", "FLAG")).toThrow(
+      /FLAG must be true, false, 1, 0, on, off, yes, no, enabled, or disabled/
+    );
   });
 
   it.each(["0", "false", "off", "no", "disabled"] as const)(
@@ -120,9 +125,11 @@ describe("env-value primitives stay consistent across former modules", () => {
   );
 
   it("rejects illegal flag tokens in both core and storage", () => {
-    expect(() => isEnvFlagDisabled("maybe", "FLAG")).toThrow(/FLAG must be on, off, true, false, 1, or 0/);
+    expect(() => isEnvFlagDisabled("maybe", "FLAG")).toThrow(
+      /FLAG must be true, false, 1, 0, on, off, yes, no, enabled, or disabled/
+    );
     expect(() => isStorageEnvFlagDisabled("maybe", "FLAG"))
-      .toThrow(/FLAG must be on, off, true, false, 1, or 0/);
+      .toThrow(/FLAG must be true, false, 1, 0, on, off, yes, no, enabled, or disabled/);
   });
 
   it("parses the same positive integers in core and engine-gateway", () => {

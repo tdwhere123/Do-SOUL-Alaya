@@ -37,6 +37,18 @@ describe("provider url guard", () => {
   it("allows private http hosts only with the extra opt-in", () => {
     expect(assertAllowedProviderChatUrl(
       "http://127.0.0.1/v1/chat/completions",
+      { ALAYA_ALLOW_PRIVATE_PROVIDER_URL: "on" }
+    )).toBeUndefined();
+    expect(assertAllowedProviderChatUrl(
+      "http://127.0.0.1/v1/chat/completions",
+      { ALAYA_ALLOW_PRIVATE_PROVIDER_URL: "yes" }
+    )).toBeUndefined();
+    expect(() => assertAllowedProviderChatUrl(
+      "http://127.0.0.1/v1/chat/completions",
+      { ALAYA_ALLOW_PRIVATE_PROVIDER_URL: "2" }
+    )).toThrow(/ALAYA_ALLOW_PRIVATE_PROVIDER_URL/);
+    expect(assertAllowedProviderChatUrl(
+      "http://127.0.0.1/v1/chat/completions",
       PRIVATE_OPT_IN
     )).toBeUndefined();
     expect(assertAllowedProviderChatUrl(

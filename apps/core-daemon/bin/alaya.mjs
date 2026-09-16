@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import process from "node:process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(scriptDirectory, "..");
@@ -102,7 +103,12 @@ function toExitCode(value, fallback) {
 }
 
 function writeError(stream, error, env) {
-  const debugEnabled = env.ALAYA_DEBUG === "1";
+  let debugEnabled = false;
+  try {
+    debugEnabled = parseEnvBoolean(env.ALAYA_DEBUG, "ALAYA_DEBUG");
+  } catch {
+    debugEnabled = false;
+  }
   if (debugEnabled && error instanceof Error && typeof error.stack === "string") {
     stream.write(`${error.stack}\n`);
     return;

@@ -52,6 +52,8 @@ for (const key of documented) {
   }
 }
 
+assertBooleanVocabularyLock();
+
 if (errors.length > 0) {
   for (const error of errors) process.stderr.write(`env-docs: ${error}\n`);
   process.exit(1);
@@ -82,6 +84,58 @@ function loadDocumentedKeys(filePath) {
     keys.add(match[1]);
   }
   return keys;
+}
+
+function parseExportedStringArray(source, name) {
+  const match = source.match(new RegExp(`export const ${name} = \\[([^\\]]+)\\]`));
+  if (match === null) {
+    errors.push(`protocol env-value.ts is missing ${name}`);
+    return [];
+  }
+  const tokens = [...match[1].matchAll(/"([^"]+)"/g)].map((entry) => entry[1]);
+  if (tokens.length === 0) {
+    errors.push(`protocol env-value.ts ${name} is empty`);
+  }
+  return tokens;
+}
+
+function loadBooleanVocabulary() {
+  const source = readFileSync(
+    path.join(repoRoot, "packages/protocol/src/config/env-value.ts"),
+    "utf8"
+  );
+  return {
+    trueTokens: parseExportedStringArray(source, "ENV_BOOLEAN_TRUE_TOKENS"),
+    falseTokens: parseExportedStringArray(source, "ENV_BOOLEAN_FALSE_TOKENS")
+  };
+}
+
+function compactWhitespace(value) {
+  return value.toLowerCase().replace(/\s+/g, " ");
+}
+
+function assertBooleanVocabularyLock() {
+  const { trueTokens, falseTokens } = loadBooleanVocabulary();
+  const envExample = readFileSync(envExamplePath, "utf8");
+  const vocabBlock = envExample.match(
+    /Public boolean flags share one vocabulary[\s\S]{0,800}/
+  );
+  if (vocabBlock === null) {
+    errors.push(".env.example is missing the public boolean vocabulary header");
+    return;
+  }
+  const haystack = compactWhitespace(vocabBlock[0]);
+  const trueLine = `true: ${trueTokens.join(", ")}`;
+  const falseLine = `false: ${falseTokens.join(", ")}`;
+  if (!haystack.includes(compactWhitespace(trueLine))) {
+    errors.push(`.env.example must document boolean true tokens as "${trueLine}"`);
+  }
+  if (!haystack.includes(compactWhitespace(falseLine))) {
+    errors.push(`.env.example must document boolean false tokens as "${falseLine}"`);
+  }
+  if (!/"2"/.test(vocabBlock[0]) || !/invalid/i.test(vocabBlock[0])) {
+    errors.push(`.env.example must document that the token "2" is invalid`);
+  }
 }
 
 function hasProductionReadSite(key) {

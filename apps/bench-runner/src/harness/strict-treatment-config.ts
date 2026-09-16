@@ -1,4 +1,5 @@
 import { D2Q_SCHEMA_VERSION } from "@do-soul/alaya-core";
+import { parseEnvOptionalBoolean } from "@do-soul/alaya-protocol";
 
 const RAW_EMBEDDING_SCHEMA_VERSION = 1;
 
@@ -11,11 +12,7 @@ export function readOptionalTreatmentBoolean(
   raw: string | undefined,
   key: TreatmentBooleanKey
 ): boolean | null {
-  const value = raw?.trim().toLowerCase();
-  if (value === undefined || value.length === 0) return null;
-  if (value === "1" || value === "true") return true;
-  if (value === "0" || value === "false") return false;
-  throw new Error(`${key} must be true, false, 1, or 0`);
+  return parseEnvOptionalBoolean(raw, key) ?? null;
 }
 
 export function refuseRetiredLocalCrossEncoderTreatment(

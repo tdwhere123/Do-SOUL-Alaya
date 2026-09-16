@@ -1,4 +1,5 @@
 import type { LongMemEvalQuestion } from "../../ingestion/dataset.js";
+import { isEnvFlagDisabled, parseEnvBoolean } from "@do-soul/alaya-protocol";
 import { buildLongMemEvalSidecarKey, type LongMemEvalSidecarEntry } from "../runner-helpers.js";
 import { scoreQaQuestion, type QaDeliveredCandidate, type QaQuestionVerdict } from "../../../../runs/qa/qa-harness.js";
 import type { QaChatFn } from "../../../../runs/qa/qa-chat.js";
@@ -22,12 +23,11 @@ function readPositiveIntEnv(name: string, fallback: number): number {
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
 }
 
-function isEnvExplicitlyDisabled(raw: string | undefined): boolean {
-  if (raw === undefined) {
-    return false;
-  }
-  const normalized = raw.trim().toLowerCase();
-  return normalized === "0" || normalized === "off" || normalized === "false";
+export function shouldDedupQaDelivery(): boolean {
+  return !isEnvFlagDisabled(
+    process.env.ALAYA_BENCH_QA_DEDUP_DELIVERY,
+    "ALAYA_BENCH_QA_DEDUP_DELIVERY"
+  );
 }
 
 export function resolveQaDeliveryBudget(questionType: string): {
@@ -48,10 +48,6 @@ export function resolveQaDeliveryBudget(questionType: string): {
     deliverK: useWideDelivery ? 20 : 10,
     useWideDelivery
   };
-}
-
-export function shouldDedupQaDelivery(): boolean {
-  return !isEnvExplicitlyDisabled(process.env.ALAYA_BENCH_QA_DEDUP_DELIVERY);
 }
 
 function qaDeliveryIdentity(candidate: QaDeliveredCandidate): string | null {
@@ -281,16 +277,7 @@ function buildQaSupportCandidatesFromSidecar(
 }
 
 export function isBenchProfileEnabled(): boolean {
-  const raw = process.env[BENCH_PROFILE_ENV];
-  if (raw === undefined) return false;
-  const normalized = raw.trim().toLowerCase();
-  return (
-    normalized !== "" &&
-    normalized !== "0" &&
-    normalized !== "false" &&
-    normalized !== "off" &&
-    normalized !== "no"
-  );
+  return parseEnvBoolean(process.env[BENCH_PROFILE_ENV], BENCH_PROFILE_ENV);
 }
 
 interface PhaseTimer {

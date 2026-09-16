@@ -1,4 +1,5 @@
 import { bindEventPublisher } from "@do-soul/alaya-core";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 import {
   createApp,
   type CoreDaemonLifecycleState,
@@ -403,7 +404,7 @@ export function shouldEnableE2eEventTriggers(env: NodeJS.ProcessEnv): boolean {
   if (env.NODE_ENV?.trim().toLowerCase() === "production") {
     return false;
   }
-  return env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS === "1";
+  return parseEnvBoolean(env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS, "ALAYA_ENABLE_E2E_EVENT_TRIGGERS");
 }
 
 function createE2eEventLogRepo(eventLogRepo: E2eEventLogInputPort): E2eEventLogRepo {

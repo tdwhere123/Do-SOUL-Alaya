@@ -5,6 +5,8 @@ import {
   AcceptedBy,
   DEFAULT_SOUL_CONFIG,
   ProjectMappingState,
+  parseEnvBoolean,
+  parseEnvOptionalBoolean,
   type AgentRuntimePort,
   type EngineBinding,
   type EngineBindingSummary,
@@ -217,15 +219,10 @@ export type EdgeClassifyWiringMode = "host_worker_defer" | "cloud_llm" | "heuris
 
 export interface EdgeClassifyWiring {
   readonly mode: EdgeClassifyWiringMode;
-  // strict opt-in for the synchronous cloud edge-LLM (1/true only).
+  // strict opt-in for the synchronous cloud edge-LLM.
   readonly llmEnabled: boolean;
   // host-worker defer is on (explicit override OR provider_kind=host_worker default).
   readonly hostWorkerEnabled: boolean;
-}
-
-function readBooleanOptIn(raw: string | undefined): boolean {
-  const value = raw?.toLowerCase();
-  return value === "1" || value === "true";
 }
 
 // invariant: the single decision that chooses cloud llmPort vs the
@@ -241,14 +238,15 @@ export function resolveEdgeClassifyWiring(
   env: Readonly<Record<string, string | undefined>>,
   gardenComputeConfig: { readonly provider_kind: string }
 ): EdgeClassifyWiring {
-  const llmEnabled = readBooleanOptIn(env[ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV]);
-  const hostWorkerRaw = env[ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV]?.toLowerCase();
-  const hostWorkerEnabled =
-    hostWorkerRaw === "1" || hostWorkerRaw === "true"
-      ? true
-      : hostWorkerRaw === "0" || hostWorkerRaw === "false"
-        ? false
-        : gardenComputeConfig.provider_kind === "host_worker";
+  const llmEnabled = parseEnvBoolean(
+    env[ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV],
+    ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV
+  );
+  const hostWorkerOverride = parseEnvOptionalBoolean(
+    env[ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV],
+    ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV
+  );
+  const hostWorkerEnabled = hostWorkerOverride ?? gardenComputeConfig.provider_kind === "host_worker";
   const mode: EdgeClassifyWiringMode = hostWorkerEnabled
     ? "host_worker_defer"
     : llmEnabled

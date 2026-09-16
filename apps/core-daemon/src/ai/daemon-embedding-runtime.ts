@@ -15,7 +15,7 @@ import {
   type EmbeddingRecallServiceDependencies,
   type HqProvider
 } from "@do-soul/alaya-core";
-import type { RecallPolicy } from "@do-soul/alaya-protocol";
+import { parseEnvBoolean, type RecallPolicy } from "@do-soul/alaya-protocol";
 import {
   RecallQualifiedEvidenceReader,
   type SqliteMemoryEntryRepo,
@@ -334,7 +334,10 @@ function resolveEmbeddingProvider(input: {
     apiKey: input.apiKey,
     model: input.openAiModel ?? undefined,
     baseUrl: input.openAiBaseUrl ?? undefined,
-    allowPrivateProviderUrl: processEnvLookup().ALAYA_ALLOW_PRIVATE_PROVIDER_URL === "1"
+    allowPrivateProviderUrl: parseEnvBoolean(
+      processEnvLookup().ALAYA_ALLOW_PRIVATE_PROVIDER_URL,
+      "ALAYA_ALLOW_PRIVATE_PROVIDER_URL"
+    )
   });
 }
 

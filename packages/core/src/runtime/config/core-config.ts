@@ -1,4 +1,4 @@
-import { StorageTier } from "@do-soul/alaya-protocol";
+import { StorageTier, parseEnvBoolean } from "@do-soul/alaya-protocol";
 import { parseRecallRuntimeConfigFromEnv, type RecallRuntimeConfig } from "./recall-runtime-config.js";
 import { CORE_CONFIG_ENV_KEYS } from "./core-config-environment.js";
 import { parseEnvOptionalNumber } from "./env-value.js";
@@ -62,8 +62,10 @@ export function parseCoreConfigFromEnv(
 export function resolvePathRelContentStrengthEnabledFromConfig(
   config: PathGraphRuntimeConfig
 ): boolean {
-  const raw = config.pathrelContentStrength;
-  return raw === "on" || raw === "1" || raw === "true";
+  return parseEnvBoolean(
+    config.pathrelContentStrength,
+    CORE_CONFIG_ENV_KEYS.pathGraph.contentStrength
+  );
 }
 
 export function resolveEmbeddingRecallTiersFromConfig(
