@@ -28,17 +28,18 @@ jobs:
           # Hygiene/audit stay on Ubuntu PR CI. macOS and Windows keep
           # build+test (Windows also CLI smoke). Do not move hygiene onto
           # every PR OS; native/path issues can use a nightly three-OS job.
+          # Combined Quality exceeds 30m on Ubuntu/macOS; a 30m job timeout cancels before tests finish.
           - label: ubuntu-node24
             os: ubuntu-latest
             node: '24'
-            timeout_minutes: 30
+            timeout_minutes: 60
             run_hygiene: true
             run_coverage: true
             run_smoke: false
           - label: macos-node24
             os: macos-latest
             node: '24'
-            timeout_minutes: 30
+            timeout_minutes: 60
             run_hygiene: false
             run_coverage: false
             run_smoke: false
