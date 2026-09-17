@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
   buildOfficialApiSourceCorpus,
@@ -33,6 +34,8 @@ import {
   testExtractionTransportProvenance,
   writeExtractionCacheTestManifest
 } from "../../../../../../apps/bench-runner/src/__tests__/longmemeval/extraction/extraction-cache-test-fixture.js";
+import { buildExtractionTransportProvenance } from
+  "../../../../../../apps/bench-runner/src/runs/extraction/transport-route.js";
 import {
   RETAINED_PAID_MODEL,
   RETAINED_PAID_OUTPUT_SHA256,
@@ -242,7 +245,10 @@ describe("admitted public consumption entry", () => {
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, request
     });
     const bindInput = {
-      cacheRoot, model: SHARD_MODEL, requestProfile: SHARD_PROFILE,
+      cacheRoot, model: SHARD_MODEL, modelFamily: SHARD_MODEL,
+      providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+      sourcePacking: DEFAULT_EXTRACTION_SOURCE_PACKING,
+      requestProfile: SHARD_PROFILE,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, sourceCorpus: corpus,
       artifactKey: "actual", request
     } as const;
@@ -303,6 +309,22 @@ describe("admitted public consumption entry", () => {
       expect(bindAdmittedActualModelShard({
         ...bindInput, request: packedRequest(officialCorpus(`${canary.intended} Extra.`))
       }).status).toBe("not_exercised");
+      expect(bindAdmittedActualModelShard(bindInput)).toMatchObject({
+        status: "not_exercised", reason: "transport_generation_mismatch"
+      });
+      writeCachedExtraction(cacheRoot, cacheKey, {
+        model: SHARD_MODEL, request_profile: SHARD_PROFILE, cache_key: cacheKey,
+        raw_json: rawJson, extracted_at: NOW,
+        empty_classification: "completed_signals",
+        transport_provenance: buildExtractionTransportProvenance({
+          model: SHARD_MODEL, providerUrl: TEST_EXTRACTION_PROVIDER_URL
+        }),
+        request_completion: { version: EXTRACTION_REQUEST_COMPLETION_VERSION, status: "completed_signals" },
+        response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA
+      });
+      expect(bindAdmittedActualModelShard(bindInput)).toMatchObject({
+        status: "not_exercised", reason: "missing_admission_identity"
+      });
       expect(fetches).toBe(0);
     } finally {
       await rm(cacheRoot, { recursive: true, force: true });
@@ -342,7 +364,10 @@ describe("admitted public consumption entry", () => {
         result: { rawJson, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }
       });
       const bindInput = {
-        cacheRoot, model: SHARD_MODEL, modelFamily: family, requestProfile: SHARD_PROFILE,
+        cacheRoot, model: SHARD_MODEL, modelFamily: family,
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        sourcePacking: DEFAULT_EXTRACTION_SOURCE_PACKING,
+        requestProfile: SHARD_PROFILE,
         systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, sourceCorpus: corpus,
         artifactKey: "actual", request
       } as const;
@@ -402,6 +427,11 @@ describe("admitted public consumption entry", () => {
         expect(scored.content.has_full_intended).toBe(true);
         expect(scored.content.has_all_required_phrases).toBe(true);
         expect(scored.content.has_forbidden_distractor).toBe(false);
+        if (canary.group === "aspiration") {
+          expect(trace.termination.source_bodies[planted.sourceId] ?? "").toContain(
+            "because we believe that cloud technologies"
+          );
+        }
         expect(scored.primary_native_visits).not.toBe("miss");
         expect(scored.first_complete_costs).not.toBeNull();
         expect(scored.first_complete_costs?.cumulative_native_visits).not.toBe("unavailable");

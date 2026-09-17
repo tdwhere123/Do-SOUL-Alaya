@@ -89,6 +89,15 @@ describe("official API source interpretation receive", () => {
     expect(missing.located[0]?.diagnostics).toEqual([
       { candidate_index: null, reason: "missing_response" }
     ]);
+    const unknown = receiveOfficialApiSourceInterpretations(
+      "{}",
+      request,
+      { sourceCorpus: corpus, artifactKey: "artifact-1", responseKind: "transport_unknown" }
+    );
+    expect(unknown.rejections[0]?.reason).toBe("transport_unknown");
+    expect(unknown.located[0]?.diagnostics).toEqual([
+      { candidate_index: null, reason: "transport_unknown" }
+    ]);
   });
 
   it("does not leak candidates across source or assertion mismatches", () => {

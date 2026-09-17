@@ -25,11 +25,13 @@ import {
 import { computeCacheKey } from
   "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-key.js";
 import {
-  extractionModelFamily,
-  readExtractionCacheManifestIdentity
+  readExtractionCacheManifestIdentity,
+  type ExtractionCacheManifestIdentity
 } from "../../../../../../apps/bench-runner/src/runs/extraction/cache/extraction-cache-manifest.js";
 import { assertExtractionCacheIdentity } from
   "../../../../../../apps/bench-runner/src/runs/extraction/cache/cache-identity.js";
+import { computeExtractionRawJsonSha256 } from
+  "../../../../../../apps/bench-runner/src/runs/extraction/content-closure.js";
 import { buildExtractionTransportProvenance } from
   "../../../../../../apps/bench-runner/src/runs/extraction/transport-route.js";
 import { insertLocatedBoundGist } from "./source-discovery-public-consumption.js";
@@ -123,6 +125,8 @@ type ExtractionShardBindInput = Readonly<{
   readonly cacheKey?: string;
   readonly sha256?: FieldContractSha256;
   readonly modelFamily?: string;
+  readonly providerUrl?: string;
+  readonly sourcePacking?: typeof DEFAULT_EXTRACTION_SOURCE_PACKING;
 }>;
 
 type ExtractionShardSnapshot =
@@ -132,6 +136,7 @@ type ExtractionShardSnapshot =
       readonly derivedKey: string;
       readonly request: OfficialApiExtractionRequest;
       readonly entry: CachedExtractionEntry;
+      readonly manifestIdentity: ExtractionCacheManifestIdentity | undefined;
     }>;
 
 export function bindReceivedExtractionShard(input: ExtractionShardBindInput): BoundPublicReceive {
@@ -252,11 +257,21 @@ function takeExtractionShardSnapshot(input: ExtractionShardBindInput): Extractio
   if (inspected.status !== "hit") {
     return { kind: "bind", bind: { ...invalidBind(inspected), cacheKey: derivedKey } };
   }
+  let manifestIdentity: ExtractionCacheManifestIdentity | undefined;
+  try {
+    manifestIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
+  } catch {
+    return {
+      kind: "bind",
+      bind: { status: "invalid", reason: "invalid_cache_manifest", cacheKey: derivedKey }
+    };
+  }
   return {
     kind: "entry",
     derivedKey,
     request: packed.request,
-    entry: cached.entry
+    entry: cached.entry,
+    manifestIdentity
   };
 }
 
@@ -282,25 +297,23 @@ function actualModelIdentityGap(
   input: ExtractionShardBindInput,
   snapshot: Extract<ExtractionShardSnapshot, { readonly kind: "entry" }>
 ): string | null {
-  let identity: ReturnType<typeof readExtractionCacheManifestIdentity>;
-  try {
-    identity = readExtractionCacheManifestIdentity(input.cacheRoot);
-  } catch {
-    return "invalid_cache_manifest";
-  }
+  const identity = snapshot.manifestIdentity;
   if (identity === undefined) return "missing_cache_manifest";
+  if (input.modelFamily === undefined) return "missing_model_family";
+  if (input.providerUrl === undefined) return "missing_provider_url";
+  if (input.sourcePacking === undefined) return "missing_source_packing";
   try {
     assertExtractionCacheIdentity({
       config: {
         model: input.model,
-        modelFamily: input.modelFamily ?? extractionModelFamily(identity.manifest),
-        providerUrl: identity.manifest.provider_url,
+        modelFamily: input.modelFamily,
+        providerUrl: input.providerUrl,
         requestProfile: input.requestProfile,
-        sourcePacking: DEFAULT_EXTRACTION_SOURCE_PACKING
+        sourcePacking: input.sourcePacking
       },
       systemPrompt: input.systemPrompt,
       manifest: identity.manifest,
-      validateProvider: false
+      validateProvider: true
     });
   } catch {
     return "cache_identity_mismatch";
@@ -308,11 +321,17 @@ function actualModelIdentityGap(
   const transport = snapshot.entry.transport_provenance;
   if (transport === undefined) return "unbound_transport_metadata";
   const expected = buildExtractionTransportProvenance({
-    model: identity.manifest.extraction_model,
-    providerUrl: identity.manifest.provider_url
+    model: input.model,
+    providerUrl: input.providerUrl
   });
   if (transport.model !== expected.model || transport.provider_url_sha256 !== expected.provider_url_sha256) {
     return "transport_generation_mismatch";
+  }
+  const admission = snapshot.entry.admission_identity;
+  if (admission === undefined) return "missing_admission_identity";
+  if (admission.manifest_sha256 !== identity.manifestSha256) return "admission_manifest_mismatch";
+  if (admission.raw_json_sha256 !== computeExtractionRawJsonSha256(snapshot.entry.raw_json)) {
+    return "admission_payload_mismatch";
   }
   return null;
 }

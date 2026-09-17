@@ -19,6 +19,7 @@ import { EXTRACTION_CACHE_ROOT } from "./compile-seed-config.js";
 import { assertExtractionCacheIdentity } from "../extraction/cache/cache-identity.js";
 import { ExtractionCacheInvariantError } from "../extraction/cache/cache-invariant-error.js";
 import {
+  computeExtractionRawJsonSha256,
   inspectExtractionRawJson,
   type ExtractionRawJsonInspection
 } from "../extraction/content-closure.js";
@@ -447,6 +448,7 @@ function persistExtraction(
     );
   }
   try {
+    const manifestIdentity = readExtractionCacheManifestIdentity(cacheRoot);
     writeCachedExtraction(cacheRoot, cacheKey, {
       model: options.config.model,
       request_profile: options.config.requestProfile,
@@ -458,7 +460,13 @@ function persistExtraction(
         transport_provenance: buildExtractionTransportProvenance(options.config),
         request_completion: { version: EXTRACTION_REQUEST_COMPLETION_VERSION, status: requestCompletion! }
       } : {}),
-      ...persistedResponseMetadata(result.responseMetadata, result.usage, providerBacked)
+      ...persistedResponseMetadata(result.responseMetadata, result.usage, providerBacked),
+      ...(manifestIdentity === undefined ? {} : {
+        admission_identity: {
+          manifest_sha256: manifestIdentity.manifestSha256,
+          raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson)
+        }
+      })
     });
   } catch (cause) {
     throw new ExtractionCacheInvariantError(

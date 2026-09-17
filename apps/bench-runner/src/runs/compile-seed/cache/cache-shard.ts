@@ -34,6 +34,11 @@ import {
 
 const MAX_EXTRACTION_CACHE_SHARD_BYTES = 32 * 1024 * 1024;
 
+export interface CachedExtractionAdmissionIdentity {
+  readonly manifest_sha256: string;
+  readonly raw_json_sha256: string;
+}
+
 export interface CachedExtractionEntry {
   readonly model: string;
   readonly request_profile: CompileSeedExtractionConfig["requestProfile"];
@@ -44,6 +49,7 @@ export interface CachedExtractionEntry {
   readonly request_completion?: PersistedExtractionRequestCompletion;
   readonly response_metadata?: CachedExtractionResponseMetadata;
   readonly transport_provenance?: ExtractionTransportProvenance;
+  readonly admission_identity?: CachedExtractionAdmissionIdentity;
 }
 
 export type CachedExtractionInspection =
@@ -277,5 +283,20 @@ function inspectCachedIdentity(
       !isExtractionTransportProvenance(parsed.transport_provenance)) {
     return "transport_provenance is invalid";
   }
+  if (parsed.admission_identity !== undefined &&
+      !isCachedExtractionAdmissionIdentity(parsed.admission_identity)) {
+    return "admission_identity is invalid";
+  }
   return parsed.cache_key === cacheKey ? null : "cache_key does not match fixture path";
+}
+
+function isCachedExtractionAdmissionIdentity(
+  value: unknown
+): value is CachedExtractionAdmissionIdentity {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<CachedExtractionAdmissionIdentity>;
+  return typeof candidate.manifest_sha256 === "string" &&
+    /^[a-f0-9]{64}$/u.test(candidate.manifest_sha256) &&
+    typeof candidate.raw_json_sha256 === "string" &&
+    /^[a-f0-9]{64}$/u.test(candidate.raw_json_sha256);
 }
