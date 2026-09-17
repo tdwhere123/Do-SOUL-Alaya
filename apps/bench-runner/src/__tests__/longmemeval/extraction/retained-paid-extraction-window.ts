@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   computeOfficialApiSourceCorpusIdentity,
@@ -22,21 +22,14 @@ export const RETAINED_PAID_REQUEST_KEY =
 export const RETAINED_PAID_MODEL = "gemini-3.1-flash-lite";
 export const RETAINED_PAID_REQUEST_PROFILE = "gemini-3.1-low-v1" as const;
 
+const WORKTREE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../../");
+
 export function resolveRepoRelativeArtifact(relativePath: string): string | null {
-  const starts = [process.cwd(), join(dirname(fileURLToPath(import.meta.url)), "../../../../../../")];
-  const seen = new Set<string>();
-  for (const start of starts) {
-    let dir = start;
-    for (let i = 0; i < 8; i += 1) {
-      if (seen.has(dir)) break;
-      seen.add(dir);
-      const candidate = join(dir, relativePath);
-      if (existsSync(candidate)) return candidate;
-      const parent = dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  }
+  if (relativePath === "" || isAbsolute(relativePath)) return null;
+  const candidate = resolve(WORKTREE_ROOT, relativePath);
+  const inside = relative(WORKTREE_ROOT, candidate);
+  if (inside === "" || inside.startsWith("..") || isAbsolute(inside)) return null;
+  if (existsSync(candidate)) return candidate;
   return null;
 }
 

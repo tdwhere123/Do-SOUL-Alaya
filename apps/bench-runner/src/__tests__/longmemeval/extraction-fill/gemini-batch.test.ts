@@ -15,8 +15,23 @@ import { decodeGeminiGenerateContent, encodeGeminiGenerateContent } from
 import type { GeminiBatchInvocation, GeminiBatchPlan } from
   "../../../runs/extraction/fill/batch/contract.js";
 import * as batchStore from "../../../runs/extraction/fill/batch/store.js";
-import { buildOfficialApiExtractionRequest, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
+import {
+  OFFICIAL_API_SYSTEM_PROMPT,
+  buildOfficialApiExtractionRequest,
+  buildOfficialApiSourceCorpus,
+  stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
 import { createGardenHttpExtractor } from "../../../runs/compile-seed/compile-seed-http.js";
+import {
+  ExtractionResponseAdmissionError,
+  computeCacheKey,
+  importExtractionResponse
+} from "../../../runs/compile-seed/compile-seed-cache.js";
+import {
+  TEST_EXTRACTION_PROVIDER_URL,
+  TEST_PROVIDER_COMPLETION_METADATA,
+  writeExtractionCacheTestManifest
+} from "../extraction/extraction-cache-test-fixture.js";
 
 describe("durable Gemini Batch HTTP extraction", () => {
   let root: string;
@@ -262,6 +277,76 @@ describe("durable Gemini Batch HTTP extraction", () => {
       diagnostic_reason: "ambiguous"
     });
     expect(importer).toHaveBeenCalledTimes(2);
+  });
+
+  it("reopens malformed JSON rejections from batch state after importExtractionResponse", async () => {
+    const source = "Alice uses tools.";
+    const request = buildOfficialApiExtractionRequest(source, []);
+    const sourceCorpus = buildOfficialApiSourceCorpus(source, []);
+    const userPrompt = stringifyOfficialApiExtractionRequest(request);
+    const model = "test-model";
+    const requestProfile = "provider-default-v1" as const;
+    const cacheKey = computeCacheKey(model, requestProfile, OFFICIAL_API_SYSTEM_PROMPT, userPrompt);
+    const sourcePlan: GeminiBatchPlan = {
+      ...plan(),
+      lines: [{
+        key: cacheKey,
+        unitKeys: ["unit-a"],
+        requestSha256: batchDigest(userPrompt),
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        userPrompt
+      }]
+    };
+    writeExtractionCacheTestManifest({
+      cacheRoot: root, model, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, requestProfile
+    });
+    await run("prepare", { plan: sourcePlan });
+    await run("submit", { plan: sourcePlan });
+    state = "BATCH_STATE_SUCCEEDED";
+    output = JSON.stringify({
+      key: cacheKey,
+      response: {
+        candidates: [{ finishReason: "STOP", content: { parts: [{ text: "not-json" }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, thoughtsTokenCount: 2, totalTokenCount: 17 }
+      }
+    }) + "\n";
+    const lease = acquireExtractionCacheWriteLease(root);
+    const imported = await withExtractionCacheWriteLease(lease, () => executeGeminiBatchOperation({
+      operation: "resume", root, lease, plan: sourcePlan,
+      http: createGeminiBatchHttp({ endpoint, apiKey: "synthetic-key", timeoutMs: 1_000 }),
+      reserveSubmission: reserve,
+      importLine: async (result) => {
+        try {
+          importExtractionResponse({
+            config: {
+              model, modelFamily: model, providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile
+            },
+            cacheRoot: root,
+            writeLease: lease,
+            systemPrompt: result.line.systemPrompt,
+            userPrompt: result.line.userPrompt,
+            expectedCacheKey: result.line.key,
+            sourceCorpus,
+            result: { rawJson: result.rawJson, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }
+          });
+        } catch (cause) {
+          if (cause instanceof ExtractionResponseAdmissionError) {
+            return {
+              status: "quarantined" as const,
+              reason: cause.message,
+              rejections: cause.rejections
+            };
+          }
+          throw cause;
+        }
+      }
+    }));
+    expect(imported.jobs[0]?.outcomes[cacheKey]).toMatchObject({
+      status: "quarantined",
+      rejections: [{ reason: "malformed_response" }]
+    });
+    const reopened = await run("status", { plan: sourcePlan });
+    expect(reopened.jobs[0]?.outcomes[cacheKey]?.rejections?.[0]?.reason).toBe("malformed_response");
   });
 
   it("does not certify a missing or truncated line and retains unknown cost", async () => {

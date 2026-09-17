@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -25,7 +25,8 @@ import {
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
 import {
-  composeEnrichmentPreparationReport
+  composeEnrichmentPreparationReport,
+  type EnrichmentBoundNativeOutcome
 } from "../../../runs/extraction/enrichment-acceptance/preparation-report.js";
 import {
   nativeOutcomesFromInterpretationReceive
@@ -172,17 +173,6 @@ describe("interpretation admission diagnostics", () => {
         expect(admission.cause).toBeInstanceOf(OfficialApiInterpretationAdmissionError);
         expect(admission.rejections[0]?.reason).toBe("malformed_response");
         expect(admission.receive?.rejections[0]?.reason).toBe("malformed_response");
-        const quarantinePath = join(root, "quarantine-reopen.json");
-        writeFileSync(quarantinePath, JSON.stringify({
-          status: "quarantined",
-          reason: admission.message,
-          rejections: admission.rejections,
-          receive: admission.receive
-        }));
-        const reopened = JSON.parse(readFileSync(quarantinePath, "utf8")) as {
-          readonly rejections: readonly { readonly reason: string }[];
-        };
-        expect(reopened.rejections[0]?.reason).toBe("malformed_response");
       }
       expect(inspectCachedExtraction(root, expectedCacheKey, MODEL, PROFILE).status).toBe("missing");
       expect(fetches).toBe(0);
@@ -224,25 +214,12 @@ describe("interpretation admission diagnostics", () => {
       diagnostic_reason: "ambiguous",
       located_outcome: "failed"
     });
-    const pointerOutcomes = outcomes.flatMap((item) => {
-      if (item.annotation_pointer === undefined) return [];
-      return [Object.freeze({
-        annotation_pointer: item.annotation_pointer,
-        request_ordinal: item.request_ordinal,
-        candidate_ordinal: item.candidate_ordinal,
-        raw_state: item.raw_state,
-        machine_admission: item.machine_admission,
-        located_outcome: item.located_outcome,
-        ...(item.diagnostic_reason === undefined ? {} : { diagnostic_reason: item.diagnostic_reason }),
-        rejected_siblings: item.rejected_siblings
-      })];
-    });
     const report = composeEnrichmentPreparationReport({
       population: { rows },
       bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
       preflight: null,
       selectedStage: "first_stage",
-      nativeOutcomes: pointerOutcomes,
+      nativeOutcomes: reportNativeOutcomes(outcomes),
       fixtureOutcomes: [{
         name: "actual-model public consumption",
         kind: "public_consumption",
@@ -320,42 +297,34 @@ describe("interpretation admission diagnostics", () => {
       artifactKey: "retained-paid"
     });
     expect(received.status).toBe("partial");
-    const assertionSix = received.located.find((row) => row.assertion_binding.assertion_id === 6);
-    expect(assertionSix?.outcome).toBe("failed");
-    expect(assertionSix?.diagnostics).toEqual([{ candidate_index: 0, reason: "ambiguous" }]);
+    expect(paid.request.source_assertions).toHaveLength(8);
+    const byAssertion = new Map(
+      received.located.map((row) => [row.assertion_binding.assertion_id, row] as const)
+    );
+    expect(byAssertion.get(1)?.outcome).toBe("candidates");
+    expect(byAssertion.get(2)?.outcome).toBe("candidates");
+    expect(byAssertion.get(3)?.outcome).toBe("empty");
+    expect(byAssertion.get(4)?.outcome).toBe("candidates");
+    expect(byAssertion.get(5)?.outcome).toBe("empty");
+    expect(byAssertion.get(6)?.outcome).toBe("failed");
+    expect(byAssertion.get(6)?.diagnostics).toEqual([{ candidate_index: 0, reason: "ambiguous" }]);
+    expect(byAssertion.get(7)?.outcome).toBe("empty");
+    expect(byAssertion.get(8)?.outcome).toBe("candidates");
     expect(() => classifyOfficialApiExtractionResult(
       paid.rawJson, paid.request, paid.sourceCorpus
     )).toThrow(OfficialApiInterpretationAdmissionError);
     const rows = Array.from({ length: 38 }, (_, index) => frozenRow(index + 1, index < 8));
-    const member = paid.request.source_assertions.find((item) => item.assertion_id === 6);
-    expect(member).toBeDefined();
     const outcomes = nativeOutcomesFromInterpretationReceive({
       requestKey: RETAINED_PAID_REQUEST_KEY,
       receive: received,
-      attributions: [{ 
-        annotation_pointer: rows[5]!.annotation_pointer,
-        current_assertion_id: member!.assertion_id
-      }]
-    });
-    const pointerOutcomes = outcomes.flatMap((item) => {
-      if (item.annotation_pointer === undefined) return [];
-      return [Object.freeze({
-        annotation_pointer: item.annotation_pointer,
-        request_ordinal: item.request_ordinal,
-        candidate_ordinal: item.candidate_ordinal,
-        raw_state: item.raw_state,
-        machine_admission: item.machine_admission,
-        located_outcome: item.located_outcome,
-        ...(item.diagnostic_reason === undefined ? {} : { diagnostic_reason: item.diagnostic_reason }),
-        rejected_siblings: item.rejected_siblings
-      })];
+      attributions: packedAttributions(paid.request.source_assertions, rows)
     });
     const report = composeEnrichmentPreparationReport({
       population: { rows },
       bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
       preflight: null,
       selectedStage: "first_stage",
-      nativeOutcomes: pointerOutcomes,
+      nativeOutcomes: reportNativeOutcomes(outcomes),
       fixtureOutcomes: [{
         name: "actual-model public consumption",
         kind: "public_consumption",
@@ -364,31 +333,65 @@ describe("interpretation admission diagnostics", () => {
         detail: "historical quarantined payload; provenance is not cache-admitted"
       }]
     });
-    expect(report.source_fidelity.rows.find((row) => row.original_ordinal === 6)?.native_cells[0])
-      .toMatchObject({
-        candidate_ordinal: 0,
-        diagnostic_reason: "ambiguous",
-        located_outcome: "failed",
-        machine_admission: "rejected"
-      });
+    expect(reportRow(report, 1)?.native_cells[0]?.located_outcome).toBe("candidates");
+    expect(reportRow(report, 2)?.native_cells[0]?.located_outcome).toBe("candidates");
+    expect(reportRow(report, 3)?.native_cells[0]?.located_outcome).toBe("empty");
+    expect(reportRow(report, 4)?.native_cells[0]?.located_outcome).toBe("candidates");
+    expect(reportRow(report, 5)?.native_cells[0]?.located_outcome).toBe("empty");
+    expect(reportRow(report, 6)?.native_cells[0]).toMatchObject({
+      candidate_ordinal: 0,
+      diagnostic_reason: "ambiguous",
+      located_outcome: "failed",
+      machine_admission: "rejected"
+    });
+    expect(reportRow(report, 7)?.native_cells[0]?.located_outcome).toBe("empty");
+    expect(reportRow(report, 8)?.native_cells[0]?.located_outcome).toBe("candidates");
+    expect(report.source_fidelity.rows).toHaveLength(38);
     expect(report.source_fidelity.rows.slice(8).every((row) =>
       row.selected === false && row.raw_state === "not_exercised")).toBe(true);
     expect(report.public_consumption.status).toBe("not_exercised");
+    expect(resolveRepoRelativeArtifact("..")).toBeNull();
     const persisted = join(root, "retained-first-stage-preparation-report.json");
     writeFileSync(persisted, `${JSON.stringify(report)}\n`);
     const reopened = JSON.parse(readFileSync(persisted, "utf8")) as typeof report;
-    expect(reopened.source_fidelity.rows.find((row) => row.original_ordinal === 6)?.native_cells[0])
+    expect(reportRow(reopened, 1)?.native_cells[0]?.located_outcome).toBe("candidates");
+    expect(reportRow(reopened, 6)?.native_cells[0])
       .toMatchObject({ candidate_ordinal: 0, diagnostic_reason: "ambiguous" });
-    const evidenceDir = resolveRepoRelativeArtifact(
-      ".do-it/bench-runs/associative-field-enrichment-readiness-20260914/enrichment-admission-consumption-repair"
-    );
-    if (evidenceDir !== null) {
-      mkdirSync(evidenceDir, { recursive: true });
-      writeFileSync(
-        join(evidenceDir, "retained-first-stage-preparation-report.json"),
-        `${JSON.stringify(report)}\n`
-      );
-    }
+    expect(reopened.source_fidelity.rows.slice(8).every((row) =>
+      row.raw_state === "not_exercised")).toBe(true);
+    expect(fetches).toBe(0);
+  });
+
+  it("keeps a successful candidate ordinal when rejected siblings share an incomplete request", () => {
+    const source = "Alice uses tools every morning.";
+    const request = buildOfficialApiExtractionRequest(source, []);
+    const sourceCorpus = buildOfficialApiSourceCorpus(source, []);
+    const first = request.source_assertions[0]!;
+    const needle = first.text.match(/[A-Za-z]{4,}/u)?.[0] ?? "Alice";
+    const received = receiveOfficialApiSourceInterpretations(JSON.stringify({
+      interpretations: [{
+        assertion_id: first.assertion_id,
+        relations: [
+          { predicate: { text: needle }, arguments: [], qualifiers: [] },
+          { predicate: { text: "invented-absent" }, arguments: [], qualifiers: [] }
+        ]
+      }]
+    }), request, { sourceCorpus, artifactKey: "mixed-siblings" });
+    expect(received.status).toBe("partial");
+    const located = received.located.find((row) => row.assertion_binding.assertion_id === first.assertion_id);
+    expect(located?.outcome).toBe("candidates");
+    expect(located?.diagnostics.length).toBeGreaterThan(0);
+    const outcomes = nativeOutcomesFromInterpretationReceive({
+      requestKey: "aa".repeat(32),
+      receive: received,
+      attributions: []
+    });
+    const mixed = outcomes.find((item) => item.located_outcome === "candidates");
+    expect(mixed?.candidate_ordinal).toBe(0);
+    expect(mixed?.machine_admission).toBe("partial");
+    expect(mixed?.machine_admission).not.toBe("rejected");
+    expect(mixed?.rejected_siblings?.some((item) => item.reason === "absent" || item.reason === "invalid_candidate"))
+      .toBe(true);
     expect(fetches).toBe(0);
   });
 });
@@ -428,4 +431,47 @@ function frozenRow(ordinal: number, firstStage: boolean): FrozenAssertion {
     time: null,
     event_policy: null
   };
+}
+
+function packedAttributions(
+  members: readonly { readonly assertion_id: number }[],
+  rows: readonly FrozenAssertion[]
+) {
+  return members.map((member) => {
+    const row = rows.find((item) => item.original_ordinal === member.assertion_id);
+    if (row === undefined) throw new Error(`frozen row missing for assertion ${member.assertion_id}`);
+    return {
+      annotation_pointer: row.annotation_pointer,
+      current_assertion_id: member.assertion_id
+    };
+  });
+}
+
+function pointerOnlyOutcome(item: EnrichmentBoundNativeOutcome): EnrichmentBoundNativeOutcome {
+  return Object.freeze({
+    annotation_pointer: item.annotation_pointer,
+    request_ordinal: item.request_ordinal,
+    candidate_ordinal: item.candidate_ordinal,
+    raw_state: item.raw_state,
+    machine_admission: item.machine_admission,
+    located_outcome: item.located_outcome,
+    ...(item.diagnostic_reason === undefined ? {} : { diagnostic_reason: item.diagnostic_reason }),
+    rejected_siblings: item.rejected_siblings
+  });
+}
+
+function reportNativeOutcomes(
+  outcomes: readonly EnrichmentBoundNativeOutcome[]
+): readonly EnrichmentBoundNativeOutcome[] {
+  return Object.freeze([
+    ...outcomes.filter((item) => item.annotation_pointer !== undefined).map(pointerOnlyOutcome),
+    ...outcomes.filter((item) => item.annotation_pointer === undefined)
+  ]);
+}
+
+function reportRow(
+  report: ReturnType<typeof composeEnrichmentPreparationReport>,
+  ordinal: number
+) {
+  return report.source_fidelity.rows.find((row) => row.original_ordinal === ordinal);
 }

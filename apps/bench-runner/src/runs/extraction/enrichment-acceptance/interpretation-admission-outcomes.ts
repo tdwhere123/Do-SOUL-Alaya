@@ -20,7 +20,8 @@ export function nativeOutcomesFromInterpretationReceive(input: Readonly<{
   const fromLocated = input.receive.located.map((located, requestOrdinal) => {
     const attribution = byAssertion.get(located.assertion_binding.assertion_id);
     const diagnostics = located.diagnostics;
-    const primary = diagnostics[0];
+    const successful = located.outcome === "candidates";
+    const primary = successful ? undefined : diagnostics[0];
     return Object.freeze({
       ...(attribution?.annotation_pointer === undefined
         ? {}
@@ -31,7 +32,7 @@ export function nativeOutcomesFromInterpretationReceive(input: Readonly<{
         ? {}
         : { occurrence_identity: attribution.occurrence_identity }),
       request_ordinal: requestOrdinal,
-      candidate_ordinal: primary?.candidate_index ?? (located.outcome === "candidates" ? 0 : null),
+      candidate_ordinal: successful ? 0 : primary?.candidate_index ?? null,
       raw_state: localCellState(located.outcome),
       machine_admission: machineCellState(located.outcome, requestComplete),
       located_outcome: located.outcome,
@@ -93,6 +94,7 @@ function machineCellState(
   requestComplete: boolean
 ): PreparationCellState {
   if (outcome === "failed") return "rejected";
-  if (outcome === "empty") return requestComplete ? "valid-empty" : "partial";
-  return requestComplete ? "unreviewed" : "rejected";
+  if (!requestComplete) return "partial";
+  if (outcome === "empty") return "valid-empty";
+  return "unreviewed";
 }

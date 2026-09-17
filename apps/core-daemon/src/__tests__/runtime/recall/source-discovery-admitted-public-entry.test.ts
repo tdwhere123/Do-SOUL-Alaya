@@ -5,13 +5,18 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
   buildOfficialApiSourceCorpus,
-  buildOfficialApiSourceRequest
+  buildOfficialApiSourceRequest,
+  stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import { indexOfficialApiSourceAssertions } from
   "../../../../../../packages/soul/src/garden/triage/grounding/source-locator.js";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { writeCachedExtraction } from
   "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-shard.js";
+import { importExtractionResponse } from
+  "../../../../../../apps/bench-runner/src/runs/compile-seed/compile-seed-cache.js";
+import { acquireExtractionCacheWriteLease } from
+  "../../../../../../apps/bench-runner/src/runs/extraction/fill/manifest/fill-root-guard.js";
 import {
   computeCacheKey,
   EXTRACTION_CACHE_KEY_GOLDEN_VECTOR
@@ -23,6 +28,8 @@ import { EXTRACTION_REQUEST_COMPLETION_VERSION } from
   "../../../../../../apps/bench-runner/src/runs/extraction/empty-classification.js";
 import {
   TEST_CACHED_PROVIDER_COMPLETION_METADATA,
+  TEST_EXTRACTION_PROVIDER_URL,
+  TEST_PROVIDER_COMPLETION_METADATA,
   testExtractionTransportProvenance,
   writeExtractionCacheTestManifest
 } from "../../../../../../apps/bench-runner/src/__tests__/longmemeval/extraction/extraction-cache-test-fixture.js";
@@ -152,6 +159,10 @@ describe("admitted public consumption entry", () => {
       writeCachedExtraction(cacheRoot, cacheKey, {
         model: SHARD_MODEL, request_profile: SHARD_PROFILE, cache_key: cacheKey,
         raw_json: rawJson, extracted_at: NOW
+      });
+      writeExtractionCacheTestManifest({
+        cacheRoot, model: SHARD_MODEL, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        requestProfile: SHARD_PROFILE
       });
       const authored = bindReceivedExtractionShard({
         cacheRoot, model: SHARD_MODEL, requestProfile: SHARD_PROFILE,
@@ -294,6 +305,54 @@ describe("admitted public consumption entry", () => {
       }).status).toBe("not_exercised");
       expect(fetches).toBe(0);
     } finally {
+      await rm(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("admits actual-model only after native import binds transport to the manifest generation", async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), "alaya-native-admit-"));
+    const canary = SOURCE_DISCOVERY_CANARY[0]!;
+    const corpus = officialCorpus(canary.intended);
+    const request = packedRequest(corpus);
+    const rawJson = canaryControlJson(corpus, canary);
+    const cacheKey = expectedExtractionCacheKey({
+      model: SHARD_MODEL, requestProfile: SHARD_PROFILE,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, request
+    });
+    const family = "flash-lite-family";
+    writeExtractionCacheTestManifest({
+      cacheRoot, model: SHARD_MODEL, modelFamily: family,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, requestProfile: SHARD_PROFILE
+    });
+    const lease = acquireExtractionCacheWriteLease(cacheRoot);
+    try {
+      importExtractionResponse({
+        config: {
+          model: SHARD_MODEL,
+          modelFamily: family,
+          providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+          requestProfile: SHARD_PROFILE
+        },
+        cacheRoot,
+        writeLease: lease,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        userPrompt: stringifyOfficialApiExtractionRequest(request),
+        expectedCacheKey: cacheKey,
+        sourceCorpus: corpus,
+        result: { rawJson, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }
+      });
+      const bindInput = {
+        cacheRoot, model: SHARD_MODEL, modelFamily: family, requestProfile: SHARD_PROFILE,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, sourceCorpus: corpus,
+        artifactKey: "actual", request
+      } as const;
+      const admitted = bindAdmittedActualModelShard(bindInput);
+      expect(admitted).toMatchObject({ status: "complete", provenance: "cache-admitted", cacheKey });
+      const mechanism = bindReceivedExtractionShard(bindInput);
+      expect(mechanism.status === "complete" ? mechanism.provenance : mechanism.status).toBe("cache-authored");
+      expect(fetches).toBe(0);
+    } finally {
+      lease.release();
       await rm(cacheRoot, { recursive: true, force: true });
     }
   });

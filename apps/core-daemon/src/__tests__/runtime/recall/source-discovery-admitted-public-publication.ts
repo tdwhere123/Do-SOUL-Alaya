@@ -24,10 +24,14 @@ import {
 } from "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-shard.js";
 import { computeCacheKey } from
   "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-key.js";
-import { readExtractionCacheManifestIdentity } from
-  "../../../../../../apps/bench-runner/src/runs/extraction/cache/extraction-cache-manifest.js";
+import {
+  extractionModelFamily,
+  readExtractionCacheManifestIdentity
+} from "../../../../../../apps/bench-runner/src/runs/extraction/cache/extraction-cache-manifest.js";
 import { assertExtractionCacheIdentity } from
   "../../../../../../apps/bench-runner/src/runs/extraction/cache/cache-identity.js";
+import { buildExtractionTransportProvenance } from
+  "../../../../../../apps/bench-runner/src/runs/extraction/transport-route.js";
 import { insertLocatedBoundGist } from "./source-discovery-public-consumption.js";
 
 export type BoundPublicSource = Readonly<{
@@ -118,6 +122,7 @@ type ExtractionShardBindInput = Readonly<{
   readonly request?: OfficialApiExtractionRequest;
   readonly cacheKey?: string;
   readonly sha256?: FieldContractSha256;
+  readonly modelFamily?: string;
 }>;
 
 type ExtractionShardSnapshot =
@@ -160,22 +165,15 @@ export function bindAdmittedActualModelShard(input: ExtractionShardBindInput): B
       cacheKey: snapshot.derivedKey
     };
   }
-  const identityGap = actualModelIdentityGap(input);
+  const identityGap = actualModelIdentityGap(input, snapshot);
   if (identityGap !== null) {
     return { status: "not_exercised", reason: identityGap, cacheKey: snapshot.derivedKey };
   }
   const bound = receiveFromShardSnapshot(input, snapshot);
-  if (bound.status === "partial") {
+  if (bound.status !== "complete") {
     return { status: "not_exercised", reason: "quarantined_admission", cacheKey: bound.cacheKey };
   }
-  if (bound.status !== "complete" || bound.provenance !== "cache-admitted") {
-    return {
-      status: "not_exercised",
-      reason: bound.status === "complete" ? bound.provenance : bound.status,
-      cacheKey: bound.status === "complete" || bound.status === "not_exercised" ? bound.cacheKey : snapshot.derivedKey
-    };
-  }
-  return bound;
+  return { ...bound, provenance: "cache-admitted" };
 }
 
 export function publishBoundPublicSources(input: Readonly<{
@@ -271,20 +269,19 @@ function receiveFromShardSnapshot(
     artifactKey: input.artifactKey,
     sha256: input.sha256 ?? fieldContractSha256
   });
-  const provenance: BoundPublicProvenance =
-    snapshot.entry.transport_provenance !== undefined && snapshot.entry.request_completion !== undefined
-      ? "cache-admitted"
-      : "cache-authored";
   return {
     status: receive.status,
     rawJson: snapshot.entry.raw_json,
     receive,
-    provenance,
+    provenance: "cache-authored",
     cacheKey: snapshot.derivedKey
   };
 }
 
-function actualModelIdentityGap(input: ExtractionShardBindInput): string | null {
+function actualModelIdentityGap(
+  input: ExtractionShardBindInput,
+  snapshot: Extract<ExtractionShardSnapshot, { readonly kind: "entry" }>
+): string | null {
   let identity: ReturnType<typeof readExtractionCacheManifestIdentity>;
   try {
     identity = readExtractionCacheManifestIdentity(input.cacheRoot);
@@ -292,17 +289,14 @@ function actualModelIdentityGap(input: ExtractionShardBindInput): string | null 
     return "invalid_cache_manifest";
   }
   if (identity === undefined) return "missing_cache_manifest";
-  const packing = identity.manifest.schema_version === 4
-    ? identity.manifest.source_packing
-    : DEFAULT_EXTRACTION_SOURCE_PACKING;
   try {
     assertExtractionCacheIdentity({
       config: {
         model: input.model,
-        modelFamily: input.model,
+        modelFamily: input.modelFamily ?? extractionModelFamily(identity.manifest),
         providerUrl: identity.manifest.provider_url,
         requestProfile: input.requestProfile,
-        sourcePacking: packing
+        sourcePacking: DEFAULT_EXTRACTION_SOURCE_PACKING
       },
       systemPrompt: input.systemPrompt,
       manifest: identity.manifest,
@@ -310,6 +304,15 @@ function actualModelIdentityGap(input: ExtractionShardBindInput): string | null 
     });
   } catch {
     return "cache_identity_mismatch";
+  }
+  const transport = snapshot.entry.transport_provenance;
+  if (transport === undefined) return "unbound_transport_metadata";
+  const expected = buildExtractionTransportProvenance({
+    model: identity.manifest.extraction_model,
+    providerUrl: identity.manifest.provider_url
+  });
+  if (transport.model !== expected.model || transport.provider_url_sha256 !== expected.provider_url_sha256) {
+    return "transport_generation_mismatch";
   }
   return null;
 }
