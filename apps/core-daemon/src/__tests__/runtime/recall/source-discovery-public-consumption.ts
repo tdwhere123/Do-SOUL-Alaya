@@ -1,4 +1,5 @@
 import {
+  BoundSourceInterpretationSchema,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   locateSourceInterpretation,
   SoulMemorySearchRequestSchema,
@@ -321,7 +322,36 @@ export function insertLocatedBoundGist(
   runId: string,
   now: string
 ): void {
-  const bound = {
+  const bound = boundCandidateGist(
+    source, rootId, digest, evidenceObjectId, located, workspaceId
+  );
+  database.connection.prepare(`
+    INSERT INTO evidence_capsules (
+      object_id, created_at, updated_at, created_by, evidence_kind, semantic_anchor,
+      gist, excerpt, run_id, workspace_id
+    ) VALUES (?, ?, ?, 'test', 'conversation_excerpt', '{}', ?, ?, ?, ?)
+  `).run(objectId, now, now, JSON.stringify(bound), source, runId, workspaceId);
+}
+
+function boundCandidateGist(
+  source: string,
+  rootId: string,
+  digest: string,
+  evidenceObjectId: string | null,
+  located: SourceLocatedInterpretation,
+  workspaceId: string
+) {
+  if (located.outcome !== "candidates") {
+    throw new Error("bound gist requires candidate outcome");
+  }
+  const [start, end] = located.assertion_binding.source_span;
+  if (source.slice(start, end) !== located.assertion_binding.text) {
+    throw new Error("assertion slice does not match source body");
+  }
+  if (located.source_corpus_digest !== fieldContractSha256(source)) {
+    throw new Error("source identity does not match planted body");
+  }
+  return BoundSourceInterpretationSchema.parse({
     ...located,
     source_target: sourceRecallTarget({
       workspace_id: workspaceId,
@@ -331,13 +361,7 @@ export function insertLocatedBoundGist(
       content_digest: digest,
       evidence_object_id: evidenceObjectId
     })
-  };
-  database.connection.prepare(`
-    INSERT INTO evidence_capsules (
-      object_id, created_at, updated_at, created_by, evidence_kind, semantic_anchor,
-      gist, excerpt, run_id, workspace_id
-    ) VALUES (?, ?, ?, 'test', 'conversation_excerpt', '{}', ?, ?, ?, ?)
-  `).run(objectId, now, now, JSON.stringify(bound), source, runId, workspaceId);
+  });
 }
 
 export function insertBoundGist(

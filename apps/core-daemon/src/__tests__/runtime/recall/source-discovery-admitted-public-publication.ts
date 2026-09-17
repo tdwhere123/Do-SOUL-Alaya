@@ -3,13 +3,13 @@ import {
 } from "../../../../../../packages/core/src/shared/field-hash.js";
 import type { FieldContractSha256, SourceLocatedInterpretation } from "@do-soul/alaya-protocol";
 import {
-  OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH,
-  buildOfficialApiSourceAssertions,
-  buildOfficialApiSourceRequest,
+  computeOfficialApiSourceCorpusIdentity,
   receiveOfficialApiSourceInterpretations,
   type OfficialApiExtractionRequest,
   type OfficialApiInterpretationReceiveReceipt
 } from "@do-soul/alaya-soul";
+import { indexOfficialApiSourceAssertions } from
+  "../../../../../../packages/soul/src/garden/triage/grounding/source-locator.js";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import {
   inspectCachedExtraction,
@@ -17,56 +17,50 @@ import {
 } from "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-shard.js";
 import { insertLocatedBoundGist } from "./source-discovery-public-consumption.js";
 
-export type AdmittedSourceRecord = Readonly<{
+export type BoundPublicSource = Readonly<{
   readonly body: string;
   readonly rootId: string;
   readonly digest: string;
   readonly evidenceObjectId: string | null;
 }>;
 
-export type AdmittedPublicBind =
+export type BoundPublicReceive =
   | Readonly<{
-      readonly status: "received";
+      readonly status: "complete" | "partial";
       readonly rawJson: string;
       readonly receive: OfficialApiInterpretationReceiveReceipt;
     }>
   | Readonly<{
-      readonly status: "unbound";
-      readonly reason: "catalog_exceeds_batch";
+      readonly status: "missing";
     }>
   | Readonly<{
-      readonly status: Exclude<CachedExtractionInspection["status"], "hit">;
-      readonly reason?: string;
+      readonly status: "invalid";
+      readonly reason: string;
     }>;
 
-export type AdmittedPublicPublication = Readonly<{
-  readonly bind: AdmittedPublicBind;
+export type BoundPublicPublication = Readonly<{
+  readonly bind: BoundPublicReceive;
   readonly gist_object_ids: readonly string[];
 }>;
 
-export function bindAdmittedSourceInterpretationPayload(input: Readonly<{
+export function bindReceivedSourceInterpretationPayload(input: Readonly<{
   readonly rawJson: string;
   readonly sourceCorpus: string;
   readonly artifactKey: string;
   readonly request?: OfficialApiExtractionRequest;
   readonly sha256?: FieldContractSha256;
-}>): AdmittedPublicBind {
-  const request = input.request ?? requestFromCorpus(input.sourceCorpus);
-  if (request === "catalog_exceeds_batch") {
-    return { status: "unbound", reason: "catalog_exceeds_batch" };
-  }
-  return {
-    status: "received",
-    rawJson: input.rawJson,
-    receive: receiveOfficialApiSourceInterpretations(input.rawJson, request, {
-      sourceCorpus: input.sourceCorpus,
-      artifactKey: input.artifactKey,
-      sha256: input.sha256 ?? fieldContractSha256
-    })
-  };
+}>): BoundPublicReceive {
+  const packed = requirePackedRequest(input.request, input.sourceCorpus);
+  if (packed.status !== "ok") return packed.bind;
+  const receive = receiveOfficialApiSourceInterpretations(input.rawJson, packed.request, {
+    sourceCorpus: input.sourceCorpus,
+    artifactKey: input.artifactKey,
+    sha256: input.sha256 ?? fieldContractSha256
+  });
+  return { status: receive.status, rawJson: input.rawJson, receive };
 }
 
-export function bindAdmittedExtractionShard(input: Readonly<{
+export function bindReceivedExtractionShard(input: Readonly<{
   readonly cacheRoot: string;
   readonly cacheKey: string;
   readonly model: string;
@@ -75,37 +69,38 @@ export function bindAdmittedExtractionShard(input: Readonly<{
   readonly artifactKey: string;
   readonly request?: OfficialApiExtractionRequest;
   readonly sha256?: FieldContractSha256;
-}>): AdmittedPublicBind {
+}>): BoundPublicReceive {
+  const packed = requirePackedRequest(input.request, input.sourceCorpus);
+  if (packed.status !== "ok") return packed.bind;
   const inspected = inspectCachedExtraction(
     input.cacheRoot, input.cacheKey, input.model, input.requestProfile
   );
-  if (inspected.status !== "hit") {
-    return inspected.status === "missing"
-      ? { status: "missing" }
-      : { status: inspected.status, reason: inspected.reason };
-  }
-  return bindAdmittedSourceInterpretationPayload({
+  if (inspected.status === "missing") return { status: "missing" };
+  if (inspected.status !== "hit") return invalidBind(inspected);
+  return bindReceivedSourceInterpretationPayload({
     rawJson: inspected.rawJson,
     sourceCorpus: input.sourceCorpus,
     artifactKey: input.artifactKey,
-    ...(input.request === undefined ? {} : { request: input.request }),
+    request: packed.request,
     ...(input.sha256 === undefined ? {} : { sha256: input.sha256 })
   });
 }
 
-export function publishAdmittedPublicSources(input: Readonly<{
+export function publishBoundPublicSources(input: Readonly<{
   readonly database: StorageDatabase;
-  readonly source: AdmittedSourceRecord;
+  readonly source: BoundPublicSource;
   readonly workspaceId: string;
   readonly runId: string;
   readonly now: string;
-  readonly bind: AdmittedPublicBind;
-}>): AdmittedPublicPublication {
-  if (input.bind.status !== "received") {
+  readonly bind: BoundPublicReceive;
+}>): BoundPublicPublication {
+  if (input.bind.status !== "complete" && input.bind.status !== "partial") {
     return { bind: input.bind, gist_object_ids: [] };
   }
-  const gistObjectIds = input.bind.receive.located.map((located, index) => {
-    const objectId = admittedGistObjectId(input.source.rootId, located, index);
+  const gistObjectIds: string[] = [];
+  for (const located of input.bind.receive.located) {
+    if (located.outcome !== "candidates") continue;
+    const objectId = boundGistObjectId(input.workspaceId, input.source.digest, located);
     insertLocatedBoundGist(
       input.database,
       objectId,
@@ -118,23 +113,73 @@ export function publishAdmittedPublicSources(input: Readonly<{
       input.runId,
       input.now
     );
-    return objectId;
-  });
+    gistObjectIds.push(objectId);
+  }
   return { bind: input.bind, gist_object_ids: gistObjectIds };
 }
 
-function requestFromCorpus(
-  sourceCorpus: string
-): OfficialApiExtractionRequest | "catalog_exceeds_batch" {
-  const ids = buildOfficialApiSourceAssertions(sourceCorpus).map((row) => row.assertion_id);
-  if (ids.length > OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH) return "catalog_exceeds_batch";
-  return buildOfficialApiSourceRequest(sourceCorpus, ids);
+export function requireCompletePublicBind(
+  bind: BoundPublicReceive
+): Extract<BoundPublicReceive, { readonly status: "complete" }> {
+  if (bind.status !== "complete") {
+    throw new Error(`public bind ${bind.status}`);
+  }
+  return bind;
 }
 
-function admittedGistObjectId(
-  rootId: string,
-  located: SourceLocatedInterpretation,
-  index: number
+export function requirePartialPublicBind(
+  bind: BoundPublicReceive
+): Extract<BoundPublicReceive, { readonly status: "partial" }> {
+  if (bind.status !== "partial") {
+    throw new Error(`public bind ${bind.status}`);
+  }
+  return bind;
+}
+
+function requirePackedRequest(
+  request: OfficialApiExtractionRequest | undefined,
+  sourceCorpus: string
+): Readonly<{ readonly status: "ok"; readonly request: OfficialApiExtractionRequest }>
+  | Readonly<{ readonly status: "invalid"; readonly bind: BoundPublicReceive }> {
+  if (request === undefined) {
+    return { status: "invalid", bind: { status: "invalid", reason: "packed_request_required" } };
+  }
+  if (!packedRequestMatchesCatalog(request, sourceCorpus)) {
+    return { status: "invalid", bind: { status: "invalid", reason: "source_assertion_mismatch" } };
+  }
+  return { status: "ok", request };
+}
+
+function packedRequestMatchesCatalog(
+  request: OfficialApiExtractionRequest,
+  sourceCorpus: string
+): boolean {
+  if (computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
+    return false;
+  }
+  const catalog = new Map(
+    indexOfficialApiSourceAssertions(sourceCorpus).map((row) => [row.assertion_id, row.text] as const)
+  );
+  return request.source_assertions.length > 0
+    && request.source_assertions.every((member) => catalog.get(member.assertion_id) === member.text);
+}
+
+function invalidBind(
+  inspected: Extract<CachedExtractionInspection, { readonly status: "invalid" | "quarantined" }>
+): BoundPublicReceive {
+  return { status: "invalid", reason: inspected.reason };
+}
+
+function boundGistObjectId(
+  workspaceId: string,
+  contentDigest: string,
+  located: SourceLocatedInterpretation
 ): string {
-  return `admitted-gist-${rootId}-${located.assertion_binding.assertion_id}-${index}`;
+  return [
+    "bound-gist",
+    workspaceId,
+    contentDigest,
+    String(located.assertion_binding.assertion_id),
+    located.assertion_binding.context_id
+  ].join("-");
 }

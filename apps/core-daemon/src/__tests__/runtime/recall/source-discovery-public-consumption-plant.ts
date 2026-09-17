@@ -12,6 +12,7 @@ import {
   SqliteFieldSourceRecordRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import type { OfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
@@ -31,9 +32,11 @@ import {
   type ResultView
 } from "./source-discovery-public-consumption.js";
 import {
-  bindAdmittedSourceInterpretationPayload,
-  publishAdmittedPublicSources,
-  type AdmittedPublicBind
+  bindReceivedSourceInterpretationPayload,
+  publishBoundPublicSources,
+  requireCompletePublicBind,
+  type BoundPublicReceive,
+  type BoundPublicSource
 } from "./source-discovery-admitted-public-publication.js";
 
 export type PlantedIntended = Readonly<{
@@ -60,11 +63,16 @@ export type PlantedPublicPair = Readonly<{
   readonly later_body: string;
 }>;
 
-export type PlantedAdmitted = Readonly<{
+export type PlantedSources = Readonly<{
   readonly database: StorageDatabase;
   readonly filename: string;
   readonly sourceId: string;
-  readonly bind: Extract<AdmittedPublicBind, { readonly status: "received" }>;
+  readonly distractorId: string;
+  readonly source: BoundPublicSource;
+}>;
+
+export type PlantedBound = PlantedSources & Readonly<{
+  readonly bind: Extract<BoundPublicReceive, { readonly status: "complete" }>;
   readonly gistObjectIds: readonly string[];
 }>;
 
@@ -105,43 +113,69 @@ export async function withPlantedWorker(
   await runPlantedHandler(filename, slice, { database: slice.database, filename, intendedId: intended.record_id }, run);
 }
 
-export async function withAdmittedPublicWorker(
+export async function withPlantedSourceWorker<T extends object>(
   sourceBody: string,
-  rawJson: string,
-  run: PlantedHandler<PlantedAdmitted>
+  distractorBody: string,
+  setup: (planted: PlantedSources) => T,
+  run: PlantedHandler<PlantedSources & T>
 ): Promise<void> {
-  const directory = await mkdtemp(join(tmpdir(), "alaya-admitted-public-"));
+  const directory = await mkdtemp(join(tmpdir(), "alaya-bound-public-"));
   const filename = join(directory, "alaya.db");
   const slice = await openSourceSlice(() => {}, filename);
-  const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
-  const source = records.insert(hashedRecord(WS, sourceBody, "admitted-source"));
-  const bind = bindAdmittedSourceInterpretationPayload({
-    rawJson,
-    sourceCorpus: sourceBody,
-    artifactKey: `admitted-${source.record_id}`
-  });
-  if (bind.status !== "received") {
-    throw new Error(`admitted bind ${bind.status}`);
+  let handedOff = false;
+  try {
+    const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
+    const sourceRow = records.insert(hashedRecord(WS, sourceBody, "bound-source"));
+    const distractor = records.insert(hashedRecord(WS, distractorBody, "distractor-source"));
+    const planted: PlantedSources = {
+      database: slice.database,
+      filename,
+      sourceId: sourceRow.record_id,
+      distractorId: distractor.record_id,
+      source: {
+        body: sourceBody,
+        rootId: sourceRow.record_id,
+        digest: sourceRow.content_digest,
+        evidenceObjectId: sourceRow.evidence_object_id
+      }
+    };
+    const extra = setup(planted);
+    handedOff = true;
+    await runPlantedHandler(filename, slice, { ...planted, ...extra }, run);
+  } finally {
+    if (!handedOff) {
+      try { slice.database.close(); } catch { /* closed */ }
+      closeCachedDatabase(filename);
+      await rm(dirname(filename), { recursive: true, force: true });
+    }
   }
-  const published = publishAdmittedPublicSources({
-    database: slice.database,
-    source: {
-      body: sourceBody,
-      rootId: source.record_id,
-      digest: source.content_digest,
-      evidenceObjectId: source.evidence_object_id
-    },
-    workspaceId: WS,
-    runId: RUN,
-    now: NOW,
-    bind
-  });
-  await runPlantedHandler(filename, slice, {
-    database: slice.database,
-    filename,
-    sourceId: source.record_id,
-    bind,
-    gistObjectIds: published.gist_object_ids
+}
+
+export async function withBoundPublicWorker(
+  input: Readonly<{
+    readonly sourceBody: string;
+    readonly distractorBody: string;
+    readonly rawJson: string;
+    readonly request: OfficialApiExtractionRequest;
+  }>,
+  run: PlantedHandler<PlantedBound>
+): Promise<void> {
+  await withPlantedSourceWorker(input.sourceBody, input.distractorBody, (planted) => {
+    const bind = requireCompletePublicBind(bindReceivedSourceInterpretationPayload({
+      rawJson: input.rawJson,
+      sourceCorpus: input.sourceBody,
+      artifactKey: `bound-${planted.sourceId}`,
+      request: input.request
+    }));
+    const published = publishBoundPublicSources({
+      database: planted.database,
+      source: planted.source,
+      workspaceId: WS,
+      runId: RUN,
+      now: NOW,
+      bind
+    });
+    return { bind, gistObjectIds: published.gist_object_ids };
   }, run);
 }
 
