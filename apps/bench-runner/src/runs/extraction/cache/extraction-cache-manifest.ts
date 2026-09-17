@@ -169,6 +169,18 @@ export interface ExtractionCacheManifestIdentity {
   readonly manifestSha256: string;
 }
 
+/** Admission pins extraction semantics, not the mutable fill progress document. */
+export function extractionAdmissionGenerationSha256(manifest: ExtractionCacheManifest): string {
+  return createHash("sha256").update(JSON.stringify([
+    manifest.schema_version, manifest.extraction_model, manifest.model_family,
+    manifest.request_profile, manifest.schema_version === 4 ? manifest.source_packing : null,
+    manifest.provider_url, manifest.system_prompt_sha256, manifest.cache_key_algo,
+    manifest.dataset, manifest.dataset_revision, manifest.window_offset, manifest.window_limit,
+    manifest.expected_key_set_sha256, manifest.expansion_source_anchor ?? null,
+    manifest.expansion_lineage ?? null
+  ])).digest("hex");
+}
+
 /**
  * Compute the prompt hash component the manifest pins. The same hash is
  * recomputed at run-start from the live OFFICIAL_API_SYSTEM_PROMPT and

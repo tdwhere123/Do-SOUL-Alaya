@@ -56,7 +56,9 @@ afterAll(({}, suite) => {
     selected: selectedPublicConsumptionCases(),
     completed: completedCases,
     failed: failedCases,
-    fileFailed: observedVitestFailure(suite)
+    fileFailed: observedVitestFailure(suite),
+    evidenceDirectory: process.env.ALAYA_ADMISSION_EVIDENCE_DIRECTORY,
+    provenance: "authored-cap-and-order-companion"
   });
 });
 

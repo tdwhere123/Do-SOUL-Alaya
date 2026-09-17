@@ -35,7 +35,8 @@ import {
 const MAX_EXTRACTION_CACHE_SHARD_BYTES = 32 * 1024 * 1024;
 
 export interface CachedExtractionAdmissionIdentity {
-  readonly manifest_sha256: string;
+  readonly generation_sha256: string;
+  readonly request_key: string;
   readonly raw_json_sha256: string;
 }
 
@@ -295,8 +296,10 @@ function isCachedExtractionAdmissionIdentity(
 ): value is CachedExtractionAdmissionIdentity {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<CachedExtractionAdmissionIdentity>;
-  return typeof candidate.manifest_sha256 === "string" &&
-    /^[a-f0-9]{64}$/u.test(candidate.manifest_sha256) &&
+  return typeof candidate.generation_sha256 === "string" &&
+    /^[a-f0-9]{64}$/u.test(candidate.generation_sha256) &&
+    typeof candidate.request_key === "string" &&
+    /^[a-f0-9]{64}$/u.test(candidate.request_key) &&
     typeof candidate.raw_json_sha256 === "string" &&
     /^[a-f0-9]{64}$/u.test(candidate.raw_json_sha256);
 }

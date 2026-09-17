@@ -25,20 +25,14 @@ import {
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
 import {
-  composeEnrichmentPreparationReport,
-  type EnrichmentBoundNativeOutcome
+  composeEnrichmentPreparationReport
 } from "../../../runs/extraction/enrichment-acceptance/preparation-report.js";
 import {
   nativeOutcomesFromInterpretationReceive
 } from "../../../runs/extraction/enrichment-acceptance/interpretation-admission-outcomes.js";
 import { bindFrozenPopulation } from "../../../runs/extraction/enrichment-acceptance/source-binding.js";
 import type { FrozenAssertion } from "../../../runs/extraction/enrichment-acceptance/frozen-population.js";
-import {
-  RETAINED_PAID_OUTPUT_SHA256,
-  RETAINED_PAID_REQUEST_KEY,
-  requireRetainedPaidExtractionWindow,
-  resolveRepoRelativeArtifact
-} from "./retained-paid-extraction-window.js";
+
 
 
 const MODEL = "test-model";
@@ -199,6 +193,7 @@ describe("interpretation admission diagnostics", () => {
     expect(received.status).toBe("partial");
     expect(received.located[0]?.diagnostics).toEqual([{ candidate_index: 0, reason: "ambiguous" }]);
     const rows = Array.from({ length: 38 }, (_, index) => frozenRow(index + 1, index < 8));
+    rows[5] = { ...rows[5]!, exact_text: member!.text };
     const requestKey = "aa".repeat(32);
     const outcomes = nativeOutcomesFromInterpretationReceive({
       requestKey,
@@ -216,10 +211,18 @@ describe("interpretation admission diagnostics", () => {
     });
     const report = composeEnrichmentPreparationReport({
       population: { rows },
-      bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
+      bindings: bindFrozenPopulation(rows, { sourceCorpus,
+        catalogUnits: [{ assertionId: member!.assertion_id, text: member!.text,
+          semanticKey: "synthetic-semantic-key", binding: {
+            sourceCorpusIdentity: request.source_corpus_identity,
+            locator: { start: sourceCorpus.indexOf(member!.text), end: sourceCorpus.indexOf(member!.text) + member!.text.length }
+          } }],
+        requests: [{ key: requestKey, source_assertions: request.source_assertions,
+          source_corpus_identity: request.source_corpus_identity, sourceCorpus }]
+      }),
       preflight: null,
       selectedStage: "first_stage",
-      nativeOutcomes: reportNativeOutcomes(outcomes),
+      nativeOutcomes: outcomes,
       fixtureOutcomes: [{
         name: "actual-model public consumption",
         kind: "public_consumption",
@@ -289,79 +292,6 @@ describe("interpretation admission diagnostics", () => {
     expect(fetches).toBe(0);
   });
 
-  it("replays the retained paid request, response and source through receive and reopens the stage report", () => {
-    const paid = requireRetainedPaidExtractionWindow();
-    expect(paid.outputSha256).toBe(RETAINED_PAID_OUTPUT_SHA256);
-    const received = receiveOfficialApiSourceInterpretations(paid.rawJson, paid.request, {
-      sourceCorpus: paid.sourceCorpus,
-      artifactKey: "retained-paid"
-    });
-    expect(received.status).toBe("partial");
-    expect(paid.request.source_assertions).toHaveLength(8);
-    const byAssertion = new Map(
-      received.located.map((row) => [row.assertion_binding.assertion_id, row] as const)
-    );
-    expect(byAssertion.get(1)?.outcome).toBe("candidates");
-    expect(byAssertion.get(2)?.outcome).toBe("candidates");
-    expect(byAssertion.get(3)?.outcome).toBe("empty");
-    expect(byAssertion.get(4)?.outcome).toBe("candidates");
-    expect(byAssertion.get(5)?.outcome).toBe("empty");
-    expect(byAssertion.get(6)?.outcome).toBe("failed");
-    expect(byAssertion.get(6)?.diagnostics).toEqual([{ candidate_index: 0, reason: "ambiguous" }]);
-    expect(byAssertion.get(7)?.outcome).toBe("empty");
-    expect(byAssertion.get(8)?.outcome).toBe("candidates");
-    expect(() => classifyOfficialApiExtractionResult(
-      paid.rawJson, paid.request, paid.sourceCorpus
-    )).toThrow(OfficialApiInterpretationAdmissionError);
-    const rows = Array.from({ length: 38 }, (_, index) => frozenRow(index + 1, index < 8));
-    const outcomes = nativeOutcomesFromInterpretationReceive({
-      requestKey: RETAINED_PAID_REQUEST_KEY,
-      receive: received,
-      attributions: packedAttributions(paid.request.source_assertions, rows)
-    });
-    const report = composeEnrichmentPreparationReport({
-      population: { rows },
-      bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
-      preflight: null,
-      selectedStage: "first_stage",
-      nativeOutcomes: reportNativeOutcomes(outcomes),
-      fixtureOutcomes: [{
-        name: "actual-model public consumption",
-        kind: "public_consumption",
-        result: "not_run",
-        cell_state: "not_exercised",
-        detail: "historical quarantined payload; provenance is not cache-admitted"
-      }]
-    });
-    expect(reportRow(report, 1)?.native_cells[0]?.located_outcome).toBe("candidates");
-    expect(reportRow(report, 2)?.native_cells[0]?.located_outcome).toBe("candidates");
-    expect(reportRow(report, 3)?.native_cells[0]?.located_outcome).toBe("empty");
-    expect(reportRow(report, 4)?.native_cells[0]?.located_outcome).toBe("candidates");
-    expect(reportRow(report, 5)?.native_cells[0]?.located_outcome).toBe("empty");
-    expect(reportRow(report, 6)?.native_cells[0]).toMatchObject({
-      candidate_ordinal: 0,
-      diagnostic_reason: "ambiguous",
-      located_outcome: "failed",
-      machine_admission: "rejected"
-    });
-    expect(reportRow(report, 7)?.native_cells[0]?.located_outcome).toBe("empty");
-    expect(reportRow(report, 8)?.native_cells[0]?.located_outcome).toBe("candidates");
-    expect(report.source_fidelity.rows).toHaveLength(38);
-    expect(report.source_fidelity.rows.slice(8).every((row) =>
-      row.selected === false && row.raw_state === "not_exercised")).toBe(true);
-    expect(report.public_consumption.status).toBe("not_exercised");
-    expect(resolveRepoRelativeArtifact("..")).toBeNull();
-    const persisted = join(root, "retained-first-stage-preparation-report.json");
-    writeFileSync(persisted, `${JSON.stringify(report)}\n`);
-    const reopened = JSON.parse(readFileSync(persisted, "utf8")) as typeof report;
-    expect(reportRow(reopened, 1)?.native_cells[0]?.located_outcome).toBe("candidates");
-    expect(reportRow(reopened, 6)?.native_cells[0])
-      .toMatchObject({ candidate_ordinal: 0, diagnostic_reason: "ambiguous" });
-    expect(reopened.source_fidelity.rows.slice(8).every((row) =>
-      row.raw_state === "not_exercised")).toBe(true);
-    expect(fetches).toBe(0);
-  });
-
   it("keeps a successful candidate ordinal when rejected siblings share an incomplete request", () => {
     const source = "Alice uses tools every morning.";
     const request = buildOfficialApiExtractionRequest(source, []);
@@ -372,8 +302,9 @@ describe("interpretation admission diagnostics", () => {
       interpretations: [{
         assertion_id: first.assertion_id,
         relations: [
+          { predicate: { text: "invented-absent" }, arguments: [], qualifiers: [] },
           { predicate: { text: needle }, arguments: [], qualifiers: [] },
-          { predicate: { text: "invented-absent" }, arguments: [], qualifiers: [] }
+          { predicate: { text: "uses" }, arguments: [], qualifiers: [] }
         ]
       }]
     }), request, { sourceCorpus, artifactKey: "mixed-siblings" });
@@ -387,12 +318,34 @@ describe("interpretation admission diagnostics", () => {
       attributions: []
     });
     const mixed = outcomes.find((item) => item.located_outcome === "candidates");
-    expect(mixed?.candidate_ordinal).toBe(0);
+    expect(mixed?.candidate_ordinal).toBe(1);
+    expect(outcomes.filter((item) => item.located_outcome === "candidates").map((item) => item.candidate_ordinal)).toEqual([1, 2]);
     expect(mixed?.machine_admission).toBe("partial");
     expect(mixed?.machine_admission).not.toBe("rejected");
     expect(mixed?.rejected_siblings?.some((item) => item.reason === "absent" || item.reason === "invalid_candidate"))
       .toBe(true);
     expect(fetches).toBe(0);
+  });
+
+  it.each(["missing_response", "transport_unknown"] as const)("preserves unavailable %s independently of rejection and valid empty", (responseKind) => {
+    const source = "Alice uses tools.";
+    const request = buildOfficialApiExtractionRequest(source, []);
+    const sourceCorpus = buildOfficialApiSourceCorpus(source, []);
+    const receive = receiveOfficialApiSourceInterpretations("", request, { sourceCorpus, artifactKey: "unavailable", responseKind });
+    const cells = nativeOutcomesFromInterpretationReceive({ requestKey: "aa".repeat(32), receive, attributions: [] });
+    expect(cells[0]).toMatchObject({ request_ordinal: 0, candidate_ordinal: null,
+      diagnostic_reason: responseKind, raw_state: responseKind === "missing_response" ? "missing" : "unknown",
+      machine_admission: responseKind === "missing_response" ? "missing" : "unknown" });
+  });
+
+  it("retains request ordinals and mismatch reasons when no assertion can be located", () => {
+    const source = "Alice uses tools. Bob writes notes.";
+    const request = buildOfficialApiExtractionRequest(source, []);
+    const receive = receiveOfficialApiSourceInterpretations("{}", request, { sourceCorpus: "foreign source", artifactKey: "foreign" });
+    const cells = nativeOutcomesFromInterpretationReceive({ requestKey: "aa".repeat(32), receive, attributions: [] });
+    expect(cells.map((cell) => cell.request_ordinal)).toEqual(request.source_assertions.map((_, index) => index));
+    expect(cells.every((cell) => cell.admission_reason === "source_generation_mismatch")).toBe(true);
+    expect(cells.map((cell) => cell.current_assertion_id)).toEqual(request.source_assertions.map((member) => member.assertion_id));
   });
 });
 
@@ -431,47 +384,4 @@ function frozenRow(ordinal: number, firstStage: boolean): FrozenAssertion {
     time: null,
     event_policy: null
   };
-}
-
-function packedAttributions(
-  members: readonly { readonly assertion_id: number }[],
-  rows: readonly FrozenAssertion[]
-) {
-  return members.map((member) => {
-    const row = rows.find((item) => item.original_ordinal === member.assertion_id);
-    if (row === undefined) throw new Error(`frozen row missing for assertion ${member.assertion_id}`);
-    return {
-      annotation_pointer: row.annotation_pointer,
-      current_assertion_id: member.assertion_id
-    };
-  });
-}
-
-function pointerOnlyOutcome(item: EnrichmentBoundNativeOutcome): EnrichmentBoundNativeOutcome {
-  return Object.freeze({
-    annotation_pointer: item.annotation_pointer,
-    request_ordinal: item.request_ordinal,
-    candidate_ordinal: item.candidate_ordinal,
-    raw_state: item.raw_state,
-    machine_admission: item.machine_admission,
-    located_outcome: item.located_outcome,
-    ...(item.diagnostic_reason === undefined ? {} : { diagnostic_reason: item.diagnostic_reason }),
-    rejected_siblings: item.rejected_siblings
-  });
-}
-
-function reportNativeOutcomes(
-  outcomes: readonly EnrichmentBoundNativeOutcome[]
-): readonly EnrichmentBoundNativeOutcome[] {
-  return Object.freeze([
-    ...outcomes.filter((item) => item.annotation_pointer !== undefined).map(pointerOnlyOutcome),
-    ...outcomes.filter((item) => item.annotation_pointer === undefined)
-  ]);
-}
-
-function reportRow(
-  report: ReturnType<typeof composeEnrichmentPreparationReport>,
-  ordinal: number
-) {
-  return report.source_fidelity.rows.find((row) => row.original_ordinal === ordinal);
 }

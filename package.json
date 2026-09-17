@@ -15,6 +15,7 @@
   "scripts": {
     "build": "node ./scripts/build-existing.mjs",
     "test": "node ./scripts/ci/run-vitest-projects.mjs",
+    "replay:enrichment-admission": "node ./scripts/replay-enrichment-admission.mjs",
     "test:coverage": "node ./scripts/ci/run-vitest-projects.mjs --coverage.enabled --coverage.reporter=text-summary --coverage.reporter=json-summary --coverage.reporter=lcov",
     "test:parallel": "vitest run --config vitest.config.mjs",
     "ci:content-contracts": "node ./scripts/ci/check-content-contracts.mjs",

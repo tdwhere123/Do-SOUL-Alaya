@@ -25,6 +25,7 @@ import {
   type CanaryCase
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
 import { publicIdentities } from "./source-discovery-public-consumer.js";
+import { bindNativeControl } from "./source-discovery-native-control.js";
 import {
   insertBoundGist,
   publicSearchRequest,
@@ -118,7 +119,8 @@ export async function withPlantedSourceWorker<T extends object>(
   sourceBody: string,
   distractorBody: string,
   setup: (planted: PlantedSources) => T,
-  run: PlantedHandler<PlantedSources & T>
+  run: PlantedHandler<PlantedSources & T>,
+  options?: Readonly<{ readonly memoryText?: string; readonly sourceFirst?: boolean }>
 ): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "alaya-bound-public-"));
   const filename = join(directory, "alaya.db");
@@ -127,7 +129,16 @@ export async function withPlantedSourceWorker<T extends object>(
   try {
     const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
     const sourceRow = records.insert(hashedRecord(WS, sourceBody, "bound-source"));
-    const distractor = records.insert(hashedRecord(WS, distractorBody, "distractor-source"));
+    const distractorInput = options?.sourceFirst === undefined
+      ? hashedRecord(WS, distractorBody, "distractor-source")
+      : Array.from({ length: 128 }, (_, index) => hashedRecord(WS, distractorBody, `distractor-${index}`))
+        .find((row) => (sourceRow.record_id < row.record_id) === options.sourceFirst);
+    if (distractorInput === undefined) throw new Error("requested source order cannot be planted");
+    const distractor = records.insert(distractorInput);
+    if (options?.memoryText !== undefined) {
+      await slice.writeMemory(MEM.r, options.memoryText, MemoryDimension.FACT);
+      await slice.writeMemory(MEM.c, `${options.memoryText} second memory`, MemoryDimension.FACT);
+    }
     const planted: PlantedSources = {
       database: slice.database,
       filename,
@@ -163,12 +174,12 @@ export async function withBoundPublicWorker(
   run: PlantedHandler<PlantedBound>
 ): Promise<void> {
   await withPlantedSourceWorker(input.sourceBody, input.distractorBody, (planted) => {
-    const bind = requireCompletePublicBind(bindReceivedSourceInterpretationPayload({
+    const receive = input.provenance === "native-admitted-control" ? bindNativeControl : bindReceivedSourceInterpretationPayload;
+    const bind = requireCompletePublicBind(receive({
       rawJson: input.rawJson,
       sourceCorpus: input.sourceBody,
       artifactKey: `bound-${planted.sourceId}`,
-      request: input.request,
-      ...(input.provenance === undefined ? {} : { provenance: input.provenance })
+      request: input.request
     }));
     const published = publishBoundPublicSources({
       database: planted.database,

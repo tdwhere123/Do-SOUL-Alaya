@@ -26,6 +26,7 @@ import { computeCacheKey } from
   "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-key.js";
 import {
   readExtractionCacheManifestIdentity,
+  extractionAdmissionGenerationSha256,
   type ExtractionCacheManifestIdentity
 } from "../../../../../../apps/bench-runner/src/runs/extraction/cache/extraction-cache-manifest.js";
 import { assertExtractionCacheIdentity } from
@@ -35,6 +36,9 @@ import { computeExtractionRawJsonSha256 } from
 import { buildExtractionTransportProvenance } from
   "../../../../../../apps/bench-runner/src/runs/extraction/transport-route.js";
 import { insertLocatedBoundGist } from "./source-discovery-public-consumption.js";
+import { readRetainedBatchRun } from "../../../../../../apps/bench-runner/src/runs/extraction/fill/batch/store.js";
+import { parseOutputInventory } from "../../../../../../apps/bench-runner/src/runs/extraction/fill/batch/output-inventory.js";
+import { decodeGeminiGenerateContent } from "../../../../../../apps/bench-runner/src/runs/extraction/fill/batch/native-codec.js";
 
 export type BoundPublicSource = Readonly<{
   readonly body: string;
@@ -50,13 +54,13 @@ export type BoundPublicProvenance =
   | "cache-admitted";
 
 export type BoundPublicReceive =
-  | Readonly<{
-      readonly status: "complete" | "partial";
+  | { [Status in "complete" | "partial"]: Readonly<{
+      readonly status: Status;
       readonly rawJson: string;
       readonly receive: OfficialApiInterpretationReceiveReceipt;
       readonly provenance: BoundPublicProvenance;
       readonly cacheKey?: string;
-    }>
+    }> }["complete" | "partial"]
   | Readonly<{
       readonly status: "missing";
       readonly cacheKey?: string;
@@ -83,7 +87,7 @@ export function bindReceivedSourceInterpretationPayload(input: Readonly<{
   readonly artifactKey: string;
   readonly request?: OfficialApiExtractionRequest;
   readonly sha256?: FieldContractSha256;
-  readonly provenance?: Exclude<BoundPublicProvenance, "cache-authored" | "cache-admitted">;
+  readonly provenance?: "payload";
 }>): BoundPublicReceive {
   const packed = requirePackedRequest(input.request, input.sourceCorpus);
   if (packed.status !== "ok") return packed.bind;
@@ -127,6 +131,7 @@ type ExtractionShardBindInput = Readonly<{
   readonly modelFamily?: string;
   readonly providerUrl?: string;
   readonly sourcePacking?: typeof DEFAULT_EXTRACTION_SOURCE_PACKING;
+  readonly retainedBatchPlanIdentity?: string;
 }>;
 
 type ExtractionShardSnapshot =
@@ -146,6 +151,15 @@ export function bindReceivedExtractionShard(input: ExtractionShardBindInput): Bo
 }
 
 export function bindAdmittedActualModelShard(input: ExtractionShardBindInput): BoundPublicReceive {
+  return bindAdmittedShard(input, "cache-admitted");
+}
+
+export function bindNativeAdmittedControlShard(input: ExtractionShardBindInput): BoundPublicReceive {
+  return bindAdmittedShard(input, "native-admitted-control");
+}
+
+function bindAdmittedShard(input: ExtractionShardBindInput,
+  provenance: "cache-admitted" | "native-admitted-control"): BoundPublicReceive {
   const snapshot = takeExtractionShardSnapshot(input);
   if (snapshot.kind === "bind") {
     if (snapshot.bind.status === "missing") {
@@ -174,11 +188,36 @@ export function bindAdmittedActualModelShard(input: ExtractionShardBindInput): B
   if (identityGap !== null) {
     return { status: "not_exercised", reason: identityGap, cacheKey: snapshot.derivedKey };
   }
+  if (provenance === "cache-admitted") {
+    const evidenceGap = retainedProviderEvidenceGap(input, snapshot);
+    if (evidenceGap !== null) return { status: "not_exercised", reason: evidenceGap, cacheKey: snapshot.derivedKey };
+  }
   const bound = receiveFromShardSnapshot(input, snapshot);
   if (bound.status !== "complete") {
     return { status: "not_exercised", reason: "quarantined_admission", cacheKey: bound.cacheKey };
   }
-  return { ...bound, provenance: "cache-admitted" };
+  return { ...bound, provenance };
+}
+
+function retainedProviderEvidenceGap(input: ExtractionShardBindInput,
+  snapshot: Extract<ExtractionShardSnapshot, { readonly kind: "entry" }>): string | null {
+  if (input.retainedBatchPlanIdentity === undefined) return "missing_retained_provider_evidence";
+  try {
+    const retained = readRetainedBatchRun(input.cacheRoot, input.retainedBatchPlanIdentity);
+    const line = retained.plan.lines.find((item) => item.key === snapshot.derivedKey);
+    if (retained.plan.model !== input.model || retained.plan.requestProfile !== input.requestProfile ||
+      line?.systemPrompt !== input.systemPrompt ||
+      line.userPrompt !== stringifyOfficialApiExtractionRequest(snapshot.request)) return "retained_request_mismatch";
+    const job = retained.state.jobs.find((item) => item.lineKeys.includes(snapshot.derivedKey));
+    if (job === undefined || job.outcomes[snapshot.derivedKey]?.status !== "admitted") return "retained_admission_missing";
+    const output = retained.outputs.get(job.id);
+    if (output === undefined) return "retained_response_missing";
+    const response = parseOutputInventory(output, job).get(snapshot.derivedKey)?.response;
+    if (decodeGeminiGenerateContent(response).rawJson !== snapshot.entry.raw_json) return "retained_payload_mismatch";
+    return null;
+  } catch {
+    return "invalid_retained_provider_evidence";
+  }
 }
 
 export function publishBoundPublicSources(input: Readonly<{
@@ -254,6 +293,9 @@ function takeExtractionShardSnapshot(input: ExtractionShardBindInput): Extractio
     return { kind: "bind", bind: { status: "invalid", reason: cached.reason, cacheKey: derivedKey } };
   }
   const inspected = inspectCachedExtractionContent(cached.entry);
+  if (inspected.status === "missing") {
+    return { kind: "bind", bind: { status: "missing", cacheKey: derivedKey } };
+  }
   if (inspected.status !== "hit") {
     return { kind: "bind", bind: { ...invalidBind(inspected), cacheKey: derivedKey } };
   }
@@ -329,7 +371,10 @@ function actualModelIdentityGap(
   }
   const admission = snapshot.entry.admission_identity;
   if (admission === undefined) return "missing_admission_identity";
-  if (admission.manifest_sha256 !== identity.manifestSha256) return "admission_manifest_mismatch";
+  if (admission.generation_sha256 !== extractionAdmissionGenerationSha256(identity.manifest)) {
+    return "admission_generation_mismatch";
+  }
+  if (admission.request_key !== snapshot.derivedKey) return "admission_request_mismatch";
   if (admission.raw_json_sha256 !== computeExtractionRawJsonSha256(snapshot.entry.raw_json)) {
     return "admission_payload_mismatch";
   }

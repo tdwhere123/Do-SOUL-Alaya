@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import {
   locateSourceInterpretation,
   SourceInterpretationResponseEnvelopeSchema,
+  SourceLocatedInterpretationSchema,
   type FieldContractSha256,
   type SourceLocatedInterpretation
 } from "@do-soul/alaya-protocol";
@@ -20,23 +22,17 @@ export const OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER =
 
 type OfficialApiInterpretationReceiveStatus = "complete" | "partial";
 
-type OfficialApiInterpretationEntryRejectionReason =
-  | "source_generation_mismatch"
-  | "source_assertion_mismatch"
-  | "candidate_rejected"
-  | "malformed_response"
-  | "missing_response"
-  | "transport_unknown";
-
-export interface OfficialApiInterpretationEntryRejection {
-  readonly index: number;
-  /** Envelope index for foreign entries; request ordinal for packed members. */
-  readonly index_scope?: "envelope" | "request";
-  readonly reason: OfficialApiInterpretationEntryRejectionReason;
-  readonly assertion_id?: number;
-  readonly candidate_index?: number | null;
-  readonly diagnostic_reason?: SourceLocatedInterpretation["diagnostics"][number]["reason"];
-}
+export const OfficialApiInterpretationEntryRejectionSchema = z.object({
+  index: z.number().int().nonnegative().safe(),
+  index_scope: z.enum(["envelope", "request"]).optional(),
+  reason: z.enum(["source_generation_mismatch", "source_assertion_mismatch", "candidate_rejected",
+    "malformed_response", "missing_response", "transport_unknown"]),
+  assertion_id: z.number().int().positive().safe().optional(),
+  candidate_index: z.number().int().nonnegative().safe().nullable().optional(),
+  diagnostic_reason: SourceLocatedInterpretationSchema.unwrap().shape.diagnostics.unwrap()
+    .element.unwrap().shape.reason.optional()
+}).strict();
+export type OfficialApiInterpretationEntryRejection = z.infer<typeof OfficialApiInterpretationEntryRejectionSchema>;
 
 export interface OfficialApiInterpretationReceiveReceipt {
   readonly contract_version: typeof OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION;
@@ -44,6 +40,8 @@ export interface OfficialApiInterpretationReceiveReceipt {
   readonly status: OfficialApiInterpretationReceiveStatus;
   readonly located: readonly SourceLocatedInterpretation[];
   readonly rejections: readonly OfficialApiInterpretationEntryRejection[];
+  /** Original packed membership, including members rejected before location. */
+  readonly request_assertion_ids: readonly number[];
 }
 
 /** Classification refusal that keeps the receive receipt as the diagnostic authority. */
@@ -74,7 +72,7 @@ export function receiveOfficialApiSourceInterpretations(
   const sha256 = input.sha256 ?? sha256Utf8;
   const bound = requestBoundRejections(request, input.sourceCorpus);
   if (bound !== null) {
-    return toReceipt("partial", [], bound);
+    return toReceipt("partial", [], bound, request);
   }
   if (input.responseKind === "missing_response" || input.responseKind === "transport_unknown") {
     return locateUnavailable(request, input, sha256, input.responseKind);
@@ -142,7 +140,7 @@ export function receiveOfficialApiSourceInterpretations(
       });
     }
   });
-  return toReceipt(rejections.length === 0 ? "complete" : "partial", located, rejections);
+  return toReceipt(rejections.length === 0 ? "complete" : "partial", located, rejections, request);
 }
 
 /** Live ordinary extraction classifier. Historical HOLD readers keep classifyOfficialApiRequestResult. */
@@ -228,10 +226,11 @@ function requestBoundRejections(
   sourceCorpus: string
 ): readonly OfficialApiInterpretationEntryRejection[] | null {
   if (computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
-    return request.source_assertions.map((_, index) => Object.freeze({
+    return request.source_assertions.map((assertion, index) => Object.freeze({
       index,
       index_scope: "request" as const,
-      reason: "source_generation_mismatch" as const
+      reason: "source_generation_mismatch" as const,
+      assertion_id: assertion.assertion_id
     }));
   }
   const catalog = new Map(buildOfficialApiSourceAssertions(sourceCorpus)
@@ -295,19 +294,21 @@ function locateUnavailable(
       assertion_id: member.assertion_id
     }));
   });
-  return toReceipt("partial", located, rejections);
+  return toReceipt("partial", located, rejections, request);
 }
 
 function toReceipt(
   status: OfficialApiInterpretationReceiveStatus,
   located: readonly SourceLocatedInterpretation[],
-  rejections: readonly OfficialApiInterpretationEntryRejection[]
+  rejections: readonly OfficialApiInterpretationEntryRejection[],
+  request: OfficialApiExtractionRequest
 ): OfficialApiInterpretationReceiveReceipt {
   return Object.freeze({
     contract_version: OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION,
     producer: OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER,
     status: rejections.length > 0 ? "partial" : status,
     located: Object.freeze([...located]),
+    request_assertion_ids: Object.freeze(request.source_assertions.map((member) => member.assertion_id)),
     rejections: Object.freeze([...rejections])
   });
 }

@@ -20,6 +20,7 @@ export {
   classifyOfficialApiInterpretationResult,
   receiveOfficialApiSourceInterpretations,
   OfficialApiInterpretationAdmissionError,
+  OfficialApiInterpretationEntryRejectionSchema,
   OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION,
   OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER,
   type OfficialApiInterpretationEntryRejection,

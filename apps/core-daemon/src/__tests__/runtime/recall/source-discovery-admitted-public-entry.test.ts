@@ -1,3 +1,5 @@
+import { bindNativeControl } from "./source-discovery-native-control.js";
+import { aggregateAdmittedUtility, runAdmittedPublicMatrix } from "./source-discovery-admitted-matrix.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,8 +13,7 @@ import {
 } from "@do-soul/alaya-soul";
 import { indexOfficialApiSourceAssertions } from
   "../../../../../../packages/soul/src/garden/triage/grounding/source-locator.js";
-import { closeCachedDatabase } from "@do-soul/alaya-storage";
-import { writeCachedExtraction } from
+import { readCachedEntry, writeCachedExtraction } from
   "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-shard.js";
 import { importExtractionResponse } from
   "../../../../../../apps/bench-runner/src/runs/compile-seed/compile-seed-cache.js";
@@ -36,27 +37,16 @@ import {
 } from "../../../../../../apps/bench-runner/src/__tests__/longmemeval/extraction/extraction-cache-test-fixture.js";
 import { buildExtractionTransportProvenance } from
   "../../../../../../apps/bench-runner/src/runs/extraction/transport-route.js";
-import {
-  RETAINED_PAID_MODEL,
-  RETAINED_PAID_OUTPUT_SHA256,
-  RETAINED_PAID_REQUEST_PROFILE,
-  requireRetainedPaidExtractionWindow
-} from "../../../../../../apps/bench-runner/src/__tests__/longmemeval/extraction/retained-paid-extraction-window.js";
+
 import { NOW, RUN, WS } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import {
   SOURCE_DISCOVERY_CANARY,
-  canaryContentScopeCheck,
   type CanaryCase
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
 import { assertBuiltWorker } from "./recall-read-worker-client-fixture.js";
-import { consumePublicSources } from "./source-discovery-public-consumer.js";
-import {
-  publicSearchRequest,
-  scoreConsumption
-} from "./source-discovery-public-consumption.js";
-import { withBoundPublicWorker } from "./source-discovery-public-consumption-plant.js";
 import {
   bindAdmittedActualModelShard,
+  bindNativeAdmittedControlShard,
   bindReceivedExtractionShard,
   bindReceivedSourceInterpretationPayload,
   expectedExtractionCacheKey,
@@ -331,7 +321,7 @@ describe("admitted public consumption entry", () => {
     }
   });
 
-  it("admits actual-model only after native import binds transport to the manifest generation", async () => {
+  it("keeps native imported controls separate from actual-model provider evidence", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "alaya-native-admit-"));
     const canary = SOURCE_DISCOVERY_CANARY[0]!;
     const corpus = officialCorpus(canary.intended);
@@ -372,7 +362,16 @@ describe("admitted public consumption entry", () => {
         artifactKey: "actual", request
       } as const;
       const admitted = bindAdmittedActualModelShard(bindInput);
-      expect(admitted).toMatchObject({ status: "complete", provenance: "cache-admitted", cacheKey });
+      expect(admitted).toMatchObject({ status: "not_exercised", reason: "missing_retained_provider_evidence", cacheKey });
+      expect(bindNativeAdmittedControlShard(bindInput)).toMatchObject({ status: "complete", provenance: "native-admitted-control", cacheKey });
+      const alternateCorpus = officialCorpus(`${canary.intended}\n\nA different surrounding context.`);
+      const alternateRequest = packedRequest(alternateCorpus);
+      const alternateKey = expectedExtractionCacheKey({ ...bindInput, request: alternateRequest });
+      const cached = readCachedEntry(cacheRoot, cacheKey, SHARD_MODEL, SHARD_PROFILE);
+      if (cached.status !== "hit") throw new Error("native admitted control missing");
+      writeCachedExtraction(cacheRoot, alternateKey, { ...cached.entry, cache_key: alternateKey });
+      expect(bindNativeAdmittedControlShard({ ...bindInput, sourceCorpus: alternateCorpus, request: alternateRequest }))
+        .toMatchObject({ status: "not_exercised", reason: "admission_request_mismatch" });
       const mechanism = bindReceivedExtractionShard(bindInput);
       expect(mechanism.status === "complete" ? mechanism.provenance : mechanism.status).toBe("cache-authored");
       expect(fetches).toBe(0);
@@ -382,69 +381,25 @@ describe("admitted public consumption entry", () => {
     }
   });
 
-  it("stops actual-model before publish when the retained paid generation is not cache-admitted", () => {
-    const paid = requireRetainedPaidExtractionWindow();
-    expect(paid.outputSha256).toBe(RETAINED_PAID_OUTPUT_SHA256);
-    const actual = bindAdmittedActualModelShard({
-      cacheRoot: paid.cacheRoot,
-      model: RETAINED_PAID_MODEL,
-      requestProfile: RETAINED_PAID_REQUEST_PROFILE,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      sourceCorpus: paid.sourceCorpus,
-      artifactKey: "retained-paid",
-      request: paid.request
-    });
-    expect(actual.status).toBe("not_exercised");
-    expect(publishBoundPublicSources({
-      database: { connection: { prepare: () => ({ run: () => undefined, all: () => [] }) } } as never,
-      source: { body: paid.sourceCorpus, rootId: "root", digest: "d".repeat(64), evidenceObjectId: null },
-      workspaceId: CONTEXT.workspaceId, runId: CONTEXT.runId, now: NOW, bind: actual
-    }).gist_object_ids).toEqual([]);
-    expect(fetches).toBe(0);
-  });
-
-  it.each(SOURCE_DISCOVERY_CANARY)("native-admitted $group control runs both lookup arms with complete context", async (canary) => {
-    const corpus = officialCorpus(canary.intended);
+  it("native-admitted three-group population runs the complete paired matrix after SQLite reopen", async () => {
+    const corpus = officialCorpus(SOURCE_DISCOVERY_CANARY.map((canary) => canary.intended).join("\n\n"));
     const request = packedRequest(corpus);
-    const rawJson = canaryControlJson(corpus, canary);
-    await withBoundPublicWorker({
-      sourceBody: corpus, distractorBody: canary.distractor, rawJson, request,
-      provenance: "native-admitted-control"
-    }, async (planted, handler, receipts, client) => {
-      expect(planted.bind.provenance).toBe("native-admitted-control");
-      expect(planted.gistObjectIds.length).toBeGreaterThan(0);
-      planted.database.close();
-      closeCachedDatabase(planted.filename);
-      await client.ready();
-      for (const lookup of ["proposal", "source_text"] as const) {
-        const started = receipts.length;
-        const trace = await consumePublicSources({
-          handler, context: CONTEXT,
-          request: publicSearchRequest(canary, lookup, "source_only", "canonical"),
-          receipts
-        });
-        const scored = scoreConsumption(canary, planted.sourceId, trace, "source_only");
-        expect(scored.content.has_full_intended).toBe(true);
-        expect(scored.content.has_all_required_phrases).toBe(true);
-        expect(scored.content.has_forbidden_distractor).toBe(false);
-        if (canary.group === "aspiration") {
-          expect(trace.termination.source_bodies[planted.sourceId] ?? "").toContain(
-            "because we believe that cloud technologies"
-          );
-        }
-        expect(scored.primary_native_visits).not.toBe("miss");
-        expect(scored.first_complete_costs).not.toBeNull();
-        expect(scored.first_complete_costs?.cumulative_native_visits).not.toBe("unavailable");
-        expect(scored.first_complete_costs?.cumulative_native_bytes).not.toBe("unavailable");
-        expect(canaryContentScopeCheck(trace.termination.source_bodies[planted.sourceId] ?? "", canary)
-          .has_all_required_phrases).toBe(true);
-        expect(trace.termination.source_bodies[planted.sourceId] ?? "").toContain(canary.intended);
-        expect(receipts.length).toBeGreaterThan(started);
-        expect(trace.steps.length).toBeGreaterThan(0);
-      }
-      expect(fetches).toBe(0);
-    });
-  }, 90_000);
+    const rawJson = JSON.stringify({ interpretations: SOURCE_DISCOVERY_CANARY.flatMap((canary) =>
+      JSON.parse(canaryControlJson(corpus, canary)).interpretations) });
+    const bind = bindNativeControl({ rawJson, sourceCorpus: corpus, request, artifactKey: "native-control-population" });
+    expect(bind).toMatchObject({ status: "complete", provenance: "native-admitted-control" });
+    const matrix = await runAdmittedPublicMatrix({ bind, sourceCorpus: corpus,
+      evidenceDirectory: process.env.ALAYA_ADMISSION_EVIDENCE_DIRECTORY });
+    expect(matrix.file_failed).toBe(false);
+    expect(matrix.failed).toEqual([]);
+    expect(matrix.completed).toHaveLength(matrix.selected.length);
+    expect(matrix.utility.content_scope.every((group) => group.complete)).toBe(true);
+    expect(aggregateAdmittedUtility(matrix.rows.slice(1), matrix.selected.length, false).accepted).toBe(false);
+    expect(aggregateAdmittedUtility(matrix.rows, matrix.selected.length, true).accepted).toBe(false);
+    expect(matrix.rows.filter((row) => row.view !== "memory_only").every((row) =>
+      typeof row.score?.primary_native_visits === "number")).toBe(true);
+    expect(fetches).toBe(0);
+  }, 120_000);
 });
 
 function officialCorpus(text: string): string {
@@ -465,7 +420,7 @@ function canaryControlJson(corpus: string, canary: CanaryCase): string {
       assertion_id: assertion.assertion_id,
       relations: [{
         predicate: { text: canary.sketch.predicate },
-        arguments: canary.sketch.arguments.map((item) => ({
+        arguments: (canary.sketch.arguments ?? []).map((item) => ({
           role: item.role, phrase: { text: item.phrase }
         })),
         qualifiers: (canary.sketch.qualifiers ?? []).map((item) => ({

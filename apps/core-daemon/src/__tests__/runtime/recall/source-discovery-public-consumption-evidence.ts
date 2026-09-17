@@ -112,6 +112,9 @@ export function persistRunEvidence(input: Readonly<{
   readonly completed: readonly CaseIdentity[];
   readonly failed: readonly CaseIdentity[] | "unavailable";
   readonly fileFailed: boolean | "unavailable";
+  readonly evidenceDirectory?: string;
+  readonly provenance?: string;
+  readonly summary?: unknown;
 }>): void {
   const identity = resultCandidateIdentity();
   if (identity.result_sha === "unavailable" || identity.result_tree === "unavailable") {
@@ -128,14 +131,16 @@ export function persistRunEvidence(input: Readonly<{
     file_failed: input.fileFailed
   };
   const runOutcome = deriveRunOutcome(coverage);
-  const directory = join(evidenceDirectory(), "public-source-consumption-runs", identity.result_sha);
+  const directory = join(input.evidenceDirectory ?? evidenceDirectory(), "public-source-consumption-runs", identity.result_sha);
   mkdirSync(directory, { recursive: true });
   const envelope = {
     protocol: PUBLIC_CONSUMPTION_PROTOCOL,
     result_identity: identity,
     captured_at: capturedAt,
     run_outcome: runOutcome,
-    case_coverage: coverage
+    case_coverage: coverage,
+    provenance: input.provenance ?? "authored-control",
+    summary: input.summary ?? null
   };
   persistExclusivePair(directory, stamp, {
     ...envelope,
@@ -258,7 +263,7 @@ export function reconstructedSourceBodies(trace: ConsumptionTrace): Readonly<Rec
   return Object.fromEntries(entries);
 }
 
-function resultCandidateIdentity(): Readonly<{
+export function resultCandidateIdentity(): Readonly<{
   readonly result_sha: string | "unavailable";
   readonly result_tree: string | "unavailable";
 }> {

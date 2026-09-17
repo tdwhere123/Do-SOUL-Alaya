@@ -27,7 +27,9 @@
       "@do-soul/alaya-engine-gateway": ["./packages/engine-gateway/src/index.ts"],
       "@do-soul/alaya-storage": ["./packages/storage/src/index.ts"],
       "@do-soul/alaya-storage/lru-cache": ["./packages/storage/src/sqlite/lru-cache.ts"],
-      "@do-soul/alaya-eval": ["./packages/eval/src/index.ts"]
+      "@do-soul/alaya-eval": ["./packages/eval/src/index.ts"],
+      "@do-soul/alaya-eval/authority": ["./packages/eval/src/authority.ts"],
+      "@do-soul/alaya-eval/internal": ["./packages/eval/src/internal.ts"]
     },
     "types": ["node", "vitest/globals"]
   }

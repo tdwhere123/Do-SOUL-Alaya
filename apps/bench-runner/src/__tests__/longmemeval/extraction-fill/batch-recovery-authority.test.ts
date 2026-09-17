@@ -1,7 +1,16 @@
 import { join } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiSourceCorpus, computeOfficialApiSourceCorpusIdentity,
+  parseOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
+import { readRetainedBatchRun } from "../../../runs/extraction/fill/batch/store.js";
+import { readExtractionCacheManifest, writeExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
+import { bindNativeAdmittedControlShard, publishBoundPublicSources } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-admitted-public-publication.js";
+import { withPlantedSourceWorker } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumption-plant.js";
+import { publicSearchRequest } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumption.js";
+import { consumePublicSources } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumer.js";
+import { WS, RUN, NOW } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
+import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { preflightExtractionCache } from "../../../runs/compile-seed/compile-seed-preflight.js";
 import { inspectTurnContentKeySpace } from "../../../runs/extraction/turn-contents.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
@@ -23,6 +32,48 @@ let dataDir: string;
 let pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks((roots) => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots));
 afterEach(() => vi.restoreAllMocks());
+
+it("keeps native Batch admission readable after completion finalization and reopen while rejecting generation drift", async () => {
+  const { run } = await setup();
+  await run("prepare");
+  await run("submit");
+  const imported = await run("resume");
+  expect(imported.manifest.fill_status).toBe("complete");
+  await run("import");
+  const plan = JSON.parse(readFileSync(join(cacheRoot, "gemini-batch-plan.json"), "utf8"));
+  const retained = readRetainedBatchRun(cacheRoot, plan.identity);
+  const corpora = inspectTurnContentKeySpace([buildAuthorityQuestion("q0", "alpha0", "decoy0")])
+    .distinctExtractionTurns.map((turn) => buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages));
+  const manifest = readExtractionCacheManifest(cacheRoot)!;
+  for (const line of retained.plan.lines) {
+    const request = parseOfficialApiExtractionRequest(JSON.parse(line.userPrompt));
+    const sourceCorpus = corpora.find((corpus) => computeOfficialApiSourceCorpusIdentity(corpus) === request.source_corpus_identity)!;
+    const input = { cacheRoot, model: retained.plan.model, modelFamily: manifest.model_family!,
+      providerUrl: manifest.provider_url, requestProfile: retained.plan.requestProfile,
+      sourcePacking: "reference-eight" as const, systemPrompt: line.systemPrompt,
+      sourceCorpus, artifactKey: "native-batch-control", request };
+    const bind = bindNativeAdmittedControlShard(input);
+    expect(bind).toMatchObject({ status: "complete", provenance: "native-admitted-control" });
+    await withPlantedSourceWorker(sourceCorpus, "unrelated distractor", (planted) => {
+      publishBoundPublicSources({ database: planted.database, source: planted.source,
+        workspaceId: WS, runId: RUN, now: NOW, bind });
+      return {};
+    }, async (planted, handler, receipts, client) => {
+      planted.database.close();
+      closeCachedDatabase(planted.filename);
+      await client.ready();
+      const trace = await consumePublicSources({ handler, receipts,
+        context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" },
+        request: publicSearchRequest({ group: "capability", intended: sourceCorpus, distractor: "unrelated distractor",
+          original_query: request.source_assertions[0]!.text, unknown: "native control only",
+          sketch: { predicate: request.source_assertions[0]!.text } }, "proposal", "source_only", "canonical") });
+      expect(trace.termination.source_bodies[planted.sourceId]).toBe(sourceCorpus);
+    });
+    writeExtractionCacheManifest(cacheRoot, { ...manifest, dataset_revision: "foreign-dataset" });
+    expect(bindNativeAdmittedControlShard(input)).toMatchObject({ status: "not_exercised", reason: "admission_generation_mismatch" });
+    writeExtractionCacheManifest(cacheRoot, manifest);
+  }
+});
 
 type ResultKind = "valid" | "empty" | "error" | "missing" | "truncated" | "foreign-quote" | "substring";
 

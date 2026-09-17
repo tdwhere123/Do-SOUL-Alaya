@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { readdirSync } from "node:fs";
 import { z } from "zod";
-import type { OfficialApiInterpretationEntryRejection } from "@do-soul/alaya-soul";
+import { OfficialApiInterpretationEntryRejectionSchema } from "@do-soul/alaya-soul";
 import { boundedArtifactEntryExists, readBoundedCanonicalUtf8Artifact } from
   "../../cache-audit/bounded-artifact-reader.js";
 import { publishBytesExclusiveDurable, replaceBytesDurable } from
@@ -12,17 +12,6 @@ import { batchDigest, canonicalBatchPlan, MAX_BATCH_ARTIFACT_BYTES, prepareBatch
 import { applyRemoteOperation, readBatchRemoteWitness, terminalBatchStates } from "./remote-operation.js";
 import { record, resourceName } from "./native-codec.js";
 import { deriveBatchUsage } from "./output-inventory.js";
-
-const INTERPRETATION_REJECTION_REASONS = [
-  "source_generation_mismatch", "source_assertion_mismatch", "candidate_rejected",
-  "malformed_response", "missing_response", "transport_unknown"
-] as const satisfies readonly OfficialApiInterpretationEntryRejection["reason"][];
-const INTERPRETATION_DIAGNOSTIC_REASONS = [
-  "absent", "ambiguous", "out_of_range", "scope_rejected", "invalid_candidate",
-  "malformed_response", "transport_unknown", "missing_response"
-] as const satisfies readonly NonNullable<
-  OfficialApiInterpretationEntryRejection["diagnostic_reason"]
->[];
 
 const Nonnegative = z.number().int().nonnegative().safe();
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -42,14 +31,7 @@ const StateSchema = z.object({
     rawOutputSha256: Digest.optional(),
     outcomes: z.record(z.string(), z.object({
       status: z.enum(["admitted", "failed", "quarantined"]), reason: z.string().optional(),
-      rejections: z.array(z.object({
-        index: Nonnegative,
-        index_scope: z.enum(["envelope", "request"]).optional(),
-        reason: z.enum(INTERPRETATION_REJECTION_REASONS),
-        assertion_id: z.number().int().positive().safe().optional(),
-        candidate_index: Nonnegative.nullable().optional(),
-        diagnostic_reason: z.enum(INTERPRETATION_DIAGNOSTIC_REASONS).optional()
-      }).strict()).optional()
+      rejections: z.array(OfficialApiInterpretationEntryRejectionSchema).optional()
     }).strict()), usage: Usage.optional(), usageUnknown: z.boolean(), diagnostic: z.string().optional()
   }).strict())
 }).strict();
@@ -84,7 +66,15 @@ export function openBatchState(input: {
     return state;
   }
   const state = StateSchema.parse(JSON.parse(readArtifact(lease, `batch-state-${plan.identity}.json`)));
-  if (state.planDigest !== planDigest || state.endpoint !== input.endpoint || state.jobs.length !== jobs.length) {
+  const verified = verifyBatchState(lease.stableRootPath, plan, state, input.endpoint);
+  lease.assertOwned();
+  return verified;
+}
+
+function verifyBatchState(root: string, plan: GeminiBatchPlan, state: GeminiBatchState, endpoint: string): GeminiBatchState {
+  const jobs = prepareBatchJobs(plan);
+  const planDigest = batchDigest(JSON.stringify(plan));
+  if (state.planDigest !== planDigest || state.endpoint !== endpoint || state.jobs.length !== jobs.length) {
     throw new Error("Batch plan/endpoint drift on resume");
   }
   for (let index = 0; index < jobs.length; index += 1) {
@@ -100,8 +90,8 @@ export function openBatchState(input: {
       throw new Error("Batch durable outcome contains a foreign line");
     }
     assertBatchJobState(actual);
-    recoverRemoteEvidence(lease, plan, actual);
-    const retainedOutput = readRetainedBatchOutput(lease, actual);
+    recoverRemoteEvidence(root, plan, actual);
+    const retainedOutput = readRetainedOutputAtRoot(root, actual);
     if (retainedOutput !== undefined) {
       actual.rawOutputSha256 = batchDigest(retainedOutput);
       const derived = deriveBatchUsage(retainedOutput, actual);
@@ -122,10 +112,10 @@ export function isBatchPlanAdmitted(lease: ExtractionCacheWriteLease, plan: Gemi
   return true;
 }
 
-function recoverRemoteEvidence(lease: ExtractionCacheWriteLease, plan: GeminiBatchPlan, job: GeminiBatchJob): void {
+function recoverRemoteEvidence(root: string, plan: GeminiBatchPlan, job: GeminiBatchJob): void {
   const attemptsName = `batch-attempts-${job.id}.json`;
-  if (artifactExists(lease, attemptsName)) {
-    const witness = record(JSON.parse(readArtifact(lease, attemptsName)));
+  if (artifactExistsAtRoot(root, attemptsName)) {
+    const witness = record(JSON.parse(readArtifactAtRoot(root, attemptsName)));
     const ordinals = z.record(z.string(), z.number().int().positive().safe()).parse(witness.attemptOrdinals);
     if (job.submittedAt === undefined || witness.jobId !== job.id || witness.planIdentity !== plan.identity ||
         witness.inputSha256 !== job.inputSha256 ||
@@ -137,9 +127,9 @@ function recoverRemoteEvidence(lease: ExtractionCacheWriteLease, plan: GeminiBat
   let acknowledged = false;
   for (const kind of ["created", "reconciled"] as const) {
     const name = `batch-${kind}-${job.id}.json`;
-    if (!artifactExists(lease, name)) continue;
+    if (!artifactExistsAtRoot(root, name)) continue;
     if (job.submittedAt === undefined) throw new Error("Batch remote receipt contradicts unsubmitted state");
-    const operation = record(readBatchRemoteWitness(job, plan, JSON.parse(readArtifact(lease, name))));
+    const operation = record(readBatchRemoteWitness(job, plan, JSON.parse(readArtifactAtRoot(root, name))));
     acknowledged = true;
     job.remoteJob ??= resourceName(operation.name, "batches");
     if (job.status === "submission_unknown") job.status = "submitted";
@@ -149,14 +139,14 @@ function recoverRemoteEvidence(lease: ExtractionCacheWriteLease, plan: GeminiBat
   let observed = false;
   for (let ordinal = job.polls; ordinal > 0; ordinal -= 1) {
     const name = `batch-poll-${batchDigest(`${job.id}:${ordinal}`)}.json`;
-    if (!artifactExists(lease, name)) continue;
-    const operation = readBatchRemoteWitness(job, plan, JSON.parse(readArtifact(lease, name)));
+    if (!artifactExistsAtRoot(root, name)) continue;
+    const operation = readBatchRemoteWitness(job, plan, JSON.parse(readArtifactAtRoot(root, name)));
     applyRemoteOperation(job, plan, operation);
     observed = true;
     break;
   }
   if (job.submittedAt !== undefined && terminalBatchStates.has(job.status) && !observed &&
-      !artifactExists(lease, `batch-reconciled-${job.id}.json`)) {
+      !artifactExistsAtRoot(root, `batch-reconciled-${job.id}.json`)) {
     throw new Error("Batch terminal state lacks a durable remote observation");
   }
 }
@@ -255,19 +245,28 @@ export function saveBatchState(lease: ExtractionCacheWriteLease, plan: GeminiBat
 
 export function artifactExists(lease: ExtractionCacheWriteLease, name: string): boolean {
   lease.assertOwned();
+  return artifactExistsAtRoot(lease.stableRootPath, name);
+}
+
+function artifactExistsAtRoot(root: string, name: string): boolean {
   assertName(name);
-  return boundedArtifactEntryExists(join(lease.stableRootPath, name));
+  return boundedArtifactEntryExists(join(root, name));
 }
 
 export function readRetainedBatchOutput(lease: ExtractionCacheWriteLease, job: GeminiBatchJob): string | undefined {
+  lease.assertOwned();
+  return readRetainedOutputAtRoot(lease.stableRootPath, job);
+}
+
+function readRetainedOutputAtRoot(root: string, job: GeminiBatchJob): string | undefined {
   const name = `batch-output-${job.id}.jsonl`;
-  const expected = retainedOutputDigest(lease, job);
-  if (!artifactExists(lease, name)) {
+  const expected = retainedOutputDigest(root, job);
+  if (!artifactExistsAtRoot(root, name)) {
     if (job.rawOutputSha256 !== undefined) throw new Error("Batch retained output artifact is missing");
     return undefined;
   }
   if (expected === undefined) throw new Error("Batch retained output has no durable download binding");
-  const raw = readArtifact(lease, name);
+  const raw = readArtifactAtRoot(root, name);
   if (batchDigest(raw) !== expected || job.rawOutputSha256 !== undefined && job.rawOutputSha256 !== expected) {
     throw new Error("Batch output artifact digest mismatch");
   }
@@ -275,8 +274,9 @@ export function readRetainedBatchOutput(lease: ExtractionCacheWriteLease, job: G
 }
 
 export function publishRetainedBatchOutput(lease: ExtractionCacheWriteLease, job: GeminiBatchJob, raw: string): string {
+  lease.assertOwned();
   const digest = batchDigest(raw);
-  const previous = retainedOutputDigest(lease, job);
+  const previous = retainedOutputDigest(lease.stableRootPath, job);
   if (previous !== undefined && previous !== digest || job.rawOutputSha256 !== undefined && job.rawOutputSha256 !== digest) {
     throw new Error("Batch output artifact digest mismatch");
   }
@@ -287,10 +287,10 @@ export function publishRetainedBatchOutput(lease: ExtractionCacheWriteLease, job
   return digest;
 }
 
-function retainedOutputDigest(lease: ExtractionCacheWriteLease, job: GeminiBatchJob): string | undefined {
+function retainedOutputDigest(root: string, job: GeminiBatchJob): string | undefined {
   const name = `batch-download-${job.id}.json`;
-  if (!artifactExists(lease, name)) return undefined;
-  const retained = record(JSON.parse(readArtifact(lease, name)));
+  if (!artifactExistsAtRoot(root, name)) return undefined;
+  const retained = record(JSON.parse(readArtifactAtRoot(root, name)));
   if (JSON.stringify(retained.binding) !== JSON.stringify(outputBinding(job)) ||
       typeof retained.rawSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(retained.rawSha256)) {
     throw new Error("Batch retained download binding mismatch");
@@ -318,9 +318,13 @@ export function publishArtifact(lease: ExtractionCacheWriteLease, name: string, 
 
 export function readArtifact(lease: ExtractionCacheWriteLease, name: string): string {
   lease.assertOwned();
+  return readArtifactAtRoot(lease.stableRootPath, name);
+}
+
+function readArtifactAtRoot(root: string, name: string): string {
   assertName(name);
   return readBoundedCanonicalUtf8Artifact({
-    path: join(lease.stableRootPath, name), maxBytes: MAX_BATCH_ARTIFACT_BYTES, label: "Batch artifact"
+    path: join(root, name), maxBytes: MAX_BATCH_ARTIFACT_BYTES, label: "Batch artifact"
   });
 }
 
@@ -331,4 +335,24 @@ function statePath(lease: ExtractionCacheWriteLease, plan: GeminiBatchPlan): str
 
 function assertName(name: string): void {
   if (!/^batch-[a-z]+-[a-f0-9]{64}\.(json|jsonl)$/u.test(name)) throw new Error("invalid Batch artifact name");
+}
+
+/** Read-only historical replay shares resume validation without acquiring a writer lease. */
+export function readRetainedBatchRun(root: string, identity: string): {
+  readonly plan: GeminiBatchPlan; readonly state: GeminiBatchState;
+  readonly outputs: ReadonlyMap<string, string>;
+} {
+  const plan = canonicalBatchPlan(JSON.parse(readArtifactAtRoot(root, `batch-plan-${identity}.json`)) as GeminiBatchPlan);
+  if (plan.identity !== identity) throw new Error("Batch retained plan identity mismatch");
+  const persisted = StateSchema.parse(JSON.parse(readArtifactAtRoot(root, `batch-state-${identity}.json`)));
+  const state = verifyBatchState(root, plan, persisted, persisted.endpoint);
+  const outputs = new Map<string, string>();
+  for (const job of state.jobs) {
+    const raw = readRetainedOutputAtRoot(root, job);
+    if (raw !== undefined) outputs.set(job.id, raw);
+    if (job.submittedAt !== undefined && batchDigest(readArtifactAtRoot(root, `batch-input-${job.id}.jsonl`)) !== job.inputSha256) {
+      throw new Error("Batch retained input digest mismatch");
+    }
+  }
+  return { plan, state, outputs };
 }
