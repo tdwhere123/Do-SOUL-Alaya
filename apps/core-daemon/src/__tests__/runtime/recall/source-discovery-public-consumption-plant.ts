@@ -30,6 +30,11 @@ import {
   tapRecallReceipts,
   type ResultView
 } from "./source-discovery-public-consumption.js";
+import {
+  bindAdmittedSourceInterpretationPayload,
+  publishAdmittedPublicSources,
+  type AdmittedPublicBind
+} from "./source-discovery-admitted-public-publication.js";
 
 export type PlantedIntended = Readonly<{
   readonly database: StorageDatabase;
@@ -53,6 +58,14 @@ export type PlantedPublicPair = Readonly<{
   readonly later_id: string;
   readonly public_first_body: string;
   readonly later_body: string;
+}>;
+
+export type PlantedAdmitted = Readonly<{
+  readonly database: StorageDatabase;
+  readonly filename: string;
+  readonly sourceId: string;
+  readonly bind: Extract<AdmittedPublicBind, { readonly status: "received" }>;
+  readonly gistObjectIds: readonly string[];
 }>;
 
 type PlantedHandler<T> = (
@@ -90,6 +103,46 @@ export async function withPlantedWorker(
     await slice.writeMemory(MEM.c, `${canary.original_query} second memory`, MemoryDimension.FACT);
   }
   await runPlantedHandler(filename, slice, { database: slice.database, filename, intendedId: intended.record_id }, run);
+}
+
+export async function withAdmittedPublicWorker(
+  sourceBody: string,
+  rawJson: string,
+  run: PlantedHandler<PlantedAdmitted>
+): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "alaya-admitted-public-"));
+  const filename = join(directory, "alaya.db");
+  const slice = await openSourceSlice(() => {}, filename);
+  const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
+  const source = records.insert(hashedRecord(WS, sourceBody, "admitted-source"));
+  const bind = bindAdmittedSourceInterpretationPayload({
+    rawJson,
+    sourceCorpus: sourceBody,
+    artifactKey: `admitted-${source.record_id}`
+  });
+  if (bind.status !== "received") {
+    throw new Error(`admitted bind ${bind.status}`);
+  }
+  const published = publishAdmittedPublicSources({
+    database: slice.database,
+    source: {
+      body: sourceBody,
+      rootId: source.record_id,
+      digest: source.content_digest,
+      evidenceObjectId: source.evidence_object_id
+    },
+    workspaceId: WS,
+    runId: RUN,
+    now: NOW,
+    bind
+  });
+  await runPlantedHandler(filename, slice, {
+    database: slice.database,
+    filename,
+    sourceId: source.record_id,
+    bind,
+    gistObjectIds: published.gist_object_ids
+  }, run);
 }
 
 export async function withOmittedPairWorker(

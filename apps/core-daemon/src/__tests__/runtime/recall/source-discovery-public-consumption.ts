@@ -4,7 +4,8 @@ import {
   SoulMemorySearchRequestSchema,
   sourceRecallTarget,
   type SoulMemorySearchRequest,
-  type SoulMemorySearchResponse
+  type SoulMemorySearchResponse,
+  type SourceLocatedInterpretation
 } from "@do-soul/alaya-protocol";
 import {
   compileQuerySourceSketch,
@@ -308,6 +309,37 @@ export function scoreConsumption(
   };
 }
 
+export function insertLocatedBoundGist(
+  database: StorageDatabase,
+  objectId: string,
+  source: string,
+  rootId: string,
+  digest: string,
+  evidenceObjectId: string | null,
+  located: SourceLocatedInterpretation,
+  workspaceId: string,
+  runId: string,
+  now: string
+): void {
+  const bound = {
+    ...located,
+    source_target: sourceRecallTarget({
+      workspace_id: workspaceId,
+      root_kind: "source_record",
+      root_id: rootId,
+      source_version: "v1",
+      content_digest: digest,
+      evidence_object_id: evidenceObjectId
+    })
+  };
+  database.connection.prepare(`
+    INSERT INTO evidence_capsules (
+      object_id, created_at, updated_at, created_by, evidence_kind, semantic_anchor,
+      gist, excerpt, run_id, workspace_id
+    ) VALUES (?, ?, ?, 'test', 'conversation_excerpt', '{}', ?, ?, ?, ?)
+  `).run(objectId, now, now, JSON.stringify(bound), source, runId, workspaceId);
+}
+
 export function insertBoundGist(
   database: StorageDatabase,
   objectId: string,
@@ -342,23 +374,9 @@ export function insertBoundGist(
   if (located.outcome !== "candidates") {
     throw new Error(`locate failed: ${JSON.stringify(located.diagnostics)}`);
   }
-  const bound = {
-    ...located,
-    source_target: sourceRecallTarget({
-      workspace_id: workspaceId,
-      root_kind: "source_record",
-      root_id: rootId,
-      source_version: "v1",
-      content_digest: digest,
-      evidence_object_id: evidenceObjectId
-    })
-  };
-  database.connection.prepare(`
-    INSERT INTO evidence_capsules (
-      object_id, created_at, updated_at, created_by, evidence_kind, semantic_anchor,
-      gist, excerpt, run_id, workspace_id
-    ) VALUES (?, ?, ?, 'test', 'conversation_excerpt', '{}', ?, ?, ?, ?)
-  `).run(objectId, now, now, JSON.stringify(bound), source, runId, workspaceId);
+  insertLocatedBoundGist(
+    database, objectId, source, rootId, digest, evidenceObjectId, located, workspaceId, runId, now
+  );
 }
 
 export function observePlantedDiscovery(
