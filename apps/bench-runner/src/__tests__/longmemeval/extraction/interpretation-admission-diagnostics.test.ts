@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -8,7 +7,7 @@ import {
   OfficialApiInterpretationAdmissionError,
   buildOfficialApiExtractionRequest,
   buildOfficialApiSourceCorpus,
-  parseOfficialApiExtractionRequest,
+  classifyOfficialApiExtractionResult,
   receiveOfficialApiSourceInterpretations,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
@@ -29,13 +28,16 @@ import {
   composeEnrichmentPreparationReport
 } from "../../../runs/extraction/enrichment-acceptance/preparation-report.js";
 import {
-  locatePackedRequestInterpretations,
   nativeOutcomesFromInterpretationReceive
 } from "../../../runs/extraction/enrichment-acceptance/interpretation-admission-outcomes.js";
-import { decodeGeminiGenerateContent } from
-  "../../../runs/extraction/fill/batch/native-codec.js";
 import { bindFrozenPopulation } from "../../../runs/extraction/enrichment-acceptance/source-binding.js";
 import type { FrozenAssertion } from "../../../runs/extraction/enrichment-acceptance/frozen-population.js";
+import {
+  RETAINED_PAID_OUTPUT_SHA256,
+  RETAINED_PAID_REQUEST_KEY,
+  requireRetainedPaidExtractionWindow,
+  resolveRepoRelativeArtifact
+} from "./retained-paid-extraction-window.js";
 
 
 const MODEL = "test-model";
@@ -126,6 +128,69 @@ describe("interpretation admission diagnostics", () => {
     }
   });
 
+  it("routes malformed JSON through receive into import refusal without a completed shard", () => {
+    const source = "Alice uses tools.";
+    const request = buildOfficialApiExtractionRequest(source, []);
+    const sourceCorpus = buildOfficialApiSourceCorpus(source, []);
+    const userPrompt = stringifyOfficialApiExtractionRequest(request);
+    const expectedCacheKey = computeCacheKey(MODEL, PROFILE, OFFICIAL_API_SYSTEM_PROMPT, userPrompt);
+    writeExtractionCacheTestManifest({
+      cacheRoot: root, model: MODEL, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    expect(() => classifyOfficialApiExtractionResult("not-json", request, sourceCorpus))
+      .toThrow(OfficialApiInterpretationAdmissionError);
+    try {
+      classifyOfficialApiExtractionResult("not-json", request, sourceCorpus);
+    } catch (error) {
+      expect(error).toBeInstanceOf(OfficialApiInterpretationAdmissionError);
+      const refusal = error as OfficialApiInterpretationAdmissionError;
+      expect(refusal.receive.rejections[0]?.reason).toBe("malformed_response");
+      expect(refusal.message).toMatch(/interpretations array/u);
+    }
+    const lease = acquireExtractionCacheWriteLease(root);
+    try {
+      try {
+        importExtractionResponse({
+          config: {
+            model: MODEL,
+            modelFamily: MODEL,
+            providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+            requestProfile: PROFILE
+          },
+          cacheRoot: root,
+          writeLease: lease,
+          systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+          userPrompt,
+          expectedCacheKey,
+          sourceCorpus,
+          result: { rawJson: "not-json", responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }
+        });
+        throw new Error("expected import admission refusal");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ExtractionResponseAdmissionError);
+        const admission = error as ExtractionResponseAdmissionError;
+        expect(admission.cause).toBeInstanceOf(OfficialApiInterpretationAdmissionError);
+        expect(admission.rejections[0]?.reason).toBe("malformed_response");
+        expect(admission.receive?.rejections[0]?.reason).toBe("malformed_response");
+        const quarantinePath = join(root, "quarantine-reopen.json");
+        writeFileSync(quarantinePath, JSON.stringify({
+          status: "quarantined",
+          reason: admission.message,
+          rejections: admission.rejections,
+          receive: admission.receive
+        }));
+        const reopened = JSON.parse(readFileSync(quarantinePath, "utf8")) as {
+          readonly rejections: readonly { readonly reason: string }[];
+        };
+        expect(reopened.rejections[0]?.reason).toBe("malformed_response");
+      }
+      expect(inspectCachedExtraction(root, expectedCacheKey, MODEL, PROFILE).status).toBe("missing");
+      expect(fetches).toBe(0);
+    } finally {
+      lease.release();
+    }
+  });
+
   it("reports a quarantined first-stage request with per-assertion locator diagnostics", () => {
     const source = "we planned work because we needed time.";
     const request = buildOfficialApiExtractionRequest(source, []);
@@ -196,23 +261,134 @@ describe("interpretation admission diagnostics", () => {
       row.selected === false && row.raw_state === "not_exercised")).toBe(true);
     expect(report.native_formation_publication.machine_admission).toBe("rejected");
     expect(report.public_consumption.status).toBe("not_exercised");
+    const persisted = join(root, "preparation-report.json");
+    writeFileSync(persisted, `${JSON.stringify(report)}\n`);
+    const reopened = JSON.parse(readFileSync(persisted, "utf8")) as typeof report;
+    expect(reopened.source_fidelity.rows.find((row) => row.original_ordinal === 6)?.native_cells[0])
+      .toMatchObject({
+        candidate_ordinal: 0,
+        diagnostic_reason: "ambiguous",
+        located_outcome: "failed"
+      });
     expect(fetches).toBe(0);
   });
 
-  it("reopens assertion-local diagnostics from the retained paid response", () => {
-    const paid = readRetainedPaidWindow();
-    if (paid === null) return;
-    const located = locatePackedRequestInterpretations({
-      rawJson: paid.rawJson,
-      request: paid.request,
+  it("keeps foreign receive rejections visible in the preparation report", () => {
+    const source = "Alice uses tools.";
+    const request = buildOfficialApiExtractionRequest(source, []);
+    const sourceCorpus = buildOfficialApiSourceCorpus(source, []);
+    const received = receiveOfficialApiSourceInterpretations(JSON.stringify({
+      interpretations: [
+        {
+          assertion_id: request.source_assertions[0]!.assertion_id,
+          relations: [{ predicate: { text: "uses" }, arguments: [], qualifiers: [] }]
+        },
+        {
+          assertion_id: 99,
+          relations: [{ predicate: { text: "uses" }, arguments: [], qualifiers: [] }]
+        }
+      ]
+    }), request, { sourceCorpus, artifactKey: "foreign-entry" });
+    expect(received.status).toBe("partial");
+    expect(received.rejections.some((item) => item.index_scope === "envelope" && item.assertion_id === 99))
+      .toBe(true);
+    const outcomes = nativeOutcomesFromInterpretationReceive({
+      requestKey: "aa".repeat(32),
+      receive: received,
+      attributions: []
+    });
+    expect(outcomes.some((item) => item.current_assertion_id === 99 && item.machine_admission === "rejected"))
+      .toBe(true);
+    const rows = [frozenRow(1, true)];
+    const report = composeEnrichmentPreparationReport({
+      population: { rows },
+      bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
+      preflight: null,
+      selectedStage: "first_stage",
+      nativeOutcomes: outcomes
+    });
+    expect(report.native_formation_publication.unmatched_native_outcomes.some((item) =>
+      item.current_assertion_id === 99 && item.machine_admission === "rejected")).toBe(true);
+    expect(fetches).toBe(0);
+  });
+
+  it("replays the retained paid request, response and source through receive and reopens the stage report", () => {
+    const paid = requireRetainedPaidExtractionWindow();
+    expect(paid.outputSha256).toBe(RETAINED_PAID_OUTPUT_SHA256);
+    const received = receiveOfficialApiSourceInterpretations(paid.rawJson, paid.request, {
+      sourceCorpus: paid.sourceCorpus,
       artifactKey: "retained-paid"
     });
-    const assertionSix = located.find((row) => row.assertion_binding.assertion_id === 6);
+    expect(received.status).toBe("partial");
+    const assertionSix = received.located.find((row) => row.assertion_binding.assertion_id === 6);
     expect(assertionSix?.outcome).toBe("failed");
     expect(assertionSix?.diagnostics).toEqual([{ candidate_index: 0, reason: "ambiguous" }]);
-    expect(paid.outputSha256).toBe(
-      "b13a3d57ae50c8fa8eecc7c036da7d1c610a01dfd226f8bd259b16cdd05567e0"
+    expect(() => classifyOfficialApiExtractionResult(
+      paid.rawJson, paid.request, paid.sourceCorpus
+    )).toThrow(OfficialApiInterpretationAdmissionError);
+    const rows = Array.from({ length: 38 }, (_, index) => frozenRow(index + 1, index < 8));
+    const member = paid.request.source_assertions.find((item) => item.assertion_id === 6);
+    expect(member).toBeDefined();
+    const outcomes = nativeOutcomesFromInterpretationReceive({
+      requestKey: RETAINED_PAID_REQUEST_KEY,
+      receive: received,
+      attributions: [{ 
+        annotation_pointer: rows[5]!.annotation_pointer,
+        current_assertion_id: member!.assertion_id
+      }]
+    });
+    const pointerOutcomes = outcomes.flatMap((item) => {
+      if (item.annotation_pointer === undefined) return [];
+      return [Object.freeze({
+        annotation_pointer: item.annotation_pointer,
+        request_ordinal: item.request_ordinal,
+        candidate_ordinal: item.candidate_ordinal,
+        raw_state: item.raw_state,
+        machine_admission: item.machine_admission,
+        located_outcome: item.located_outcome,
+        ...(item.diagnostic_reason === undefined ? {} : { diagnostic_reason: item.diagnostic_reason }),
+        rejected_siblings: item.rejected_siblings
+      })];
+    });
+    const report = composeEnrichmentPreparationReport({
+      population: { rows },
+      bindings: bindFrozenPopulation(rows, { catalogUnits: [] }),
+      preflight: null,
+      selectedStage: "first_stage",
+      nativeOutcomes: pointerOutcomes,
+      fixtureOutcomes: [{
+        name: "actual-model public consumption",
+        kind: "public_consumption",
+        result: "not_run",
+        cell_state: "not_exercised",
+        detail: "historical quarantined payload; provenance is not cache-admitted"
+      }]
+    });
+    expect(report.source_fidelity.rows.find((row) => row.original_ordinal === 6)?.native_cells[0])
+      .toMatchObject({
+        candidate_ordinal: 0,
+        diagnostic_reason: "ambiguous",
+        located_outcome: "failed",
+        machine_admission: "rejected"
+      });
+    expect(report.source_fidelity.rows.slice(8).every((row) =>
+      row.selected === false && row.raw_state === "not_exercised")).toBe(true);
+    expect(report.public_consumption.status).toBe("not_exercised");
+    const persisted = join(root, "retained-first-stage-preparation-report.json");
+    writeFileSync(persisted, `${JSON.stringify(report)}\n`);
+    const reopened = JSON.parse(readFileSync(persisted, "utf8")) as typeof report;
+    expect(reopened.source_fidelity.rows.find((row) => row.original_ordinal === 6)?.native_cells[0])
+      .toMatchObject({ candidate_ordinal: 0, diagnostic_reason: "ambiguous" });
+    const evidenceDir = resolveRepoRelativeArtifact(
+      ".do-it/bench-runs/associative-field-enrichment-readiness-20260914/enrichment-admission-consumption-repair"
     );
+    if (evidenceDir !== null) {
+      mkdirSync(evidenceDir, { recursive: true });
+      writeFileSync(
+        join(evidenceDir, "retained-first-stage-preparation-report.json"),
+        `${JSON.stringify(report)}\n`
+      );
+    }
     expect(fetches).toBe(0);
   });
 });
@@ -251,37 +427,5 @@ function frozenRow(ordinal: number, firstStage: boolean): FrozenAssertion {
     scope: null,
     time: null,
     event_policy: null
-  };
-}
-
-const RETAINED_PAID_CACHE =
-  "/home/tdwhere/vibe/Do-SOUL-Alaya/.do-it/bench-runs/associative-field-enrichment-readiness-20260914/first-stage-enrichment-canary/paid-eight-01/cache";
-const RETAINED_PAID_JOB = "556a08d8ab9630951c942167fc4de6fd38764fd945b204d52c561c187b1bb1a7";
-
-function readRetainedPaidWindow(): {
-  readonly rawJson: string;
-  readonly request: ReturnType<typeof parseOfficialApiExtractionRequest>;
-  readonly outputSha256: string;
-} | null {
-  const outputPath = join(RETAINED_PAID_CACHE, `batch-output-${RETAINED_PAID_JOB}.jsonl`);
-  const inputPath = join(RETAINED_PAID_CACHE, `batch-input-${RETAINED_PAID_JOB}.jsonl`);
-  if (!existsSync(outputPath) || !existsSync(inputPath)) return null;
-  const outputBytes = readFileSync(outputPath);
-  const outputLine = JSON.parse(outputBytes.toString("utf8").trim().split("\n")[0]!) as {
-    readonly response?: unknown;
-  };
-  const inputLine = JSON.parse(readFileSync(inputPath, "utf8").trim().split("\n")[0]!) as {
-    readonly request?: {
-      readonly contents?: readonly {
-        readonly parts?: readonly { readonly text?: string }[];
-      }[];
-    };
-  };
-  const userPrompt = inputLine.request?.contents?.[0]?.parts?.[0]?.text;
-  if (typeof userPrompt !== "string") return null;
-  return {
-    rawJson: decodeGeminiGenerateContent(outputLine.response).rawJson,
-    request: parseOfficialApiExtractionRequest(JSON.parse(userPrompt) as unknown),
-    outputSha256: createHash("sha256").update(outputBytes).digest("hex")
   };
 }

@@ -152,7 +152,7 @@ export function inspectCachedRawExtraction(
   }
 }
 
-function readCachedEntry(
+export function readCachedEntry(
   cacheRoot: string,
   cacheKey: string,
   model: string,

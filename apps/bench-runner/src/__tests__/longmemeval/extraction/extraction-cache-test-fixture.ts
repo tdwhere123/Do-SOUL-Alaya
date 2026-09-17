@@ -2,7 +2,8 @@ import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   computeSystemPromptSha256,
-  writeExtractionCacheManifest
+  writeExtractionCacheManifest,
+  type ExtractionRequestProfile
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 
 const TEST_EXTRACTION_PROVIDER_URL = "https://provider.invalid/v1";
@@ -46,7 +47,7 @@ export function writeExtractionCacheTestManifest(input: {
   readonly systemPrompt: string;
   readonly modelFamily?: string;
   readonly providerUrl?: string;
-  readonly requestProfile?: "provider-default-v1" | "deepseek-v4-nonthinking-v1";
+  readonly requestProfile?: ExtractionRequestProfile;
 }): void {
   writeExtractionCacheManifest(input.cacheRoot, {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,

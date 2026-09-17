@@ -12,6 +12,26 @@ import { indexOfficialApiSourceAssertions } from
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { writeCachedExtraction } from
   "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-shard.js";
+import {
+  computeCacheKey,
+  EXTRACTION_CACHE_KEY_GOLDEN_VECTOR
+} from "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-key.js";
+import {
+  EXTRACTION_CACHE_KEY_ALGO
+} from "../../../../../../apps/bench-runner/src/runs/extraction/cache/extraction-cache-manifest.js";
+import { EXTRACTION_REQUEST_COMPLETION_VERSION } from
+  "../../../../../../apps/bench-runner/src/runs/extraction/empty-classification.js";
+import {
+  TEST_CACHED_PROVIDER_COMPLETION_METADATA,
+  testExtractionTransportProvenance,
+  writeExtractionCacheTestManifest
+} from "../../../../../../apps/bench-runner/src/__tests__/longmemeval/extraction/extraction-cache-test-fixture.js";
+import {
+  RETAINED_PAID_MODEL,
+  RETAINED_PAID_OUTPUT_SHA256,
+  RETAINED_PAID_REQUEST_PROFILE,
+  requireRetainedPaidExtractionWindow
+} from "../../../../../../apps/bench-runner/src/__tests__/longmemeval/extraction/retained-paid-extraction-window.js";
 import { NOW, RUN, WS } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import {
   SOURCE_DISCOVERY_CANARY,
@@ -145,22 +165,16 @@ describe("admitted public consumption entry", () => {
         artifactKey: "actual", request
       })).toMatchObject({ status: "not_exercised", reason: "cache-authored" });
 
-      const ambiguousCorpus = officialCorpus("we planned work because we needed time.");
-      const ambiguousRequest = packedRequest(ambiguousCorpus);
-      expect(ambiguousRequest.source_assertions.length).toBeGreaterThan(0);
-      const ambiguous = bindReceivedSourceInterpretationPayload({
-        rawJson: JSON.stringify({
-          interpretations: [{
-            assertion_id: ambiguousRequest.source_assertions[0]!.assertion_id,
-            relations: [{ predicate: { text: "we" }, arguments: [], qualifiers: [] }]
-          }]
-        }),
-        sourceCorpus: ambiguousCorpus,
-        artifactKey: "quarantine",
-        request: ambiguousRequest
+      writeCachedExtraction(cacheRoot, cacheKey, {
+        model: SHARD_MODEL, request_profile: SHARD_PROFILE, cache_key: cacheKey,
+        raw_json: '{"interpretations":[]}', extracted_at: NOW,
+        empty_classification: "provider_empty_with_assertions"
       });
-      expect(ambiguous.status).toBe("partial");
-      expect(requirePartialPublicBind(ambiguous).receive.rejections[0]?.diagnostic_reason).toBe("ambiguous");
+      expect(bindAdmittedActualModelShard({
+        cacheRoot, model: SHARD_MODEL, requestProfile: SHARD_PROFILE,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, sourceCorpus: corpus,
+        artifactKey: "actual", request
+      })).toMatchObject({ status: "not_exercised" });
       expect(fetches).toBe(0);
     } finally {
       await rm(cacheRoot, { recursive: true, force: true });
@@ -196,6 +210,115 @@ describe("admitted public consumption entry", () => {
     expect(fetches).toBe(0);
   });
 
+  it("pins the cache-key golden vector independently of the bind helper", () => {
+    expect(computeCacheKey(
+      EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.model,
+      EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.requestProfile,
+      EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.systemPrompt,
+      EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.extractionRequest
+    )).toBe(EXTRACTION_CACHE_KEY_ALGO);
+    expect(fetches).toBe(0);
+  });
+
+  it("rejects actual-model binds that lack manifest, completion, or generation identity", async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), "alaya-actual-provenance-"));
+    const canary = SOURCE_DISCOVERY_CANARY[0]!;
+    const corpus = officialCorpus(canary.intended);
+    const request = packedRequest(corpus);
+    const rawJson = canaryControlJson(corpus, canary);
+    const cacheKey = expectedExtractionCacheKey({
+      model: SHARD_MODEL, requestProfile: SHARD_PROFILE,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, request
+    });
+    const bindInput = {
+      cacheRoot, model: SHARD_MODEL, requestProfile: SHARD_PROFILE,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, sourceCorpus: corpus,
+      artifactKey: "actual", request
+    } as const;
+    try {
+      writeCachedExtraction(cacheRoot, cacheKey, {
+        model: SHARD_MODEL, request_profile: SHARD_PROFILE, cache_key: cacheKey,
+        raw_json: rawJson, extracted_at: NOW,
+        empty_classification: "completed_signals",
+        transport_provenance: testExtractionTransportProvenance(SHARD_MODEL),
+        request_completion: { version: EXTRACTION_REQUEST_COMPLETION_VERSION, status: "completed_signals" },
+        response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA
+      });
+      expect(bindAdmittedActualModelShard(bindInput)).toMatchObject({
+        status: "not_exercised", reason: "missing_cache_manifest"
+      });
+
+      writeCachedExtraction(cacheRoot, cacheKey, {
+        model: SHARD_MODEL, request_profile: SHARD_PROFILE, cache_key: cacheKey,
+        raw_json: rawJson, extracted_at: NOW,
+        empty_classification: "completed_signals",
+        transport_provenance: testExtractionTransportProvenance(SHARD_MODEL),
+        response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA
+      });
+      writeExtractionCacheTestManifest({
+        cacheRoot, model: SHARD_MODEL, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        requestProfile: SHARD_PROFILE
+      });
+      expect(bindAdmittedActualModelShard(bindInput)).toMatchObject({
+        status: "not_exercised", reason: "unbound_transport_metadata"
+      });
+
+      writeCachedExtraction(cacheRoot, cacheKey, {
+        model: SHARD_MODEL, request_profile: SHARD_PROFILE, cache_key: cacheKey,
+        raw_json: rawJson, extracted_at: NOW,
+        empty_classification: "completed_signals",
+        transport_provenance: testExtractionTransportProvenance(SHARD_MODEL),
+        request_completion: { version: EXTRACTION_REQUEST_COMPLETION_VERSION, status: "completed_signals" },
+        response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA
+      });
+      writeExtractionCacheTestManifest({
+        cacheRoot, model: SHARD_MODEL, systemPrompt: `${OFFICIAL_API_SYSTEM_PROMPT} drift`,
+        requestProfile: SHARD_PROFILE
+      });
+      expect(bindAdmittedActualModelShard(bindInput)).toMatchObject({
+        status: "not_exercised", reason: "cache_identity_mismatch"
+      });
+
+      writeExtractionCacheTestManifest({
+        cacheRoot, model: SHARD_MODEL, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        requestProfile: SHARD_PROFILE
+      });
+      expect(bindAdmittedActualModelShard({
+        ...bindInput, systemPrompt: `${OFFICIAL_API_SYSTEM_PROMPT} foreign-prompt`
+      })).toMatchObject({ status: "not_exercised" });
+      expect(bindAdmittedActualModelShard({
+        ...bindInput, requestProfile: "provider-default-v1"
+      })).toMatchObject({ status: "not_exercised" });
+      expect(bindAdmittedActualModelShard({
+        ...bindInput, request: packedRequest(officialCorpus(`${canary.intended} Extra.`))
+      }).status).toBe("not_exercised");
+      expect(fetches).toBe(0);
+    } finally {
+      await rm(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("stops actual-model before publish when the retained paid generation is not cache-admitted", () => {
+    const paid = requireRetainedPaidExtractionWindow();
+    expect(paid.outputSha256).toBe(RETAINED_PAID_OUTPUT_SHA256);
+    const actual = bindAdmittedActualModelShard({
+      cacheRoot: paid.cacheRoot,
+      model: RETAINED_PAID_MODEL,
+      requestProfile: RETAINED_PAID_REQUEST_PROFILE,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      sourceCorpus: paid.sourceCorpus,
+      artifactKey: "retained-paid",
+      request: paid.request
+    });
+    expect(actual.status).toBe("not_exercised");
+    expect(publishBoundPublicSources({
+      database: { connection: { prepare: () => ({ run: () => undefined, all: () => [] }) } } as never,
+      source: { body: paid.sourceCorpus, rootId: "root", digest: "d".repeat(64), evidenceObjectId: null },
+      workspaceId: CONTEXT.workspaceId, runId: CONTEXT.runId, now: NOW, bind: actual
+    }).gist_object_ids).toEqual([]);
+    expect(fetches).toBe(0);
+  });
+
   it.each(SOURCE_DISCOVERY_CANARY)("native-admitted $group control runs both lookup arms with complete context", async (canary) => {
     const corpus = officialCorpus(canary.intended);
     const request = packedRequest(corpus);
@@ -221,8 +344,12 @@ describe("admitted public consumption entry", () => {
         expect(scored.content.has_all_required_phrases).toBe(true);
         expect(scored.content.has_forbidden_distractor).toBe(false);
         expect(scored.primary_native_visits).not.toBe("miss");
+        expect(scored.first_complete_costs).not.toBeNull();
+        expect(scored.first_complete_costs?.cumulative_native_visits).not.toBe("unavailable");
+        expect(scored.first_complete_costs?.cumulative_native_bytes).not.toBe("unavailable");
         expect(canaryContentScopeCheck(trace.termination.source_bodies[planted.sourceId] ?? "", canary)
           .has_all_required_phrases).toBe(true);
+        expect(trace.termination.source_bodies[planted.sourceId] ?? "").toContain(canary.intended);
         expect(receipts.length).toBeGreaterThan(started);
         expect(trace.steps.length).toBeGreaterThan(0);
       }

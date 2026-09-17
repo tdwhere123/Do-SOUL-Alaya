@@ -6,6 +6,7 @@ import { buildOfficialApiExtractionRequest } from "../../../garden/ingestion/off
 import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 import {
   OfficialApiInterpretationAdmissionError,
+  classifyOfficialApiExtractionResult,
   classifyOfficialApiInterpretationResult,
   receiveOfficialApiSourceInterpretations
 } from "../../../garden/ingestion/official-api/source-interpretation-receive.js";
@@ -37,7 +38,7 @@ describe("official API source interpretation receive", () => {
       { sourceCorpus: corpus, artifactKey: "artifact-1" }
     );
     expect(received.status).toBe("partial");
-    expect(received.rejections).toEqual([{ index: 0, assertion_id: 1,
+    expect(received.rejections).toEqual([{ index: 0, index_scope: "request", assertion_id: 1,
       reason: "candidate_rejected", candidate_index: 1, diagnostic_reason: "absent" }]);
     expect(() => classifyOfficialApiInterpretationResult(
       interpretationRaw([usesRelation, { predicate: { text: "invented" }, arguments: [], qualifiers: [] }]),
@@ -69,6 +70,15 @@ describe("official API source interpretation receive", () => {
     expect(receivedMalformed.status).toBe("partial");
     expect(receivedMalformed.located[0]?.outcome).toBe("failed");
     expect(receivedMalformed.rejections[0]?.reason).toBe("malformed_response");
+    expect(() => classifyOfficialApiExtractionResult('{"signals":[]}', request, corpus))
+      .toThrow(OfficialApiInterpretationAdmissionError);
+    try {
+      classifyOfficialApiExtractionResult("not-json", request, corpus);
+    } catch (error) {
+      expect(error).toBeInstanceOf(OfficialApiInterpretationAdmissionError);
+      expect((error as OfficialApiInterpretationAdmissionError).receive.rejections[0]?.reason)
+        .toBe("malformed_response");
+    }
 
     const missing = receiveOfficialApiSourceInterpretations(
       "{}",
@@ -131,7 +141,7 @@ describe("official API source interpretation receive", () => {
     const ambiguous = receiveOfficialApiSourceInterpretations(
       ambiguousRaw, packed, { sourceCorpus: packedCorpus, artifactKey: "locator" }
     );
-    expect(ambiguous.rejections).toEqual([{ index: 0, assertion_id: 1,
+    expect(ambiguous.rejections).toEqual([{ index: 0, index_scope: "request", assertion_id: 1,
       reason: "candidate_rejected", candidate_index: 0, diagnostic_reason: "ambiguous" }]);
     try {
       classifyOfficialApiInterpretationResult(ambiguousRaw, packed, packedCorpus);
@@ -168,7 +178,7 @@ describe("official API source interpretation receive", () => {
     expect(received.status).toBe("partial");
     expect(received.located[0]?.outcome).toBe("candidates");
     expect(received.located[0]?.candidates).toHaveLength(1);
-    expect(received.rejections).toEqual([{ index: 0, assertion_id: 1,
+    expect(received.rejections).toEqual([{ index: 0, index_scope: "request", assertion_id: 1,
       reason: "candidate_rejected", candidate_index: 1, diagnostic_reason: "absent" }]);
     expect(() => classifyOfficialApiInterpretationResult(raw, request, corpus))
       .toThrow(OfficialApiInterpretationAdmissionError);

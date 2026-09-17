@@ -30,6 +30,8 @@ type OfficialApiInterpretationEntryRejectionReason =
 
 export interface OfficialApiInterpretationEntryRejection {
   readonly index: number;
+  /** Envelope index for foreign entries; request ordinal for packed members. */
+  readonly index_scope?: "envelope" | "request";
   readonly reason: OfficialApiInterpretationEntryRejectionReason;
   readonly assertion_id?: number;
   readonly candidate_index?: number | null;
@@ -98,7 +100,12 @@ export function receiveOfficialApiSourceInterpretations(
   const requestedIds = new Set(request.source_assertions.map((member) => member.assertion_id));
   envelope.data.interpretations.forEach((entry, index) => {
     if (!requestedIds.has(entry.assertion_id)) {
-      rejections.push({ index, assertion_id: entry.assertion_id, reason: "source_assertion_mismatch" });
+      rejections.push({
+        index,
+        index_scope: "envelope",
+        assertion_id: entry.assertion_id,
+        reason: "source_assertion_mismatch"
+      });
     }
   });
   request.source_assertions.forEach((member, index) => {
@@ -106,6 +113,7 @@ export function receiveOfficialApiSourceInterpretations(
     if (catalog === undefined || catalog.text !== member.text) {
       rejections.push(Object.freeze({
         index,
+        index_scope: "request" as const,
         reason: "source_assertion_mismatch" as const,
         assertion_id: member.assertion_id
       }));
@@ -124,9 +132,14 @@ export function receiveOfficialApiSourceInterpretations(
     });
     located.push(interpretation);
     for (const diagnostic of interpretation.diagnostics) {
-      rejections.push({ index, assertion_id: member.assertion_id,
-        reason: "candidate_rejected", candidate_index: diagnostic.candidate_index,
-        diagnostic_reason: diagnostic.reason });
+      rejections.push({
+        index,
+        index_scope: "request",
+        assertion_id: member.assertion_id,
+        reason: "candidate_rejected",
+        candidate_index: diagnostic.candidate_index,
+        diagnostic_reason: diagnostic.reason
+      });
     }
   });
   return toReceipt(rejections.length === 0 ? "complete" : "partial", located, rejections);
@@ -138,16 +151,7 @@ export function classifyOfficialApiExtractionResult(
   request: OfficialApiExtractionRequest,
   sourceCorpus?: string
 ) {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawJson);
-  } catch {
-    throw new Error("official API completed result requires an interpretations array");
-  }
-  if (typeof parsed === "object" && parsed !== null && Array.isArray((parsed as { interpretations?: unknown }).interpretations)) {
-    return classifyOfficialApiInterpretationResult(rawJson, request, sourceCorpus);
-  }
-  throw new Error("official API completed result requires an interpretations array");
+  return classifyOfficialApiInterpretationResult(rawJson, request, sourceCorpus);
 }
 
 export function classifyOfficialApiInterpretationResult(
@@ -226,6 +230,7 @@ function requestBoundRejections(
   if (computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
     return request.source_assertions.map((_, index) => Object.freeze({
       index,
+      index_scope: "request" as const,
       reason: "source_generation_mismatch" as const
     }));
   }
@@ -234,6 +239,7 @@ function requestBoundRejections(
   if (request.source_assertions.some((assertion) => catalog.get(assertion.assertion_id) !== assertion.text)) {
     return request.source_assertions.map((assertion, index) => Object.freeze({
       index,
+      index_scope: "request" as const,
       reason: "source_assertion_mismatch" as const,
       assertion_id: assertion.assertion_id
     }));
@@ -263,6 +269,7 @@ function locateUnavailable(
     if (catalog === undefined || catalog.text !== member.text) {
       rejections.push(Object.freeze({
         index,
+        index_scope: "request" as const,
         reason: "source_assertion_mismatch" as const,
         assertion_id: member.assertion_id
       }));
@@ -283,6 +290,7 @@ function locateUnavailable(
     }));
     rejections.push(Object.freeze({
       index,
+      index_scope: "request" as const,
       reason,
       assertion_id: member.assertion_id
     }));

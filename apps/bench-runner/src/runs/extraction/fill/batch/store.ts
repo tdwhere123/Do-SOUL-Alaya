@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { readdirSync } from "node:fs";
 import { z } from "zod";
+import type { OfficialApiInterpretationEntryRejection } from "@do-soul/alaya-soul";
 import { boundedArtifactEntryExists, readBoundedCanonicalUtf8Artifact } from
   "../../cache-audit/bounded-artifact-reader.js";
 import { publishBytesExclusiveDurable, replaceBytesDurable } from
@@ -11,6 +12,17 @@ import { batchDigest, canonicalBatchPlan, MAX_BATCH_ARTIFACT_BYTES, prepareBatch
 import { applyRemoteOperation, readBatchRemoteWitness, terminalBatchStates } from "./remote-operation.js";
 import { record, resourceName } from "./native-codec.js";
 import { deriveBatchUsage } from "./output-inventory.js";
+
+const INTERPRETATION_REJECTION_REASONS = [
+  "source_generation_mismatch", "source_assertion_mismatch", "candidate_rejected",
+  "malformed_response", "missing_response", "transport_unknown"
+] as const satisfies readonly OfficialApiInterpretationEntryRejection["reason"][];
+const INTERPRETATION_DIAGNOSTIC_REASONS = [
+  "absent", "ambiguous", "out_of_range", "scope_rejected", "invalid_candidate",
+  "malformed_response", "transport_unknown", "missing_response"
+] as const satisfies readonly NonNullable<
+  OfficialApiInterpretationEntryRejection["diagnostic_reason"]
+>[];
 
 const Nonnegative = z.number().int().nonnegative().safe();
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -32,16 +44,11 @@ const StateSchema = z.object({
       status: z.enum(["admitted", "failed", "quarantined"]), reason: z.string().optional(),
       rejections: z.array(z.object({
         index: Nonnegative,
-        reason: z.enum([
-          "source_generation_mismatch", "source_assertion_mismatch", "candidate_rejected",
-          "malformed_response", "missing_response", "transport_unknown"
-        ]),
+        index_scope: z.enum(["envelope", "request"]).optional(),
+        reason: z.enum(INTERPRETATION_REJECTION_REASONS),
         assertion_id: z.number().int().positive().safe().optional(),
         candidate_index: Nonnegative.nullable().optional(),
-        diagnostic_reason: z.enum([
-          "absent", "ambiguous", "out_of_range", "scope_rejected", "invalid_candidate",
-          "malformed_response", "transport_unknown", "missing_response"
-        ]).optional()
+        diagnostic_reason: z.enum(INTERPRETATION_DIAGNOSTIC_REASONS).optional()
       }).strict()).optional()
     }).strict()), usage: Usage.optional(), usageUnknown: z.boolean(), diagnostic: z.string().optional()
   }).strict())

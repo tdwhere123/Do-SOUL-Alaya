@@ -1,7 +1,11 @@
 import {
   fieldContractSha256
 } from "../../../../../../packages/core/src/shared/field-hash.js";
-import type { FieldContractSha256, SourceLocatedInterpretation } from "@do-soul/alaya-protocol";
+import {
+  DEFAULT_EXTRACTION_SOURCE_PACKING,
+  type FieldContractSha256,
+  type SourceLocatedInterpretation
+} from "@do-soul/alaya-protocol";
 import {
   computeOfficialApiSourceCorpusIdentity,
   receiveOfficialApiSourceInterpretations,
@@ -13,12 +17,17 @@ import { indexOfficialApiSourceAssertions } from
   "../../../../../../packages/soul/src/garden/triage/grounding/source-locator.js";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import {
-  inspectCachedExtraction,
-  inspectCachedRawExtraction,
+  inspectCachedExtractionContent,
+  readCachedEntry,
+  type CachedExtractionEntry,
   type CachedExtractionInspection
 } from "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-shard.js";
 import { computeCacheKey } from
   "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-key.js";
+import { readExtractionCacheManifestIdentity } from
+  "../../../../../../apps/bench-runner/src/runs/extraction/cache/extraction-cache-manifest.js";
+import { assertExtractionCacheIdentity } from
+  "../../../../../../apps/bench-runner/src/runs/extraction/cache/cache-identity.js";
 import { insertLocatedBoundGist } from "./source-discovery-public-consumption.js";
 
 export type BoundPublicSource = Readonly<{
@@ -87,7 +96,7 @@ export function bindReceivedSourceInterpretationPayload(input: Readonly<{
 
 export function expectedExtractionCacheKey(input: Readonly<{
   readonly model: string;
-  readonly requestProfile: Parameters<typeof inspectCachedExtraction>[3];
+  readonly requestProfile: Parameters<typeof readCachedEntry>[3];
   readonly systemPrompt: string;
   readonly request: OfficialApiExtractionRequest;
 }>): string {
@@ -99,67 +108,63 @@ export function expectedExtractionCacheKey(input: Readonly<{
   );
 }
 
-export function bindReceivedExtractionShard(input: Readonly<{
+type ExtractionShardBindInput = Readonly<{
   readonly cacheRoot: string;
   readonly model: string;
-  readonly requestProfile: Parameters<typeof inspectCachedExtraction>[3];
+  readonly requestProfile: Parameters<typeof readCachedEntry>[3];
   readonly systemPrompt: string;
   readonly sourceCorpus: string;
   readonly artifactKey: string;
   readonly request?: OfficialApiExtractionRequest;
   readonly cacheKey?: string;
   readonly sha256?: FieldContractSha256;
-}>): BoundPublicReceive {
-  const packed = requirePackedRequest(input.request, input.sourceCorpus);
-  if (packed.status !== "ok") return packed.bind;
-  const derivedKey = expectedExtractionCacheKey({
-    model: input.model,
-    requestProfile: input.requestProfile,
-    systemPrompt: input.systemPrompt,
-    request: packed.request
-  });
-  if (input.cacheKey !== undefined && input.cacheKey !== derivedKey) {
-    return {
-      status: "invalid",
-      reason: "generation_identity_mismatch",
-      cacheKey: derivedKey
-    };
-  }
-  const inspected = inspectCachedExtraction(
-    input.cacheRoot, derivedKey, input.model, input.requestProfile
-  );
-  if (inspected.status === "missing") return { status: "missing", cacheKey: derivedKey };
-  if (inspected.status !== "hit") {
-    return { ...invalidBind(inspected), cacheKey: derivedKey };
-  }
-  const raw = inspectCachedRawExtraction(
-    input.cacheRoot, derivedKey, input.model, input.requestProfile
-  );
-  const provenance: BoundPublicProvenance = raw.status === "hit" && raw.transportProvenance !== undefined
-    ? "cache-admitted"
-    : "cache-authored";
-  const receive = receiveOfficialApiSourceInterpretations(inspected.rawJson, packed.request, {
-    sourceCorpus: input.sourceCorpus,
-    artifactKey: input.artifactKey,
-    sha256: input.sha256 ?? fieldContractSha256
-  });
-  return {
-    status: receive.status,
-    rawJson: inspected.rawJson,
-    receive,
-    provenance,
-    cacheKey: derivedKey
-  };
+}>;
+
+type ExtractionShardSnapshot =
+  | Readonly<{ readonly kind: "bind"; readonly bind: BoundPublicReceive }>
+  | Readonly<{
+      readonly kind: "entry";
+      readonly derivedKey: string;
+      readonly request: OfficialApiExtractionRequest;
+      readonly entry: CachedExtractionEntry;
+    }>;
+
+export function bindReceivedExtractionShard(input: ExtractionShardBindInput): BoundPublicReceive {
+  const snapshot = takeExtractionShardSnapshot(input);
+  if (snapshot.kind === "bind") return snapshot.bind;
+  return receiveFromShardSnapshot(input, snapshot);
 }
 
-export function bindAdmittedActualModelShard(input: Parameters<typeof bindReceivedExtractionShard>[0]): BoundPublicReceive {
-  const bound = bindReceivedExtractionShard(input);
-  if (bound.status === "missing") {
-    return { status: "not_exercised", reason: "missing_admitted_shard", cacheKey: bound.cacheKey };
+export function bindAdmittedActualModelShard(input: ExtractionShardBindInput): BoundPublicReceive {
+  const snapshot = takeExtractionShardSnapshot(input);
+  if (snapshot.kind === "bind") {
+    if (snapshot.bind.status === "missing") {
+      return { status: "not_exercised", reason: "missing_admitted_shard", cacheKey: snapshot.bind.cacheKey };
+    }
+    if (snapshot.bind.status === "invalid") {
+      return { status: "not_exercised", reason: snapshot.bind.reason, cacheKey: snapshot.bind.cacheKey };
+    }
+    return { status: "not_exercised", reason: snapshot.bind.status, cacheKey: snapshot.bind.cacheKey };
   }
-  if (bound.status === "invalid") {
-    return { status: "not_exercised", reason: bound.reason, cacheKey: bound.cacheKey };
+  if (snapshot.entry.transport_provenance !== undefined && snapshot.entry.request_completion === undefined) {
+    return { status: "not_exercised", reason: "unbound_transport_metadata", cacheKey: snapshot.derivedKey };
   }
+  if (snapshot.entry.transport_provenance === undefined || snapshot.entry.request_completion === undefined) {
+    const authored = receiveFromShardSnapshot(input, snapshot);
+    if (authored.status === "partial") {
+      return { status: "not_exercised", reason: "quarantined_admission", cacheKey: authored.cacheKey };
+    }
+    return {
+      status: "not_exercised",
+      reason: "cache-authored",
+      cacheKey: snapshot.derivedKey
+    };
+  }
+  const identityGap = actualModelIdentityGap(input);
+  if (identityGap !== null) {
+    return { status: "not_exercised", reason: identityGap, cacheKey: snapshot.derivedKey };
+  }
+  const bound = receiveFromShardSnapshot(input, snapshot);
   if (bound.status === "partial") {
     return { status: "not_exercised", reason: "quarantined_admission", cacheKey: bound.cacheKey };
   }
@@ -167,7 +172,7 @@ export function bindAdmittedActualModelShard(input: Parameters<typeof bindReceiv
     return {
       status: "not_exercised",
       reason: bound.status === "complete" ? bound.provenance : bound.status,
-      cacheKey: bound.status === "complete" || bound.status === "not_exercised" ? bound.cacheKey : undefined
+      cacheKey: bound.status === "complete" || bound.status === "not_exercised" ? bound.cacheKey : snapshot.derivedKey
     };
   }
   return bound;
@@ -221,6 +226,92 @@ export function requirePartialPublicBind(
     throw new Error(`public bind ${bind.status}`);
   }
   return bind;
+}
+
+function takeExtractionShardSnapshot(input: ExtractionShardBindInput): ExtractionShardSnapshot {
+  const packed = requirePackedRequest(input.request, input.sourceCorpus);
+  if (packed.status !== "ok") return { kind: "bind", bind: packed.bind };
+  const derivedKey = expectedExtractionCacheKey({
+    model: input.model,
+    requestProfile: input.requestProfile,
+    systemPrompt: input.systemPrompt,
+    request: packed.request
+  });
+  if (input.cacheKey !== undefined && input.cacheKey !== derivedKey) {
+    return {
+      kind: "bind",
+      bind: { status: "invalid", reason: "generation_identity_mismatch", cacheKey: derivedKey }
+    };
+  }
+  const cached = readCachedEntry(input.cacheRoot, derivedKey, input.model, input.requestProfile);
+  if (cached.status === "missing") {
+    return { kind: "bind", bind: { status: "missing", cacheKey: derivedKey } };
+  }
+  if (cached.status !== "hit") {
+    return { kind: "bind", bind: { status: "invalid", reason: cached.reason, cacheKey: derivedKey } };
+  }
+  const inspected = inspectCachedExtractionContent(cached.entry);
+  if (inspected.status !== "hit") {
+    return { kind: "bind", bind: { ...invalidBind(inspected), cacheKey: derivedKey } };
+  }
+  return {
+    kind: "entry",
+    derivedKey,
+    request: packed.request,
+    entry: cached.entry
+  };
+}
+
+function receiveFromShardSnapshot(
+  input: ExtractionShardBindInput,
+  snapshot: Extract<ExtractionShardSnapshot, { readonly kind: "entry" }>
+): BoundPublicReceive {
+  const receive = receiveOfficialApiSourceInterpretations(snapshot.entry.raw_json, snapshot.request, {
+    sourceCorpus: input.sourceCorpus,
+    artifactKey: input.artifactKey,
+    sha256: input.sha256 ?? fieldContractSha256
+  });
+  const provenance: BoundPublicProvenance =
+    snapshot.entry.transport_provenance !== undefined && snapshot.entry.request_completion !== undefined
+      ? "cache-admitted"
+      : "cache-authored";
+  return {
+    status: receive.status,
+    rawJson: snapshot.entry.raw_json,
+    receive,
+    provenance,
+    cacheKey: snapshot.derivedKey
+  };
+}
+
+function actualModelIdentityGap(input: ExtractionShardBindInput): string | null {
+  let identity: ReturnType<typeof readExtractionCacheManifestIdentity>;
+  try {
+    identity = readExtractionCacheManifestIdentity(input.cacheRoot);
+  } catch {
+    return "invalid_cache_manifest";
+  }
+  if (identity === undefined) return "missing_cache_manifest";
+  const packing = identity.manifest.schema_version === 4
+    ? identity.manifest.source_packing
+    : DEFAULT_EXTRACTION_SOURCE_PACKING;
+  try {
+    assertExtractionCacheIdentity({
+      config: {
+        model: input.model,
+        modelFamily: input.model,
+        providerUrl: identity.manifest.provider_url,
+        requestProfile: input.requestProfile,
+        sourcePacking: packing
+      },
+      systemPrompt: input.systemPrompt,
+      manifest: identity.manifest,
+      validateProvider: false
+    });
+  } catch {
+    return "cache_identity_mismatch";
+  }
+  return null;
 }
 
 function requirePackedRequest(

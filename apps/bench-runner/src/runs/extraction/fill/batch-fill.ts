@@ -243,7 +243,7 @@ async function importBatchLine(input: BatchFillInput, workset: BatchExtractionWo
       return {
         status: "quarantined" as const,
         reason: cause.message,
-        ...(cause.rejections.length === 0 ? {} : { rejections: cause.rejections })
+        rejections: cause.rejections
       };
     }
     throw cause;
