@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { readdirSync } from "node:fs";
 import { z } from "zod";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { OfficialApiInterpretationEntryRejectionSchema } from "@do-soul/alaya-soul";
 import { boundedArtifactEntryExists, readBoundedCanonicalUtf8Artifact } from
   "../../cache-audit/bounded-artifact-reader.js";
@@ -343,7 +344,7 @@ export function readRetainedBatchRun(root: string, identity: string): {
   readonly outputs: ReadonlyMap<string, string>;
 } {
   const plan = canonicalBatchPlan(JSON.parse(readArtifactAtRoot(root, `batch-plan-${identity}.json`)) as GeminiBatchPlan);
-  if (plan.identity !== identity) throw new Error("Batch retained plan identity mismatch");
+  if (plan.identity !== identity) throw new AlayaError("CONFLICT", "Batch retained plan identity mismatch");
   const persisted = StateSchema.parse(JSON.parse(readArtifactAtRoot(root, `batch-state-${identity}.json`)));
   const state = verifyBatchState(root, plan, persisted, persisted.endpoint);
   const outputs = new Map<string, string>();
@@ -351,7 +352,7 @@ export function readRetainedBatchRun(root: string, identity: string): {
     const raw = readRetainedOutputAtRoot(root, job);
     if (raw !== undefined) outputs.set(job.id, raw);
     if (job.submittedAt !== undefined && batchDigest(readArtifactAtRoot(root, `batch-input-${job.id}.jsonl`)) !== job.inputSha256) {
-      throw new Error("Batch retained input digest mismatch");
+      throw new AlayaError("CONFLICT", "Batch retained input digest mismatch");
     }
   }
   return { plan, state, outputs };

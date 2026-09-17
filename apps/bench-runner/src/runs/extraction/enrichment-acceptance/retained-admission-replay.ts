@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   computeOfficialApiSourceCorpusIdentity, parseOfficialApiExtractionRequest,
   receiveOfficialApiSourceInterpretations, stringifyOfficialApiExtractionRequest
@@ -27,16 +28,20 @@ export function replayRetainedAdmission(input: {
   const retained = readRetainedBatchRun(input.cacheRoot, input.planIdentity);
   const line = retained.plan.lines.find((item) => item.key === input.requestKey);
   const job = retained.state.jobs.find((item) => item.lineKeys.includes(input.requestKey));
-  if (line === undefined || job === undefined) throw new Error("selected request absent from retained Batch");
+  if (line === undefined || job === undefined) {
+    throw new AlayaError("CONFLICT", "selected request absent from retained Batch");
+  }
   const output = retained.outputs.get(job.id);
-  if (output === undefined) throw new Error("retained Batch output missing");
+  if (output === undefined) throw new AlayaError("CONFLICT", "retained Batch output missing");
   const result = decodeGeminiGenerateContent(parseOutputInventory(output, job).get(line.key)?.response);
   const request = parseOfficialApiExtractionRequest(JSON.parse(line.userPrompt));
   if (computeCacheKey(retained.plan.model, retained.plan.requestProfile, line.systemPrompt,
-    stringifyOfficialApiExtractionRequest(request)) !== line.key) throw new Error("retained request key is not canonical");
+    stringifyOfficialApiExtractionRequest(request)) !== line.key) {
+    throw new AlayaError("CONFLICT", "retained request key is not canonical");
+  }
   const sourceCorpus = readFileSync(input.sourcePath, "utf8");
   if (computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
-    throw new Error("retained source corpus does not identify the selected request");
+    throw new AlayaError("CONFLICT", "retained source corpus does not identify the selected request");
   }
   const population = loadFrozenEnrichmentPopulation(input);
   const sourceMap = JSON.parse(readFileSync(join(input.preparationDirectory, "source-map.json"), "utf8")) as {
@@ -45,13 +50,15 @@ export function replayRetainedAdmission(input: {
     readonly bindings: readonly (FrozenAssertion & Omit<FrozenAssertionBinding, "row">)[];
   };
   const preflight = JSON.parse(readFileSync(join(input.preparationDirectory, "preflight.json"), "utf8")) as EnrichmentPreflight;
-  if (sourceMap.bindings.length !== population.rows.length) throw new Error("frozen source map denominator mismatch");
+  if (sourceMap.bindings.length !== population.rows.length) {
+    throw new AlayaError("CONFLICT", "frozen source map denominator mismatch");
+  }
   const bindings: FrozenPopulationBindings = {
     packing: sourceMap.packing,
     bindings: population.rows.map((row) => {
       const matches = sourceMap.bindings.filter((binding) =>
         JSON.stringify(binding.annotation_pointer) === JSON.stringify(row.annotation_pointer));
-      if (matches.length !== 1) throw new Error("frozen source map membership mismatch");
+      if (matches.length !== 1) throw new AlayaError("CONFLICT", "frozen source map membership mismatch");
       const bound = matches[0]!;
       return { row, status: bound.status, reason: bound.reason, current: bound.current, occurrences: bound.occurrences };
     })
@@ -61,7 +68,9 @@ export function replayRetainedAdmission(input: {
     const member = request.source_assertions.find((item) => item.assertion_id === current.assertion_id);
     if (!current.request_keys?.includes(line.key) || current.sourceCorpusIdentity !== request.source_corpus_identity ||
       member === undefined || sourceCorpus.slice(current.locator.start, current.locator.end) !== member.text ||
-      current.occurrenceIdentity === null) throw new Error("frozen selected occurrence does not bind retained request/source");
+      current.occurrenceIdentity === null) {
+      throw new AlayaError("CONFLICT", "frozen selected occurrence does not bind retained request/source");
+    }
     return { annotation_pointer: binding.row.annotation_pointer, current_assertion_id: current.assertion_id,
       occurrence_identity: current.occurrenceIdentity };
   }));
