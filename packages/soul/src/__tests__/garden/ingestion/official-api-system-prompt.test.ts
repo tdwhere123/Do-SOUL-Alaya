@@ -8,8 +8,10 @@ import { SOURCE_INTERPRETATION_CONTRACT } from "@do-soul/alaya-protocol";
 import { buildOfficialApiExtractionRequests, parseOfficialApiExtractionRequest } from
   "../../../garden/ingestion/official-api/extraction-request.js";
 import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
-import { classifyOfficialApiInterpretationResult } from
-  "../../../garden/ingestion/official-api/source-interpretation-receive.js";
+import {
+  OfficialApiInterpretationAdmissionError,
+  classifyOfficialApiInterpretationResult
+} from "../../../garden/ingestion/official-api/source-interpretation-receive.js";
 import { officialApiExtractionResponseSchema } from "../../../garden/ingestion/official-api/response-schema.js";
 import {
   OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,
@@ -22,10 +24,11 @@ describe("official API system prompt", () => {
     .map((match) => JSON.parse(match[1]!) as { input: unknown; output: unknown });
 
   it("embeds complete fictional examples accepted by the live interpretation contract", () => {
-    expect(examples).toHaveLength(3);
+    expect(examples).toHaveLength(4);
     const sources = ["In 2020, I opened a workshop and promised to lend tools.",
       "I can borrow tools in the workshop only on Saturdays.",
-      "The exhibit opened in 2019 with the aim of helping visitors learn ceramics."];
+      "The exhibit opened in 2019 with the aim of helping visitors learn ceramics.",
+      "Nia told Nia to wait."];
     examples.forEach((example, index) => {
       const source = sources[index]!;
       const request = parseOfficialApiExtractionRequest(example.input);
@@ -51,6 +54,10 @@ describe("official API system prompt", () => {
         expect(phrases).not.toContain("tools");
       } else if (index === 1) {
         expect(phrases).toEqual(expect.arrayContaining(["I", "borrow", "tools", "in the workshop", "only on Saturdays"]));
+      } else if (index === 3) {
+        expect(phrases).toEqual(["told", "Nia", "Nia", "to wait"]);
+        expect(classified.located[0]!.candidates[0]!.arguments.map((item) => item.phrase.source_span))
+          .toEqual([[6, 9], [15, 18], [19, 26]]);
       }
     });
   });
@@ -70,6 +77,70 @@ describe("official API system prompt", () => {
       "with the aim of helping visitors learn ceramics"
     ]);
     expect(candidate.arguments.map((item) => item.role)).not.toContain("promiser");
+  });
+
+  it("admits a repeated phrase with occurrence 0 then 1 and refuses omitting occurrence 0", () => {
+    const source = "Nia told Nia to wait.";
+    const example = examples[3]!;
+    const request = parseOfficialApiExtractionRequest(example.input);
+    const corpus = buildOfficialApiSourceCorpus(source, []);
+    const classified = classifyOfficialApiInterpretationResult(
+      JSON.stringify(example.output), request, corpus
+    );
+    expect(classified.status).toBe("completed_signals");
+    const candidate = classified.located[0]!.candidates[0]!;
+    expect(candidate.predicate.text).toBe("told");
+    expect(candidate.predicate.source_span).toEqual([10, 14]);
+    expect(candidate.arguments.map((item) => [item.role, item.phrase.text, item.phrase.source_span])).toEqual([
+      ["agent", "Nia", [6, 9]],
+      ["recipient", "Nia", [15, 18]],
+      ["theme", "to wait", [19, 26]]
+    ]);
+
+    const omitted = {
+      interpretations: [{
+        assertion_id: 1,
+        relations: [{
+          predicate: { text: "told" },
+          arguments: [
+            { role: "agent", phrase: { text: "Nia" } },
+            { role: "recipient", phrase: { text: "Nia", occurrence: 1 } },
+            { role: "theme", phrase: { text: "to wait" } }
+          ],
+          qualifiers: []
+        }]
+      }]
+    };
+    try {
+      classifyOfficialApiInterpretationResult(JSON.stringify(omitted), request, corpus);
+      throw new Error("expected classification refusal");
+    } catch (error) {
+      expect(error).toBeInstanceOf(OfficialApiInterpretationAdmissionError);
+      const refusal = error as OfficialApiInterpretationAdmissionError;
+      expect(refusal.receive.status).toBe("partial");
+      expect(refusal.receive.rejections[0]).toMatchObject({
+        assertion_id: 1, candidate_index: 0, diagnostic_reason: "ambiguous"
+      });
+      expect(refusal.receive.located[0]?.outcome).toBe("failed");
+      expect(refusal.receive.located[0]?.candidates).toEqual([]);
+    }
+  });
+
+  it("adds only the repeated-phrase occurrence example to the archived primary and repair prompts", () => {
+    const primary = resolveOfficialApiSystemPrompt(
+      "729288791ea8b5ad3c021b908855f245dc52f85fe22a7e5c118e02cd81744b6a");
+    const repair = resolveOfficialApiSystemPrompt(
+      "fabdd4339f8071bd36c96ab464311220e7284fb9f0e824ba13995fb7c44d0b61");
+    const added = ` <example>${JSON.stringify(examples[3])}</example>`;
+    expect(primary).toBeDefined();
+    expect(repair).toBeDefined();
+    expect(OFFICIAL_API_SYSTEM_PROMPT.split(added)).toHaveLength(2);
+    expect(OFFICIAL_API_SYSTEM_PROMPT.replace(added, "")).toBe(primary);
+    expect(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT.replace(added, "")).toBe(repair);
+    expect(sha256(primary!)).toBe("729288791ea8b5ad3c021b908855f245dc52f85fe22a7e5c118e02cd81744b6a");
+    expect(sha256(repair!)).toBe("fabdd4339f8071bd36c96ab464311220e7284fb9f0e824ba13995fb7c44d0b61");
+    expect(primary).not.toBe(OFFICIAL_API_SYSTEM_PROMPT);
+    expect(repair).not.toBe(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT);
   });
 
   it("archives the previous identities-and-topology prompt under its content hash", () => {
@@ -126,6 +197,8 @@ describe("official API system prompt", () => {
 
   it("resolves current and sealed historical prompt identities without a fallback", () => {
     const currentSha256 = sha256(OFFICIAL_API_SYSTEM_PROMPT);
+    const previousOccurrenceSha256 =
+      "729288791ea8b5ad3c021b908855f245dc52f85fe22a7e5c118e02cd81744b6a";
     const previousLiveSha256 =
       "8789e33fec393cd3729a2f66ebfa224418060de4075dab4e493e68be36a06533";
     const historicalSha256 =
@@ -144,7 +217,11 @@ describe("official API system prompt", () => {
     const historical = resolveOfficialApiSystemPrompt(historicalSha256);
     const g8 = resolveOfficialApiSystemPrompt(g8Sha256);
     const previousLive = resolveOfficialApiSystemPrompt(previousLiveSha256);
+    const previousOccurrence = resolveOfficialApiSystemPrompt(previousOccurrenceSha256);
 
+    expect(currentSha256).not.toBe(previousOccurrenceSha256);
+    expect(previousOccurrence).toBeDefined();
+    expect(previousOccurrence).not.toBe(OFFICIAL_API_SYSTEM_PROMPT);
     expect(currentSha256).not.toBe(previousLiveSha256);
     expect(previousLive).toBeDefined();
     expect(previousLive).toContain('"identity_observation"');

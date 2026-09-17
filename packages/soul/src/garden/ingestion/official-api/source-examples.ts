@@ -125,5 +125,27 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
         }
       ]
     }
+  },
+  {
+    "input": buildOfficialApiExtractionRequest(
+      "Nia told Nia to wait.", []
+    ),
+    "output": {
+      "interpretations": [
+        {
+          "assertion_id": 1,
+          "relations": [
+            relation(
+              "told",
+              [
+                { role: "agent", text: "Nia", occurrence: 0 },
+                { role: "recipient", text: "Nia", occurrence: 1 },
+                { role: "theme", text: "to wait" }
+              ]
+            )
+          ]
+        }
+      ]
+    }
   }
 ] as const;

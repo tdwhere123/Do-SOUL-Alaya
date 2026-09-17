@@ -176,6 +176,51 @@ describe("official API source interpretation receive", () => {
     expect(outOfRange.rejections[0]?.diagnostic_reason).toBe("out_of_range");
   });
 
+  it("admits occurrence 0 then 1 on a repeated phrase and refuses omitting occurrence 0", () => {
+    const source = "Nia told Nia to wait.";
+    const packed = buildOfficialApiExtractionRequest(source, []);
+    const packedCorpus = buildOfficialApiSourceCorpus(source, []);
+    const admittedRaw = interpretationRaw([{
+      predicate: { text: "told" },
+      arguments: [
+        { role: "agent", phrase: { text: "Nia", occurrence: 0 } },
+        { role: "recipient", phrase: { text: "Nia", occurrence: 1 } },
+        { role: "theme", phrase: { text: "to wait" } }
+      ],
+      qualifiers: []
+    }]);
+    const admitted = receiveOfficialApiSourceInterpretations(
+      admittedRaw, packed, { sourceCorpus: packedCorpus, artifactKey: "occurrence" }
+    );
+    expect(admitted.status).toBe("complete");
+    expect(admitted.rejections).toEqual([]);
+    expect(admitted.located[0]?.outcome).toBe("candidates");
+    expect(admitted.located[0]!.candidates[0]!.arguments.map((item) => item.phrase.source_span))
+      .toEqual([[6, 9], [15, 18], [19, 26]]);
+    expect(classifyOfficialApiInterpretationResult(admittedRaw, packed, packedCorpus).status)
+      .toBe("completed_signals");
+
+    const omittedRaw = interpretationRaw([{
+      predicate: { text: "told" },
+      arguments: [
+        { role: "agent", phrase: { text: "Nia" } },
+        { role: "recipient", phrase: { text: "Nia", occurrence: 1 } },
+        { role: "theme", phrase: { text: "to wait" } }
+      ],
+      qualifiers: []
+    }]);
+    const omitted = receiveOfficialApiSourceInterpretations(
+      omittedRaw, packed, { sourceCorpus: packedCorpus, artifactKey: "occurrence" }
+    );
+    expect(omitted.status).toBe("partial");
+    expect(omitted.located[0]?.outcome).toBe("failed");
+    expect(omitted.located[0]?.candidates).toEqual([]);
+    expect(omitted.rejections).toEqual([{ index: 0, index_scope: "request", assertion_id: 1,
+      reason: "candidate_rejected", candidate_index: 0, diagnostic_reason: "ambiguous" }]);
+    expect(() => classifyOfficialApiInterpretationResult(omittedRaw, packed, packedCorpus))
+      .toThrow(OfficialApiInterpretationAdmissionError);
+  });
+
   it("keeps a request incomplete when one sibling candidate is rejected", () => {
     const raw = interpretationRaw([
       usesRelation,

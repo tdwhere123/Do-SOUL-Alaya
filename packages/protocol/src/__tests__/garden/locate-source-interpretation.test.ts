@@ -29,6 +29,48 @@ describe("source interpretation location", () => {
     expect(result).not.toHaveProperty("source_target");
   });
 
+  it("requires occurrence 0 then 1 for a repeated exact phrase and refuses omitting 0", () => {
+    const source = "User: Nia told Nia to wait.";
+    const assertion = { assertion_id: 1, text: source, source_span: [0, source.length] as [number, number] };
+    const admitted = locateSourceInterpretation({
+      source, artifactKey: "artifact-1", sha256, assertion,
+      response: { kind: "received", value: { interpretations: [{ assertion_id: 1, relations: [{
+        predicate: { text: "told" },
+        arguments: [
+          { role: "agent", phrase: { text: "Nia", occurrence: 0 } },
+          { role: "recipient", phrase: { text: "Nia", occurrence: 1 } },
+          { role: "theme", phrase: { text: "to wait" } }
+        ],
+        qualifiers: []
+      }] }] } }
+    });
+    expect(admitted.outcome).toBe("candidates");
+    expect(admitted.diagnostics).toEqual([]);
+    expect(admitted.candidates[0]!.predicate.source_span).toEqual([10, 14]);
+    expect(admitted.candidates[0]!.arguments.map((item) => [item.role, item.phrase.text, item.phrase.source_span]))
+      .toEqual([
+        ["agent", "Nia", [6, 9]],
+        ["recipient", "Nia", [15, 18]],
+        ["theme", "to wait", [19, 26]]
+      ]);
+
+    const omitted = locateSourceInterpretation({
+      source, artifactKey: "artifact-1", sha256, assertion,
+      response: { kind: "received", value: { interpretations: [{ assertion_id: 1, relations: [{
+        predicate: { text: "told" },
+        arguments: [
+          { role: "agent", phrase: { text: "Nia" } },
+          { role: "recipient", phrase: { text: "Nia", occurrence: 1 } },
+          { role: "theme", phrase: { text: "to wait" } }
+        ],
+        qualifiers: []
+      }] }] } }
+    });
+    expect(omitted.outcome).toBe("failed");
+    expect(omitted.candidates).toEqual([]);
+    expect(omitted.diagnostics).toEqual([{ candidate_index: 0, reason: "ambiguous" }]);
+  });
+
   it("rejects an ambiguous relation while preserving another candidate and its ordinal identity", () => {
     const base = input("Alice uses tools and Alice uses apps.");
     const result = locateSourceInterpretation({ ...base, response: response([
