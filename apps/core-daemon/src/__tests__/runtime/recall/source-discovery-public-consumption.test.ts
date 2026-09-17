@@ -212,6 +212,11 @@ describe("public source consumption comparison", () => {
         expect(laterId).toBeDefined();
         expect(result.trace.termination.preview_complete[publicFirst!]).toBe(true);
         expect(result.trace.termination.source_bodies[publicFirst!]).toBe(bodyById[publicFirst!]);
+        const fullScore = scoreConsumption(canary, publicFirst!, result.trace, "source_only", bodyById[publicFirst!]);
+        const firstContext = result.trace.steps.findIndex((step) =>
+          (step.source_bodies[publicFirst!] ?? "").includes(canary.intended));
+        expect(fullScore.first_complete_step).toBeGreaterThan(firstContext);
+        expect(result.trace.steps[fullScore.first_complete_step!]!.preview_complete[publicFirst!]).toBe(true);
         expect((result.trace.termination.source_bodies[laterId!] ?? "").length).toBeGreaterThan(0);
         expect(payloadStepsFor(result.trace, laterId!).length).toBeGreaterThan(0);
         expect(result.trace.termination.stop_reason).toMatch(/continuation_exhausted|membership_page_cap|index_invalidated|declared_turn_cap/);
@@ -244,6 +249,11 @@ describe("public source consumption comparison", () => {
         expect(result.trace.termination.preview_complete[publicFirst!]).toBe(false);
         expect(result.trace.termination.source_bodies[publicFirst!] ?? "").toContain(CAPPED_SOURCE_MARKER);
         expect(result.trace.termination.source_bodies[publicFirst!] ?? "").not.toBe(publicFirstBody);
+        expect(result.trace.steps.some((step) => (step.source_bodies[publicFirst!] ?? "").includes(canary.intended))).toBe(true);
+        const cappedScore = scoreConsumption(canary, publicFirst!, result.trace, "source_only", publicFirstBody);
+        expect(cappedScore.first_complete_step).toBeNull();
+        expect(cappedScore.primary_native_visits).toBe("miss");
+        expect(cappedScore.consumption_attribution).toBe("payload");
         expect(result.trace.termination.preview_complete[laterId!]).toBe(true);
         expect(result.trace.termination.source_bodies[laterId!] ?? "").toContain(COMPLETE_SOURCE_MARKER);
         expect(result.trace.termination.source_bodies[laterId!]).toBe(planted.later_body);

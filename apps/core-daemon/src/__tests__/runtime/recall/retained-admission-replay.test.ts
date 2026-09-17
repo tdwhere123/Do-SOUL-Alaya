@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { expect, it } from "vitest";
 import { DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
@@ -16,7 +16,9 @@ it.skipIf(configuration === undefined)("replays retained native evidence against
   const input = JSON.parse(readFileSync(configuration!, "utf8")) as Parameters<typeof replayRetainedAdmission>[0];
   const directory = process.env.ALAYA_ADMISSION_EVIDENCE_DIRECTORY;
   if (directory === undefined) throw new Error("replay evidence directory is required");
-  if (!relative(resolve(input.cacheRoot, ".."), resolve(directory)).startsWith("..")) {
+  // The command creates this directory only after checking its canonical prospective path.
+  const outputRelative = relative(dirname(realpathSync(input.cacheRoot)), realpathSync(directory));
+  if (outputRelative === "" || (!isAbsolute(outputRelative) && outputRelative !== ".." && !outputRelative.startsWith(`..${sep}`))) {
     throw new Error("derived reports must stay outside the retained paid root");
   }
   const originalFetch = globalThis.fetch;

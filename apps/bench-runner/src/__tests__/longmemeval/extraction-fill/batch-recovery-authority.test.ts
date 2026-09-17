@@ -5,7 +5,7 @@ import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiSourceCorpus, computeOffici
   parseOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import { readRetainedBatchRun } from "../../../runs/extraction/fill/batch/store.js";
 import { readExtractionCacheManifest, writeExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
-import { bindNativeAdmittedControlShard, publishBoundPublicSources } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-admitted-public-publication.js";
+import { bindAdmittedActualModelShard, bindNativeAdmittedControlShard, publishBoundPublicSources } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-admitted-public-publication.js";
 import { withPlantedSourceWorker } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumption-plant.js";
 import { publicSearchRequest } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumption.js";
 import { consumePublicSources } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumer.js";
@@ -52,6 +52,14 @@ it("keeps native Batch admission readable after completion finalization and reop
       providerUrl: manifest.provider_url, requestProfile: retained.plan.requestProfile,
       sourcePacking: "reference-eight" as const, systemPrompt: line.systemPrompt,
       sourceCorpus, artifactKey: "native-batch-control", request };
+    const actualInput = { ...input, retainedBatchPlanIdentity: plan.identity };
+    // Synthetic HTTP receipts test closure mechanics, not empirical provider quality.
+    expect(bindAdmittedActualModelShard(actualInput)).toMatchObject({ status: "complete", provenance: "cache-admitted" });
+    const statePath = join(cacheRoot, `batch-state-${plan.identity}.json`);
+    const stateBytes = readFileSync(statePath, "utf8");
+    writeFileSync(statePath, JSON.stringify({ ...JSON.parse(stateBytes), endpoint: "https://foreign-provider.invalid" }));
+    expect(bindAdmittedActualModelShard(actualInput)).toMatchObject({ status: "not_exercised", reason: "retained_provider_mismatch" });
+    writeFileSync(statePath, stateBytes);
     const bind = bindNativeAdmittedControlShard(input);
     expect(bind).toMatchObject({ status: "complete", provenance: "native-admitted-control" });
     await withPlantedSourceWorker(sourceCorpus, "unrelated distractor", (planted) => {

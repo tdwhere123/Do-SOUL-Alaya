@@ -248,7 +248,8 @@ export function scoreConsumption(
   canary: CanaryCase,
   intendedRootId: string,
   trace: ConsumptionTrace,
-  view?: ResultView
+  view?: ResultView,
+  expectedSourceBody?: string
 ): Readonly<{
   readonly first_page_includes_intended: boolean;
   readonly first_page_position: number | null;
@@ -270,7 +271,9 @@ export function scoreConsumption(
   const firstPageIncludes = firstPosition >= 0;
   let firstComplete: number | null = null;
   for (const [index, step] of trace.steps.entries()) {
-    if ((step.source_bodies[intendedRootId] ?? "").includes(canary.intended)) {
+    const body = step.source_bodies[intendedRootId];
+    if (step.preview_complete[intendedRootId] === true && body?.includes(canary.intended) &&
+      (expectedSourceBody === undefined || body === expectedSourceBody)) {
       firstComplete = index;
       break;
     }
@@ -302,7 +305,7 @@ export function scoreConsumption(
     },
     content,
     consumption_attribution: consumptionAttribution({
-      content,
+      completed: firstComplete !== null,
       view,
       seenOnPublic,
       resourceRejected
@@ -508,12 +511,12 @@ function firstPageOmissionAttribution(input: Readonly<{
 }
 
 function consumptionAttribution(input: Readonly<{
-  readonly content: ReturnType<typeof canaryContentScopeCheck>;
+  readonly completed: boolean;
   readonly view: ResultView | undefined;
   readonly seenOnPublic: boolean;
   readonly resourceRejected: boolean;
 }>): ConsumptionAttribution {
-  if (input.content.has_full_intended) return "hit";
+  if (input.completed) return "hit";
   if (input.view === "memory_only") return "qualification";
   if (input.resourceRejected) return "resource";
   if (!input.seenOnPublic) return "unknown";

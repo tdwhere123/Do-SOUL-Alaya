@@ -396,6 +396,11 @@ describe("admitted public consumption entry", () => {
     expect(matrix.utility.content_scope.every((group) => group.complete)).toBe(true);
     expect(aggregateAdmittedUtility(matrix.rows.slice(1), matrix.selected.length, false).accepted).toBe(false);
     expect(aggregateAdmittedUtility(matrix.rows, matrix.selected.length, true).accepted).toBe(false);
+    expect(aggregateAdmittedUtility([matrix.rows[1]!, ...matrix.rows.slice(1)], matrix.selected.length, false).accepted).toBe(false);
+    expect(aggregateAdmittedUtility([{ ...matrix.rows[0]!, cell: "foreign" }, ...matrix.rows.slice(1)], matrix.selected.length, false).accepted).toBe(false);
+    expect(aggregateAdmittedUtility([{ ...matrix.rows[0]!, state: "failed" }, ...matrix.rows.slice(1)], matrix.selected.length, false).accepted).toBe(false);
+    expect(aggregateAdmittedUtility([{ ...matrix.rows[0]!, score: { ...matrix.rows[0]!.score!, primary_native_visits: "unavailable" } },
+      ...matrix.rows.slice(1)], matrix.selected.length, false).accepted).toBe(false);
     expect(matrix.rows.filter((row) => row.view !== "memory_only").every((row) =>
       typeof row.score?.primary_native_visits === "number")).toBe(true);
     expect(fetches).toBe(0);

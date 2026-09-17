@@ -39,6 +39,7 @@ import { insertLocatedBoundGist } from "./source-discovery-public-consumption.js
 import { readRetainedBatchRun } from "../../../../../../apps/bench-runner/src/runs/extraction/fill/batch/store.js";
 import { parseOutputInventory } from "../../../../../../apps/bench-runner/src/runs/extraction/fill/batch/output-inventory.js";
 import { decodeGeminiGenerateContent } from "../../../../../../apps/bench-runner/src/runs/extraction/fill/batch/native-codec.js";
+import { normalizeGeminiEndpoint } from "../../../../../../apps/bench-runner/src/runs/provider/gemini-endpoint.js";
 
 export type BoundPublicSource = Readonly<{
   readonly body: string;
@@ -204,6 +205,8 @@ function retainedProviderEvidenceGap(input: ExtractionShardBindInput,
   if (input.retainedBatchPlanIdentity === undefined) return "missing_retained_provider_evidence";
   try {
     const retained = readRetainedBatchRun(input.cacheRoot, input.retainedBatchPlanIdentity);
+    if (input.providerUrl === undefined || normalizeGeminiEndpoint(retained.state.endpoint).origin !==
+      normalizeGeminiEndpoint(input.providerUrl).origin) return "retained_provider_mismatch";
     const line = retained.plan.lines.find((item) => item.key === snapshot.derivedKey);
     if (retained.plan.model !== input.model || retained.plan.requestProfile !== input.requestProfile ||
       line?.systemPrompt !== input.systemPrompt ||
