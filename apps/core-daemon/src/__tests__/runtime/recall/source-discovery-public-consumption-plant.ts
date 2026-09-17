@@ -35,6 +35,7 @@ import {
   bindReceivedSourceInterpretationPayload,
   publishBoundPublicSources,
   requireCompletePublicBind,
+  type BoundPublicProvenance,
   type BoundPublicReceive,
   type BoundPublicSource
 } from "./source-discovery-admitted-public-publication.js";
@@ -157,6 +158,7 @@ export async function withBoundPublicWorker(
     readonly distractorBody: string;
     readonly rawJson: string;
     readonly request: OfficialApiExtractionRequest;
+    readonly provenance?: Extract<BoundPublicProvenance, "payload" | "native-admitted-control">;
   }>,
   run: PlantedHandler<PlantedBound>
 ): Promise<void> {
@@ -165,7 +167,8 @@ export async function withBoundPublicWorker(
       rawJson: input.rawJson,
       sourceCorpus: input.sourceBody,
       artifactKey: `bound-${planted.sourceId}`,
-      request: input.request
+      request: input.request,
+      ...(input.provenance === undefined ? {} : { provenance: input.provenance })
     }));
     const published = publishBoundPublicSources({
       database: planted.database,

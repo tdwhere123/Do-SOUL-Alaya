@@ -240,7 +240,11 @@ async function importBatchLine(input: BatchFillInput, workset: BatchExtractionWo
   } catch (cause) {
     if (cause instanceof ExtractionResponseAdmissionError) {
       authority.abandonPendingShard(result.line.key, result.provenance.attemptOrdinal);
-      return { status: "quarantined", reason: cause.message };
+      return {
+        status: "quarantined" as const,
+        reason: cause.message,
+        ...(cause.rejections.length === 0 ? {} : { rejections: cause.rejections })
+      };
     }
     throw cause;
   }
@@ -250,7 +254,7 @@ async function importBatchLine(input: BatchFillInput, workset: BatchExtractionWo
   );
   if (inspected.status !== "hit") {
     authority.abandonPendingShard(result.line.key, result.provenance.attemptOrdinal);
-    return { status: "quarantined", reason: inspected.reason ?? inspected.status };
+    return { status: "quarantined" as const, reason: inspected.reason ?? inspected.status };
   }
   authority.commitSuccessfulShard(result.line.key);
 }

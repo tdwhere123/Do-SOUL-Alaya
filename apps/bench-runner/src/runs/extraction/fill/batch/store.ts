@@ -29,7 +29,20 @@ const StateSchema = z.object({
     attemptOrdinals: z.record(z.string(), z.number().int().positive().safe()).optional(),
     rawOutputSha256: Digest.optional(),
     outcomes: z.record(z.string(), z.object({
-      status: z.enum(["admitted", "failed", "quarantined"]), reason: z.string().optional()
+      status: z.enum(["admitted", "failed", "quarantined"]), reason: z.string().optional(),
+      rejections: z.array(z.object({
+        index: Nonnegative,
+        reason: z.enum([
+          "source_generation_mismatch", "source_assertion_mismatch", "candidate_rejected",
+          "malformed_response", "missing_response", "transport_unknown"
+        ]),
+        assertion_id: z.number().int().positive().safe().optional(),
+        candidate_index: Nonnegative.nullable().optional(),
+        diagnostic_reason: z.enum([
+          "absent", "ambiguous", "out_of_range", "scope_rejected", "invalid_candidate",
+          "malformed_response", "transport_unknown", "missing_response"
+        ]).optional()
+      }).strict()).optional()
     }).strict()), usage: Usage.optional(), usageUnknown: z.boolean(), diagnostic: z.string().optional()
   }).strict())
 }).strict();

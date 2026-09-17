@@ -19,8 +19,10 @@ export {
   classifyOfficialApiExtractionResult,
   classifyOfficialApiInterpretationResult,
   receiveOfficialApiSourceInterpretations,
+  OfficialApiInterpretationAdmissionError,
   OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION,
   OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER,
+  type OfficialApiInterpretationEntryRejection,
   type OfficialApiInterpretationReceiveReceipt
 } from "./garden/ingestion/official-api/source-interpretation-receive.js";
 export {

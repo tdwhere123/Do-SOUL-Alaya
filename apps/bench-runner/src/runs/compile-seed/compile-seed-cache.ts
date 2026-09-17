@@ -2,7 +2,10 @@ import {
   parseOfficialApiExtractionRequest,
   classifyOfficialApiExtractionResult,
   stringifyOfficialApiExtractionRequest,
-  type OfficialApiExtractionRequest
+  OfficialApiInterpretationAdmissionError,
+  type OfficialApiExtractionRequest,
+  type OfficialApiInterpretationEntryRejection,
+  type OfficialApiInterpretationReceiveReceipt
 } from "@do-soul/alaya-soul";
 import {
   classifyExtractionEnvelope,
@@ -124,7 +127,29 @@ export function createCachingSignalExtractor(
 }
 
 /** Admit a retained provider result without dispatching or accounting a new call. */
-export class ExtractionResponseAdmissionError extends Error {}
+export class ExtractionResponseAdmissionError extends Error {
+  readonly rejections: readonly OfficialApiInterpretationEntryRejection[];
+  readonly receive: OfficialApiInterpretationReceiveReceipt | null;
+
+  constructor(
+    message: string,
+    options?: {
+      readonly cause?: unknown;
+      readonly rejections?: readonly OfficialApiInterpretationEntryRejection[];
+      readonly receive?: OfficialApiInterpretationReceiveReceipt | null;
+    }
+  ) {
+    super(message, options?.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "ExtractionResponseAdmissionError";
+    const fromCause = options?.cause instanceof OfficialApiInterpretationAdmissionError
+      ? options.cause
+      : null;
+    this.rejections = Object.freeze([
+      ...(options?.rejections ?? fromCause?.receive.rejections ?? [])
+    ]);
+    this.receive = options?.receive ?? fromCause?.receive ?? null;
+  }
+}
 
 export function importExtractionResponse(input: {
   readonly config: CachingSignalExtractorOptions["config"];

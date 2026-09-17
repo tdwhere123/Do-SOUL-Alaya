@@ -5,6 +5,7 @@ import {
 import { buildOfficialApiExtractionRequest } from "../../../garden/ingestion/official-api/extraction-request.js";
 import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 import {
+  OfficialApiInterpretationAdmissionError,
   classifyOfficialApiInterpretationResult,
   receiveOfficialApiSourceInterpretations
 } from "../../../garden/ingestion/official-api/source-interpretation-receive.js";
@@ -111,5 +112,65 @@ describe("official API source interpretation receive", () => {
       interpretationRaw([usesRelation]),
       request
     )).toThrow(/requires the source corpus/);
+  });
+
+  it("preserves locator reasons and original candidate ordinals through classification", () => {
+    const source = "Alice uses tools and Alice uses apps.";
+    const packed = buildOfficialApiExtractionRequest(source, []);
+    const packedCorpus = buildOfficialApiSourceCorpus(source, []);
+    const unique = receiveOfficialApiSourceInterpretations(
+      interpretationRaw([{ predicate: { text: "uses", occurrence: 1 }, arguments: [], qualifiers: [] }]),
+      packed, { sourceCorpus: packedCorpus, artifactKey: "locator" }
+    );
+    expect(unique.status).toBe("complete");
+    expect(unique.located[0]?.outcome).toBe("candidates");
+
+    const ambiguousRaw = interpretationRaw([
+      { predicate: { text: "uses" }, arguments: [], qualifiers: [] }
+    ]);
+    const ambiguous = receiveOfficialApiSourceInterpretations(
+      ambiguousRaw, packed, { sourceCorpus: packedCorpus, artifactKey: "locator" }
+    );
+    expect(ambiguous.rejections).toEqual([{ index: 0, assertion_id: 1,
+      reason: "candidate_rejected", candidate_index: 0, diagnostic_reason: "ambiguous" }]);
+    try {
+      classifyOfficialApiInterpretationResult(ambiguousRaw, packed, packedCorpus);
+      throw new Error("expected classification refusal");
+    } catch (error) {
+      expect(error).toBeInstanceOf(OfficialApiInterpretationAdmissionError);
+      const refusal = error as OfficialApiInterpretationAdmissionError;
+      expect(refusal.receive.rejections[0]).toMatchObject({
+        assertion_id: 1, candidate_index: 0, diagnostic_reason: "ambiguous"
+      });
+    }
+
+    const absent = receiveOfficialApiSourceInterpretations(
+      interpretationRaw([{ predicate: { text: "missing" }, arguments: [], qualifiers: [] }]),
+      packed, { sourceCorpus: packedCorpus, artifactKey: "locator" }
+    );
+    expect(absent.rejections[0]?.diagnostic_reason).toBe("absent");
+
+    const outOfRange = receiveOfficialApiSourceInterpretations(
+      interpretationRaw([{ predicate: { text: "uses", occurrence: 2 }, arguments: [], qualifiers: [] }]),
+      packed, { sourceCorpus: packedCorpus, artifactKey: "locator" }
+    );
+    expect(outOfRange.rejections[0]?.diagnostic_reason).toBe("out_of_range");
+  });
+
+  it("keeps a request incomplete when one sibling candidate is rejected", () => {
+    const raw = interpretationRaw([
+      usesRelation,
+      { predicate: { text: "invented" }, arguments: [], qualifiers: [] }
+    ]);
+    const received = receiveOfficialApiSourceInterpretations(
+      raw, request, { sourceCorpus: corpus, artifactKey: "sibling" }
+    );
+    expect(received.status).toBe("partial");
+    expect(received.located[0]?.outcome).toBe("candidates");
+    expect(received.located[0]?.candidates).toHaveLength(1);
+    expect(received.rejections).toEqual([{ index: 0, assertion_id: 1,
+      reason: "candidate_rejected", candidate_index: 1, diagnostic_reason: "absent" }]);
+    expect(() => classifyOfficialApiInterpretationResult(raw, request, corpus))
+      .toThrow(OfficialApiInterpretationAdmissionError);
   });
 });

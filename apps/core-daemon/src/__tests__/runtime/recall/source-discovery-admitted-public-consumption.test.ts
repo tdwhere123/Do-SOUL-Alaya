@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH,
+  OFFICIAL_API_SYSTEM_PROMPT,
   buildOfficialApiSourceCorpus,
   buildOfficialApiSourceRequest
 } from "@do-soul/alaya-soul";
@@ -36,6 +37,7 @@ import {
 import {
   bindReceivedExtractionShard,
   bindReceivedSourceInterpretationPayload,
+  expectedExtractionCacheKey,
   publishBoundPublicSources,
   requireCompletePublicBind,
   requirePartialPublicBind
@@ -175,9 +177,9 @@ describe("bound source interpretation public consumption", () => {
       const source = records.insert(hashedRecord(WS, corpus, "bound-source"));
       const bind = bindReceivedExtractionShard({
         cacheRoot,
-        cacheKey: "ab".repeat(32),
         model: SHARD_MODEL,
         requestProfile: SHARD_PROFILE,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
         sourceCorpus: corpus,
         artifactKey: "missing-shard",
         request: packedRequest(corpus)
@@ -212,7 +214,10 @@ describe("bound source interpretation public consumption", () => {
     const corpus = officialCorpus(CANARY.intended);
     const request = packedRequest(corpus);
     const rawJson = faithfulPayloadControl(corpus);
-    const cacheKey = "cd".repeat(32);
+    const cacheKey = expectedExtractionCacheKey({
+      model: SHARD_MODEL, requestProfile: SHARD_PROFILE,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, request
+    });
     try {
       writeCachedExtraction(cacheRoot, cacheKey, {
         model: SHARD_MODEL,
@@ -222,13 +227,15 @@ describe("bound source interpretation public consumption", () => {
         extracted_at: NOW
       });
       const omitted = bindReceivedExtractionShard({
-        cacheRoot, cacheKey, model: SHARD_MODEL, requestProfile: SHARD_PROFILE,
+        cacheRoot, model: SHARD_MODEL, requestProfile: SHARD_PROFILE,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
         sourceCorpus: corpus, artifactKey: "shard-bind"
       });
       expect(omitted).toEqual({ status: "invalid", reason: "packed_request_required" });
       await withPlantedSourceWorker(corpus, CANARY.distractor, (planted) => {
         const bind = requireCompletePublicBind(bindReceivedExtractionShard({
-          cacheRoot, cacheKey, model: SHARD_MODEL, requestProfile: SHARD_PROFILE,
+          cacheRoot, model: SHARD_MODEL, requestProfile: SHARD_PROFILE,
+          systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
           sourceCorpus: corpus, artifactKey: "shard-bind", request
         }));
         expect(bind.rawJson).toBe(rawJson);

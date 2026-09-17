@@ -1,3 +1,4 @@
+import type { SourceLocatedInterpretation } from "@do-soul/alaya-protocol";
 import type { FrozenAssertion, FrozenClassification } from "./frozen-population.js";
 import type {
   FrozenAssertionBinding,
@@ -43,6 +44,7 @@ export interface EnrichmentBoundNativeOutcome {
   readonly raw_state: PreparationCellState;
   readonly machine_admission: PreparationCellState;
   readonly located_outcome?: "candidates" | "empty" | "failed";
+  readonly diagnostic_reason?: SourceLocatedInterpretation["diagnostics"][number]["reason"];
   readonly rejected_siblings?: readonly EnrichmentRejectedSibling[];
   readonly unmet_obligations?: readonly string[];
 }

@@ -44,6 +44,17 @@ export interface OfficialApiInterpretationReceiveReceipt {
   readonly rejections: readonly OfficialApiInterpretationEntryRejection[];
 }
 
+/** Classification refusal that keeps the receive receipt as the diagnostic authority. */
+export class OfficialApiInterpretationAdmissionError extends Error {
+  readonly receive: OfficialApiInterpretationReceiveReceipt;
+
+  constructor(message: string, receive: OfficialApiInterpretationReceiveReceipt) {
+    super(message);
+    this.name = "OfficialApiInterpretationAdmissionError";
+    this.receive = receive;
+  }
+}
+
 function sha256Utf8(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -147,51 +158,65 @@ export function classifyOfficialApiInterpretationResult(
   if (sourceCorpus === undefined) {
     throw new Error("official API completed result requires the source corpus");
   }
-  if (computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
-    throw new Error("official API completed result source corpus differs from its request");
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawJson);
-  } catch {
-    throw new Error("official API completed result requires an interpretations array");
-  }
-  const envelope = SourceInterpretationResponseEnvelopeSchema.safeParse(parsed);
-  if (!envelope.success) {
-    throw new Error("official API completed result requires an interpretations array");
-  }
-  const catalogIds = new Set(
-    request.source_assertions.map((assertion) => assertion.assertion_id)
-  );
-  if (envelope.data.interpretations.some((entry) => !catalogIds.has(entry.assertion_id))) {
-    throw new Error("official API completed result contains rejected interpretation entries");
-  }
   const received = receiveOfficialApiSourceInterpretations(rawJson, request, {
     sourceCorpus,
     artifactKey: "admission",
     responseKind: "received"
   });
   if (received.status !== "complete") {
-    throw new Error("official API completed result contains rejected interpretation entries");
+    throw new OfficialApiInterpretationAdmissionError(
+      classificationRefusalMessage(received),
+      received
+    );
   }
-  const failed = received.located.some((item) => item.outcome === "failed");
-  if (failed) {
-    throw new Error("official API completed result contains rejected interpretation entries");
-  }
+  const emittedCount = countReceivedInterpretations(rawJson);
   const hasCandidates = received.located.some((item) => item.outcome === "candidates");
-  if (envelope.data.interpretations.length === 0) {
+  if (emittedCount === 0) {
     return Object.freeze({
       status: "completed_empty" as const,
       located: received.located
     });
   }
   if (!hasCandidates) {
-    throw new Error("official API completed result contains rejected interpretation entries");
+    throw new OfficialApiInterpretationAdmissionError(
+      "official API completed result contains rejected interpretation entries",
+      received
+    );
   }
   return Object.freeze({
     status: "completed_signals" as const,
     located: received.located
   });
+}
+
+function classificationRefusalMessage(
+  received: OfficialApiInterpretationReceiveReceipt
+): string {
+  if (
+    received.rejections.length > 0 &&
+    received.rejections.every((item) => item.reason === "source_generation_mismatch")
+  ) {
+    return "official API completed result source corpus differs from its request";
+  }
+  if (
+    received.rejections.some((item) => item.reason === "malformed_response") &&
+    received.rejections.every((item) =>
+      item.reason === "malformed_response" || item.reason === "source_assertion_mismatch"
+    )
+  ) {
+    return "official API completed result requires an interpretations array";
+  }
+  return "official API completed result contains rejected interpretation entries";
+}
+
+function countReceivedInterpretations(rawJson: string): number {
+  try {
+    const parsed: unknown = JSON.parse(rawJson);
+    const envelope = SourceInterpretationResponseEnvelopeSchema.safeParse(parsed);
+    return envelope.success ? envelope.data.interpretations.length : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function requestBoundRejections(

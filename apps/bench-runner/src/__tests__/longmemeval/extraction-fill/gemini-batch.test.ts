@@ -235,6 +235,35 @@ describe("durable Gemini Batch HTTP extraction", () => {
     expect(importer).toHaveBeenCalledTimes(2);
   });
 
+  it("reopens structured locator rejections from durable quarantine outcomes", async () => {
+    await run("prepare"); await run("submit"); state = "BATCH_STATE_SUCCEEDED";
+    const rejections = [{
+      index: 0,
+      assertion_id: 6,
+      reason: "candidate_rejected" as const,
+      candidate_index: 0,
+      diagnostic_reason: "ambiguous" as const
+    }];
+    importer.mockImplementation(async () => ({
+      status: "quarantined",
+      reason: "provider response failed request-bound admission",
+      rejections
+    }));
+    const imported = await run("resume");
+    expect(imported.jobs[0]?.outcomes["line-a"]).toEqual({
+      status: "quarantined",
+      reason: "provider response failed request-bound admission",
+      rejections
+    });
+    const reopened = await run("status");
+    expect(reopened.jobs[0]?.outcomes["line-a"]?.rejections?.[0]).toMatchObject({
+      assertion_id: 6,
+      candidate_index: 0,
+      diagnostic_reason: "ambiguous"
+    });
+    expect(importer).toHaveBeenCalledTimes(2);
+  });
+
   it("does not certify a missing or truncated line and retains unknown cost", async () => {
     await run("prepare"); await run("submit"); state = "BATCH_STATE_SUCCEEDED";
     output = result("line-a", "MAX_TOKENS");

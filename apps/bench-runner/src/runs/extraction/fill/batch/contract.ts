@@ -1,7 +1,20 @@
+import type { OfficialApiInterpretationEntryRejection } from "@do-soul/alaya-soul";
 import type { GeminiGenerateContentSettings } from "./native-codec.js";
 import type { ExtractionCacheWriteLease } from "../manifest/fill-root-guard.js";
 
 export type GeminiBatchOperation = "prepare" | "submit" | "status" | "resume" | "import" | "cancel";
+
+export type GeminiBatchLineOutcome = {
+  readonly status: "admitted" | "failed" | "quarantined";
+  readonly reason?: string;
+  readonly rejections?: readonly OfficialApiInterpretationEntryRejection[];
+};
+
+export type GeminiBatchQuarantineOutcome = {
+  readonly status: "quarantined";
+  readonly reason?: string;
+  readonly rejections?: readonly OfficialApiInterpretationEntryRejection[];
+};
 
 /** Logical identity is owned by the caller's shared extraction request owner. */
 export interface GeminiBatchLine {
@@ -56,7 +69,7 @@ export interface GeminiBatchJob {
   polls: number;
   cancelRequested?: boolean;
   rawOutputSha256?: string;
-  outcomes: Record<string, { status: "admitted" | "failed" | "quarantined"; reason?: string }>;
+  outcomes: Record<string, GeminiBatchLineOutcome>;
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
   usageUnknown: boolean;
   diagnostic?: string;
@@ -103,7 +116,7 @@ export interface GeminiBatchInvocation {
       readonly attemptOrdinal?: number;
       readonly usage?: { readonly inputTokens: number; readonly outputTokens: number; readonly totalTokens: number };
     };
-  }) => Promise<void | { readonly status: "quarantined"; readonly reason: string }>;
+  }) => Promise<void | GeminiBatchQuarantineOutcome>;
   /** Existing attempt/authority owner reserves before the non-idempotent create. */
   readonly reserveSubmission: (lines: readonly GeminiBatchLine[], costBoundUsd: number) =>
     Promise<void | Readonly<Record<string, number>>>;

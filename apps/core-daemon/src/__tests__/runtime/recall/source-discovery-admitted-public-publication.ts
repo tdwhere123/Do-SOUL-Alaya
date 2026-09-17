@@ -5,6 +5,7 @@ import type { FieldContractSha256, SourceLocatedInterpretation } from "@do-soul/
 import {
   computeOfficialApiSourceCorpusIdentity,
   receiveOfficialApiSourceInterpretations,
+  stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest,
   type OfficialApiInterpretationReceiveReceipt
 } from "@do-soul/alaya-soul";
@@ -13,8 +14,11 @@ import { indexOfficialApiSourceAssertions } from
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import {
   inspectCachedExtraction,
+  inspectCachedRawExtraction,
   type CachedExtractionInspection
 } from "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-shard.js";
+import { computeCacheKey } from
+  "../../../../../../apps/bench-runner/src/runs/compile-seed/cache/cache-key.js";
 import { insertLocatedBoundGist } from "./source-discovery-public-consumption.js";
 
 export type BoundPublicSource = Readonly<{
@@ -24,18 +28,33 @@ export type BoundPublicSource = Readonly<{
   readonly evidenceObjectId: string | null;
 }>;
 
+export type BoundPublicProvenance =
+  | "payload"
+  | "native-admitted-control"
+  | "cache-authored"
+  | "cache-admitted";
+
 export type BoundPublicReceive =
   | Readonly<{
       readonly status: "complete" | "partial";
       readonly rawJson: string;
       readonly receive: OfficialApiInterpretationReceiveReceipt;
+      readonly provenance: BoundPublicProvenance;
+      readonly cacheKey?: string;
     }>
   | Readonly<{
       readonly status: "missing";
+      readonly cacheKey?: string;
     }>
   | Readonly<{
       readonly status: "invalid";
       readonly reason: string;
+      readonly cacheKey?: string;
+    }>
+  | Readonly<{
+      readonly status: "not_exercised";
+      readonly reason: string;
+      readonly cacheKey?: string;
     }>;
 
 export type BoundPublicPublication = Readonly<{
@@ -49,6 +68,7 @@ export function bindReceivedSourceInterpretationPayload(input: Readonly<{
   readonly artifactKey: string;
   readonly request?: OfficialApiExtractionRequest;
   readonly sha256?: FieldContractSha256;
+  readonly provenance?: Exclude<BoundPublicProvenance, "cache-authored" | "cache-admitted">;
 }>): BoundPublicReceive {
   const packed = requirePackedRequest(input.request, input.sourceCorpus);
   if (packed.status !== "ok") return packed.bind;
@@ -57,33 +77,100 @@ export function bindReceivedSourceInterpretationPayload(input: Readonly<{
     artifactKey: input.artifactKey,
     sha256: input.sha256 ?? fieldContractSha256
   });
-  return { status: receive.status, rawJson: input.rawJson, receive };
+  return {
+    status: receive.status,
+    rawJson: input.rawJson,
+    receive,
+    provenance: input.provenance ?? "payload"
+  };
+}
+
+export function expectedExtractionCacheKey(input: Readonly<{
+  readonly model: string;
+  readonly requestProfile: Parameters<typeof inspectCachedExtraction>[3];
+  readonly systemPrompt: string;
+  readonly request: OfficialApiExtractionRequest;
+}>): string {
+  return computeCacheKey(
+    input.model,
+    input.requestProfile,
+    input.systemPrompt,
+    stringifyOfficialApiExtractionRequest(input.request)
+  );
 }
 
 export function bindReceivedExtractionShard(input: Readonly<{
   readonly cacheRoot: string;
-  readonly cacheKey: string;
   readonly model: string;
   readonly requestProfile: Parameters<typeof inspectCachedExtraction>[3];
+  readonly systemPrompt: string;
   readonly sourceCorpus: string;
   readonly artifactKey: string;
   readonly request?: OfficialApiExtractionRequest;
+  readonly cacheKey?: string;
   readonly sha256?: FieldContractSha256;
 }>): BoundPublicReceive {
   const packed = requirePackedRequest(input.request, input.sourceCorpus);
   if (packed.status !== "ok") return packed.bind;
+  const derivedKey = expectedExtractionCacheKey({
+    model: input.model,
+    requestProfile: input.requestProfile,
+    systemPrompt: input.systemPrompt,
+    request: packed.request
+  });
+  if (input.cacheKey !== undefined && input.cacheKey !== derivedKey) {
+    return {
+      status: "invalid",
+      reason: "generation_identity_mismatch",
+      cacheKey: derivedKey
+    };
+  }
   const inspected = inspectCachedExtraction(
-    input.cacheRoot, input.cacheKey, input.model, input.requestProfile
+    input.cacheRoot, derivedKey, input.model, input.requestProfile
   );
-  if (inspected.status === "missing") return { status: "missing" };
-  if (inspected.status !== "hit") return invalidBind(inspected);
-  return bindReceivedSourceInterpretationPayload({
-    rawJson: inspected.rawJson,
+  if (inspected.status === "missing") return { status: "missing", cacheKey: derivedKey };
+  if (inspected.status !== "hit") {
+    return { ...invalidBind(inspected), cacheKey: derivedKey };
+  }
+  const raw = inspectCachedRawExtraction(
+    input.cacheRoot, derivedKey, input.model, input.requestProfile
+  );
+  const provenance: BoundPublicProvenance = raw.status === "hit" && raw.transportProvenance !== undefined
+    ? "cache-admitted"
+    : "cache-authored";
+  const receive = receiveOfficialApiSourceInterpretations(inspected.rawJson, packed.request, {
     sourceCorpus: input.sourceCorpus,
     artifactKey: input.artifactKey,
-    request: packed.request,
-    ...(input.sha256 === undefined ? {} : { sha256: input.sha256 })
+    sha256: input.sha256 ?? fieldContractSha256
   });
+  return {
+    status: receive.status,
+    rawJson: inspected.rawJson,
+    receive,
+    provenance,
+    cacheKey: derivedKey
+  };
+}
+
+export function bindAdmittedActualModelShard(input: Parameters<typeof bindReceivedExtractionShard>[0]): BoundPublicReceive {
+  const bound = bindReceivedExtractionShard(input);
+  if (bound.status === "missing") {
+    return { status: "not_exercised", reason: "missing_admitted_shard", cacheKey: bound.cacheKey };
+  }
+  if (bound.status === "invalid") {
+    return { status: "not_exercised", reason: bound.reason, cacheKey: bound.cacheKey };
+  }
+  if (bound.status === "partial") {
+    return { status: "not_exercised", reason: "quarantined_admission", cacheKey: bound.cacheKey };
+  }
+  if (bound.status !== "complete" || bound.provenance !== "cache-admitted") {
+    return {
+      status: "not_exercised",
+      reason: bound.status === "complete" ? bound.provenance : bound.status,
+      cacheKey: bound.status === "complete" || bound.status === "not_exercised" ? bound.cacheKey : undefined
+    };
+  }
+  return bound;
 }
 
 export function publishBoundPublicSources(input: Readonly<{
@@ -94,7 +181,7 @@ export function publishBoundPublicSources(input: Readonly<{
   readonly now: string;
   readonly bind: BoundPublicReceive;
 }>): BoundPublicPublication {
-  if (input.bind.status !== "complete" && input.bind.status !== "partial") {
+  if (input.bind.status !== "complete") {
     return { bind: input.bind, gist_object_ids: [] };
   }
   const gistObjectIds: string[] = [];
