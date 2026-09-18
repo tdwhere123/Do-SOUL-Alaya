@@ -118,9 +118,9 @@ export async function withPlantedWorker(
 export async function withPlantedSourceWorker<T extends object>(
   sourceBody: string,
   distractorBody: string,
-  setup: (planted: PlantedSources) => T,
+  setup: (planted: PlantedSources) => T | Promise<T>,
   run: PlantedHandler<PlantedSources & T>,
-  options?: Readonly<{ readonly memoryText?: string; readonly sourceFirst?: boolean }>
+  options?: Readonly<{ readonly memoryText?: string; readonly sourceFirst?: boolean; readonly sourceId?: string }>
 ): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "alaya-bound-public-"));
   const filename = join(directory, "alaya.db");
@@ -128,7 +128,7 @@ export async function withPlantedSourceWorker<T extends object>(
   let handedOff = false;
   try {
     const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
-    const sourceRow = records.insert(hashedRecord(WS, sourceBody, "bound-source"));
+    const sourceRow = records.insert(hashedRecord(WS, sourceBody, options?.sourceId ?? "bound-source"));
     const distractorInput = options?.sourceFirst === undefined
       ? hashedRecord(WS, distractorBody, "distractor-source")
       : Array.from({ length: 128 }, (_, index) => hashedRecord(WS, distractorBody, `distractor-${index}`))
@@ -151,7 +151,7 @@ export async function withPlantedSourceWorker<T extends object>(
         evidenceObjectId: sourceRow.evidence_object_id
       }
     };
-    const extra = setup(planted);
+    const extra = await setup(planted);
     handedOff = true;
     await runPlantedHandler(filename, slice, { ...planted, ...extra }, run);
   } finally {

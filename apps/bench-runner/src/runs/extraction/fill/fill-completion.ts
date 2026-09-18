@@ -1,13 +1,12 @@
-import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import type { SourceInterpretationProfile, ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import {
   computeExtractionTurnCacheKeys,
-  computeSourceTurnCacheKeys,
-  inspectCachedExtraction
+  computeSourceTurnCacheKeys
 } from "../../compile-seed/compile-seed-cache.js";
-import { inspectCachedRawExtraction } from
+import { inspectCachedExtractionArtifact, inspectCachedRawExtraction } from
   "../../compile-seed/cache/cache-shard.js";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
 import {
@@ -49,6 +48,7 @@ interface ShardInspectionInput {
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly sourcePacking?: ExtractionSourcePacking;
+  readonly sourceInterpretationProfile?: SourceInterpretationProfile;
 }
 
 export function inspectExtractionFillCompletion(input: {
@@ -56,6 +56,7 @@ export function inspectExtractionFillCompletion(input: {
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly sourcePacking?: ExtractionSourcePacking;
+  readonly sourceInterpretationProfile?: SourceInterpretationProfile;
   readonly systemPrompt: string;
   readonly turnContents?: readonly string[];
   readonly extractionTurns?: readonly LongMemEvalExtractionTurn[];
@@ -89,12 +90,12 @@ export function inspectExtractionFillCompletion(input: {
 function expectedCacheKeys(input: Parameters<typeof inspectExtractionFillCompletion>[0]): Set<string> {
   if (input.extractionTurns !== undefined) {
     return new Set(input.extractionTurns.flatMap((turn) => computeExtractionTurnCacheKeys(
-      input.model, input.requestProfile, input.systemPrompt, turn, input.sourcePacking
+      input.model, input.requestProfile, input.systemPrompt, turn, input.sourcePacking, input.sourceInterpretationProfile
     )));
   }
   return new Set((input.turnContents ?? []).flatMap((turnContent) =>
     computeSourceTurnCacheKeys(
-      input.model, input.requestProfile, input.systemPrompt, { turnContent }, input.sourcePacking
+      input.model, input.requestProfile, input.systemPrompt, { turnContent }, input.sourcePacking, input.sourceInterpretationProfile
     )
   ));
 }
@@ -104,6 +105,7 @@ export function inspectExtractionCacheContentClosure(input: {
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly sourcePacking?: ExtractionSourcePacking;
+  readonly sourceInterpretationProfile?: SourceInterpretationProfile;
 }): ExtractionCacheContentInspection {
   const inventory = inspectShardInventory(input.cacheRoot);
   const counts = inspectExpectedShards(input, inventory.keys);
@@ -127,6 +129,7 @@ export function inspectExtractionCacheContentClosureExcluding(input: {
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly sourcePacking?: ExtractionSourcePacking;
+  readonly sourceInterpretationProfile?: SourceInterpretationProfile;
   readonly excludeCacheKeys: readonly string[];
 }): ExtractionCacheContentInspection {
   const inventory = inspectShardInventory(input.cacheRoot);
@@ -195,8 +198,8 @@ function inspectExpectedShards(
   let invalid = 0;
   const entries: ExtractionContentClosureEntry[] = [];
   for (const cacheKey of expectedKeys) {
-    const result = inspectCachedExtraction(
-      input.cacheRoot, cacheKey, input.model, input.requestProfile
+    const result = inspectCachedExtractionArtifact(
+      input.cacheRoot, cacheKey, input.model, input.requestProfile, input.sourceInterpretationProfile !== undefined
     );
     if (result.status === "hit") {
       valid += 1;

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   AuthorizedScopesAdmissionSchema,
+  SourceInterpretationReasoningRequestSchema,
+  SourceInterpretationReasoningResultSchema,
   EvidenceCapsuleSchema,
   MemoryDimensionSchema,
   MemoryEntrySchema,
@@ -87,6 +89,9 @@ const PAYLOAD_SCHEMAS = {
   "snapshot.commit": EmptyObjectSchema,
   "snapshot.rollback": EmptyObjectSchema,
   "conditionalField.recall": ConditionalFieldRecallWorkerPayloadSchema,
+  "conditionalField.interpretation": z.object({ workspace_id: z.string().min(1),
+    as_of: z.string().datetime(), authorized_scopes: AuthorizedScopesAdmissionSchema,
+    request: SourceInterpretationReasoningRequestSchema }).strict(),
   "conditionalField.acknowledge": AcknowledgeSchema,
   "conditionalField.discard": DiscardSchema,
   "memory.findByWorkspaceId": z.object({
@@ -256,6 +261,7 @@ const RESULT_SCHEMAS = {
   "snapshot.commit": z.null(),
   "snapshot.rollback": z.null(),
   "conditionalField.recall": ConditionalFieldRecallPortResultSchema,
+  "conditionalField.interpretation": SourceInterpretationReasoningResultSchema,
   // Receipt fields are owned by core; this boundary only requires the version tag.
   "conditionalField.acknowledge": z.union([
     z.null(),

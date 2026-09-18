@@ -398,13 +398,17 @@ function capturePublicExchange(
   return {
     step_index: stepIndex,
     request: {
+      query: request.query,
+      interpretation_proposal: request.interpretation_proposal ?? null,
       continuation: continuationRef(request.continuation),
       payload_continuation: payloadContinuationRef(request.payload_continuation)
     },
     response: {
       delivery_id: response.delivery_id ?? "unavailable",
       page_purpose: response.page_purpose ?? response.index?.page_purpose ?? "unavailable",
-      chunks: responseChunks(response)
+      chunks: responseChunks(response),
+      source_lookups: response.results.flatMap((row) => row.target?.kind === "source_evidence"
+        ? [{ target: row.target, reasons: row.source_lookup_reasons ?? "unavailable" as const }] : [])
     },
     receipt: receipt === undefined ? "unavailable" : {
       query_id: receipt.query_id,

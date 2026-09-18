@@ -49,6 +49,9 @@ export interface ParsedFlags {
   readonly questionManifest?: string;
   readonly extractionCacheRoot?: string;
   readonly extractionSourcePacking?: ExtractionSourcePacking;
+  readonly extractionPacketProfile?: string;
+  readonly extractionPreflightOut?: string;
+  readonly extractionPreflightKeys?: string;
   /** Digest-bound extraction authority receipt required for live cache fills. */
   readonly extractionAuthority?: string;
   /** Immutable target-root selection receipt linked from a normal authority receipt. */
@@ -97,6 +100,9 @@ export interface ParsedFlagsState {
   questionManifest?: string;
   extractionCacheRoot?: string;
   extractionSourcePacking?: ExtractionSourcePacking;
+  extractionPacketProfile?: string;
+  extractionPreflightOut?: string;
+  extractionPreflightKeys?: string;
   extractionAuthority?: string;
   extractionTargetSelection?: string;
   extractionPredecessorAuthority?: string;
@@ -328,6 +334,21 @@ function consumeSnapshotCachePathFlags(
   }
   if (matchFlagToken(token, "--pinned-meta-root")) {
     state.pinnedMetaRoot = readFlagValue(args, index, token, "--pinned-meta-root");
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--extraction-packet-profile")) {
+    if (state.extractionPacketProfile !== undefined) throw new Error("packet profile may be supplied only once");
+    state.extractionPacketProfile = readFlagValue(args, index, token, "--extraction-packet-profile");
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--extraction-preflight-keys")) {
+    if (state.extractionPreflightKeys !== undefined) throw new Error("preflight keys may be supplied only once");
+    state.extractionPreflightKeys = readFlagValue(args, index, token, "--extraction-preflight-keys");
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--extraction-preflight-out")) {
+    if (state.extractionPreflightOut !== undefined) throw new Error("preflight output may be supplied only once");
+    state.extractionPreflightOut = readFlagValue(args, index, token, "--extraction-preflight-out");
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--extraction-source-packing")) {

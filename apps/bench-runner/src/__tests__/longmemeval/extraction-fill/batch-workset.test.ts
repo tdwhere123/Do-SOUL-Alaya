@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, parseOfficialApiSourcePacketRequest, receiveOfficialApiSourcePacket } from "@do-soul/alaya-soul";
 import { prepareBatchExtractionWorkset } from "../../../runs/extraction/fill/batch-workset.js";
 import { computeExtractionTurnCacheKeys } from "../../../runs/compile-seed/cache/cache-key.js";
 import { writeCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
@@ -118,5 +118,32 @@ describe("fresh Batch source workset", () => {
     expect(plan.units.length).toBeGreaterThan(plan.lines.length);
     expect(new Set(plan.units.map((unit) => unit.binding.occurrenceIdentity)).size)
       .toBe(plan.units.length);
+  });
+
+  it("binds packet profile content and role-bearing message corpora through the same request-key owner", () => {
+    const sourceInterpretationProfile = { contract: "source-interpretation-profile-v1" as const, description: "Event description",
+      predicates: [{ symbol: "complete", meaning: "Complete a theme", governing_roles: [] }],
+      roles: [{ symbol: "theme", meaning: "Thing completed" }] };
+    const source = { turnContent: "I completed alpha.", turnMessages: [
+      { message_id: "u1", role: "user" as const, content: "I completed alpha." },
+      { message_id: "a1", role: "assistant" as const, content: "Acknowledged." }
+    ] };
+    const input = { ...prepared([source]), config: { ...config, sourceInterpretationProfile } };
+    const workset = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: input });
+    const item = workset.requests[0]!, request = parseOfficialApiSourcePacketRequest(JSON.parse(item.line.userPrompt));
+    expect(item.line.key).toMatch(/^[a-f0-9]{64}$/u);
+    expect(item.line.key).toBe(computeExtractionTurnCacheKeys(config.model, config.requestProfile, item.line.systemPrompt,
+      source, undefined, sourceInterpretationProfile)[0]);
+    expect(receiveOfficialApiSourcePacket('{"contract":"source-interpretation-response-v2","packet":null}', request,
+      { sourceCorpus: item.units[0]!.sourceCorpus, artifactKey: "unbound", producerId: "control" }).status).toBe("empty");
+    expect(() => receiveOfficialApiSourcePacket('{"contract":"source-interpretation-response-v2","packet":null}', request,
+      { sourceCorpus: source.turnContent, artifactKey: "unbound", producerId: "control" })).toThrow(/generation/u);
+    const changed = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: { ...input, config: { ...input.config,
+      sourceInterpretationProfile: { ...sourceInterpretationProfile, description: "Changed meaning, identical symbols" } } } });
+    expect(changed.lines[0]!.key).not.toBe(item.line.key);
+    const empty = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: { ...input,
+      executionExtractionTurns: [turn("")] } });
+    expect(empty.lines).toEqual([]);
+    expect(empty.deterministicEmptyRequests).toHaveLength(1);
   });
 });

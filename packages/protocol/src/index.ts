@@ -235,8 +235,12 @@ export { ManifestationBudgetConfigRouteDataSchema } from "./recall/manifestation
 export * from "./garden/semantic-artifact.js";
 export * from "./garden/identity-observation.js";
 export * from "./garden/source-interpretation.js";
+export * from "./garden/source-interpretation-packet.js";
+export * from "./recall/conditional-field/interpretation-coordinate.js";
+export { retargetInterpretationProduct, productEndpointId } from "./recall/conditional-field/product-identity.js";
 export * from "./garden/locate-source-interpretation.js";
 export * from "./evidence/source-selection.js";
+export * from "./evidence/source-reference.js";
 export * from "./garden/source-packing.js";
 export {
   canonicalizeSemanticExtractionProfile,
@@ -251,3 +255,7 @@ export {
   fallbackCjkRunPieces,
   isCjkSegmentationCandidate
 } from "./shared/cjk-run-policy.js";
+
+export * from "./garden/source-interpretation-profile.js";
+
+export { SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS, sourceInterpretationDependsOnRecord } from "./garden/source-interpretation-dependency.js";

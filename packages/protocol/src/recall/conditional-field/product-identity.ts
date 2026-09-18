@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { BoundedIdSchema, NonNegativeIntSchema } from "../../shared/schema-primitives.js";
 import { compareCodeUnits } from "../field-contract/canonical-identity.js";
+import { InterpretationNodeCoordinateSchema, interpretationNodeIdentity, type InterpretationNodeCoordinate } from "./interpretation-coordinate.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   ConditionalFieldIdSchema,
@@ -69,9 +70,15 @@ export const ProductStateKeySchema = z
     program_state: ConditionalFieldIdSchema,
     hypothesis_id: ConditionalFieldIdSchema,
     binding_context: ConditionalFieldIdSchema,
-    time_state: ConditionalFieldIdSchema
+    time_state: ConditionalFieldIdSchema,
+    interpretation_node: InterpretationNodeCoordinateSchema.optional()
   })
-  .strict()
+  .strict().superRefine((value, context) => {
+    if (value.interpretation_node !== undefined && (value.target.kind !== "source_evidence" ||
+        value.hypothesis_id !== value.interpretation_node.hypothesis_id)) {
+      context.addIssue({ code: "custom", message: "interpretation node requires its source target and matching hypothesis" });
+    }
+  })
   .readonly();
 
 export type RecallTargetKind = z.infer<typeof RecallTargetKindSchema>;
@@ -94,6 +101,7 @@ export type MemoryProductStateInput = Readonly<{
 }>;
 
 export type SourceProductStateInput = Readonly<{
+  readonly interpretation_node?: InterpretationNodeCoordinate;
   readonly workspace_id: string;
   readonly root_kind: SourceEvidenceRootKind;
   readonly root_id: string;
@@ -159,7 +167,8 @@ export function sourceProductStateKey(input: SourceProductStateInput): ProductSt
     program_state: input.program_state,
     hypothesis_id: input.hypothesis_id,
     binding_context: input.binding_context,
-    time_state: input.time_state
+    time_state: input.time_state,
+    ...(input.interpretation_node === undefined ? {} : { interpretation_node: input.interpretation_node })
   });
 }
 
@@ -189,6 +198,20 @@ export function sharedProductIdentity(key: ProductStateKey): string {
 
 export function productSubjectId(key: ProductStateKey): string {
   return key.target.kind === "memory_entry" ? key.target.object_id : key.target.root_id;
+}
+
+export function productEndpointId(key: ProductStateKey): string {
+  return key.interpretation_node === undefined ? productSubjectId(key) : interpretationNodeIdentity(key.interpretation_node);
+}
+
+/** Retarget proposed nodes without inventing a MemoryEntry or replacing their delivery source. */
+export function retargetInterpretationProduct(from: ProductStateKey, node: InterpretationNodeCoordinate,
+  patch: Readonly<{ program_state: string; binding_context: string }>): ProductStateKey {
+  if (from.target.kind !== "source_evidence" || from.interpretation_node === undefined ||
+      node.packet_id !== from.interpretation_node.packet_id || node.hypothesis_id !== from.hypothesis_id) {
+    throw new Error("interpretation transfer crosses its admitted source hypothesis");
+  }
+  return ProductStateKeySchema.parse({ ...from, ...patch, interpretation_node: node });
 }
 
 export function productMemoryObjectId(key: ProductStateKey): string | undefined {

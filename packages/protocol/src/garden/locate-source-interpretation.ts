@@ -1,4 +1,4 @@
-import { findSourceTextOccurrence } from "../evidence/source-selection.js";
+import { locateSourceTextSelection } from "../evidence/source-selection.js";
 import { normalizeMemoryObjectKeySurface } from "../memory/memory-object-key.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import {
@@ -106,13 +106,9 @@ function locateRelation(
 
 function locatePhrase(base: SourceLocatedInterpretation, selection: Selection): Match {
   const source = base.assertion_binding.text;
-  const first = findSourceTextOccurrence(source, selection.text, 0);
-  if (first === null) return { reason: "absent" };
-  if (selection.occurrence === undefined && findSourceTextOccurrence(source, selection.text, 1) !== null) {
-    return { reason: "ambiguous" };
-  }
-  const span = findSourceTextOccurrence(source, selection.text, selection.occurrence ?? 0);
-  if (span === null) return { reason: "out_of_range" };
+  const located = locateSourceTextSelection(source, selection);
+  if ("reason" in located) return located;
+  const { span } = located;
   const offset = base.assertion_binding.source_span[0];
   return { phrase: { text: selection.text, source_span: [offset + span[0], offset + span[1]],
     lookup_key: normalizeMemoryObjectKeySurface(selection.text) } };

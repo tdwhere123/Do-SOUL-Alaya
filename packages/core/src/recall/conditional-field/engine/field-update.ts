@@ -2,7 +2,7 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_TOP,
   PHYSICAL_COVERAGE_REGION_KINDS,
-  productSubjectId,
+  productEndpointId,
   type CompletenessStatus,
   type CoverageRegion,
   type Derivation,
@@ -464,7 +464,7 @@ function chargeIdentities(state: BindableState): BindableState {
     memory -= cost;
     charged = charged.with(nodeId, identity);
     ordered = ordered.with(productIndexOrderKey(identity), identity);
-    subjects = subjects.with(productSubjectId(identity), true);
+    subjects = subjects.with(productEndpointId(identity), true);
     keptIdentities = keptIdentities.append(identity);
     processed += 1;
   }

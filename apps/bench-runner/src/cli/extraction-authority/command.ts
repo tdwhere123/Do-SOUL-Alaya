@@ -1,3 +1,4 @@
+import { readExtractionPacketProfile } from "../extraction-fill/packet-profile.js";
 import { createExtractionSampleScope } from "../../runs/extraction/authority/sample-scope.js";
 import { readBoundedCanonicalUtf8Artifact } from "../../runs/extraction/cache-audit/bounded-artifact-reader.js";
 import process from "node:process";
@@ -202,6 +203,7 @@ async function inspectAuthorityForReceipt(
   const inspectInput = {
     variant: flags.variant,
     sourcePacking: flags.extractionSourcePacking,
+    sourceInterpretationProfile: readExtractionPacketProfile(flags.extractionPacketProfile),
     ...(flags.limit === undefined ? {} : { limit: flags.limit }),
     ...(flags.offset === undefined ? {} : { offset: flags.offset }),
     ...(flags.questionBatchLimit === undefined ? {} : {

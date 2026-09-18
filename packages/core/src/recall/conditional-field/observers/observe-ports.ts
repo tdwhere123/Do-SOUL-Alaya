@@ -3,7 +3,9 @@ import {
   type ObserverCursor,
   type ObserverPage,
   type QueryInterpretation,
-  type RelationValidity,
+  type Transition,
+  type InterpretationNodeCoordinate,
+  type RecallTargetRef,
   type SnapshotReadLease,
   type SourceEvidenceRootKind,
   type StagedWarningArray,
@@ -29,6 +31,8 @@ export type LexicalObserverPage = Readonly<{
 }>;
 
 export type SourceObserverRow = Readonly<{
+  readonly target?: RecallTargetRef;
+  readonly interpretation_node?: InterpretationNodeCoordinate;
   readonly object_id: string;
   readonly sourceRevision: string;
   readonly predicates?: Readonly<Record<string, boolean>>;
@@ -128,7 +132,9 @@ export type RelationObserverRow = Readonly<{
   readonly targetObjectId: string;
   readonly resultObjectId: string;
   readonly predicate: string;
-  readonly validity?: RelationValidity;
+  readonly validity?: Transition["validity"];
+  readonly interpretation_source?: InterpretationNodeCoordinate;
+  readonly interpretation_target?: InterpretationNodeCoordinate;
   readonly evidenceRefs?: readonly string[];
   readonly evidenceReceipts?: readonly Readonly<{ evidenceId: string; eventId: string; eventType: string; occurredAt: string }>[];
   readonly sourceObservations?: readonly Readonly<{ source_id: string; source_sha256: string }>[];
@@ -220,6 +226,7 @@ export type ObserverReaders = Readonly<{
     readonly limit: number;
     readonly nativeLimit: number;
     readonly afterAssertionId: string | null;
+    readonly byteLimit?: number;
     readonly asOf?: string;
   }>) => RelationObserverPage;
   readonly relationKinds?: (input: Readonly<{

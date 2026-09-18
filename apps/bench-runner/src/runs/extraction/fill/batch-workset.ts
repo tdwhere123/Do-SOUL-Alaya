@@ -1,15 +1,15 @@
+import { assertSourcePacketShardCapacity } from "../cache/source-packet-artifact.js";
+import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
+import { extractionArtifactPrompt, extractionArtifactRequests } from "../request-artifact.js";
+import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
 import { createHash } from "node:crypto";
 import {
-  OFFICIAL_API_SYSTEM_PROMPT,
-  collectOfficialApiExtractionCoverage,
   planOfficialApiSemanticWorkset,
-  stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
-  computeOfficialApiRequestCacheKey,
-  computeExtractionTurnCacheKeys,
-  inspectCachedExtraction
+  computeCacheKey,
+  computeExtractionTurnCacheKeys
 } from "../../compile-seed/compile-seed-cache.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import {
@@ -56,8 +56,8 @@ export function prepareBatchExtractionWorkset(input: {
   const deterministicEmptyRequests: BatchExtractionRequest[] = [];
   const cachedRequests: BatchExtractionRequest[] = [];
   for (const item of requests) {
-    const cached = inspectCachedExtraction(input.cacheRoot, item.line.key,
-      prepared.config.model, prepared.config.requestProfile);
+    const cached = inspectCachedExtractionArtifact(input.cacheRoot, item.line.key,
+      prepared.config.model, prepared.config.requestProfile, prepared.config.sourceInterpretationProfile !== undefined);
     if (cached.status === "invalid") {
       throw new ExtractionCacheInvariantError(
         `Batch selected cache shard ${item.line.key} is invalid: ${cached.reason}`
@@ -82,7 +82,7 @@ function selectedRequestKeys(
   allowlist: ReadonlySet<string> | undefined
 ): ReadonlySet<string> {
   const available = new Set(turns.flatMap((turn) => computeExtractionTurnCacheKeys(
-    prepared.config.model, prepared.config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn, prepared.config.sourcePacking
+    prepared.config.model, prepared.config.requestProfile, extractionArtifactPrompt(prepared.config.sourceInterpretationProfile), turn, prepared.config.sourcePacking, prepared.config.sourceInterpretationProfile
   )));
   if (allowlist === undefined) return available;
   for (const key of allowlist) {
@@ -144,9 +144,11 @@ function collectBatchRequests(
         key,
         unitKeys: Object.freeze(units.map((unit) => unit.binding.occurrenceIdentity)),
         requestSha256: createHash("sha256").update(item.userPrompt, "utf8").digest("hex"),
-        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        systemPrompt: extractionArtifactPrompt(prepared.config.sourceInterpretationProfile),
         userPrompt: item.userPrompt
       });
+      if (prepared.config.sourceInterpretationProfile !== undefined) assertSourcePacketShardCapacity(
+        buildOfficialApiSourceCorpus(item.sourceTurn.turnContent, item.sourceTurn.turnMessages), line);
       return Object.freeze({ line, request: item.request, sourceTurn: item.sourceTurn, units });
     }));
 }
@@ -169,15 +171,13 @@ function coveragePrompts(
   );
   const cached = memo.get(memoKey);
   if (cached !== undefined) return cached;
-  const prompts = Object.freeze(collectOfficialApiExtractionCoverage(
-    turn.turnContent, turn.turnMessages, prepared.config.sourcePacking
-  ).requests.map((request) => {
-    const userPrompt = stringifyOfficialApiExtractionRequest(request);
+  const prompts = Object.freeze(extractionArtifactRequests(turn, prepared.config.sourcePacking, prepared.config.sourceInterpretationProfile)
+    .map(({ source: request, userPrompt }) => {
     return Object.freeze({
       request,
       userPrompt,
-      key: computeOfficialApiRequestCacheKey(
-        prepared.config.model, prepared.config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, userPrompt
+      key: computeCacheKey(
+        prepared.config.model, prepared.config.requestProfile, extractionArtifactPrompt(prepared.config.sourceInterpretationProfile), userPrompt
       )
     });
   }));

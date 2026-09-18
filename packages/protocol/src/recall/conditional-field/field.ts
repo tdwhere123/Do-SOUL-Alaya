@@ -4,6 +4,7 @@ import {
   BoundedLabelSchema
 } from "../../shared/schema-primitives.js";
 import { RelationValiditySchema } from "../../relations/relation-assertion.js";
+import { InterpretationPremiseValiditySchema } from "./interpretation-coordinate.js";
 import {
   ConditionalFieldIdSchema,
   MilligradeSchema,
@@ -11,7 +12,7 @@ import {
   Sha256DigestSchema
 } from "./common.js";
 import { FieldActivationSchema } from "./measurement.js";
-import { ProductStateKeySchema } from "./product-identity.js";
+import { ProductStateKeySchema, sameSourceEvidenceRoot } from "./product-identity.js";
 
 export {
   CANONICAL_PRODUCT_IDENTITY_VERSION,
@@ -61,11 +62,26 @@ export const TransitionSchema = z
     transfer_id: ConditionalFieldIdSchema.optional(),
     transfer_version: ConditionalFieldIdSchema.optional(),
     strength_milligrades: MilligradeSchema,
-    validity: RelationValiditySchema,
+    validity: z.union([RelationValiditySchema, InterpretationPremiseValiditySchema]),
     applicable: z.boolean(),
     cap_contract_id: Sha256DigestSchema.optional()
   })
   .strict()
+  .superRefine((transition, context) => {
+    const from = transition.from.interpretation_node;
+    const to = transition.to.interpretation_node;
+    if (transition.validity.kind === "interpretation") {
+      const valid = transition.validity;
+      if (from === undefined || to === undefined || from.packet_id !== valid.packet_id || to.packet_id !== valid.packet_id ||
+          from.hypothesis_id !== valid.hypothesis_id || to.hypothesis_id !== valid.hypothesis_id ||
+          transition.from.target.kind !== "source_evidence" || transition.to.target.kind !== "source_evidence" ||
+          !sameSourceEvidenceRoot(transition.from.target, transition.to.target)) {
+        context.addIssue({ code: "custom", message: "interpretation transition must remain inside one source-bound hypothesis" });
+      }
+    } else if (from !== undefined || to !== undefined) {
+      context.addIssue({ code: "custom", message: "interpretation nodes cannot carry world relation validity" });
+    }
+  })
   .readonly();
 
 export const SeedActivationSchema = z

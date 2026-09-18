@@ -1,3 +1,4 @@
+import { inspectCachedSourcePacket, type CachedSourcePacket } from "../../extraction/cache/source-packet-artifact.js";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -32,15 +33,13 @@ import {
 } from
   "../../extraction/cache-audit/bounded-artifact-reader.js";
 
-const MAX_EXTRACTION_CACHE_SHARD_BYTES = 32 * 1024 * 1024;
+export const MAX_EXTRACTION_CACHE_SHARD_BYTES = 32 * 1024 * 1024;
 
-export interface CachedExtractionAdmissionIdentity {
-  readonly generation_sha256: string;
-  readonly request_key: string;
-  readonly raw_json_sha256: string;
-}
+export type CachedExtractionAdmissionIdentity = NonNullable<
+  import("@do-soul/alaya-protocol").PublishedSourceInterpretationPacket["provenance"]["cache_admission"]>;
 
 export interface CachedExtractionEntry {
+  readonly source_packet?: CachedSourcePacket;
   readonly model: string;
   readonly request_profile: CompileSeedExtractionConfig["requestProfile"];
   readonly cache_key: string;
@@ -79,6 +78,7 @@ export type CachedExtractionInspection =
 export type CachedRawExtractionInspection =
   | {
       readonly status: "hit";
+      readonly deterministicEmpty?: boolean;
       readonly rawJson: string;
       readonly rawJsonSha256: string;
       readonly rawSignalCount: number;
@@ -112,7 +112,15 @@ export function inspectCachedExtraction(
 ): CachedExtractionInspection {
   const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile, observer);
   if (cached.status !== "hit") return cached;
+  if (cached.entry.source_packet !== undefined) return { status: "invalid", reason: "typed source interpretation is not a signal cache shard" };
   return inspectCachedExtractionContent(cached.entry);
+}
+
+/** Governance inventory can explicitly select typed packets without exposing them to signal consumers. */
+export function inspectCachedExtractionArtifact(cacheRoot: string, cacheKey: string, model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"], packetMode = false): CachedExtractionInspection {
+  return packetMode ? inspectCachedSourcePacket(cacheRoot, cacheKey, model, requestProfile)
+    : inspectCachedExtraction(cacheRoot, cacheKey, model, requestProfile);
 }
 
 export function inspectCachedRawExtraction(
@@ -123,6 +131,7 @@ export function inspectCachedRawExtraction(
 ): CachedRawExtractionInspection {
   const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile);
   if (cached.status !== "hit") return cached;
+  if (cached.entry.source_packet !== undefined) return inspectCachedSourcePacket(cacheRoot, cacheKey, model, requestProfile);
   const rawJsonSha256 = computeExtractionRawJsonSha256(cached.entry.raw_json);
   try {
     inspectCachedResponseMetadata(
@@ -193,11 +202,13 @@ export function writeCachedExtraction(
   cacheKey: string,
   entry: CachedExtractionEntry
 ): void {
+  const bytes = Buffer.from(`${JSON.stringify(entry, null, 2)}\n`, "utf8");
+  if (entry.source_packet !== undefined && bytes.length > MAX_EXTRACTION_CACHE_SHARD_BYTES) throw new Error("typed packet shard exceeds reader byte bound");
   const filePath = cacheFilePath(cacheRoot, cacheKey);
   mkdirSync(dirname(filePath), { recursive: true });
   replaceBytesDurable({
     destination: filePath,
-    bytes: Buffer.from(`${JSON.stringify(entry, null, 2)}\n`, "utf8"),
+    bytes,
     ownerIdentity: cacheKey,
     temporaryDirectory: dirname(filePath)
   });
@@ -205,8 +216,9 @@ export function writeCachedExtraction(
 
 export function inspectCachedExtractionContent(
   entry: Pick<CachedExtractionEntry, "raw_json" | "response_metadata" |
-    "transport_provenance" | "empty_classification" | "request_completion">
+    "transport_provenance" | "empty_classification" | "request_completion" | "source_packet">
 ): CachedExtractionInspection {
+  if (entry.source_packet !== undefined) return { status: "invalid", reason: "typed source interpretation is not a signal cache shard" };
   const { raw_json: rawJson, response_metadata: responseMetadata,
     empty_classification: storedClassification, request_completion: requestCompletion } = entry;
   const providerBacked = entry.transport_provenance !== undefined;

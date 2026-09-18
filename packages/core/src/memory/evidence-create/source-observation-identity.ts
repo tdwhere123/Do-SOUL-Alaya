@@ -74,8 +74,7 @@ export function publicationIdentity(
 
 export function bindInterpretation(
   durable: SourceLocatedInterpretation,
-  stored: StoredSourceRecord,
-  evidenceObjectId: string
+  stored: StoredSourceRecord
 ): BoundSourceInterpretation {
   const span: SourceDeliveredSpan = {
     content_start: durable.assertion_binding.source_span[0],
@@ -92,10 +91,17 @@ export function bindInterpretation(
       root_id: stored.record.identity,
       source_version: stored.record.source_version,
       content_digest: stored.record.content_digest,
-      evidence_object_id: evidenceObjectId,
+      // The interpretation capsule is provenance for this proposal, not a source-root alias.
+      evidence_object_id: stored.record.evidence_object_id,
       span
     })
   });
+}
+
+export function assertPublicationBinding(actual: BoundSourceInterpretation, expected: BoundSourceInterpretation): void {
+  if (canonicalJson(actual) !== canonicalJson(expected)) {
+    throw new CoreError("VALIDATION", "stored source observation binding differs from its publication");
+  }
 }
 
 export async function findCompletePublication(
@@ -161,7 +167,10 @@ async function findOrCreateEvidence(
 ): Promise<Readonly<EvidenceCapsule>> {
   const existing = await evidenceService.findByIdScoped(evidenceObjectId, signal.workspace_id);
   assertSourceCurrent();
-  if (existing !== null) return existing;
+  if (existing !== null) {
+    assertEvidenceBinding(existing, bound);
+    return existing;
+  }
   const assertion = bound.assertion_binding.text;
   try {
     return await evidenceService.create({
@@ -195,9 +204,18 @@ async function findOrCreateEvidence(
   } catch (error) {
     const raced = await evidenceService.findByIdScoped(evidenceObjectId, signal.workspace_id);
     assertSourceCurrent();
-    if (raced !== null) return raced;
+    if (raced !== null) {
+      assertEvidenceBinding(raced, bound);
+      return raced;
+    }
     throw error;
   }
+}
+
+function assertEvidenceBinding(evidence: Readonly<EvidenceCapsule>, expected: BoundSourceInterpretation): void {
+  const bound = parseBoundGist(evidence.gist);
+  if (bound === null) throw new CoreError("OBLIGATION_VIOLATION", "published observation gist is not a bound interpretation");
+  assertPublicationBinding(bound, expected);
 }
 
 async function findOrCreateMemory(
@@ -269,7 +287,7 @@ function interruptAfterEvidence(error: unknown, evidenceObjectId: string): CoreE
   );
 }
 
-function uuidFromHex(hex: string): string {
+export function uuidFromHex(hex: string): string {
   const digits = hex.replace(/[^0-9a-f]/gi, "").toLowerCase().padEnd(32, "0").slice(0, 32).split("");
   digits[12] = "5";
   digits[16] = ((Number.parseInt(digits[16]!, 16) & 0x3) | 0x8).toString(16);

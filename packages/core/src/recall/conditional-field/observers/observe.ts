@@ -253,6 +253,7 @@ function observeRelation(input: ObserveConditionalFieldInput): ObserverActionRes
     limit: pageLimit(input),
     nativeLimit: input.action.work_limit,
     afterAssertionId: input.cursor.committed_through,
+    byteLimit: input.source_byte_limit,
     asOf: input.as_of ?? input.query.interpretation_clock
   });
   if (page.unavailable === true) {

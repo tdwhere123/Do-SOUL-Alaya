@@ -3,6 +3,8 @@ import {
   productStateKeyFromIndexEntry,
   reachableMilligradesOf,
   sharedProductIdentity,
+  sameSourceEvidenceRoot,
+  type PublishedSourceInterpretationPacket,
   type ClaimState,
   type Continuation,
   type Derivation,
@@ -130,6 +132,7 @@ export type AcceptingProjectionInput = Readonly<{
   readonly prior_continuation?: Continuation | null;
   readonly observer?: ObserverCoverage;
   readonly interpretation_status?: QueryInterpretationStatus;
+  readonly selected_interpretation?: PublishedSourceInterpretationPacket;
   readonly interpretation_id?: string;
   readonly interpretation_clock?: string;
   readonly model_id?: string;
@@ -170,6 +173,11 @@ function workIsOpen(status: "complete" | "open" | undefined): boolean {
 
 export function projectAcceptingIndex(input: AcceptingProjectionInput): InformationIndex {
   const representation = representationDecision(input.budget.page_budget);
+  if (input.selected_interpretation !== undefined) {
+    const scoped = admitSelectedInterpretation(input);
+    if (scoped === null) return closedIndex(input, representation, resourceRejectedCompleteness());
+    input = scoped;
+  }
   const interpretationId = resolveInterpretationId(input);
   const epochInput = { ...input, interpretation_id: interpretationId };
   if (continuationInvalidated(epochInput) || continuationCursorInvalid(input)
@@ -187,6 +195,30 @@ export function projectAcceptingIndex(input: AcceptingProjectionInput): Informat
     return closedIndex(epochInput, representation, resourceRejectedCompleteness());
   }
   return pageAcceptingIndex(epochInput, representation);
+}
+
+/** A finite source packet defines this computation domain; a hypothesis string alone does not. */
+function admitSelectedInterpretation(input: AcceptingProjectionInput): AcceptingProjectionInput | null {
+  const bound = input.selected_interpretation!;
+  if (bound.packet_id !== bound.hypothesis_id) throw new CoreError("VALIDATION", "selected interpretation identity mismatch");
+  const count = bound.packet.referents.length + bound.packet.propositions.length + bound.packet.operators.length;
+  const work = count + input.snapshot.seeds.length + input.snapshot.values.length + 2 * input.snapshot.retained_transitions.length + 1;
+  const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
+  if (work > allowance || count * 128 > (input.remaining_memory_bytes ?? input.budget.memory_bytes)) return null;
+  const nodes = new Set([...bound.packet.referents, ...bound.packet.propositions, ...bound.packet.operators].map((row) => row.id));
+  const check = (product: ProductStateKey) => {
+    const node = product.interpretation_node;
+    if (node === undefined || node.packet_id !== bound.packet_id || node.hypothesis_id !== bound.hypothesis_id ||
+        product.hypothesis_id !== bound.hypothesis_id || !nodes.has(node.node_id) || product.target.kind !== "source_evidence" ||
+        !sameSourceEvidenceRoot(product.target, bound.source_target)) {
+      throw new CoreError("VALIDATION", "projection leaves its selected interpretation domain");
+    }
+  };
+  for (const seed of input.snapshot.seeds) check(seed.state);
+  for (const value of input.snapshot.values) check(value.state);
+  for (const transition of input.snapshot.retained_transitions) { check(transition.from); check(transition.to); }
+  input.on_remaining_reserve?.(allowance - work);
+  return { ...input, remaining_reserve: allowance - work };
 }
 
 export function continueAcceptingIndex(
@@ -460,6 +492,7 @@ function indexCompleteness(
     ...extra,
     observer: extra.observer ?? input.observer,
     interpretation_status: extra.interpretation_status ?? input.interpretation_status,
+    selected_hypothesis_domain: input.selected_interpretation !== undefined,
     query_id: extra.query_id ?? input.query_id,
     residuals,
     result_kind_view: extra.result_kind_view ?? input.view.result_kind_view,

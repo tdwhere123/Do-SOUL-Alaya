@@ -1,3 +1,6 @@
+import { createSourceInterpretationPacketPublication, verifyPublishedSourceInterpretation } from "../../../memory/evidence-create/source-interpretation-packet-publication.js";
+import { reasonSourceInterpretation } from "../../../recall/runtime/source-interpretation-reasoning.js";
+import { buildSourceReferenceCatalog, sourceReferenceResolver, canonicalJson, sourceInterpretationProfileIdentity, sourceInterpretationRelationKey, type QueryProgram } from "@do-soul/alaya-protocol";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -77,14 +80,15 @@ async function admitSource(
   fixture: Awaited<ReturnType<typeof openFixture>>,
   content = SOURCE,
   sourceVersion = "1",
-  recordedAt = CLOCK
+  recordedAt = CLOCK,
+  evidenceObjectId: string | null = null
 ) {
   return await fixture.sourceAdmission.admit({
     workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
     source_id: "artifact-1",
     source_version: sourceVersion,
     content_bytes: content,
-    evidence_object_id: null,
+    evidence_object_id: evidenceObjectId,
     recorded_at: recordedAt,
     event_time: null,
     valid_from: null,
@@ -156,11 +160,11 @@ describe("source observation publication", () => {
     expect(signal.object_kind).toBeNull();
   });
 
-  it("publishes a source-bound observation, reopens the same identity, and keeps confidence unknown", async () => {
+  it.each([null, "source-evidence-alias"])("publishes and reopens the source identity with alias %s and unknown confidence", async (sourceAlias) => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-source-observation-"));
     const filename = join(directory, "memory.sqlite");
     const fixture = await openFixture(filename);
-    await admitSource(fixture);
+    await admitSource(fixture, SOURCE, "1", CLOCK, sourceAlias);
     const located = locatedInterpretation();
     const published = await fixture.publication.publish({
       signal: observationSignal(located),
@@ -172,7 +176,8 @@ describe("source observation publication", () => {
     expect(published.memory.confidence).toBeNull();
     expect(published.memory.content).toBe(ASSERTION);
     expect(published.bound.source_target.root_kind).toBe("source_record");
-    expect(published.bound.source_target.evidence_object_id).toBe(published.evidence.object_id);
+    expect(published.bound.source_target.evidence_object_id).toBe(sourceAlias);
+    expect(published.memory.evidence_refs).toContain(published.evidence.object_id);
     expect(published.bound.candidates[0]?.scope_status).toBe("unsupported");
     expect(published.bound.candidates[0]?.arguments[0]?.phrase.lookup_key).toBe("alice");
     expect(published.evidence.evidence_health_state).toBe("questionable");
@@ -195,7 +200,7 @@ describe("source observation publication", () => {
     const rebound = BoundSourceInterpretationSchema.parse(JSON.parse(evidence!.gist));
     expect(rebound.assertion_binding.context_id).toBe(located.assertion_binding.context_id);
     expect(rebound.source_target.root_id).toBe(published.bound.source_target.root_id);
-    expect(rebound.source_target.evidence_object_id).toBe(evidenceId);
+    expect(rebound.source_target.evidence_object_id).toBe(sourceAlias);
   });
 
   it("converts UTF-16 locators to UTF-8 durable spans", async () => {
@@ -388,6 +393,30 @@ describe("source observation publication", () => {
     expect(await interrupted.evidenceService.findByWorkspaceId(REAL_SQLITE_TEST_WORKSPACE_ID)).toHaveLength(1);
   });
 
+  it.each(["complete", "interrupted"] as const)("rejects a legacy invented source alias on %s publication recovery", async (state) => {
+    const fixture = await openFixture();
+    await admitSource(fixture);
+    const signal = observationSignal(locatedInterpretation());
+    const publication = state === "complete" ? fixture.publication : createSourceObservationPublication({
+      deriveTemporalProjection: () => ({}), stores: fixture.stores, sourceAdmission: fixture.sourceAdmission,
+      evidenceService: fixture.evidenceService, sha256: fieldContractSha256,
+      memoryService: { findByIdScoped: fixture.memoryService.findByIdScoped.bind(fixture.memoryService),
+        create: async () => { throw new Error("interrupted memory write"); } }
+    });
+    await publication.publish({ signal, sourceEventAnchor: null }).catch((error: unknown) => {
+      if (state === "complete") throw error;
+    });
+    const evidence = (await fixture.evidenceService.findByWorkspaceId(REAL_SQLITE_TEST_WORKSPACE_ID))[0]!;
+    const prior = BoundSourceInterpretationSchema.parse(JSON.parse(evidence.gist));
+    const legacy = JSON.stringify({ ...prior, source_target: { ...prior.source_target, evidence_object_id: evidence.object_id } });
+    fixture.database.connection.prepare("UPDATE evidence_capsules SET gist=? WHERE object_id=?").run(legacy, evidence.object_id);
+    await expect(fixture.publication.publish({ signal, sourceEventAnchor: null }))
+      .rejects.toMatchObject({ code: "VALIDATION", message: "stored source observation binding differs from its publication" });
+    expect((await fixture.evidenceService.findById(evidence.object_id))!.gist).toBe(legacy);
+    expect(await fixture.memoryService.findByDimensionAll(REAL_SQLITE_TEST_WORKSPACE_ID, "observation"))
+      .toHaveLength(state === "complete" ? 1 : 0);
+  });
+
   it("reserves one identity for concurrent overlapping publish and after dormancy", async () => {
     const fixture = await openFixture();
     await admitSource(fixture);
@@ -496,3 +525,62 @@ function expectNoPublishedObservation(database: StorageDatabase): void {
 function countRows(database: StorageDatabase, sql: string): number {
   return (database.connection.prepare(sql).get() as { n: number }).n;
 }
+
+
+describe("source interpretation conditional premises", () => {
+  it("publishes exact source premises and composes them without making a memory object", async () => {
+    const fixture = await openFixture();
+    await admitSource(fixture);
+    const owner = { ...fixture, sha256: fieldContractSha256 };
+    const publication = createSourceInterpretationPacketPublication(owner);
+    const profile = { contract: "source-interpretation-profile-v1" as const, description: "Literal use relations",
+      predicates: [{ symbol: "uses", governing_roles: [], meaning: "A source nominates use by an agent of a theme." }],
+      roles: [{ symbol: "agent", meaning: "Actor of the event." }, { symbol: "theme", meaning: "Object involved in the event." }] };
+    const profileId = sourceInterpretationProfileIdentity(profile, fieldContractSha256);
+    const catalog = buildSourceReferenceCatalog(fieldContractSha256(SOURCE), [{ assertion_id: 1, text: ASSERTION }], fieldContractSha256);
+    const references = sourceReferenceResolver(catalog, fieldContractSha256);
+    const sourceRef = (text: string) => references.referenceForSpan(1, [ASSERTION.indexOf(text), ASSERTION.indexOf(text) + text.length]);
+    const publicationInput = { workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID,
+      runId: REAL_SQLITE_TEST_RUN_ID, artifactKey: "artifact-1", source: SOURCE, profile,
+      assertions: [{ assertion_id: 1, text: ASSERTION, source_span: [6, SOURCE.length] }],
+      provenance: { request_key: "authored-independent", raw_response_id: "authored-packet", producer_id: "test-author" },
+      packet: { contract: "source-interpretation-v2", profile_id: profileId, source_catalog_id: catalog.catalog_id,
+        mentions: [{ id: "aliceMention", assertion_id: 1, source_ref: sourceRef("Alice") },
+          { id: "usesMention", assertion_id: 1, source_ref: sourceRef("uses") },
+          { id: "toolsMention", assertion_id: 1, source_ref: sourceRef("tools") }],
+        referents: [{ id: "alice", mentions: ["aliceMention"] }, { id: "tools", mentions: ["toolsMention"] }],
+        propositions: [{ id: "use", predicate: "uses", implicit: false, predicate_mentions: ["usesMention"],
+          assertion_ids: [1], arguments: [{ role: "agent", target: "alice" }, { role: "theme", target: "tools" }] }],
+        operators: [], roots: ["use"] } } as const;
+    const [published, raced] = await Promise.all([publication.publish(publicationInput), publication.publish(publicationInput)]);
+    expect(raced.evidence.object_id).toBe(published.evidence.object_id);
+    expect((await publication.publish(publicationInput)).bound).toEqual(published.bound);
+    const checked = verifyPublishedSourceInterpretation(owner, JSON.parse(published.evidence.gist), REAL_SQLITE_TEST_WORKSPACE_ID);
+    for (const forged of [
+      { ...published.bound, assertions: published.bound.assertions.map((row) => ({ ...row, text: "Alice owns tools." })) },
+      { ...published.bound, mention_spans: published.bound.mention_spans.map((row) => ({ ...row, utf8_span: [0, 1] as const })) }
+    ]) {
+      const { packet_id: _packet, hypothesis_id: _hypothesis, ...body } = forged;
+      const identity = `sha256:${fieldContractSha256(canonicalJson(body))}`;
+      expect(() => verifyPublishedSourceInterpretation(owner, { ...body, packet_id: identity, hypothesis_id: identity },
+        REAL_SQLITE_TEST_WORKSPACE_ID)).toThrow();
+    }
+    const relation = (kind: "asserted" | "role", symbol: string, from: string, to: string): QueryProgram => ({
+      schema_version: 1, kind: "relation", relation_kind: sourceInterpretationRelationKey(kind, symbol),
+      source_variable: from, target_variable: to, guard: { schema_version: 1, kind: "query_predicate", verdict: "unresolved", time_scope: "none" },
+      facet_mode: "same_path", threshold_milligrades: 0 });
+    const result = reasonSourceInterpretation({ bound: checked.bound, workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID,
+      scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
+      request: { contract: "source-interpretation-reasoning-v1", accepts_unreviewed_conditional_results: true,
+        packet_id: published.bound.packet_id, profile_id: profileId, original_query: "What does Alice use?",
+        seed_nodes: ["use"], program: { schema_version: 1, kind: "sequence", steps: [
+          relation("asserted", "uses", "event", "event"), relation("role", "theme", "event", "item")] },
+        budget: { schema_version: 1, work_units: 100000, memory_bytes: 10000000, page_budget: 100000,
+          finalization_reserve: 10000, min_envelope: 10 }, output_byte_limit: 1000000 } });
+    expect(result.premises.map((row) => [row.statement_id, row.from_node, row.to_node])).toEqual([
+      ["use", "use", "use"], ["use", "use", "tools"]]);
+    expect(result.premises.every((row) => row.source_assertions[0]?.text === ASSERTION)).toBe(true);
+    expect(result.interpretation.world_claim).toBe("unknown");
+    expect(result.index?.entries.map((entry) => entry.interpretation_node?.node_id)).toContain("tools");
+  });
+});

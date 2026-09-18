@@ -28,6 +28,9 @@ export function encodeIndexResults(
     readonly source_lookup_reasons?: RecallCandidate["source_lookup_reasons"];
   }>>> = {}
 ): readonly MemorySearchResult[] {
+  if (index.entries.some((entry) => entry.interpretation_node !== undefined)) {
+    throw new Error("conditional interpretation results require the qualified interpretation result capability");
+  }
   const encoded: MemorySearchResult[] = [];
   let usedTokens = 0;
   for (const [offset, entry] of index.entries.entries()) {

@@ -6,6 +6,7 @@ import {
   compareUtcInstants,
   sourceEvidenceRootKey,
   type RecallTargetRef,
+  type InterpretationNodeCoordinate,
   type Guard,
   type QueryHypothesis
 } from "@do-soul/alaya-protocol";
@@ -87,6 +88,7 @@ export function alignOutgoingBinding(
 }
 
 export type BoundSourceFacts = Readonly<{
+  readonly interpretation_node?: InterpretationNodeCoordinate;
   readonly source_lookup_reasons?: import("@do-soul/alaya-protocol").RecallCandidate["source_lookup_reasons"];
   readonly object_id: string;
   readonly workspace_id?: string;

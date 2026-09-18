@@ -104,6 +104,7 @@ function inspectBoundHistoricalKeyRawClosure(
   const identity = readExtractionCacheManifestIdentity(stableRoot);
   if (identity === undefined) return unclaimedClosure();
   const manifest = identity.manifest;
+  if (manifest.source_interpretation_profile !== undefined) throw new ExtractionCacheInvariantError("typed interpretation packets are not a historical signal substrate");
   const claimedComplete = hasCompleteExtractionFillSummary(manifest);
   const index = manifest.content_closure_index;
   const model = manifest.extraction_model;

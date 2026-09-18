@@ -63,7 +63,7 @@ export function readValidDeterministicLedgerShard(
     cacheRoot, cacheKey, identity.model, identity.requestProfile
   );
   if (shard.status !== "hit" ||
-      (shard.rawJson !== EMPTY_INTERPRETATIONS_ENVELOPE && shard.rawJson !== EMPTY_SIGNALS_ENVELOPE) ||
+      (shard.rawJson !== EMPTY_INTERPRETATIONS_ENVELOPE && shard.rawJson !== EMPTY_SIGNALS_ENVELOPE && shard.deterministicEmpty !== true) ||
       shard.transportProvenance !== undefined) return undefined;
   return { cacheKey, rawJsonSha256: shard.rawJsonSha256, successKind: "deterministic" };
 }

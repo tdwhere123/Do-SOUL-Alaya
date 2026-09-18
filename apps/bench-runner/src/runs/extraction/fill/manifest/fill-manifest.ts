@@ -1,5 +1,5 @@
 import { DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { extractionArtifactPrompt } from "../../request-artifact.js";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { CompileSeedExtractionConfig } from "../../../compile-seed/compile-seed-types.js";
@@ -47,11 +47,14 @@ export function buildFillManifest(input: {
       ? { schema_version: 3 as const }
       : { schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
           source_packing: input.config.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING }),
+    ...(input.config.sourceInterpretationProfile === undefined ? {} : {
+      source_interpretation_profile: input.config.sourceInterpretationProfile
+    }),
     extraction_model: input.config.model,
     model_family: input.config.modelFamily ?? input.config.model,
     request_profile: input.config.requestProfile,
     provider_url: input.config.providerUrl,
-    system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
+    system_prompt_sha256: computeSystemPromptSha256(extractionArtifactPrompt(input.config.sourceInterpretationProfile)),
     cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
     dataset: input.variant.replace(/_/u, "-"),
     dataset_revision: input.datasetRevision,
@@ -97,6 +100,7 @@ export function buildMaterializedTargetFillManifest(input: {
   readonly builtAt: string;
 }): Extract<ExtractionCacheManifest, { readonly schema_version: 3 | 4 }> {
   const source = input.sourceManifest;
+  if (source.source_interpretation_profile !== undefined) throw new ExtractionCacheInvariantError("signal cache materialization does not accept typed interpretation packets");
   const target = input.targetSelection.final_identity;
   return {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,

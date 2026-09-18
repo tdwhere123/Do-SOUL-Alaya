@@ -1,4 +1,5 @@
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { extractionArtifactPrompt } from "../request-artifact.js";
+import { assertExtractionCacheIdentity } from "../cache/cache-identity.js";
 import {
   resolveCompileSeedExtractionConfig,
   type CompileSeedExtractionConfig
@@ -139,7 +140,7 @@ export async function inspectExtractionFillPreparation(
   const startingIdentity = manifestSnapshot.identity;
   const existingManifest = startingIdentity?.manifest;
   if (existingManifest === undefined) assertManifestlessCacheIsEmpty(cacheRoot);
-  const config = resolveFillConfig(existingManifest, options.sourcePacking);
+  const config = resolveFillConfig(existingManifest, options.sourcePacking, options.sourceInterpretationProfile);
   const { window, completion } = await inspectPreparedFillWindow({
     options, cacheRoot, startingIdentity, config, expansion
   });
@@ -233,7 +234,8 @@ export function inspectFillWindow(
     model: config.model,
     requestProfile: config.requestProfile,
     sourcePacking: config.sourcePacking,
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    sourceInterpretationProfile: config.sourceInterpretationProfile,
+    systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile),
     extractionTurns
   });
 }
@@ -289,11 +291,14 @@ function preflightAndPinExtractionIdentity(input: {
   const currentIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
   assertPreparationIdentityUnchanged(input.startingIdentity, currentIdentity);
   if (currentIdentity === undefined) assertManifestlessCacheIsEmpty(input.cacheRoot);
-  preflightExtractionCache({
+  if (input.config.sourceInterpretationProfile !== undefined) {
+    if (currentIdentity !== undefined) assertExtractionCacheIdentity({ config: input.config, manifest: currentIdentity.manifest,
+      systemPrompt: extractionArtifactPrompt(input.config.sourceInterpretationProfile), validateProvider: true });
+  } else preflightExtractionCache({
     cacheRoot: input.cacheRoot,
     manifest: currentIdentity?.manifest,
     config: input.config,
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    systemPrompt: extractionArtifactPrompt(input.config.sourceInterpretationProfile),
     requiredTurnContents: input.distinctTurns,
     requiredExtractionTurns: input.distinctExtractionTurns,
     requiredQuestionWindow: {
@@ -321,9 +326,10 @@ function preflightAndPinExtractionIdentity(input: {
 
 function resolveFillConfig(
   manifest: ExtractionCacheManifest | undefined,
-  sourcePacking?: CompileSeedExtractionConfig["sourcePacking"]
+  sourcePacking?: CompileSeedExtractionConfig["sourcePacking"],
+  sourceInterpretationProfile?: CompileSeedExtractionConfig["sourceInterpretationProfile"]
 ): CompileSeedExtractionConfig {
-  const config = resolveCompileSeedExtractionConfig(process.env, manifest, sourcePacking);
+  const config = resolveCompileSeedExtractionConfig(process.env, manifest, sourcePacking, sourceInterpretationProfile);
   if (config.model.trim().length === 0) {
     throw new Error(
       "extraction-fill: resolved extraction model is empty; refusing to fill " +

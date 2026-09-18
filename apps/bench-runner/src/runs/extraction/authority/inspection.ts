@@ -1,9 +1,10 @@
-import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { extractionArtifactPrompt, extractionArtifactRequests } from "../request-artifact.js";
+import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
+import type { SourceInterpretationProfile, ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, statfsSync } from "node:fs";
 import { join } from "node:path";
-import { OFFICIAL_API_SYSTEM_PROMPT, collectOfficialApiExtractionCoverage } from "@do-soul/alaya-soul";
 import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
 import {
   assertRequiredRequestProfile,
@@ -11,8 +12,7 @@ import {
 } from "../transport-route.js";
 import { isObsoleteRequestProfile } from "../../provider/catalog.js";
 import {
-  computeExtractionTurnCacheKeys,
-  inspectCachedExtraction
+  computeExtractionTurnCacheKeys
 } from "../../compile-seed/compile-seed-cache.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
@@ -61,6 +61,7 @@ type ExtractionAuthorityCompletion = ReturnType<typeof inspectExtractionFillComp
  */
 export async function inspectExtractionAuthority(input: {
   readonly sourcePacking?: ExtractionSourcePacking;
+  readonly sourceInterpretationProfile?: SourceInterpretationProfile;
   readonly variant: LongMemEvalVariant;
   readonly limit?: number;
   readonly offset?: number;
@@ -75,7 +76,7 @@ export async function inspectExtractionAuthority(input: {
   readonly preservedValidExclusionKeys?: readonly string[];
 }): Promise<ExtractionAuthorityInspection> {
   const manifestIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
-  const config = resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest, input.sourcePacking);
+  const config = resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest, input.sourcePacking, input.sourceInterpretationProfile);
   assertRequiredRequestProfile(config);
   if (isObsoleteRequestProfile(config.requestProfile)) {
     throw new Error(
@@ -107,7 +108,8 @@ function inspectAuthorityCompletion(
     model: config.model,
     requestProfile: config.requestProfile,
     sourcePacking: config.sourcePacking,
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    sourceInterpretationProfile: config.sourceInterpretationProfile,
+    systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile),
     extractionTurns: authorizedTurns,
     ...(input.excludeContentClosureKeys === undefined ? {} : {
       excludeContentClosureKeys: input.excludeContentClosureKeys
@@ -179,7 +181,7 @@ function buildAuthorityExtractionObservation(
       sourcePacking: config.sourcePacking
     }),
     providerUrl: config.providerUrl,
-    systemPromptSha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
+    systemPromptSha256: computeSystemPromptSha256(extractionArtifactPrompt(config.sourceInterpretationProfile)),
     cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
     manifestSha256: manifestIdentity?.manifestSha256 ?? null,
     rawContentClosureSha256: completion.partialContentClosureSha256
@@ -232,13 +234,13 @@ function collectShardStatus(
   const validEntries: ExtractionContentClosureEntry[] = [];
   for (const turn of turns) {
     const keys = computeExtractionTurnCacheKeys(
-      config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn, config.sourcePacking
+      config.model, config.requestProfile, extractionArtifactPrompt(config.sourceInterpretationProfile), turn, config.sourcePacking, config.sourceInterpretationProfile
     );
-    const requests = collectOfficialApiExtractionCoverage(turn.turnContent, turn.turnMessages, config.sourcePacking).requests;
+    const requests = extractionArtifactRequests(turn, config.sourcePacking, config.sourceInterpretationProfile);
     for (const [index, key] of keys.entries()) {
-      if (requests[index]!.source_assertions.length > 0) nonemptyKeys.push(key);
-      const shard = inspectCachedExtraction(
-        cacheRoot, key, config.model, config.requestProfile
+      if (requests[index]!.source.source_assertions.length > 0) nonemptyKeys.push(key);
+      const shard = inspectCachedExtractionArtifact(
+        cacheRoot, key, config.model, config.requestProfile, config.sourceInterpretationProfile !== undefined
       );
       if (shard.status === "missing") missingKeys.push(key);
       if (shard.status === "hit" && !preservedValidExclusionKeys.has(key)) {

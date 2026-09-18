@@ -1,3 +1,4 @@
+import { SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS, sourceInterpretationDependsOnRecord } from "@do-soul/alaya-protocol";
 import {
   ProjectionEraseSubjectKindSchema,
   hashLabeledIdentity,
@@ -156,12 +157,21 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
   }
 
   private discoverEvidenceIds(workspaceId: string, recordId: string): readonly string[] {
-    return parseRows(this.database.connection.prepare(`
+    const aliases = parseRows(this.database.connection.prepare(`
       SELECT evidence_object_id AS evidence_id
       FROM source_record_evidence_refs
       WHERE workspace_id = @workspaceId AND record_id = @subjectId
       ORDER BY evidence_object_id
     `).all({ workspaceId, subjectId: recordId }), evidenceIdParser, "erase evidence binding");
+    const derived = this.database.connection.prepare(`SELECT object_id, gist FROM evidence_capsules
+      WHERE workspace_id = ? AND CASE WHEN json_valid(gist) THEN
+        json_extract(gist, '$.contract') IN (${SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS.map(() => "?").join(",")})
+        AND json_extract(gist, '$.source_target.workspace_id') = ?
+        AND json_extract(gist, '$.source_target.root_kind') = 'source_record'
+        AND json_extract(gist, '$.source_target.root_id') = ? ELSE 0 END
+    `).all(workspaceId, ...SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS, workspaceId, recordId) as { object_id: string; gist: string }[];
+    return [...new Set([...aliases, ...derived.filter((row) =>
+      sourceInterpretationDependsOnRecord(row.gist, workspaceId, recordId)).map((row) => row.object_id)])].sort();
   }
 
   private discoverGenerations(workspaceId: string): readonly EraseSubject[] {
