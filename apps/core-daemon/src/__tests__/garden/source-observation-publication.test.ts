@@ -215,7 +215,7 @@ describe("source observation publication wiring", () => {
       const rebound = BoundSourceInterpretationSchema.parse(JSON.parse(reopenedEvidence!.gist));
       expect(rebound.assertion_binding.context_id).toBe(located.assertion_binding.context_id);
       expect(rebound.source_target.root_id).toBe(admitted.record.identity);
-      expect(rebound.source_target.evidence_object_id).toBe(evidenceId);
+      expect(rebound.source_target.evidence_object_id).toBe(admitted.record.evidence_object_id);
       expect(reopenedEvidence?.excerpt).toBe(ASSERTION);
     } finally {
       database.close();
