@@ -334,6 +334,7 @@ describe("McpBridge", () => {
       "soul.explore_graph",
       "soul.report_context_usage",
       "soul.resolve",
+      "soul.interpretation",
       "garden.list_pending_tasks",
       "garden.claim_task",
       "garden.complete_task"

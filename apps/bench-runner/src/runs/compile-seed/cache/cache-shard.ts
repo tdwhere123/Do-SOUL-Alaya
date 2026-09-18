@@ -1,5 +1,7 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { inspectCachedSourcePacket, type CachedSourcePacket } from "../../extraction/cache/source-packet-artifact.js";
+import { inspectCachedSourceSemantic, type CachedSourceSemantic } from "../../extraction/cache/source-semantic-artifact.js";
+import type { ExtractionTypedArtifactMode } from "../../extraction/request-artifact.js";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -41,6 +43,7 @@ export type CachedExtractionAdmissionIdentity = NonNullable<
 
 export interface CachedExtractionEntry {
   readonly source_packet?: CachedSourcePacket;
+  readonly source_semantic?: CachedSourceSemantic;
   readonly model: string;
   readonly request_profile: CompileSeedExtractionConfig["requestProfile"];
   readonly cache_key: string;
@@ -113,15 +116,18 @@ export function inspectCachedExtraction(
 ): CachedExtractionInspection {
   const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile, observer);
   if (cached.status !== "hit") return cached;
-  if (cached.entry.source_packet !== undefined) return { status: "invalid", reason: "typed source interpretation is not a signal cache shard" };
+  if (cached.entry.source_packet !== undefined || cached.entry.source_semantic !== undefined) {
+    return { status: "invalid", reason: "typed source interpretation is not a signal cache shard" };
+  }
   return inspectCachedExtractionContent(cached.entry);
 }
 
 /** Governance inventory can explicitly select typed packets without exposing them to signal consumers. */
 export function inspectCachedExtractionArtifact(cacheRoot: string, cacheKey: string, model: string,
-  requestProfile: CompileSeedExtractionConfig["requestProfile"], packetMode = false): CachedExtractionInspection {
-  return packetMode ? inspectCachedSourcePacket(cacheRoot, cacheKey, model, requestProfile)
-    : inspectCachedExtraction(cacheRoot, cacheKey, model, requestProfile);
+  requestProfile: CompileSeedExtractionConfig["requestProfile"], typed?: ExtractionTypedArtifactMode): CachedExtractionInspection {
+  if (typed === "open_semantics") return inspectCachedSourceSemantic(cacheRoot, cacheKey, model, requestProfile);
+  if (typed === "source_packet") return inspectCachedSourcePacket(cacheRoot, cacheKey, model, requestProfile);
+  return inspectCachedExtraction(cacheRoot, cacheKey, model, requestProfile);
 }
 
 export function inspectCachedRawExtraction(
@@ -132,6 +138,7 @@ export function inspectCachedRawExtraction(
 ): CachedRawExtractionInspection {
   const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile);
   if (cached.status !== "hit") return cached;
+  if (cached.entry.source_semantic !== undefined) return inspectCachedSourceSemantic(cacheRoot, cacheKey, model, requestProfile);
   if (cached.entry.source_packet !== undefined) return inspectCachedSourcePacket(cacheRoot, cacheKey, model, requestProfile);
   const rawJsonSha256 = computeExtractionRawJsonSha256(cached.entry.raw_json);
   try {
@@ -204,7 +211,7 @@ export function writeCachedExtraction(
   entry: CachedExtractionEntry
 ): void {
   const bytes = Buffer.from(`${JSON.stringify(entry, null, 2)}\n`, "utf8");
-  if (entry.source_packet !== undefined && bytes.length > MAX_EXTRACTION_CACHE_SHARD_BYTES) {
+  if ((entry.source_packet !== undefined || entry.source_semantic !== undefined) && bytes.length > MAX_EXTRACTION_CACHE_SHARD_BYTES) {
     throw new AlayaError("VALIDATION", "typed packet shard exceeds reader byte bound");
   }
   const filePath = cacheFilePath(cacheRoot, cacheKey);
@@ -219,9 +226,11 @@ export function writeCachedExtraction(
 
 export function inspectCachedExtractionContent(
   entry: Pick<CachedExtractionEntry, "raw_json" | "response_metadata" |
-    "transport_provenance" | "empty_classification" | "request_completion" | "source_packet">
+    "transport_provenance" | "empty_classification" | "request_completion" | "source_packet" | "source_semantic">
 ): CachedExtractionInspection {
-  if (entry.source_packet !== undefined) return { status: "invalid", reason: "typed source interpretation is not a signal cache shard" };
+  if (entry.source_packet !== undefined || entry.source_semantic !== undefined) {
+    return { status: "invalid", reason: "typed source interpretation is not a signal cache shard" };
+  }
   const { raw_json: rawJson, response_metadata: responseMetadata,
     empty_classification: storedClassification, request_completion: requestCompletion } = entry;
   const providerBacked = entry.transport_provenance !== undefined;

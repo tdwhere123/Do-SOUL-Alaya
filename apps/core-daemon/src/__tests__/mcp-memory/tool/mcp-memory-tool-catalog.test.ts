@@ -32,6 +32,13 @@ describe("mcp memory tool catalog", () => {
     expect(byName.get("garden.claim_task")?.annotations.readOnlyHint).toBe(false);
     expect(byName.get("garden.complete_task")?.annotations.idempotentHint).toBe(false);
     expect(byName.get("soul.report_context_usage")?.annotations.readOnlyHint).toBe(false);
+    expect(byName.get("soul.interpretation")?.annotations.readOnlyHint).toBe(false);
+    expect(byName.get("soul.interpretation")?.annotations.idempotentHint).toBe(true);
+    expect(byName.get("soul.interpretation")?.description).toContain("provider-free");
+    expect(byName.get("soul.interpretation")?.description).toContain(
+      "soul.report_context_usage is not an interpretation delivery loop"
+    );
+    expect(byName.has("soul.recall")).toBe(true);
   });
 
   it("names cap_contracts as required for associative soul.recall", () => {

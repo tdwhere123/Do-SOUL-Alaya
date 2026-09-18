@@ -33,6 +33,7 @@ import {
   type SoulResolveResponse,
   type SoulReviewMemoryProposalRequest,
   type SoulReviewMemoryProposalResponse,
+  type SoulInterpretationResponse,
   type StorageTier,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
@@ -44,6 +45,10 @@ import type {
 } from "@do-soul/alaya-storage";
 import type { RecallUsageHandlerDependencies } from "../recall/recall-usage-handlers.js";
 import type { createSoulResolveHandler } from "./resolve-handler.js";
+import type {
+  SourceSemanticHostPort,
+  SourceSemanticPublicationPort
+} from "./interpretation-handler.js";
 import type { ReviewerIdentityBinding } from "../proposal/proposal-workflow.js";
 import type { AlayaMemoryToolName } from "./tool-catalog.js";
 import type { PostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
@@ -298,6 +303,8 @@ export interface McpMemoryToolHandlerDependencies {
   // see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts
   //   createSoulResolveHandler
   readonly soulResolveHandler?: SoulResolveHandler;
+  readonly sourceSemanticsPort?: SourceSemanticHostPort;
+  readonly sourceSemanticPublication?: SourceSemanticPublicationPort;
   readonly now?: () => string;
   readonly generateId?: () => string;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
@@ -317,6 +324,7 @@ export type McpMemoryToolResponseByName = {
   readonly "soul.explore_graph": SoulExploreGraphResponse;
   readonly "soul.report_context_usage": SoulReportContextUsageResponse;
   readonly "soul.resolve": SoulResolveResponse;
+  readonly "soul.interpretation": SoulInterpretationResponse;
   readonly "garden.list_pending_tasks": GardenListPendingTasksResponse;
   readonly "garden.claim_task": GardenClaimTaskResponse;
   readonly "garden.complete_task": GardenCompleteTaskResponse;

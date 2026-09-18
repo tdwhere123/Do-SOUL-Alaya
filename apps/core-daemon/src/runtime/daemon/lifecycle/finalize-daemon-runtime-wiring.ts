@@ -4,14 +4,17 @@ import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
 import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
 import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
+  CoreError,
   createSourceAdmissionPort,
   createAuditedSourceAdmission,
+  createSourceSemanticInterpretationPublication,
   fieldContractSha256,
   HqAnswerOverlapPairSource
 } from "@do-soul/alaya-core";
 import type { FinalizeDaemonRuntimeWiringInput } from "../../../index.js";
 import { createPostTurnSignalReceiver } from "../../../garden/post-turn-extract/signal-receiver.js";
 import { createPrivacyEffectLookup } from "../../../mcp-memory/proposal/phases/privacy-hard-effect.js";
+import type { SourceSemanticPublicationPort } from "../../../mcp-memory/tool/interpretation-handler.js";
 
 export async function finalizeDaemonRuntimeFromWiring(
   input: FinalizeDaemonRuntimeWiringInput
@@ -98,7 +101,34 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     runtimeNotifier: input.runtimeNotifier,
     resolutionService: input.resolutionService,
     claimSourceReader: createClaimSourceReader(input),
-    causalUsagePort: input.fieldComposition.usagePort
+    causalUsagePort: input.fieldComposition.usagePort,
+    ...(input.recallReadWorkerClient?.sourceSemanticsPort === undefined
+      ? {}
+      : { sourceSemanticsPort: input.recallReadWorkerClient.sourceSemanticsPort }),
+    sourceSemanticPublication: createSourceSemanticPublication(input)
+  };
+}
+
+function createSourceSemanticPublication(
+  input: FinalizeDaemonRuntimeWiringInput
+): SourceSemanticPublicationPort {
+  const stores = input.fieldComposition.stores;
+  const publication = createSourceSemanticInterpretationPublication({
+    stores,
+    evidenceService: input.evidenceService,
+    sha256: fieldContractSha256
+  });
+  return {
+    publish: (request) => publication.publish(request),
+    resolveSource: (workspaceId, sourceId, contentDigest) => {
+      const stored = stores.listStoredRecords(workspaceId).find(
+        (row) => row.record.source_id === sourceId && row.record.content_digest === contentDigest
+      );
+      if (stored === undefined) {
+        throw new CoreError("VALIDATION", "source is not currently admitted");
+      }
+      return { content_bytes: stored.content_bytes };
+    }
   };
 }
 

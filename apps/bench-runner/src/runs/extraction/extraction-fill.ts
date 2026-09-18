@@ -78,6 +78,7 @@ export {
 } from "./fill/policy/fill-concurrency.js";
 export interface ExtractionFillOptions {
   readonly sourceInterpretationProfile?: import("@do-soul/alaya-protocol").SourceInterpretationProfile;
+  readonly openSemantics?: import("./request-artifact.js").ExtractionOpenSemanticsGeneration;
   readonly sourcePacking?: ExtractionSourcePacking;
   readonly batch?: {
     readonly window?: string;
@@ -170,6 +171,10 @@ async function runExtractionFillBody(
   if (options.sourceInterpretationProfile !== undefined && (options.batch === undefined ||
       options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.extractorFactory !== undefined)) {
     throw new AlayaError("VALIDATION", "source packet fill requires explicit isolated Batch execution");
+  }
+  if (options.openSemantics !== undefined && (options.batch === undefined ||
+      options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.extractorFactory !== undefined)) {
+    throw new AlayaError("VALIDATION", "open semantics fill requires explicit isolated Batch execution");
   }
   const fill = freezeExtractionFillOptions(options);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(fill.cacheRoot);

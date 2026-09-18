@@ -3,6 +3,9 @@ import { SourceInterpretationResponseSchema } from "@do-soul/alaya-protocol";
 import { parseOfficialApiExtractionRequest } from "./extraction-request.js";
 import { parseOfficialApiSourcePacketRequest } from "./source-packet-request.js";
 import { officialApiSourcePacketResponseSchema } from "./source-packet-schema.js";
+import { parseSourceSemanticRequest, sourceSemanticResponseJsonSchema } from "./source-semantic-request.js";
+
+const SOURCE_SEMANTIC_RESPONSE_SCHEMA_PREIMAGE = JSON.stringify(sourceSemanticResponseJsonSchema());
 
 // This constrains generation, not admission: historical raw still uses its
 // recorded signals envelope and parser. Live ordinary extraction asks for
@@ -33,6 +36,7 @@ function isOfficialApiExtractionRequestPrompt(userPrompt: string): boolean {
 export function officialApiExtractionResponseSchemaPreimage(userPrompt: string): string {
   const packetSchema = sourcePacketSchema(userPrompt);
   if (packetSchema !== undefined) return JSON.stringify(packetSchema);
+  if (isSourceSemanticRequestPrompt(userPrompt)) return SOURCE_SEMANTIC_RESPONSE_SCHEMA_PREIMAGE;
   return isOfficialApiExtractionRequestPrompt(userPrompt)
     ? OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE
     : "null";
@@ -42,6 +46,7 @@ export function officialApiExtractionResponseSchemaPreimage(userPrompt: string):
 export function officialApiExtractionResponseSchema(userPrompt: string): object | undefined {
   const packetSchema = sourcePacketSchema(userPrompt);
   if (packetSchema !== undefined) return packetSchema;
+  if (isSourceSemanticRequestPrompt(userPrompt)) return structuredClone(sourceSemanticResponseJsonSchema());
   if (!isOfficialApiExtractionRequestPrompt(userPrompt)) return undefined;
   return structuredClone(responseSchema);
 }
@@ -49,4 +54,13 @@ export function officialApiExtractionResponseSchema(userPrompt: string): object 
 function sourcePacketSchema(userPrompt: string): object | undefined {
   try { return officialApiSourcePacketResponseSchema(parseOfficialApiSourcePacketRequest(JSON.parse(userPrompt))); }
   catch { return undefined; }
+}
+
+function isSourceSemanticRequestPrompt(userPrompt: string): boolean {
+  try {
+    parseSourceSemanticRequest(JSON.parse(userPrompt));
+    return true;
+  } catch {
+    return false;
+  }
 }

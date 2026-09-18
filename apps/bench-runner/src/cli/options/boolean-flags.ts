@@ -7,6 +7,7 @@ export function consumeBooleanFlags(
   state: ParsedFlagsState
 ): number {
   if (token === "--force") state.force = true;
+  if (token === "--extraction-open-semantics") state.extractionOpenSemantics = true;
   if (token === "--qa" || token === "--answer-judge") state.qa = true;
   if (token === "--edge-plane") state.edgePlane = true;
   if (token === "--materialize-question-dbs") state.materializeQuestionDbs = true;

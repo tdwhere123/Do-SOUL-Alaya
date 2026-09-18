@@ -1,6 +1,7 @@
 import { assertSourcePacketShardCapacity } from "../cache/source-packet-artifact.js";
+import { assertSourceSemanticShardCapacity } from "../cache/source-semantic-artifact.js";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
-import { extractionArtifactPrompt, extractionArtifactRequests } from "../request-artifact.js";
+import { extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode } from "../request-artifact.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
 import { createHash } from "node:crypto";
 import {
@@ -57,7 +58,7 @@ export function prepareBatchExtractionWorkset(input: {
   const cachedRequests: BatchExtractionRequest[] = [];
   for (const item of requests) {
     const cached = inspectCachedExtractionArtifact(input.cacheRoot, item.line.key,
-      prepared.config.model, prepared.config.requestProfile, prepared.config.sourceInterpretationProfile !== undefined);
+      prepared.config.model, prepared.config.requestProfile, extractionTypedArtifactMode(prepared.config));
     if (cached.status === "invalid") {
       throw new ExtractionCacheInvariantError(
         `Batch selected cache shard ${item.line.key} is invalid: ${cached.reason}`
@@ -82,7 +83,7 @@ function selectedRequestKeys(
   allowlist: ReadonlySet<string> | undefined
 ): ReadonlySet<string> {
   const available = new Set(turns.flatMap((turn) => computeExtractionTurnCacheKeys(
-    prepared.config.model, prepared.config.requestProfile, extractionArtifactPrompt(prepared.config.sourceInterpretationProfile), turn, prepared.config.sourcePacking, prepared.config.sourceInterpretationProfile
+    prepared.config.model, prepared.config.requestProfile, extractionArtifactPrompt(prepared.config.sourceInterpretationProfile, prepared.config.openSemantics), turn, prepared.config.sourcePacking, prepared.config.sourceInterpretationProfile, prepared.config.openSemantics
   )));
   if (allowlist === undefined) return available;
   for (const key of allowlist) {
@@ -144,11 +145,12 @@ function collectBatchRequests(
         key,
         unitKeys: Object.freeze(units.map((unit) => unit.binding.occurrenceIdentity)),
         requestSha256: createHash("sha256").update(item.userPrompt, "utf8").digest("hex"),
-        systemPrompt: extractionArtifactPrompt(prepared.config.sourceInterpretationProfile),
+        systemPrompt: extractionArtifactPrompt(prepared.config.sourceInterpretationProfile, prepared.config.openSemantics),
         userPrompt: item.userPrompt
       });
-      if (prepared.config.sourceInterpretationProfile !== undefined) assertSourcePacketShardCapacity(
-        buildOfficialApiSourceCorpus(item.sourceTurn.turnContent, item.sourceTurn.turnMessages), line);
+      const corpus = buildOfficialApiSourceCorpus(item.sourceTurn.turnContent, item.sourceTurn.turnMessages);
+      if (prepared.config.sourceInterpretationProfile !== undefined) assertSourcePacketShardCapacity(corpus, line);
+      if (prepared.config.openSemantics !== undefined) assertSourceSemanticShardCapacity(corpus, line);
       return Object.freeze({ line, request: item.request, sourceTurn: item.sourceTurn, units });
     }));
 }
@@ -171,13 +173,13 @@ function coveragePrompts(
   );
   const cached = memo.get(memoKey);
   if (cached !== undefined) return cached;
-  const prompts = Object.freeze(extractionArtifactRequests(turn, prepared.config.sourcePacking, prepared.config.sourceInterpretationProfile)
+  const prompts = Object.freeze(extractionArtifactRequests(turn, prepared.config.sourcePacking, prepared.config.sourceInterpretationProfile, prepared.config.openSemantics)
     .map(({ source: request, userPrompt }) => {
     return Object.freeze({
       request,
       userPrompt,
       key: computeCacheKey(
-        prepared.config.model, prepared.config.requestProfile, extractionArtifactPrompt(prepared.config.sourceInterpretationProfile), userPrompt
+        prepared.config.model, prepared.config.requestProfile, extractionArtifactPrompt(prepared.config.sourceInterpretationProfile, prepared.config.openSemantics), userPrompt
       )
     });
   }));

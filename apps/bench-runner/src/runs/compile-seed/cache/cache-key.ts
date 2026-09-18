@@ -1,5 +1,6 @@
 import { extractionArtifactRequests } from "../../extraction/request-artifact.js";
 import type { SourceInterpretationProfile, ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import type { ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
 import { createHash } from "node:crypto";
 import {
   officialApiExtractionResponseSchemaPreimage
@@ -51,10 +52,11 @@ export function computeExtractionTurnCacheKey(
   systemPrompt: string,
   turn: LongMemEvalExtractionTurn,
   sourcePacking?: ExtractionSourcePacking,
-  sourceInterpretationProfile?: SourceInterpretationProfile
+  sourceInterpretationProfile?: SourceInterpretationProfile,
+  openSemantics?: ExtractionOpenSemanticsGeneration
 ): string {
   return requireSingleCacheKey(computeExtractionTurnCacheKeys(
-    model, requestProfile, systemPrompt, turn, sourcePacking, sourceInterpretationProfile
+    model, requestProfile, systemPrompt, turn, sourcePacking, sourceInterpretationProfile, openSemantics
   ));
 }
 
@@ -64,9 +66,10 @@ export function computeExtractionTurnCacheKeys(
   systemPrompt: string,
   turn: LongMemEvalExtractionTurn,
   sourcePacking?: ExtractionSourcePacking,
-  sourceInterpretationProfile?: SourceInterpretationProfile
+  sourceInterpretationProfile?: SourceInterpretationProfile,
+  openSemantics?: ExtractionOpenSemanticsGeneration
 ): readonly string[] {
-  return computeSourceTurnCacheKeys(model, requestProfile, systemPrompt, turn, sourcePacking, sourceInterpretationProfile);
+  return computeSourceTurnCacheKeys(model, requestProfile, systemPrompt, turn, sourcePacking, sourceInterpretationProfile, openSemantics);
 }
 
 export function computeSourceTurnCacheKey(
@@ -76,10 +79,11 @@ export function computeSourceTurnCacheKey(
   input: Pick<LongMemEvalExtractionTurn, "turnContent"> &
     Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>,
   sourcePacking?: ExtractionSourcePacking,
-  sourceInterpretationProfile?: SourceInterpretationProfile
+  sourceInterpretationProfile?: SourceInterpretationProfile,
+  openSemantics?: ExtractionOpenSemanticsGeneration
 ): string {
   return requireSingleCacheKey(computeSourceTurnCacheKeys(
-    model, requestProfile, systemPrompt, input, sourcePacking, sourceInterpretationProfile
+    model, requestProfile, systemPrompt, input, sourcePacking, sourceInterpretationProfile, openSemantics
   ));
 }
 
@@ -90,9 +94,10 @@ export function computeSourceTurnCacheKeys(
   input: Pick<LongMemEvalExtractionTurn, "turnContent"> &
     Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>,
   sourcePacking?: ExtractionSourcePacking,
-  sourceInterpretationProfile?: SourceInterpretationProfile
+  sourceInterpretationProfile?: SourceInterpretationProfile,
+  openSemantics?: ExtractionOpenSemanticsGeneration
 ): readonly string[] {
-  return Object.freeze(extractionArtifactRequests(input, sourcePacking, sourceInterpretationProfile)
+  return Object.freeze(extractionArtifactRequests(input, sourcePacking, sourceInterpretationProfile, openSemantics)
     .map(({ userPrompt }) => computeCacheKey(model, requestProfile, systemPrompt, userPrompt)));
 }
 

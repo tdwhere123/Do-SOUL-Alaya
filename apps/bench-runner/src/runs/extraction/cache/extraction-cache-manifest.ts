@@ -1,4 +1,5 @@
-import { AlayaError, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { EXTRACTION_OPEN_SEMANTICS_GENERATION, type ExtractionOpenSemanticsGeneration } from "../request-artifact.js";
 import {
   mkdirSync,
   renameSync,
@@ -100,6 +101,8 @@ export type ExtractionCacheStorage = "git-tracked" | "archive";
 interface ExtractionCacheManifestBase extends ExtractionFillManifestContract {
   /** Explicit typed packet generation; absent for historical signal caches. */
   readonly source_interpretation_profile?: SourceInterpretationProfile;
+  /** Explicit open K/normalizer/request/response generation; mutually exclusive with the packet profile. */
+  readonly source_semantic_generation?: import("../request-artifact.js").ExtractionOpenSemanticsGeneration;
   /** == every cache shard's `.model`; run-start asserts config.model equals this. */
   readonly extraction_model: string;
   /** Reproduces the provider; aligns with DEFAULT_GARDEN_PROVIDER_URL. */
@@ -180,7 +183,8 @@ export function extractionAdmissionGenerationSha256(manifest: ExtractionCacheMan
     manifest.dataset, manifest.dataset_revision, manifest.window_offset, manifest.window_limit,
     manifest.expected_key_set_sha256, manifest.expansion_source_anchor ?? null,
     manifest.expansion_lineage ?? null,
-    ...(manifest.source_interpretation_profile === undefined ? [] : [manifest.source_interpretation_profile])
+    ...(manifest.source_interpretation_profile === undefined ? [] : [manifest.source_interpretation_profile]),
+    ...(manifest.source_semantic_generation === undefined ? [] : [manifest.source_semantic_generation])
   ])).digest("hex");
 }
 
@@ -274,9 +278,18 @@ function validateManifest(
   if (record.source_interpretation_profile !== undefined && schemaVersion !== 4) {
     throw new AlayaError("CONFLICT", "packet caches require the current manifest contract");
   }
+  if (record.source_semantic_generation !== undefined && schemaVersion !== 4) {
+    throw new AlayaError("CONFLICT", "open semantics caches require the current manifest contract");
+  }
+  if (record.source_interpretation_profile !== undefined && record.source_semantic_generation !== undefined) {
+    throw new AlayaError("VALIDATION", "open semantics and packet profile are mutually exclusive");
+  }
   const common: ExtractionCacheManifestBase = {
     ...(record.source_interpretation_profile === undefined ? {} : {
       source_interpretation_profile: SourceInterpretationProfileSchema.parse(record.source_interpretation_profile)
+    }),
+    ...(record.source_semantic_generation === undefined ? {} : {
+      source_semantic_generation: parseOpenSemanticsGeneration(record.source_semantic_generation)
     }),
     extraction_model: requireNonEmptyString(record.extraction_model, "extraction_model", filePath),
     provider_url: requireNonEmptyString(record.provider_url, "provider_url", filePath),
@@ -318,6 +331,14 @@ function requireSchemaVersion(
   throw new Error(
     `extraction cache manifest at ${filePath} has unsupported schema_version ${version}`
   );
+}
+
+function parseOpenSemanticsGeneration(value: unknown): ExtractionOpenSemanticsGeneration {
+  const parsed = value as ExtractionOpenSemanticsGeneration;
+  if (canonicalJson(parsed) !== canonicalJson(EXTRACTION_OPEN_SEMANTICS_GENERATION)) {
+    throw new AlayaError("CONFLICT", "open semantics generation differs from live K/normalizer/request/response identity");
+  }
+  return EXTRACTION_OPEN_SEMANTICS_GENERATION;
 }
 
 function readVersionedManifest(

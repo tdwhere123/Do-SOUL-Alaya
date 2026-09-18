@@ -8,13 +8,22 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 4.14.0
+## Unreleased — protocol 4.15.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 4.14.0 can move
-independently of the app semver.
+heading (currently `## v0.3.11` below). Protocol 4.15.0 can move
+independently of the app semver. `@do-soul/alaya-engine-gateway` is
+`0.3.12` for the additive `soul.interpretation` tool surface.
+
+Protocol 4.15.0 is an additive minor under handbook invariant §25.
+MCP/CLI expose `soul.interpretation` with four host operations
+(`prepare_source`, `propose`, `prepare_query`, `reason`). Host operations
+are provider-free; `propose` is an idempotent unreviewed-evidence write
+and does not create memory or relations. `soul.report_context_usage` is
+not an interpretation delivery loop. Existing Recall/Garden tool names
+and field names remain parseable.
 
 Protocol 4.14.0 is an additive minor under handbook invariant §25.
 MCP-reachable `InformationIndex` / `IndexEntry` / `ProductStateKey`
@@ -96,7 +105,7 @@ modality, trailing source tokens, and unsupported dependent scope. Extraction
 catalog version 3 requires demonstrated fragment independence, including
 adjacent dependent continuations. MCP, EventLog and config schemas are unchanged.
 
-Source `@do-soul/alaya-protocol` is **4.14.0** (`packages/protocol/package.json`).
+Source `@do-soul/alaya-protocol` is **4.15.0** (`packages/protocol/package.json`).
 `AlayaStatusSchema.mcp.catalog_health` is an additive optional field.
 GitHub `releases/latest` is a published tarball and is **not** this source tree;
 pin `ALAYA_VERSION` or install from a checkout. Local ONNX embeddings
@@ -228,7 +237,7 @@ ingest-reconciliation default-ON. Still deferred with close conditions:
 `#BL-051` abstention re-test on 500q data; `#BL-052` LongMemEval CI sample-floor
 scale-up; `#BL-053` edge `llm_supports` LOCAL pair-classifier; `#BL-054`
 lease-pierce governance-cache hot-path hook; `#BL-055` Inspector label/filter for
-`path_relation_failure`. See `docs/handbook/backlog.md`.
+`path_relation_failure`.
 
 ## Earlier releases
 

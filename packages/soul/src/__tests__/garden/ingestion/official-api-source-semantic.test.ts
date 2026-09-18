@@ -1,0 +1,303 @@
+import { describe, expect, it } from "vitest";
+import { sourceReferenceResolver, type SourceInterpretationProfile } from "@do-soul/alaya-protocol";
+import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
+import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/official-api/source-packet-request.js";
+import {
+  SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT,
+  SOURCE_SEMANTIC_SYSTEM_PROMPT, buildSourceSemanticRequest, semanticSha256,
+  sourceSemanticResponseJsonSchema
+} from "../../../garden/ingestion/official-api/source-semantic-request.js";
+import {
+  MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeAlignmentSemantics, proposeQuerySemantics,
+  proposeSourceSemantics
+} from "../../../garden/ingestion/official-api/source-semantic-receive.js";
+
+const PROFILE: SourceInterpretationProfile = {
+  contract: "source-interpretation-profile-v1", description: "Observed acts of seeing",
+  predicates: [{ symbol: "see", governing_roles: [], meaning: "A perceiver sees a theme." }],
+  roles: [{ symbol: "perceiver", meaning: "Participant perceiving." }, { symbol: "theme", meaning: "What is perceived." }]
+};
+
+const TEXT = "The archivist accessioned folio F into bay B.";
+
+function sourceInput(text = TEXT) {
+  const sourceCorpus = buildOfficialApiSourceCorpus(text, [{ role: "user", content: text }]);
+  const assertion = indexOfficialApiSourceAssertions(sourceCorpus).find((row) => row.text.includes(text))!;
+  return {
+    sourceCorpus, assertionIds: [assertion.assertion_id],
+    source_id: "src", source_version: "1",
+    producer_id: "authored-producer", producer_version: "p1"
+  };
+}
+
+function segment(request: ReturnType<typeof buildSourceSemanticRequest>, text: string, nth = 0) {
+  const hits = request.source_catalog.assertions[0]!.segments.filter((row) => row.text === text);
+  return hits[nth]!;
+}
+
+function accessionDraft(request: ReturnType<typeof buildSourceSemanticRequest>, gaps: readonly object[] = []) {
+  const assertionId = request.source_request.source_assertions[0]!.assertion_id;
+  const mention = (id: string, token: string, nth = 0) => {
+    const row = segment(request, token, nth);
+    return { id, assertion_id: assertionId, source_ref: { first: row.id, last: row.id } };
+  };
+  return {
+    contract: "source-interpretation-v3" as const,
+    mentions: [
+      mention("mArchivist", "archivist"), mention("mAccessioned", "accessioned"),
+      mention("mFolio", "folio"), mention("mF", "F"), mention("mBay", "bay"), mention("mB", "B")
+    ],
+    referents: [
+      { id: "rArchivist", referent_kind: "grouped" as const, mentions: ["mArchivist"] },
+      { id: "rFolio", referent_kind: "grouped" as const, mentions: ["mF"] },
+      { id: "rBay", referent_kind: "grouped" as const, mentions: ["mB"] }
+    ],
+    frames: [{
+      id: "fAccession", assertion_ids: [assertionId],
+      context_owner: { kind: "source_act" as const, source_act: "assertion" as const },
+      additional_support: [],
+      predicate_support: { kind: "explicit" as const, reading: "accession", mentions: ["mAccessioned"] },
+      slots: [
+        { id: "agent", role_reading: "agent", support: [{ kind: "lexical" as const, mentions: ["mArchivist"] }] },
+        { id: "object", role_reading: "folio", support: [{ kind: "lexical" as const, mentions: ["mFolio"] }] },
+        { id: "bay", role_reading: "bay", support: [{ kind: "lexical" as const, mentions: ["mBay"] }] }
+      ],
+      bindings: [
+        { slot_id: "agent", target: { kind: "node" as const, id: "rArchivist" }, support: [] },
+        { slot_id: "object", target: { kind: "node" as const, id: "rFolio" }, support: [] },
+        { slot_id: "bay", target: { kind: "node" as const, id: "rBay" }, support: [] }
+      ]
+    }],
+    operators: [],
+    gaps
+  };
+}
+
+function interpretedJson(request: ReturnType<typeof buildSourceSemanticRequest>, gaps: readonly object[] = []) {
+  const draft = accessionDraft(request, gaps);
+  return JSON.stringify({
+    contract: "source-interpretation-response-v3",
+    outcome: { status: "interpreted", gaps },
+    draft
+  });
+}
+
+const digest = `sha256:${"a".repeat(64)}`;
+
+function admittedQuery() {
+  return {
+    contract: "source-semantic-query-v1" as const,
+    original_query_digest: `sha256:${semanticSha256("which folio was accessioned into bay B?")}`,
+    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v1",
+    variables: [
+      { id: "folio", sort: "entity" as const }, { id: "bay", sort: "entity" as const },
+      { id: "fAccession", sort: "proposition" as const }
+    ],
+    alternatives: [{
+      frames: [{
+        id: "qAccession", variable: "fAccession", predicate_reading: "accession",
+        role_requirements: [
+          { id: "object", role_reading: "folio", target_variable: "folio",
+            support: { kind: "query_text" as const, excerpt: "folio" } },
+          { id: "bay", role_reading: "bay", target_variable: "bay",
+            support: { kind: "query_text" as const, excerpt: "bay B" } }
+        ]
+      }],
+      context_obligations: [{ frame: "qAccession", kind: "asserted_at_source" as const }]
+    }],
+    return_variables: ["folio"],
+    gaps: []
+  };
+}
+
+describe("open source semantic proposal producer", () => {
+  it("builds an open request with catalog, versions, capability and limits and no mandatory profile", () => {
+    const request = buildSourceSemanticRequest(sourceInput());
+    expect(request.schema_version).toBe(4);
+    expect(request.interpretation_contract).toBe("source-interpretation-v3");
+    expect(request.profile).toBeUndefined();
+    expect(request.source_request.k_version).toBe("source-semantic-k-v1");
+    expect(request.source_request.producer_capability.proposes).toBe("draft_semantics");
+    expect(request.source_request.resource_limits.output_byte_limit).toBe(1024 * 1024);
+    expect(request.source_catalog.assertions.length).toBe(1);
+    expect(JSON.stringify(request)).not.toMatch(/profile_id/u);
+    expect(() => parseOfficialApiSourcePacketRequest(request)).toThrow();
+    expect(SOURCE_SEMANTIC_SYSTEM_PROMPT).toMatch(/Do not emit host hashes/u);
+    expect(SOURCE_SEMANTIC_SYSTEM_PROMPT).toMatch(/not an admission prerequisite/u);
+    const schema = JSON.stringify(sourceSemanticResponseJsonSchema());
+    expect(schema).not.toContain('"enum":["see"]');
+    expect(schema).not.toContain('"enum":["perceiver","theme"]');
+  });
+
+  it("admits a novel predicate from an injected draft and normalizes catalog first/last", () => {
+    const input = sourceInput();
+    const request = buildSourceSemanticRequest(input);
+    const received = proposeSourceSemantics(input, { rawJson: interpretedJson(request) });
+    expect(received.provider_attempts).toBe(1);
+    expect(received.outcome.status).toBe("interpreted");
+    expect(received.draft?.frames[0]?.predicate_support).toEqual({
+      kind: "explicit", reading: "accession", mentions: ["mAccessioned"]
+    });
+    expect(received.interpretation?.frames[0]?.slots.map((row) => row.role_reading)).toEqual(["agent", "folio", "bay"]);
+    const references = sourceReferenceResolver(request.source_catalog, semanticSha256);
+    const mention = received.interpretation!.mentions.find((row) => row.id === "mAccessioned")!;
+    expect(references.resolve(request.source_catalog.catalog_id, mention.assertion_id, mention.source_ref).text)
+      .toBe("accessioned");
+    expect(received.raw_response_id).toMatch(/^sha256:/u);
+    const withProfileInput = { ...input, profile: PROFILE };
+    const withProfile = proposeSourceSemantics(withProfileInput, {
+      rawJson: interpretedJson(buildSourceSemanticRequest(withProfileInput))
+    });
+    expect(withProfile.request.profile).toEqual(PROFILE);
+    expect(withProfile.draft?.frames[0]?.predicate_support.reading).toBe("accession");
+  });
+
+  it("keeps abstention as abstained with a receipt and does not convert it to empty success", () => {
+    const received = proposeSourceSemantics(sourceInput(), {
+      rawJson: JSON.stringify({ contract: "source-interpretation-response-v3", outcome: { status: "abstained" } })
+    });
+    expect(received.outcome.status).toBe("abstained");
+    expect(received.provider_attempts).toBe(1);
+    expect(received.draft).toBeUndefined();
+    expect(received.interpretation).toBeUndefined();
+    expect(received.raw_response_id).toMatch(/^sha256:/u);
+  });
+
+  it("keeps partial interpretation plus explicit gaps", () => {
+    const input = sourceInput();
+    const request = buildSourceSemanticRequest(input);
+    const gaps = [{ kind: "unresolved_referent", affected_ids: ["rBay"], support: [], description: "bay identity uncertain" }];
+    const received = proposeSourceSemantics(input, { rawJson: interpretedJson(request, gaps) });
+    expect(received.outcome).toEqual({ status: "interpreted", gaps });
+    expect(received.draft?.gaps).toEqual(gaps);
+    expect(received.interpretation?.gaps[0]?.kind).toBe("unresolved_referent");
+  });
+
+  it("treats a v2 packet:null refusal as invalid instead of successful empty", () => {
+    const received = proposeSourceSemantics(sourceInput(), {
+      rawJson: JSON.stringify({ contract: "source-interpretation-response-v2", packet: null })
+    });
+    expect(received.outcome.status).toBe("invalid");
+    expect(received.provider_attempts).toBe(1);
+    expect(received.raw_response_id).toMatch(/^sha256:/u);
+    expect(received).not.toHaveProperty("packet");
+    expect(received.interpretation).toBeUndefined();
+  });
+
+  it("quarantines bad catalog references rather than admitting an H", () => {
+    const input = sourceInput();
+    const request = buildSourceSemanticRequest(input);
+    const draft = accessionDraft(request);
+    draft.mentions = draft.mentions.map((row) => row.id === "mF"
+      ? { ...row, source_ref: { first: "a1s999", last: "a1s999" } } : row);
+    const received = proposeSourceSemantics(input, {
+      rawJson: JSON.stringify({
+        contract: "source-interpretation-response-v3",
+        outcome: { status: "interpreted", gaps: [] },
+        draft
+      })
+    });
+    expect(received.outcome.status).toBe("invalid");
+    expect(received.interpretation).toBeUndefined();
+    expect(received.raw_response_id).toMatch(/^sha256:/u);
+  });
+
+  it("keeps malformed JSON distinct from interpreted empty", () => {
+    const received = proposeSourceSemantics(sourceInput(), { rawJson: '{"contract":true}' });
+    expect(received.outcome.status).toBe("invalid");
+    expect(received.provider_attempts).toBe(1);
+    expect(received.draft).toBeUndefined();
+  });
+
+  it("reports truncated incomplete JSON before treating it as abstention", () => {
+    const received = proposeSourceSemantics(sourceInput(), {
+      rawJson: '{"contract":"source-interpretation-response-v3"'
+    });
+    expect(received.outcome.status).toBe("truncated");
+    expect(received.provider_attempts).toBe(1);
+  });
+
+  it("bounds raw response bytes before JSON parse", () => {
+    const received = proposeSourceSemantics(sourceInput(), {
+      rawJson: "中".repeat(Math.ceil(MAX_SOURCE_SEMANTIC_RESPONSE_BYTES / 3))
+    });
+    expect(received.outcome.status).toBe("truncated");
+    expect(received.provider_attempts).toBe(1);
+  });
+
+  it("returns no_eligible_source with zero attempts and never dispatches", () => {
+    const received = proposeSourceSemantics({
+      sourceCorpus: "", assertionIds: [], source_id: "src", source_version: "1",
+      producer_id: "authored-producer", producer_version: "p1"
+    }, { rawJson: interpretedJson(buildSourceSemanticRequest(sourceInput())) });
+    expect(received.outcome).toEqual({ status: "no_eligible_source", provider_attempts: 0 });
+    expect(received.provider_attempts).toBe(0);
+    expect(received.raw_response_id).toBeUndefined();
+  });
+
+  it("returns unexercised when no injected response is supplied", () => {
+    expect(proposeSourceSemantics(sourceInput()).outcome.status).toBe("unexercised");
+  });
+});
+
+describe("query and alignment proposal entry points", () => {
+  it("accepts the original query and approved context and rejects answers or programs", () => {
+    const query = admittedQuery();
+    const body = {
+      variables: query.variables, alternatives: query.alternatives,
+      return_variables: query.return_variables, gaps: query.gaps
+    };
+    const received = proposeQuerySemantics({
+      original_query: "which folio was accessioned into bay B?",
+      approved_fixed_context: { context_id: "fixed-ctx" },
+      producer_id: "query-producer", producer_version: "1"
+    }, {
+      rawJson: JSON.stringify({
+        contract: "source-semantic-query-response-v1",
+        outcome: { status: "interpreted", gaps: [] },
+        query: body
+      })
+    });
+    expect(received.request.contract).toBe(SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT);
+    expect(received.request.original_query).toBe("which folio was accessioned into bay B?");
+    expect(received.query?.variables.map((row) => row.id)).toContain("folio");
+    expect(() => proposeQuerySemantics({
+      original_query: "which folio was accessioned into bay B?",
+      producer_id: "query-producer", producer_version: "1",
+      answers: ["F"]
+    } as never)).toThrow(/answers/u);
+  });
+
+  it("accepts admitted Q plus H descriptors and rejects ranking or seeds", () => {
+    const received = proposeAlignmentSemantics({
+      admitted_q: admittedQuery(),
+      h_descriptors: [{
+        h_id: digest, source_id: "src", source_version: "1",
+        frames: [{ id: "fAccession", predicate_reading: "accession", slots: [{ id: "bay", role_reading: "bay" }] }]
+      }],
+      producer_id: "align-producer", producer_version: "1"
+    }, {
+      rawJson: JSON.stringify({
+        contract: "source-semantic-alignment-response-v1",
+        outcome: { status: "interpreted", gaps: [] },
+        alignment: {
+          correspondences: [{
+            relation: "contextual_equivalence",
+            query_endpoint: { kind: "predicate", alternative: 0, frame: "qAccession" },
+            source_endpoint: { kind: "frame", frame: "fAccession" },
+            query_support: { kind: "query_text", excerpt: "accessioned" },
+            source_semantic_support: [{ kind: "lexical", mentions: ["mAccessioned"] }]
+          }]
+        }
+      })
+    });
+    expect(received.request.contract).toBe(SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT);
+    expect(received.alignment?.correspondences).toHaveLength(1);
+    expect(() => proposeAlignmentSemantics({
+      admitted_q: admittedQuery(),
+      h_descriptors: [{ h_id: digest, source_id: "src", source_version: "1", frames: [] }],
+      producer_id: "align-producer", producer_version: "1",
+      ranking: [digest], seeds: ["fAccession"]
+    } as never)).toThrow(/ranking|seeds/u);
+  });
+});

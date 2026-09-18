@@ -1,4 +1,4 @@
-import { extractionArtifactPrompt } from "../request-artifact.js";
+import { extractionArtifactPrompt, extractionTypedArtifactMode } from "../request-artifact.js";
 import { assertExtractionCacheIdentity } from "../cache/cache-identity.js";
 import {
   resolveCompileSeedExtractionConfig,
@@ -140,7 +140,7 @@ export async function inspectExtractionFillPreparation(
   const startingIdentity = manifestSnapshot.identity;
   const existingManifest = startingIdentity?.manifest;
   if (existingManifest === undefined) assertManifestlessCacheIsEmpty(cacheRoot);
-  const config = resolveFillConfig(existingManifest, options.sourcePacking, options.sourceInterpretationProfile);
+  const config = resolveFillConfig(existingManifest, options.sourcePacking, options.sourceInterpretationProfile, options.openSemantics);
   const { window, completion } = await inspectPreparedFillWindow({
     options, cacheRoot, startingIdentity, config, expansion
   });
@@ -235,7 +235,8 @@ export function inspectFillWindow(
     requestProfile: config.requestProfile,
     sourcePacking: config.sourcePacking,
     sourceInterpretationProfile: config.sourceInterpretationProfile,
-    systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile),
+    openSemantics: config.openSemantics,
+    systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics),
     extractionTurns
   });
 }
@@ -291,14 +292,14 @@ function preflightAndPinExtractionIdentity(input: {
   const currentIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
   assertPreparationIdentityUnchanged(input.startingIdentity, currentIdentity);
   if (currentIdentity === undefined) assertManifestlessCacheIsEmpty(input.cacheRoot);
-  if (input.config.sourceInterpretationProfile !== undefined) {
+  if (extractionTypedArtifactMode(input.config) !== undefined) {
     if (currentIdentity !== undefined) assertExtractionCacheIdentity({ config: input.config, manifest: currentIdentity.manifest,
-      systemPrompt: extractionArtifactPrompt(input.config.sourceInterpretationProfile), validateProvider: true });
+      systemPrompt: extractionArtifactPrompt(input.config.sourceInterpretationProfile, input.config.openSemantics), validateProvider: true });
   } else preflightExtractionCache({
     cacheRoot: input.cacheRoot,
     manifest: currentIdentity?.manifest,
     config: input.config,
-    systemPrompt: extractionArtifactPrompt(input.config.sourceInterpretationProfile),
+    systemPrompt: extractionArtifactPrompt(input.config.sourceInterpretationProfile, input.config.openSemantics),
     requiredTurnContents: input.distinctTurns,
     requiredExtractionTurns: input.distinctExtractionTurns,
     requiredQuestionWindow: {
@@ -327,9 +328,10 @@ function preflightAndPinExtractionIdentity(input: {
 function resolveFillConfig(
   manifest: ExtractionCacheManifest | undefined,
   sourcePacking?: CompileSeedExtractionConfig["sourcePacking"],
-  sourceInterpretationProfile?: CompileSeedExtractionConfig["sourceInterpretationProfile"]
+  sourceInterpretationProfile?: CompileSeedExtractionConfig["sourceInterpretationProfile"],
+  openSemantics?: CompileSeedExtractionConfig["openSemantics"]
 ): CompileSeedExtractionConfig {
-  const config = resolveCompileSeedExtractionConfig(process.env, manifest, sourcePacking, sourceInterpretationProfile);
+  const config = resolveCompileSeedExtractionConfig(process.env, manifest, sourcePacking, sourceInterpretationProfile, openSemantics);
   if (config.model.trim().length === 0) {
     throw new Error(
       "extraction-fill: resolved extraction model is empty; refusing to fill " +

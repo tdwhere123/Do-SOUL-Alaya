@@ -169,6 +169,7 @@ function extractionInspectionInput(input: {
     variant: options.variant,
     sourcePacking: options.sourcePacking,
     sourceInterpretationProfile: options.sourceInterpretationProfile,
+    openSemantics: options.openSemantics,
     ...(options.limit === undefined ? {} : { limit: options.limit }),
     ...(options.offset === undefined ? {} : { offset: options.offset }),
     ...(receipt.repair_scope === undefined || options.questionBatchLimit === undefined ? {} : {

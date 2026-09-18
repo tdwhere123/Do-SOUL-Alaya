@@ -15,6 +15,7 @@ export const ALAYA_MEMORY_TOOL_NAMES = Object.freeze([
   "soul.explore_graph",
   "soul.report_context_usage",
   "soul.resolve",
+  "soul.interpretation",
   "garden.list_pending_tasks",
   "garden.claim_task",
   "garden.complete_task"
@@ -78,6 +79,8 @@ const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.f
     "Close the delivery loop by marking used/skipped/not_applicable so trust state stays explicit.",
   "soul.resolve":
     "Apply a resolution against a staged warning surfaced by soul.recall; the audit event is the durable record of the decision.",
+  "soul.interpretation":
+    "Host operations are provider-free. propose is an idempotent unreviewed-evidence write; it does not create memory or relations. reason requires accepts_unreviewed_conditional_results and never strips H/A. Missing source/Q/A does not invent them. soul.report_context_usage is not an interpretation delivery loop.",
   "garden.list_pending_tasks": "",
   "garden.claim_task": "",
   "garden.complete_task": ""
@@ -121,6 +124,12 @@ const annotationByToolName: Record<AlayaMemoryToolName, AlayaMemoryToolDefinitio
     "soul.explore_graph": readOnlyAnnotation,
     "soul.report_context_usage": writeAnnotation,
     "soul.resolve": writeAnnotation,
+    "soul.interpretation": Object.freeze({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    }),
     "garden.list_pending_tasks": readOnlyAnnotation,
     "garden.claim_task": writeAnnotation,
     "garden.complete_task": writeAnnotation

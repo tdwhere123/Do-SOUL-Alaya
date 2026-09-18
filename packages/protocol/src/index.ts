@@ -257,5 +257,10 @@ export {
 } from "./shared/cjk-run-policy.js";
 
 export * from "./garden/source-interpretation-profile.js";
+export * from "./garden/source-semantic-draft.js";
+export * from "./garden/source-semantic-interpretation.js";
+export * from "./garden/source-semantic-worker.js";
+export * from "./garden/source-semantic-identity.js";
+export * from "./garden/normalize-source-semantics.js";
 
 export { SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS, sourceInterpretationDependsOnRecord } from "./garden/source-interpretation-dependency.js";

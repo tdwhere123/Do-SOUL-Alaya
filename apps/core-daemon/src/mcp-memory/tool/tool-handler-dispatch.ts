@@ -18,7 +18,9 @@ import {
   type SoulProposeMemoryUpdateRequest,
   type SoulReportContextUsageRequest,
   type SoulReportContextUsageResponse,
-  type SoulReviewMemoryProposalRequest
+  type SoulReviewMemoryProposalRequest,
+  type SoulInterpretationRequest,
+  type SoulInterpretationResponse
 } from "@do-soul/alaya-protocol";
 import { soulToolDefs } from "@do-soul/alaya-engine-gateway";
 import type { AlayaMemoryToolName } from "./tool-catalog.js";
@@ -50,6 +52,10 @@ export function createMcpMemoryToolDispatcher(input: Readonly<{
     context: McpMemoryToolCallContext
   ) => Promise<SoulReportContextUsageResponse>;
   readonly operations: McpMemoryToolOperations;
+  readonly interpretation: (
+    request: SoulInterpretationRequest,
+    context: McpMemoryToolCallContext
+  ) => Promise<SoulInterpretationResponse>;
 }>): Readonly<{
   dispatchToolCall(call: {
     readonly toolName: AlayaMemoryToolName;
@@ -105,6 +111,8 @@ export function createMcpMemoryToolDispatcher(input: Readonly<{
       ),
     "soul.resolve": async (parsed, context) =>
       ok("soul.resolve", await input.operations.resolveStagedWarning(parsed, context)),
+    "soul.interpretation": async (parsed, context) =>
+      ok("soul.interpretation", await input.interpretation(parsed as SoulInterpretationRequest, context)),
     "garden.list_pending_tasks": async (parsed, context) =>
       ok(
         "garden.list_pending_tasks",

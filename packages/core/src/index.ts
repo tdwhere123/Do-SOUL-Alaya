@@ -188,5 +188,22 @@ export * from "./governance/security/worker-trust-assessor.js";
 export * from "./runtime/runs/workspace-service.js";
 export * from "./governance/security/zero-day-security-layer.js";
 
-export { createSourceInterpretationPacketPublication, verifyPublishedSourceInterpretation, packetEvidenceId } from "./memory/evidence-create/source-interpretation-packet-publication.js";
+export {
+  createSourceInterpretationPacketPublication, verifyPublishedSourceInterpretation, packetEvidenceId,
+  createSourceSemanticInterpretationPublication, verifyPublishedSourceSemanticInterpretation,
+  semanticInterpretationEvidenceId
+} from "./memory/evidence-create/source-interpretation-packet-publication.js";
+export { admitSourceSemanticQuery } from "./recall/conditional-field/query/source-semantic-query-admission.js";
+export {
+  SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
+  SourceSemanticQueryProducerRegistry, defaultSourceSemanticQueryProducerRegistry
+} from "./recall/conditional-field/query/source-semantic-query-producer-registry.js";
+export {
+  admitSourceSemanticAlignment, SOURCE_SEMANTIC_LOWERING_VERSION
+} from "./recall/conditional-field/query/source-semantic-alignment-admission.js";
+export {
+  SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, SOURCE_SEMANTIC_ALIGNMENT_SOUL_PRODUCER_ID,
+  SourceSemanticAlignmentProducerRegistry, defaultSourceSemanticAlignmentProducerRegistry
+} from "./recall/conditional-field/query/source-semantic-alignment-producer-registry.js";
 export { reasonSourceInterpretation } from "./recall/runtime/source-interpretation-reasoning.js";
+export { reasonSourceSemanticInterpretation } from "./recall/runtime/source-semantic-reasoning.js";

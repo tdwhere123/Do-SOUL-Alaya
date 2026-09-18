@@ -53,8 +53,25 @@ import {
   SoulMemorySearchRequestSchema,
   SoulMemorySearchResponseSchema
 } from "./mcp-memory-search-types.js";
+import { SoulInterpretationRequestSchema } from "./mcp-interpretation-types.js";
 
 export { SoulMemorySearchResponseSchema };
+
+export {
+  SOUL_INTERPRETATION_TOOL_NAME,
+  SoulInterpretationRequestSchema,
+  SoulInterpretationResponseSchema,
+  SoulInterpretationPrepareSourceRequestSchema,
+  SoulInterpretationProposeRequestSchema,
+  SoulInterpretationPrepareQueryRequestSchema,
+  SoulInterpretationReasonRequestSchema,
+  SoulInterpretationPrepareSourceResponseSchema,
+  SoulInterpretationProposeResponseSchema,
+  SoulInterpretationPrepareQueryResponseSchema,
+  SoulInterpretationReasonResponseSchema,
+  type SoulInterpretationRequest,
+  type SoulInterpretationResponse
+} from "./mcp-interpretation-types.js";
 
 export {
   SoulMemorySearchDegradationReasonSchema,
@@ -332,6 +349,7 @@ type SoulToolName =
   | "soul.explore_graph"
   | "soul.report_context_usage"
   | "soul.resolve"
+  | "soul.interpretation"
   | "garden.list_pending_tasks"
   | "garden.claim_task"
   | "garden.complete_task";
@@ -350,6 +368,7 @@ const soulToolRequestSchemas: Record<SoulToolName, z.ZodTypeAny> = {
   "soul.explore_graph": SoulExploreGraphRequestSchema,
   "soul.report_context_usage": SoulReportContextUsageRequestSchema,
   "soul.resolve": SoulResolveRequestSchema,
+  "soul.interpretation": SoulInterpretationRequestSchema,
   "garden.list_pending_tasks": GardenListPendingTasksRequestSchema,
   "garden.claim_task": GardenClaimTaskRequestSchema,
   "garden.complete_task": GardenCompleteTaskRequestSchema

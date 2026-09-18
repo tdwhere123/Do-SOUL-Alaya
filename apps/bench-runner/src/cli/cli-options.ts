@@ -50,6 +50,7 @@ export interface ParsedFlags {
   readonly extractionCacheRoot?: string;
   readonly extractionSourcePacking?: ExtractionSourcePacking;
   readonly extractionPacketProfile?: string;
+  readonly extractionOpenSemantics?: boolean;
   readonly extractionPreflightOut?: string;
   readonly extractionPreflightKeys?: string;
   /** Digest-bound extraction authority receipt required for live cache fills. */
@@ -101,6 +102,7 @@ export interface ParsedFlagsState {
   extractionCacheRoot?: string;
   extractionSourcePacking?: ExtractionSourcePacking;
   extractionPacketProfile?: string;
+  extractionOpenSemantics?: boolean;
   extractionPreflightOut?: string;
   extractionPreflightKeys?: string;
   extractionAuthority?: string;

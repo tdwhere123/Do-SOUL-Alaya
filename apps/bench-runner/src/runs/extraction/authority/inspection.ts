@@ -1,4 +1,7 @@
-import { extractionArtifactPrompt, extractionArtifactRequests } from "../request-artifact.js";
+import {
+  extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode,
+  type ExtractionOpenSemanticsGeneration
+} from "../request-artifact.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
 import type { SourceInterpretationProfile, ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
@@ -62,6 +65,7 @@ type ExtractionAuthorityCompletion = ReturnType<typeof inspectExtractionFillComp
 export async function inspectExtractionAuthority(input: {
   readonly sourcePacking?: ExtractionSourcePacking;
   readonly sourceInterpretationProfile?: SourceInterpretationProfile;
+  readonly openSemantics?: boolean | ExtractionOpenSemanticsGeneration;
   readonly variant: LongMemEvalVariant;
   readonly limit?: number;
   readonly offset?: number;
@@ -76,7 +80,7 @@ export async function inspectExtractionAuthority(input: {
   readonly preservedValidExclusionKeys?: readonly string[];
 }): Promise<ExtractionAuthorityInspection> {
   const manifestIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
-  const config = resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest, input.sourcePacking, input.sourceInterpretationProfile);
+  const config = resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest, input.sourcePacking, input.sourceInterpretationProfile, input.openSemantics);
   assertRequiredRequestProfile(config);
   if (isObsoleteRequestProfile(config.requestProfile)) {
     throw new Error(
@@ -109,7 +113,8 @@ function inspectAuthorityCompletion(
     requestProfile: config.requestProfile,
     sourcePacking: config.sourcePacking,
     sourceInterpretationProfile: config.sourceInterpretationProfile,
-    systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile),
+    openSemantics: config.openSemantics,
+    systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics),
     extractionTurns: authorizedTurns,
     ...(input.excludeContentClosureKeys === undefined ? {} : {
       excludeContentClosureKeys: input.excludeContentClosureKeys
@@ -181,7 +186,7 @@ function buildAuthorityExtractionObservation(
       sourcePacking: config.sourcePacking
     }),
     providerUrl: config.providerUrl,
-    systemPromptSha256: computeSystemPromptSha256(extractionArtifactPrompt(config.sourceInterpretationProfile)),
+    systemPromptSha256: computeSystemPromptSha256(extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics)),
     cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
     manifestSha256: manifestIdentity?.manifestSha256 ?? null,
     rawContentClosureSha256: completion.partialContentClosureSha256
@@ -234,13 +239,13 @@ function collectShardStatus(
   const validEntries: ExtractionContentClosureEntry[] = [];
   for (const turn of turns) {
     const keys = computeExtractionTurnCacheKeys(
-      config.model, config.requestProfile, extractionArtifactPrompt(config.sourceInterpretationProfile), turn, config.sourcePacking, config.sourceInterpretationProfile
+      config.model, config.requestProfile, extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics), turn, config.sourcePacking, config.sourceInterpretationProfile, config.openSemantics
     );
-    const requests = extractionArtifactRequests(turn, config.sourcePacking, config.sourceInterpretationProfile);
+    const requests = extractionArtifactRequests(turn, config.sourcePacking, config.sourceInterpretationProfile, config.openSemantics);
     for (const [index, key] of keys.entries()) {
       if (requests[index]!.source.source_assertions.length > 0) nonemptyKeys.push(key);
       const shard = inspectCachedExtractionArtifact(
-        cacheRoot, key, config.model, config.requestProfile, config.sourceInterpretationProfile !== undefined
+        cacheRoot, key, config.model, config.requestProfile, extractionTypedArtifactMode(config)
       );
       if (shard.status === "missing") missingKeys.push(key);
       if (shard.status === "hit" && !preservedValidExclusionKeys.has(key)) {

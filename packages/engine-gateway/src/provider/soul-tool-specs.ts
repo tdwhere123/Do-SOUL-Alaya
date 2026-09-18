@@ -14,7 +14,8 @@ import {
   SoulProposeMemoryUpdateRequestSchema,
   SoulReportContextUsageRequestSchema,
   SoulResolveRequestSchema,
-  SoulReviewMemoryProposalRequestSchema
+  SoulReviewMemoryProposalRequestSchema,
+  SoulInterpretationRequestSchema
 } from "@do-soul/alaya-protocol";
 
 export interface ProviderNeutralSchema<T = unknown> {
@@ -107,6 +108,12 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
     description:
       "WHEN: a recalled pointer carries a `staged_warnings` entry and you have decided how to handle it (confirm / reject / correct / stale / defer / not_relevant). Resolve a staged warning attached to a recall result. `confirm` activates a draft claim_form (draft -> active); `reject` archives a non-draft claim_form or records the dismissal for a memory_entry; `correct` records the corrected proposition (downstream consumers pick it up from the audit row); `stale` transitions an active memory_entry to dormant; `defer` creates a deferred obligation that expires at `defer_until`; `not_relevant` records the dismissal without mutating the target. delivery_id MUST be the same delivery_id soul.recall returned for the pointer being resolved.",
     parametersSchema: SoulResolveRequestSchema
+  },
+  {
+    name: "soul.interpretation",
+    description:
+      "WHEN: you already have an authorized source and want host-owned open semantic interpretation (H/Q/A/C) without calling a model. Four operations: prepare_source (existing source + host catalog), propose (publish an injected H draft through Core; idempotent evidence write, not MemoryEntry/RelationAssertion), prepare_query (admit original-query-bound Q and discover bounded H descriptors), reason (admit A and execute compiled C; requires accepts_unreviewed_conditional_results). Missing source/Q/A returns no_eligible_source or preparation_required and never fabricates source or calls a provider. Language drafts are produced outside this tool. soul.report_context_usage is not an interpretation delivery loop.",
+    parametersSchema: SoulInterpretationRequestSchema
   },
   {
     name: "garden.list_pending_tasks",

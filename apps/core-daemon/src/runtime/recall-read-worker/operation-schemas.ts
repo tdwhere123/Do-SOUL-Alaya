@@ -3,6 +3,8 @@ import {
   AuthorizedScopesAdmissionSchema,
   SourceInterpretationReasoningRequestSchema,
   SourceInterpretationReasoningResultSchema,
+  SourceSemanticWorkerRequestSchema,
+  SourceSemanticWorkerResultSchema,
   EvidenceCapsuleSchema,
   MemoryDimensionSchema,
   MemoryEntrySchema,
@@ -92,6 +94,13 @@ const PAYLOAD_SCHEMAS = {
   "conditionalField.interpretation": z.object({ workspace_id: z.string().min(1),
     as_of: z.string().datetime(), authorized_scopes: AuthorizedScopesAdmissionSchema,
     request: SourceInterpretationReasoningRequestSchema }).strict(),
+  "conditionalField.sourceSemantics": z.object({
+    workspace_id: z.string().min(1), as_of: z.string().datetime(),
+    authorized_scopes: AuthorizedScopesAdmissionSchema,
+    principal: z.string().min(1).max(256).optional(),
+    expires_at: z.string().datetime().optional(),
+    request: SourceSemanticWorkerRequestSchema
+  }).strict(),
   "conditionalField.acknowledge": AcknowledgeSchema,
   "conditionalField.discard": DiscardSchema,
   "memory.findByWorkspaceId": z.object({
@@ -262,6 +271,7 @@ const RESULT_SCHEMAS = {
   "snapshot.rollback": z.null(),
   "conditionalField.recall": ConditionalFieldRecallPortResultSchema,
   "conditionalField.interpretation": SourceInterpretationReasoningResultSchema,
+  "conditionalField.sourceSemantics": SourceSemanticWorkerResultSchema,
   // Receipt fields are owned by core; this boundary only requires the version tag.
   "conditionalField.acknowledge": z.union([
     z.null(),

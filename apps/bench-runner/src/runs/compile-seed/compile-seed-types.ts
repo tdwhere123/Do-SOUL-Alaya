@@ -172,6 +172,7 @@ export interface BenchSignalExtractorMeta {
 
 export interface CompileSeedExtractionConfig {
   readonly sourceInterpretationProfile?: import("@do-soul/alaya-protocol").SourceInterpretationProfile;
+  readonly openSemantics?: import("../extraction/request-artifact.js").ExtractionOpenSemanticsGeneration;
   readonly sourcePacking?: ExtractionSourcePacking;
   /** OpenAI-compatible chat-completions base URL (…/v1). */
   readonly providerUrl: string;

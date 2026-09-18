@@ -8,6 +8,7 @@ import {
   createMcpMemoryToolOperations
 } from "./tool-handler-operations.js";
 import { createRecallHandler, createReportContextUsageHandler } from "../recall/recall-usage-handlers.js";
+import { createSourceSemanticInterpretationHandler } from "./interpretation-handler.js";
 import {
   classifyError,
   fail,
@@ -46,11 +47,19 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   });
   const operations = createMcpMemoryToolOperations({ deps, now, generateId, warn });
   const surfaceRegistrar = createAgentSurfaceRegistrar({ deps, warn });
+  const interpretation = createSourceSemanticInterpretationHandler({
+    now,
+    ...(deps.sourceSemanticsPort === undefined ? {} : { sourceSemanticsPort: deps.sourceSemanticsPort }),
+    ...(deps.sourceSemanticPublication === undefined
+      ? {}
+      : { publication: deps.sourceSemanticPublication })
+  });
   const dispatcher = createMcpMemoryToolDispatcher({
     gardenTasks,
     recall,
     reportContextUsage,
-    operations
+    operations,
+    interpretation
   });
 
   return {

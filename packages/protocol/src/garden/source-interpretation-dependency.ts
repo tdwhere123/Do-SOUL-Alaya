@@ -2,9 +2,14 @@ import { z } from "zod";
 import { SourceEvidenceTargetSchema } from "../recall/conditional-field/product-identity.js";
 import { SOURCE_INTERPRETATION_CONTRACT } from "./source-interpretation.js";
 import { PublishedSourceInterpretationPacketSchema } from "./source-interpretation-packet.js";
+import { SOURCE_SEMANTIC_PACKET_CONTRACT } from "./source-semantic-draft.js";
+import { SOURCE_SEMANTIC_PUBLISHED_CONTRACT } from "./source-semantic-interpretation.js";
 
 export const SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS = [
-  SOURCE_INTERPRETATION_CONTRACT, PublishedSourceInterpretationPacketSchema.unwrap().shape.contract.value
+  SOURCE_INTERPRETATION_CONTRACT,
+  PublishedSourceInterpretationPacketSchema.unwrap().shape.contract.value,
+  SOURCE_SEMANTIC_PACKET_CONTRACT,
+  SOURCE_SEMANTIC_PUBLISHED_CONTRACT
 ] as const;
 
 // This recognizes source dependency for erasure, not semantic admission of the payload.

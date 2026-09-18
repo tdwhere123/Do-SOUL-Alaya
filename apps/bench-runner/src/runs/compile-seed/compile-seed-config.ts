@@ -1,4 +1,8 @@
 import { AlayaError, canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, parseDefaultOnFlag, parseEnvBoolean, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import {
+  EXTRACTION_OPEN_SEMANTICS_GENERATION, assertExclusiveExtractionGeneration,
+  type ExtractionOpenSemanticsGeneration
+} from "../extraction/request-artifact.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSecretRef } from "@do-soul/alaya";
@@ -113,13 +117,20 @@ export function resolveCompileSeedExtractionConfig(
   env: NodeJS.ProcessEnv = process.env,
   manifest?: ExtractionCacheManifest | undefined,
   sourcePackingOverride?: ExtractionSourcePacking,
-  sourceInterpretationProfile?: SourceInterpretationProfile
+  sourceInterpretationProfile?: SourceInterpretationProfile,
+  openSemantics?: boolean | ExtractionOpenSemanticsGeneration
 ): CompileSeedExtractionConfig {
   const profile = sourceInterpretationProfile === undefined ? undefined : SourceInterpretationProfileSchema.parse(sourceInterpretationProfile);
+  const open = pinOpenSemanticsGeneration(openSemantics);
+  assertExclusiveExtractionGeneration({ sourceInterpretationProfile: profile, openSemantics: open });
   if (manifest !== undefined && canonicalJson(manifest.source_interpretation_profile ?? null) !== canonicalJson(profile ?? null)) {
     throw new AlayaError("CONFLICT", "source interpretation profile differs from cache generation; explicit matching opt-in is required");
   }
+  if (manifest !== undefined && canonicalJson(manifest.source_semantic_generation ?? null) !== canonicalJson(open ?? null)) {
+    throw new AlayaError("CONFLICT", "open semantics generation differs from cache generation; explicit matching opt-in is required");
+  }
   const packet = profile === undefined ? {} : { sourceInterpretationProfile: profile };
+  const openConfig = open === undefined ? {} : { openSemantics: open };
   const providerUrlValue = readNonEmpty(env[GARDEN_PROVIDER_URL_ENV]) ?? manifest?.provider_url;
   if (providerUrlValue === undefined) {
     throw new Error(
@@ -145,15 +156,26 @@ export function resolveCompileSeedExtractionConfig(
   };
   const secretRef = readNonEmpty(env[GARDEN_SECRET_REF_ENV]);
   if (secretRef === undefined) {
-    return { providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, ...packet, apiKey: null };
+    return { providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, ...packet, ...openConfig, apiKey: null };
   }
   const resolved = resolveSecretRef(secretRef);
   if ("value" in resolved) {
     return {
-      providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, ...packet, apiKey: resolved.value
+      providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, ...packet, ...openConfig, apiKey: resolved.value
     };
   }
-  return { providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, ...packet, apiKey: null };
+  return { providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, ...packet, ...openConfig, apiKey: null };
+}
+
+function pinOpenSemanticsGeneration(
+  value: boolean | ExtractionOpenSemanticsGeneration | undefined
+): ExtractionOpenSemanticsGeneration | undefined {
+  if (value === undefined || value === false) return undefined;
+  const identity = value === true ? EXTRACTION_OPEN_SEMANTICS_GENERATION : value;
+  if (canonicalJson(identity) !== canonicalJson(EXTRACTION_OPEN_SEMANTICS_GENERATION)) {
+    throw new AlayaError("CONFLICT", "open semantics generation differs from live K/normalizer/request/response identity");
+  }
+  return EXTRACTION_OPEN_SEMANTICS_GENERATION;
 }
 
 export function resolveExtractionSourcePacking(

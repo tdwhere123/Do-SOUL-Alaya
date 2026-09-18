@@ -268,3 +268,39 @@ export {
   type ProductUpdateKind,
   type RepresentationDecision
 } from "./index-view.js";
+export {
+  SOURCE_SEMANTIC_QUERY_CONTRACT,
+  SOURCE_SEMANTIC_CONTEXT_OBLIGATION_KINDS,
+  SourceSemanticQueryVariableSchema,
+  SourceSemanticQueryRoleRequirementSchema,
+  SourceSemanticQueryFrameSchema,
+  SourceSemanticQueryIncidenceSchema,
+  SourceSemanticContextObligationSchema,
+  SourceSemanticQueryAlternativeSchema,
+  SourceSemanticQuerySchema,
+  queryAlternativeConnected,
+  type SourceSemanticQueryVariable,
+  type SourceSemanticQueryRoleRequirement,
+  type SourceSemanticQueryFrame,
+  type SourceSemanticQueryIncidence,
+  type SourceSemanticContextObligation,
+  type SourceSemanticQueryAlternative,
+  type SourceSemanticQuery
+} from "./semantic-query.js";
+export {
+  SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
+  SOURCE_SEMANTIC_ALIGNMENT_RELATION,
+  SourceSemanticQueryEndpointSchema,
+  SourceSemanticSourceEndpointSchema,
+  SourceSemanticCorrespondenceSchema,
+  SourceSemanticAlignmentSchema,
+  type SourceSemanticQueryEndpoint,
+  type SourceSemanticSourceEndpoint,
+  type SourceSemanticCorrespondence,
+  type SourceSemanticAlignment
+} from "./semantic-alignment.js";
+export {
+  SOURCE_SEMANTIC_CONTEXT_CONTRACT,
+  SourceSemanticEvaluationContextSchema,
+  type SourceSemanticEvaluationContext
+} from "./interpretation-context.js";

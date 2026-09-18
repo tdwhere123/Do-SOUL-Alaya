@@ -1,5 +1,5 @@
 import { Worker } from "node:worker_threads";
-import { indexEntryCacheKey, type SourceInterpretationReasoningResult, type PathAnchorRef } from "@do-soul/alaya-protocol";
+import { indexEntryCacheKey, type SourceInterpretationReasoningResult, type SourceSemanticWorkerResult, type PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
   ConditionalFieldRecallPort,
   ConditionalFieldRecallPortResult,
@@ -47,6 +47,7 @@ export interface RecallReadWorkerClient {
   readonly readSnapshot: RecallReadSnapshotPort;
   readonly conditionalFieldPort: ConditionalFieldRecallPort;
   readonly sourceInterpretationPort?: Readonly<{ reason: (input: WorkerOperationPayload<"conditionalField.interpretation">) => Promise<SourceInterpretationReasoningResult> }>;
+  readonly sourceSemanticsPort?: Readonly<{ execute: (input: WorkerOperationPayload<"conditionalField.sourceSemantics">) => Promise<SourceSemanticWorkerResult> }>;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -278,6 +279,23 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   public readonly sourceInterpretationPort = {
     reason: async (input: WorkerOperationPayload<"conditionalField.interpretation">): Promise<SourceInterpretationReasoningResult> =>
       await this.request<SourceInterpretationReasoningResult>("conditionalField.interpretation", input)
+  };
+
+  public readonly sourceSemanticsPort = {
+    execute: async (input: WorkerOperationPayload<"conditionalField.sourceSemantics">): Promise<SourceSemanticWorkerResult> => {
+      const handle = input.request.kind === "reason" ? input.request.query_handle
+        : input.request.kind === "prepare_query" ? input.request.source_handle : undefined;
+      const worker = handle === undefined
+        ? this.requireWorker("conditionalField.sourceSemantics")
+        : this.deliveryOwner(handle);
+      const parsed = await this.dispatchToWorker<SourceSemanticWorkerResult>(
+        worker, "conditionalField.sourceSemantics", input);
+      const issued = parsed.kind === "prepare_source" ? parsed.source_handle
+        : parsed.kind === "prepare_query" ? parsed.query_handle : undefined;
+      if (issued !== undefined) this.deliveryOwners.set(issued, worker);
+      while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
+      return parsed;
+    }
   };
 
   public async ready(): Promise<void> {

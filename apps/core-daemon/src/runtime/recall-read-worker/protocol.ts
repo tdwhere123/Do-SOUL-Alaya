@@ -57,6 +57,7 @@ export const RECALL_READ_WORKER_OPERATIONS = [
   "snapshot.rollback",
   "conditionalField.recall",
   "conditionalField.interpretation",
+  "conditionalField.sourceSemantics",
   "conditionalField.acknowledge",
   "conditionalField.discard",
   "close"

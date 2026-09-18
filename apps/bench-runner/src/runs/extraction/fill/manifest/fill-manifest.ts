@@ -50,11 +50,14 @@ export function buildFillManifest(input: {
     ...(input.config.sourceInterpretationProfile === undefined ? {} : {
       source_interpretation_profile: input.config.sourceInterpretationProfile
     }),
+    ...(input.config.openSemantics === undefined ? {} : {
+      source_semantic_generation: input.config.openSemantics
+    }),
     extraction_model: input.config.model,
     model_family: input.config.modelFamily ?? input.config.model,
     request_profile: input.config.requestProfile,
     provider_url: input.config.providerUrl,
-    system_prompt_sha256: computeSystemPromptSha256(extractionArtifactPrompt(input.config.sourceInterpretationProfile)),
+    system_prompt_sha256: computeSystemPromptSha256(extractionArtifactPrompt(input.config.sourceInterpretationProfile, input.config.openSemantics)),
     cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
     dataset: input.variant.replace(/_/u, "-"),
     dataset_revision: input.datasetRevision,
@@ -100,7 +103,9 @@ export function buildMaterializedTargetFillManifest(input: {
   readonly builtAt: string;
 }): Extract<ExtractionCacheManifest, { readonly schema_version: 3 | 4 }> {
   const source = input.sourceManifest;
-  if (source.source_interpretation_profile !== undefined) throw new ExtractionCacheInvariantError("signal cache materialization does not accept typed interpretation packets");
+  if (source.source_interpretation_profile !== undefined || source.source_semantic_generation !== undefined) {
+    throw new ExtractionCacheInvariantError("signal cache materialization does not accept typed interpretation packets");
+  }
   const target = input.targetSelection.final_identity;
   return {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
