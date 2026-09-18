@@ -297,4 +297,8 @@ export {
   defaultSourceEnrichmentProfile,
   semanticExtractionProfilesEqual
 } from "./garden/ingestion/official-api/semantic-artifact-identity.js";
-export { officialApiExtractionResponseSchema } from "./garden/ingestion/official-api/response-schema.js";
+export { officialApiExtractionResponseSchema, officialApiExtractionResponseSchemaPreimage } from "./garden/ingestion/official-api/response-schema.js";
+
+export { buildOfficialApiSourcePacketRequest, parseOfficialApiSourcePacketRequest, sourcePacketRequestIdentity,
+  OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT, type OfficialApiSourcePacketRequest } from "./garden/ingestion/official-api/source-packet-request.js";
+export { receiveOfficialApiSourcePacket, completeEmptyOfficialApiSourcePacket, MAX_OFFICIAL_API_SOURCE_PACKET_RESPONSE_BYTES } from "./garden/ingestion/official-api/source-packet-receive.js";

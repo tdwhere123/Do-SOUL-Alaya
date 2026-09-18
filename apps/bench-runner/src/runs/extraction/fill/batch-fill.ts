@@ -1,3 +1,7 @@
+import { retainBatchAuthority } from "./batch/retained-authority.js";
+import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
+import { SourcePacketAdmissionError, writeDeterministicSourcePacketArtifact, importSourcePacketArtifact } from "../cache/source-packet-artifact.js";
+import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
 import { assertSampleExecutionOptions, assertSampleKeys } from "../authority/sample-scope.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
@@ -5,7 +9,6 @@ import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 import {
   createCachingSignalExtractor,
   importExtractionResponse,
-  inspectCachedExtraction,
   ExtractionResponseAdmissionError
 } from "../../compile-seed/compile-seed-cache.js";
 import type { ExtractionFillOptions, ExtractionFillResult } from "../extraction-fill.js";
@@ -74,6 +77,7 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
   const workset = prepareBatchExtractionWorkset({ prepared: input.prepared, cacheRoot: input.cacheRoot,
     ...(selected === undefined ? {} : { executionCacheKeys: selected }) });
   const plan = bindBatchPlan(input, workset, route.model, profile);
+  if (input.prepared.config.sourceInterpretationProfile !== undefined) retainBatchAuthority(input.writeLease, plan.identity, authority.receipt);
   for (const line of plan.lines) {
     assertAttemptInputWithinReceiptLimit(
       attemptInputByteUpperBound(JSON.stringify(encodeGeminiGenerateContent(line, {
@@ -113,7 +117,7 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
           fingerprint: batchDigest(JSON.stringify({ job: binding.jobId, key, outcome }))
         }], ...(usage === undefined ? {} : { usage }) }, binding.attemptOrdinal);
     },
-    importLine: (result) => importBatchLine(input, workset, result)
+    importLine: (result) => importBatchLine(input, workset, result, plan)
   });
   if (batch.operation === "import" || batch.operation === "resume") await importEmptyRequests(input, workset);
   input.writeLease.assertOwned();
@@ -226,31 +230,34 @@ function bindBatchPlan(input: BatchFillInput, workset: BatchExtractionWorkset,
 }
 
 async function importBatchLine(input: BatchFillInput, workset: BatchExtractionWorkset,
-  result: Parameters<GeminiBatchInvocation["importLine"]>[0]): ReturnType<GeminiBatchInvocation["importLine"]> {
+  result: Parameters<GeminiBatchInvocation["importLine"]>[0], plan: GeminiBatchPlan): ReturnType<GeminiBatchInvocation["importLine"]> {
   const authority = input.authority!;
   const sourceCorpus = workset.requests.find((request) => request.line.key === result.line.key)?.units[0]?.sourceCorpus;
   if (sourceCorpus === undefined) throw new Error("Batch import lost its bound source corpus");
   try {
-    importExtractionResponse({ config: input.prepared.config, cacheRoot: input.cacheRoot,
+    if (input.prepared.config.sourceInterpretationProfile !== undefined) {
+      importSourcePacketArtifact({ config: input.prepared.config, cacheRoot: input.cacheRoot,
+        writeLease: input.writeLease, sourceCorpus, plan, authority: authority.receipt, result });
+    } else importExtractionResponse({ config: input.prepared.config, cacheRoot: input.cacheRoot,
     writeLease: input.writeLease, systemPrompt: result.line.systemPrompt,
     userPrompt: result.line.userPrompt, expectedCacheKey: result.line.key, sourceCorpus,
     result: { rawJson: result.rawJson,
       ...(result.provenance.usage === undefined ? {} : { usage: result.provenance.usage }),
       responseMetadata: { finishReason: "STOP", completionContractVersion: 1, completionWitness: "finish_reason" } } });
   } catch (cause) {
-    if (cause instanceof ExtractionResponseAdmissionError) {
+    if (cause instanceof ExtractionResponseAdmissionError || cause instanceof SourcePacketAdmissionError) {
       authority.abandonPendingShard(result.line.key, result.provenance.attemptOrdinal);
       return {
         status: "quarantined" as const,
         reason: cause.message,
-        rejections: cause.rejections
+        ...(cause instanceof ExtractionResponseAdmissionError ? { rejections: cause.rejections } : {})
       };
     }
     throw cause;
   }
-  const inspected = inspectCachedExtraction(
+  const inspected = inspectCachedExtractionArtifact(
     input.cacheRoot, result.line.key,
-    input.prepared.config.model, input.prepared.config.requestProfile
+    input.prepared.config.model, input.prepared.config.requestProfile, input.prepared.config.sourceInterpretationProfile !== undefined
   );
   if (inspected.status !== "hit") {
     authority.abandonPendingShard(result.line.key, result.provenance.attemptOrdinal);
@@ -260,6 +267,14 @@ async function importBatchLine(input: BatchFillInput, workset: BatchExtractionWo
 }
 
 async function importEmptyRequests(input: BatchFillInput, workset: BatchExtractionWorkset): Promise<void> {
+  if (input.prepared.config.sourceInterpretationProfile !== undefined) {
+    for (const { line, sourceTurn } of workset.deterministicEmptyRequests) {
+      writeDeterministicSourcePacketArtifact({ config: input.prepared.config, cacheRoot: input.cacheRoot,
+        writeLease: input.writeLease, line, sourceCorpus: buildOfficialApiSourceCorpus(sourceTurn.turnContent, sourceTurn.turnMessages) });
+      input.authority!.commitDeterministicShard(line.key);
+    }
+    return;
+  }
   const extractor = createCachingSignalExtractor({ config: input.prepared.config,
     cacheRoot: input.cacheRoot, writeLease: input.writeLease,
     onDeterministicExtractionSucceeded: input.authority!.commitDeterministicShard,

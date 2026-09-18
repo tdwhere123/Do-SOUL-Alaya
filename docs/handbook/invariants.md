@@ -99,6 +99,13 @@ These rules always win over lower-level docs and task-card convenience.
     whether it becomes evidence-grounded assertion state, stays
     deferred, or enters quarantine; no model output can mutate truth or
     a projection directly.
+    An explicitly selected, source-bound interpretation packet may instead
+    supply premises to conditional computation under its own hypothesis.
+    This does not admit a RelationAssertion or certify source faithfulness:
+    every conclusion retains the source, complete interpretation, hypothesis,
+    and unreviewed status. It cannot use the ordinary world-claim result
+    projection, and source authorization, currentness, validity, and erasure
+    still apply. Temporal assertion governance is unchanged.
 13. Evidence and governance changes must be explicit, structured, and
     auditable, including path plasticity changes (reinforcement,
     weakening, redirection, retirement).

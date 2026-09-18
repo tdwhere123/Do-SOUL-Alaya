@@ -1,3 +1,8 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
+import { readBoundedCanonicalUtf8Artifact } from "../../runs/extraction/cache-audit/bounded-artifact-reader.js";
+import { writeFileSync } from "node:fs";
+import { preflightExtractionBatch } from "../../runs/extraction/fill/batch-preflight.js";
+import { readExtractionPacketProfile } from "./packet-profile.js";
 import process from "node:process";
 import { ExtractionFillTaskError } from "../../runs/extraction/fill/fill-pool.js";
 import type { runExtractionFill } from "../../runs/extraction/extraction-fill.js";
@@ -27,6 +32,24 @@ export async function runExtractionFillCommand(
   batch?: ExtractionBatchOptions
 ): Promise<number> {
   try {
+    if (opts.extractionPreflightKeys !== undefined && opts.extractionPreflightOut === undefined) {
+      throw new AlayaError("VALIDATION", "preflight keys require dry preflight output");
+    }
+    if (opts.extractionPreflightOut !== undefined) {
+      if (batch === undefined || opts.extractionCacheRoot === undefined || opts.extractionAuthority !== undefined ||
+          opts.extractionPredecessorAuthority !== undefined || opts.extractionTargetSelection !== undefined) {
+        throw new AlayaError("VALIDATION", "dry preflight requires Batch prepare settings and a cache root, without execution receipts");
+      }
+      const report = await preflightExtractionBatch({ variant: opts.variant, sourcePacking: opts.extractionSourcePacking,
+        sourceInterpretationProfile: readExtractionPacketProfile(opts.extractionPacketProfile),
+        cacheRoot: opts.extractionCacheRoot, dataDir: opts.dataDir, pinnedMetaRoot: opts.pinnedMetaRoot,
+        limit: opts.limit, offset: opts.offset, batch, ...lazy,
+        ...(opts.extractionPreflightKeys === undefined ? {} : { preflightKeys: JSON.parse(readBoundedCanonicalUtf8Artifact({
+          path: opts.extractionPreflightKeys, maxBytes: 4 * 1024 * 1024, label: "proposed preflight request keys" })) }) });
+      writeFileSync(opts.extractionPreflightOut, `${JSON.stringify(report, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+      process.stdout.write(`Provider-free Batch preflight: ${opts.extractionPreflightOut}\n`);
+      return 0;
+    }
     if (opts.extractionPredecessorAuthority !== undefined &&
         opts.extractionAuthority === undefined) {
       throw new Error(
@@ -44,6 +67,7 @@ export async function runExtractionFillCommand(
       (signal) => deps.runExtractionFill({
         variant: opts.variant,
         sourcePacking: opts.extractionSourcePacking,
+        sourceInterpretationProfile: readExtractionPacketProfile(opts.extractionPacketProfile),
         ...(batch === undefined ? {} : { batch }),
         ...(opts.limit === undefined ? {} : { limit: opts.limit }),
         ...(opts.offset === undefined ? {} : { offset: opts.offset }),

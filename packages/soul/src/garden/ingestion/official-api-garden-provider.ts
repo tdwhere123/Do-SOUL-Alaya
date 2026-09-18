@@ -1,3 +1,6 @@
+import { OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT, parseOfficialApiSourcePacketRequest,
+  type OfficialApiSourcePacketRequest } from "./official-api/source-packet-request.js";
+import { receiveOfficialApiSourcePacket, completeEmptyOfficialApiSourcePacket } from "./official-api/source-packet-receive.js";
 import { ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   AlayaError,
@@ -69,6 +72,8 @@ export interface GardenCompileContext {
 export interface GardenComputeProvider {
   readonly provider_kind: GardenProviderKind;
   compile(turnContent: string, context: GardenCompileContext): Promise<readonly CandidateMemorySignal[]>;
+  extractSourcePacket?(request: OfficialApiSourcePacketRequest, input: Readonly<{ sourceCorpus: string; artifactKey: string }>):
+    Promise<ReturnType<typeof receiveOfficialApiSourcePacket>>;
   extractOpenSemanticFactors?(
     sourceKind: "evidence" | "query",
     sourceText: string
@@ -254,6 +259,26 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     // Incomplete reception retains the existing typed receipt and located proposals;
     // malformed or unknown reception must never become a successful empty result.
     return this.requestInterpretations(normalizedTurnContent, context);
+  }
+
+  /** Explicit packet capability; the legacy compile/signals path retains its recorded v1 meaning. */
+  public async extractSourcePacket(requestValue: OfficialApiSourcePacketRequest,
+    input: Readonly<{ sourceCorpus: string; artifactKey: string }>) {
+    const request = parseOfficialApiSourcePacketRequest(requestValue);
+    if (request.source_request.source_assertions.length === 0) return completeEmptyOfficialApiSourcePacket(request,
+      { ...input, producerId: `official-api:${this.model}` }).received;
+    if (this.extractor === null || (this.apiKey === null && !this.canUseCredentiallessCacheExtractor)) {
+      throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
+    }
+    const receive = (rawJson: string) => receiveOfficialApiSourcePacket(rawJson, request,
+      { ...input, producerId: `official-api:${this.model}` });
+    const response = await withWallClockTimeout((signal) => this.extractor!.extract({
+      systemPrompt: OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT, userPrompt: JSON.stringify(request),
+      timeoutMs: this.requestTimeoutMs, abortSignal: signal, sourceCorpus: input.sourceCorpus,
+      validateRawJson: (rawJson) => { receive(rawJson); },
+      responseSchemaRetryInstruction: "Return the exact source-interpretation-response-v2 envelope required by this request."
+    }), { budgetMs: this.wallClockBudgetMs });
+    return receive(response.rawJson);
   }
 
   public async extractOpenSemanticFactors(

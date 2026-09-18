@@ -1,4 +1,4 @@
-import { ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { AlayaError, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   mkdirSync,
   renameSync,
@@ -98,6 +98,8 @@ export type ExtractionCacheStorage = "git-tracked" | "archive";
  * writer does not have to commit to a denominator it cannot yet compute).
  */
 interface ExtractionCacheManifestBase extends ExtractionFillManifestContract {
+  /** Explicit typed packet generation; absent for historical signal caches. */
+  readonly source_interpretation_profile?: SourceInterpretationProfile;
   /** == every cache shard's `.model`; run-start asserts config.model equals this. */
   readonly extraction_model: string;
   /** Reproduces the provider; aligns with DEFAULT_GARDEN_PROVIDER_URL. */
@@ -177,7 +179,8 @@ export function extractionAdmissionGenerationSha256(manifest: ExtractionCacheMan
     manifest.provider_url, manifest.system_prompt_sha256, manifest.cache_key_algo,
     manifest.dataset, manifest.dataset_revision, manifest.window_offset, manifest.window_limit,
     manifest.expected_key_set_sha256, manifest.expansion_source_anchor ?? null,
-    manifest.expansion_lineage ?? null
+    manifest.expansion_lineage ?? null,
+    ...(manifest.source_interpretation_profile === undefined ? [] : [manifest.source_interpretation_profile])
   ])).digest("hex");
 }
 
@@ -268,7 +271,13 @@ function validateManifest(
   }
   const record = parsed as Record<string, unknown>;
   const schemaVersion = requireSchemaVersion(record, filePath);
+  if (record.source_interpretation_profile !== undefined && schemaVersion !== 4) {
+    throw new AlayaError("CONFLICT", "packet caches require the current manifest contract");
+  }
   const common: ExtractionCacheManifestBase = {
+    ...(record.source_interpretation_profile === undefined ? {} : {
+      source_interpretation_profile: SourceInterpretationProfileSchema.parse(record.source_interpretation_profile)
+    }),
     extraction_model: requireNonEmptyString(record.extraction_model, "extraction_model", filePath),
     provider_url: requireNonEmptyString(record.provider_url, "provider_url", filePath),
     system_prompt_sha256: requireNonEmptyString(

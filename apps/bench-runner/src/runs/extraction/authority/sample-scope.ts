@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 import { computeExtractionKeySetSha256 } from "../content-closure.js";
 import type { ExtractionAuthorityInspection } from "./inspection.js";
@@ -12,11 +13,20 @@ const SampleScopeSchema = z.object({
 
 export type ExtractionSampleScope = z.infer<typeof SampleScopeSchema>;
 
+/** A syntactic key proposal has no authority until a receipt binds its inspected scope. */
+export function parseExtractionSampleKeys(value: unknown): readonly string[] {
+  const keys = SampleKeysSchema.parse(value);
+  if (new Set(keys).size !== keys.length) {
+    throw new AlayaError("VALIDATION", "sample scope requires distinct canonical keys");
+  }
+  return Object.freeze([...keys].sort());
+}
+
 /** Proposed keys become authority only after the native full-window inspection. */
 export function createExtractionSampleScope(
   proposedKeys: unknown, inspection: ExtractionAuthorityInspection
 ): ExtractionSampleScope {
-  const keys = SampleKeysSchema.parse(proposedKeys);
+  const keys = parseExtractionSampleKeys(proposedKeys);
   const scope = Object.freeze({
     keys: Object.freeze([...keys].sort()),
     key_set_sha256: computeExtractionKeySetSha256(keys)

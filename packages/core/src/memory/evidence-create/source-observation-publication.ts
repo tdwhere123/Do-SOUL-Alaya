@@ -1,6 +1,5 @@
 import {
   BoundSourceInterpretationSchema,
-  canonicalJson,
   SourceInterpretationSignalSchema,
   type BoundSourceInterpretation,
   type EvidenceCapsule,
@@ -18,6 +17,7 @@ import {
   verifyAssertionAndScope
 } from "./source-observation-currentness.js";
 import {
+  assertPublicationBinding,
   bindInterpretation,
   findCompletePublication,
   persistObservation,
@@ -64,10 +64,8 @@ export function verifySourceObservationPublication(input: Readonly<{
   verifyAssertionAndScope(stored, signal.workspace_id, signal.scope_hint, located);
   const durable = durableInterpretation(stored.content_bytes, located);
   const identity = publicationIdentity(stored, durable, input.sha256);
-  const expected = bindInterpretation(durable, stored, identity.evidenceObjectId);
-  if (canonicalJson(bound) !== canonicalJson(expected)) {
-    throw new CoreError("VALIDATION", "stored source observation binding differs from its publication");
-  }
+  const expected = bindInterpretation(durable, stored);
+  assertPublicationBinding(bound, expected);
   return Object.freeze({ stored, identity });
 }
 
@@ -115,7 +113,10 @@ export function createSourceObservationPublication(input: Readonly<{
         identity
       );
       assertSourceCurrent();
-      if (existing !== null) return existing;
+      if (existing !== null) {
+        verifySourceObservationPublication({ stores: input.stores, signal, bound: existing.bound, sha256: input.sha256 });
+        return existing;
+      }
       if (!await publicationReservationExists(
         input.evidenceService,
         input.memoryService,
@@ -124,7 +125,7 @@ export function createSourceObservationPublication(input: Readonly<{
       )) {
         await admitLocatedSpans(input.sourceAdmission, stored, durable);
       }
-      const bound = bindInterpretation(durable, stored, identity.evidenceObjectId);
+      const bound = bindInterpretation(durable, stored);
       return await persistObservation(
         { ...input, assertSourceCurrent,
           temporalProjection: input.deriveTemporalProjection(bound.assertion_binding.text, stored.record.event_time)

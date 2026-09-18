@@ -22,6 +22,18 @@ export type BoundInterpretationHintPage = Readonly<{
 export class SqliteSourceHintReader {
   public constructor(private readonly db: SqliteConnection) {}
 
+  /** One active packet by identity; a refused body is distinct from absence. */
+  public readBoundInterpretation(workspaceId: string, objectId: string, byteLimit: number) {
+    const allowance = boundedBytes(byteLimit);
+    if (allowance < 16) return { gist: null, bytesRead: 0, nativeVisits: 0, status: "resource_limited" as const };
+    const row = this.db.prepare(`SELECT octet_length(gist) AS bytes,
+      CASE WHEN octet_length(gist) <= ? THEN gist ELSE NULL END AS gist
+      FROM evidence_capsules WHERE workspace_id=? AND object_id=? AND lifecycle_state='active' LIMIT 1`
+    ).get(allowance - 16, workspaceId, objectId) as { bytes: number; gist: string | null } | undefined;
+    return { gist: row?.gist ?? null, bytesRead: 16 + Buffer.byteLength(row?.gist ?? ""), nativeVisits: 1,
+      status: row === undefined ? "absent" as const : row.gist === null ? "resource_limited" as const : "complete" as const };
+  }
+
   public pageBoundInterpretations(input: Readonly<{
     workspaceId: string; limit: number; nativeLimit: number; afterCursor: string | null;
     matches?: (gist: string) => boolean; nativeByteLimit?: number;

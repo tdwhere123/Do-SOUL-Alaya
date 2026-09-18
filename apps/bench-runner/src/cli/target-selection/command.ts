@@ -1,3 +1,4 @@
+import { readExtractionPacketProfile } from "../extraction-fill/packet-profile.js";
 import process from "node:process";
 import { isAbsolute, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -181,6 +182,7 @@ async function inspectSelection(
   const inspection = await (deps.inspect ?? inspectExtractionAuthority)({
     variant: flags.variant,
     sourcePacking: flags.extractionSourcePacking,
+    sourceInterpretationProfile: readExtractionPacketProfile(flags.extractionPacketProfile),
     ...(flags.limit === undefined ? {} : { limit: flags.limit }),
     ...(flags.offset === undefined ? {} : { offset: flags.offset }),
     cacheRoot,

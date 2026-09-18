@@ -1,4 +1,4 @@
-import { ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, parseDefaultOnFlag, parseEnvBoolean, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, parseDefaultOnFlag, parseEnvBoolean, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSecretRef } from "@do-soul/alaya";
@@ -112,8 +112,14 @@ export function toSeedExtractionPathKpi(
 export function resolveCompileSeedExtractionConfig(
   env: NodeJS.ProcessEnv = process.env,
   manifest?: ExtractionCacheManifest | undefined,
-  sourcePackingOverride?: ExtractionSourcePacking
+  sourcePackingOverride?: ExtractionSourcePacking,
+  sourceInterpretationProfile?: SourceInterpretationProfile
 ): CompileSeedExtractionConfig {
+  const profile = sourceInterpretationProfile === undefined ? undefined : SourceInterpretationProfileSchema.parse(sourceInterpretationProfile);
+  if (manifest !== undefined && canonicalJson(manifest.source_interpretation_profile ?? null) !== canonicalJson(profile ?? null)) {
+    throw new AlayaError("CONFLICT", "source interpretation profile differs from cache generation; explicit matching opt-in is required");
+  }
+  const packet = profile === undefined ? {} : { sourceInterpretationProfile: profile };
   const providerUrlValue = readNonEmpty(env[GARDEN_PROVIDER_URL_ENV]) ?? manifest?.provider_url;
   if (providerUrlValue === undefined) {
     throw new Error(
@@ -139,15 +145,15 @@ export function resolveCompileSeedExtractionConfig(
   };
   const secretRef = readNonEmpty(env[GARDEN_SECRET_REF_ENV]);
   if (secretRef === undefined) {
-    return { providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, apiKey: null };
+    return { providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, ...packet, apiKey: null };
   }
   const resolved = resolveSecretRef(secretRef);
   if ("value" in resolved) {
     return {
-      providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, apiKey: resolved.value
+      providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, ...packet, apiKey: resolved.value
     };
   }
-  return { providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, apiKey: null };
+  return { providerUrl, model, modelFamily, requestProfile, sourcePacking, ...transport, ...packet, apiKey: null };
 }
 
 export function resolveExtractionSourcePacking(

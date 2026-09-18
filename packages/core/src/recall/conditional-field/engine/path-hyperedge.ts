@@ -4,9 +4,7 @@ import {
   HARD_IDENTITY_TRANSFER_VERSION,
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
-  memoryProductStateKey,
-  productSubjectId,
-  retargetMemoryProduct,
+  productEndpointId,
   type Derivation,
   type ProductStateKey,
   type QueryProgram,
@@ -34,6 +32,7 @@ import {
 } from "./program-automaton.js";
 import {
   inactiveResolution,
+  retargetRelationProduct,
   observedTargetRevision,
   relationMatches,
   admitRelationRow,
@@ -183,7 +182,7 @@ function* assignmentsForPremise(
   if (premise.kind === "relation") return yield* relationAssignments(premise, from, rows, input);
   if (premise.kind === "empty") return [];
   if (premise.kind === "epsilon") {
-    return [terminalAssignment(from, productSubjectId(from), MILLIGRADE_TOP, openValidity(), "epsilon")];
+    return [terminalAssignment(from, productEndpointId(from), MILLIGRADE_TOP, openValidity(from), "epsilon")];
   }
   if (premise.kind === "hyperedge") {
     return yield* nestedHyperedgeAssignments(premise, from, rows, input);
@@ -226,7 +225,7 @@ function* nestedHyperedgeAssignments(
     if (effect.hyperedge === undefined || effect.derivation === undefined) { yield step; continue; }
     const assigned = terminalAssignment(
       from,
-      productSubjectId(effect.hyperedge.to),
+      productEndpointId(effect.hyperedge.to),
       effect.hyperedge.strength_milligrades,
       effect.hyperedge.validity,
       effect.hyperedge.relation_kind,
@@ -266,8 +265,8 @@ function* walkCompiledPremise(
     }
     for (const programState of nextStates) {
       yield { kind: "work", retained_bytes: 1024 };
-      const to = hyperedgeMemoryTo(node, { object_id: assignment.target_object_id, source_revision: revision,
-        program_state: programState, binding_context: assignment.binding_context });
+      const to = hyperedgeTarget(node, { object_id: assignment.target_object_id, source_revision: revision,
+        program_state: programState, binding_context: assignment.binding_context }, input.sourceFacts);
       const edge: Transition = { schema_version: 1, from: node, to, applicable: true,
         relation_kind: assignment.relation_kind, instance_id: assignment.instance_id ?? assignment.derivation.derivation_id,
         ...(assignment.revision_id === undefined ? {} : { revision_id: assignment.revision_id }),
@@ -304,7 +303,7 @@ function* walkCompiledPremise(
         if (step.kind === "work") { yield step; continue; }
         const effect = step.effect;
         if (effect.hyperedge === undefined || effect.derivation === undefined) { yield step; continue; }
-        const assignment = terminalAssignment(node, productSubjectId(effect.hyperedge.to), effect.hyperedge.strength_milligrades,
+        const assignment = terminalAssignment(node, productEndpointId(effect.hyperedge.to), effect.hyperedge.strength_milligrades,
           effect.hyperedge.validity, effect.hyperedge.relation_kind, effect.hyperedge.to.binding_context);
         yield* retain(node, { ...assignment, derivation: effect.derivation, derivations: effect.derivations ?? [effect.derivation] }, hyperedge.to);
         yield { kind: "work", retained_bytes: Buffer.byteLength(JSON.stringify(assignment), "utf8") };
@@ -339,13 +338,15 @@ function* walkCompiledPremise(
     const root = rootId === undefined ? undefined : grounded.progress.forest.get(rootId);
     const grade = grounded.progress.grades.get(key);
     if (root === undefined || grade === undefined) continue;
-    assignments.push({ ...terminalAssignment(from, productSubjectId(node), grade, openValidity(), "path", node.binding_context),
+    assignments.push({ ...terminalAssignment(from, productEndpointId(node), grade, openValidity(from), "path", node.binding_context),
       derivation: root, derivations: forest });
   }
   return assignments;
 }
 
-function openValidity(): Transition["validity"] {
+function openValidity(from: ProductStateKey): Transition["validity"] {
+  if (from.interpretation_node !== undefined) return { kind: "interpretation",
+    packet_id: from.interpretation_node.packet_id, hypothesis_id: from.hypothesis_id };
   return { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
 }
 
@@ -356,7 +357,7 @@ function terminalAssignment(
   validity: Transition["validity"],
   relationKind: string,
   binding = from.binding_context,
-  leafId = `${productSubjectId(from)}:${target}:${relationKind}`
+  leafId = `${productEndpointId(from)}:${target}:${relationKind}`
 ): PremiseAssignment {
   const derivation = leafDerivation({
     derivation_id: `leaf:${leafId}`,
@@ -396,7 +397,7 @@ function* assignmentFromRow(
     readonly observedStates?: Iterable<ProductStateKey>;
   }>
 ): PathComputation<PremiseAssignment | undefined> {
-  if (row.sourceObjectId !== productSubjectId(from)) return undefined;
+  if (row.sourceObjectId !== productEndpointId(from)) return undefined;
   if (!relationMatches(relation.relation_kind, row.predicate)) return undefined;
   if (row.validity === undefined || inactiveResolution(row.resolutionKind)) return undefined;
   const admitted = yield* admitRelationRow(relation, from, row, {
@@ -490,28 +491,12 @@ function completionReservation(premises: readonly PremiseAssignment[]): number {
   return 2048 + premises.reduce((sum, premise) => sum + 128 + premise.derivations.length * 80, 0);
 }
 
-function hyperedgeMemoryTo(
+function hyperedgeTarget(
   from: ProductStateKey,
-  patch: Readonly<{
-    readonly object_id: string;
-    readonly source_revision: string;
-    readonly program_state: string;
-    readonly binding_context: string;
-  }>
+  patch: Readonly<{ object_id: string; source_revision: string; program_state: string; binding_context: string }>,
+  facts?: ReadonlyMap<string, BoundSourceFacts>
 ): ProductStateKey {
-  if (from.target.kind === "memory_entry") {
-    return retargetMemoryProduct(from, patch);
-  }
-  // retargetMemoryProduct is memory-only; source-rooted completions mint B from observed revision.
-  return memoryProductStateKey({
-    workspace_id: from.target.workspace_id,
-    object_id: patch.object_id,
-    source_revision: patch.source_revision,
-    program_state: patch.program_state,
-    hypothesis_id: from.hypothesis_id,
-    binding_context: patch.binding_context,
-    time_state: from.time_state
-  });
+  return retargetRelationProduct(from, patch.object_id, patch.source_revision, patch, facts);
 }
 
 function* completionEffects(
@@ -538,7 +523,7 @@ function* completionEffects(
   );
   if (targetRevision === undefined) {
     return [{
-      observation_id: `revision:${productSubjectId(from)}:${from.program_state}:${spec.target}`,
+      observation_id: `revision:${productEndpointId(from)}:${from.program_state}:${spec.target}`,
       unresolved_guard: true,
       missing_target_revision: true
     }];
@@ -553,14 +538,14 @@ function* completionEffects(
   const derivations: Derivation[] = [];
   for (const row of forest.values()) { yield { kind: "work", retained_bytes: 8 }; derivations.push(row); }
   return toProgramStates.map((programState) => {
-    const to: ProductStateKey = hyperedgeMemoryTo(from, {
+    const to: ProductStateKey = hyperedgeTarget(from, {
       object_id: spec.target,
       program_state: programState,
       binding_context: spec.binding,
       source_revision: targetRevision
-    });
+    }, input.sourceFacts);
     return {
-      observation_id: `hyperedge:${productSubjectId(from)}:${from.hypothesis_id}:${from.program_state}:${programState}:${spec.join}:${spec.relation_kind}:${spec.target}`,
+      observation_id: `hyperedge:${productEndpointId(from)}:${from.hypothesis_id}:${from.program_state}:${programState}:${spec.join}:${spec.relation_kind}:${spec.target}`,
       hyperedge_premises: premises.map((premise) => ({
         hypothesis_id: premise.hypothesis_id,
         binding_context: premise.binding_context,
@@ -629,7 +614,7 @@ function orWitnesses(
   return premises.map((premise, index) => ({
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     witness_id: `or-${String(index)}`,
-    premises: [productSubjectId(completion.from), productSubjectId(completion.to)],
+    premises: [productEndpointId(completion.from), productEndpointId(completion.to)],
     cost: 1,
     complete: premise.present
   }));

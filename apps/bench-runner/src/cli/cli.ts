@@ -48,7 +48,7 @@ Usage:
   alaya-bench-runner provider-preflight --mode probe|probe-sse --provider-route <url> [--model <id>]
   alaya-bench-runner provider-preflight --mode retire-obsolete --extraction-cache-root <dir> --expected-path <dir> --profile <profile> [--confirm-retire]
     Replay requires the canonical sealed request manifest and a credentialless environment. Probe requires credentials and a catalog binding. Retire-obsolete is a path/lock preflight and does not delete.
-  alaya-bench-runner extraction-fill [ordinary fill options] --batch-operation prepare|submit|status|resume|import|cancel --batch-limits <json> [--batch-window <name>] [--batch-request-limit N] [--batch-local-job <id> --batch-remote-job <batches/id>]
+  alaya-bench-runner extraction-fill [ordinary fill options] [--extraction-packet-profile <profile.json>] [--extraction-preflight-out <new-report.json> --extraction-preflight-keys <keys.json>] --batch-operation prepare|submit|status|resume|import|cancel --batch-limits <json> [--batch-window <name>] [--batch-request-limit N] [--batch-local-job <id> --batch-remote-job <batches/id>]
     Gemini uses --extraction-output-token-field maxOutputTokens when creating its extraction authority. Batch prices, input/output caps and root spending remain receipt-bound. A named window selects missing work; resume never submits new jobs.
   alaya-bench-runner extraction-fill --batch-campaign <manifest.json>
     Runs durable bounded windows until shared scope coverage is complete or a failure needs inspection. Restart uses the same current window. Run as an ordinary foreground process; its state reports the next check time.

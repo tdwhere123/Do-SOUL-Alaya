@@ -1,9 +1,13 @@
 import {
+  AlayaError,
   HARD_IDENTITY_TRANSFER_ID,
   HARD_IDENTITY_TRANSFER_VERSION,
   MILLIGRADE_TOP,
+  retargetInterpretationProduct,
+  memoryProductStateKey,
   type AdmittedTransfer,
   type ProductStateKey,
+  type InterpretationNodeCoordinate,
   type Transition
 } from "@do-soul/alaya-protocol";
 import type { QueryRelation } from "../query/compile-query.js";
@@ -31,6 +35,8 @@ export type AdjacencyRow = Readonly<{
   readonly targetObjectId: string;
   readonly predicate: string;
   readonly validity?: Transition["validity"];
+  readonly interpretation_source?: InterpretationNodeCoordinate;
+  readonly interpretation_target?: InterpretationNodeCoordinate;
   readonly resolutionKind?: string | null;
 }>;
 
@@ -149,6 +155,19 @@ export function observedTargetRevision(
   return undefined;
 }
 
+/** Both unary and hyperedge transfers use the same computational endpoint owner. */
+export function retargetRelationProduct(from: ProductStateKey, targetId: string, sourceRevision: string,
+  patch: Readonly<{ program_state: string; binding_context: string }>,
+  facts?: ReadonlyMap<string, BoundSourceFacts>): ProductStateKey {
+  if (from.interpretation_node !== undefined) {
+    const node = facts?.get(targetId)?.interpretation_node;
+    if (node === undefined) throw new AlayaError("CONFLICT", "interpretation target has no admitted node identity");
+    return retargetInterpretationProduct(from, node, { program_state: patch.program_state, binding_context: patch.binding_context });
+  }
+  return memoryProductStateKey({ workspace_id: from.target.workspace_id, object_id: targetId,
+    source_revision: sourceRevision, hypothesis_id: from.hypothesis_id, time_state: from.time_state, ...patch });
+}
+
 /** Both unary transfers and hyperedge premises preserve unresolved admission. */
 export function* admitRelationRow(
   relation: QueryRelation,
@@ -167,6 +186,12 @@ export function* admitRelationRow(
   revisionId: string;
   strength: AdmittedRelationStrength;
 }> | undefined> {
+  if (row.validity?.kind === "interpretation" && (from.interpretation_node === undefined ||
+      from.hypothesis_id !== row.validity.hypothesis_id ||
+      from.interpretation_node.packet_id !== row.validity.packet_id ||
+      row.interpretation_source?.hypothesis_id !== from.hypothesis_id ||
+      row.interpretation_target?.hypothesis_id !== from.hypothesis_id)) return;
+  if (from.interpretation_node !== undefined && row.validity?.kind !== "interpretation") return;
   if (overlayBlocksTransfer(input.overlay, row.predicate, relation.relation_kind)) return;
   const unified = unifyAdvance(from, relation, row, input.bindingContexts);
   if (unified === undefined) return;

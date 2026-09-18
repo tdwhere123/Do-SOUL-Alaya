@@ -75,6 +75,7 @@ export function productStateFromObservation(
       source_version: defaults.source_revision ?? target.source_version,
       content_digest: target.content_digest,
       evidence_object_id: target.evidence_object_id,
+      ...(observation.interpretation_node === undefined ? {} : { interpretation_node: observation.interpretation_node }),
       program_state: programState,
       hypothesis_id: hypothesisId,
       binding_context: bindingContext,

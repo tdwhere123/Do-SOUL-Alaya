@@ -58,6 +58,7 @@ export function productComponentState(entry: IndexEntry): ProductComponentState 
   return {
     membership_revision: digestOf({
       target: root,
+      ...(entry.interpretation_node === undefined ? {} : { interpretation_node: entry.interpretation_node }),
       hypothesis_id: entry.hypothesis_id,
       output_binding: entry.output_binding,
       program_state: entry.program_state,
@@ -68,6 +69,7 @@ export function productComponentState(entry: IndexEntry): ProductComponentState 
       association_milligrades: entry.association_milligrades,
       role: entry.role,
       target: root,
+      ...(entry.interpretation_node === undefined ? {} : { interpretation_node: entry.interpretation_node }),
       ...(entry.guaranteed_milligrades === undefined
         ? {}
         : { guaranteed_milligrades: entry.guaranteed_milligrades })

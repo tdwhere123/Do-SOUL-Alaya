@@ -1,5 +1,5 @@
 import { Worker } from "node:worker_threads";
-import { indexEntryCacheKey, type PathAnchorRef } from "@do-soul/alaya-protocol";
+import { indexEntryCacheKey, type SourceInterpretationReasoningResult, type PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
   ConditionalFieldRecallPort,
   ConditionalFieldRecallPortResult,
@@ -20,7 +20,7 @@ import {
   type RecallReadWorkerRequest,
   type RecallReadWorkerResponse
 } from "../recall-read-worker/protocol.js";
-import { parseWorkerOperationResult } from "../recall-read-worker/operation-schemas.js";
+import { type WorkerOperationPayload, parseWorkerOperationResult } from "../recall-read-worker/operation-schemas.js";
 import {
   isPathAffinityOperation,
   isRecallReadWorkerResponse,
@@ -46,6 +46,7 @@ export interface RecallReadWorkerClient {
   readonly activeConstraintsPort: RecallServiceActiveConstraintsPort;
   readonly readSnapshot: RecallReadSnapshotPort;
   readonly conditionalFieldPort: ConditionalFieldRecallPort;
+  readonly sourceInterpretationPort?: Readonly<{ reason: (input: WorkerOperationPayload<"conditionalField.interpretation">) => Promise<SourceInterpretationReasoningResult> }>;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -273,6 +274,11 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     });
     this.readSnapshot = this.snapshotSession.port;
   }
+
+  public readonly sourceInterpretationPort = {
+    reason: async (input: WorkerOperationPayload<"conditionalField.interpretation">): Promise<SourceInterpretationReasoningResult> =>
+      await this.request<SourceInterpretationReasoningResult>("conditionalField.interpretation", input)
+  };
 
   public async ready(): Promise<void> {
     if (this.readyPromise === null) {

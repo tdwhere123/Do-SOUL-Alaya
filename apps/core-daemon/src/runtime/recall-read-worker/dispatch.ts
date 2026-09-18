@@ -15,6 +15,7 @@ import { runEvidenceOperation } from "./evidence-operations.js";
 import { runSynthesisOperation } from "./synthesis-operations.js";
 import { runPathOperation } from "./path-operations.js";
 import { runConditionalFieldWorkerRecall } from "./observer-operations.js";
+import { runSourceInterpretationReasoning } from "./source-interpretation-reasoning.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { settleWorkerDelivery } from "./prepared-delivery.js";
 
@@ -24,6 +25,7 @@ type DispatchParsedOperation = Exclude<
   RecallReadWorkerRequest["operation"],
   | "constraints.readBounded"
   | "conditionalField.recall"
+  | "conditionalField.interpretation"
   | "conditionalField.acknowledge"
   | "conditionalField.discard"
 >;
@@ -48,6 +50,10 @@ export async function runOperation(
     return parseWorkerOperationResult(request.operation, reader(parsed));
   }
   const parsedPayload = parseWorkerOperationPayload(request.operation, request.payload);
+  if (request.operation === "conditionalField.interpretation") {
+    return parseWorkerOperationResult(request.operation, runSourceInterpretationReasoning(runtime,
+      parsedPayload as WorkerOperationPayload<"conditionalField.interpretation">));
+  }
   if (request.operation === "conditionalField.recall") {
     return parseWorkerOperationResult(
       request.operation,

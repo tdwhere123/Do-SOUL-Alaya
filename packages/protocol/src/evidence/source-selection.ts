@@ -23,3 +23,14 @@ export function findSourceTextOccurrence(
   }
   return null;
 }
+
+/** Strict proposal selection: a repeated quotation requires an explicit occurrence. */
+export function locateSourceTextSelection(source: string, selection: Readonly<{ text: string; occurrence?: number }>):
+  { readonly span: readonly [number, number] } | { readonly reason: "absent" | "ambiguous" | "out_of_range" } {
+  if (findSourceTextOccurrence(source, selection.text, 0) === null) return { reason: "absent" };
+  if (selection.occurrence === undefined && findSourceTextOccurrence(source, selection.text, 1) !== null) {
+    return { reason: "ambiguous" };
+  }
+  const span = findSourceTextOccurrence(source, selection.text, selection.occurrence ?? 0);
+  return span === null ? { reason: "out_of_range" } : { span };
+}

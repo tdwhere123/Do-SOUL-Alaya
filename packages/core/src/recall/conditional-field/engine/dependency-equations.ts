@@ -1,5 +1,5 @@
 import {
-  productSubjectId,
+  productEndpointId,
   type Derivation,
   type SeedActivation,
   type SupportRecord,
@@ -186,15 +186,15 @@ export function affectedSubjectsOf(
   const subjects = new Set<string>();
   for (const seed of seeds) {
     if (affectedProductIds.has(productStateNodeId(seed.state))) {
-      subjects.add(productSubjectId(seed.state));
+      subjects.add(productEndpointId(seed.state));
     }
   }
   for (const transition of transitions) {
     if (affectedProductIds.has(productStateNodeId(transition.from))) {
-      subjects.add(productSubjectId(transition.from));
+      subjects.add(productEndpointId(transition.from));
     }
     if (affectedProductIds.has(productStateNodeId(transition.to))) {
-      subjects.add(productSubjectId(transition.to));
+      subjects.add(productEndpointId(transition.to));
     }
   }
   return subjects;

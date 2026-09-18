@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { SourceInterpretationResponseSchema } from "@do-soul/alaya-protocol";
 import { parseOfficialApiExtractionRequest } from "./extraction-request.js";
+import { parseOfficialApiSourcePacketRequest } from "./source-packet-request.js";
+import { officialApiSourcePacketResponseSchema } from "./source-packet-schema.js";
 
 // This constrains generation, not admission: historical raw still uses its
 // recorded signals envelope and parser. Live ordinary extraction asks for
@@ -29,6 +31,8 @@ function isOfficialApiExtractionRequestPrompt(userPrompt: string): boolean {
 
 /** Stable cache-key bytes; cloning the live schema object per shard is not required. */
 export function officialApiExtractionResponseSchemaPreimage(userPrompt: string): string {
+  const packetSchema = sourcePacketSchema(userPrompt);
+  if (packetSchema !== undefined) return JSON.stringify(packetSchema);
   return isOfficialApiExtractionRequestPrompt(userPrompt)
     ? OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE
     : "null";
@@ -36,6 +40,13 @@ export function officialApiExtractionResponseSchemaPreimage(userPrompt: string):
 
 /** Query/protocol probes have different envelopes and must not inherit this schema. */
 export function officialApiExtractionResponseSchema(userPrompt: string): object | undefined {
+  const packetSchema = sourcePacketSchema(userPrompt);
+  if (packetSchema !== undefined) return packetSchema;
   if (!isOfficialApiExtractionRequestPrompt(userPrompt)) return undefined;
   return structuredClone(responseSchema);
+}
+
+function sourcePacketSchema(userPrompt: string): object | undefined {
+  try { return officialApiSourcePacketResponseSchema(parseOfficialApiSourcePacketRequest(JSON.parse(userPrompt))); }
+  catch { return undefined; }
 }

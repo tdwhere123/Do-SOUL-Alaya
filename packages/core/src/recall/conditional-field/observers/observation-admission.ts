@@ -109,6 +109,11 @@ export function relationRowEligible(
     if (order === undefined || order <= 0) return false;
   }
   if (row.validity === undefined) return false;
+  if (row.validity.kind === "interpretation") {
+    return input.query.hypotheses.length === 1 && input.query.hypotheses[0]?.hypothesis_id === row.validity.hypothesis_id
+      && row.interpretation_source?.packet_id === row.validity.packet_id
+      && row.interpretation_target?.packet_id === row.validity.packet_id;
+  }
   if (asOf === undefined) return true;
   return isRelationValidityActiveAt(row.validity, asOf,
     new Set(input.permitted_timeless_policy_ids ?? input.readers.permittedTimelessPolicyIds?.() ?? []));
@@ -164,7 +169,8 @@ export function buildTypedObservation(
     ...(modelId === undefined ? {} : { model_id: modelId }),
     ...(binding === undefined ? {} : { binding_context: binding }),
     ...(stamp === undefined ? {} : { observed_at: stamp }),
-    ...(args.target === undefined ? {} : { target: args.target })
+    ...((args.target ?? args.sourceRow?.target) === undefined ? {} : { target: args.target ?? args.sourceRow?.target }),
+    ...(args.sourceRow?.interpretation_node === undefined ? {} : { interpretation_node: args.sourceRow.interpretation_node })
   };
 }
 

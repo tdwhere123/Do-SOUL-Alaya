@@ -393,6 +393,10 @@ describe("admitted public consumption entry", () => {
     expect(matrix.file_failed).toBe(false);
     expect(matrix.failed).toEqual([]);
     expect(matrix.completed).toHaveLength(matrix.selected.length);
+    expect(matrix.no_hint_controls).toHaveLength(24);
+    expect(matrix.traces).toHaveLength(72);
+    expect(matrix.no_hint_traces).toHaveLength(24);
+    expect(matrix.utility.no_hint_controls_complete).toBe(true);
     expect(matrix.utility.content_scope.every((group) => group.complete)).toBe(true);
     expect(aggregateAdmittedUtility(matrix.rows.slice(1), matrix.selected.length, false).accepted).toBe(false);
     expect(aggregateAdmittedUtility(matrix.rows, matrix.selected.length, true).accepted).toBe(false);
@@ -403,6 +407,38 @@ describe("admitted public consumption entry", () => {
       ...matrix.rows.slice(1)], matrix.selected.length, false).accepted).toBe(false);
     expect(matrix.rows.filter((row) => row.view !== "memory_only").every((row) =>
       typeof row.score?.primary_native_visits === "number")).toBe(true);
+    const witnessed = matrix.rows.find((row) => row.proposal_exposure?.status === "observed");
+    expect(witnessed).toBeDefined();
+    // Deliberate counters isolate the evaluator rule; these are not measured performance claims.
+    const samePair = (row: typeof matrix.rows[number]) => row.cell === witnessed!.cell &&
+      row.group === witnessed!.group && row.view === witnessed!.view && row.enumeration === witnessed!.enumeration;
+    const measuredRows = matrix.rows.map((row) => samePair(row)
+      ? { ...row, score: { ...row.score!, primary_native_visits: row.lookup === "proposal" ? 1 : 2 } } : row);
+    const controls = matrix.no_hint_controls.map((row) => samePair(row)
+      ? { ...row, score: { ...row.score!, primary_native_visits: 3 } } : row);
+    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false, controls).accepted).toBe(true);
+    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false).accepted).toBe(false);
+    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false, controls.slice(1)).accepted).toBe(false);
+    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false,
+      [controls[1]!, ...controls.slice(1)]).accepted).toBe(false);
+    const foreignControl = controls.map((row, index) => index === 0 ? { ...row, source_id: "foreign" } : row);
+    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false, foreignControl).no_hint_controls_complete).toBe(false);
+    const incompleteControl = controls.map((row, index) => index === 0
+      ? { ...row, score: { ...row.score!, first_complete_step: null } } : row);
+    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false, incompleteControl).accepted).toBe(false);
+    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, true, controls).causal_benefit).toBe("not_established");
+    const foreignText = measuredRows.map((row) => row.lookup === "source_text" && samePair(row)
+      ? { ...row, source_id: "foreign" } : row);
+    expect(aggregateAdmittedUtility(foreignText, matrix.selected.length, false, controls).accepted).toBe(false);
+    const noGain = controls.map((row) => ({ ...row, score: { ...row.score!, primary_native_visits: 0 } }));
+    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false, noGain).accepted).toBe(false);
+    const unobserved = measuredRows.map((row) => ({ ...row, proposal_exposure: undefined }));
+    expect(aggregateAdmittedUtility(unobserved, matrix.selected.length, false, controls).accepted).toBe(false);
+    const splitGains = measuredRows.map((row) => row.lookup === "source_text" && samePair(row)
+      ? { ...row, score: { ...row.score!, primary_native_visits: 0 } } : row);
+    const onlyOneNetGain = controls.map((row) => samePair(row) ? row
+      : { ...row, score: { ...row.score!, primary_native_visits: 0 } });
+    expect(aggregateAdmittedUtility(splitGains, matrix.selected.length, false, onlyOneNetGain).accepted).toBe(false);
     expect(fetches).toBe(0);
   }, 120_000);
 });

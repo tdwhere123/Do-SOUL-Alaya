@@ -1,6 +1,6 @@
 import type { GeminiBatchInvocation, GeminiBatchJob, GeminiBatchState } from "./contract.js";
 import { record, decodeGeminiGenerateContent, geminiUsage } from "./native-codec.js";
-import { batchDigest } from "./plan.js";
+import { batchLineResult } from "./line-result.js";
 import { publishRetainedBatchOutput, readRetainedBatchOutput, saveBatchState } from "./store.js";
 import { deriveBatchUsage, parseOutputInventory } from "./output-inventory.js";
 
@@ -87,30 +87,11 @@ async function reportTransportOutcomes(input: GeminiBatchInvocation, job: Gemini
 async function importSuccessfulLine(
   input: GeminiBatchInvocation, job: GeminiBatchJob, key: string, response: unknown
 ): Promise<void> {
-  let decoded: ReturnType<typeof decodeGeminiGenerateContent>;
-  try {
-    decoded = decodeGeminiGenerateContent(response);
-    if (decoded.usage !== undefined && decoded.usage.outputTokens > input.plan.limits.maxOutputTokens) {
-      throw new Error("provider output exceeds authorized token cap");
-    }
-  } catch (cause) {
-    job.outcomes[key] = { status: "quarantined", reason: message(cause) };
-    return;
-  }
-  const line = input.plan.lines.find((candidate) => candidate.key === key);
-  if (line === undefined) throw new Error("Batch admission lost selected line");
-  // Callback failures remain retryable: a cache commit may have preceded the interruption.
-  // The shared owner distinguishes semantic rejection from an interrupted publication.
-  const admission = await input.importLine({
-    line, rawJson: decoded.rawJson,
-    provenance: {
-      transport: "gemini-batch", job: job.remoteJob!, inputFile: job.inputFile!,
-      inputSha256: job.inputSha256, outputSha256: job.rawOutputSha256!,
-      responseSha256: batchDigest(JSON.stringify(response)), finishReason: "STOP",
-      ...(job.attemptOrdinals?.[key] === undefined ? {} : { attemptOrdinal: job.attemptOrdinals[key] }),
-      ...(decoded.usage === undefined ? {} : { usage: decoded.usage })
-    }
-  });
+  let result: Parameters<GeminiBatchInvocation["importLine"]>[0];
+  try { result = batchLineResult(input.plan, job, key, response); }
+  catch (cause) { job.outcomes[key] = { status: "quarantined", reason: message(cause) }; return; }
+  // Callback failures remain retryable after a cache commit and before ledger publication.
+  const admission = await input.importLine(result);
   input.lease.assertOwned();
   input.signal?.throwIfAborted();
   job.outcomes[key] = admission ?? { status: "admitted" };

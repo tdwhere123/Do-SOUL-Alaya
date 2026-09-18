@@ -311,6 +311,7 @@ export function indexEntryForValue(
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     target: value.state.target,
+    ...(value.state.interpretation_node === undefined ? {} : { interpretation_node: value.state.interpretation_node }),
     ...(value.state.target.kind === "memory_entry" ? { object_id: value.state.target.object_id } : {}),
     hypothesis_id: value.state.hypothesis_id,
     output_binding: value.state.binding_context,

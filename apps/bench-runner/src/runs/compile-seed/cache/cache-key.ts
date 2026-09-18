@@ -1,10 +1,8 @@
-import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { extractionArtifactRequests } from "../../extraction/request-artifact.js";
+import type { SourceInterpretationProfile, ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import {
-  collectOfficialApiExtractionCoverage,
-  officialApiExtractionResponseSchema,
-  parseOfficialApiExtractionRequest,
-  stringifyOfficialApiExtractionRequest
+  officialApiExtractionResponseSchemaPreimage
 } from "@do-soul/alaya-soul";
 import { ExtractionCacheInvariantError } from
   "../../extraction/cache/cache-invariant-error.js";
@@ -18,8 +16,6 @@ export const EXTRACTION_CACHE_KEY_GOLDEN_VECTOR = Object.freeze({
   systemPrompt: "alaya-cache-key-golden-system-prompt",
   extractionRequest: '{"schema_version":2,"source_locator_contract_version":4,"batch_contract_version":1,"source_corpus_identity":"5cfbac30da538a52d242938adeb5c71ff1b3dc07bc4ce8330878da4318a01a2b","batch_index":0,"batch_count":1,"source_assertions":[{"assertion_id":1,"text":"User: I enjoy coffee."}]}'
 });
-
-const GENERATION_SCHEMA_CACHE_MATERIAL = generationSchemaJson();
 
 export function computeCacheKey(
   model: string,
@@ -42,34 +38,11 @@ export function computeOfficialApiRequestCacheKey(
   systemPrompt: string,
   extractionRequest: string
 ): string {
-  return hashCacheIdentity(
-    model,
-    requestProfile,
-    systemPrompt,
-    extractionRequest,
-    GENERATION_SCHEMA_CACHE_MATERIAL
-  );
+  return computeCacheKey(model, requestProfile, systemPrompt, extractionRequest);
 }
 
 function generationSchemaCacheMaterial(extractionRequest: string): string {
-  try {
-    parseOfficialApiExtractionRequest(JSON.parse(extractionRequest));
-  } catch {
-    return "null";
-  }
-  return GENERATION_SCHEMA_CACHE_MATERIAL;
-}
-
-function generationSchemaJson(): string {
-  const schema = officialApiExtractionResponseSchema(
-    EXTRACTION_CACHE_KEY_GOLDEN_VECTOR.extractionRequest
-  );
-  if (schema === undefined) {
-    throw new ExtractionCacheInvariantError(
-      "golden extraction request must bind the generation schema"
-    );
-  }
-  return JSON.stringify(schema);
+  return officialApiExtractionResponseSchemaPreimage(extractionRequest);
 }
 
 export function computeExtractionTurnCacheKey(
@@ -77,10 +50,11 @@ export function computeExtractionTurnCacheKey(
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
   turn: LongMemEvalExtractionTurn,
-  sourcePacking?: ExtractionSourcePacking
+  sourcePacking?: ExtractionSourcePacking,
+  sourceInterpretationProfile?: SourceInterpretationProfile
 ): string {
   return requireSingleCacheKey(computeExtractionTurnCacheKeys(
-    model, requestProfile, systemPrompt, turn, sourcePacking
+    model, requestProfile, systemPrompt, turn, sourcePacking, sourceInterpretationProfile
   ));
 }
 
@@ -89,9 +63,10 @@ export function computeExtractionTurnCacheKeys(
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
   turn: LongMemEvalExtractionTurn,
-  sourcePacking?: ExtractionSourcePacking
+  sourcePacking?: ExtractionSourcePacking,
+  sourceInterpretationProfile?: SourceInterpretationProfile
 ): readonly string[] {
-  return computeSourceTurnCacheKeys(model, requestProfile, systemPrompt, turn, sourcePacking);
+  return computeSourceTurnCacheKeys(model, requestProfile, systemPrompt, turn, sourcePacking, sourceInterpretationProfile);
 }
 
 export function computeSourceTurnCacheKey(
@@ -100,10 +75,11 @@ export function computeSourceTurnCacheKey(
   systemPrompt: string,
   input: Pick<LongMemEvalExtractionTurn, "turnContent"> &
     Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>,
-  sourcePacking?: ExtractionSourcePacking
+  sourcePacking?: ExtractionSourcePacking,
+  sourceInterpretationProfile?: SourceInterpretationProfile
 ): string {
   return requireSingleCacheKey(computeSourceTurnCacheKeys(
-    model, requestProfile, systemPrompt, input, sourcePacking
+    model, requestProfile, systemPrompt, input, sourcePacking, sourceInterpretationProfile
   ));
 }
 
@@ -113,17 +89,11 @@ export function computeSourceTurnCacheKeys(
   systemPrompt: string,
   input: Pick<LongMemEvalExtractionTurn, "turnContent"> &
     Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>,
-  sourcePacking?: ExtractionSourcePacking
+  sourcePacking?: ExtractionSourcePacking,
+  sourceInterpretationProfile?: SourceInterpretationProfile
 ): readonly string[] {
-  return Object.freeze(collectOfficialApiExtractionCoverage(
-    input.turnContent,
-    input.turnMessages ?? [], sourcePacking
-  ).requests.map((request) => computeOfficialApiRequestCacheKey(
-    model,
-    requestProfile,
-    systemPrompt,
-    stringifyOfficialApiExtractionRequest(request)
-  )));
+  return Object.freeze(extractionArtifactRequests(input, sourcePacking, sourceInterpretationProfile)
+    .map(({ userPrompt }) => computeCacheKey(model, requestProfile, systemPrompt, userPrompt)));
 }
 
 function hashCacheIdentity(

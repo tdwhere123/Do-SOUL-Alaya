@@ -77,6 +77,7 @@ export {
   EXTRACTION_FILL_MAX_CONCURRENCY
 } from "./fill/policy/fill-concurrency.js";
 export interface ExtractionFillOptions {
+  readonly sourceInterpretationProfile?: import("@do-soul/alaya-protocol").SourceInterpretationProfile;
   readonly sourcePacking?: ExtractionSourcePacking;
   readonly batch?: {
     readonly window?: string;
@@ -166,6 +167,10 @@ async function runExtractionFillBody(
   options: ExtractionFillOptions,
   durableFailpoint: CatalogRefillResumeFailpoint | undefined
 ): Promise<ExtractionFillResult> {
+  if (options.sourceInterpretationProfile !== undefined && (options.batch === undefined ||
+      options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.extractorFactory !== undefined)) {
+    throw new AlayaError("VALIDATION", "source packet fill requires explicit isolated Batch execution");
+  }
   const fill = freezeExtractionFillOptions(options);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(fill.cacheRoot);
   assertLazyFieldIsolation(fill, cacheRoot);

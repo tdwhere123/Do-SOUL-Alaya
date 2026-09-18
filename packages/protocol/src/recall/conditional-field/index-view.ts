@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { InterpretationNodeCoordinateSchema } from "./interpretation-coordinate.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BoundedString,
@@ -48,6 +49,7 @@ export const IndexEntrySchema = z
     schema_version: SchemaVersionSchema,
     target: RecallTargetRefSchema,
     object_id: ConditionalFieldIdSchema.optional(),
+    interpretation_node: InterpretationNodeCoordinateSchema.optional(),
     hypothesis_id: ConditionalFieldIdSchema,
     output_binding: ConditionalFieldIdSchema,
     role: IndexRoleSchema,
@@ -62,6 +64,11 @@ export const IndexEntrySchema = z
   })
   .strict()
   .superRefine((entry, context) => {
+    if (entry.interpretation_node !== undefined && (entry.target.kind !== "source_evidence" ||
+        entry.interpretation_node.hypothesis_id !== entry.hypothesis_id || entry.claim !== "unknown" ||
+        entry.claim_proposition !== undefined || entry.claim_proposition_id !== undefined)) {
+      context.addIssue({ code: "custom", message: "interpretation result requires source hypothesis and cannot assert a world claim" });
+    }
     if (entry.target.kind === "memory_entry") {
       if (entry.object_id !== entry.target.object_id) {
         context.addIssue({
@@ -276,6 +283,7 @@ export function canonicalIndexEntryIdentity(entry: IndexEntry): string {
   return stableCanonicalStringify({
     identity_version: "product-identity.v1",
     target,
+    ...(entry.interpretation_node === undefined ? {} : { interpretation_node: entry.interpretation_node }),
     hypothesis_id: entry.hypothesis_id,
     output_binding: entry.output_binding,
     program_state: indexEntryProgramState(entry),
@@ -305,6 +313,7 @@ export function productStateKeyFromIndexEntry(entry: IndexEntry): ProductStateKe
     content_digest: entry.target.content_digest,
     evidence_object_id: entry.target.evidence_object_id,
     ...(entry.target.span === undefined ? {} : { span: entry.target.span }),
+    ...(entry.interpretation_node === undefined ? {} : { interpretation_node: entry.interpretation_node }),
     program_state: programState,
     hypothesis_id: entry.hypothesis_id,
     binding_context: entry.output_binding,

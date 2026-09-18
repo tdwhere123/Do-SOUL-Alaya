@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import {
   ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  productSubjectId,
-  retargetMemoryProduct,
+  productEndpointId,
   type Derivation,
   type FacetVector,
   type ProductStateKey,
@@ -35,6 +34,7 @@ import {
   inactiveResolution,
   relationMatches,
   admitRelationRow,
+  retargetRelationProduct,
   type AdjacencyRow,
   type AdmittedRelationStrength,
   type NamedKindOverlay
@@ -156,7 +156,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     for (let index = input.liveStateOffset ?? 0; index < input.liveStates.length; index += 1) {
       yield { kind: "work" };
       const from = input.liveStates.at(index)!;
-      if (productSubjectId(from) !== row.sourceObjectId) continue;
+      if (productEndpointId(from) !== row.sourceObjectId) continue;
       yield* effectsForLiveRow(automaton, row, from, {
         query_id: input.interpretation.query_id,
         overlay: input.overlay,
@@ -170,7 +170,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
   const origins = new Set<string>();
   for (const state of input.liveStates) {
     yield { kind: "work", retained_bytes: 64 };
-    origins.add(productSubjectId(state));
+    origins.add(productEndpointId(state));
   }
   for (const discovery of input.discoveries ?? []) {
     yield { kind: "work", retained_bytes: 64 };
@@ -205,7 +205,7 @@ function* effectsForLiveRow(
     readonly bindingContexts?: BindingContextStore;
   }>
 ): PathComputation<void> {
-  if (from.target.kind !== "memory_entry") {
+  if (from.target.kind !== "memory_entry" && from.interpretation_node === undefined) {
     // Terminal evidence product: never retarget into a memory Transition.
     for (const effect of routingDiscoveryEffect(row, input.overlay)) yield { kind: "effect", effect };
     return;
@@ -252,12 +252,10 @@ function* effectsForAdvance(
       input.bindingContexts
     );
     if (binding === undefined) continue;
-    const to = retargetMemoryProduct(from, {
-      object_id: row.targetObjectId,
+    const to = retargetRelationProduct(from, row.targetObjectId, targetRevision, {
       program_state: programState,
-      binding_context: binding,
-      source_revision: targetRevision
-    });
+      binding_context: binding
+    }, input.sourceFacts);
     yield* compiledEffects({ ...row, source_revision: revisionId },
       from, to, strength, "true", input.facets ?? []);
   }

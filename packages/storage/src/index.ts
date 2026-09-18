@@ -428,3 +428,5 @@ export { SqliteMemoryRecallReader } from "./repos/memory-entry/reads/bounded-rec
 export { readBoundedActiveConstraints, type BoundedGovernancePathReader } from "./repos/governance/reads/bounded-active-constraints.js";
 
 export { parseStoredCandidateMemorySignal } from "./repos/signal/signal-repo.js";
+
+export { RETAINED_SOURCE_READ_RESERVATION } from "./repos/field/retained-source-chunks.js";

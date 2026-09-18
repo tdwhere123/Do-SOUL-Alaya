@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { InterpretationNodeCoordinateSchema } from "./interpretation-coordinate.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BoundedLabelSchema,
@@ -144,7 +145,8 @@ export const TypedObservationSchema = z
     binding_context: ConditionalFieldIdSchema.optional(),
     observed_at: IsoDatetimeStringSchema.optional(),
     // Native source identity when the observation is not a memory object.
-    target: RecallTargetRefSchema.optional()
+    target: RecallTargetRefSchema.optional(),
+    interpretation_node: InterpretationNodeCoordinateSchema.optional()
   })
   .strict()
   .readonly();

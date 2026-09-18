@@ -44,7 +44,8 @@ import { fieldSha256 } from "../../../../../../packages/storage/src/__tests__/re
 import type { RecallUsageToolCallContext } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 
 export const PUBLIC_CONSUMPTION_PROTOCOL = Object.freeze({
-  protocol_id: "public-source-consumption-v1",
+  protocol_id: "public-source-consumption-v2",
+  attribution_contract: "published-proposal-exposure-before-complete-v1",
   base_sha: "dece964bde5b0cce993c9f3218dea04cc53b95e2",
   base_tree: "ec6ddf1279512cee6f5a4fead599bc974cd7f40b",
   primary_metric: "cumulative_native_visits_to_first_complete_required_context",
@@ -130,6 +131,8 @@ export type PublicStepReceipt = Readonly<{
 export type PublicStepExchange = Readonly<{
   readonly step_index: number;
   readonly request: Readonly<{
+    readonly query: string;
+    readonly interpretation_proposal: SoulMemorySearchRequest["interpretation_proposal"] | null;
     readonly continuation: PublicContinuationRef | null;
     readonly payload_continuation: PublicPayloadContinuationRef | null;
   }>;
@@ -137,6 +140,10 @@ export type PublicStepExchange = Readonly<{
     readonly delivery_id: string | "unavailable";
     readonly page_purpose: string | "unavailable";
     readonly chunks: readonly PublicPayloadChunk[];
+    readonly source_lookups: readonly Readonly<{
+      readonly target: NonNullable<SoulMemorySearchResponse["results"][number]["target"]>;
+      readonly reasons: SoulMemorySearchResponse["results"][number]["source_lookup_reasons"] | "unavailable";
+    }>[];
   }>;
   readonly receipt: PublicStepReceipt | "unavailable";
 }>;

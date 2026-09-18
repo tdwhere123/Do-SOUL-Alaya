@@ -20,7 +20,7 @@ type BoundPhrase = SourceLocatedInterpretation["candidates"][number]["predicate"
 export function resolveCurrentSource(
   stores: Pick<FieldFormationStores, "listRecords" | "getStoredRecord">,
   workspaceId: string,
-  located: SourceLocatedInterpretation,
+  located: Pick<SourceLocatedInterpretation, "artifact_key" | "source_corpus_digest">,
   sha256: FieldContractSha256
 ): StoredSourceRecord {
   const expectedDigest = formatFieldContractDigest(located.source_corpus_digest);

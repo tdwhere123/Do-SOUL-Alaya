@@ -70,6 +70,8 @@ export type ObserverCoverage = Readonly<{
 export type CompletenessInput = Readonly<{
   readonly observer?: ObserverCoverage;
   readonly interpretation_status?: QueryInterpretationStatus;
+  /** Set by projection only after validating every represented product against one finite source packet. */
+  readonly selected_hypothesis_domain?: boolean;
   readonly total: number;
   readonly remaining: number;
   readonly omitted_payload: boolean;
@@ -358,7 +360,8 @@ function observerCompleteness(input: CompletenessInput): CompletenessReport | un
 
 function emptyCompleteness(input: CompletenessInput): CompletenessReport {
   const status = input.interpretation_status;
-  if (status === "partial" || status === "hypotheses") {
+  const selectedHypothesis = status === "hypotheses" && input.selected_hypothesis_domain === true;
+  if (status === "partial" || (status === "hypotheses" && !selectedHypothesis)) {
     return dimensionReport({
       logical_index: "open",
       observed_coverage: "exhausted_empty",
@@ -368,7 +371,7 @@ function emptyCompleteness(input: CompletenessInput): CompletenessReport {
       closed: "open"
     });
   }
-  if (status !== undefined && !interpretationMayEmitCompleteEmpty(status)) {
+  if (status !== undefined && !selectedHypothesis && !interpretationMayEmitCompleteEmpty(status)) {
     return dimensionReport({
       logical_index: status === "resource_rejected" ? "resource_rejected" : "unavailable",
       observed_coverage: "unavailable",

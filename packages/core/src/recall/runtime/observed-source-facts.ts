@@ -40,6 +40,7 @@ export function recordObservedAt(
     if (row === null) continue;
     sourceFacts.set(objectId, {
       object_id: row.object_id,
+      ...(row.interpretation_node === undefined ? {} : { interpretation_node: row.interpretation_node }),
       workspace_id: input.workspace_id,
       source_revision: row.sourceRevision,
       ...(row.content === undefined ? {} : { content: row.content }),

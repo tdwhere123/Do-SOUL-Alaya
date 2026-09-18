@@ -1,4 +1,4 @@
-import { productSubjectId, type ObserverPage } from "@do-soul/alaya-protocol";
+import { productEndpointId, type ObserverPage } from "@do-soul/alaya-protocol";
 import { applyObserverPage, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { createAdjacencyEffectCursor } from "../conditional-field/engine/path-composition-adjacency.js";
 
@@ -37,7 +37,7 @@ function advancePathEffects(state: FieldEngineState): FieldEngineState {
   let subjects = applied.resume_subjects;
   for (const effect of advanced.effects) {
     const transition = effect.transition ?? effect.hyperedge;
-    if (transition !== undefined) { subjects = subjects.with(productSubjectId(transition.from), true).with(productSubjectId(transition.to), true); }
+    if (transition !== undefined) { subjects = subjects.with(productEndpointId(transition.from), true).with(productEndpointId(transition.to), true); }
     if (effect.discovery !== undefined) subjects = subjects.with(effect.discovery.subject_id, true);
   }
   const finished = advanced.status === "complete";

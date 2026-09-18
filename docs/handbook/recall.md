@@ -305,6 +305,26 @@ Fixed-corpus local canaries measure scans, hydrated contexts, native bytes,
 retained memory and legal exposure separately. They establish mechanism behavior;
 semantic usefulness and the R02 quality gate remain unaccepted.
 
+Public source-consumption evidence uses `public-source-consumption-v2` and the
+`published-hint-utility-v2` evaluator. It retains request proposals, public
+lookup reasons, target identities, and receipt identities. An improvement can
+satisfy this evaluator only when the intended source has a published
+candidate/context witness at or before its first complete read. Missing or
+omitted reasons remain unobserved; legacy traces without these fields remain
+unavailable. The original paired visit metric is reported separately. Alongside
+the frozen 72 cells, 24 companion cells omit only the query interpretation
+proposal from the same published population. Acceptance requires complete
+companion coverage and at least one witnessed pair that uses fewer visits than
+both source-text and no-hint controls. Missing controls cannot pass. The measured
+benefit is limited to this fixture intervention; semantic fidelity and consumer
+agent usage remain unproved. Historical v1 reports are not
+reinterpreted or rewritten. The admitted matrix publishes through Core source
+observation publication, retains its returned UTF-8 bound interpretations, then
+reopens SQLite through the public worker. Witness comparison preserves the
+publication's exact assertion span and source alias. Direct gist fixtures prove
+only their explicitly scoped matcher mechanisms. Query matching, request
+admission and public wire contracts remain unchanged.
+
 One request pins its interpretation clock, snapshot and generation. Native
 readers advance cursors within their allowances. Grounding, support, projection
 and previews share request accounting and retain concrete unfinished work.
@@ -563,11 +583,100 @@ Absolute calendar years use UTC and need no clock.
 Source observation publication derives temporal fields through the existing Soul
 projection owner using the verified assertion and retained source `event_time`.
 Ingestion or provider timestamps cannot replace a missing source clock.
+Its bound target preserves the current source record's evidence alias, including
+`null`; the new interpretation capsule is provenance in memory evidence refs,
+not a replacement source alias. Both complete and interrupted publication
+recovery verify the stored interpretation against the current expected binding.
+Legacy interpretations with an invented capsule alias are rejected unchanged;
+they require a separately authorized rebuild, not automatic identity promotion.
 Generation response-schema JSON participates in raw cache identity; current
 parser, grounding and formation identities separate newly derived artifacts
 from historical raw or previously qualified generations.
 
 Finite max-min oracles establish only their stated finite reference properties.
+The opt-in `source-interpretation-reasoning-v1` worker capability accepts one
+published `source-interpretation-v2` packet and one explicit hypothesis. Core
+publishes it through audited EvidenceService creation; it never creates fake
+memory entries, governed relation assertions, or inferred temporal validity.
+The existing typed query, observation, sequence/hyperedge composition, max/min,
+and index projection operate on source endpoints with a separate local node
+coordinate. Physical source identity remains unchanged.
+
+A caller-provided, content-bound semantic profile owns predicate/role symbols
+and each predicate's mandatory `governing_roles`. All scope-operator operands
+govern their descendants. Only governing edges prohibit independent asserted
+roots and scope cycles; ordinary references may connect co-roots or form cycles.
+Mention selections locate evidence, not entities: local referent grouping and
+semantic predicates remain unreviewed proposals. Typed queries consume the same
+profile; unknown symbols fail admission. There is no automatic natural-language
+query compiler or general ontology in this capability.
+
+New packet mentions select inclusive host-generated first/last segment IDs from
+`ascii-run-unicode-scalar-v1`, bound to the source digest and selected assertion
+catalog. ASCII letters, digits and underscores form runs; every other Unicode
+scalar, including whitespace, is a separate segment. The catalog is lossless and
+does not normalize source text or split surrogate pairs. ASCII run-internal spans
+are explicitly unsupported. Missing, reversed, cross-assertion and foreign
+catalog references fail whole-packet admission. The host derives quotation text
+and UTF-16 spans; Core's existing owner converts durable spans to UTF-8. An
+implicit predicate is still a semantic proposal, never a fabricated quotation.
+The previous in-progress packet text/occurrence wire is superseded; historical
+interpretation-v1 retains its strict original selector and ambiguity policy.
+Catalog preparation is capped at 64 assertions, 65,536 UTF-16 code units and
+32,768 segments, with a 1 MB new-request envelope limit. The Protocol segment
+owner estimates temporary catalog/index workspace before worker reconstruction;
+insufficient request memory fails without a proof. This is conservative logical
+budget accounting, not a measurement of JavaScript process RSS. Temporary
+workspace reservation is released after verification and is not native read
+bytes; scanned source code units and segment work remain charged.
+
+The result includes the complete published interpretation and the actual proof
+leaves, with mandatory source/hypothesis/unreviewed/world-unknown qualifiers.
+`computation_status` describes finite selected-hypothesis closure; semantic
+coverage can remain unresolved even when that computation completes. A finite
+selected packet may also complete with no accepted entries: the index owner
+validates every retained seed, state and transition against that packet's node,
+source and hypothesis domain before closing it. Resource exhaustion, pending
+projection and open observation still prevent closure. Default hypothesis
+queries retain their open logical-index meaning; selected-packet closure does
+not establish a global absence or verified interpretation. The normal
+MemorySearchResult mapper refuses these entries. Output limits remove the
+conclusions and interpretation together, never their qualifiers alone. Native
+reads, indexed premise preparation, engine work, and projection work are reported
+separately; unused finalization reserve is not consumed work. Capsule creation's
+existing character limit remains authoritative, while reading uses the request's
+byte budget rather than the historical hint byte cap.
+
+The new ordinary `extractSourcePacket` capability and Batch packet adapter share
+request-v3 construction, profile/schema generation, and whole-packet reception.
+They are explicit opt-ins; historical request-v2/interpretation-v1 and default
+Garden ingestion remain unchanged. Packet reception rejects raw UTF-8 responses
+above 1 MiB before JSON parsing; failure is never converted to `packet:null`.
+The governed Batch fill CLI opts in with `--extraction-packet-profile`. The full
+profile content binds request, schema, cache generation and authority identity.
+`--extraction-preflight-out` with `--extraction-preflight-keys` produces a local
+read-only request preview within the original dataset scope, without a grant.
+A genuinely empty eligible source catalog produces a typed deterministic-empty
+artifact and uses the existing zero-attempt ledger completion. Provider-backed
+`packet:null` remains a separate, receipt-bearing empty response.
+Typed cache artifacts remain source-unbound until a caller supplies an admitted
+source ID to `publishCachedSourcePacket`; Core checks the exact current source.
+The cache retains a shared Batch plan reference instead of copying the plan.
+Durable reads verify the retained input/output/attempt and decoded line receipt,
+including the exact transport route in the retained original authority receipt;
+raw ledger readers accept this checked artifact, while parsed signal readers
+reject it. Workset preparation checks the actual source/request JSON size plus
+worst-case bounded response escaping against the existing 32 MiB shard reader
+limit before reservation. The writer also checks exact serialized bytes.
+Cache admission, audited publication, and semantic fidelity are distinct gates. This is an additive qualified result
+capability, not a redefinition of an existing guaranteed world result or MCP
+tool. A new public MCP surface would require the separate invariant 25 review.
+On read, bounded source verification checks exact assertion and mention spans,
+the current root and source eligibility. Source erasure discovers both published
+packet-v2 and bound interpretation-v1 dependencies through their Protocol
+contract and scrubs their capsules in the existing erase transaction. Derived
+interpretation capsules are dependencies, never fabricated source aliases.
+
 Real SQLite, worker, MCP/CLI, continuation and attribution tests establish the
 specific producer-consumer cases they exercise. Neither set establishes dataset
 quality, full process memory usage, general-language understanding, or deployment

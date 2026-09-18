@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import {
   RecallService,
@@ -85,6 +86,27 @@ type PlantedHandler<T> = (
   client: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>
 ) => Promise<void>;
 
+/** Windows can keep WAL/SHM after better-sqlite3 close(); worker reopen must wait. */
+export async function awaitWorkerAfterMainSqliteClose(
+  client: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>
+): Promise<void> {
+  if (process.platform !== "win32") {
+    await client.ready();
+    return;
+  }
+  let last: unknown;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await client.ready();
+      return;
+    } catch (error) {
+      last = error;
+      await sleep(100);
+    }
+  }
+  throw last;
+}
+
 export async function withPlantedWorker(
   canary: CanaryCase,
   view: ResultView,
@@ -118,9 +140,9 @@ export async function withPlantedWorker(
 export async function withPlantedSourceWorker<T extends object>(
   sourceBody: string,
   distractorBody: string,
-  setup: (planted: PlantedSources) => T,
+  setup: (planted: PlantedSources) => T | Promise<T>,
   run: PlantedHandler<PlantedSources & T>,
-  options?: Readonly<{ readonly memoryText?: string; readonly sourceFirst?: boolean }>
+  options?: Readonly<{ readonly memoryText?: string; readonly sourceFirst?: boolean; readonly sourceId?: string }>
 ): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "alaya-bound-public-"));
   const filename = join(directory, "alaya.db");
@@ -128,7 +150,7 @@ export async function withPlantedSourceWorker<T extends object>(
   let handedOff = false;
   try {
     const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
-    const sourceRow = records.insert(hashedRecord(WS, sourceBody, "bound-source"));
+    const sourceRow = records.insert(hashedRecord(WS, sourceBody, options?.sourceId ?? "bound-source"));
     const distractorInput = options?.sourceFirst === undefined
       ? hashedRecord(WS, distractorBody, "distractor-source")
       : Array.from({ length: 128 }, (_, index) => hashedRecord(WS, distractorBody, `distractor-${index}`))
@@ -151,7 +173,7 @@ export async function withPlantedSourceWorker<T extends object>(
         evidenceObjectId: sourceRow.evidence_object_id
       }
     };
-    const extra = setup(planted);
+    const extra = await setup(planted);
     handedOff = true;
     await runPlantedHandler(filename, slice, { ...planted, ...extra }, run);
   } finally {
@@ -232,7 +254,7 @@ export async function withPublicOrderedPairWorker(
       async (planted, handler, receipts, client) => {
         planted.database.close();
         closeCachedDatabase(planted.filename);
-        await client.ready();
+        await awaitWorkerAfterMainSqliteClose(client);
         const probeAt = receipts.length;
         const firstPage = await handler(
           publicSearchRequest(canary, "proposal", "source_only", "canonical"),

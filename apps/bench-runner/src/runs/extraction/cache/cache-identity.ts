@@ -1,4 +1,4 @@
-import { DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
+import { canonicalJson, DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
 import { normalizeBaseUrl } from "../../compile-seed/compile-seed-config.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import {
@@ -15,12 +15,16 @@ const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
 export function assertExtractionCacheIdentity(input: {
   readonly config: Pick<
     CompileSeedExtractionConfig,
-    "model" | "modelFamily" | "providerUrl" | "requestProfile" | "sourcePacking"
+    "model" | "modelFamily" | "providerUrl" | "requestProfile" | "sourcePacking" | "sourceInterpretationProfile"
   >;
   readonly systemPrompt: string;
   readonly manifest: ExtractionCacheManifest;
   readonly validateProvider: boolean;
 }): void {
+  if (canonicalJson(input.config.sourceInterpretationProfile ?? null) !==
+      canonicalJson(input.manifest.source_interpretation_profile ?? null)) {
+    throw new ExtractionCacheInvariantError("source interpretation profile differs from cache generation");
+  }
   const packing = input.manifest.schema_version === 4
     ? input.manifest.source_packing : DEFAULT_EXTRACTION_SOURCE_PACKING;
   if ((input.config.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING) !== packing) {

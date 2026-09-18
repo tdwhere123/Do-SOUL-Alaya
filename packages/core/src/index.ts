@@ -187,3 +187,6 @@ export * from "./governance/security/worker-safety-gate.js";
 export * from "./governance/security/worker-trust-assessor.js";
 export * from "./runtime/runs/workspace-service.js";
 export * from "./governance/security/zero-day-security-layer.js";
+
+export { createSourceInterpretationPacketPublication, verifyPublishedSourceInterpretation, packetEvidenceId } from "./memory/evidence-create/source-interpretation-packet-publication.js";
+export { reasonSourceInterpretation } from "./recall/runtime/source-interpretation-reasoning.js";
