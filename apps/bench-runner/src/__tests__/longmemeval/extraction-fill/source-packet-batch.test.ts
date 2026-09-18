@@ -178,20 +178,33 @@ it("rejects profile generation and transport drift before dispatch and rejects m
   const identity = { model: MODEL, requestProfile: REQUEST_PROFILE };
   const successful = readValidLedgerShard(cacheRoot, key, identity)!;
   expect(successful).toBeDefined();
-  for (const mutate of [
-    (value: any) => { value.source_packet.result.provenance.attemptOrdinal = 0; },
-    (value: any) => { value.source_packet.result.provenance.attemptOrdinal = 99; },
-    (value: any) => { value.source_packet.result.provenance.job = "batches/unrelated"; },
-    ...["inputSha256", "outputSha256", "responseSha256"].map((field) => (value: any) => {
+  type WritableShard = {
+    source_packet: {
+      plan_identity: string;
+      authority_receipt_digest: string;
+      result: { provenance: Record<string, unknown> & { usage: { inputTokens: number } } };
+    };
+    admission_identity: { generation_sha256: string };
+    response_metadata: { usage: { input_tokens: number } };
+  };
+  const corruptions: ReadonlyArray<(value: WritableShard) => void> = [
+    (value) => { value.source_packet.result.provenance.attemptOrdinal = 0; },
+    (value) => { value.source_packet.result.provenance.attemptOrdinal = 99; },
+    (value) => { value.source_packet.result.provenance.job = "batches/unrelated"; },
+    ...["inputSha256", "outputSha256", "responseSha256"].map((field) => (value: WritableShard) => {
       value.source_packet.result.provenance[field] = "e".repeat(64);
     }),
-    (value: any) => { value.source_packet.result.provenance.finishReason = "MAX_TOKENS"; },
-    (value: any) => { value.source_packet.plan_identity = "f".repeat(64); },
-    (value: any) => { value.source_packet.authority_receipt_digest = "f".repeat(64); },
-    (value: any) => { value.admission_identity.generation_sha256 = "f".repeat(64); },
-    (value: any) => { value.response_metadata.usage.input_tokens += 1; },
-    (value: any) => { value.source_packet.result.provenance.usage.inputTokens += 1; }
-  ]) { const value = JSON.parse(original); mutate(value); writeFileSync(path, JSON.stringify(value));
+    (value) => { value.source_packet.result.provenance.finishReason = "MAX_TOKENS"; },
+    (value) => { value.source_packet.plan_identity = "f".repeat(64); },
+    (value) => { value.source_packet.authority_receipt_digest = "f".repeat(64); },
+    (value) => { value.admission_identity.generation_sha256 = "f".repeat(64); },
+    (value) => { value.response_metadata.usage.input_tokens += 1; },
+    (value) => { value.source_packet.result.provenance.usage.inputTokens += 1; }
+  ];
+  for (const mutate of corruptions) {
+    const value = JSON.parse(original) as WritableShard;
+    mutate(value);
+    writeFileSync(path, JSON.stringify(value));
     expect(inspectCachedRawExtraction(cacheRoot, key, MODEL, REQUEST_PROFILE).status).toBe("invalid");
     expect(() => assertLedgerSuccessfulShard(cacheRoot, successful, identity)).toThrow(/closure drifted/u);
     await expect(publishCachedSourcePacket({ cacheRoot, cacheKey: key, config: identity,
