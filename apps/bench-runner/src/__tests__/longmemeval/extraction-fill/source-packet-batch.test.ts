@@ -145,7 +145,7 @@ it("replays an interruption after typed durability without a second reservation 
   let interrupted = false;
   vi.spyOn(durable, "replaceBytesDurable").mockImplementation((input) => {
     original(input);
-    if (!interrupted && /\/[a-f0-9]{2}\/[a-f0-9]{64}\.json$/u.test(input.destination)) {
+    if (!interrupted && /(?:^|[\\/])[a-f0-9]{2}[\\/][a-f0-9]{64}\.json$/u.test(input.destination)) {
       interrupted = true; throw new Error("offline interruption after typed artifact publication");
     }
   });
