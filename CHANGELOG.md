@@ -8,13 +8,20 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 4.13.0
+## Unreleased — protocol 4.14.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 4.13.0 can move
+heading (currently `## v0.3.11` below). Protocol 4.14.0 can move
 independently of the app semver.
+
+Protocol 4.14.0 is an additive minor under handbook invariant §25.
+MCP-reachable `InformationIndex` / `IndexEntry` / `ProductStateKey`
+admit optional `interpretation_node`, and `Transition.validity` admits
+interpretation-premise validity beside world relation validity. Default
+MCP encoding still refuses interpretation entries without the qualified
+result capability; existing search field names remain parseable.
 
 Protocol 4.13.0 is an additive minor under handbook invariant §25.
 Optional `SoulSignalTriagedPayloadSchema.deferral` records write-path
@@ -89,7 +96,7 @@ modality, trailing source tokens, and unsupported dependent scope. Extraction
 catalog version 3 requires demonstrated fragment independence, including
 adjacent dependent continuations. MCP, EventLog and config schemas are unchanged.
 
-Source `@do-soul/alaya-protocol` is **4.13.0** (`packages/protocol/package.json`).
+Source `@do-soul/alaya-protocol` is **4.14.0** (`packages/protocol/package.json`).
 `AlayaStatusSchema.mcp.catalog_health` is an additive optional field.
 GitHub `releases/latest` is a published tarball and is **not** this source tree;
 pin `ALAYA_VERSION` or install from a checkout. Local ONNX embeddings

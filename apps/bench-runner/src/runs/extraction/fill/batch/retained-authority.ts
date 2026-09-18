@@ -1,10 +1,11 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { readExtractionAuthorityReceipt, writeExtractionAuthorityReceiptExclusive,
   type ExtractionAuthorityReceipt } from "../../authority/receipt.js";
 import type { ExtractionCacheWriteLease } from "../manifest/fill-root-guard.js";
 
 function receiptPath(root: string, planIdentity: string): string {
-  if (!/^[a-f0-9]{64}$/u.test(planIdentity)) throw new Error("invalid Batch authority reference");
+  if (!/^[a-f0-9]{64}$/u.test(planIdentity)) throw new AlayaError("VALIDATION", "invalid Batch authority reference");
   return join(root, `batch-authority-${planIdentity}.json`);
 }
 
@@ -18,7 +19,7 @@ export function retainBatchAuthority(lease: ExtractionCacheWriteLease, planIdent
 export function readRetainedBatchAuthority(root: string, planIdentity: string, receiptDigest: string) {
   const receipt = readExtractionAuthorityReceipt(receiptPath(root, planIdentity));
   if (receipt.receipt_digest !== receiptDigest || receipt.observation.transport === undefined) {
-    throw new Error("retained Batch authority binding mismatch");
+    throw new AlayaError("CONFLICT", "retained Batch authority binding mismatch");
   }
   return receipt;
 }

@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { parseExtractionSampleKeys } from "../authority/sample-scope.js";
 import { inspectExtractionFillPreparation } from "./fill-preparation.js";
 import { prepareBatchExtractionWorkset } from "./batch-workset.js";
@@ -11,17 +12,23 @@ export async function preflightExtractionBatch(options: ExtractionFillOptions & 
   if (options.batch?.operation !== "prepare" || options.authorityReceiptPath !== undefined ||
       options.batch.reconcile !== undefined || options.ingestionMode === "lazy_field" ||
       options.expansionCapability !== undefined || options.extractorFactory !== undefined) {
-    throw new Error("Batch dry preflight requires prepare settings without execution authority or alternate execution modes");
+    throw new AlayaError("VALIDATION", "Batch dry preflight requires prepare settings without execution authority or alternate execution modes");
   }
   const inspected = await inspectExtractionFillPreparation(options, options.cacheRoot, undefined);
   const selectedKeys = options.preflightKeys === undefined ? undefined : parseExtractionSampleKeys(options.preflightKeys);
-  if (selectedKeys !== undefined && options.batch.requestLimit !== undefined) throw new Error("explicit preflight keys cannot combine a request limit");
+  if (selectedKeys !== undefined && options.batch.requestLimit !== undefined) {
+    throw new AlayaError("VALIDATION", "explicit preflight keys cannot combine a request limit");
+  }
   const workset = prepareBatchExtractionWorkset({ prepared: inspected, cacheRoot: options.cacheRoot,
     ...(selectedKeys === undefined ? {} : { executionCacheKeys: new Set(selectedKeys) }) });
   const route = resolveExtractionTransportRoute(inspected.config);
-  if (!isGeminiGenerateContentProfile(inspected.config.requestProfile)) throw new Error("unsupported Batch request profile");
+  if (!isGeminiGenerateContentProfile(inspected.config.requestProfile)) {
+    throw new AlayaError("VALIDATION", "unsupported Batch request profile");
+  }
   const requestLimit = options.batch.requestLimit;
-  if (requestLimit !== undefined && (!Number.isSafeInteger(requestLimit) || requestLimit <= 0)) throw new Error("invalid preflight request limit");
+  if (requestLimit !== undefined && (!Number.isSafeInteger(requestLimit) || requestLimit <= 0)) {
+    throw new AlayaError("VALIDATION", "invalid preflight request limit");
+  }
   const lines = workset.lines.slice(0, requestLimit);
   const content = { model: route.model, requestProfile: inspected.config.requestProfile, lines, limits: options.batch.limits };
   const preview = canonicalBatchPlan({ ...content, identity: batchDigest(JSON.stringify(content)) });

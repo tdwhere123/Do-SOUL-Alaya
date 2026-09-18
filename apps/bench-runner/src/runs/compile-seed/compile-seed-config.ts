@@ -1,4 +1,4 @@
-import { canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, parseDefaultOnFlag, parseEnvBoolean, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, parseDefaultOnFlag, parseEnvBoolean, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSecretRef } from "@do-soul/alaya";
@@ -117,7 +117,7 @@ export function resolveCompileSeedExtractionConfig(
 ): CompileSeedExtractionConfig {
   const profile = sourceInterpretationProfile === undefined ? undefined : SourceInterpretationProfileSchema.parse(sourceInterpretationProfile);
   if (manifest !== undefined && canonicalJson(manifest.source_interpretation_profile ?? null) !== canonicalJson(profile ?? null)) {
-    throw new Error("source interpretation profile differs from cache generation; explicit matching opt-in is required");
+    throw new AlayaError("CONFLICT", "source interpretation profile differs from cache generation; explicit matching opt-in is required");
   }
   const packet = profile === undefined ? {} : { sourceInterpretationProfile: profile };
   const providerUrlValue = readNonEmpty(env[GARDEN_PROVIDER_URL_ENV]) ?? manifest?.provider_url;

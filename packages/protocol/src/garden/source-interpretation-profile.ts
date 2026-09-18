@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AlayaError } from "../shared/alaya-error.js";
 import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import { type FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import type { QueryProgram } from "../recall/conditional-field/query.js";
@@ -42,15 +43,21 @@ export function sourceInterpretationProfileIdentity(profile: SourceInterpretatio
 
 export function assertSourceInterpretationPacketProfile(packet: SourceInterpretationPacket,
   profile: SourceInterpretationProfile, sha256: FieldContractSha256): void {
-  if (packet.profile_id !== sourceInterpretationProfileIdentity(profile, sha256)) throw new Error("interpretation profile identity mismatch");
+  if (packet.profile_id !== sourceInterpretationProfileIdentity(profile, sha256)) {
+    throw new AlayaError("CONFLICT", "interpretation profile identity mismatch");
+  }
   const predicates = new Set(profile.predicates.map((row) => row.symbol));
   const roles = new Set(profile.roles.map((row) => row.symbol));
   for (const proposition of packet.propositions) {
-    if (!predicates.has(proposition.predicate)) throw new Error("unknown interpretation predicate symbol");
-    for (const arg of proposition.arguments) if (!roles.has(arg.role)) throw new Error("unknown interpretation role symbol");
+    if (!predicates.has(proposition.predicate)) throw new AlayaError("VALIDATION", "unknown interpretation predicate symbol");
+    for (const arg of proposition.arguments) {
+      if (!roles.has(arg.role)) throw new AlayaError("VALIDATION", "unknown interpretation role symbol");
+    }
   }
   for (const operator of packet.operators) {
-    for (const operand of operator.operands) if (!roles.has(operand.role)) throw new Error("unknown interpretation scope role symbol");
+    for (const operand of operator.operands) {
+      if (!roles.has(operand.role)) throw new AlayaError("VALIDATION", "unknown interpretation scope role symbol");
+    }
   }
   assertPacketScope(packet, profile);
 }
@@ -66,11 +73,11 @@ function assertPacketScope(packet: SourceInterpretationPacket, profile: SourceIn
   const active = new Set<string>();
   const visited = new Set<string>();
   const walk = (id: string): void => {
-    if (active.has(id)) throw new Error("cyclic proposition scope");
+    if (active.has(id)) throw new AlayaError("CONFLICT", "cyclic proposition scope");
     if (visited.has(id)) return;
     active.add(id);
     for (const target of children.get(id) ?? []) {
-      if (roots.has(target)) throw new Error("governed propositions cannot also be asserted roots");
+      if (roots.has(target)) throw new AlayaError("CONFLICT", "governed propositions cannot also be asserted roots");
       walk(target);
     }
     active.delete(id); visited.add(id);
@@ -84,14 +91,16 @@ export function assertSourceInterpretationQueryProfile(program: QueryProgram, pr
   const walk = (node: QueryProgram): void => {
     if (node.kind === "relation") {
       let key: unknown;
-      try { key = JSON.parse(node.relation_kind); } catch { throw new Error("query relation is outside interpretation profile"); }
+      try { key = JSON.parse(node.relation_kind); } catch {
+        throw new AlayaError("VALIDATION", "query relation is outside interpretation profile");
+      }
       if (!Array.isArray(key) || key.length !== 3 || key[0] !== "source-interpretation-v2" || typeof key[2] !== "string") {
-        throw new Error("query relation is outside interpretation profile");
+        throw new AlayaError("VALIDATION", "query relation is outside interpretation profile");
       }
       const allowed = key[1] === "predicate" || key[1] === "asserted" ? predicates :
         key[1] === "role" || key[1] === "inverse_role" ? roles :
         key[1] === "operator" ? new Set<string>(SOURCE_INTERPRETATION_SCOPE_OPERATORS) : new Set();
-      if (!allowed.has(key[2])) throw new Error("unknown interpretation query symbol");
+      if (!allowed.has(key[2])) throw new AlayaError("VALIDATION", "unknown interpretation query symbol");
     } else if (node.kind === "sequence") node.steps.forEach(walk);
     else if (node.kind === "alternative") node.options.forEach(walk);
     else if (node.kind === "hyperedge") node.premises.forEach(walk);

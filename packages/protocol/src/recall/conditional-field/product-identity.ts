@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AlayaError } from "../../shared/alaya-error.js";
 import { BoundedIdSchema, NonNegativeIntSchema } from "../../shared/schema-primitives.js";
 import { compareCodeUnits } from "../field-contract/canonical-identity.js";
 import { InterpretationNodeCoordinateSchema, interpretationNodeIdentity, type InterpretationNodeCoordinate } from "./interpretation-coordinate.js";
@@ -209,7 +210,7 @@ export function retargetInterpretationProduct(from: ProductStateKey, node: Inter
   patch: Readonly<{ program_state: string; binding_context: string }>): ProductStateKey {
   if (from.target.kind !== "source_evidence" || from.interpretation_node === undefined ||
       node.packet_id !== from.interpretation_node.packet_id || node.hypothesis_id !== from.hypothesis_id) {
-    throw new Error("interpretation transfer crosses its admitted source hypothesis");
+    throw new AlayaError("CONFLICT", "interpretation transfer crosses its admitted source hypothesis");
   }
   return ProductStateKeySchema.parse({ ...from, ...patch, interpretation_node: node });
 }

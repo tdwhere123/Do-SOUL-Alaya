@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { inspectCachedSourcePacket, type CachedSourcePacket } from "../../extraction/cache/source-packet-artifact.js";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -203,7 +204,9 @@ export function writeCachedExtraction(
   entry: CachedExtractionEntry
 ): void {
   const bytes = Buffer.from(`${JSON.stringify(entry, null, 2)}\n`, "utf8");
-  if (entry.source_packet !== undefined && bytes.length > MAX_EXTRACTION_CACHE_SHARD_BYTES) throw new Error("typed packet shard exceeds reader byte bound");
+  if (entry.source_packet !== undefined && bytes.length > MAX_EXTRACTION_CACHE_SHARD_BYTES) {
+    throw new AlayaError("VALIDATION", "typed packet shard exceeds reader byte bound");
+  }
   const filePath = cacheFilePath(cacheRoot, cacheKey);
   mkdirSync(dirname(filePath), { recursive: true });
   replaceBytesDurable({

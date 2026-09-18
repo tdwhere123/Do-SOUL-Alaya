@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { canonicalJson, buildSourceReferenceCatalog, SourceReferenceCatalogSchema, SourceInterpretationProfileSchema, sourceInterpretationProfileIdentity,
+import { AlayaError, canonicalJson, buildSourceReferenceCatalog, SourceReferenceCatalogSchema, SourceInterpretationProfileSchema, sourceInterpretationProfileIdentity,
   type SourceReferenceCatalog, type SourceInterpretationProfile } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceRequest, parseOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest } from "./extraction-request.js";
@@ -19,14 +19,18 @@ export function parseOfficialApiSourcePacketRequest(value: unknown): OfficialApi
   const parsed = PacketRequestEnvelope.parse(value);
   const source_request = parseOfficialApiExtractionRequest(parsed.source_request);
   if (parsed.profile_id !== sourceInterpretationProfileIdentity(parsed.profile, packetSha256)) {
-    throw new Error("source packet request profile does not bind its vocabulary");
+    throw new AlayaError("CONFLICT", "source packet request profile does not bind its vocabulary");
   }
   if (new Set(source_request.source_assertions.map((row) => row.assertion_id)).size !== source_request.source_assertions.length) {
-    throw new Error("source packet request has duplicate assertion identities");
+    throw new AlayaError("VALIDATION", "source packet request has duplicate assertion identities");
   }
   const catalog = buildSourceReferenceCatalog(parsed.source_catalog.source_digest, source_request.source_assertions, packetSha256);
-  if (canonicalJson(catalog) !== canonicalJson(parsed.source_catalog)) throw new Error("source packet request catalog mismatch");
-  if (Buffer.byteLength(JSON.stringify(parsed)) > 1_000_000) throw new Error("source packet request exceeds its byte bound");
+  if (canonicalJson(catalog) !== canonicalJson(parsed.source_catalog)) {
+    throw new AlayaError("CONFLICT", "source packet request catalog mismatch");
+  }
+  if (Buffer.byteLength(JSON.stringify(parsed)) > 1_000_000) {
+    throw new AlayaError("VALIDATION", "source packet request exceeds its byte bound");
+  }
   return { ...parsed, source_request };
 }
 

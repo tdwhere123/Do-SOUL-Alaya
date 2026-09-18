@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { computeCacheKey } from "../../../compile-seed/cache/cache-key.js";
 import type { CompileSeedExtractionConfig } from "../../../compile-seed/compile-seed-types.js";
 import { createHash } from "node:crypto";
@@ -25,12 +26,12 @@ export function receiveSourceInterpretationPacketBatchLine(input: Readonly<{
   const request = parseOfficialApiSourcePacketRequest(JSON.parse(input.line.userPrompt));
   const expected = prepareSourceInterpretationPacketBatchLine(request, input.line.unitKeys, input.config);
   if (expected.key !== input.line.key || expected.requestSha256 !== input.line.requestSha256 ||
-      expected.systemPrompt !== input.line.systemPrompt) throw new Error("Batch packet line identity mismatch");
+      expected.systemPrompt !== input.line.systemPrompt) throw new AlayaError("CONFLICT", "Batch packet line identity mismatch");
   const retained = input.retained;
   if (retained !== undefined) canonicalBatchPlan(retained.plan);
   if (retained !== undefined && (retained.provenance.attemptOrdinal === undefined ||
       !retained.plan.lines.some((line) => JSON.stringify(line) === JSON.stringify(input.line)))) {
-    throw new Error("Batch packet is missing its retained plan/attempt binding");
+    throw new AlayaError("CONFLICT", "Batch packet is missing its retained plan/attempt binding");
   }
   const transport = retained === undefined ? { kind: "unavailable" as const } : {
     kind: "gemini_batch" as const, plan_identity: retained.plan.identity, model: retained.plan.model,

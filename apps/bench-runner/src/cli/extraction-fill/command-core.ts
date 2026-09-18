@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { readBoundedCanonicalUtf8Artifact } from "../../runs/extraction/cache-audit/bounded-artifact-reader.js";
 import { writeFileSync } from "node:fs";
 import { preflightExtractionBatch } from "../../runs/extraction/fill/batch-preflight.js";
@@ -31,11 +32,13 @@ export async function runExtractionFillCommand(
   batch?: ExtractionBatchOptions
 ): Promise<number> {
   try {
-    if (opts.extractionPreflightKeys !== undefined && opts.extractionPreflightOut === undefined) throw new Error("preflight keys require dry preflight output");
+    if (opts.extractionPreflightKeys !== undefined && opts.extractionPreflightOut === undefined) {
+      throw new AlayaError("VALIDATION", "preflight keys require dry preflight output");
+    }
     if (opts.extractionPreflightOut !== undefined) {
       if (batch === undefined || opts.extractionCacheRoot === undefined || opts.extractionAuthority !== undefined ||
           opts.extractionPredecessorAuthority !== undefined || opts.extractionTargetSelection !== undefined) {
-        throw new Error("dry preflight requires Batch prepare settings and a cache root, without execution receipts");
+        throw new AlayaError("VALIDATION", "dry preflight requires Batch prepare settings and a cache root, without execution receipts");
       }
       const report = await preflightExtractionBatch({ variant: opts.variant, sourcePacking: opts.extractionSourcePacking,
         sourceInterpretationProfile: readExtractionPacketProfile(opts.extractionPacketProfile),

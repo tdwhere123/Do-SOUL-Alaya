@@ -1,4 +1,4 @@
-import { SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { AlayaError, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   mkdirSync,
   renameSync,
@@ -272,7 +272,7 @@ function validateManifest(
   const record = parsed as Record<string, unknown>;
   const schemaVersion = requireSchemaVersion(record, filePath);
   if (record.source_interpretation_profile !== undefined && schemaVersion !== 4) {
-    throw new Error("packet caches require the current manifest contract");
+    throw new AlayaError("CONFLICT", "packet caches require the current manifest contract");
   }
   const common: ExtractionCacheManifestBase = {
     ...(record.source_interpretation_profile === undefined ? {} : {

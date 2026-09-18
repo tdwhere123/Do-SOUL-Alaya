@@ -1,4 +1,5 @@
 import {
+  AlayaError,
   HARD_IDENTITY_TRANSFER_ID,
   HARD_IDENTITY_TRANSFER_VERSION,
   MILLIGRADE_TOP,
@@ -160,7 +161,7 @@ export function retargetRelationProduct(from: ProductStateKey, targetId: string,
   facts?: ReadonlyMap<string, BoundSourceFacts>): ProductStateKey {
   if (from.interpretation_node !== undefined) {
     const node = facts?.get(targetId)?.interpretation_node;
-    if (node === undefined) throw new Error("interpretation target has no admitted node identity");
+    if (node === undefined) throw new AlayaError("CONFLICT", "interpretation target has no admitted node identity");
     return retargetInterpretationProduct(from, node, { program_state: patch.program_state, binding_context: patch.binding_context });
   }
   return memoryProductStateKey({ workspace_id: from.target.workspace_id, object_id: targetId,

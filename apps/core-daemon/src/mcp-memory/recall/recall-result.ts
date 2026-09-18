@@ -1,4 +1,5 @@
 import {
+  AlayaError,
   MILLIGRADE_TOP,
   indexEntryCacheKey,
   indexEntryObjectKind,
@@ -29,7 +30,7 @@ export function encodeIndexResults(
   }>>> = {}
 ): readonly MemorySearchResult[] {
   if (index.entries.some((entry) => entry.interpretation_node !== undefined)) {
-    throw new Error("conditional interpretation results require the qualified interpretation result capability");
+    throw new AlayaError("CONFLICT", "conditional interpretation results require the qualified interpretation result capability");
   }
   const encoded: MemorySearchResult[] = [];
   let usedTokens = 0;

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AlayaError } from "../shared/alaya-error.js";
 import { SourceAssertionIdSchema, SourceTextSpanSchema } from "./source-selection.js";
 import { Sha256HexSchema, Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
@@ -22,14 +23,14 @@ function* selectedSegments(assertions: readonly Assertion[]) {
   if (assertions.length > 64 ||
       new Set(assertions.map((row) => row.assertion_id)).size !== assertions.length ||
       assertions.reduce((sum, row) => sum + row.text.length, 0) > MAX_SOURCE_UNITS) {
-    throw new Error("source reference catalog exceeds its assertion/text bound");
+    throw new AlayaError("VALIDATION", "source reference catalog exceeds its assertion/text bound");
   }
   let count = 0;
   for (const row of assertions) {
-    if (/[\uD800-\uDFFF]/u.test(row.text)) throw new Error("source reference catalog contains an unpaired surrogate");
+    if (/[\uD800-\uDFFF]/u.test(row.text)) throw new AlayaError("VALIDATION", "source reference catalog contains an unpaired surrogate");
     let ordinal = 0;
     for (const match of row.text.matchAll(/[A-Za-z0-9_]+|[^]/gu)) {
-      if (++count > MAX_SEGMENTS) throw new Error("source reference catalog exceeds its segment bound");
+      if (++count > MAX_SEGMENTS) throw new AlayaError("VALIDATION", "source reference catalog exceeds its segment bound");
       yield { assertion_id: row.assertion_id, id: `a${row.assertion_id}s${ordinal}`, text: match[0],
         start: match.index, end: match.index + match[0].length, ordinal };
       ordinal += 1;
@@ -69,7 +70,9 @@ export function sourceReferenceResolver(value: SourceReferenceCatalog, sha256: F
   const catalog = SourceReferenceCatalogSchema.parse(value);
   const expected = buildSourceReferenceCatalog(catalog.source_digest, catalog.assertions.map((row) => ({
     assertion_id: row.assertion_id, text: row.segments.map((segment) => segment.text).join("") })), sha256);
-  if (canonicalJson(catalog) !== canonicalJson(expected)) throw new Error("source reference catalog identity/content mismatch");
+  if (canonicalJson(catalog) !== canonicalJson(expected)) {
+    throw new AlayaError("CONFLICT", "source reference catalog identity/content mismatch");
+  }
   const byId = new Map<string, { assertion_id: number; start: number; end: number; ordinal: number }>();
   const assertions = new Map<number, { text: string; segments: typeof catalog.assertions[number]["segments"] }>();
   for (const row of catalog.assertions) {
@@ -83,13 +86,13 @@ export function sourceReferenceResolver(value: SourceReferenceCatalog, sha256: F
   return {
     resolve(catalogId: string, assertionId: number, value: SourceReference) {
       const reference = SourceReferenceSchema.parse(value);
-      if (catalogId !== catalog.catalog_id) throw new Error("source reference belongs to a foreign catalog");
+      if (catalogId !== catalog.catalog_id) throw new AlayaError("CONFLICT", "source reference belongs to a foreign catalog");
       const first = byId.get(reference.first);
       const last = byId.get(reference.last);
       if (first === undefined || last === undefined || first.assertion_id !== assertionId || last.assertion_id !== assertionId) {
-        throw new Error("source reference has missing or cross-assertion endpoints");
+        throw new AlayaError("CONFLICT", "source reference has missing or cross-assertion endpoints");
       }
-      if (first.ordinal > last.ordinal) throw new Error("source reference endpoints are reversed");
+      if (first.ordinal > last.ordinal) throw new AlayaError("CONFLICT", "source reference endpoints are reversed");
       return { text: assertions.get(assertionId)!.text.slice(first.start, last.end),
         span: [first.start, last.end] as const };
     },
@@ -98,7 +101,9 @@ export function sourceReferenceResolver(value: SourceReferenceCatalog, sha256: F
       const row = assertions.get(assertionId);
       const first = row?.segments.find((segment) => byId.get(segment.id)!.start === start);
       const last = row?.segments.find((segment) => byId.get(segment.id)!.end === end);
-      if (first === undefined || last === undefined) throw new Error("unsupported source reference boundary inside a segment");
+      if (first === undefined || last === undefined) {
+        throw new AlayaError("VALIDATION", "unsupported source reference boundary inside a segment");
+      }
       return { first: first.id, last: last.id };
     }
   };

@@ -169,7 +169,7 @@ async function runExtractionFillBody(
 ): Promise<ExtractionFillResult> {
   if (options.sourceInterpretationProfile !== undefined && (options.batch === undefined ||
       options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.extractorFactory !== undefined)) {
-    throw new Error("source packet fill requires explicit isolated Batch execution");
+    throw new AlayaError("VALIDATION", "source packet fill requires explicit isolated Batch execution");
   }
   const fill = freezeExtractionFillOptions(options);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(fill.cacheRoot);
