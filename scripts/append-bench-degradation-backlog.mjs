@@ -17,7 +17,7 @@ const KNOWN_BENCHES = new Set([
 const args = parseArgs(process.argv.slice(2));
 const historyRoot = args["history-root"] ?? "docs/bench-history";
 const benchName = args.bench ?? "public";
-const backlogPath = args.backlog ?? "docs/handbook/backlog.md";
+const backlogPath = args.backlog ?? "docs/bench-history/degradation-backlog.md";
 const thresholdPp = Number.parseFloat(args["threshold-pp"] ?? "5");
 
 if (!KNOWN_BENCHES.has(benchName)) {

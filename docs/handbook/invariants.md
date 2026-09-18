@@ -354,12 +354,13 @@ required anti-recurrence step when a cause class recurs across independent revie
 ## Docs
 
 32. The v0.1 port-era task-card record was removed on 2026-08-24
-    (commit 2b23da6f2). Track ordinary engineering debt in
-    `docs/handbook/backlog.md` and PR descriptions. The in-repo
+    (commit 2b23da6f2). Track ordinary engineering debt in PR
+    descriptions. Do not keep a parallel handbook issue list. The in-repo
     authority for the recall-field contract and current live state is
     `docs/handbook/recall.md`. Gitignored local work artifacts under
     `.do-it/` (including `.do-it/plans/`) are execution tracking, not
-    handbook or invariant truth.
+    handbook or invariant truth. Bench KPI degradations belong in
+    `docs/bench-history/`, not the handbook.
 33. `docs/handbook/` is the maintained implementation handbook.
 34. `docs/archive/` holds retired-but-preserved documents. The
     remaining file is `docs/archive/recall-before-retirement-2026-09-08.md`.

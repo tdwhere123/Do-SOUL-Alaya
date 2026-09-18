@@ -12,4 +12,4 @@ Run ac5404ba on 2026-06-04T23:46:39.966Z flipped one or more KPIs into ✗ FAIL.
 
 ## Next step
 
-Open a backlog entry in `docs/handbook/backlog.md` for each failure, with suspected root cause and proposed fix scope.
+Record each failure in the PR description or `docs/bench-history/`, with suspected root cause and proposed fix scope.

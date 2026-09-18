@@ -33,6 +33,11 @@ observation, derivations, support and index projection. The shared runtime
 runner owns request budgets and continuation. Storage owns native persistence
 and generation changes; the daemon wires worker snapshots and MCP/CLI.
 
+Readiness labels for new claims: `schema_only` (types only), `implementation_wired`
+(startup plus fixture tests), `live_event_proven` (real workspace / attach /
+bench E2E), `agent_used` (host agent invoked the surface with EventLog).
+Official 100Q / 500Q promotion is not claimed.
+
 The conditional field is the single ordinary Recall decision route. Retired
 prefix-capture, budget-aware-q, query-proof shadow, Select_Gamma walks,
 `runCoarseFilter`, `prepareRecallRequest` selector prepare, family-rank-base

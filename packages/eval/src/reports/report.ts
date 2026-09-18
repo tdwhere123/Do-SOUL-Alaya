@@ -306,7 +306,7 @@ export function renderFindings(
   lines.push("## Next step");
   lines.push("");
   lines.push(
-    "Open a backlog entry in `docs/handbook/backlog.md` for each failure, with suspected root cause and proposed fix scope."
+    "Record each failure in the PR description or `docs/bench-history/`, with suspected root cause and proposed fix scope."
   );
   lines.push("");
   return lines.join("\n");

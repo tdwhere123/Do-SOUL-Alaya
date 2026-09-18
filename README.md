@@ -24,9 +24,7 @@ a completed recall landing or a published KPI.
 | [`docs/handbook/README.md`](docs/handbook/README.md) | Handbook index |
 | [`docs/handbook/invariants.md`](docs/handbook/invariants.md) | Rules that always win |
 | [`docs/handbook/architecture.md`](docs/handbook/architecture.md) | Package shape, surfaces, write model, governance routes |
-| [`docs/handbook/recall.md`](docs/handbook/recall.md) | Recall contract and live versus historical path |
-| [`docs/handbook/runtime-snapshot.md`](docs/handbook/runtime-snapshot.md) | Readiness vocabulary and dated snapshots |
-| [`docs/handbook/backlog.md`](docs/handbook/backlog.md) | Open issues that are not the recall field |
+| [`docs/handbook/recall.md`](docs/handbook/recall.md) | Recall contract, live path, readiness vocabulary |
 | [`docs/handbook/glossary.md`](docs/handbook/glossary.md) | Stable vocabulary |
 
 Agent working copy: [`AGENTS.md`](AGENTS.md).

@@ -265,7 +265,6 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
       "docs/handbook/architecture.md",
       "docs/handbook/invariants.md",
       "docs/handbook/glossary.md",
-      "docs/handbook/runtime-snapshot.md",
       "docs/handbook/README.md",
       "scripts/ci/repository-structure-policy.json"
     ])

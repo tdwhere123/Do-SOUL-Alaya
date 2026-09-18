@@ -10,4 +10,4 @@ Run efc68f5 on 2026-06-24T12:19:50.979Z is below one or more absolute benchmark 
 
 ## Next step
 
-Open a backlog entry in `docs/handbook/backlog.md` for each failure, with suspected root cause and proposed fix scope.
+Record each failure in the PR description or `docs/bench-history/`, with suspected root cause and proposed fix scope.

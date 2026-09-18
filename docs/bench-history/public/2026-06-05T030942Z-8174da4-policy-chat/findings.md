@@ -10,4 +10,4 @@ Run 8174da4 on 2026-06-05T03:09:42.454Z is below one or more absolute benchmark 
 
 ## Next step
 
-Open a backlog entry in `docs/handbook/backlog.md` for each failure, with suspected root cause and proposed fix scope.
+Record each failure in the PR description or `docs/bench-history/`, with suspected root cause and proposed fix scope.

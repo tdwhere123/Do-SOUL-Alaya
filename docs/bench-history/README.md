@@ -240,7 +240,7 @@ docs/bench-history/
 - `findings.md` is emitted by the diff engine when any KPI hits the `✗`
   threshold; it lists the regression, the suspected root cause, and a
   candidate `#BL-XXX` backlog entry. The release relay turn must lift
-  these into `docs/handbook/backlog.md`.
+  these into `docs/bench-history/degradation-backlog.md` or the PR description.
 
 ## KPI schema (`kpi.json`)
 
