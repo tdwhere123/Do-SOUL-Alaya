@@ -6,7 +6,7 @@ import { WS, RUN, NOW } from "../../../../../../packages/core/src/__tests__/reca
 import { SOURCE_DISCOVERY_CANARY } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
 import { bindReceivedSourceInterpretationPayload } from "./source-discovery-admitted-public-publication.js";
 import { publishCorePublicSources } from "./source-discovery-native-publication.js";
-import { withPlantedSourceWorker } from "./source-discovery-public-consumption-plant.js";
+import { awaitWorkerAfterMainSqliteClose, withPlantedSourceWorker } from "./source-discovery-public-consumption-plant.js";
 import { observePlantedDiscovery, publicSearchRequest, scoreConsumption } from "./source-discovery-public-consumption.js";
 import { consumePublicSources } from "./source-discovery-public-consumer.js";
 import { runAdmittedPublicMatrix } from "./source-discovery-admitted-matrix.js";
@@ -77,7 +77,7 @@ it.skipIf(configuration === undefined)("measures isolated expression populations
           }, async (planted, handler, receipts, client) => {
             planted.database.close();
             closeCachedDatabase(planted.filename);
-            await client.ready();
+            await awaitWorkerAfterMainSqliteClose(client);
             for (const enumeration of ["canonical", "associative"] as const) {
               for (const lookup of ["proposal", "source_text", "no-hint"] as const) {
                 const offset = receipts.length;

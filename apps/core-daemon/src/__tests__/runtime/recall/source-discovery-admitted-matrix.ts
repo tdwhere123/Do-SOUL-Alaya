@@ -4,7 +4,7 @@ import { SOURCE_DISCOVERY_CANARY, type CanaryCase } from "../../../../../../pack
 import { consumePublicSources } from "./source-discovery-public-consumer.js";
 import { PUBLIC_CONSUMPTION_PROTOCOL, publicSearchRequest, scoreConsumption } from "./source-discovery-public-consumption.js";
 import { boundTrace, caseKey, missingCases, persistRunEvidence, type CaseIdentity } from "./source-discovery-public-consumption-evidence.js";
-import { withPlantedSourceWorker } from "./source-discovery-public-consumption-plant.js";
+import { awaitWorkerAfterMainSqliteClose, withPlantedSourceWorker } from "./source-discovery-public-consumption-plant.js";
 import { type BoundPublicReceive } from "./source-discovery-admitted-public-publication.js";
 import { publishCorePublicSources } from "./source-discovery-native-publication.js";
 import { observePublishedProposalExposure, type ProposalExposure } from "./source-discovery-proposal-attribution.js";
@@ -54,7 +54,7 @@ export async function runAdmittedPublicMatrix(input: {
             }, async (planted, handler, receipts, client) => {
               planted.database.close();
               closeCachedDatabase(planted.filename);
-              await client.ready();
+              await awaitWorkerAfterMainSqliteClose(client);
               for (const enumeration of ["canonical", "associative"] as const) {
                 for (const lookup of ["proposal", "source_text"] as const) {
                   const identity: CaseIdentity = { cell: sourceFirst ? "physical-source-first" : "physical-distractor-first",

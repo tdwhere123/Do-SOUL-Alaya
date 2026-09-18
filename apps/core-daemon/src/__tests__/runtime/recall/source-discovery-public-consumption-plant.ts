@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import {
   RecallService,
@@ -84,6 +85,27 @@ type PlantedHandler<T> = (
   receipts: ConditionalFieldExecutionReceipt[],
   client: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>
 ) => Promise<void>;
+
+/** Windows can keep WAL/SHM after better-sqlite3 close(); worker reopen must wait. */
+export async function awaitWorkerAfterMainSqliteClose(
+  client: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>
+): Promise<void> {
+  if (process.platform !== "win32") {
+    await client.ready();
+    return;
+  }
+  let last: unknown;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await client.ready();
+      return;
+    } catch (error) {
+      last = error;
+      await sleep(100);
+    }
+  }
+  throw last;
+}
 
 export async function withPlantedWorker(
   canary: CanaryCase,
@@ -232,7 +254,7 @@ export async function withPublicOrderedPairWorker(
       async (planted, handler, receipts, client) => {
         planted.database.close();
         closeCachedDatabase(planted.filename);
-        await client.ready();
+        await awaitWorkerAfterMainSqliteClose(client);
         const probeAt = receipts.length;
         const firstPage = await handler(
           publicSearchRequest(canary, "proposal", "source_only", "canonical"),

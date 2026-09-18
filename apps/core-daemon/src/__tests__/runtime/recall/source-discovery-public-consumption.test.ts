@@ -28,6 +28,7 @@ import {
   type CaseIdentity
 } from "./source-discovery-public-consumption-evidence.js";
 import {
+  awaitWorkerAfterMainSqliteClose,
   withOmittedPairWorker,
   withPlantedWorker,
   withPublicOrderedPairWorker
@@ -77,7 +78,7 @@ describe("public source consumption comparison", () => {
         };
         planted.database.close();
         closeCachedDatabase(planted.filename);
-        await client.ready();
+        await awaitWorkerAfterMainSqliteClose(client);
         for (const enumeration of ["canonical", "associative"] as const) {
           const pair: Awaited<ReturnType<typeof runPair>>[] = [];
           for (const lookup of ["proposal", "source_text"] as const) {
@@ -124,7 +125,7 @@ describe("public source consumption comparison", () => {
       await withPlantedWorker(canary, view, true, async (planted, handler, receipts, client) => {
         planted.database.close();
         closeCachedDatabase(planted.filename);
-        await client.ready();
+        await awaitWorkerAfterMainSqliteClose(client);
         for (const enumeration of ["canonical", "associative"] as const) {
           const pair: Awaited<ReturnType<typeof runPair>>[] = [];
           for (const lookup of ["proposal", "source_text"] as const) {
@@ -152,7 +153,7 @@ describe("public source consumption comparison", () => {
     await withPlantedWorker(canary, "memory_only", false, async (planted, handler, receipts, client) => {
       planted.database.close();
       closeCachedDatabase(planted.filename);
-      await client.ready();
+      await awaitWorkerAfterMainSqliteClose(client);
       for (const lookup of ["proposal", "source_text"] as const) {
         const scored = await attemptCell({
           cell: "memory_only", group: canary.group, view: "memory_only",
@@ -191,7 +192,7 @@ describe("public source consumption comparison", () => {
     await withOmittedPairWorker(canary, firstBody, secondBody, async (planted, handler, receipts, client) => {
       planted.database.close();
       closeCachedDatabase(planted.filename);
-      await client.ready();
+      await awaitWorkerAfterMainSqliteClose(client);
       const identity: CaseIdentity = {
         cell: "public_first_complete_then_later_read", group: canary.group,
         view: "source_only", enumeration: "canonical", lookup: "proposal"

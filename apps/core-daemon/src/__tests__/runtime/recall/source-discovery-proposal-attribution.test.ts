@@ -8,7 +8,7 @@ import { SOURCE_DISCOVERY_CANARY } from
 import { WS, RUN } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import { bindReceivedSourceInterpretationPayload, requireCompletePublicBind } from "./source-discovery-admitted-public-publication.js";
 import { aggregateAdmittedUtility, runAdmittedPublicMatrix } from "./source-discovery-admitted-matrix.js";
-import { withBoundPublicWorker, withPlantedSourceWorker } from "./source-discovery-public-consumption-plant.js";
+import { awaitWorkerAfterMainSqliteClose, withBoundPublicWorker, withPlantedSourceWorker } from "./source-discovery-public-consumption-plant.js";
 import { publishCorePublicSources } from "./source-discovery-native-publication.js";
 import { consumePublicSources } from "./source-discovery-public-consumer.js";
 import { publicSearchRequest, scoreConsumption, type ConsumptionTrace } from "./source-discovery-public-consumption.js";
@@ -74,7 +74,7 @@ it("binds an exposed proposal to its published candidate, request and source bef
     async (planted, handler, receipts, client) => {
       planted.database.close();
       closeCachedDatabase(planted.filename);
-      await client.ready();
+      await awaitWorkerAfterMainSqliteClose(client);
       const search = publicSearchRequest(canary, "proposal", "source_only", "canonical");
       const trace = await consumePublicSources({ handler, receipts, request: search,
         context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" } });
@@ -148,7 +148,7 @@ it("retains source lookup witnesses from Core publication across SQLite reopen a
       .toBe(Buffer.byteLength(sourceCorpus.slice(0, sourceCorpus.indexOf("access")), "utf8"));
     planted.database.close();
     closeCachedDatabase(planted.filename);
-    await client.ready();
+    await awaitWorkerAfterMainSqliteClose(client);
     const search = publicSearchRequest(canary, "proposal", "source_only", "canonical");
     const trace = await consumePublicSources({ handler, receipts, request: search,
       context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" } });

@@ -30,6 +30,7 @@ import {
   publicSearchRequest
 } from "./source-discovery-public-consumption.js";
 import {
+  awaitWorkerAfterMainSqliteClose,
   withBoundPublicWorker,
   withPlantedSourceWorker,
   type PlantedBound
@@ -97,7 +98,7 @@ describe("bound source interpretation public consumption", () => {
       expectProposalUsedPublishedGists(planted);
       planted.database.close();
       closeCachedDatabase(planted.filename);
-      await client.ready();
+      await awaitWorkerAfterMainSqliteClose(client);
       await consumePublic(handler, receipts, "proposal");
       await expectPublicProposal(handler, planted.sourceId, true);
       expect(fetches).toBe(0);
@@ -124,7 +125,7 @@ describe("bound source interpretation public consumption", () => {
       expect(native.lookup_kind).not.toBe("proposal");
       planted.database.close();
       closeCachedDatabase(planted.filename);
-      await client.ready();
+      await awaitWorkerAfterMainSqliteClose(client);
       await consumePublic(handler, receipts, "proposal");
       await expectPublicProposal(handler, planted.sourceId, false);
       expect(fetches).toBe(0);
@@ -159,7 +160,7 @@ describe("bound source interpretation public consumption", () => {
       expect(native.lookup_kind).not.toBe("proposal");
       planted.database.close();
       closeCachedDatabase(planted.filename);
-      await client.ready();
+      await awaitWorkerAfterMainSqliteClose(client);
       await consumePublic(handler, receipts, "proposal");
       await expectPublicProposal(handler, planted.sourceId, false);
       expect(fetches).toBe(0);
@@ -248,7 +249,7 @@ describe("bound source interpretation public consumption", () => {
         expectProposalUsedPublishedGists(planted);
         planted.database.close();
         closeCachedDatabase(planted.filename);
-        await client.ready();
+        await awaitWorkerAfterMainSqliteClose(client);
         await consumePublic(handler, receipts, "proposal");
         await expectPublicProposal(handler, planted.sourceId, true);
         expect(fetches).toBe(0);
@@ -274,7 +275,7 @@ describe("bound source interpretation public consumption", () => {
       expect(native.lookup_kind).not.toBe("proposal");
       planted.database.close();
       closeCachedDatabase(planted.filename);
-      await client.ready();
+      await awaitWorkerAfterMainSqliteClose(client);
       await consumePublic(handler, receipts, "proposal");
       await expectPublicProposal(handler, planted.sourceId, false);
       expect(fetches).toBe(0);
