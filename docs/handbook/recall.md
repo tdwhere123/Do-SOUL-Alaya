@@ -704,7 +704,7 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local H, source-independent
 Q, explicit A, and selected C. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 6.4.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
+Garden v1. Protocol 6.5.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
 reasoning/cache v3, `source-semantic-k-v3`,
 `source-semantic-normalizer-v4` and `source-semantic-lowering-v3`. An older open
 H is not relabeled or silently promoted; recreate its interpretation explicitly.
@@ -732,9 +732,15 @@ Canonical-envelope archives retain native request/response replay with their
 original prompt. Their normalizer-v3 manifests remain ineligible for current
 cache reuse; replay does not upgrade or publish an old interpretation.
 
-Gemini decoding guidance has its own provider projection: recursive schemas use
-JSON mode without a decoder schema, while the complete source schema is attached
-as system guidance. Local Protocol admission still requires all fields, expression
+New expression requests bind `bounded-expression-schema-v1`. Protocol derives
+its generation schema from the same expression shapes, with shared acyclic
+definitions spanning the canonical domination-depth limit. SOUL selects it for
+structured generation; reference validation and semantic admission still run
+locally. Decoder acceptance does not prove semantic fidelity or source coverage.
+Recorded requests without this marker keep their original recursive schema.
+Gemini decoding guidance has its own provider projection: those recursive schemas
+use JSON mode without a decoder schema, while the complete source schema is
+attached as system guidance. Local Protocol admission still requires all fields, expression
 operands and arguments. Recursive Gemini cache identities include the source
 schema, explicit absence of a decoder schema and exact appended guidance; acyclic
 historical keys and transmitted bytes remain unchanged. Provider acceptance and

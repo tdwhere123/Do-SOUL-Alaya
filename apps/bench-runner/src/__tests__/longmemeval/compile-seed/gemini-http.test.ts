@@ -129,22 +129,19 @@ describe("native Gemini interactive extraction", () => {
     expect(soul.officialApiExtractionResponseSchema(userPrompt)).toEqual(originalSnapshot);
   });
 
-  it("transmits recursive decoding guidance over HTTP and admits complete source expressions locally", async () => {
+  it.each(["historical", "bounded"])("transmits %s expression generation over HTTP and admits complete source expressions locally", async (generation) => {
     const source = { sourceCorpus: "Mira promised to lend the atlas. Every visitor might read it.", assertionIds: [1, 2],
       source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
-    const request = soul.buildSourceSemanticRequest(source);
+    const current = soul.buildSourceSemanticRequest(source);
+    const { generation_schema_contract: _generation, ...source_request } = current.source_request;
+    const request = generation === "bounded" ? current : { ...current, source_request };
     const raw = soul.SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
-    let observed = false;
+    let observed: string | undefined;
     await withServer((req, res) => {
       const chunks: Buffer[] = [];
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("end", () => {
-        const wire = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        expect(wire.generationConfig.responseMimeType).toBe("application/json");
-        expect(wire.generationConfig).not.toHaveProperty("responseJsonSchema");
-        expect(wire.systemInstruction.parts[1].text).toContain(
-          JSON.stringify(soul.officialApiExtractionResponseSchema(JSON.stringify(request))));
-        observed = true;
+        observed = Buffer.concat(chunks).toString("utf8");
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: raw }] } }] }));
       });
@@ -155,7 +152,17 @@ describe("native Gemini interactive extraction", () => {
       });
       expect(result.rawJson).toBe(raw);
     });
-    expect(observed).toBe(true);
+    expect(observed).toBeDefined();
+    const wire = JSON.parse(observed!);
+    expect(wire.generationConfig.responseMimeType).toBe("application/json");
+    if (generation === "bounded") {
+      expect(wire.generationConfig.responseJsonSchema).toBeDefined();
+      expect(wire.systemInstruction.parts).toHaveLength(1);
+    } else {
+      expect(wire.generationConfig).not.toHaveProperty("responseJsonSchema");
+      expect(wire.systemInstruction.parts[1].text).toContain(
+        JSON.stringify(soul.officialApiExtractionResponseSchema(JSON.stringify(request))));
+    }
   });
 
   it("adapts generation array bounds and empty additional-property schemas without changing other constraints or property names", () => {

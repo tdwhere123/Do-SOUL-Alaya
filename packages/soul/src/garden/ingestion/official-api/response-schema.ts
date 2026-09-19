@@ -38,7 +38,8 @@ export function officialApiExtractionResponseSchemaPreimage(userPrompt: string):
   if (packetSchema !== undefined) return JSON.stringify(packetSchema);
   const semanticRequest = sourceSemanticRequest(userPrompt);
   if (semanticRequest !== undefined) {
-    const contract = semanticRequest.source_request.proposal_contract ?? "canonical-envelope";
+    const contract = JSON.stringify([semanticRequest.source_request.proposal_contract ?? "canonical-envelope",
+      semanticRequest.source_request.generation_schema_contract ?? null]);
     let preimage = semanticSchemaPreimages.get(contract);
     if (preimage === undefined) {
       preimage = JSON.stringify(sourceSemanticResponseJsonSchema(semanticRequest));

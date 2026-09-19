@@ -34,7 +34,7 @@ describe("source-bound nested semantic expressions", () => {
   it("selects schema and exact prompt from each recorded producer contract", () => {
     const current = buildSourceSemanticRequest(input);
     const historical = parseSourceSemanticRequest({ ...current, source_request: {
-      ...current.source_request, proposal_contract: "source-semantic-proposal-v2"
+      ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v2"
     } });
     expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v3");
     expect(sourceSemanticSystemPrompt(current)).toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
@@ -51,6 +51,25 @@ describe("source-bound nested semantic expressions", () => {
     const revised = parseSourceSemanticRequest({ ...historical, source_request: { ...historical.source_request, revision } });
     expect(receiveSourceSemantics(prior, revised, input).outcome.status).toBe("interpreted");
     expect(() => buildSourceSemanticRequest({ ...input, revision })).toThrow(/different original source/u);
+  });
+
+  it("pins bounded generation separately while replaying historical recursive requests unchanged", () => {
+    const current = buildSourceSemanticRequest(input);
+    const { generation_schema_contract: _generation, ...body } = current.source_request;
+    const historical = parseSourceSemanticRequest({ ...current, source_request: body });
+    expect(current.source_request.generation_schema_contract).toBe("bounded-expression-schema-v1");
+    expect(historical.source_request).not.toHaveProperty("generation_schema_contract");
+    expect(sourceSemanticResponseJsonSchema(current)).not.toEqual(sourceSemanticResponseJsonSchema(historical));
+    for (const request of [historical, current, historical, current]) {
+      const prompt = JSON.stringify(request);
+      expect(officialApiExtractionResponseSchemaPreimage(prompt)).toBe(JSON.stringify(officialApiExtractionResponseSchema(prompt)));
+    }
+    expect(receiveSourceSemantics(raw, historical, input).interpretation).toEqual(receiveSourceSemantics(raw, current, input).interpretation);
+    const revision = prepareSourceSemanticRevision(historical, raw);
+    expect(() => buildSourceSemanticRequest({ ...input, revision })).toThrow(/different original source/u);
+    expect(() => parseSourceSemanticRequest({ ...current, source_request: {
+      ...current.source_request, proposal_contract: "source-semantic-proposal-v2"
+    } })).toThrow(/bounded generation schema/u);
   });
 
   it("retains contradictory declarations as rejected raw without publishing an interpretation", () => {

@@ -35,8 +35,10 @@ describe("Gemini recursive decoding schema projection", () => {
       .toThrow(/unresolved reference/u);
   });
 
-  it("binds projected decoding bytes in new recursive cache identity while preserving acyclic identities", () => {
-    const request = JSON.stringify(buildSourceSemanticRequest(input));
+  it("replays historical recursive decoding bytes and cache identity while preserving acyclic identities", () => {
+    const current = buildSourceSemanticRequest(input);
+    const { generation_schema_contract: _generation, ...source_request } = current.source_request;
+    const request = JSON.stringify({ ...current, source_request });
     const source = officialApiExtractionResponseSchemaPreimage(request);
     const material = geminiGenerationSchemaCacheMaterial(source);
     const body = encodeGeminiGenerateContent({ userPrompt: request, systemPrompt: SOURCE_SEMANTIC_SYSTEM_PROMPT },
@@ -54,6 +56,22 @@ describe("Gemini recursive decoding schema projection", () => {
     const acyclic = JSON.stringify({ type: "object", properties: { rows: { type: "array", maxItems: 3 } }, required: ["rows"] });
     expect(geminiGenerationSchemaCacheMaterial(acyclic)).toBe(acyclic);
     expect(geminiGenerationSchemaCacheMaterial("null")).toBe("null");
+  });
+
+  it("transmits the current bounded expression schema through the native structured decoder", () => {
+    const request = JSON.stringify(buildSourceSemanticRequest(input));
+    const source = officialApiExtractionResponseSchemaPreimage(request);
+    const projected = projectGeminiGenerationSchema(JSON.parse(source));
+    expect(projected.recursive).toBe(false);
+    expect(projected.instruction).toBeUndefined();
+    const body = encodeGeminiGenerateContent({ userPrompt: request, systemPrompt: SOURCE_SEMANTIC_SYSTEM_PROMPT },
+      { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1", maxOutputTokens: 32768 });
+    expect(body).toMatchObject({ generationConfig: { responseMimeType: "application/json", responseJsonSchema: projected.schema } });
+    expect(body).toMatchObject({ systemInstruction: { parts: [{ text: SOURCE_SEMANTIC_SYSTEM_PROMPT }] } });
+    expect(geminiGenerationSchemaCacheMaterial(source)).toBe(source);
+    const fields = ["gemini-3.1-flash-lite", "gemini-3.1-low-v1", SOURCE_SEMANTIC_SYSTEM_PROMPT, request, source];
+    expect(computeCacheKey(fields[0]!, "gemini-3.1-low-v1", fields[2]!, request))
+      .toBe(createHash("sha256").update(fields.join("\0")).digest("hex"));
   });
 
   it("still rejects a missing nested operand through the unchanged strict local receiver", () => {

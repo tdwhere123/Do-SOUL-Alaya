@@ -11,7 +11,7 @@ const raw = () => SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!
 const buildSourceSemanticRequest = (value: Parameters<typeof buildCurrentRequest>[0]) => {
   const request = buildCurrentRequest(value);
   return parseSourceSemanticRequest({ ...request, source_request: {
-    ...request.source_request, proposal_contract: "source-semantic-proposal-v2"
+    ...request.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v2"
   } });
 };
 const proposeSourceSemantics = (value: Parameters<typeof buildCurrentRequest>[0], response: { rawJson: string }) =>

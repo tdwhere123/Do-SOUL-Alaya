@@ -24,7 +24,7 @@ const TEXT = "The archivist accessioned folio F into bay B.";
 function buildSourceSemanticRequest(input: Parameters<typeof buildCurrentSourceSemanticRequest>[0]) {
   const current = buildCurrentSourceSemanticRequest(input);
   return parseSourceSemanticRequest({ ...current, source_request: {
-    ...current.source_request, proposal_contract: "source-semantic-proposal-v1"
+    ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v1"
   } });
 }
 function proposeSourceSemantics(input: Parameters<typeof proposeCurrentSourceSemantics>[0], injected?: { rawJson: string }) {

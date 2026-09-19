@@ -6,6 +6,7 @@ import {
   SourceSemanticProposalSchema, SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
   SourceSemanticContentProposalSchema, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
   SourceSemanticExpressionProposalSchema, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
+  SourceSemanticExpressionGenerationSchema,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
   buildSourceReferenceCatalog, canonicalJson,
@@ -46,6 +47,7 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   proposal_contract: z.enum([SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
     SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT]).optional(),
   source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT).optional(),
+  generation_schema_contract: z.literal("bounded-expression-schema-v1").optional(),
   revision: SourceSemanticRevisionSchema.optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
@@ -71,6 +73,9 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   }
   if (request.revision !== undefined && !semanticContent) {
     context.addIssue({ code: "custom", message: "revision requires the semantic content proposal contract" });
+  }
+  if (request.generation_schema_contract !== undefined && request.proposal_contract !== SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT) {
+    context.addIssue({ code: "custom", message: "bounded generation schema requires the expression proposal contract" });
   }
 }).readonly();
 
@@ -200,6 +205,7 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     proposal_contract: SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
     source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
+    generation_schema_contract: "bounded-expression-schema-v1",
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
     assertion_locations: units.map((row) => ({
@@ -257,11 +263,14 @@ export function buildSourceSemanticAlignmentRequest(
 /** Producer JSON Schema selected by the recorded request contract, without profile enums. */
 export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest): object {
   const contract = request?.source_request.proposal_contract;
+  const bounded = request === undefined || request.source_request.generation_schema_contract !== undefined;
   const schema = request !== undefined && contract === undefined ? SourceSemanticResponseEnvelopeSchema
     : contract === SOURCE_SEMANTIC_PROPOSAL_CONTRACT ? SourceSemanticProposalSchema
-    : contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT ? SourceSemanticContentProposalSchema : SourceSemanticExpressionProposalSchema;
+    : contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT ? SourceSemanticContentProposalSchema
+    : bounded ? SourceSemanticExpressionGenerationSchema : SourceSemanticExpressionProposalSchema;
   return z.toJSONSchema(schema, {
-    io: schema === SourceSemanticExpressionProposalSchema ? "output" : "input",
+    io: schema === SourceSemanticExpressionProposalSchema || schema === SourceSemanticExpressionGenerationSchema ? "output" : "input",
+    ...(bounded ? { reused: "ref" as const } : {}),
     override: ({ jsonSchema }) => {
       if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
     }

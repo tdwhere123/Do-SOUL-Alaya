@@ -12,7 +12,7 @@ describe("source semantic unit coverage", () => {
   it("preserves historical empty-request identity and source binding without current-generation relabeling", () => {
     const input = { ...producer, sourceCorpus: "", assertionIds: [] };
     const current = buildSourceSemanticRequest(input);
-    const { source_unit_contract: _units, proposal_contract: _proposal, ...body } = current.source_request;
+    const { source_unit_contract: _units, proposal_contract: _proposal, generation_schema_contract: _generation, ...body } = current.source_request;
     const historical = parseSourceSemanticRequest({ ...current, source_request: {
       ...body, normalizer_version: "source-semantic-normalizer-v3"
     } });
@@ -71,7 +71,7 @@ describe("source semantic unit coverage", () => {
     const indexed = indexOfficialApiSourceAssertions(sourceCorpus);
     expect(indexed).toHaveLength(1);
     const row = indexed[0]!;
-    const { source_unit_contract: _contract, ...body } = current.source_request;
+    const { source_unit_contract: _contract, generation_schema_contract: _generation, ...body } = current.source_request;
     const source_assertions = [{ assertion_id: row.assertion_id, text: row.text }];
     const legacy = parseSourceSemanticRequest({ ...current,
       source_catalog: buildSourceReferenceCatalog(semanticSha256(sourceCorpus), source_assertions, semanticSha256),

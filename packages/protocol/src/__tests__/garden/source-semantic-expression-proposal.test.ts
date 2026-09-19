@@ -7,6 +7,8 @@ import { SourceSemanticResponseEnvelopeSchema } from "../../garden/source-semant
 import { sourceSemanticValidationDiagnostics } from "../../garden/source-semantic-diagnostics.js";
 import { normalizeSourceSemantics } from "../../garden/normalize-source-semantics.js";
 import { buildSourceReferenceCatalog } from "../../evidence/source-reference.js";
+import { SourceSemanticExpressionGenerationSchema } from "../../garden/source-semantic-expression-proposal.js";
+import { SOURCE_SEMANTIC_MAX_DEPTH } from "../../garden/source-semantic-draft.js";
 
 const anchor = (index = 0) => ({ assertion_id: 1, source_ref: { first: `a1s${index}`, last: `a1s${index}` } });
 const entity = (key = "Mira", mentions = [anchor(0)], referent_kind = "grouped") => ({ kind: "entity", key, referent_kind, mentions });
@@ -166,6 +168,56 @@ describe("nested source semantic expression proposals", () => {
     expect(schema.type).toBe("object"); expect(JSON.stringify(schema)).toContain('"roots"');
     expect(JSON.stringify(schema)).toContain('"$ref"'); expect(JSON.stringify(schema)).toContain("content_reference");
     expect(JSON.stringify(schema)).toContain("source-semantic-proposal-v3");
+  });
+
+  it("shares bounded decoder layers as an acyclic JSON Schema without changing semantic admission", () => {
+    const schema = z.toJSONSchema(SourceSemanticExpressionGenerationSchema, { io: "output", reused: "ref" });
+    const visited = new Set<object>(), visiting = new Set<object>();
+    const walk = (value: unknown): void => {
+      if (value === null || typeof value !== "object" || visited.has(value)) return;
+      expect(visiting.has(value)).toBe(false); visiting.add(value);
+      const object = value as Record<string, unknown>;
+      if (typeof object.$ref === "string") {
+        expect(object.$ref.startsWith("#/")).toBe(true);
+        let target: unknown = schema;
+        for (const key of object.$ref.slice(2).split("/")) target = (target as Record<string, unknown>)[key.replace(/~1/gu, "/").replace(/~0/gu, "~")];
+        expect(target).toBeDefined(); walk(target);
+      }
+      for (const [key, child] of Object.entries(object)) if (key !== "$defs") walk(child);
+      visiting.delete(value); visited.add(value);
+    };
+    walk(schema);
+    expect(Object.keys(schema.$defs ?? {}).length).toBeGreaterThan(SOURCE_SEMANTIC_MAX_DEPTH);
+    expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThan(200000);
+    for (const value of [proposal(), quantified(), measured()]) {
+      expect(SourceSemanticExpressionGenerationSchema.parse(value)).toEqual(value);
+      expect(compile(value)).toEqual(compile(SourceSemanticExpressionGenerationSchema.parse(value)));
+    }
+    const unresolved = proposal([root(statement("claim", [argument("topic", reference("missing"))]))]);
+    expect(SourceSemanticExpressionGenerationSchema.safeParse(unresolved).success).toBe(true);
+    expect(() => compile(unresolved)).toThrow(/Reference requires a declared statement or operator key/u);
+  });
+
+  it("retains deepest legal leaves, ordinary references and shared content without another nested layer", () => {
+    const nested = (leaf: object, parents: number) => {
+      let expression = leaf;
+      for (let i = 0; i < parents; i++) expression = { kind: "possible", key: `scope${i}`, evidence: [anchor()], content: expression };
+      return expression;
+    };
+    const leaf = statement("leaf", [argument("topic", reference("independent"))]);
+    const deepest = proposal([root(nested(leaf, SOURCE_SEMANTIC_MAX_DEPTH)), root(statement("independent"))]);
+    expect(SourceSemanticExpressionGenerationSchema.safeParse(deepest).success).toBe(true);
+    expect(compile(deepest).operators).toHaveLength(SOURCE_SEMANTIC_MAX_DEPTH);
+    const shared = proposal([root(nested(statement("parent", [argument("content", content(statement("shared"))),
+      argument("same content", reuse("shared"))]), SOURCE_SEMANTIC_MAX_DEPTH - 1))]);
+    expect(SourceSemanticExpressionGenerationSchema.safeParse(shared).success).toBe(true);
+    const compiled = compile(shared);
+    expect(frame(compiled, "parent").bindings.map(row => row.target)).toEqual([
+      { kind: "node", id: frame(compiled, "shared").id }, { kind: "node", id: frame(compiled, "shared").id }
+    ]);
+    const excessive = proposal([root(nested(statement("leaf"), SOURCE_SEMANTIC_MAX_DEPTH + 1))]);
+    expect(SourceSemanticExpressionGenerationSchema.safeParse(excessive).success).toBe(false);
+    expect(() => compile(excessive)).toThrow(/canonical domination depth/u);
   });
 
   it("preserves dispositions and rejects old flat or canonical ownership fields", () => {

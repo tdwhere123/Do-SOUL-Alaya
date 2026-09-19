@@ -33,25 +33,31 @@ type ExpressionValue = StatementValue
   | OperatorBase & Readonly<{ kind: "opaque"; operands: readonly OperandValue[] }>
   | OperatorBase & Readonly<{ kind: "forall"; domain: string; restriction: OperandValue | null; content: OperandValue }>;
 
-const Target: z.ZodType<TargetValue> = z.lazy(() => z.discriminatedUnion("kind", [Entity, ContentReference,
+function targetShape(expression?: z.ZodType<ExpressionValue>): z.ZodType<TargetValue> {
+  return z.discriminatedUnion("kind", [Entity, ContentReference,
   z.object({ kind: z.literal("reference"), key: Key }).strict().readonly(),
-  z.object({ kind: z.literal("content"), expression: Expression }).strict().readonly(),
+  ...(expression === undefined ? [] : [z.object({ kind: z.literal("content"), expression }).strict().readonly()]),
   z.object({ kind: z.literal("bound_variable"), quantifier: Key }).strict().readonly(),
   z.object({ kind: z.literal("unresolved") }).strict().readonly()
-]));
+  ]);
+}
+const Target: z.ZodType<TargetValue> = z.lazy(() => targetShape(Expression));
 const Operand: z.ZodType<OperandValue> = z.lazy(() => z.union([ContentReference, Expression]));
 const OperatorFields = { key: Key, evidence: Evidence };
-const Expression: z.ZodType<ExpressionValue> = z.lazy(() => z.discriminatedUnion("kind", [
+function expressionShape(target: z.ZodType<TargetValue>, operand: z.ZodType<OperandValue>): z.ZodType<ExpressionValue> {
+  return z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("statement"), key: Key, predicate: Predicate,
-    arguments: z.array(z.object({ role: ArgumentFields.role, evidence: ArgumentFields.evidence, target: Target }).strict().readonly()).max(8).readonly()
+    arguments: z.array(z.object({ role: ArgumentFields.role, evidence: ArgumentFields.evidence, target }).strict().readonly()).max(8).readonly()
   }).strict().readonly(),
-  z.object({ kind: z.literal("not"), ...OperatorFields, content: Operand }).strict().readonly(),
-  z.object({ kind: z.literal("possible"), ...OperatorFields, content: Operand }).strict().readonly(),
-  z.object({ kind: z.literal("reported"), ...OperatorFields, content: Operand, reporter: Entity.optional() }).strict().readonly(),
-  z.object({ kind: z.literal("conditional"), ...OperatorFields, antecedent: Operand, consequent: Operand }).strict().readonly(),
-  z.object({ kind: z.literal("opaque"), ...OperatorFields, operands: z.array(Operand).min(1).max(8).readonly() }).strict().readonly(),
-  z.object({ kind: z.literal("forall"), ...OperatorFields, domain: Key, restriction: Operand.nullable(), content: Operand }).strict().readonly()
-]));
+  z.object({ kind: z.literal("not"), ...OperatorFields, content: operand }).strict().readonly(),
+  z.object({ kind: z.literal("possible"), ...OperatorFields, content: operand }).strict().readonly(),
+  z.object({ kind: z.literal("reported"), ...OperatorFields, content: operand, reporter: Entity.optional() }).strict().readonly(),
+  z.object({ kind: z.literal("conditional"), ...OperatorFields, antecedent: operand, consequent: operand }).strict().readonly(),
+  z.object({ kind: z.literal("opaque"), ...OperatorFields, operands: z.array(operand).min(1).max(8).readonly() }).strict().readonly(),
+  z.object({ kind: z.literal("forall"), ...OperatorFields, domain: Key, restriction: operand.nullable(), content: operand }).strict().readonly()
+  ]);
+}
+const Expression: z.ZodType<ExpressionValue> = z.lazy(() => expressionShape(Target, Operand));
 const Domain = SourceSemanticDomainSchema.unwrap().omit({ id: true }).extend({ key: Key, context: Key.nullable(), support: Evidence,
   members: z.array(z.object({ referent: Entity, evidence: Key, restrictions: z.array(
     z.object({ restriction: Key, evidence: Key }).strict().readonly()).max(16).readonly() }).strict().readonly()).max(64).readonly(),
@@ -61,14 +67,29 @@ const Domain = SourceSemanticDomainSchema.unwrap().omit({ id: true }).extend({ k
 }).readonly();
 const Measurement = SourceSemanticMeasurementSchema.unwrap().omit({ id: true }).extend({ key: Key, subject: Entity,
   owner: Key, population: Key, support: Evidence }).readonly();
-const Content = z.object({ roots: z.array(z.object({ act: z.enum(SOURCE_SEMANTIC_SOURCE_ACTS), expression: Expression }).strict().readonly()).max(512).readonly(),
+function contentShape(expression: z.ZodType<ExpressionValue>) {
+  return z.object({ roots: z.array(z.object({ act: z.enum(SOURCE_SEMANTIC_SOURCE_ACTS), expression }).strict().readonly()).max(512).readonly(),
   domains: z.array(Domain).max(64).readonly().optional(), measurements: z.array(Measurement).max(256).readonly().optional(),
   gaps: Fields.gaps.unwrap().element.unwrap().extend({ affected: z.array(Key).max(56).readonly().optional() }).readonly().array().max(256).readonly()
-}).strict().readonly();
+  }).strict().readonly();
+}
+const Content = contentShape(Expression);
 const Outcome = z.discriminatedUnion("status", [z.object({ status: z.literal("interpreted") }).strict().readonly(),
   ...SourceSemanticOutcomeSchema.options.filter(option => option.unwrap().shape.status.value !== "interpreted")]);
 const Proposal = z.object({ contract: z.literal(SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT), outcome: Outcome,
   content: Content.optional() }).strict().readonly();
+
+/** Decoder syntax only; the unchanged compiler remains the semantic admission authority.
+ * Emit with reused: "ref" so shared layers become an acyclic definitions DAG. */
+export const SourceSemanticExpressionGenerationSchema = (() => {
+  let expression: z.ZodType<ExpressionValue> | undefined;
+  // Canonical depth counts domination edges: a root plus MAX_DEPTH descendants.
+  for (let depth = SOURCE_SEMANTIC_MAX_DEPTH; depth >= 0; depth--) {
+    const operand: z.ZodType<OperandValue> = expression === undefined ? ContentReference : z.union([ContentReference, expression]);
+    expression = expressionShape(targetShape(expression), operand);
+  }
+  return Proposal.unwrap().extend({ content: contentShape(expression!).optional() }).readonly();
+})();
 type ContentValue = z.infer<typeof Content>;
 type Path = (string | number)[];
 type SymbolKind = "entity" | "statement" | "operator" | "domain" | "measurement";
