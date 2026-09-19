@@ -8,14 +8,22 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 6.3.0
+## Unreleased — protocol 6.4.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 6.3.0 can move
+heading (currently `## v0.3.11` below). Protocol 6.4.0 can move
 independently of the app semver. `@do-soul/alaya-engine-gateway` is
 `0.3.12` for the additive `soul.interpretation` tool surface.
+
+Protocol 6.4.0 adds nested source-semantic expressions. Producers declare scope
+through nesting and entities where used; the shared compiler generates canonical
+identities and lowers through the existing content compiler. Explicit co-reference,
+same-parent content reuse and non-governing references remain distinct semantic
+choices. SOUL selects schemas, prompts and revision validation by the recorded
+producer contract, preserving v2 raw replay. Canonical H and consumer admission
+remain unchanged; this interface does not certify semantic completeness.
 
 Protocol 6.3.0 exposes the shared bounded diagnostics schema and preserves exact
 producer alias/ownership paths. SOUL adds explicit source-bound revision

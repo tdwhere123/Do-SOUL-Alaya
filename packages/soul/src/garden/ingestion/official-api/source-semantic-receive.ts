@@ -5,6 +5,7 @@ import {
   SourceSemanticOutcomeSchema, SourceSemanticQuerySchema, SourceSemanticResponseEnvelopeSchema,
   SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
   materializeSourceSemanticProposal, materializeSourceSemanticContentProposal, buildSourceReferenceCatalog,
+  materializeSourceSemanticExpressionProposal, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
   SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   normalizeSourceSemantics, sourceSemanticQueryIdentity, verifySourceSemanticDisposition, canonicalJson,
   type SourceSemanticAlignment, type SourceSemanticDraft, type SourceSemanticInterpretation,
@@ -105,11 +106,13 @@ export function receiveSourceSemantics(
   // Remove this branch when those archives use an offline-only legacy reader.
   let envelope: ReturnType<typeof SourceSemanticResponseEnvelopeSchema.safeParse>;
   const limits = request.source_request.resource_limits;
-  const meter = request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
+  const expression = request.source_request.proposal_contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT;
+  const meter = expression || request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
     ? new SourceSemanticResourceLedger({ work_units: limits.work_units ?? 200000, memory_bytes: limits.memory_bytes ?? 20000000 }) : undefined;
   try {
     envelope = request.source_request.proposal_contract === undefined
       ? SourceSemanticResponseEnvelopeSchema.safeParse(parsed.value)
+      : expression ? { success: true, data: materializeSourceSemanticExpressionProposal(parsed.value, meter) }
       : meter !== undefined ? { success: true, data: materializeSourceSemanticContentProposal(parsed.value, meter) }
       : { success: true, data: materializeSourceSemanticProposal(parsed.value) };
   } catch (error) {

@@ -5,16 +5,18 @@ import {
   SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema, SourceSemanticResponseEnvelopeSchema,
   SourceSemanticProposalSchema, SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
   SourceSemanticContentProposalSchema, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
+  SourceSemanticExpressionProposalSchema, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
   buildSourceReferenceCatalog, canonicalJson,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, selectSourceSemanticUnits } from "./source-semantic-units.js";
-import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT as CONTENT_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-expression-guidance.js";
 import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canonical-prompt.js";
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
-export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
+export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-expression-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT = "source-semantic-query-request-v2" as const;
 export const SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT = "source-semantic-query-response-v2" as const;
@@ -41,7 +43,8 @@ const ProducerCapability = z.object({
 const SourceSemanticOpenRequestBodySchema = z.object({
   k_version: z.literal(SOURCE_SEMANTIC_K_VERSION),
   normalizer_version: z.enum([SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION]),
-  proposal_contract: z.enum([SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT]).optional(),
+  proposal_contract: z.enum([SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
+    SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT]).optional(),
   source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT).optional(),
   revision: SourceSemanticRevisionSchema.optional(),
   producer_capability: ProducerCapability,
@@ -61,10 +64,12 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   if (request.source_unit_contract !== undefined && (!current || request.source_assertions.some((row) => row.source_role === undefined))) {
     context.addIssue({ code: "custom", message: "source units require the current proposal contract and explicit source roles" });
   }
-  if (request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT && request.source_unit_contract === undefined) {
+  const semanticContent = request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT ||
+    request.proposal_contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT;
+  if (semanticContent && request.source_unit_contract === undefined) {
     context.addIssue({ code: "custom", message: "content proposals require complete source units" });
   }
-  if (request.revision !== undefined && request.proposal_contract !== SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT) {
+  if (request.revision !== undefined && !semanticContent) {
     context.addIssue({ code: "custom", message: "revision requires the semantic content proposal contract" });
   }
 }).readonly();
@@ -193,7 +198,7 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
   const source_request = SourceSemanticOpenRequestBodySchema.parse({
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    proposal_contract: SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
+    proposal_contract: SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
     source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
@@ -253,9 +258,10 @@ export function buildSourceSemanticAlignmentRequest(
 export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest): object {
   const contract = request?.source_request.proposal_contract;
   const schema = request !== undefined && contract === undefined ? SourceSemanticResponseEnvelopeSchema
-    : contract === SOURCE_SEMANTIC_PROPOSAL_CONTRACT ? SourceSemanticProposalSchema : SourceSemanticContentProposalSchema;
+    : contract === SOURCE_SEMANTIC_PROPOSAL_CONTRACT ? SourceSemanticProposalSchema
+    : contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT ? SourceSemanticContentProposalSchema : SourceSemanticExpressionProposalSchema;
   return z.toJSONSchema(schema, {
-    io: "input",
+    io: schema === SourceSemanticExpressionProposalSchema ? "output" : "input",
     override: ({ jsonSchema }) => {
       if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
     }
@@ -328,8 +334,9 @@ const LEGACY_SOURCE_SEMANTIC_SYSTEM_PROMPT = [
 /** A retained request selects its producer syntax and prompt together. */
 export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): string {
   if (request.source_request.proposal_contract === undefined) return CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT;
+  if (request.source_request.proposal_contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT) return SOURCE_SEMANTIC_SYSTEM_PROMPT;
   return request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
-    ? SOURCE_SEMANTIC_SYSTEM_PROMPT : LEGACY_SOURCE_SEMANTIC_SYSTEM_PROMPT;
+    ? CONTENT_SOURCE_SEMANTIC_SYSTEM_PROMPT : LEGACY_SOURCE_SEMANTIC_SYSTEM_PROMPT;
 }
 
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [

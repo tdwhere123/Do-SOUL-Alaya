@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   AlayaError, SourceAssertionIdSchema, SourceSemanticDiagnosticsSchema,
-  materializeSourceSemanticContentProposal, sourceSemanticValidationDiagnostics
+  materializeSourceSemanticContentProposal, materializeSourceSemanticExpressionProposal, sourceSemanticValidationDiagnostics
 } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, semanticSha256, type SourceSemanticRequest } from "./source-semantic-request.js";
 
@@ -37,7 +37,8 @@ export function sourceSemanticBaseRequestDigest(request: SourceSemanticRequest):
 export function prepareSourceSemanticRevision(requestValue: SourceSemanticRequest, previousResponse: string,
   sourceReview: SourceSemanticRevision["source_review"] = []): SourceSemanticRevision {
   const request = parseSourceSemanticRequest(requestValue);
-  if (request.source_request.proposal_contract !== "source-semantic-proposal-v2") {
+  if (request.source_request.proposal_contract !== "source-semantic-proposal-v2" &&
+      request.source_request.proposal_contract !== "source-semantic-proposal-v3") {
     throw new AlayaError("VALIDATION", "revision requires the semantic content proposal contract");
   }
   if (Buffer.byteLength(previousResponse, "utf8") > 524288) throw new AlayaError("VALIDATION", "revision response exceeds its byte bound");
@@ -48,7 +49,7 @@ export function prepareSourceSemanticRevision(requestValue: SourceSemanticReques
     parent_request_json: JSON.stringify(request),
     previous_response_sha256: semanticSha256(previousResponse), previous_response: previousResponse,
     revision_number: (request.source_request.revision?.revision_number ?? 0) + 1,
-    structural_diagnostics: structuralDiagnostics(previousResponse), source_review: sourceReview
+    structural_diagnostics: structuralDiagnostics(previousResponse, request), source_review: sourceReview
   });
   validateSourceSemanticRevision(request, revision);
   return revision;
@@ -74,7 +75,7 @@ export function validateSourceSemanticRevision(request: SourceSemanticRequest, r
       sourceSemanticBaseRequestDigest(parent) !== revision.base_request_sha256) {
     throw new AlayaError("CONFLICT", "revision parent has a different original request");
   }
-  if (JSON.stringify(structuralDiagnostics(revision.previous_response)) !== JSON.stringify(revision.structural_diagnostics)) {
+  if (JSON.stringify(structuralDiagnostics(revision.previous_response, request)) !== JSON.stringify(revision.structural_diagnostics)) {
     throw new AlayaError("CONFLICT", "revision structural diagnostics differ from retained raw validation");
   }
   const ids = new Set(request.source_request.source_assertions.map((row) => row.assertion_id));
@@ -83,11 +84,14 @@ export function validateSourceSemanticRevision(request: SourceSemanticRequest, r
   }
 }
 
-function structuralDiagnostics(raw: string): SourceSemanticRevision["structural_diagnostics"] {
+function structuralDiagnostics(raw: string, request: SourceSemanticRequest): SourceSemanticRevision["structural_diagnostics"] {
   let previous: unknown;
   try { previous = JSON.parse(raw); }
   catch { throw new AlayaError("VALIDATION", "revision requires a complete retained JSON response"); }
-  try { materializeSourceSemanticContentProposal(previous); }
+  try {
+    if (request.source_request.proposal_contract === "source-semantic-proposal-v3") materializeSourceSemanticExpressionProposal(previous);
+    else materializeSourceSemanticContentProposal(previous);
+  }
   catch (error) {
     if (!(error instanceof z.ZodError)) throw error;
     return sourceSemanticValidationDiagnostics(error);

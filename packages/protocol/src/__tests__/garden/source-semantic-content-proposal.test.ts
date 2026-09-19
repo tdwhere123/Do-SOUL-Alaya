@@ -10,14 +10,22 @@ import { z } from "zod";
 
 const anchor = (index = 0, assertion_id = 1) => ({ assertion_id,
   source_ref: { first: `a${assertion_id}s${index}`, last: `a${assertion_id}s${index}` } });
-const statement = (id: string, arguments_: object[] = []) => ({ id,
+type FixtureArgument = { role: string; target: { kind: string; id?: string; quantifier?: string }; evidence: ReturnType<typeof anchor>[] };
+type FixtureOperator = { id: string; operator: string; evidence: ReturnType<typeof anchor>[]; content?: string;
+  antecedent?: string; consequent?: string; operands?: string[]; domain?: string; restriction?: string | null; reporter?: string };
+const statement = (id: string, arguments_: FixtureArgument[] = []) => ({ id,
   predicate: { kind: "explicit", reading: id, evidence: [anchor()] }, arguments: arguments_ });
 const argument = (kind: string, id: string, role = "theme") => ({ role, target: { kind, id }, evidence: [anchor(1)] });
 const act = (occurrence: string) => ({ occurrence, act: "assertion" });
 const entity = (id = "alice") => ({ id, referent_kind: "grouped", mentions: [anchor(1)] });
 const domain = (context: string | null = null) => ({ id: "people", context, support: [anchor(2)],
   members: [] as object[], exclusions: [], closure: { kind: "open" } });
-function proposal(content: object = {}) {
+type FixtureContent = {
+  entities: ReturnType<typeof entity>[]; statements: ReturnType<typeof statement>[]; operators: FixtureOperator[];
+  acts: ReturnType<typeof act>[]; gaps: { kind: string; evidence: ReturnType<typeof anchor>[]; affected?: string[]; description?: string }[];
+  domains?: ReturnType<typeof domain>[]; measurements?: object[];
+};
+function proposal(content: Partial<FixtureContent> = {}): { contract: string; outcome: { status: string }; content: FixtureContent } {
   return { contract: "source-semantic-proposal-v2", outcome: { status: "interpreted" }, content: {
     entities: [entity()], statements: [statement("send", [argument("entity", "alice")])],
     operators: [], acts: [act("send")], gaps: [], ...content
@@ -107,13 +115,13 @@ describe("source-bound content proposal compiler", () => {
   });
 
   it("preserves universal restrictions and rejects unsupported nested universal scopes", () => {
-    const value = quantified() as Record<string, any>, c = value.content;
+    const value = quantified(), c = value.content;
     c.statements.push(statement("owned", [{ role: "item", target: { kind: "bound_variable", quantifier: "everyone" }, evidence: [anchor(3)] }]));
-    c.operators[0].restriction = "owned";
+    c.operators[0]!.restriction = "owned";
     expect(compile(value).frames[2]!.context_owner).toEqual({ kind: "operator", operator_handle: "everyone" });
-    c.operators[0].content = "inner";
+    c.operators[0]!.content = "inner";
     c.operators.push({ id: "inner", operator: "forall", domain: "people", restriction: null, content: "send", evidence: [anchor(3)] });
-    c.statements[1].arguments[0].target.quantifier = "inner";
+    c.statements[1]!.arguments[0]!.target.quantifier = "inner";
     expect(() => compile(value)).toThrow(/nested universal/u);
   });
 
@@ -141,15 +149,15 @@ describe("source-bound content proposal compiler", () => {
   });
 
   it.each(["unowned", "conflicting_owner", "duplicate_alias", "wrong_entity", "wrong_reference", "unknown_content", "forged_gap_alias", "cycle"])("rejects %s without repairing input", (failure) => {
-    const value = proposal() as Record<string, any>, c = value.content;
+    const value = proposal(), c = value.content;
     if (failure === "unowned") c.acts = [];
     if (failure === "conflicting_owner") c.acts.push(act("send"));
     if (failure === "duplicate_alias") c.entities.push(entity("send"));
-    if (failure === "wrong_entity") c.statements[0].arguments[0].target.id = "send";
-    if (failure === "wrong_reference") c.statements[0].arguments[0].target = { kind: "reference", id: "alice" };
-    if (failure === "unknown_content") c.statements[0].arguments[0].target = { kind: "content", id: "missing" };
+    if (failure === "wrong_entity") c.statements[0]!.arguments[0]!.target.id = "send";
+    if (failure === "wrong_reference") c.statements[0]!.arguments[0]!.target = { kind: "reference", id: "alice" };
+    if (failure === "unknown_content") c.statements[0]!.arguments[0]!.target = { kind: "content", id: "missing" };
     if (failure === "forged_gap_alias") c.gaps = [{ kind: "uninterpreted_clause", evidence: [anchor()], affected: ["hostMention0"] }];
-    if (failure === "cycle") { c.acts = []; c.statements[0].arguments[0].target = { kind: "content", id: "send" }; }
+    if (failure === "cycle") { c.acts = []; c.statements[0]!.arguments[0]!.target = { kind: "content", id: "send" }; }
     const before = JSON.stringify(value);
     expect(SourceSemanticContentProposalSchema.safeParse(value).success).toBe(false);
     expect(() => compile(value)).toThrow();
@@ -157,11 +165,11 @@ describe("source-bound content proposal compiler", () => {
   });
 
   it.each(["missing_domain", "unused_binder", "escaped_binder", "unknown_evidence", "missing_population"])("preserves canonical quantified rejection for %s", (failure) => {
-    const value = quantified() as Record<string, any>, c = value.content;
+    const value = quantified(), c = value.content;
     if (failure === "missing_domain") c.domains = [];
-    if (failure === "unused_binder") c.statements[1].arguments[0].target = { kind: "entity", id: "alice" };
-    if (failure === "escaped_binder") c.statements[0].arguments = [{ role: "agent", evidence: [], target: { kind: "bound_variable", quantifier: "everyone" } }, c.statements[0].arguments[0]];
-    if (failure === "unknown_evidence") c.domains[0].members = [{ referent: "alice", evidence: "absent", restrictions: [] }];
+    if (failure === "unused_binder") c.statements[1]!.arguments[0]!.target = { kind: "entity", id: "alice" };
+    if (failure === "escaped_binder") c.statements[0]!.arguments = [{ role: "agent", evidence: [], target: { kind: "bound_variable", quantifier: "everyone" } }, c.statements[0]!.arguments[0]!];
+    if (failure === "unknown_evidence") c.domains![0]!.members = [{ referent: "alice", evidence: "absent", restrictions: [] }];
     if (failure === "missing_population") c.measurements = [{ id: "latency", subject: "alice", owner: "promise", population: "absent", metric: "latency", unit: "ms", context: "observed", value: "2", support: [anchor()] }];
     expect(() => compile(value)).toThrow();
   });
@@ -180,8 +188,8 @@ describe("source-bound content proposal compiler", () => {
   });
 
   it("locates conflicting ownership at both declarations without choosing a semantic repair", () => {
-    const value = quantified() as Record<string, any>;
-    value.content.statements[0].arguments[0].target.id = "send";
+    const value = quantified();
+    value.content.statements[0]!.arguments[0]!.target.id = "send";
     value.content.acts.push(act("everyone"));
     const diagnostics = diagnosticsOf(value);
     expect(diagnostics).toEqual([expect.objectContaining({ code: "conflicting_owner", reference: "send",
@@ -218,7 +226,8 @@ describe("source-bound content proposal compiler", () => {
     expect(materializeSourceSemanticContentProposal({ contract: "source-semantic-proposal-v2", outcome: { status: "abstained" } }).outcome).toEqual({ status: "abstained" });
     expect(() => compile({ ...proposal(), outcome: { status: "abstained" } })).toThrow();
     expect(() => compile({ ...proposal(), contract: "source-semantic-proposal-v1" })).toThrow();
-    expect(() => compile(proposal({ statements: [{ ...statement("send"), context_owner: { kind: "source_act", source_act: "assertion" } }] }))).toThrow();
+    const canonicalFrame = { ...statement("send"), context_owner: { kind: "source_act", source_act: "assertion" } };
+    expect(() => compile(proposal({ statements: [canonicalFrame] }))).toThrow();
   });
 
   it("shares the caller's ledger and bounds expansion before allocating excess canonical mentions", () => {

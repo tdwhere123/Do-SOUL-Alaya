@@ -1,6 +1,8 @@
 import { z } from "zod";
 export { SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT, SourceSemanticContentProposalSchema,
   materializeSourceSemanticContentProposal } from "./source-semantic-content-proposal.js";
+export { SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT, SourceSemanticExpressionProposalSchema,
+  materializeSourceSemanticExpressionProposal } from "./source-semantic-expression-proposal.js";
 import {
   SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticContextOwnerSchema,
   SourceSemanticFrameSchema, SourceSemanticGraphFields, SourceSemanticOperatorSchema

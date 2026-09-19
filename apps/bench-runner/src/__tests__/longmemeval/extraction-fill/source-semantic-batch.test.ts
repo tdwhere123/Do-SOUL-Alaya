@@ -35,20 +35,18 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const envelope = {
-    contract: "source-semantic-proposal-v2",
+    contract: "source-semantic-proposal-v3",
     outcome: { status: "interpreted" },
     content: {
-      entities: [{ id: "r0", referent_kind: "grouped", mentions: [anchor(theme)] }],
-      statements: [{
-        id: "f0", predicate: { kind: "explicit", reading: "complete", evidence: [anchor("completed")] },
-        arguments: [{ role: "theme", target: { kind: "entity", id: "r0" }, evidence: [anchor(theme)] }]
-      }],
-      operators: [], acts: [{ occurrence: "f0", act: "assertion" }],
+      roots: [{ act: "assertion", expression: {
+        kind: "statement", key: "f0", predicate: { kind: "explicit", reading: "complete", evidence: [anchor("completed")] },
+        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", referent_kind: "grouped", mentions: [anchor(theme)] }, evidence: [anchor(theme)] }]
+      } }],
       gaps: []
     }
   };
   const editable = JSON.parse(JSON.stringify(envelope));
-  if (mode === "unknown_alias") editable.content.statements[0].arguments[0].target.id = segment(theme).id;
+  if (mode === "unknown_alias") editable.content.roots[0].expression.arguments[0].target = { kind: "reference", key: segment(theme).id };
   if (mode === "duplicate_gap_channel" || mode === "partial") {
     const gaps = [{ kind: "unresolved_referent", affected: ["r0"], evidence: [anchor(theme)] }];
     if (mode === "partial") editable.content.gaps = gaps;
@@ -206,7 +204,7 @@ it.each(["unknown_alias", "duplicate_gap_channel"] as const)("retains %s admissi
   for (const line of fixture.plan().lines) {
     const outcome = outcomes[line.key]!;
     expect(outcome.status).toBe("quarantined");
-    expect(outcome.reason).toContain(mode === "unknown_alias" ? '"code":"unknown_alias"' : "unrecognized_keys");
+    expect(outcome.reason).toContain(mode === "unknown_alias" ? '"code":"unknown_or_wrong_kind_key"' : "unrecognized_keys");
     if (mode === "duplicate_gap_channel") expect(outcome.reason).toContain('"path":["outcome"]');
     expect(outcome.reason).toContain("raw_response_id=sha256:");
     expect(outcome.reason!.length).toBeLessThan(16384);
@@ -297,7 +295,7 @@ it("enforces the 32 MiB shard bound and the 1 MiB envelope before reservation or
 
 function dispositionResponse(userPrompt: string): string {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt)), row = request.source_catalog.assertions[0]!;
-  return JSON.stringify({ contract: "source-semantic-proposal-v2", outcome: {
+  return JSON.stringify({ contract: "source-semantic-proposal-v3", outcome: {
     status: "no_executable_proposition", description: "Unreviewed producer disposition",
     context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
       source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }]

@@ -1,14 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { SOURCE_SEMANTIC_SYSTEM_PROMPT, buildSourceSemanticRequest, parseSourceSemanticRequest,
+import { buildSourceSemanticRequest as buildCurrentRequest, parseSourceSemanticRequest,
   sourceSemanticResponseJsonSchema, sourceSemanticSystemPrompt } from "../../../garden/ingestion/official-api/source-semantic-request.js";
-import { proposeSourceSemantics, receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
+import { receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-content-guidance.js";
 import { officialApiExtractionResponseSchema, officialApiExtractionResponseSchemaPreimage } from "../../../garden/ingestion/official-api/response-schema.js";
 
 const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor might read it.", assertionIds: [1, 2],
   source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
 const raw = () => SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
+const buildSourceSemanticRequest = (value: Parameters<typeof buildCurrentRequest>[0]) => {
+  const request = buildCurrentRequest(value);
+  return parseSourceSemanticRequest({ ...request, source_request: {
+    ...request.source_request, proposal_contract: "source-semantic-proposal-v2"
+  } });
+};
+const proposeSourceSemantics = (value: Parameters<typeof buildCurrentRequest>[0], response: { rawJson: string }) =>
+  receiveSourceSemantics(response.rawJson, buildSourceSemanticRequest(value), value);
 
-describe("source-bound semantic content compilation", () => {
+describe("retained source-bound semantic content compilation", () => {
   it("compiles promise, coreference and universal possibility without asserting their content", () => {
     const received = proposeSourceSemantics(input, { rawJson: raw() });
     expect(received.outcome).toEqual({ status: "interpreted", gaps: [] });

@@ -704,24 +704,27 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local H, source-independent
 Q, explicit A, and selected C. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 6.3.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
+Garden v1. Protocol 6.4.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
 reasoning/cache v3, `source-semantic-k-v3`,
 `source-semantic-normalizer-v4` and `source-semantic-lowering-v3`. An older open
 H is not relabeled or silently promoted; recreate its interpretation explicitly.
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
 
-New H extraction uses the producer-only `source-semantic-proposal-v2` contract.
+New H extraction uses the producer-only `source-semantic-proposal-v3` contract.
 The producer owns predicate/role readings, co-reference, semantic scope, speech
 acts, domain membership/closure and measurement context. It provides source
-anchors inline, one argument list and each governing relationship once.
-Protocol compiles mentions, slot/binding pairs, reciprocal context owners,
+anchors and entity declarations inline, one argument list and nested expressions
+for governing relationships. Repeated entity keys declare co-reference; ordinary
+occurrence references do not govern scope. Same-parent content references allow
+explicit reuse without a second governing owner. Protocol assigns canonical IDs
+and compiles mentions, slot/binding pairs, reciprocal context owners,
 assertion membership, quantifier binders and canonical outcome gaps. A plain
 occurrence reference does not embed its target. Unowned or conflicting scopes
 are rejected; the compiler never guesses assertion permission or domain facts.
 Compilation and normalization share one resource ledger. Structural admission
 and located gaps cannot certify language completeness. The canonical H and
-response-envelope shapes remain unchanged. Recorded v1 proposals select their
+response-envelope shapes remain unchanged. Recorded v1/v2 proposals select their
 original prompt/schema explicitly for replay. Marker-absent normalizer-v3
 requests retain an explicit historical replay path; new publication requires
 normalizer-v4. Request/schema identities distinguish the new producer wire.
