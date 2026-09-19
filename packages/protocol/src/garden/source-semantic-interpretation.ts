@@ -16,14 +16,14 @@ import { SourceInterpretationProfileSchema } from "./source-interpretation-profi
 import {
   SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticDraftSchema,
   SourceSemanticGapSchema, SourceSemanticGraphFields, SourceSemanticHandleSchema,
-  SourceSemanticMentionSchema, refineSourceSemanticGraph
+  SourceSemanticMentionSchema, SourceSemanticReadingSchema, SourceSemanticDecimalSchema, refineSourceSemanticGraph
 } from "./source-semantic-draft.js";
 
-export const SOURCE_SEMANTIC_PUBLISHED_CONTRACT = "published-source-interpretation-v3" as const;
-export const SOURCE_SEMANTIC_RESPONSE_CONTRACT = "source-interpretation-response-v3" as const;
-export const SOURCE_SEMANTIC_REASONING_CONTRACT = "source-interpretation-reasoning-v2" as const;
-export const SOURCE_SEMANTIC_CACHE_CONTRACT = "source-interpretation-cache-v2" as const;
-export const SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION = 4 as const;
+export const SOURCE_SEMANTIC_PUBLISHED_CONTRACT = "published-source-interpretation-v4" as const;
+export const SOURCE_SEMANTIC_RESPONSE_CONTRACT = "source-interpretation-response-v4" as const;
+export const SOURCE_SEMANTIC_REASONING_CONTRACT = "source-interpretation-reasoning-v3" as const;
+export const SOURCE_SEMANTIC_CACHE_CONTRACT = "source-interpretation-cache-v3" as const;
+export const SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION = 5 as const;
 
 export const SourceSemanticNormalizedMentionSchema = SourceSemanticMentionSchema.unwrap().extend({
   text: z.string().min(1).max(65536),
@@ -54,6 +54,8 @@ export const SourceSemanticInterpretationSchema = z.object({
   referents: SourceSemanticGraphFields.referents,
   frames: SourceSemanticGraphFields.frames,
   operators: SourceSemanticGraphFields.operators,
+  domains: SourceSemanticGraphFields.domains,
+  measurements: SourceSemanticGraphFields.measurements,
   gaps: SourceSemanticGraphFields.gaps,
   entry_roots: z.array(SourceSemanticHandleSchema).max(64).readonly(),
   asserted_at_scope: z.array(SourceSemanticHandleSchema).max(64).readonly()
@@ -192,7 +194,8 @@ export const SourceSemanticReasoningRequestSchema = z.object({
 export const SourceSemanticConsumedLeafSchema = z.object({
   leaf_kind: z.enum([
     "h_presence", "h_binding", "h_assertion_permission", "h_content",
-    "a_predicate", "a_slot", "a_referent", "h_source_act", "h_operator", "h_sort", "h_context"
+    "a_predicate", "a_slot", "a_referent", "h_source_act", "h_operator", "h_sort", "h_context",
+    "h_domain", "h_membership", "h_restriction", "h_closure", "h_measurement", "h_numeric_order", "h_instantiation", "a_membership", "a_domain"
   ]),
   occurrence: SourceSemanticHandleSchema.optional(),
   slot_id: SourceSemanticHandleSchema.optional(),
@@ -200,8 +203,44 @@ export const SourceSemanticConsumedLeafSchema = z.object({
   parent: SourceSemanticHandleSchema.optional(),
   target: SourceSemanticHandleSchema.optional(),
   relation_kind: z.enum(["embedding", "operator_operand"]).optional(),
-  role: z.enum(["content", "antecedent", "consequent", "reporter"]).optional(),
-  value: BoundedLabelSchema.optional()
+  role: z.enum(["content", "antecedent", "consequent", "reporter", "restriction"]).optional(),
+  value: BoundedLabelSchema.optional(),
+  domain: SourceSemanticHandleSchema.optional(),
+  member: BoundedIdSchema.optional(),
+  quantifier: SourceSemanticHandleSchema.optional(),
+  binder: SourceSemanticHandleSchema.optional(),
+  derived_node: BoundedIdSchema.optional(),
+  derived_parent: BoundedIdSchema.optional(),
+  derived_target: BoundedIdSchema.optional(),
+  measurement: SourceSemanticHandleSchema.optional(),
+  other_measurement: SourceSemanticHandleSchema.optional(),
+  metric: SourceSemanticReadingSchema.optional(),
+  unit: SourceSemanticReadingSchema.optional(),
+  measurement_context: SourceSemanticReadingSchema.optional(),
+  decimal_value: SourceSemanticDecimalSchema.optional(),
+  assumption_index: z.number().int().nonnegative().optional(),
+  context_path: z.array(SourceSemanticHandleSchema).max(16).readonly().optional()
+}).strict().readonly();
+
+export const SourceSemanticDerivedNodeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("instantiation"), node_id: BoundedIdSchema,
+    template: SourceSemanticHandleSchema, quantifier: SourceSemanticHandleSchema,
+    binder: SourceSemanticHandleSchema, member: BoundedIdSchema }).strict().readonly(),
+  z.object({ kind: z.literal("query_entity"), node_id: BoundedIdSchema,
+    query_variable: SourceSemanticHandleSchema, excerpt: z.string().min(1).max(1024) }).strict().readonly(),
+  z.object({ kind: z.literal("instance_slot"), node_id: BoundedIdSchema,
+    instance: BoundedIdSchema, slot_id: SourceSemanticHandleSchema }).strict().readonly(),
+  z.object({ kind: z.literal("comparison"), node_id: BoundedIdSchema,
+    left: SourceSemanticHandleSchema, right: SourceSemanticHandleSchema }).strict().readonly()
+]);
+
+export const SourceSemanticEvaluationReportSchema = z.object({
+  status: z.enum(["supported", "refuted", "unknown", "incomparable", "inconsistent", "empty_domain"]),
+  domain_closed: z.boolean(),
+  vacuous: z.boolean(),
+  reasons: z.array(z.enum(["open_domain", "missing_membership", "excluded_member", "missing_restriction",
+    "missing_body_proof", "missing_operand", "incompatible_measurement", "no_unique_extremum", "empty_domain", "no_proof"])).max(16).readonly(),
+  counterexample_explanation_ids: z.array(BoundedIdSchema).max(1000).readonly()
 }).strict().readonly();
 
 export const SourceSemanticAnswerSchema = z.object({
@@ -228,6 +267,8 @@ export const SourceSemanticReasoningResultSchema = z.object({
   query_gaps: z.array(SourceSemanticGapSchema).max(256).readonly().optional(),
   source_target: SourceEvidenceTargetSchema.optional(),
   resource_usage: z.object({ work_units: z.number().int().nonnegative(), memory_bytes: z.number().int().nonnegative() }).strict().readonly().optional(),
+  derived_nodes: z.array(SourceSemanticDerivedNodeSchema).max(4096).readonly().optional(),
+  evaluation: SourceSemanticEvaluationReportSchema.optional(),
   semantic_status: z.literal("unreviewed"),
   conclusion_scope: z.literal("conditional_on_interpretation"),
   world_claim: z.literal("unknown")
@@ -249,6 +290,8 @@ export type SourceSemanticRequestEnvelope = z.infer<typeof SourceSemanticRequest
 export type SourceSemanticResponseEnvelope = z.infer<typeof SourceSemanticResponseEnvelopeSchema>;
 export type SourceSemanticReasoningRequest = z.infer<typeof SourceSemanticReasoningRequestSchema>;
 export type SourceSemanticConsumedLeaf = z.infer<typeof SourceSemanticConsumedLeafSchema>;
+export type SourceSemanticDerivedNode = z.infer<typeof SourceSemanticDerivedNodeSchema>;
+export type SourceSemanticEvaluationReport = z.infer<typeof SourceSemanticEvaluationReportSchema>;
 export type SourceSemanticAnswer = z.infer<typeof SourceSemanticAnswerSchema>;
 export type SourceSemanticReasoningResult = z.infer<typeof SourceSemanticReasoningResultSchema>;
 export type SourceSemanticCache = z.infer<typeof SourceSemanticCacheSchema>;

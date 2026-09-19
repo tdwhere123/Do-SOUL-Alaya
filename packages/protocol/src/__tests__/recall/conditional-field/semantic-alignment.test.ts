@@ -4,9 +4,9 @@ import { SourceSemanticEvaluationContextSchema } from "../../../recall/condition
 
 const digest = `sha256:${"a".repeat(64)}`;
 const alignment = {
-  contract: "source-semantic-alignment-v1" as const,
+  contract: "source-semantic-alignment-v2" as const,
   h_id: digest, q_id: digest, producer_id: "ap", producer_version: "1",
-  contract_version: "source-semantic-alignment-v1",
+  contract_version: "source-semantic-alignment-v2",
   correspondences: [{
     relation: "contextual_equivalence" as const,
     query_endpoint: { kind: "predicate" as const, alternative: 0, frame: "qSend" },
@@ -31,11 +31,11 @@ it("admits contextual equivalence only and rejects answer ids, programs, and see
 
 it("requires C to bind A_id rather than a free branch digest", () => {
   expect(SourceSemanticEvaluationContextSchema.parse({
-    contract: "source-semantic-context-v1", h_id: digest, q_id: digest, a_id: digest,
+    contract: "source-semantic-context-v2", h_id: digest, q_id: digest, a_id: digest,
     k_version: "k1", lowering_version: "l1"
   }).a_id).toBe(digest);
   expect(SourceSemanticEvaluationContextSchema.safeParse({
-    contract: "source-semantic-context-v1", h_id: digest, q_id: digest, branch_id: digest,
+    contract: "source-semantic-context-v2", h_id: digest, q_id: digest, branch_id: digest,
     k_version: "k1", lowering_version: "l1"
   }).success).toBe(false);
 });

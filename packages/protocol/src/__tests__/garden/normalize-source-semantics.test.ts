@@ -22,7 +22,7 @@ function run(
   return normalizeSourceSemantics({
     draft, catalog, sha256: sha,
     source: { source_id: "src", source_version: "1", content_digest: digest },
-    producer_id: "producer", producer_version: "p1", contract_version: "source-interpretation-v3",
+    producer_id: "producer", producer_version: "p1", contract_version: "source-interpretation-v4",
     ...over
   });
 }
@@ -45,7 +45,7 @@ function frame(over: Record<string, unknown> = {}) {
 
 function draft(over: Record<string, unknown> = {}) {
   return {
-    contract: "source-interpretation-v3",
+    contract: "source-interpretation-v4",
     mentions: [mention("mSent", "a1s0", "a1s0")],
     referents: [{ id: "rBob", referent_kind: "grouped", mentions: ["mSent"] }],
     frames: [frame()],
@@ -280,7 +280,7 @@ it("rejects a domination cycle as invalid H and admits an ordinary binding cycle
   const text = "sent";
   const catalog = catalogFor(text);
   const cyclic = run({
-    contract: "source-interpretation-v3",
+    contract: "source-interpretation-v4",
     mentions: [], referents: [], frames: [],
     operators: [
       {

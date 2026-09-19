@@ -29,7 +29,7 @@ import {
  * engine) owns the actual lowering; this admission only records the version.
  * Distinct lowering versions must not splice into one C.
  */
-export const SOURCE_SEMANTIC_LOWERING_VERSION = "source-semantic-lowering-v2" as const;
+export const SOURCE_SEMANTIC_LOWERING_VERSION = "source-semantic-lowering-v3" as const;
 
 export type SourceSemanticAlignmentAdmissionInput = Readonly<{
   readonly alignment: unknown;
@@ -91,6 +91,7 @@ export function admitSourceSemanticAlignment(
     return { kind: "unsupported" };
   }
   if (parsed.data.correspondences.some((row) => !input.original_query.includes(row.query_support.excerpt))) return { kind: "invalid" };
+  if (!validFiniteAlignment(parsed.data, interpretation.data, queryAdmission.query, input.original_query)) return { kind: "invalid" };
   const leaves = alignmentLeaves(parsed.data, interpretation.data, queryAdmission.query);
   if (leaves === undefined) return { kind: "invalid" };
   const alignmentId = sourceSemanticAlignmentIdentity(parsed.data, fieldContractSha256);
@@ -115,6 +116,35 @@ export function admitSourceSemanticAlignment(
     leaves,
     producer
   };
+}
+
+function validFiniteAlignment(alignment: SourceSemanticAlignment, h: SourceSemanticInterpretation,
+  q: SourceSemanticQuery, text: string): boolean {
+  const domains = new Map((h.domains ?? []).map((row) => [row.id, row]));
+  const seen = new Set<string>();
+  for (const row of alignment.domains ?? []) {
+    if (!domains.has(row.source_domain) || !q.domains?.some((domain) => domain.id === row.query_domain)
+      || seen.has(row.query_domain) || !text.includes(row.query_support.excerpt)
+      || !supportOnInterpretation(row.source_semantic_support, h)) return false;
+    seen.add(row.query_domain);
+  }
+  const assumptions = new Set<string>();
+  for (const row of alignment.membership_assumptions ?? []) {
+    const variable = q.variables.find((item) => item.id === row.query_variable), domain = domains.get(row.source_domain);
+    const key = JSON.stringify([row.query_variable, row.source_domain]);
+    if (variable?.sort !== "entity" || variable.reference === undefined || domain === undefined
+      || assumptions.has(key) || !text.includes(row.query_support.excerpt)) return false;
+    assumptions.add(key);
+    if (row.restrictions.some((id) => !h.operators.some((op) => op.operator === "forall"
+      && op.domain === domain.id && op.restriction === id))) return false;
+    const source = alignment.correspondences.find((item) => item.query_endpoint.kind === "referent"
+      && item.query_endpoint.variable === variable.id)?.source_endpoint;
+    const referent = source?.kind === "referent" ? source.referent : undefined;
+    if (row.status === "member" && (domain.exclusions.some((item) => item.referent === referent)
+      || domain.closure.kind === "closed" && !domain.members.some((item) => item.referent === referent))) return false;
+    if (row.status === "excluded" && domain.members.some((item) => item.referent === referent)) return false;
+  }
+  return true;
 }
 
 function alignmentLeaves(

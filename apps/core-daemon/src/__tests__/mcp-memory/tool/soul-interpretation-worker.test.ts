@@ -134,7 +134,7 @@ function usesDraft(catalog: SourceReferenceCatalog, text: string, extra: { theme
     text.indexOf(word), text.indexOf(word) + word.length
   ]);
   return {
-    contract: "source-interpretation-v3" as const,
+    contract: "source-interpretation-v4" as const,
     mentions: [
       { id: "mAlice", assertion_id: 1, source_ref: sourceRef("Alice") },
       { id: "mUses", assertion_id: 1, source_ref: sourceRef("uses") },
@@ -167,11 +167,11 @@ function usesDraft(catalog: SourceReferenceCatalog, text: string, extra: { theme
 
 function queryOf(): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v1",
+    contract: "source-semantic-query-v2",
     original_query_digest: digestOriginalQuery(ORIGINAL),
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v1",
+    contract_version: "source-semantic-query-v2",
     variables: [{ id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } }, { id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }],
     alternatives: [{
       frames: [{
@@ -192,11 +192,11 @@ const WHO = "who uses the tools?";
 
 function agentQuery(): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v1",
+    contract: "source-semantic-query-v2",
     original_query_digest: digestOriginalQuery(WHO),
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v1",
+    contract_version: "source-semantic-query-v2",
     variables: [{ id: "who", sort: "entity" }, { id: "fUse", sort: "proposition" }],
     alternatives: [{
       frames: [{
@@ -215,10 +215,10 @@ function agentQuery(): SourceSemanticQuery {
 
 function themeAlignment(hId: string, qId: string) {
   return {
-    contract: "source-semantic-alignment-v1" as const,
+    contract: "source-semantic-alignment-v2" as const,
     h_id: hId, q_id: qId,
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-    producer_version: "1", contract_version: "source-semantic-alignment-v1",
+    producer_version: "1", contract_version: "source-semantic-alignment-v2",
     correspondences: [
       ...ALICE_CORRESPONDENCES,
       {
@@ -321,7 +321,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       draft: usesDraft(prepared.output.catalog, SOURCE),
       producer_id: "test-author",
       producer_version: "p1",
-      contract_version: "source-interpretation-v3"
+      contract_version: "source-interpretation-v4"
     });
     const proposed = await callInterpretation(handler, { toolName: "soul.interpretation", arguments: proposeArgs, context });
     expect(proposed.ok).toBe(true);
@@ -366,10 +366,10 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       const admitted = admitSourceSemanticQuery(q, ORIGINAL);
       if (admitted.kind !== "admitted") throw new Error("query must admit");
       const a = {
-        contract: "source-semantic-alignment-v1" as const,
+        contract: "source-semantic-alignment-v2" as const,
         h_id: hId, q_id: admitted.query_id,
         producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-        producer_version: "1", contract_version: "source-semantic-alignment-v1",
+        producer_version: "1", contract_version: "source-semantic-alignment-v2",
         correspondences: [
       ...ALICE_CORRESPONDENCES,
           {
@@ -513,7 +513,7 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "propose", source_handle: handle, draft: usesDraft(catalog, SOURCE),
-        producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v3"
+        producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4"
       }),
       context
     });
@@ -546,7 +546,7 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "propose", source_handle: handle,
         draft: usesDraft(catalog, SOURCE, { themeBound: false }),
-        producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v3"
+        producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4"
       }),
       context
     });
@@ -595,10 +595,10 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
         operation: "reason", accepts_unreviewed_conditional_results: true,
         h_id: hId2, q: who,
         a: {
-          contract: "source-semantic-alignment-v1",
+          contract: "source-semantic-alignment-v2",
           h_id: hId2, q_id: admittedWho.query_id,
           producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-          producer_version: "1", contract_version: "source-semantic-alignment-v1",
+          producer_version: "1", contract_version: "source-semantic-alignment-v2",
           correspondences: [
             {
               relation: "contextual_equivalence",

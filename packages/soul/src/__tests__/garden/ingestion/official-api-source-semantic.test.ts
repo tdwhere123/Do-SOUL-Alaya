@@ -42,7 +42,7 @@ function accessionDraft(request: ReturnType<typeof buildSourceSemanticRequest>, 
     return { id, assertion_id: assertionId, source_ref: { first: row.id, last: row.id } };
   };
   return {
-    contract: "source-interpretation-v3" as const,
+    contract: "source-interpretation-v4" as const,
     mentions: [
       mention("mArchivist", "archivist"), mention("mAccessioned", "accessioned"),
       mention("mFolio", "folio"), mention("mF", "F"), mention("mBay", "bay"), mention("mB", "B")
@@ -76,7 +76,7 @@ function accessionDraft(request: ReturnType<typeof buildSourceSemanticRequest>, 
 function interpretedJson(request: ReturnType<typeof buildSourceSemanticRequest>, gaps: readonly object[] = []) {
   const draft = accessionDraft(request, gaps);
   return JSON.stringify({
-    contract: "source-interpretation-response-v3",
+    contract: "source-interpretation-response-v4",
     outcome: { status: "interpreted", gaps },
     draft
   });
@@ -86,9 +86,9 @@ const digest = `sha256:${"a".repeat(64)}`;
 
 function admittedQuery() {
   return {
-    contract: "source-semantic-query-v1" as const,
+    contract: "source-semantic-query-v2" as const,
     original_query_digest: `sha256:${semanticSha256("which folio was accessioned into bay B?")}`,
-    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v1",
+    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v2",
     variables: [
       { id: "folio", sort: "entity" as const }, { id: "bay", sort: "entity" as const },
       { id: "fAccession", sort: "proposition" as const }
@@ -149,10 +149,10 @@ describe("open source semantic proposal producer", () => {
   });
   it("builds an open request with catalog, versions, capability and limits and no mandatory profile", () => {
     const request = buildSourceSemanticRequest(sourceInput());
-    expect(request.schema_version).toBe(4);
-    expect(request.interpretation_contract).toBe("source-interpretation-v3");
+    expect(request.schema_version).toBe(5);
+    expect(request.interpretation_contract).toBe("source-interpretation-v4");
     expect(request.profile).toBeUndefined();
-    expect(request.source_request.k_version).toBe("source-semantic-k-v2");
+    expect(request.source_request.k_version).toBe("source-semantic-k-v3");
     expect(request.source_request.producer_capability.proposes).toBe("draft_semantics");
     expect(request.source_request.resource_limits.output_byte_limit).toBe(1024 * 1024);
     expect(request.source_catalog.assertions.length).toBe(1);
@@ -190,7 +190,7 @@ describe("open source semantic proposal producer", () => {
 
   it("keeps abstention as abstained with a receipt and does not convert it to empty success", () => {
     const received = proposeSourceSemantics(sourceInput(), {
-      rawJson: JSON.stringify({ contract: "source-interpretation-response-v3", outcome: { status: "abstained" } })
+      rawJson: JSON.stringify({ contract: "source-interpretation-response-v4", outcome: { status: "abstained" } })
     });
     expect(received.outcome.status).toBe("abstained");
     expect(received.provider_attempts).toBe(1);
@@ -252,7 +252,7 @@ describe("open source semantic proposal producer", () => {
       ? { ...row, source_ref: { first: "a1s999", last: "a1s999" } } : row);
     const received = proposeSourceSemantics(input, {
       rawJson: JSON.stringify({
-        contract: "source-interpretation-response-v3",
+        contract: "source-interpretation-response-v4",
         outcome: { status: "interpreted", gaps: [] },
         draft
       })
@@ -270,7 +270,7 @@ describe("open source semantic proposal producer", () => {
   });
 
   it("keeps incomplete JSON as invalid rather than truncated or abstained", () => {
-    for (const rawJson of ['{"contract":"source-interpretation-response-v3"', '{"a":', "[", '{"a":"']) {
+    for (const rawJson of ['{"contract":"source-interpretation-response-v4"', '{"a":', "[", '{"a":"']) {
       const received = proposeSourceSemantics(sourceInput(), { rawJson });
       expect(received.outcome, rawJson).toEqual({ status: "invalid", reason: "malformed_json" });
       expect(received.provider_attempts).toBe(1);
@@ -323,11 +323,11 @@ describe("query and alignment proposal entry points", () => {
       expect(preparedAlignment.system_prompt).toContain("outcome.gaps must be empty");
       for (const valid of [false, true]) {
         const q = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
-          contract: "source-semantic-query-response-v1", outcome: { status: "interpreted", gaps: [] },
+          contract: "source-semantic-query-response-v2", outcome: { status: "interpreted", gaps: [] },
           query: { variables: query.variables, alternatives: query.alternatives, return_variables: query.return_variables, gaps: [] }
         }) : "{}" });
         const a = proposeAlignmentSemantics(alignmentInput, { rawJson: valid ? JSON.stringify({
-          contract: "source-semantic-alignment-response-v1", outcome: { status: "interpreted", gaps: [] }, alignment: { correspondences: [] }
+          contract: "source-semantic-alignment-response-v2", outcome: { status: "interpreted", gaps: [] }, alignment: { correspondences: [] }
         }) : "{}" });
         expect(q.outcome.status).toBe(valid ? "interpreted" : "invalid");
         expect(a.outcome.status).toBe(valid ? "interpreted" : "invalid");
@@ -345,7 +345,7 @@ describe("query and alignment proposal entry points", () => {
     const gaps = [{ kind: "unresolved_referent", affected_ids: ["bay"], support: [] }];
     const received = proposeQuerySemantics({ original_query: "which folio was accessioned into bay B?",
       producer_id: "query-producer", producer_version: "1" }, { rawJson: JSON.stringify({
-      contract: "source-semantic-query-response-v1", outcome: { status: "interpreted", gaps },
+      contract: "source-semantic-query-response-v2", outcome: { status: "interpreted", gaps },
       query: { variables: query.variables, alternatives: query.alternatives,
         return_variables: query.return_variables, gaps: matching ? gaps : [] }
     }) });
@@ -364,7 +364,7 @@ describe("query and alignment proposal entry points", () => {
     const received = proposeAlignmentSemantics({ admitted_q: admittedQuery(),
       h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
       producer_id: "align-producer", producer_version: "1" }, { rawJson: JSON.stringify({
-      contract: "source-semantic-alignment-response-v1",
+      contract: "source-semantic-alignment-response-v2",
       outcome: { status: "interpreted", gaps: [{ kind: "unsupported_meaning", affected_ids: [], support: [] }] },
       alignment: { correspondences: [] }
     }) });
@@ -384,7 +384,7 @@ describe("query and alignment proposal entry points", () => {
       producer_id: "query-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-query-response-v1",
+        contract: "source-semantic-query-response-v2",
         outcome: { status: "interpreted", gaps: [] },
         query: body
       })
@@ -410,7 +410,7 @@ describe("query and alignment proposal entry points", () => {
       producer_id: "align-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-alignment-response-v1",
+        contract: "source-semantic-alignment-response-v2",
         outcome: { status: "interpreted", gaps: [] },
         alignment: {
           correspondences: [{
@@ -442,10 +442,10 @@ it("retains a located no-proposition disposition without confusing it with abste
   const disposition = { status: "no_executable_proposition", description: "Acknowledgement without an executable proposition",
     context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
       source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }] };
-  const received = proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-interpretation-response-v3", outcome: disposition }) });
+  const received = proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-interpretation-response-v4", outcome: disposition }) });
   expect(received.outcome).toEqual(disposition);
   expect(received.provider_attempts).toBe(1); expect(received.draft).toBeUndefined(); expect(received.raw_response_id).toBeDefined();
   const forged = { ...disposition, context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
     source_ref: { first: "a999s0", last: "a999s0" } }] };
-  expect(proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-interpretation-response-v3", outcome: forged }) }).outcome.status).toBe("invalid");
+  expect(proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-interpretation-response-v4", outcome: forged }) }).outcome.status).toBe("invalid");
 });

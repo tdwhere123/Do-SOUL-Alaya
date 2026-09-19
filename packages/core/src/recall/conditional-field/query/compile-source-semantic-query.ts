@@ -1,15 +1,20 @@
-import { SourceSemanticResourceLedger, type QueryProgram, type SourceSemanticQuery, type SourceSemanticQueryAlternative } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceLedger, type QueryProgram, type SourceSemanticQuery, type SourceSemanticQueryAlternative,
+  type SourceSemanticInterpretation } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../../shared/errors.js";
-import { sourceSemanticRelationKey as key } from "../../runtime/source-semantic-premises.js";
+import { sourceSemanticRelationKey as key, type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
+import { semanticInstanceProof } from "./source-semantic-proof-program.js";
 
 const GUARD = { schema_version: 1 as const, kind: "query_predicate" as const, verdict: "unresolved" as const, time_scope: "none" as const };
 type Edge = Readonly<{ from: string; to: string; forward: string; backward: string }>;
 type Graph = Readonly<{ edges: readonly Edge[]; properties: ReadonlyMap<string, readonly string[]> }>;
 
 /** Finite graph walk; every conjunct is visited, including reverse and non-tree edges. */
-export function compileSourceSemanticQueryProgram(query: SourceSemanticQuery, meter: SourceSemanticResourceLedger): QueryProgram {
+export type SourceSemanticCompilation = Readonly<{ h: SourceSemanticInterpretation; population: SourceSemanticPremisePopulation }>;
+
+export function compileSourceSemanticQueryProgram(query: SourceSemanticQuery, meter: SourceSemanticResourceLedger,
+  finite?: SourceSemanticCompilation): QueryProgram {
   meter.retain(query, "query compilation");
-  const options = query.alternatives.map((alternative, index) => compileAlternative(query, alternative, index, meter));
+  const options = query.alternatives.map((alternative, index) => compileSourceSemanticAlternative(query, alternative, index, meter, finite));
   return options.length === 1 ? options[0]! : { schema_version: 1, kind: "alternative", options };
 }
 
@@ -19,8 +24,8 @@ function rel(predicate: string, from: string, to: string, meter: SourceSemanticR
     guard: GUARD, facet_mode: "same_path", threshold_milligrades: 0 };
 }
 
-function compileAlternative(q: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative, alt: number,
-  meter: SourceSemanticResourceLedger): QueryProgram {
+export function compileSourceSemanticAlternative(q: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative, alt: number,
+  meter: SourceSemanticResourceLedger, finite?: SourceSemanticCompilation, omitAccept = false): QueryProgram {
   const graph = buildGraph(q, alternative, alt, meter);
   const root = alternative.frames[0]!.variable;
   const steps = [rel(key("candidate_route"), `@seed:${alt}`, root, meter)];
@@ -33,7 +38,18 @@ function compileAlternative(q: SourceSemanticQuery, alternative: SourceSemanticQ
   const visited = new Set<string>(), edgesSeen = new Set<number>();
   const enter = (variable: string) => {
     visited.add(variable);
-    for (const predicate of graph.properties.get(variable) ?? []) steps.push(rel(predicate, variable, variable, meter));
+    const properties = graph.properties.get(variable) ?? [];
+    for (const predicate of properties) {
+      if (finite !== undefined && predicate === key("h_entailed_permission")) {
+        steps.push(semanticInstanceProof(variable, finite.population, finite.h, meter, true));
+      } else {
+        steps.push(rel(predicate === key("h_entailed_permission") ? key("h_assertion_permission") : predicate, variable, variable, meter));
+      }
+    }
+    if (finite !== undefined && finite.population.instances.size > 0 && properties.includes(key("h_presence"))
+      && !properties.includes(key("h_entailed_permission"))) {
+      steps.push(semanticInstanceProof(variable, finite.population, finite.h, meter));
+    }
   };
   type Visit = { variable: string; next: number; back?: { predicate: string; target: string } };
   const stack: Visit[] = [{ variable: root, next: 0 }];
@@ -60,7 +76,7 @@ function compileAlternative(q: SourceSemanticQuery, alternative: SourceSemanticQ
   if (edgesSeen.size !== graph.edges.length || [...graph.properties.keys()].some((id) => !visited.has(id))) {
     throw new CoreError("OBLIGATION_VIOLATION", "query lowering omitted an atomic obligation");
   }
-  steps.push(rel(key("accept"), root, `@accepted:${alt}`, meter));
+  if (!omitAccept) steps.push(rel(key("accept"), root, `@accepted:${alt}`, meter));
   return sequence(steps);
 }
 
@@ -102,6 +118,7 @@ function buildGraph(query: SourceSemanticQuery, alternative: SourceSemanticQuery
   for (const obligation of alternative.context_obligations) {
     const frame = byFrame.get(obligation.frame)!;
     add(frame.variable, obligation.kind === "asserted_at_source" ? "h_assertion_permission"
+      : obligation.kind === "entailed_at_source" ? "h_entailed_permission"
       : obligation.kind === "explicit_embedded_structure" ? "h_embedded" : "open_context");
     if (obligation.incidence !== undefined) {
       const incidence = obligation.incidence;

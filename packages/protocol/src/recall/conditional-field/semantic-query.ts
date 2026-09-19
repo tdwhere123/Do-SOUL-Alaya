@@ -1,14 +1,15 @@
 import { z } from "zod";
 import { BoundedIdSchema, BoundedLabelSchema } from "../../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "./common.js";
+import { canonicalJson } from "../selection/capture/canonical-json.js";
 import {
   SOURCE_SEMANTIC_MAX_BYTES, SourceSemanticGapSchema, SourceSemanticHandleSchema,
   SourceSemanticReadingSchema
 } from "../../garden/source-semantic-draft.js";
 
-export const SOURCE_SEMANTIC_QUERY_CONTRACT = "source-semantic-query-v1" as const;
+export const SOURCE_SEMANTIC_QUERY_CONTRACT = "source-semantic-query-v2" as const;
 export const SOURCE_SEMANTIC_CONTEXT_OBLIGATION_KINDS = [
-  "asserted_at_source", "explicit_embedded_structure", "unresolved"
+  "asserted_at_source", "entailed_at_source", "explicit_embedded_structure", "unresolved"
 ] as const;
 
 const Handle = SourceSemanticHandleSchema;
@@ -30,7 +31,7 @@ export const SourceSemanticQueryFrameSchema = z.object({
   id: Handle,
   variable: Handle,
   predicate_reading: SourceSemanticReadingSchema,
-  operator: z.enum(["not", "possible", "reported", "conditional", "opaque"]).optional(),
+  operator: z.enum(["not", "possible", "reported", "conditional", "opaque", "forall"]).optional(),
   role_requirements: z.array(SourceSemanticQueryRoleRequirementSchema).max(8).readonly(),
   source_act: z.enum(["question", "directive"]).optional()
 }).strict().readonly();
@@ -38,7 +39,7 @@ export const SourceSemanticQueryFrameSchema = z.object({
 export const SourceSemanticQueryIncidenceSchema = z.object({
   kind: z.enum(["embedding", "operator_operand"]),
   other_frame: Handle,
-  role: z.enum(["content", "antecedent", "consequent", "reporter"]).optional()
+  role: z.enum(["content", "antecedent", "consequent", "reporter", "restriction"]).optional()
 }).strict().readonly();
 
 export const SourceSemanticContextObligationSchema = z.object({
@@ -48,9 +49,21 @@ export const SourceSemanticContextObligationSchema = z.object({
 }).strict().readonly();
 
 export const SourceSemanticQueryAlternativeSchema = z.object({
-  frames: z.array(SourceSemanticQueryFrameSchema).min(1).max(256).readonly(),
-  context_obligations: z.array(SourceSemanticContextObligationSchema).max(256).readonly()
+  frames: z.array(SourceSemanticQueryFrameSchema).max(256).readonly(),
+  context_obligations: z.array(SourceSemanticContextObligationSchema).max(256).readonly(),
+  purpose: z.enum(["support", "counterexample"]).optional()
 }).strict().readonly();
+
+const SourceSemanticEvaluationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("forall"), domain: Handle, binder: Handle,
+    local_variables: z.array(Handle).max(256).readonly() }).strict().readonly(),
+  z.object({ kind: z.literal("comparison"), domain: Handle,
+    operation: z.enum(["lt", "le", "eq", "ge", "gt", "minimum", "maximum"]),
+    left: Handle, right: Handle.optional(), strict: z.boolean(),
+    metric: SourceSemanticReadingSchema, unit: SourceSemanticReadingSchema, context: SourceSemanticReadingSchema,
+    scope: z.enum(["asserted", "preserve"])
+  }).strict().readonly()
+]);
 
 export const SourceSemanticQuerySchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_QUERY_CONTRACT),
@@ -61,7 +74,11 @@ export const SourceSemanticQuerySchema = z.object({
   variables: z.array(SourceSemanticQueryVariableSchema).min(1).max(256).readonly(),
   alternatives: z.array(SourceSemanticQueryAlternativeSchema).min(1).max(16).readonly(),
   return_variables: z.array(Handle).max(64).readonly(),
-  gaps: z.array(SourceSemanticGapSchema).max(256).readonly()
+  gaps: z.array(SourceSemanticGapSchema).max(256).readonly(),
+  domains: z.array(z.object({ id: Handle,
+    support: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly()
+  }).strict().readonly()).max(64).readonly().optional(),
+  evaluation: SourceSemanticEvaluationSchema.optional()
 }).strict().superRefine((query, context) => {
   const problem = (message: string) => context.addIssue({ code: "custom", message });
   if (new TextEncoder().encode(JSON.stringify(query)).length > SOURCE_SEMANTIC_MAX_BYTES) {
@@ -72,13 +89,41 @@ export const SourceSemanticQuerySchema = z.object({
   if (query.return_variables.some((id) => !variables.has(id))) problem("unknown cross-reference");
   if (new Set(query.return_variables).size !== query.return_variables.length) problem("duplicate handles rejected");
   const sorts = new Map(query.variables.map((row) => [row.id, row.sort]));
+  const domains = new Set(query.domains?.map((row) => row.id) ?? []);
+  if (domains.size !== (query.domains?.length ?? 0)) problem("duplicate query domains");
+  if (query.evaluation !== undefined && !domains.has(query.evaluation.domain)) problem("evaluation requires a declared query domain");
+  const evaluation = query.evaluation;
+  if (evaluation?.kind === "forall") {
+    if (sorts.get(evaluation.binder) !== "entity") problem("universal query requires an entity binder");
+    if (new Set(evaluation.local_variables).size !== evaluation.local_variables.length
+      || evaluation.local_variables.some((id) => !variables.has(id))
+      || !evaluation.local_variables.includes(evaluation.binder)) problem("invalid universal local variables");
+    if (query.return_variables.some((id) => evaluation.local_variables.includes(id))) problem("universal query cannot return a bound witness");
+  }
+  if (evaluation?.kind === "comparison") {
+    if (sorts.get(evaluation.left) !== "entity" || (evaluation.right !== undefined && sorts.get(evaluation.right) !== "entity")) problem("comparison requires entity operands");
+    const extreme = evaluation.operation === "minimum" || evaluation.operation === "maximum";
+    if (!extreme && evaluation.right === undefined) problem("pairwise comparison requires both operands");
+    if (!extreme && evaluation.strict !== ["lt", "gt"].includes(evaluation.operation)) problem("pairwise strictness must agree with its comparator");
+    if (extreme && evaluation.right !== undefined) problem("extremum uses its declared population");
+    if (query.return_variables.some((id) => id !== evaluation.left && id !== evaluation.right)) problem("comparison cannot return an unbound variable");
+  }
   for (const variable of query.variables) {
     if (variable.reference !== undefined && variable.sort !== "entity") problem("query reference requires an entity variable");
   }
   for (const alternative of query.alternatives) {
+    if (evaluation?.kind === "comparison" && (alternative.frames.length !== 0 || alternative.context_obligations.length !== 0)) {
+      problem("comparison uses typed operand scope; additional frame constraints are not supported");
+    }
+    if (alternative.frames.length === 0 && evaluation?.kind !== "comparison") problem("query body requires a frame");
+    if (alternative.purpose === "counterexample") {
+      if (evaluation?.kind !== "forall") problem("counterexample alternative requires a universal query");
+      if (!isStructuralCounterexample(query.alternatives, alternative)) problem("counterexample must explicitly negate the same single-frame universal body");
+    }
     refineAlternative(alternative, variables, problem);
     const used = new Set(alternative.frames.flatMap((row) => [row.variable, ...row.role_requirements.map((role) => role.target_variable)]));
-    if (query.return_variables.some((id) => !used.has(id))) problem("return variable is unbound in an alternative");
+    if (evaluation?.kind === "forall" && !used.has(evaluation.binder)) problem("universal binder must occur in its body");
+    if (evaluation?.kind !== "comparison" && query.return_variables.some((id) => !used.has(id))) problem("return variable is unbound in an alternative");
     for (const frame of alternative.frames) {
       if (sorts.get(frame.variable) !== (frame.operator === undefined ? "proposition" : "context")) problem("frame variable has wrong sort");
       if (frame.operator !== undefined && frame.role_requirements.some((role) =>
@@ -88,6 +133,26 @@ export const SourceSemanticQuerySchema = z.object({
     }
   }
 }).readonly();
+
+function isStructuralCounterexample(alternatives: readonly z.infer<typeof SourceSemanticQueryAlternativeSchema>[],
+  counterexample: z.infer<typeof SourceSemanticQueryAlternativeSchema>): boolean {
+  const positives = alternatives.filter((row) => row.purpose !== "counterexample");
+  if (positives.length !== 1 || positives[0]!.frames.length !== 1 || counterexample.frames.length !== 2) return false;
+  const positive = positives[0]!, body = positive.frames[0]!;
+  if (body.operator !== undefined || body.source_act !== undefined || positive.context_obligations.length !== 1
+    || !["asserted_at_source", "entailed_at_source"].includes(positive.context_obligations[0]!.kind)) return false;
+  const negative = counterexample.frames.find((row) => row.operator === "not");
+  const content = counterexample.frames.find((row) => row !== negative);
+  if (negative === undefined || content === undefined || negative.role_requirements.length !== 0
+    || negative.source_act !== undefined || content.operator !== undefined || content.source_act !== undefined) return false;
+  const meaning = (frame: typeof body) => canonicalJson({ predicate: frame.predicate_reading, variable: frame.variable,
+    roles: frame.role_requirements.map((row) => [row.role_reading, row.target_variable]).sort((a, b) => canonicalJson(a).localeCompare(canonicalJson(b))) });
+  if (meaning(body) !== meaning(content) || counterexample.context_obligations.length !== 2) return false;
+  return counterexample.context_obligations.some((row) => row.frame === negative.id && row.kind === "asserted_at_source"
+    && row.incidence === undefined) && counterexample.context_obligations.some((row) => row.frame === content.id
+    && row.kind === "explicit_embedded_structure" && row.incidence?.kind === "operator_operand"
+    && row.incidence.other_frame === negative.id && (row.incidence.role ?? "content") === "content");
+}
 
 function refineAlternative(
   alternative: z.infer<typeof SourceSemanticQueryAlternativeSchema>,
@@ -121,7 +186,8 @@ function refineAlternative(
     const role = edge.role ?? "content";
     if (edge.kind === "embedding" && (parent.operator !== undefined || role !== "content")) problem("embedding requires an ordinary content owner");
     if (edge.kind === "operator_operand" && (parent.operator === undefined || role === "reporter" ||
-      (parent.operator === "conditional" ? role !== "antecedent" && role !== "consequent" : role !== "content"))) {
+      (parent.operator === "conditional" ? role !== "antecedent" && role !== "consequent"
+        : parent.operator === "forall" ? role !== "content" && role !== "restriction" : role !== "content"))) {
       problem("operator incidence requires its declared operand type");
     }
   }

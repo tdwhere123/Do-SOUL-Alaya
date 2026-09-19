@@ -10,7 +10,7 @@ const frame = (owner: unknown, bindings: unknown[] = [{ slot_id: "agent", target
   bindings
 });
 const draft = (over: Record<string, unknown> = {}) => ({
-  contract: "source-interpretation-v3",
+  contract: "source-interpretation-v4",
   mentions: [mention],
   referents: [{ id: "rBob", referent_kind: "grouped", mentions: ["mSent"] }],
   frames: [frame({ kind: "source_act", source_act: "assertion" })],

@@ -11,10 +11,10 @@ import {
 import { indexOfficialApiSourceAssertions } from "../../triage/grounding/source-locator.js";
 import { buildOfficialApiSourceRequest } from "./extraction-request.js";
 
-export const SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT = "source-semantic-query-request-v1" as const;
-export const SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT = "source-semantic-query-response-v1" as const;
-export const SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT = "source-semantic-alignment-request-v1" as const;
-export const SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT = "source-semantic-alignment-response-v1" as const;
+export const SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT = "source-semantic-query-request-v2" as const;
+export const SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT = "source-semantic-query-response-v2" as const;
+export const SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT = "source-semantic-alignment-request-v2" as const;
+export const SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT = "source-semantic-alignment-response-v2" as const;
 
 const FORBIDDEN_PROPOSAL_KEYS = [
   "answers", "answer", "ranking", "seeds", "seed", "programs", "program",
@@ -230,10 +230,10 @@ const exampleGaps = [{ kind: "unresolved_referent", affected_ids: ["rItem"],
   { kind: "uninterpreted_clause", affected_ids: ["mClause"],
     support: [{ kind: "lexical", mentions: ["mClause"] }], description: "This clause is left uninterpreted without inventing a frame." }];
 const sourceSemanticResponseExample = {
-  contract: "source-interpretation-response-v3",
+  contract: "source-interpretation-response-v4",
   outcome: { status: "interpreted", gaps: exampleGaps },
   draft: {
-    contract: "source-interpretation-v3",
+    contract: "source-interpretation-v4",
     mentions: [
       { id: "mActor", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" } },
       { id: "mShelved", assertion_id: 1, source_ref: { first: "a1s2", last: "a1s2" } },
@@ -261,8 +261,8 @@ const sourceSemanticResponseExample = {
 };
 
 export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
-  "Propose one source-local semantic draft using source-interpretation-v3.",
-  'Return strict JSON {"contract":"source-interpretation-response-v3","outcome":OUTCOME,"draft":DRAFT_IF_INTERPRETED}.',
+  "Propose one source-local semantic draft using source-interpretation-v4.",
+  'Return strict JSON {"contract":"source-interpretation-response-v4","outcome":OUTCOME,"draft":DRAFT_IF_INTERPRETED}.',
   "Ask only for draft semantics: mention handles with catalog first/last selections, referents, frames with predicate and role readings, slot definitions versus bindings, operators, context owners, lexical/additional/dominating support, and explicit gaps.",
   "Do not emit host hashes, character or UTF-8 offsets, entry_roots, asserted_at_scope, persistent IDs, QueryProgram, seeds, scores, ranking, answers, or verdicts.",
   "A supplied profile is an optional adapter, not an admission prerequisite. Novel predicate and role readings are allowed.",
@@ -276,6 +276,9 @@ export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
   "Cover every selected source assertion with interpreted meaning or an explicit located draft.gaps entry. Locate gap support through declared mentions for that assertion. Do not silently omit clauses that are difficult to interpret.",
   "Explicit predicate support needs valid mention handles; implicit support needs supporting context and a reading. Empty or omitted support is a gap, not implicit.",
   "Unresolved referents are local. Do not mint a global unknown. Record unsupported meaning as gaps.",
+  'For source universals use operator="forall" with binder, domain, restriction (a governed occurrence or null), and content. Bind its body with {kind:"bound_variable",quantifier:OPERATOR_ID,binder:BINDER}. Nested universal binders are unsupported: retain a located gap instead of flattening them.',
+  'Optional domains contain {id,context:OWNER_ID_OR_NULL,support,members:[{referent,evidence,restrictions:[{restriction,evidence}]}],exclusions:[{referent,evidence}],closure:{kind:"open"}|{kind:"closed",evidence}}. Membership/restriction/closure evidence must be occurrences in the declared context; null requires source assertions. Lists are bounded to64 members. A universal claim does not establish a complete census. Preserve promise/report/negative ownership.',
+  'Optional measurements contain {id,subject,owner,population,metric,unit,context,value,support}. value is an exact decimal string (128 digits,64 fractional digits maximum), with source support. Distinct values for the same subject/population/metric/unit/context require an explicit context distinction. Do not turn subjective easiest/best wording into objective values or rankings.',
   "Outcome interpreted requires a draft; abstained, invalid, quarantine, truncated, and transport failures must not carry a draft.",
   "For interpreted output, outcome.gaps must exactly repeat draft.gaps, including all supports. The draft is the sole owner of gaps.",
   "Do not infer world truth or confidence. Admission of a draft does not certify language fidelity.",
@@ -284,10 +287,12 @@ export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
 ].join("\n");
 
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
-  "Propose query interpretation for the original query only, using source-semantic-query-v1 body fields.",
+  "Propose query interpretation for the original query only, using source-semantic-query-v2 body fields.",
   "Return variables, frames, role requirements, context obligations, finite alternatives, and located gaps.",
   "Do not emit answers, ranking, seeds, QueryProgram, programs, verdicts, or source answer IDs.",
   "Bind meaning to the original query text. Approved fixed context is given; do not invent H or A.",
+  'Optional domains are {id,support:{kind:"query_text",excerpt}}. Universal evaluation is {kind:"forall",domain,binder,local_variables}; binders occur in the body and cannot be returned. entailed_at_source requests inference; asserted_at_source requests a literal assertion. Counterexample alternatives use purpose:"counterexample" and explicit negated-body incidence.',
+  'Comparison evaluation is {kind:"comparison",domain,operation:"lt"|"le"|"eq"|"ge"|"gt"|"minimum"|"maximum",left,right?,strict,metric,unit,context,scope:"asserted"|"preserve"}. Comparison alternatives have empty frames/context_obligations. Pairwise strict is true only for lt/gt; extrema omit right and explicitly choose strictness. Return only operand variables.',
   "For interpreted output, outcome.gaps must exactly echo query.gaps. Retain partial meaning and located gaps in the query body."
 ].join(" ");
 
@@ -295,5 +300,6 @@ export const SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT = [
   "Propose alignment correspondences from admitted Q endpoints to the supplied H descriptors.",
   "Use contextual equivalence only. Do not emit answers, ranking, seeds, programs, verdicts, or chosen results.",
   "Do not invent H structure or rewrite Q.",
+  'Optional domains map {query_domain,source_domain,query_support,source_semantic_support}. Explicit conditional membership assumptions are {query_variable,source_domain,restrictions:[],status:"member"|"excluded",query_support,description}; use only assumptions stated in the query/context, never infer identity from a matching surface name. Closed source domains cannot acquire novel assumed members.',
   "An interpreted alignment has no gap channel: outcome.gaps must be empty. Use abstained if no supported alignment can be proposed."
 ].join(" ");

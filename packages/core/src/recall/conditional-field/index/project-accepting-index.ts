@@ -4,7 +4,7 @@ import {
   reachableMilligradesOf,
   sharedProductIdentity,
   sameSourceEvidenceRoot, sourceSemanticSlotNodeId, sourceSemanticInterpretationIdentity, sourceSemanticContextIdentity,
-  type SourceSemanticInterpretation, type SourceSemanticEvaluationContext, type SourceEvidenceTarget,
+  type SourceSemanticInterpretation, type SourceSemanticEvaluationContext, type SourceEvidenceTarget, type InterpretationNodeCoordinate,
   type PublishedSourceInterpretationPacket,
   type ClaimState,
   type Continuation,
@@ -135,7 +135,8 @@ export type AcceptingProjectionInput = Readonly<{
   readonly observer?: ObserverCoverage;
   readonly interpretation_status?: QueryInterpretationStatus;
   readonly selected_interpretation?: PublishedSourceInterpretationPacket;
-  readonly selected_semantics?: Readonly<{ h: SourceSemanticInterpretation; context: SourceSemanticEvaluationContext; source_target: SourceEvidenceTarget }>;
+  readonly selected_semantics?: Readonly<{ h: SourceSemanticInterpretation; context: SourceSemanticEvaluationContext;
+    source_target: SourceEvidenceTarget; compiled_nodes?: ReadonlyMap<string, InterpretationNodeCoordinate> }>;
   readonly interpretation_id?: string;
   readonly interpretation_clock?: string;
   readonly model_id?: string;
@@ -212,6 +213,12 @@ function admitSelectedInterpretation(input: AcceptingProjectionInput): Accepting
     ? [...bound!.packet.referents, ...bound!.packet.propositions, ...bound!.packet.operators].map((row) => row.id)
     : [...semantic.h.referents, ...semantic.h.frames, ...semantic.h.operators].map((row) => row.id)
       .concat(semantic.h.frames.flatMap((frame, fi) => frame.slots.map((_slot, si) => sourceSemanticSlotNodeId(fi, si))));
+  for (const [id, coordinate] of semantic?.compiled_nodes ?? []) {
+    if (id !== coordinate.node_id || coordinate.packet_id !== packetId || coordinate.hypothesis_id !== hypothesisId) {
+      throw new CoreError("VALIDATION", "compiled coordinate leaves its selected interpretation");
+    }
+    ids.push(id);
+  }
   const count = ids.length;
   const work = count + input.snapshot.seeds.length + input.snapshot.values.length + 2 * input.snapshot.retained_transitions.length + 1;
   const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;

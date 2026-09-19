@@ -51,7 +51,7 @@ const WORK = {
 } as const;
 
 const DRAFT = {
-  contract: "source-interpretation-v3" as const,
+  contract: "source-interpretation-v4" as const,
   mentions: [{ id: "mSent", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" } }],
   referents: [{ id: "rBob", referent_kind: "grouped" as const, mentions: ["mSent"] }],
   frames: [{
@@ -95,7 +95,7 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
   return {
     kind: "reason",
     result: {
-      contract: "source-interpretation-reasoning-v2",
+      contract: "source-interpretation-reasoning-v3",
       semantic_status: "unreviewed",
       world_claim: "unknown",
       consumed_leaves: [],
@@ -252,7 +252,7 @@ describe("soul.interpretation MCP/CLI surface", () => {
       draft: DRAFT,
       producer_id: "author",
       producer_version: "1",
-      contract_version: "source-interpretation-v3"
+      contract_version: "source-interpretation-v4"
     });
     expect(finished).toBe(true);
     expect(proposed.ok).toBe(true);
@@ -287,7 +287,7 @@ describe("soul.interpretation MCP/CLI surface", () => {
       draft: DRAFT,
       producer_id: "author",
       producer_version: "1",
-      contract_version: "source-interpretation-v3"
+      contract_version: "source-interpretation-v4"
     });
     expect(publish).not.toHaveBeenCalled();
     expect(proposed.ok).toBe(true);
@@ -358,7 +358,7 @@ it("does not fold an unavailable body during propose into malformed interpretati
   });
   const result = await callInterpretation(createHandler({ sourceSemanticsPort: createPort(), publication: { publish } }), {
     operation: "propose", source_handle: "source-handle", draft: DRAFT,
-    producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v3", budget: BUDGET
+    producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v4", budget: BUDGET
   });
   expect(result).toMatchObject({ ok: true, output: { outcome: { status: "unavailable", reason: "source_body" }, provider_attempts: 0 } });
 });
@@ -371,7 +371,7 @@ it("accepts a located no-proposition disposition without publishing a fictitious
     disposition: { status: "no_executable_proposition", description: "Producer disposition under an unreviewed interpretation",
       context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
         source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }] },
-    producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v3", budget: BUDGET });
+    producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v4", budget: BUDGET });
   expect(result).toMatchObject({ ok: true, output: { outcome: { status: "no_executable_proposition" },
     semantic_status: "unreviewed", source_binding: { source_id: "artifact-1" }, provider_attempts: 0 } });
   expect(publish).not.toHaveBeenCalled();
@@ -383,7 +383,7 @@ it("preserves publication budget exhaustion and adds post-preparation failure co
   }); };
   const handler = createHandler({ sourceSemanticsPort: createPort(), publication: { publish } });
   const result = await callInterpretation(handler, { operation: "propose", source_handle: "source-handle", draft: DRAFT,
-    producer_id: "test-author", producer_version: "1", contract_version: "source-interpretation-v3", budget: BUDGET });
+    producer_id: "test-author", producer_version: "1", contract_version: "source-interpretation-v4", budget: BUDGET });
   expect(result).toMatchObject({ ok: true, output: { outcome: { status: "resource_exhausted" },
     work: { native_work: WORK.native_work + 4, logical_work: WORK.native_work + 12,
       logical_memory_bytes: WORK.logical_memory_bytes + 400 }, provider_attempts: 0 } });

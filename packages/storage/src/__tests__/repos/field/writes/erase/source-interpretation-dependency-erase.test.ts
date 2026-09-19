@@ -37,10 +37,10 @@ describe("source interpretation dependency erase", () => {
       unrelated: "00000000-0000-4000-8000-000000000014"
     };
     seedCapsule(database, ids.publishedV3, JSON.stringify({
-      contract: "published-source-interpretation-v3", source_target: target, broken: true
+      contract: "published-source-interpretation-v4", source_target: target, broken: true
     }));
     seedCapsule(database, ids.packetV3, JSON.stringify({
-      contract: "source-interpretation-v3", source_target: target, broken: true
+      contract: "source-interpretation-v4", source_target: target, broken: true
     }));
     seedCapsule(database, ids.publishedV2, JSON.stringify({
       contract: "published-source-interpretation-v2", source_target: target, broken: true

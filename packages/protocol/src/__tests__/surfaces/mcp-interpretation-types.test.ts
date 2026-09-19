@@ -14,7 +14,7 @@ const BUDGET = {
 };
 
 const DRAFT = {
-  contract: "source-interpretation-v3" as const,
+  contract: "source-interpretation-v4" as const,
   mentions: [{ id: "mSent", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" } }],
   referents: [{ id: "rBob", referent_kind: "grouped" as const, mentions: ["mSent"] }],
   frames: [{
@@ -42,7 +42,7 @@ it("parses the four soul.interpretation operations and rejects unknown operation
     draft: DRAFT,
     producer_id: "author",
     producer_version: "1",
-    contract_version: "source-interpretation-v3"
+    contract_version: "source-interpretation-v4"
   }).operation).toBe("propose");
   expect(SoulInterpretationRequestSchema.parse({
     operation: "prepare_query",

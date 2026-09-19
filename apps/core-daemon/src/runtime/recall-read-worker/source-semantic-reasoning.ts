@@ -110,7 +110,10 @@ function discover(runtime: RecallReadWorkerRuntime, payload: Payload, authorized
   const page = new SqliteSourceHintReader(runtime.database.connection).pageBoundInterpretations({
     workspaceId: payload.workspace_id, limit: 16, nativeLimit: Math.min(32, meter.work), afterCursor: after,
     nativeByteLimit: Math.min(meter.bytes, 1_000_000), maxGistBytes: 1_000_000, activeOnly: true,
-    matches: (gist) => { try { return JSON.parse(gist)?.contract === SOURCE_SEMANTIC_PUBLISHED_CONTRACT; } catch { return false; } }
+    matches: (gist) => { try {
+      const contract = JSON.parse(gist)?.contract;
+      return contract === SOURCE_SEMANTIC_PUBLISHED_CONTRACT || contract === "published-source-interpretation-v3";
+    } catch { return false; } }
   });
   meter.read(page.nativeVisits, page.bytesRead);
   const candidates: SourceSemanticHandleDescriptor[] = [];
@@ -150,7 +153,18 @@ function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, hId: 
     throw new CoreError("CONFLICT", `source semantic interpretation read is ${capsule.status}`, { details: { admission: "unavailable", unavailable: capsule.status } });
   }
   meter.charge(1, capsule.bytesRead * 4, "interpretation decoding");
-  const bound = SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(capsule.gist));
+  let raw: unknown;
+  try { raw = JSON.parse(capsule.gist); } catch {
+    throw new CoreError("VALIDATION", "stored interpretation is malformed", { details: { admission: "invalid" } });
+  }
+  const parsed = SourceSemanticPublishedInterpretationSchema.safeParse(raw);
+  if (!parsed.success) {
+    const contract = typeof raw === "object" && raw !== null && "contract" in raw ? raw.contract : undefined;
+    throw new CoreError("VALIDATION", contract === "published-source-interpretation-v3"
+      ? "stored interpretation requires explicit preparation under the current structural contract" : "stored interpretation is malformed",
+    { details: { admission: "invalid", reason: contract === "published-source-interpretation-v3" ? "unsupported_structural_contract" : "malformed_interpretation" } });
+  }
+  const bound = parsed.data;
   if (bound.interpretation_id !== hId) throw new CoreError("VALIDATION", "interpretation identity mismatch");
   const stores = sourceSemanticReadStores(runtime.database, workspace, bound.interpretation.source.source_id, meter, authorized);
   meter.retain(bound, "interpretation verification");
@@ -183,7 +197,7 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
     return SourceSemanticWorkerResultSchema.parse({
       kind: "reason",
       result: {
-        contract: "source-interpretation-reasoning-v2", semantic_status: "unreviewed",
+        contract: "source-interpretation-reasoning-v3", semantic_status: "unreviewed",
         conclusion_scope: "conditional_on_interpretation", world_claim: "unknown",
         outcome: { status: "invalid", reason: admission.kind === "unsupported" ? "unsupported_producer" : "malformed_alignment" },
         consumed_leaves: []
@@ -194,7 +208,7 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
   }
   const result = reasonSourceSemanticInterpretation({
     request: {
-      contract: "source-interpretation-reasoning-v2", accepts_unreviewed_conditional_results: true,
+      contract: "source-interpretation-reasoning-v3", accepts_unreviewed_conditional_results: true,
       h_id: admission.interpretation_id, q_id: admission.query_id, a_id: admission.alignment_id,
       original_query: original, budget: { ...request.budget, ...meter.remaining() }, output_byte_limit: request.output_byte_limit
     },

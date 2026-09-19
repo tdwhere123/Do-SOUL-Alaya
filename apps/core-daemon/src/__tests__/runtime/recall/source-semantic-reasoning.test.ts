@@ -7,14 +7,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
-  buildSourceReferenceCatalog, hashLabeledIdentity, sourceReferenceResolver,
+  buildSourceReferenceCatalog, hashLabeledIdentity, sourceReferenceResolver, canonicalJson,
   type SourceReferenceCatalog, type SourceSemanticAlignment, type SourceSemanticQuery,
   type SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
 import {
   admitSourceSemanticQuery, createAuditedSourceAdmission, createSourceSemanticInterpretationPublication,
   EvidenceService, fieldContractSha256, SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-  SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
+  SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, semanticInterpretationEvidenceId
 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteFieldEraseBarrierRepo }
   from "@do-soul/alaya-storage";
@@ -58,7 +58,7 @@ function usesDraft(catalog: SourceReferenceCatalog, assertion: string) {
     assertion.indexOf(text), assertion.indexOf(text) + text.length
   ]);
   return {
-    contract: "source-interpretation-v3" as const,
+    contract: "source-interpretation-v4" as const,
     mentions: [
       { id: "mAlice", assertion_id: 1, source_ref: sourceRef("Alice") },
       { id: "mUses", assertion_id: 1, source_ref: sourceRef("uses") },
@@ -89,11 +89,11 @@ function usesDraft(catalog: SourceReferenceCatalog, assertion: string) {
 
 function queryOf(): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v1",
+    contract: "source-semantic-query-v2",
     original_query_digest: digestOriginalQuery(ORIGINAL),
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v1",
+    contract_version: "source-semantic-query-v2",
     variables: [{ id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } }, { id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }],
     alternatives: [{
       frames: [{
@@ -114,10 +114,10 @@ function alignmentOf(hId: string, q: SourceSemanticQuery): SourceSemanticAlignme
   const admitted = admitSourceSemanticQuery(q, ORIGINAL);
   if (admitted.kind !== "admitted") throw new Error("query must admit");
   return {
-    contract: "source-semantic-alignment-v1",
+    contract: "source-semantic-alignment-v2",
     h_id: hId, q_id: admitted.query_id,
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-    producer_version: "1", contract_version: "source-semantic-alignment-v1",
+    producer_version: "1", contract_version: "source-semantic-alignment-v2",
     correspondences: [
       ...ALICE_CORRESPONDENCES,
       {
@@ -166,7 +166,7 @@ async function withPublished(body: (input: {
   }).publish({
     workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE, catalog,
     provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
-    producer_version: "p1", contract_version: "source-interpretation-v3"
+    producer_version: "p1", contract_version: "source-interpretation-v4"
   });
   const allIds = [published.bound.interpretation_id];
   for (let index = 1; index < (options.count ?? 1); index += 1) {
@@ -176,7 +176,7 @@ async function withPublished(body: (input: {
       provenance: { producer_id: "test-author" }, draft: { ...draft,
         gaps: options.large && index === (options.count ?? 1) - 1 ? Array.from({ length: 40 }, () => ({
           kind: "unsupported_meaning", affected_ids: [], support: [], description: "字".repeat(800)
-        })) : [] }, producer_version: `p${index + 1}`, contract_version: "source-interpretation-v3"
+        })) : [] }, producer_version: `p${index + 1}`, contract_version: "source-interpretation-v4"
     });
     if (options.large && index === (options.count ?? 1) - 1) {
       expect(JSON.stringify(extra.bound).length).toBeLessThan(65536);
@@ -228,6 +228,41 @@ function call(execute: Execute, request: SourceSemanticWorkerRequest, extra: {
     request
   });
 }
+
+it("keeps durable legacy interpretation bytes and identity while failing closed through the worker", async () => {
+  await withPublished(async ({ hId, execute, filename }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const repo = new SqliteEvidenceCapsuleRepo(database);
+    const capsule = await repo.findById(semanticInterpretationEvidenceId(hId, fieldContractSha256));
+    if (capsule === null) throw new Error("published capsule missing");
+    const current = JSON.parse(capsule.gist), h = { ...current.interpretation,
+      contract: "source-interpretation-v3", contract_version: "source-interpretation-v3",
+      k_version: "source-semantic-k-v2", normalizer_version: "source-semantic-normalizer-v2" };
+    const legacyId = `sha256:${fieldContractSha256(canonicalJson({ contract: "published-source-interpretation-v3",
+      k_version: h.k_version, normalizer_version: h.normalizer_version, source: h.source,
+      producer_id: h.producer_id, producer_version: h.producer_version, contract_version: h.contract_version,
+      body: { contract: h.contract, mentions: h.mentions.map(({ utf8_span: _span, span_space: _space, ...row }: Record<string, unknown>) => row),
+        referents: h.referents, frames: h.frames, operators: h.operators, gaps: h.gaps,
+        entry_roots: h.entry_roots, asserted_at_scope: h.asserted_at_scope } }))}`;
+    const oldBytes = JSON.stringify({ ...current, contract: "published-source-interpretation-v3", interpretation_id: legacyId, interpretation: h });
+    const evidenceId = semanticInterpretationEvidenceId(legacyId, fieldContractSha256);
+    await repo.create({ ...capsule, object_id: evidenceId, gist: oldBytes });
+    database.close(); closeCachedDatabase(filename);
+    expect((await call(execute, { kind: "prepare_source", source_id: "artifact-1", budget: BUDGET })).kind).toBe("prepare_source");
+    const discovered = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q: queryOf(), budget: BUDGET });
+    expect(discovered.kind).toBe("prepare_query");
+    if (discovered.kind !== "prepare_query") throw new Error("query preparation expected");
+    expect(discovered.candidates.some((row) => row.interpretation_id === legacyId)).toBe(false);
+    expect(discovered.coverage.discovery).toBe("truncated");
+    await expect(call(execute, { kind: "reason", accepts_unreviewed_conditional_results: true,
+      h_id: legacyId, q: queryOf(), a: alignmentOf(legacyId, queryOf()), original_query: ORIGINAL,
+      budget: BUDGET, output_byte_limit: 1000000 })).rejects.toMatchObject({ code: "VALIDATION",
+      details: expect.objectContaining({ reason: "unsupported_structural_contract" }) });
+    const reopened = await createRecallRealStorage(() => undefined, filename);
+    expect((await new SqliteEvidenceCapsuleRepo(reopened.database).findById(evidenceId))?.gist).toBe(oldBytes);
+    reopened.database.close(); closeCachedDatabase(filename);
+  });
+});
 
 it("prepares, reasons, and reopens durable H through a real worker fork", async () => {
   await withPublished(async ({ hId, execute }) => {

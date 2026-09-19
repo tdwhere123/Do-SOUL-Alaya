@@ -13,9 +13,9 @@ export const BUDGET = { schema_version: 1 as const, work_units: 1000000, memory_
   page_budget: 10000, finalization_reserve: 50000, min_envelope: 10 };
 export function source(): SourceSemanticInterpretation {
   const names = ["Alice", "Bob", "X", "Y", "uses"];
-  return { contract: "source-interpretation-v3", k_version: SOURCE_SEMANTIC_K_VERSION, normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
+  return { contract: "source-interpretation-v4", k_version: SOURCE_SEMANTIC_K_VERSION, normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     source: { source_id: "two-users", source_version: "1", content_digest: `sha256:${sha("Alice uses X. Bob uses Y.")}` },
-    producer_id: "fixture", producer_version: "1", contract_version: "source-interpretation-v3",
+    producer_id: "fixture", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: names.map((name, index) => ({ id: `m${name}`, assertion_id: 1, text: name, utf8_span: [0, name.length], source_ref: { first: `a1s${index}`, last: `a1s${index}` } })),
     referents: names.slice(0,4).map((name) => ({ id: `r${name}`, referent_kind: "grouped", mentions: [`m${name}`] })),
     frames: [event("fAlice", "rAlice", "rX"), event("fBob", "rBob", "rY")],
@@ -28,8 +28,8 @@ export function event(id: string, actor: string, object: string): SourceSemantic
     bindings: [{ slot_id: "agent", target: { kind: "node", id: actor }, support: [] }, { slot_id: "theme", target: { kind: "node", id: object }, support: [] }] };
 }
 export function query(original = ORIGINAL, fixed = true): SourceSemanticQuery {
-  return { contract: "source-semantic-query-v1", original_query_digest: `sha256:${sha(original)}`,
-    producer_id: QP, producer_version: "1", contract_version: "source-semantic-query-v1",
+  return { contract: "source-semantic-query-v2", original_query_digest: `sha256:${sha(original)}`,
+    producer_id: QP, producer_version: "1", contract_version: "source-semantic-query-v2",
     variables: [{ id: "actor", sort: "entity", ...(fixed ? { reference: { kind: "query_text" as const, excerpt: "Alice" } } : {}) },
       { id: "tools", sort: "entity" }, { id: "use", sort: "proposition" }],
     alternatives: [{ frames: [{ id: "qUse", variable: "use", predicate_reading: "use",
@@ -49,13 +49,13 @@ export function align(h: SourceSemanticInterpretation, q: SourceSemanticQuery, f
   if (fixed) correspondences.push({ relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
     source_endpoint: { kind: "referent", referent: "rAlice" }, query_support: { kind: "query_text", excerpt: "Alice" },
     source_semantic_support: [{ kind: "lexical", mentions: ["mAlice"] }] });
-  return { contract: "source-semantic-alignment-v1", h_id: sourceSemanticInterpretationIdentity(h, sha), q_id: sourceSemanticQueryIdentity(q, sha),
-    producer_id: AP, producer_version: "1", contract_version: "source-semantic-alignment-v1", correspondences };
+  return { contract: "source-semantic-alignment-v2", h_id: sourceSemanticInterpretationIdentity(h, sha), q_id: sourceSemanticQueryIdentity(q, sha),
+    producer_id: AP, producer_version: "1", contract_version: "source-semantic-alignment-v2", correspondences };
 }
 export function run(h: SourceSemanticInterpretation, q: SourceSemanticQuery, a: SourceSemanticAlignment, original = ORIGINAL,
   budget = BUDGET, output = 1000000) {
   const result = reasonSourceSemanticInterpretation({ h, q, a, workspaceId: "ws", scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
-    request: { contract: "source-interpretation-reasoning-v2", accepts_unreviewed_conditional_results: true,
+    request: { contract: "source-interpretation-reasoning-v3", accepts_unreviewed_conditional_results: true,
       h_id: a.h_id, q_id: a.q_id, a_id: alignmentId(a), original_query: original, budget, output_byte_limit: output } });
   if (result.outcome.status === "interpreted") {
     const oracle = oracleSourceSemanticJoin(h, q, a);

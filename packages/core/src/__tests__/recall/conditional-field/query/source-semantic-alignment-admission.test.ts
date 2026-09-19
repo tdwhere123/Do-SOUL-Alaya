@@ -31,11 +31,11 @@ function queryDraft(
   extra: { readonly producer_id?: string; readonly producer_version?: string } = {}
 ): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v1",
+    contract: "source-semantic-query-v2",
     original_query_digest: digestOriginalQuery(ORIGINAL),
     producer_id: extra.producer_id ?? SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: extra.producer_version ?? "1",
-    contract_version: "source-semantic-query-v1",
+    contract_version: "source-semantic-query-v2",
     variables,
     alternatives: [{
       frames,
@@ -90,11 +90,11 @@ function assertedFrame(
 
 function mixedInterpretation(sourceId = "src", sourceVersion = "1"): SourceSemanticInterpretation {
   return {
-    contract: "source-interpretation-v3",
+    contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     source: { source_id: sourceId, source_version: sourceVersion, content_digest: digestOriginalQuery(ORIGINAL) },
-    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v3",
+    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [
       mention("mSent", "sent", 1, [0, 4]),
       mention("mParcelSend", "parcel", 1, [5, 11]),
@@ -153,11 +153,11 @@ function alignmentBody(
   extra: { readonly producer_id?: string; readonly producer_version?: string } = {}
 ) {
   return {
-    contract: "source-semantic-alignment-v1" as const,
+    contract: "source-semantic-alignment-v2" as const,
     h_id: hId, q_id: qId,
     producer_id: extra.producer_id ?? SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
     producer_version: extra.producer_version ?? "1",
-    contract_version: "source-semantic-alignment-v1",
+    contract_version: "source-semantic-alignment-v2",
     correspondences
   };
 }
@@ -226,7 +226,7 @@ describe("source semantic alignment admission", () => {
       .toBe(true);
     expect(JSON.stringify(both.admission.leaves)).not.toMatch(/h_presence|h_binding|h_assertion/u);
     expect(both.admission.context).toEqual({
-      contract: "source-semantic-context-v1",
+      contract: "source-semantic-context-v2",
       h_id: both.admission.interpretation_id,
       q_id: both.admission.query_id,
       a_id: both.admission.alignment_id,

@@ -9,7 +9,7 @@ import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { compileConditionalFieldQuery } from "../conditional-field/query/compile-query.js";
 import { defaultView } from "../conditional-field/query/query-admission.js";
 import { admitSourceSemanticAlignment } from "../conditional-field/query/source-semantic-alignment-admission.js";
-import { compileSourceSemanticQueryProgram } from "../conditional-field/query/compile-source-semantic-query.js";
+import { compileSourceSemanticExecution } from "../conditional-field/query/compile-source-semantic-finite.js";
 import { observeField } from "./conditional-field-observe.js";
 import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
 import { compileSourceSemanticPremises, sourceSemanticReaders } from "./source-semantic-premises.js";
@@ -70,8 +70,10 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
     source_target: sourceTarget, query_gaps: admission.query.gaps };
   const population = compileSourceSemanticPremises({ interpretation: admission.interpretation, alignment: admission.alignment,
     context_id: admission.context_id, interpretation_id: admission.interpretation_id, scope: input.scope,
-    source_target: sourceTarget, meter, sourceValidity: input.sourceValidity });
-  const program = compileSourceSemanticQueryProgram(admission.query, meter);
+    source_target: sourceTarget, meter, sourceValidity: input.sourceValidity, query: admission.query });
+  const execution = compileSourceSemanticExecution({ h: admission.interpretation, q: admission.query,
+    a: admission.alignment, population, meter });
+  const program = execution.program;
   const seeds = [...admission.interpretation.entry_roots].sort().map((id) => interpretationNodeIdentity(population.coordinates.get(id)!));
   const snapshot = `sha256:${fieldContractSha256(canonicalJson({ c: admission.context_id, scopes: input.authorizedScopes, as_of: input.asOf }))}`;
   const remaining = { ...(request?.budget ?? BUDGET), ...meter.remaining() };
@@ -88,10 +90,11 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   if (state.binding.kind !== "bound") return { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] };
   let afterProjection = beforeProjection;
   const index = projectAcceptingIndex({ snapshot: state.binding.snapshot, view: query.view, query_id: query.query_id,
-    snapshot_id: snapshot, result_version: "source-interpretation-reasoning-v2",
+    snapshot_id: snapshot, result_version: "source-interpretation-reasoning-v3",
     budget: { ...remaining, work_units: state.remaining_exploration, memory_bytes: state.remaining_memory_bytes },
     binding_contexts: state.binding_contexts,
-    selected_semantics: { h: admission.interpretation, context: admission.context, source_target: sourceTarget },
+    selected_semantics: { h: admission.interpretation, context: admission.context, source_target: sourceTarget,
+      compiled_nodes: population.coordinates },
     observer: { outcome: { schema_version: 1, status: state.closure.observation }, open_regions: state.residuals },
     interpretation_status: query.status, resume_cursors: state.resume_cursors,
     remaining_reserve: beforeProjection, on_remaining_reserve: (value) => { afterProjection = value; },
@@ -103,7 +106,8 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   if (index.entries.some((entry) => entry.interpretation_node?.packet_id !== admission.interpretation_id || entry.hypothesis_id !== admission.context_id)) {
     throw new CoreError("OBLIGATION_VIOLATION", "conditional result escaped its evaluation context");
   }
-  const { proofComplete, ...proof } = deliverSourceSemanticProof({ index, query: admission.query, population, bindings: state.binding_contexts, meter });
+  const { proofComplete, ...proof } = deliverSourceSemanticProof({ index, query: admission.query, population,
+    bindings: state.binding_contexts, meter, execution });
   const complete = proofComplete && state.binding.solver_complete && state.closure.observation === "exhausted"
     && !state.memory_exhausted && state.remaining_work.length === 0 && index.continuation === null
     && Object.entries(index.completeness).every(([key, value]) => ["schema_version", "certificate_id", "interpretation_coverage"].includes(key)
@@ -114,7 +118,7 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
 
 function invalid(reason: string): ResultBody { return { outcome: { status: "invalid", reason }, consumed_leaves: [] }; }
 function finish(result: ResultBody, outputLimit = 1_000_000): SourceSemanticReasoningResult {
-  const checked = SourceSemanticReasoningResultSchema.parse({ contract: "source-interpretation-reasoning-v2",
+  const checked = SourceSemanticReasoningResultSchema.parse({ contract: "source-interpretation-reasoning-v3",
     semantic_status: "unreviewed", conclusion_scope: "conditional_on_interpretation", world_claim: "unknown", ...result });
   if (Buffer.byteLength(JSON.stringify(checked)) <= outputLimit) return checked;
   const limited = SourceSemanticReasoningResultSchema.parse({ contract: checked.contract,

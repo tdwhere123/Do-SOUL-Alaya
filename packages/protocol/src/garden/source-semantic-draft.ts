@@ -2,8 +2,9 @@ import { z } from "zod";
 import { sourceSemanticOwnershipProblems, sourceSemanticStructuralEdges } from "./source-semantic-structure.js";
 import { SourceAssertionIdSchema } from "../evidence/source-selection.js";
 import { SourceReferenceSchema } from "../evidence/source-reference.js";
+import { refineSourceSemanticQuantification } from "./source-semantic-quantified-validation.js";
 
-export const SOURCE_SEMANTIC_PACKET_CONTRACT = "source-interpretation-v3" as const;
+export const SOURCE_SEMANTIC_PACKET_CONTRACT = "source-interpretation-v4" as const;
 export const SOURCE_SEMANTIC_MAX_DEPTH = 16;
 export const SOURCE_SEMANTIC_MAX_BYTES = 262144;
 export const SOURCE_SEMANTIC_SOURCE_ACTS = ["assertion", "question", "directive", "unresolved"] as const;
@@ -31,6 +32,7 @@ export const SourceSemanticPredicateSupportSchema = z.discriminatedUnion("kind",
 
 export const SourceSemanticArgumentTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("node"), id: Handle }).strict().readonly(),
+  z.object({ kind: z.literal("bound_variable"), quantifier: Handle, binder: Handle }).strict().readonly(),
   z.object({ kind: z.literal("unresolved") }).strict().readonly()
 ]);
 
@@ -72,8 +74,35 @@ export const SourceSemanticOperatorSchema = z.discriminatedUnion("operator", [
   z.object({ ...OccurrenceBase, operator: z.literal("reported"), content: Handle,
     reporter: Handle.optional() }).strict().readonly(),
   z.object({ ...OccurrenceBase, operator: z.literal("conditional"), antecedent: Handle,
-    consequent: Handle }).strict().readonly()
+    consequent: Handle }).strict().readonly(),
+  z.object({ ...OccurrenceBase, operator: z.literal("forall"), binder: Handle, domain: Handle,
+    restriction: Handle.nullable(), content: Handle }).strict().readonly()
 ]);
+
+export const SourceSemanticDomainSchema = z.object({
+  id: Handle,
+  context: Handle.nullable(),
+  support: z.array(SourceSemanticSupportSchema).min(1).max(8).readonly(),
+  members: z.array(z.object({ referent: Handle, evidence: Handle,
+    restrictions: z.array(z.object({ restriction: Handle, evidence: Handle }).strict().readonly()).max(16).readonly()
+  }).strict().readonly()).max(64).readonly(),
+  exclusions: z.array(z.object({ referent: Handle, evidence: Handle }).strict().readonly()).max(64).readonly(),
+  closure: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("open") }).strict().readonly(),
+    z.object({ kind: z.literal("closed"), evidence: Handle }).strict().readonly()
+  ])
+}).strict().readonly();
+
+export const SourceSemanticDecimalSchema = z.string().regex(/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/u)
+  .max(194).refine((value) => value.replace(/[-.]/gu, "").length <= 128
+    && (value.split(".")[1]?.length ?? 0) <= 64, "decimal exceeds its precision bound");
+
+export const SourceSemanticMeasurementSchema = z.object({
+  id: Handle, subject: Handle, owner: Handle, population: Handle,
+  metric: SourceSemanticReadingSchema, unit: SourceSemanticReadingSchema, context: SourceSemanticReadingSchema,
+  value: SourceSemanticDecimalSchema,
+  support: z.array(SourceSemanticSupportSchema).min(1).max(8).readonly()
+}).strict().readonly();
 
 export const SourceSemanticMentionSchema = z.object({
   id: Handle, assertion_id: SourceAssertionIdSchema, source_ref: SourceReferenceSchema
@@ -97,7 +126,9 @@ export const SourceSemanticGraphFields = {
   referents: z.array(SourceSemanticReferentSchema).max(256).readonly(),
   frames: z.array(SourceSemanticFrameSchema).max(256).readonly(),
   operators: z.array(SourceSemanticOperatorSchema).max(256).readonly(),
-  gaps: z.array(SourceSemanticGapSchema).max(256).readonly()
+  gaps: z.array(SourceSemanticGapSchema).max(256).readonly(),
+  domains: z.array(SourceSemanticDomainSchema).max(64).readonly().optional(),
+  measurements: z.array(SourceSemanticMeasurementSchema).max(256).readonly().optional()
 };
 
 export type SourceSemanticSupport = z.infer<typeof SourceSemanticSupportSchema>;
@@ -111,6 +142,8 @@ export type SourceSemanticOperator = z.infer<typeof SourceSemanticOperatorSchema
 export type SourceSemanticMention = z.infer<typeof SourceSemanticMentionSchema>;
 export type SourceSemanticReferent = z.infer<typeof SourceSemanticReferentSchema>;
 export type SourceSemanticGap = z.infer<typeof SourceSemanticGapSchema>;
+export type SourceSemanticDomain = z.infer<typeof SourceSemanticDomainSchema>;
+export type SourceSemanticMeasurement = z.infer<typeof SourceSemanticMeasurementSchema>;
 
 export type SourceSemanticGraph = Readonly<{
   readonly mentions: readonly SourceSemanticMention[];
@@ -118,6 +151,8 @@ export type SourceSemanticGraph = Readonly<{
   readonly frames: readonly SourceSemanticFrame[];
   readonly operators: readonly SourceSemanticOperator[];
   readonly gaps: readonly SourceSemanticGap[];
+  readonly domains?: readonly SourceSemanticDomain[];
+  readonly measurements?: readonly SourceSemanticMeasurement[];
 }>;
 
 type IssuePath = (string | number)[];
@@ -192,6 +227,7 @@ export function refineSourceSemanticGraph(graph: SourceSemanticGraph, context: I
     refineOperatorOperands(operator, { referents, occurrences }, problem);
   }
   for (const issue of sourceSemanticOwnershipProblems(graph)) problem(issue);
+  refineSourceSemanticQuantification(graph, problem);
   refineDomination(graph, problem);
 }
 
@@ -221,7 +257,7 @@ function refineOperatorOperands(
   const occurrence = (id: string) => {
     if (!ids.occurrences.has(id)) problem("invalid operator / operand types / wrong target types");
   };
-  if (operator.operator === "not" || operator.operator === "possible" || operator.operator === "reported") {
+  if (operator.operator === "not" || operator.operator === "possible" || operator.operator === "reported" || operator.operator === "forall") {
     occurrence(operator.content);
     if (operator.operator === "reported" && operator.reporter !== undefined && !ids.referents.has(operator.reporter)) {
       problem("invalid operator / operand types / wrong target types");

@@ -5,7 +5,7 @@ import {
   SOURCE_SEMANTIC_MAX_BYTES, SourceSemanticHandleSchema, SourceSemanticSupportSchema
 } from "../../garden/source-semantic-draft.js";
 
-export const SOURCE_SEMANTIC_ALIGNMENT_CONTRACT = "source-semantic-alignment-v1" as const;
+export const SOURCE_SEMANTIC_ALIGNMENT_CONTRACT = "source-semantic-alignment-v2" as const;
 export const SOURCE_SEMANTIC_ALIGNMENT_RELATION = "contextual_equivalence" as const;
 
 const Handle = SourceSemanticHandleSchema;
@@ -38,7 +38,16 @@ export const SourceSemanticAlignmentSchema = z.object({
   producer_id: BoundedIdSchema,
   producer_version: BoundedLabelSchema,
   contract_version: BoundedLabelSchema,
-  correspondences: z.array(SourceSemanticCorrespondenceSchema).max(256).readonly()
+  correspondences: z.array(SourceSemanticCorrespondenceSchema).max(256).readonly(),
+  domains: z.array(z.object({ query_domain: Handle, source_domain: Handle,
+    query_support: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly(),
+    source_semantic_support: z.array(SourceSemanticSupportSchema).max(8).readonly()
+  }).strict().readonly()).max(64).readonly().optional(),
+  membership_assumptions: z.array(z.object({ query_variable: Handle, source_domain: Handle,
+    restrictions: z.array(Handle).max(16).readonly(), status: z.enum(["member", "excluded"]),
+    query_support: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly(),
+    description: z.string().min(1).max(1024)
+  }).strict().readonly()).max(64).readonly().optional()
 }).strict().superRefine((alignment, context) => {
   if (new TextEncoder().encode(JSON.stringify(alignment)).length > SOURCE_SEMANTIC_MAX_BYTES) {
     context.addIssue({ code: "custom", message: "source semantic alignment exceeds its byte bound" });

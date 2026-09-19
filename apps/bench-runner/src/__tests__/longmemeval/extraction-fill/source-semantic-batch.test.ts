@@ -35,10 +35,10 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_mentio
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const envelope = {
-    contract: "source-interpretation-response-v3",
+    contract: "source-interpretation-response-v4",
     outcome: { status: "interpreted", gaps: [] },
     draft: {
-      contract: "source-interpretation-v3",
+      contract: "source-interpretation-v4",
       mentions: [mention("m0", "completed"), mention("m1", theme)],
       referents: [{ id: "r0", referent_kind: "grouped", mentions: ["m1"] }],
       frames: [{
@@ -266,7 +266,7 @@ it("enforces the 32 MiB shard bound and the 1 MiB envelope before reservation or
 
 function dispositionResponse(userPrompt: string): string {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt)), row = request.source_catalog.assertions[0]!;
-  return JSON.stringify({ contract: "source-interpretation-response-v3", outcome: {
+  return JSON.stringify({ contract: "source-interpretation-response-v4", outcome: {
     status: "no_executable_proposition", description: "Unreviewed producer disposition",
     context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
       source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }]

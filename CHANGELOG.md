@@ -8,14 +8,25 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 5.2.0
+## Unreleased — protocol 6.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 5.2.0 can move
+heading (currently `## v0.3.11` below). Protocol 6.0.0 can move
 independently of the app semver. `@do-soul/alaya-engine-gateway` is
 `0.3.12` for the additive `soul.interpretation` tool surface.
+
+Protocol 6.0.0 versions source semantics as H v4, Q/A v2, envelope 5,
+and reasoning/cache v3. Explicit finite domains, universal templates,
+conditional membership assumptions, and exact decimal measurements lower
+through the existing conditional-field engine. Proofs retain instantiated
+coordinates and source leaves; exhaustive answers require a closed asserted
+domain. Open domains permit evidence-bound instances without exhaustive claims.
+Numeric comparisons require matching metric, unit, context, and population;
+extrema preserve ties and unknown operands. Nested universal binders and
+additional comparison frame constraints are rejected explicitly. Legacy
+interpretations are not relabeled or promoted to the new contract.
 
 Protocol 5.2.0 adds optional bounded path/code/reference diagnostics to invalid
 source-semantic outcomes. Interpreted producer envelopes must echo the body's

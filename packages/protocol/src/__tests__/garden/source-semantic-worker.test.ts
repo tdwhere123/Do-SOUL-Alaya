@@ -26,7 +26,7 @@ it("admits prepare and one-shot reason without a continuation token", () => {
   const result = SourceSemanticWorkerResultSchema.parse({
     kind: "reason",
     result: {
-      contract: "source-interpretation-reasoning-v2",
+      contract: "source-interpretation-reasoning-v3",
       outcome: { status: "truncated" }, consumed_leaves: [],
       semantic_status: "unreviewed", conclusion_scope: "conditional_on_interpretation",
       world_claim: "unknown"

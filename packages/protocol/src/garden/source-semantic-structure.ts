@@ -4,7 +4,7 @@ export type SourceSemanticStructuralEdge = Readonly<{
   kind: "embedding" | "operator_operand";
   from: string;
   to: string;
-  role: "content" | "antecedent" | "consequent" | "reporter";
+  role: "content" | "antecedent" | "consequent" | "reporter" | "restriction";
   governing: boolean;
 }>;
 
@@ -26,6 +26,7 @@ readonly SourceSemanticStructuralEdge[] {
     else {
       add(operator.content, "content");
       if (operator.operator === "reported" && operator.reporter !== undefined) add(operator.reporter, "reporter");
+      if (operator.operator === "forall" && operator.restriction !== null) add(operator.restriction, "restriction");
     }
   }
   return edges;

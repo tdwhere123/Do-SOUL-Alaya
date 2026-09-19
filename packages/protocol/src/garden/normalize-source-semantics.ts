@@ -3,6 +3,7 @@ import { sourceSemanticStanceLists } from "./source-semantic-structure.js";
 export { sourceSemanticStanceLists } from "./source-semantic-structure.js";
 import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted } from "./source-semantic-resources.js";
 import { AlayaError } from "../shared/alaya-error.js";
+import { canonicalSourceSemanticDecimal } from "./source-semantic-quantified-validation.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import {
   SourceReferenceCatalogSchema, sourceReferencePreparationCost, sourceReferenceResolver,
@@ -18,8 +19,8 @@ import {
   type SourceSemanticSourceBinding
 } from "./source-semantic-interpretation.js";
 
-export const SOURCE_SEMANTIC_K_VERSION = "source-semantic-k-v2" as const;
-export const SOURCE_SEMANTIC_NORMALIZER_VERSION = "source-semantic-normalizer-v2" as const;
+export const SOURCE_SEMANTIC_K_VERSION = "source-semantic-k-v3" as const;
+export const SOURCE_SEMANTIC_NORMALIZER_VERSION = "source-semantic-normalizer-v3" as const;
 
 export type SourceSemanticNormalizationBudget = Readonly<{
   readonly work_units: number;
@@ -134,6 +135,10 @@ function assemble(
     referents: draft.referents,
     frames: draft.frames,
     operators: draft.operators,
+    ...(draft.domains === undefined ? {} : { domains: draft.domains }),
+    ...(draft.measurements === undefined ? {} : { measurements: draft.measurements.map((row) => ({
+      ...row, value: canonicalSourceSemanticDecimal(row.value)
+    })) }),
     gaps: draft.gaps,
     ...sourceSemanticStanceLists(occurrences)
   });
@@ -150,7 +155,9 @@ function identityMap(draft: SourceSemanticDraft): Record<string, string> {
     ...draft.mentions.map((row) => row.id),
     ...draft.referents.map((row) => row.id),
     ...draft.frames.map((row) => row.id),
-    ...draft.operators.map((row) => row.id)
+    ...draft.operators.map((row) => row.id),
+    ...(draft.domains ?? []).map((row) => row.id),
+    ...(draft.measurements ?? []).map((row) => row.id)
   ];
   return Object.fromEntries(ids.map((id) => [id, id]));
 }

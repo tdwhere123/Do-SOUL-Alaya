@@ -31,6 +31,8 @@ export function sourceSemanticInterpretationPreimage(interpretation: SourceSeman
       referents: value.referents,
       frames: value.frames,
       operators: value.operators,
+      domains: value.domains ?? [],
+      measurements: value.measurements ?? [],
       gaps: value.gaps,
       entry_roots: value.entry_roots,
       asserted_at_scope: value.asserted_at_scope
@@ -51,7 +53,8 @@ export function sourceSemanticQueryPreimage(query: SourceSemanticQuery) {
       variables: value.variables,
       alternatives: value.alternatives,
       return_variables: value.return_variables,
-      gaps: value.gaps
+      gaps: value.gaps,
+      domains: value.domains ?? [], evaluation: value.evaluation ?? null
     }
   };
 }
@@ -65,7 +68,8 @@ export function sourceSemanticAlignmentPreimage(alignment: SourceSemanticAlignme
     producer_id: value.producer_id,
     producer_version: value.producer_version,
     contract_version: value.contract_version,
-    body: { contract: value.contract, correspondences: value.correspondences }
+    body: { contract: value.contract, correspondences: value.correspondences,
+      domains: value.domains ?? [], membership_assumptions: value.membership_assumptions ?? [] }
   };
 }
 

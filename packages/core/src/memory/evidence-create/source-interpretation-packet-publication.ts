@@ -262,7 +262,7 @@ function assemblePublishedInterpretation(sha256: FieldContractSha256, stored: Re
     content_digest: stored.record.content_digest, evidence_object_id: stored.record.evidence_object_id
   });
   return SourceSemanticPublishedInterpretationSchema.parse({
-    contract: "published-source-interpretation-v3" as const,
+    contract: "published-source-interpretation-v4" as const,
     interpretation_id: sourceSemanticInterpretationIdentity(interpretation, sha256),
     semantic_status: "unreviewed" as const, source_target, interpretation, provenance,
     ...(profile === undefined ? {} : { profile })

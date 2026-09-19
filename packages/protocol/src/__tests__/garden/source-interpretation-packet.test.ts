@@ -37,7 +37,7 @@ it("recognizes only exact workspace and source record dependencies without faili
   const target = sourceRecallTarget({ workspace_id: "workspace", root_kind: "source_record", root_id: "record",
     source_version: "1", content_digest: `sha256:${"a".repeat(64)}`, evidence_object_id: null });
   for (const contract of ["source-interpretation-v1", "published-source-interpretation-v2",
-    "source-interpretation-v3", "published-source-interpretation-v3"]) {
+    "source-interpretation-v4", "published-source-interpretation-v4"]) {
     const gist = JSON.stringify({ contract, source_target: target });
     expect(sourceInterpretationDependsOnRecord(gist, "workspace", "record")).toBe(true);
     expect(sourceInterpretationDependsOnRecord(gist, "other", "record")).toBe(false);

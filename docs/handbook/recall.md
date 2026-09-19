@@ -704,8 +704,9 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local H, source-independent
 Q, explicit A, and selected C. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 5.2.0 uses `source-semantic-k-v2`,
-`source-semantic-normalizer-v2` and `source-semantic-lowering-v2`. An older open
+Garden v1. Protocol 6.0.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
+reasoning/cache v3, `source-semantic-k-v3`,
+`source-semantic-normalizer-v3` and `source-semantic-lowering-v3`. An older open
 H is not relabeled or silently promoted; recreate its interpretation explicitly.
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
@@ -727,6 +728,40 @@ The Q context obligation `unresolved` requires no completed-event assertion and
 excludes source assertion occurrences. It accepts question, directive,
 unresolved source acts and embedded/operator content through the non-asserted
 context premise; it is not a positive test for `source_act=unresolved`.
+
+Finite universal operators declare a domain, binder, optional restriction and
+body. Domains carry source evidence for membership, exclusions and optional
+closure, in a declared source context. Open domains support member instances;
+exhaustive universal queries require a closed asserted domain. Closed empty
+domains yield a boolean certificate with no witness. Scoped-domain exhaustive
+queries remain unproved. Nested universal binders are explicitly unsupported.
+Counterexample branches currently require asserted negation of the same single
+positive predicate/role-variable body; complex counterexample formulas are
+rejected instead of treating an unrelated negated clause as a falsifier.
+Elimination does not cross negation, opaque operators or conditional antecedents.
+`entailed_at_source` distinguishes an inferred instance from literal
+`asserted_at_source`. Promise, report and possibility content retain their path.
+Novel query entities require explicit A membership assumptions; their derived
+coordinates and assumption leaves remain visible in the conditional proof.
+
+Measurements declare a subject, owner occurrence, population, metric, unit,
+context and exact decimal value (at most 128 digits and 64 fractional digits).
+Comparisons use identical units without conversion. Missing operands remain
+unknown; incompatible signatures remain incomparable. Extrema require closed
+populations, retain non-strict ties, and have no winner in empty populations.
+Each operand consumes membership evidence or an explicit A assumption for its
+aligned query referent. Open unknown membership remains unresolved; measurement
+metadata alone does not establish eligibility. Excluded subjects and subjects
+absent from closed populations cannot have measurements in that population.
+Conflicting values for the same subject/population/metric/unit/context require
+an explicit context distinction and are rejected at admission. Additional
+comparison frame constraints are unsupported; the typed operand scope controls
+assertion versus preserved context. Subjective adjectives alone create no numeric
+measurement or objective ordering. All finite obligations lower to existing
+relation gates and AND joins; only arithmetic order is a primitive evidence atom.
+Enumeration, proof material and encoded output consume the request resource
+ledger. Compiler coordinates are compact, C-bound, and explicitly described in
+proof output; they do not become declarations or assertion permissions in H.
 
 Core publishes source UTF-8 assertion locations and re-resolves mention
 selectors at both the normalized-IR entrance and SQLite reopen. Ambiguous

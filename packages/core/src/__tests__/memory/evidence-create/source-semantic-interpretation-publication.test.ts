@@ -108,7 +108,7 @@ function usesDraft(catalog: SourceReferenceCatalog, assertion: string) {
     assertion.indexOf(text), assertion.indexOf(text) + text.length
   ]);
   return {
-    contract: "source-interpretation-v3" as const,
+    contract: "source-interpretation-v4" as const,
     mentions: [
       { id: "mAlice", assertion_id: 1, source_ref: sourceRef("Alice") },
       { id: "mUses", assertion_id: 1, source_ref: sourceRef("uses") },
@@ -152,7 +152,7 @@ function publicationInput(
     provenance: { producer_id: "test-author", request_key: "req-1", raw_response_id: "raw-1" },
     draft: usesDraft(catalog, assertion),
     producer_version: "p1",
-    contract_version: "source-interpretation-v3",
+    contract_version: "source-interpretation-v4",
     ...extra
   };
 }
@@ -178,7 +178,7 @@ describe("source semantic interpretation publication", () => {
     const again = await fixture.publication.publish(publicationInput(catalog));
     expect(again.bound).toEqual(first.bound);
     expect(first.bound.semantic_status).toBe("unreviewed");
-    expect(first.bound.contract).toBe("published-source-interpretation-v3");
+    expect(first.bound.contract).toBe("published-source-interpretation-v4");
     expect(first.bound.source_target.root_id).toBe(admitted.record.identity);
     expect(first.bound.source_target.evidence_object_id).toBeNull();
     expect(first.bound.interpretation.source).toEqual({
@@ -233,7 +233,7 @@ describe("source semantic interpretation publication", () => {
     const references = sourceReferenceResolver(catalog, fieldContractSha256);
     const cafe = "café";
     const draft = {
-      contract: "source-interpretation-v3" as const,
+      contract: "source-interpretation-v4" as const,
       mentions: [{
         id: "mCafe", assertion_id: 1,
         source_ref: references.referenceForSpan(1, [source.indexOf(cafe), source.indexOf(cafe) + cafe.length])
@@ -258,7 +258,7 @@ describe("source semantic interpretation publication", () => {
         content_digest: admitted.record.content_digest,
         assertion_locations: [{ assertion_id: 1, source_utf8_span: [0, Buffer.byteLength(source)] }]
       },
-      producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v3"
+      producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4"
     });
     expect(normalized.status).toBe("normalized");
     if (normalized.status !== "normalized") throw new Error("expected normalized IR");
@@ -339,7 +339,7 @@ describe("source semantic interpretation publication", () => {
     const admitted = await admitSource(fixture);
     const catalog = catalogFor(ASSERTION);
     await expect(fixture.publication.publish(publicationInput(catalog, {
-      draft: { contract: "source-interpretation-v3", mentions: [{ id: "mX", assertion_id: 1, source_ref: { first: "a1s0", last: "missing" } }], referents: [], frames: [], operators: [], gaps: [] }
+      draft: { contract: "source-interpretation-v4", mentions: [{ id: "mX", assertion_id: 1, source_ref: { first: "a1s0", last: "missing" } }], referents: [], frames: [], operators: [], gaps: [] }
     }))).rejects.toThrow();
     expect(fixture.stores.getStoredRecord(REAL_SQLITE_TEST_WORKSPACE_ID, admitted.record.identity)?.content_bytes)
       .toBe(SOURCE);
@@ -347,7 +347,7 @@ describe("source semantic interpretation publication", () => {
 
     const published = await fixture.publication.publish(publicationInput(catalog));
     const damaged = JSON.stringify({
-      contract: "published-source-interpretation-v3",
+      contract: "published-source-interpretation-v4",
       source_target: published.bound.source_target,
       broken: true
     });
@@ -393,7 +393,7 @@ describe("source semantic interpretation publication", () => {
         content_digest: admitted.record.content_digest,
         assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, 23] }]
       },
-      producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v3"
+      producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4"
     });
     expect(normalized.status).toBe("normalized");
     if (normalized.status !== "normalized") throw new Error("expected normalized IR");
@@ -419,7 +419,7 @@ it("rejects forged selectors on already-normalized interpretations and re-verifi
   const normalized = normalizeSourceSemantics({ draft: usesDraft(catalog, ASSERTION), catalog, sha256: fieldContractSha256,
     source: { source_id: admitted.record.source_id, source_version: admitted.record.source_version,
       content_digest: admitted.record.content_digest, assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, 23] }] },
-    producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v3" });
+    producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4" });
   if (normalized.status !== "normalized") throw new Error("normalization should pass");
   const wrong = { ...normalized.interpretation, mentions: normalized.interpretation.mentions.map((row, index) => index === 0
     ? { ...row, source_ref: normalized.interpretation.mentions[1]!.source_ref } : row) };
@@ -448,7 +448,7 @@ it("publishes repeated identical assertions only with distinct exact host locati
   const locations = [{ assertion_id: 1, source_utf8_span: [0, sentence.length] as const },
     { assertion_id: 2, source_utf8_span: [sentence.length + 1, source.length] as const }];
   const input = { workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID, runId: REAL_SQLITE_TEST_RUN_ID, artifactKey: "artifact-1",
-    source, catalog, provenance: { producer_id: "test-author" }, producer_version: "p1", contract_version: "source-interpretation-v3" };
+    source, catalog, provenance: { producer_id: "test-author" }, producer_version: "p1", contract_version: "source-interpretation-v4" };
   await expect(fixture.publication.publish({ ...input, draft: second })).rejects.toThrow(/host-owned source location/);
   const a = await fixture.publication.publish({ ...input, draft: first, assertion_locations: locations });
   const b = await fixture.publication.publish({ ...input, draft: second, assertion_locations: locations });

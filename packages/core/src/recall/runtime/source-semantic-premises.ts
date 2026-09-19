@@ -1,13 +1,21 @@
 import {
   interpretationNodeIdentity, sourceSemanticStructuralEdges, sourceSemanticSlotNodeId, SourceSemanticResourceLedger,
   type InterpretationNodeCoordinate, type SourceEvidenceTarget, type SourceSemanticAlignment,
-  type SourceSemanticConsumedLeaf, type SourceSemanticInterpretation
+  type SourceSemanticConsumedLeaf, type SourceSemanticInterpretation, type SourceSemanticQuery,
+  type SourceSemanticDerivedNode
 } from "@do-soul/alaya-protocol";
+import { groundSourceSemanticInstances, type SourceSemanticInstance } from "./source-semantic-instances.js";
+import { populateSourceSemanticFiniteFacts } from "./source-semantic-finite-facts.js";
 import { CoreError } from "../../shared/errors.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 import type { ObserverReaders, RelationObserverRow, SourceObserverRow } from "../conditional-field/observers/observe.js";
 
 export function sourceSemanticRelationKey(...parts: readonly (string | number)[]): string {
-  return JSON.stringify(["source-interpretation-v3", ...parts]);
+  return JSON.stringify(["source-interpretation-v4", ...parts]);
+}
+/** Coordinates remain bounded independently of source-handle lengths; C binds their meaning. */
+export function sourceSemanticDerivedNodeId(kind: string, ...parts: readonly string[]): string {
+  return `@${kind}:${fieldContractSha256(JSON.stringify(parts)).slice(0, 48)}`;
 }
 export type SourceSemanticPremisePopulation = Readonly<{
   nodes: ReadonlyMap<string, SourceObserverRow>;
@@ -18,11 +26,14 @@ export type SourceSemanticPremisePopulation = Readonly<{
   origins: ReadonlyMap<string, SourceSemanticConsumedLeaf>;
   work: number;
   bytes: number;
+  instances: ReadonlyMap<string, SourceSemanticInstance>;
+  derivedNodes: readonly SourceSemanticDerivedNode[];
 }>;
 type Input = Readonly<{
   interpretation: SourceSemanticInterpretation; alignment: SourceSemanticAlignment;
   context_id: string; interpretation_id: string; scope: string; source_target: SourceEvidenceTarget;
   meter: SourceSemanticResourceLedger;
+  query?: SourceSemanticQuery;
   sourceValidity?: Readonly<{ valid_from: string | null; valid_to: string | null }>;
 }>;
 
@@ -38,13 +49,16 @@ export function compileSourceSemanticPremises(input: Input): SourceSemanticPremi
     builder.slotNodes.set(JSON.stringify([frame.id, slot.id]), id); builder.node(id);
   }
   populateOccurrences(builder, h); populateStructure(builder, h); populateBindings(builder, h);
+  groundSourceSemanticInstances(builder, h, input.alignment, input.query);
+  populateSourceSemanticFiniteFacts(builder, h, input.alignment);
   populateAlignment(builder, input.alignment);
   return { nodes: builder.nodes, rows: builder.rows, coordinates: builder.coordinates,
     adjacency: builder.adjacency, positions: builder.positions, origins: builder.origins,
-    work: meter.spentWork - workBefore, bytes: meter.spentBytes - bytesBefore };
+    work: meter.spentWork - workBefore, bytes: meter.spentBytes - bytesBefore,
+    instances: builder.instances, derivedNodes: builder.derivedNodes };
 }
 
-class PremiseBuilder {
+export class PremiseBuilder {
   readonly nodes = new Map<string, SourceObserverRow>();
   readonly coordinates = new Map<string, InterpretationNodeCoordinate>();
   readonly rows: RelationObserverRow[] = [];
@@ -52,6 +66,9 @@ class PremiseBuilder {
   readonly positions = new Map<string, number>();
   readonly origins = new Map<string, SourceSemanticConsumedLeaf>();
   readonly slotNodes = new Map<string, string>();
+  readonly instances = new Map<string, SourceSemanticInstance>();
+  readonly derivedNodes: SourceSemanticDerivedNode[] = [];
+  readonly aliases = new Map<string, string>();
   constructor(readonly input: Input) {}
   node(id: string): void {
     this.input.meter.charge(1, 1024, "premise node");
@@ -73,7 +90,7 @@ class PremiseBuilder {
       validity: { kind: "interpretation", packet_id: this.input.interpretation_id, hypothesis_id: this.input.context_id },
       interpretation_source: source, interpretation_target: target, source_revision: this.input.interpretation_id
     };
-    if (leaf !== undefined) this.origins.set(row.assertionId, leaf);
+    if (leaf !== undefined) this.origins.set(row.assertionId, this.provenance(leaf));
     const key = JSON.stringify([row.sourceObjectId, predicate]), bucket = this.adjacency.get(key) ?? [];
     this.positions.set(row.assertionId, bucket.length);
     bucket.push(row); this.adjacency.set(key, bucket); this.rows.push(row);
@@ -81,12 +98,24 @@ class PremiseBuilder {
   self(id: string, parts: readonly (string | number)[], leaf?: SourceSemanticConsumedLeaf): void {
     this.edge(id, id, sourceSemanticRelationKey(...parts), leaf);
   }
+  private provenance(leaf: SourceSemanticConsumedLeaf): SourceSemanticConsumedLeaf {
+    const result = { ...leaf };
+    for (const [field, derived] of [["occurrence", "derived_node"], ["parent", "derived_parent"], ["target", "derived_target"]] as const) {
+      const value = result[field];
+      if (value === undefined || !value.startsWith("@")) continue;
+      result[derived] = value;
+      const template = this.aliases.get(value);
+      if (template === undefined) delete result[field]; else result[field] = template;
+    }
+    return result;
+  }
 }
 
-function populateOccurrences(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
+export function populateOccurrences(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
   const asserted = new Set(h.asserted_at_scope);
   for (const row of [...h.frames, ...h.operators]) {
     builder.self(row.id, ["h_presence"], { leaf_kind: "h_presence", occurrence: row.id });
+    if (!builder.instances.has(row.id)) builder.self(row.id, ["h_original"]);
     const sort = "operator" in row ? "context" : "proposition";
     builder.self(row.id, ["h_sort", sort], { leaf_kind: "h_sort", occurrence: row.id, value: sort });
     if ("operator" in row) builder.self(row.id, ["h_operator", row.operator], { leaf_kind: "h_operator", occurrence: row.id, value: row.operator });
@@ -101,7 +130,7 @@ function populateOccurrences(builder: PremiseBuilder, h: SourceSemanticInterpret
   }
 }
 
-function populateStructure(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
+export function populateStructure(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
   const parents = new Map<string, string>();
   for (const edge of sourceSemanticStructuralEdges(h)) {
     const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "h_content", occurrence: edge.to,
@@ -121,7 +150,7 @@ function populateStructure(builder: PremiseBuilder, h: SourceSemanticInterpretat
   }
 }
 
-function populateBindings(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
+export function populateBindings(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
   for (const frame of h.frames) for (const binding of frame.bindings) {
     if (binding.target.kind !== "node") continue;
     const slot = builder.slotNodes.get(JSON.stringify([frame.id, binding.slot_id]))!;
@@ -138,11 +167,19 @@ function populateAlignment(builder: PremiseBuilder, alignment: SourceSemanticAli
       builder.self(source.referent, ["a_referent", query.variable], { leaf_kind: "a_referent", occurrence: source.referent, correspondence_index: index });
     } else if (query.kind === "predicate" && source.kind === "frame") {
       builder.self(source.frame, ["a_predicate", query.alternative, query.frame], { leaf_kind: "a_predicate", occurrence: source.frame, correspondence_index: index });
+      for (const [id, template] of builder.aliases) if (template === source.frame) builder.self(id,
+        ["a_predicate", query.alternative, query.frame], { leaf_kind: "a_predicate", occurrence: id, correspondence_index: index });
     } else if (query.kind === "slot" && source.kind === "slot") {
       const slot = builder.slotNodes.get(JSON.stringify([source.frame, source.slot]))!;
       const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "a_slot", occurrence: source.frame, slot_id: source.slot, correspondence_index: index };
       builder.edge(source.frame, slot, sourceSemanticRelationKey("a_slot", query.alternative, query.frame, query.slot), leaf);
       builder.edge(slot, source.frame, sourceSemanticRelationKey("a_slot_inv", query.alternative, query.frame, query.slot), leaf);
+      for (const [id, template] of builder.aliases) if (template === source.frame) {
+        const derivedSlot = builder.slotNodes.get(JSON.stringify([id, source.slot]))!;
+        const derivedLeaf = { ...leaf, occurrence: id, derived_target: derivedSlot };
+        builder.edge(id, derivedSlot, sourceSemanticRelationKey("a_slot", query.alternative, query.frame, query.slot), derivedLeaf);
+        builder.edge(derivedSlot, id, sourceSemanticRelationKey("a_slot_inv", query.alternative, query.frame, query.slot), derivedLeaf);
+      }
     }
   }
 }

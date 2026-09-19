@@ -16,10 +16,10 @@ const digest = `sha256:${"a".repeat(64)}`;
 const other = `sha256:${"b".repeat(64)}`;
 
 const interpretation = SourceSemanticInterpretationSchema.parse({
-  contract: "source-interpretation-v3",
+  contract: "source-interpretation-v4",
   k_version: "k1", normalizer_version: "n1",
   source: { source_id: "src", source_version: "1", content_digest: digest },
-  producer_id: "producer", producer_version: "p1", contract_version: "source-interpretation-v3",
+  producer_id: "producer", producer_version: "p1", contract_version: "source-interpretation-v4",
   mentions: [{ id: "mSent", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" }, text: "sent", utf8_span: [0, 4] }],
   referents: [{ id: "rBob", referent_kind: "grouped", mentions: ["mSent"] }],
   frames: [{
@@ -32,8 +32,8 @@ const interpretation = SourceSemanticInterpretationSchema.parse({
 });
 
 const query = SourceSemanticQuerySchema.parse({
-  contract: "source-semantic-query-v1", original_query_digest: digest,
-  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v1",
+  contract: "source-semantic-query-v2", original_query_digest: digest,
+  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v2",
   variables: [{ id: "parcel", sort: "entity" }, { id: "fSend", sort: "proposition" }],
   alternatives: [{
     frames: [{
@@ -80,8 +80,8 @@ it("keeps A and C acyclic: A hashes H and Q, C hashes A_id, A never contains C",
   const hid = sourceSemanticInterpretationIdentity(interpretation, sha);
   const qid = sourceSemanticQueryIdentity(query, sha);
   const alignment = SourceSemanticAlignmentSchema.parse({
-    contract: "source-semantic-alignment-v1", h_id: hid, q_id: qid,
-    producer_id: "ap", producer_version: "1", contract_version: "source-semantic-alignment-v1",
+    contract: "source-semantic-alignment-v2", h_id: hid, q_id: qid,
+    producer_id: "ap", producer_version: "1", contract_version: "source-semantic-alignment-v2",
     correspondences: [{
       relation: "contextual_equivalence",
       query_endpoint: { kind: "predicate", alternative: 0, frame: "qSend" },
@@ -95,14 +95,14 @@ it("keeps A and C acyclic: A hashes H and Q, C hashes A_id, A never contains C",
   expect(canonicalJson(sourceSemanticAlignmentPreimage(alignment))).toContain(qid);
   expect(SourceSemanticAlignmentSchema.safeParse({ ...alignment, c_id: other }).success).toBe(false);
   const context = SourceSemanticEvaluationContextSchema.parse({
-    contract: "source-semantic-context-v1", h_id: hid, q_id: qid, a_id: aid,
+    contract: "source-semantic-context-v2", h_id: hid, q_id: qid, a_id: aid,
     k_version: "k1", lowering_version: "l1"
   });
   const cid = sourceSemanticContextIdentity(context, sha);
   expect(canonicalJson(sourceSemanticContextPreimage(context))).toContain(aid);
   expect(canonicalJson(sourceSemanticAlignmentPreimage(alignment))).not.toContain(cid);
   expect(SourceSemanticEvaluationContextSchema.safeParse({
-    contract: "source-semantic-context-v1", h_id: hid, q_id: qid, k_version: "k1", lowering_version: "l1"
+    contract: "source-semantic-context-v2", h_id: hid, q_id: qid, k_version: "k1", lowering_version: "l1"
   }).success).toBe(false);
   expect(SourceSemanticEvaluationContextSchema.safeParse({ ...context, branch_id: other }).success).toBe(false);
 });

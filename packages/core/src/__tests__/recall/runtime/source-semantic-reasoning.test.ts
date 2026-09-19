@@ -40,11 +40,11 @@ function queryOf(
   obligations: SourceSemanticQuery["alternatives"][number]["context_obligations"]
 ): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v1",
+    contract: "source-semantic-query-v2",
     original_query_digest: digestOriginalQuery(original),
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v1",
+    contract_version: "source-semantic-query-v2",
     variables, alternatives: [{ frames, context_obligations: obligations }],
     return_variables: ["parcel"], gaps: []
   };
@@ -144,11 +144,11 @@ function frame(input: {
 
 function mixedH(): SourceSemanticInterpretation {
   return {
-    contract: "source-interpretation-v3",
+    contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     source: { source_id: "src", source_version: "1", content_digest: digestOriginalQuery(AND_QUERY) },
-    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v3",
+    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [
       mention("mSent", "sent", 1, [0, 4]), mention("mParcelSend", "parcel", 1, [5, 11]),
       mention("mInspected", "inspected", 2, [12, 21]), mention("mParcelInspect", "parcel", 2, [22, 28])
@@ -190,11 +190,11 @@ function orionH(extra: {
       { id: "rQ", referent_kind: "grouped" as const, mentions: ["mQ"] }
     ];
   return {
-    contract: "source-interpretation-v3",
+    contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     source: { source_id: "orion", source_version: "1", content_digest: digestOriginalQuery(JOIN_QUERY) },
-    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v3",
+    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [
       mention("mOrion", "Orion", 1, [0, 5]), mention("mSent", "sent", 1, [6, 10]),
       mention("mP1", "P", 1, [18, 19]), mention("mVega1", "Vega", 1, [23, 27]),
@@ -231,11 +231,11 @@ function orionH(extra: {
 function stanceH(act: "assertion" | "question" | "directive"): SourceSemanticInterpretation {
   const asserted = act === "assertion";
   return {
-    contract: "source-interpretation-v3",
+    contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     source: { source_id: "stance", source_version: act, content_digest: digestOriginalQuery(SEND_QUERY) },
-    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v3",
+    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [mention("mSent", "sent", 1, [0, 4]), mention("mParcel", "parcel", 1, [5, 11])],
     referents: [{ id: "rParcel", referent_kind: "grouped", mentions: ["mParcel"] }],
     frames: [frame({
@@ -268,12 +268,12 @@ function alignmentOf(
   const admitted = admitSourceSemanticQuery(q, original);
   if (admitted.kind !== "admitted") throw new Error("query must admit");
   return {
-    contract: "source-semantic-alignment-v1",
+    contract: "source-semantic-alignment-v2",
     h_id: sourceSemanticInterpretationIdentity(h, fieldContractSha256),
     q_id: admitted.query_id,
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-alignment-v1",
+    contract_version: "source-semantic-alignment-v2",
     correspondences
   };
 }
@@ -657,7 +657,7 @@ describe("source semantic query compilation", () => {
       h, q, a, original_query: AND_QUERY, workspaceId: "ws-semantic",
       scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
       request: {
-        contract: "source-interpretation-reasoning-v2",
+        contract: "source-interpretation-reasoning-v3",
         accepts_unreviewed_conditional_results: true,
         h_id: admitted.interpretation_id, q_id: admitted.query_id, a_id: admitted.alignment_id,
         original_query: AND_QUERY,
