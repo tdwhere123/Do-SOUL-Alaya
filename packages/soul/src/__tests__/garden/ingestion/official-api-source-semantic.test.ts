@@ -111,6 +111,16 @@ function admittedQuery() {
 }
 
 describe("open source semantic proposal producer", () => {
+  it("normalizes the complete neutral prompt example through the real request catalog", () => {
+    const rawJson = SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
+    const input = { sourceCorpus: "Mira shelved something.", assertionIds: [1],
+      source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
+    const received = proposeSourceSemantics(input, { rawJson });
+    expect(received.outcome.status).toBe("interpreted");
+    expect(received.interpretation?.mentions.map((row) => row.text)).toEqual(["Mira", "shelved", "something"]);
+    expect(received.interpretation?.gaps).toEqual(JSON.parse(rawJson).outcome.gaps);
+    expect(received.interpretation?.gaps).toHaveLength(1);
+  });
   it("builds an open request with catalog, versions, capability and limits and no mandatory profile", () => {
     const request = buildSourceSemanticRequest(sourceInput());
     expect(request.schema_version).toBe(4);
@@ -171,6 +181,30 @@ describe("open source semantic proposal producer", () => {
     expect(received.outcome).toEqual({ status: "interpreted", gaps });
     expect(received.draft?.gaps).toEqual(gaps);
     expect(received.interpretation?.gaps[0]?.kind).toBe("unresolved_referent");
+  });
+
+  it("rejects outcome-only gaps instead of silently dropping them", () => {
+    const input = sourceInput(), request = buildSourceSemanticRequest(input);
+    const envelope = JSON.parse(interpretedJson(request));
+    envelope.outcome.gaps = [{ kind: "unresolved_referent", affected_ids: ["rBay"], support: [] }];
+    const received = proposeSourceSemantics(input, { rawJson: JSON.stringify(envelope) });
+    expect(received.outcome.status).toBe("invalid");
+    expect(received.interpretation).toBeUndefined();
+  });
+
+  it("identifies catalog IDs used as graph mention handles without repairing them", () => {
+    const input = sourceInput(), request = buildSourceSemanticRequest(input);
+    const envelope = JSON.parse(interpretedJson(request));
+    const reference = segment(request, "archivist").id;
+    envelope.draft.frames[0].slots[0].support[0].mentions = [reference];
+    const rawJson = JSON.stringify(envelope);
+    const received = proposeSourceSemantics(input, { rawJson });
+    expect(received.outcome).toMatchObject({ status: "invalid", reason: "malformed_response", diagnostics: [{
+      code: "unknown_cross_reference", path: ["draft", "frames", 0, "slots", 0, "support", 0, "mentions", 0], reference
+    }] });
+    expect(received.rawJson).toBe(rawJson);
+    expect(received.raw_response_id).toBe(`sha256:${semanticSha256(rawJson)}`);
+    expect(received.interpretation).toBeUndefined();
   });
 
   it("treats a v2 packet:null refusal as invalid instead of successful empty", () => {
@@ -241,6 +275,38 @@ describe("open source semantic proposal producer", () => {
 });
 
 describe("query and alignment proposal entry points", () => {
+  it.each([false, true])("validates query outcome gaps against the admitted body (matching=%s)", (matching) => {
+    const query = admittedQuery();
+    const gaps = [{ kind: "unresolved_referent", affected_ids: ["bay"], support: [] }];
+    const received = proposeQuerySemantics({ original_query: "which folio was accessioned into bay B?",
+      producer_id: "query-producer", producer_version: "1" }, { rawJson: JSON.stringify({
+      contract: "source-semantic-query-response-v1", outcome: { status: "interpreted", gaps },
+      query: { variables: query.variables, alternatives: query.alternatives,
+        return_variables: query.return_variables, gaps: matching ? gaps : [] }
+    }) });
+    if (matching) {
+      expect(received.outcome).toEqual({ status: "interpreted", gaps });
+      expect(received.query?.gaps).toEqual(gaps);
+    } else {
+      expect(received.outcome).toMatchObject({ status: "invalid", diagnostics: [{ code: "outcome_gap_mismatch", path: ["outcome", "gaps"] }] });
+      expect(received.query).toBeUndefined();
+    }
+  });
+
+  it("rejects alignment outcome gaps rather than returning successful empty gaps", () => {
+    const input = sourceInput(), request = buildSourceSemanticRequest(input);
+    const h = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
+    const received = proposeAlignmentSemantics({ admitted_q: admittedQuery(),
+      h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
+      producer_id: "align-producer", producer_version: "1" }, { rawJson: JSON.stringify({
+      contract: "source-semantic-alignment-response-v1",
+      outcome: { status: "interpreted", gaps: [{ kind: "unsupported_meaning", affected_ids: [], support: [] }] },
+      alignment: { correspondences: [] }
+    }) });
+    expect(received.outcome).toMatchObject({ status: "invalid", diagnostics: [{ code: "outcome_gap_mismatch", path: ["outcome", "gaps"] }] });
+    expect(received.alignment).toBeUndefined();
+  });
+
   it("accepts the original query and approved context and rejects answers or programs", () => {
     const query = admittedQuery();
     const body = {

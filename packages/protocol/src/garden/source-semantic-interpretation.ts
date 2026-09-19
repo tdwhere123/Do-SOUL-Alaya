@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
+import { SourceSemanticDiagnosticsSchema } from "./source-semantic-diagnostics.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import { sourceSemanticStanceLists } from "./source-semantic-structure.js";
 import { DerivationSchema } from "../recall/conditional-field/support.js";
@@ -129,7 +131,8 @@ export const SourceSemanticOutcomeSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("abstained"), raw_response_id: BoundedIdSchema.optional() }).strict().readonly(),
   z.object({ status: z.literal("interpreted"), gaps: z.array(SourceSemanticGapSchema).max(256).readonly() }).strict().readonly(),
   SourceSemanticNoPropositionOutcomeSchema,
-  z.object({ status: z.literal("invalid"), reason: BoundedLabelSchema }).strict().readonly(),
+  z.object({ status: z.literal("invalid"), reason: BoundedLabelSchema,
+    diagnostics: SourceSemanticDiagnosticsSchema.optional() }).strict().readonly(),
   z.object({ status: z.literal("quarantine"), reason: BoundedLabelSchema }).strict().readonly(),
   z.object({ status: z.literal("truncated") }).strict().readonly(),
   z.object({ status: z.literal("transport_failure") }).strict().readonly(),
@@ -155,7 +158,25 @@ export const SourceSemanticResponseEnvelopeSchema = z.object({
   if (interpreted !== (envelope.draft !== undefined)) {
     context.addIssue({ code: "custom", message: "interpreted outcome requires a draft; other outcomes must not carry one" });
   }
+  if (envelope.draft !== undefined) refineSourceSemanticOutcomeGaps(envelope.outcome, envelope.draft.gaps, context);
 }).readonly();
+
+/** The body owns executable gaps. The envelope is an exact echo, never a second channel. */
+function refineSourceSemanticOutcomeGaps(
+  outcome: z.infer<typeof SourceSemanticOutcomeSchema>, gaps: readonly z.infer<typeof SourceSemanticGapSchema>[],
+  context: { addIssue: (issue: { code: "custom"; path: string[]; message: string; params: { diagnostic_code: string } }) => void }
+): void {
+  if (outcome.status === "interpreted" && canonicalJson(outcome.gaps) !== canonicalJson(gaps)) {
+    context.addIssue({ code: "custom", path: ["outcome", "gaps"],
+      message: "interpreted outcome gaps must exactly echo body gaps",
+      params: { diagnostic_code: "outcome_gap_mismatch" } });
+  }
+}
+
+export const SourceSemanticOutcomeGapBindingSchema = z.object({
+  outcome: SourceSemanticOutcomeSchema,
+  gaps: z.array(SourceSemanticGapSchema).max(256).readonly()
+}).strict().superRefine((value, context) => refineSourceSemanticOutcomeGaps(value.outcome, value.gaps, context));
 
 export const SourceSemanticReasoningRequestSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_REASONING_CONTRACT),

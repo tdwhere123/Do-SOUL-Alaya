@@ -120,7 +120,9 @@ export type SourceSemanticGraph = Readonly<{
   readonly gaps: readonly SourceSemanticGap[];
 }>;
 
-type IssueContext = { addIssue: (issue: { code: "custom"; message: string }) => void };
+type IssuePath = (string | number)[];
+type IssueContext = { addIssue: (issue: { code: "custom"; message: string; path?: IssuePath;
+  params?: { diagnostic_code: string; reference: string } }) => void };
 
 export function refineSourceSemanticGraph(graph: SourceSemanticGraph, context: IssueContext): void {
   const problem = (message: string) => context.addIssue({ code: "custom", message });
@@ -140,45 +142,52 @@ export function refineSourceSemanticGraph(graph: SourceSemanticGraph, context: I
   const operators = new Set(operatorIds);
   const occurrences = new Set(occurrenceIds);
   const nodes = new Set([...referents, ...occurrences]);
-  const mentionExists = (id: string) => mentions.has(id);
-  const supportMentions = (support: readonly SourceSemanticSupport[]) => {
-    for (const item of support) {
+  const reference = (id: string, allowed: ReadonlySet<string>, path: IssuePath) => {
+    if (!allowed.has(id)) context.addIssue({ code: "custom", message: "unknown cross-reference", path,
+      params: { diagnostic_code: "unknown_cross_reference", reference: id } });
+  };
+  const references = (ids: readonly string[], allowed: ReadonlySet<string>, path: IssuePath) =>
+    ids.forEach((id, index) => reference(id, allowed, [...path, index]));
+  const supportMentions = (support: readonly SourceSemanticSupport[], path: IssuePath) => {
+    for (const [index, item] of support.entries()) {
       if (item.kind === "lexical" || item.kind === "additional") {
-        if (item.mentions.some((id) => !mentionExists(id))) problem("unknown cross-reference");
-      } else if (!occurrences.has(item.via_id) && !referents.has(item.via_id)) problem("unknown cross-reference");
+        references(item.mentions, mentions, [...path, index, "mentions"]);
+      } else reference(item.via_id, nodes, [...path, index, "via_id"]);
     }
   };
-  for (const gap of graph.gaps) {
-    if (gap.affected_ids.some((id) => !nodeIds.includes(id))) problem("unknown cross-reference");
-    supportMentions(gap.support);
+  for (const [index, gap] of graph.gaps.entries()) {
+    references(gap.affected_ids, new Set(nodeIds), ["gaps", index, "affected_ids"]);
+    supportMentions(gap.support, ["gaps", index, "support"]);
   }
-  for (const referent of graph.referents) {
+  for (const [index, referent] of graph.referents.entries()) {
     if (referent.referent_kind === "grouped" && referent.mentions.length === 0) {
       problem("grouped referent requires mentions");
     }
-    if (referent.mentions.some((id) => !mentionExists(id))) problem("unknown cross-reference");
+    references(referent.mentions, mentions, ["referents", index, "mentions"]);
   }
-  for (const frame of graph.frames) {
+  for (const [index, frame] of graph.frames.entries()) {
+    const path: IssuePath = ["frames", index];
     const slotIds = frame.slots.map((slot) => slot.id);
     if (new Set(slotIds).size !== slotIds.length) problem("duplicate handles rejected");
     const slots = new Set(slotIds);
     if (new Set(frame.bindings.map((row) => row.slot_id)).size !== frame.bindings.length) {
       problem("duplicate handles rejected");
     }
-    for (const slot of frame.slots) supportMentions(slot.support);
-    for (const binding of frame.bindings) {
-      if (!slots.has(binding.slot_id)) problem("unknown cross-reference");
-      supportMentions(binding.support);
-      if (binding.target.kind === "node" && !nodes.has(binding.target.id)) problem("unknown cross-reference");
+    for (const [slotIndex, slot] of frame.slots.entries()) supportMentions(slot.support, [...path, "slots", slotIndex, "support"]);
+    for (const [bindingIndex, binding] of frame.bindings.entries()) {
+      const bindingPath = [...path, "bindings", bindingIndex];
+      reference(binding.slot_id, slots, [...bindingPath, "slot_id"]);
+      supportMentions(binding.support, [...bindingPath, "support"]);
+      if (binding.target.kind === "node") reference(binding.target.id, nodes, [...bindingPath, "target", "id"]);
     }
     const pred = frame.predicate_support;
-    if (pred.kind === "explicit" && pred.mentions.some((id) => !mentionExists(id))) problem("unknown cross-reference");
-    if (pred.kind === "implicit" && pred.supporting_context.some((id) => !mentionExists(id))) problem("unknown cross-reference");
-    supportMentions(frame.additional_support);
+    if (pred.kind === "explicit") references(pred.mentions, mentions, [...path, "predicate_support", "mentions"]);
+    if (pred.kind === "implicit") references(pred.supporting_context, mentions, [...path, "predicate_support", "supporting_context"]);
+    supportMentions(frame.additional_support, [...path, "additional_support"]);
     refineContextOwner(frame.id, frame.context_owner, { frames, operators, occurrences }, problem);
   }
-  for (const operator of graph.operators) {
-    supportMentions(operator.additional_support);
+  for (const [index, operator] of graph.operators.entries()) {
+    supportMentions(operator.additional_support, ["operators", index, "additional_support"]);
     refineContextOwner(operator.id, operator.context_owner, { frames, operators, occurrences }, problem);
     refineOperatorOperands(operator, { referents, occurrences }, problem);
   }

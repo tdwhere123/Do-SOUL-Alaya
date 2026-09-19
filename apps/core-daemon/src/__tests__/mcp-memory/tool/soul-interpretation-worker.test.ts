@@ -434,6 +434,13 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       expect(oracleNecessaryLeavesHeld(oracle, direct.output.result.consumed_leaves)).toBe(true);
       expect(oracleProofsMatchEngine(oracle, direct.output.result)).toBe(true);
       expect(decoded).toEqual([{ actor: "rAlice", tools: "rTools", fUse: "fUse" }]);
+      const { database: inspectedDb } = await createRecallRealStorage(() => undefined, filename);
+      try {
+        expect(inspectedDb.connection.prepare("SELECT count(*) AS n FROM memory_entries").get()).toEqual({ n: 0 });
+        expect(inspectedDb.connection.prepare("SELECT count(*) AS n FROM relation_assertions").get()).toEqual({ n: 0 });
+      } finally {
+        inspectedDb.close();
+      }
     } finally {
       await reopened.close();
     }

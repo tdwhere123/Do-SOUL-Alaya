@@ -41,6 +41,29 @@ function nestedH(outer: "not" | "reported", inner: "not" | "reported"): SourceSe
       { id: "inner", operator: inner, content: "fAlice", assertion_ids: [1], additional_support: [], context_owner: { kind: "operator", operator_handle: "outer" } }],
     entry_roots: ["outer", "fBob"], asserted_at_scope: ["outer", "fBob"] };
 }
+
+it.each(["assertion", "question", "directive", "unresolved", "embedding", "operator"] as const)(
+  "matches unresolved query obligation against %s context without asserting the event", (kind) => {
+    const base = source(), baseQ = query();
+    const q: SourceSemanticQuery = { ...baseQ, alternatives: [{ ...baseQ.alternatives[0]!,
+      context_obligations: [{ frame: "qUse", kind: "unresolved" }] }] };
+    const context_owner = kind === "embedding"
+      ? { kind: "embedding" as const, parent_frame: "fBob", content_argument: "fAlice" }
+      : kind === "operator" ? { kind: "operator" as const, operator_handle: "inner" }
+      : { kind: "source_act" as const, source_act: kind };
+    const h: SourceSemanticInterpretation = kind === "operator" ? nestedH("not", "reported") : {
+      ...base, frames: base.frames.map((row) => row.id === "fAlice" ? { ...row, context_owner } : row),
+      entry_roots: kind === "embedding" ? ["fBob"] : base.entry_roots,
+      asserted_at_scope: kind === "assertion" ? base.asserted_at_scope : ["fBob"]
+    };
+    const result = run(h, q, align(h, q));
+    expect(result.outcome.status).toBe("interpreted");
+    expect(result.answers?.map((answer) => answer.returned.tools?.node_id)).toEqual(kind === "assertion" ? [] : ["rX"]);
+    if (kind !== "assertion") {
+      expect(result.consumed_leaves).toContainEqual({ leaf_kind: "h_context", occurrence: "fAlice" });
+      expect(result.consumed_leaves).not.toContainEqual({ leaf_kind: "h_assertion_permission", occurrence: "fAlice" });
+    }
+  });
 function nestedQ(outer: "not" | "reported", inner: "not" | "reported"): SourceSemanticQuery {
   const base = query();
   return { ...base, variables: [...base.variables, { id: "outer", sort: "context" }, { id: "inner", sort: "context" }],

@@ -187,7 +187,7 @@ export function importSourceSemanticArtifact(input: Readonly<{
   }
   const completion = retainableOutcome(admitted);
   if (completion === undefined) {
-    throw new SourceSemanticAdmissionError(`source semantics failed request-bound admission: ${admitted.outcome.status}`);
+    throw new SourceSemanticAdmissionError(`source semantics failed request-bound admission: ${JSON.stringify(admitted.outcome)}; raw_response_id=${admitted.raw_response_id}`);
   }
   const rawJsonSha256 = computeExtractionRawJsonSha256(result.rawJson);
   const entry: CachedExtractionEntry = { model: config.model, request_profile: config.requestProfile,

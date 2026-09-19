@@ -3,6 +3,7 @@ import {
   AlayaError, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_PACKET_CONTRACT,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticAlignmentSchema,
   SourceSemanticOutcomeSchema, SourceSemanticQuerySchema, SourceSemanticResponseEnvelopeSchema,
+  SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
   normalizeSourceSemantics, sourceSemanticQueryIdentity, verifySourceSemanticDisposition, canonicalJson,
   type SourceSemanticAlignment, type SourceSemanticDraft, type SourceSemanticInterpretation,
   type SourceSemanticOutcome, type SourceSemanticQuery
@@ -97,7 +98,7 @@ export function receiveSourceSemantics(
   if (parsed.status !== "ok") return parsed.result;
   const envelope = SourceSemanticResponseEnvelopeSchema.safeParse(parsed.value);
   if (!envelope.success) {
-    return { ...attempt, outcome: { status: "invalid", reason: "malformed_response" } };
+    return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
   }
   const { outcome, draft } = envelope.data;
   if (HOST_ONLY_OUTCOMES.has(outcome.status)) {
@@ -133,7 +134,7 @@ export function receiveQuerySemantics(
   if (parsed.status !== "ok") return parsed.result;
   const envelope = queryResponseSchema.safeParse(parsed.value);
   if (!envelope.success) {
-    return { ...attempt, outcome: { status: "invalid", reason: "malformed_response" } };
+    return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
   }
   if (HOST_ONLY_OUTCOMES.has(envelope.data.outcome.status)) {
     return { ...attempt, outcome: { status: "invalid", reason: "host_only_outcome" } };
@@ -144,12 +145,13 @@ export function receiveQuerySemantics(
   }
   try {
     const query = parseQuery({ original_query: request.original_query, request, query: materializeQuery(envelope.data.query, request) });
+    SourceSemanticOutcomeGapBindingSchema.parse({ outcome: envelope.data.outcome, gaps: query.gaps });
     if (query.original_query_digest !== request.original_query_digest) {
       return { ...attempt, outcome: { status: "invalid", reason: "query_digest_mismatch" } };
     }
     return { ...attempt, outcome: { status: "interpreted", gaps: query.gaps }, query };
   } catch (error) {
-    return { ...attempt, outcome: { status: "invalid", reason: reasonOf(error) } };
+    return { ...attempt, outcome: invalidProposalOutcome(error) };
   }
 }
 
@@ -174,7 +176,7 @@ export function receiveAlignmentSemantics(
   if (parsed.status !== "ok") return parsed.result;
   const envelope = alignmentResponseSchema.safeParse(parsed.value);
   if (!envelope.success) {
-    return { ...attempt, outcome: { status: "invalid", reason: "malformed_response" } };
+    return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
   }
   if (HOST_ONLY_OUTCOMES.has(envelope.data.outcome.status)) {
     return { ...attempt, outcome: { status: "invalid", reason: "host_only_outcome" } };
@@ -185,6 +187,7 @@ export function receiveAlignmentSemantics(
   }
   try {
     const alignment = SourceSemanticAlignmentSchema.parse(materializeAlignment(envelope.data.alignment, request));
+    SourceSemanticOutcomeGapBindingSchema.parse({ outcome: envelope.data.outcome, gaps: [] });
     if (alignment.q_id !== sourceSemanticQueryIdentity(request.admitted_q, semanticSha256)) {
       return { ...attempt, outcome: { status: "invalid", reason: "alignment_q_mismatch" } };
     }
@@ -193,7 +196,7 @@ export function receiveAlignmentSemantics(
     }
     return { ...attempt, outcome: { status: "interpreted", gaps: [] }, alignment };
   } catch (error) {
-    return { ...attempt, outcome: { status: "invalid", reason: reasonOf(error) } };
+    return { ...attempt, outcome: invalidProposalOutcome(error) };
   }
 }
 
@@ -308,6 +311,14 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 256) : "invalid_proposal";
+}
+
+function invalidSchemaOutcome(error: z.ZodError): SourceSemanticOutcome {
+  return { status: "invalid", reason: "malformed_response", diagnostics: sourceSemanticValidationDiagnostics(error) };
+}
+
+function invalidProposalOutcome(error: unknown): SourceSemanticOutcome {
+  return error instanceof z.ZodError ? invalidSchemaOutcome(error) : { status: "invalid", reason: reasonOf(error) };
 }
 
 const queryResponseSchema = z.object({

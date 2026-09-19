@@ -8,14 +8,24 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 5.1.0
+## Unreleased — protocol 5.2.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 5.1.0 can move
+heading (currently `## v0.3.11` below). Protocol 5.2.0 can move
 independently of the app semver. `@do-soul/alaya-engine-gateway` is
 `0.3.12` for the additive `soul.interpretation` tool surface.
+
+Protocol 5.2.0 adds optional bounded path/code/reference diagnostics to invalid
+source-semantic outcomes. Interpreted producer envelopes must echo the body's
+gaps; H and Q no longer discard conflicting outcome-only gaps, and A rejects
+gaps it cannot represent. Matching partial interpretations remain supported.
+The producer prompt distinguishes catalog selectors from graph mention handles
+and includes a schema-checked neutral example. Batch quarantine retains the
+diagnostic and raw response identity. Historical raw responses are not repaired
+or relabeled, and new producer prompts use the existing request/cache identity
+owner. This engineering repair does not establish actual-model quality.
 
 Protocol 5.1.0 is an additive minor under handbook invariant §25. The
 opt-in `soul.interpretation` channel adds qualified answer bindings,

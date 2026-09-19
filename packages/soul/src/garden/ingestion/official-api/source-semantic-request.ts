@@ -229,6 +229,38 @@ export function sourceSemanticResponseJsonSchema(): object {
   });
 }
 
+const exampleGaps = [{ kind: "unresolved_referent", affected_ids: ["rItem"],
+  support: [{ kind: "lexical", mentions: ["mItem"] }], description: "The thing shelved is not identified." }];
+const sourceSemanticResponseExample = {
+  contract: "source-interpretation-response-v3",
+  outcome: { status: "interpreted", gaps: exampleGaps },
+  draft: {
+    contract: "source-interpretation-v3",
+    mentions: [
+      { id: "mActor", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" } },
+      { id: "mShelved", assertion_id: 1, source_ref: { first: "a1s2", last: "a1s2" } },
+      { id: "mItem", assertion_id: 1, source_ref: { first: "a1s4", last: "a1s4" } }
+    ],
+    referents: [
+      { id: "rActor", referent_kind: "grouped", mentions: ["mActor"] },
+      { id: "rItem", referent_kind: "unresolved", mentions: ["mItem"] }
+    ],
+    frames: [{
+      id: "fShelve", assertion_ids: [1], context_owner: { kind: "source_act", source_act: "assertion" },
+      additional_support: [], predicate_support: { kind: "explicit", reading: "shelve", mentions: ["mShelved"] },
+      slots: [
+        { id: "agent", role_reading: "person doing the shelving", support: [{ kind: "lexical", mentions: ["mActor"] }] },
+        { id: "theme", role_reading: "thing placed on a shelf", support: [{ kind: "lexical", mentions: ["mItem"] }] }
+      ],
+      bindings: [
+        { slot_id: "agent", target: { kind: "node", id: "rActor" }, support: [] },
+        { slot_id: "theme", target: { kind: "node", id: "rItem" }, support: [] }
+      ]
+    }],
+    operators: [], gaps: exampleGaps
+  }
+};
+
 export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
   "Propose one source-local semantic draft using source-interpretation-v3.",
   'Return strict JSON {"contract":"source-interpretation-response-v3","outcome":OUTCOME,"draft":DRAFT_IF_INTERPRETED}.',
@@ -236,21 +268,29 @@ export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
   "Do not emit host hashes, character or UTF-8 offsets, entry_roots, asserted_at_scope, persistent IDs, QueryProgram, seeds, scores, ranking, answers, or verdicts.",
   "A supplied profile is an optional adapter, not an admission prerequisite. Novel predicate and role readings are allowed.",
   "Select inclusive first/last segment IDs shown in source_catalog. Never copy quotation text, invent offsets, or cross assertion boundaries.",
+  "There are two distinct ID namespaces: source_catalog segment IDs (for example a1s2) occur ONLY inside source_ref.first/last. Graph mention IDs (for example mShelved) are declared in draft.mentions[].id. Every predicate mentions/supporting_context, referent mentions, lexical/additional support.mentions (including role, binding and gap support) MUST refer to those declared graph mention IDs, never catalog segment IDs.",
+  "Declare a mention for every source span used by predicates, roles, bindings and gaps. Graph node targets and gap affected_ids must name declared graph handles; slot_id must name a slot of its frame.",
+  "Cover every selected source assertion with interpreted meaning or an explicit located draft.gaps entry. Locate gap support through declared mentions for that assertion. Do not silently omit clauses that are difficult to interpret.",
   "Explicit predicate support needs valid mention handles; implicit support needs supporting context and a reading. Empty or omitted support is a gap, not implicit.",
   "Unresolved referents are local. Do not mint a global unknown. Record unsupported meaning as gaps.",
   "Outcome interpreted requires a draft; abstained, invalid, quarantine, truncated, and transport failures must not carry a draft.",
-  "Do not infer world truth or confidence. Admission of a draft does not certify language fidelity."
-].join(" ");
+  "For interpreted output, outcome.gaps must exactly repeat draft.gaps, including all supports. The draft is the sole owner of gaps.",
+  "Do not infer world truth or confidence. Admission of a draft does not certify language fidelity.",
+  "Neutral worked example, not the current input: assertion 1 is Mira shelved something. Its catalog segments are a1s0=Mira, a1s1=space, a1s2=shelved, a1s3=space, a1s4=something, a1s5=period. Use the current request's catalog for your response.",
+  `Example response:\n${JSON.stringify(sourceSemanticResponseExample)}`
+].join("\n");
 
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   "Propose query interpretation for the original query only, using source-semantic-query-v1 body fields.",
   "Return variables, frames, role requirements, context obligations, finite alternatives, and located gaps.",
   "Do not emit answers, ranking, seeds, QueryProgram, programs, verdicts, or source answer IDs.",
-  "Bind meaning to the original query text. Approved fixed context is given; do not invent H or A."
+  "Bind meaning to the original query text. Approved fixed context is given; do not invent H or A.",
+  "For interpreted output, outcome.gaps must exactly echo query.gaps. Retain partial meaning and located gaps in the query body."
 ].join(" ");
 
 export const SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT = [
   "Propose alignment correspondences from admitted Q endpoints to the supplied H descriptors.",
   "Use contextual equivalence only. Do not emit answers, ranking, seeds, programs, verdicts, or chosen results.",
-  "Do not invent H structure or rewrite Q."
+  "Do not invent H structure or rewrite Q.",
+  "An interpreted alignment has no gap channel: outcome.gaps must be empty. Use abstained if no supported alignment can be proposed."
 ].join(" ");

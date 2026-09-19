@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
 import { SourceSemanticDraftSchema } from "../../garden/source-semantic-draft.js";
+import { sourceSemanticValidationDiagnostics, SourceSemanticDiagnosticsSchema } from "../../garden/source-semantic-diagnostics.js";
 import {
   LegacyUnresolvedProjectionSchema, SourceSemanticCacheSchema, SourceSemanticInterpretationSchema,
   SourceSemanticOutcomeSchema, SourceSemanticPublishedInterpretationSchema,
@@ -101,6 +102,39 @@ it("requires a draft only for interpreted responses", () => {
     contract: "source-interpretation-response-v3",
     outcome: { status: "no_eligible_source", provider_attempts: 0 }
   }).draft).toBeUndefined();
+});
+
+it("rejects conflicting gap channels and validates matching gap references in the graph", () => {
+  const base = { contract: "source-interpretation-v3", mentions: [{ id: "mSent", assertion_id: 1,
+    source_ref: { first: "a1s0", last: "a1s0" } }], referents: irBody.referents,
+    frames: irBody.frames, operators: [], gaps: [] };
+  const gap = { kind: "unresolved_referent", affected_ids: ["rBob"], support: [] };
+  const response = (outcomeGaps: object[], draftGaps: object[]) => SourceSemanticResponseEnvelopeSchema.safeParse({
+    contract: "source-interpretation-response-v3", outcome: { status: "interpreted", gaps: outcomeGaps },
+    draft: { ...base, gaps: draftGaps }
+  });
+  expect(response([gap], []).success).toBe(false);
+  expect(response([], [gap]).success).toBe(false);
+  expect(response([gap], [gap]).success).toBe(true);
+  const invalidGap = { ...gap, support: [{ kind: "lexical", mentions: ["a1s0"] }] };
+  const parsed = response([invalidGap], [invalidGap]);
+  expect(parsed.success).toBe(false);
+  if (!parsed.success) expect(sourceSemanticValidationDiagnostics(parsed.error)).toContainEqual({
+    code: "unknown_cross_reference", path: ["draft", "gaps", 0, "support", 0, "mentions", 0],
+    message: "unknown cross-reference", reference: "a1s0"
+  });
+});
+
+it("bounds structural diagnostics without changing the invalid state", () => {
+  const failed = SourceSemanticResponseEnvelopeSchema.safeParse({ contract: "wrong", outcome: {},
+    draft: { ...irBody, mentions: Array.from({ length: 512 }, () => ({})) } });
+  expect(failed.success).toBe(false);
+  if (failed.success) return;
+  const diagnostics = sourceSemanticValidationDiagnostics(failed.error);
+  expect(diagnostics.length).toBeGreaterThan(0);
+  expect(diagnostics.length).toBeLessThanOrEqual(32);
+  expect(JSON.stringify(diagnostics).length).toBeLessThanOrEqual(8192);
+  expect(SourceSemanticDiagnosticsSchema.safeParse(diagnostics).success).toBe(true);
 });
 
 it("versions the open envelope, reasoning, and cache without reusing occupied literals", () => {

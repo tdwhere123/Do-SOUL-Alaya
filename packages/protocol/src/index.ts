@@ -260,6 +260,7 @@ export {
 
 export * from "./garden/source-interpretation-profile.js";
 export * from "./garden/source-semantic-draft.js";
+export { sourceSemanticValidationDiagnostics } from "./garden/source-semantic-diagnostics.js";
 export * from "./garden/source-semantic-interpretation.js";
 export * from "./garden/source-semantic-worker.js";
 export * from "./garden/source-semantic-identity.js";

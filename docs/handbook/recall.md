@@ -704,7 +704,7 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local H, source-independent
 Q, explicit A, and selected C. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 4.16.0 uses `source-semantic-k-v2`,
+Garden v1. Protocol 5.2.0 uses `source-semantic-k-v2`,
 `source-semantic-normalizer-v2` and `source-semantic-lowering-v2`. An older open
 H is not relabeled or silently promoted; recreate its interpretation explicitly.
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
@@ -717,6 +717,10 @@ not governed content. Query operators, role targets, variable sorts, named
 referent correspondences and all incidence obligations lower onto the existing
 conditional-field engine. Iterative traversal visits reverse and non-tree
 incidences with shared variable binding; it is not a second answer matcher.
+The Q context obligation `unresolved` requires no completed-event assertion and
+excludes source assertion occurrences. It accepts question, directive,
+unresolved source acts and embedded/operator content through the non-asserted
+context premise; it is not a positive test for `source_act=unresolved`.
 
 Core publishes source UTF-8 assertion locations and re-resolves mention
 selectors at both the normalized-IR entrance and SQLite reopen. Ambiguous
@@ -742,6 +746,13 @@ attribution. `consumed_leaves` is only a summary, not a replacement for the proo
 forest. A source or query gap is not filled by a structural match. In particular,
 query gaps retain `query_complete=false`; fixed-C computation completion does
 not certify H, Q, A fidelity or exhaust possible interpretations.
+
+For interpreted producer responses, H draft gaps and Q body gaps own the
+executable qualifiers. `outcome.gaps` must echo that body's gaps exactly;
+disagreement is invalid rather than repaired or silently discarded. A has no
+gap channel, so an interpreted A requires empty outcome gaps. Partial H and Q
+remain valid with matching, structurally valid gaps. Protocol owns this binding
+rule and bounded validation diagnostics; raw response identity remains intact.
 
 Work, logical memory, native I/O and process RSS remain separately labeled.
 Preparation, compilation, solving, projection and proof materialization share
