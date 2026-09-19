@@ -2,6 +2,7 @@ import type { GeminiBatchJob, GeminiBatchPlan } from "./contract.js";
 import { record, resourceName } from "./native-codec.js";
 
 export const terminalBatchStates = new Set(["succeeded", "failed", "cancelled", "expired"]);
+export const batchPollingStoppedDiagnostic = "poll limit/deadline reached; remote work remains unresolved";
 
 export function batchRemoteWitness(job: GeminiBatchJob, plan: GeminiBatchPlan, operation: unknown): object {
   return { binding: remoteBinding(job, plan), operation };
@@ -66,4 +67,5 @@ export function applyRemoteOperation(job: GeminiBatchJob, plan: GeminiBatchPlan,
   }
   if (status === "succeeded" && job.outputFile === undefined) throw new Error("successful Gemini Batch job has no output file");
   job.status = status;
+  if (job.diagnostic === batchPollingStoppedDiagnostic) delete job.diagnostic;
 }

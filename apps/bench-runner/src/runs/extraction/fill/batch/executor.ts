@@ -3,7 +3,8 @@ import { resourceName } from "./native-codec.js";
 import { importBatchJob } from "./import.js";
 import { batchDigest, canonicalBatchPlan, encodeGeminiBatchLines } from "./plan.js";
 import { openBatchState, publishArtifact, readRootBatchRuns, saveBatchState } from "./store.js";
-import { applyRemoteOperation, assertRemoteBatchBinding, batchRemoteWitness, terminalBatchStates as terminal } from "./remote-operation.js";
+import { applyRemoteOperation, assertRemoteBatchBinding, batchRemoteWitness, batchPollingStoppedDiagnostic,
+  terminalBatchStates as terminal } from "./remote-operation.js";
 
 export async function executeGeminiBatchOperation(invocation: GeminiBatchInvocation): Promise<GeminiBatchState> {
   const input = { ...invocation, plan: canonicalBatchPlan(invocation.plan) };
@@ -113,7 +114,7 @@ async function poll(input: GeminiBatchInvocation, state: GeminiBatchState, job: 
   if (job.remoteJob === undefined || terminal.has(job.status)) return;
   if (!explicitRecovery && (job.polls >= input.plan.limits.maxPolls ||
       Date.now() - job.submittedAt! >= input.plan.limits.deadlineMs)) {
-    job.diagnostic = "poll limit/deadline reached; remote work remains unresolved";
+    job.diagnostic = batchPollingStoppedDiagnostic;
     saveBatchState(input.lease, input.plan, state);
     return;
   }

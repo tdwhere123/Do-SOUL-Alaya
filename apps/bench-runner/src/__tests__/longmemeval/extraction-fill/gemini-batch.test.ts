@@ -448,12 +448,14 @@ describe("durable Gemini Batch HTTP extraction", () => {
     const recovered = await run("recover", { plan: limited, reconcile });
     expect(observations).toBe(before + 2);
     expect(recovered.jobs[0]).toMatchObject({ status: "succeeded", outcomes: {}, usageUnknown: true });
+    expect(recovered.jobs[0]?.diagnostic).toBeUndefined();
     expect(importer).not.toHaveBeenCalled();
     const witness = JSON.parse(readFileSync(join(root,
       `batch-poll-${batchDigest(`${job.id}:${recovered.jobs[0]!.polls}`)}.json`), "utf8"));
     expect(witness.recovery).toEqual({ authority: "original", observer: "repaired" });
     const imported = await run("import", { plan: limited });
     expect(Object.keys(imported.jobs[0]!.outcomes)).toHaveLength(2);
+    expect(imported.jobs[0]?.diagnostic).toBeUndefined();
     await run("recover", { plan: limited, reconcile });
     expect(observations).toBe(before + 2);
     expect(creates).toBe(1); expect(uploads).toHaveLength(1); expect(reserve).toHaveBeenCalledTimes(1);
