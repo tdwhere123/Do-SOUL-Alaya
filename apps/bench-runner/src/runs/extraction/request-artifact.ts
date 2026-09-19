@@ -59,11 +59,15 @@ export type ExtractionTypedArtifactMode = "source_packet" | "open_semantics";
 export type ExtractionGenerationInput = Readonly<{
   sourceInterpretationProfile?: SourceInterpretationProfile;
   openSemantics?: ExtractionOpenSemanticsGeneration;
+  sourcePacking?: ExtractionSourcePacking;
 }>;
 
 export function assertExclusiveExtractionGeneration(input: ExtractionGenerationInput): void {
   if (input.sourceInterpretationProfile !== undefined && input.openSemantics !== undefined) {
     throw new AlayaError("VALIDATION", "open semantics and packet profile are mutually exclusive");
+  }
+  if (input.sourcePacking === "complete-source" && input.openSemantics === undefined) {
+    throw new AlayaError("VALIDATION", "complete-source packing requires open semantics");
   }
 }
 
@@ -92,12 +96,13 @@ export function extractionArtifactRequests(turn: Pick<LongMemEvalExtractionTurn,
     source: ExtractionArtifactSource; packet?: OfficialApiSourcePacketRequest;
     semantic?: SourceSemanticRequest; userPrompt: string;
   }>[] {
-  assertExclusiveExtractionGeneration({ sourceInterpretationProfile: profile, openSemantics });
+  assertExclusiveExtractionGeneration({ sourceInterpretationProfile: profile, openSemantics, sourcePacking: packing });
   if (openSemantics !== undefined) {
     const sourceCorpus = buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages ?? []);
     return collectSourceSemanticUnitPacks(sourceCorpus, packing).map((source) => {
       const proposal = {
         sourceCorpus,
+        ...(source.source_scope === undefined ? {} : { sourceScope: source.source_scope }),
         assertionIds: source.source_assertions.map((row) => row.assertion_id),
         source_id: "unbound", source_version: "unbound",
         producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,

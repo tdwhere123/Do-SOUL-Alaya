@@ -8,14 +8,22 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 6.5.0
+## Unreleased — protocol 6.6.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 6.5.0 can move
+heading (currently `## v0.3.11` below). Protocol 6.6.0 can move
 independently of the app semver. `@do-soul/alaya-engine-gateway` is
 `0.3.12` for the additive `soul.interpretation` tool surface.
+
+Protocol 6.6.0 adds opt-in `complete-source` extraction packing for open
+semantics. SOUL binds every source unit in its original order into one bounded
+request, so transport partitions do not remove discourse context. Oversized
+sources fail preparation instead of being silently split. Recorded partial
+requests retain their original scope and limits; closed extraction generations
+reject this packing. Input completeness does not certify semantic coverage or
+relax interpretation and resource limits.
 
 Protocol 6.5.0 adds a bounded generation schema derived from the same semantic
 expression shapes and canonical depth limit. Shared acyclic definitions carry

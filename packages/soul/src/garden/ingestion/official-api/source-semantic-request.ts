@@ -12,7 +12,7 @@ import {
   buildSourceReferenceCatalog, canonicalJson,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
-import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, selectSourceSemanticUnits } from "./source-semantic-units.js";
+import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, indexSourceSemanticUnits, selectSourceSemanticUnits } from "./source-semantic-units.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as CONTENT_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-expression-guidance.js";
 import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canonical-prompt.js";
@@ -47,15 +47,22 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   proposal_contract: z.enum([SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
     SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT]).optional(),
   source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT).optional(),
+  source_scope: z.literal("complete-source").optional(),
   generation_schema_contract: z.literal("bounded-expression-schema-v1").optional(),
   revision: SourceSemanticRevisionSchema.optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
-  assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(8).readonly().optional(),
+  assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(64).readonly().optional(),
   source_assertions: z.array(z.object({
     assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1), source_role: z.enum(["user", "assistant"]).optional()
-  }).strict().readonly()).max(8).readonly()
+  }).strict().readonly()).max(64).readonly()
 }).strict().superRefine((request, context) => {
+  if (request.source_scope === undefined && (request.source_assertions.length > 8 || (request.assertion_locations?.length ?? 0) > 8)) {
+    context.addIssue({ code: "custom", message: "partial source requests permit at most eight source units" });
+  }
+  if (request.source_scope !== undefined && request.source_unit_contract === undefined) {
+    context.addIssue({ code: "custom", message: "complete source scope requires the source unit contract" });
+  }
   const current = request.proposal_contract !== undefined;
   if (current !== (request.normalizer_version === SOURCE_SEMANTIC_NORMALIZER_VERSION)) {
     context.addIssue({ code: "custom", message: "proposal contract and normalizer version must agree" });
@@ -108,6 +115,7 @@ export type SourceSemanticRequest = Readonly<{
 export type SourceSemanticProposalInput = Readonly<{
   sourceCorpus: string;
   assertionIds: readonly number[];
+  sourceScope?: SourceSemanticOpenRequestBody["source_scope"];
   source_id: string;
   source_version: string;
   producer_id: string;
@@ -199,12 +207,18 @@ export function parseSourceSemanticRequest(value: unknown): SourceSemanticReques
 
 export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): SourceSemanticRequest {
   rejectForbiddenProposalInput(input);
-  const units = selectSourceSemanticUnits(input.sourceCorpus, input.assertionIds);
+  const units = input.sourceScope === "complete-source"
+    ? indexSourceSemanticUnits(input.sourceCorpus) : selectSourceSemanticUnits(input.sourceCorpus, input.assertionIds);
+  if (input.sourceScope === "complete-source" && (units.length !== input.assertionIds.length ||
+    units.some((unit, index) => unit.assertion_id !== input.assertionIds[index]))) {
+    throw new AlayaError("CONFLICT", "complete source scope requires every source unit in original order");
+  }
   const source_request = SourceSemanticOpenRequestBodySchema.parse({
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     proposal_contract: SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
     source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
+    ...(input.sourceScope !== undefined ? { source_scope: input.sourceScope } : {}),
     generation_schema_contract: "bounded-expression-schema-v1",
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),

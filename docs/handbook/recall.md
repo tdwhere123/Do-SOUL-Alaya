@@ -704,7 +704,7 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local H, source-independent
 Q, explicit A, and selected C. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 6.5.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
+Garden v1. Protocol 6.6.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
 reasoning/cache v3, `source-semantic-k-v3`,
 `source-semantic-normalizer-v4` and `source-semantic-lowering-v3`. An older open
 H is not relabeled or silently promoted; recreate its interpretation explicitly.
@@ -772,6 +772,17 @@ and transport occurrence identity. Garden factual eligibility is not an input
 filter for this channel. Marker-absent requests retain their historical Garden
 assertion binding for offline replay. A source role records who supplied text;
 it does not certify the text as a fact or resolve its semantic context.
+
+Open extraction may explicitly select `complete-source` packing. Its request
+records that scope and binds all indexed units of the supplied source corpus
+in order, including both message roles. SOUL checks this membership against the
+original source on receipt. Existing catalog limits (64 units, bounded text and
+segments) apply; oversize input fails preparation without implicit partitioning.
+Recorded requests without the scope marker remain limited to eight selected
+units and retain their historical replay. Closed Garden/profile extraction
+rejects complete-source packing. This supplies source context without deciding
+co-reference or enlarging canonical H, output, or execution budgets. It does
+not claim access to conversation outside the supplied source corpus.
 
 Normalizer-v4 accounts for selected assertions without connected evidence,
 orphan mentions/referents, unresolved slots and embedded occurrences without

@@ -14,6 +14,13 @@ export interface SourceSemanticSourceUnit {
   readonly source_role: "user" | "assistant";
 }
 
+interface SourceSemanticSourcePack {
+  readonly source_unit_contract: typeof SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT;
+  readonly source_corpus_identity: string;
+  readonly source_scope?: "complete-source";
+  readonly source_assertions: readonly Pick<SourceSemanticSourceUnit, "assertion_id" | "text" | "source_role">[];
+}
+
 /** Source boundaries are not assertion eligibility: retain questions, fragments and scoped clauses. */
 export function indexSourceSemanticUnits(sourceCorpus: string): readonly SourceSemanticSourceUnit[] {
   const markers = collectSourceRoleMarkers(sourceCorpus);
@@ -39,11 +46,16 @@ export function selectSourceSemanticUnits(sourceCorpus: string, assertionIds: re
 }
 
 export function collectSourceSemanticUnitPacks(sourceCorpus: string,
-  packing: ExtractionSourcePacking = DEFAULT_EXTRACTION_SOURCE_PACKING) {
+  packing: ExtractionSourcePacking = DEFAULT_EXTRACTION_SOURCE_PACKING): readonly SourceSemanticSourcePack[] {
   const units = indexSourceSemanticUnits(sourceCorpus);
-  const size = extractionSourcePackingSize(packing);
   const source_corpus_identity = digest({ contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, sourceCorpus });
-  const packs = [];
+  if (packing === "complete-source") {
+    return [{ source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, source_corpus_identity,
+      source_scope: "complete-source" as const,
+      source_assertions: units.map(({ assertion_id, text, source_role }) => ({ assertion_id, text, source_role })) }];
+  }
+  const size = extractionSourcePackingSize(packing);
+  const packs: SourceSemanticSourcePack[] = [];
   for (let offset = 0; offset < Math.max(units.length, 1); offset += size) {
     packs.push({ source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, source_corpus_identity,
       source_assertions: units.slice(offset, offset + size).map(({ assertion_id, text, source_role }) => ({ assertion_id, text, source_role })) });

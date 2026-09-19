@@ -266,7 +266,7 @@ function bindSource(request: SourceSemanticRequest, input: SourceSemanticProposa
   const ids = request.source_request.source_assertions.map((row) => row.assertion_id);
   const expected = request.source_request.source_unit_contract === undefined
     ? historicalSourceBinding(input.sourceCorpus, ids)
-    : buildSourceSemanticRequest({ ...input, assertionIds: ids });
+    : buildSourceSemanticRequest({ ...input, assertionIds: ids, sourceScope: request.source_request.source_scope });
   if (canonicalJson(expected.source_catalog) !== canonicalJson(request.source_catalog) ||
     canonicalJson(expected.source_request.source_assertions) !== canonicalJson(request.source_request.source_assertions) ||
     request.source_request.assertion_locations !== undefined && canonicalJson(expected.source_request.assertion_locations) !== canonicalJson(request.source_request.assertion_locations)) {

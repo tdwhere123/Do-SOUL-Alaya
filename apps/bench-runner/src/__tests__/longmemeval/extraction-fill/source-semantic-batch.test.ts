@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, prepareSourceSemanticRevision } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
@@ -11,7 +12,7 @@ import { inspectCachedExtraction } from "../../../runs/compile-seed/cache/cache-
 import { inspectCachedSourcePacket } from "../../../runs/extraction/cache/source-packet-artifact.js";
 import { readExtractionCacheManifestIdentity } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { resolveCompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-config.js";
-import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
+import { EXTRACTION_OPEN_SEMANTICS_GENERATION, extractionArtifactRequests } from "../../../runs/extraction/request-artifact.js";
 import { decodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
 import type { GeminiBatchLimits, GeminiBatchPlan, GeminiBatchState } from "../../../runs/extraction/fill/batch/contract.js";
 import { buildAuthorityQuestion, registerExtractionFillHooks, setExtractionCredentialFixture, buildExtractionFillQuestion } from "./fixture.js";
@@ -56,13 +57,17 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   return JSON.stringify(editable);
 }
 
-async function setup(providerUrl = "https://fixture-provider.invalid", questionOnly = false, revise: boolean | "complete_invalid_json" = false) {
+async function setup(providerUrl = "https://fixture-provider.invalid", questionOnly = false, revise: boolean | "complete_invalid_json" = false,
+  sourcePacking: ExtractionSourcePacking = "reference-eight") {
   setExtractionCredentialFixture(); vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", providerUrl);
   await writeDataset([questionOnly
     ? buildExtractionFillQuestion("questions", "Where is the atlas?", "When will Talia leave?")
-    : buildAuthorityQuestion("q0", "alpha", "decoy")]);
+    : sourcePacking === "complete-source" ? buildExtractionFillQuestion("q0",
+      "I completed alpha. The room was quiet. The desk was clear. The lamp was on. The window was open. " +
+      "The door was closed. The shelf was full. The clock was ticking. The floor was clean. It is ready.", "I completed decoy.")
+      : buildAuthorityQuestion("q0", "alpha", "decoy")]);
   const limits: GeminiBatchLimits = { maxJobs: 1, maxRequestsPerJob: 100, maxFileBytes: 1000000,
     maxInputTokensPerJob: 1000000, maxEnqueuedTokens: 1000000, maxOutputTokens: 4096,
     maxUsd: 1, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
@@ -87,7 +92,7 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
     writeFileSync(revisionPath, JSON.stringify(revisions));
   }
   const inspection = await inspectExtractionAuthority({ variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
-    openSemantics: generation, revision: readCurrentExtractionAuthorityRevision(), action: "fill" });
+    sourcePacking, openSemantics: generation, revision: readCurrentExtractionAuthorityRevision(), action: "fill" });
   const receipt = createExtractionAuthorityReceipt({ action: "fill", observation: inspection.observation,
     outputTokenCap: { field: "maxOutputTokens", value: 4096 }, diskFloorBytes: 0,
     priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2, maximumInputTokensPerAttempt: 100000 },
@@ -116,6 +121,7 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
   vi.stubGlobal("fetch", fetchMock);
   const args = ["extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
     "--extraction-cache-root", cacheRoot, "--extraction-open-semantics", "--batch-limits", limitsPath,
+    "--extraction-source-packing", sourcePacking,
     ...(revise ? ["--extraction-source-revisions", revisionPath] : [])];
   const run = (operation: string, extra: readonly string[] = []) => runCli([...args, "--extraction-authority", receiptPath,
     "--batch-operation", operation, ...extra]);
@@ -125,6 +131,36 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
     creates: () => creates, failCreate: (value: boolean) => { failCreate = value; },
     mode: (mode: typeof responseMode) => { responseMode = mode; } };
 }
+
+it("retains the entire source across native authorization, import and cache reopen without fixed-size splitting", async () => {
+  const fixture = await setup("https://fixture-provider.invalid", false, false, "complete-source");
+  expect(await fixture.run("prepare")).toBe(0);
+  expect(fixture.fetchMock).not.toHaveBeenCalled();
+  expect(fixture.plan().lines).toHaveLength(2);
+  const line = fixture.plan().lines.find(line => line.userPrompt.includes("alpha"))!;
+  const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+  expect(request.source_request.source_scope).toBe("complete-source");
+  expect(request.source_request.source_assertions).toHaveLength(11);
+  expect(request.source_request.source_assertions[9]?.text).toBe("It is ready.");
+  expect(request.source_request.source_assertions[10]?.source_role).toBe("assistant");
+  expect(await fixture.run("submit")).toBe(0);
+  expect(await fixture.run("resume")).toBe(0);
+  expect(fixture.creates()).toBe(1);
+  expect(readExtractionCacheManifestIdentity(cacheRoot)?.manifest).toMatchObject({ source_packing: "complete-source" });
+  expect(inspectCachedSourceSemantic(cacheRoot, line.key, MODEL, REQUEST_PROFILE)).toMatchObject({ status: "hit" });
+  const calls = fixture.fetchMock.mock.calls.length;
+  expect(await fixture.run("import")).toBe(0);
+  expect(fixture.fetchMock).toHaveBeenCalledTimes(calls);
+}, 60000);
+
+it("rejects complete-source before preparing a closed extraction generation", () => {
+  expect(() => resolveCompileSeedExtractionConfig({ ALAYA_BENCH_EXTRACTION_SOURCE_PACKING: "complete-source" }))
+    .toThrow(/complete-source packing requires open semantics/u);
+  expect(() => extractionArtifactRequests({ turnContent: "I completed alpha." }, "complete-source"))
+    .toThrow(/complete-source packing requires open semantics/u);
+  expect(() => extractionArtifactRequests({ turnContent: "I completed alpha." }, "complete-source", PROFILE))
+    .toThrow(/complete-source packing requires open semantics/u);
+});
 
 it.each([true, "complete_invalid_json"] as const)("binds explicit revisions (%s) through native authority, plan, import and reopened typed cache", async (revisionMode) => {
   const fixture = await setup("https://fixture-provider.invalid", false, revisionMode);

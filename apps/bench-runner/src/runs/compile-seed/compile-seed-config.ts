@@ -122,7 +122,8 @@ export function resolveCompileSeedExtractionConfig(
 ): CompileSeedExtractionConfig {
   const profile = sourceInterpretationProfile === undefined ? undefined : SourceInterpretationProfileSchema.parse(sourceInterpretationProfile);
   const open = pinOpenSemanticsGeneration(openSemantics);
-  assertExclusiveExtractionGeneration({ sourceInterpretationProfile: profile, openSemantics: open });
+  const sourcePacking = resolveExtractionSourcePacking(env, manifest, sourcePackingOverride);
+  assertExclusiveExtractionGeneration({ sourceInterpretationProfile: profile, openSemantics: open, sourcePacking });
   if (manifest !== undefined && canonicalJson(manifest.source_interpretation_profile ?? null) !== canonicalJson(profile ?? null)) {
     throw new AlayaError("CONFLICT", "source interpretation profile differs from cache generation; explicit matching opt-in is required");
   }
@@ -145,7 +146,6 @@ export function resolveCompileSeedExtractionConfig(
     manifest?.model_family ??
     model;
   const requestProfile = resolveExtractionRequestProfile(env, manifest);
-  const sourcePacking = resolveExtractionSourcePacking(env, manifest, sourcePackingOverride);
   const transportProviderUrl = readNonEmpty(env[EXTRACTION_TRANSPORT_PROVIDER_URL_ENV]);
   const transportModel = readNonEmpty(env[EXTRACTION_TRANSPORT_MODEL_ENV]);
   const transport = {
