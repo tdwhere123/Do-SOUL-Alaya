@@ -32,7 +32,7 @@ export function encodeGeminiGenerateContent(
     contents: [{ role: "user", parts: [{ text: line.userPrompt }] }],
     generationConfig: {
       responseMimeType: "application/json", maxOutputTokens: settings.maxOutputTokens,
-      ...(projected === undefined ? {} : { responseJsonSchema: projected.schema }),
+      ...(projected?.schema === undefined ? {} : { responseJsonSchema: projected.schema }),
       ...(isNativeGeminiRequestProfile(settings.requestProfile) ? {
         thinkingConfig: THINKING_CONFIG[settings.requestProfile]
       } : {})

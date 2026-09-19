@@ -25,9 +25,9 @@ choices. SOUL selects schemas, prompts and revision validation by the recorded
 producer contract, preserving v2 raw replay. Canonical H and consumer admission
 remain unchanged; this interface does not certify semantic completeness.
 
-The native Gemini codec constrains the outer JSON envelope and carries the full
-recursive expression schema as system guidance, preserving strict local admission.
-Recursive request cache identities bind the source schema, actual decoder schema
+The native Gemini codec uses JSON mode for recursive schemas and carries the full
+expression schema as system guidance, preserving strict local admission.
+Recursive request cache identities bind the source schema, absent decoder schema
 and exact appended guidance; historical acyclic identities remain unchanged.
 Batch and interactive transport share this projection owner.
 

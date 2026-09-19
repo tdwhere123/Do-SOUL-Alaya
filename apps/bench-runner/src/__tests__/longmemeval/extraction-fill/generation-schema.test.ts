@@ -10,7 +10,7 @@ const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor mi
   source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
 
 describe("Gemini recursive decoding schema projection", () => {
-  it("keeps outer requirements and supplies full recursive structure as guidance without changing local schema", () => {
+  it("supplies recursive structure as guidance in JSON mode without changing local schema", () => {
     const schema = { type: "object", properties: { root: { $ref: "#/$defs/node" } }, required: ["root"],
       $defs: { node: { type: "object", properties: { label: { type: "string" },
         child: { anyOf: [{ $ref: "#/$defs/node" }, { type: "null" }] },
@@ -18,9 +18,7 @@ describe("Gemini recursive decoding schema projection", () => {
       examples: [{ required: ["child"], $ref: "literal annotation" }] };
     const before = structuredClone(schema), result = projectGeminiGenerationSchema(schema);
     expect(result.recursive).toBe(true);
-    expect(result.schema).toMatchObject({ type: "object", properties: { root: { type: "object", additionalProperties: true } },
-      required: ["root"], $defs: { leaf: { type: "string" }, node: { required: ["label", "child", "leaf"],
-        properties: { child: { anyOf: [{ type: "object", additionalProperties: true }, { type: "null" }] } } } }, examples: before.examples });
+    expect(result.schema).toBeUndefined();
     expect(result.instruction).toContain(JSON.stringify(before));
     expect(schema).toEqual(before);
     expect(projectGeminiGenerationSchema({ type: "string" })).toEqual({ schema: { type: "string" }, recursive: false });
@@ -31,11 +29,8 @@ describe("Gemini recursive decoding schema projection", () => {
       A: { type: "object", properties: { b: { $ref: "#/$defs/B" } }, required: ["b"] },
       B: { type: "object", properties: { a: { $ref: "#/$defs/A" } }, required: ["a"] }
     } };
-    expect(projectGeminiGenerationSchema(schema).schema).toMatchObject({ type: "object",
-      properties: { pair: { type: "object", additionalProperties: true } }, required: ["pair"], $defs: {
-        A: { properties: { b: { type: "object", additionalProperties: true } } },
-        B: { properties: { a: { type: "object", additionalProperties: true } } }
-      } });
+    expect(projectGeminiGenerationSchema(schema)).toMatchObject({ recursive: true });
+    expect(projectGeminiGenerationSchema(schema).schema).toBeUndefined();
     expect(() => projectGeminiGenerationSchema({ properties: { value: { $ref: "#/$defs/absent" } }, required: ["value"] }))
       .toThrow(/unresolved reference/u);
   });
@@ -46,10 +41,10 @@ describe("Gemini recursive decoding schema projection", () => {
     const material = geminiGenerationSchemaCacheMaterial(source);
     const body = encodeGeminiGenerateContent({ userPrompt: request, systemPrompt: SOURCE_SEMANTIC_SYSTEM_PROMPT },
       { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1", maxOutputTokens: 32768 });
-    expect(body).toMatchObject({ generationConfig: { responseJsonSchema: JSON.parse(material).response_schema } });
-    expect(JSON.parse(material).response_schema.properties.content.required).toContain("roots");
-    expect(JSON.parse(material).response_schema.properties.content.properties.roots.items.required).toContain("expression");
-    expect(JSON.parse(material).response_schema.$defs.__schema0.oneOf[0].required).toContain("arguments");
+    expect(body).toMatchObject({ generationConfig: { responseMimeType: "application/json" } });
+    expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
+    expect(JSON.parse(material).response_schema).toBeNull();
+    expect(JSON.parse(material).source_schema).toEqual(JSON.parse(source));
     expect(body).toMatchObject({ systemInstruction: { parts: [{ text: SOURCE_SEMANTIC_SYSTEM_PROMPT }, { text: JSON.parse(material).instruction }] } });
     const fields = ["gemini-3.1-flash-lite", "gemini-3.1-low-v1", SOURCE_SEMANTIC_SYSTEM_PROMPT, request];
     const oldKey = createHash("sha256").update([...fields, source].join("\0")).digest("hex");
@@ -70,14 +65,12 @@ describe("Gemini recursive decoding schema projection", () => {
     expect(result.interpretation).toBeUndefined();
   });
 
-  it("preserves acyclic references into a recursive definition's non-recursive child", () => {
+  it("retains definition subpaths in complete guidance when a schema needs JSON mode", () => {
     const schema = { type: "object", properties: { node: { $ref: "#/$defs/node" },
       label: { $ref: "#/$defs/node/properties/label" } }, required: ["node", "label"], $defs: {
       node: { type: "object", properties: { label: { type: "string" }, child: { $ref: "#/$defs/node" } } }
     } };
-    expect(projectGeminiGenerationSchema(schema).schema).toEqual({ ...schema,
-      properties: { node: { type: "object", additionalProperties: true }, label: schema.properties.label },
-      $defs: { node: { type: "object", properties: { label: { type: "string" }, child: { type: "object", additionalProperties: true } } } }
-    });
+    expect(projectGeminiGenerationSchema(schema).schema).toBeUndefined();
+    expect(projectGeminiGenerationSchema(schema).instruction).toContain(JSON.stringify(schema));
   });
 });

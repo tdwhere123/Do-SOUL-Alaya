@@ -139,11 +139,11 @@ describe("native Gemini interactive extraction", () => {
       const chunks: Buffer[] = [];
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("end", () => {
-        const schema = JSON.parse(Buffer.concat(chunks).toString("utf8")).generationConfig.responseJsonSchema;
-        expect(schema.properties.content.required).toContain("roots");
-        expect(schema.properties.content.properties.roots.items.required).toContain("expression");
-        expect(schema.properties.content.properties.roots.items.properties.expression).toEqual({ type: "object", additionalProperties: true });
-        expect(schema.$defs.__schema0.oneOf[0].required).toContain("arguments");
+        const wire = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        expect(wire.generationConfig.responseMimeType).toBe("application/json");
+        expect(wire.generationConfig).not.toHaveProperty("responseJsonSchema");
+        expect(wire.systemInstruction.parts[1].text).toContain(
+          JSON.stringify(soul.officialApiExtractionResponseSchema(JSON.stringify(request))));
         observed = true;
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: raw }] } }] }));
