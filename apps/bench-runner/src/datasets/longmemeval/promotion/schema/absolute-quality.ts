@@ -1,6 +1,6 @@
 import type { KpiPayload } from "@do-soul/alaya-eval";
 
-export const LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY = Object.freeze({
+export const LONGMEMEVAL_ABSOLUTE_QUALITY_POLICY = Object.freeze({
   answerableCount: 94,
   controlMinimumR5Hits: 76,
   productMinimumR5Hits: 90

@@ -206,7 +206,7 @@ export function parseToolWorkerEventPayload<T extends keyof typeof toolWorkerPay
   const schema = toolWorkerPayloadSchemas[type];
 
   if (schema === undefined) {
-    throw new Error(`Unknown Phase A1 event type: ${String(type)}`);
+    throw new Error(`Unknown tool-worker event type: ${String(type)}`);
   }
 
   return schema.parse(payload) as ToolWorkerEventPayloadMap[T];

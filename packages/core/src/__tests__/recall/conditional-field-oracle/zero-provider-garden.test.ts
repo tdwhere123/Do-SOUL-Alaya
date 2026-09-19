@@ -21,7 +21,7 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("CP11 zero live provider and Garden", () => {
+describe("zero live provider and Garden", () => {
   it("source-only runConditionalFieldRecall does not call fetch or enqueue Garden", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     new SqliteFieldSourceRecordRepo(slice.database, fieldSha256)

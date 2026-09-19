@@ -58,8 +58,7 @@ exclusion reasons it does not want).
 
 **TaskSurfaceBuilder** — Builder that assembles the task-shaped
 context Alaya hands to a worker (run-side); used by run lifecycle
-services. Ported in Phase 2 `P2-svc-task-surface-builder-prelude`;
-Phase 3 `P3-run-lifecycle` consumes it but does not own it.
+services. Run lifecycle consumes it but does not own it.
 
 ## Garden / Maintenance
 
@@ -88,9 +87,9 @@ neighbour consolidation.
 `POINTER_HEALING`, etc.).
 
 **ConsolidationLoop** — Garden's primary mechanism for path plasticity
-maintenance. Gate-5F owns this through the Librarian (TIER_2)
-`path_plasticity_update` task, keeping the work off the recall request
-path while matching the role that owns path consolidation. v0.3.10
+maintenance. The Librarian (TIER_2) owns `path_plasticity_update`,
+keeping the work off the recall request path while matching the role
+that owns path consolidation. v0.3.10
 keeps used-report evidence soft: repeated use decays for strength,
 `trust_mode = automatic` is half-weighted, and support counters remain
 event counts rather than host-attested truth.
@@ -274,8 +273,8 @@ becomes durable directly; flows through the Promotion Gate.
 ## Storage *(Alaya v0.1 specific)*
 
 **Sync-first repo methods** — Storage repos expose synchronous primary
-methods for SQLite-backed durable mutation. Gate-5F retired the
-parallel `*Sync` sibling pattern from A2; async wrapping now belongs at
+methods for SQLite-backed durable mutation. Parallel `*Sync` sibling
+methods are retired; async wrapping now belongs at
 I/O boundaries rather than inside SQLite repo APIs.
 
 ## Port Vocabulary *(Historical, retired after v0.1.0)*

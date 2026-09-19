@@ -84,7 +84,7 @@ export const originalReviewerIdentity = process.env.ALAYA_REVIEWER_IDENTITY;
 
 export const originalReviewerToken = process.env.ALAYA_REVIEWER_TOKEN;
 
-export const PHASE6_AGENT_USE_TIMEOUT_MS = 45_000;
+export const AGENT_USE_PROTOCOL_TIMEOUT_MS = 45_000;
 
 export async function callTool<TOutput>(
   client: Client,
@@ -124,7 +124,7 @@ export async function dispatchCli(
   return await bridge.dispatch(argv);
 }
 
-export async function seedPhase6Fixture(dataDir: string): Promise<void> {
+export async function seedAcceptAsApplyFixture(dataDir: string): Promise<void> {
   const database = initDatabase({ filename: join(dataDir, "alaya.db") });
   try {
     const workspaceRepo = new SqliteWorkspaceRepo(database);
@@ -142,7 +142,7 @@ export async function seedPhase6Fixture(dataDir: string): Promise<void> {
     await runRepo.create({
       run_id: "run-1",
       workspace_id: "workspace-1",
-      title: "Phase 6 proof run",
+      title: "accept-as-apply proof run",
       goal: null,
       run_mode: RunMode.CHAT,
       engine_binding_id: null,
@@ -163,7 +163,7 @@ export async function seedPhase6Fixture(dataDir: string): Promise<void> {
     await runRepo.create({
       run_id: "run-2",
       workspace_id: "workspace-2",
-      title: "Phase 6 foreign run",
+      title: "foreign run",
       goal: null,
       run_mode: RunMode.CHAT,
       engine_binding_id: null,
@@ -182,7 +182,7 @@ export async function seedPhase6Fixture(dataDir: string): Promise<void> {
   }
 }
 
-export async function readPhase6Evidence(
+export async function readAcceptAsApplyEvidence(
   dataDir: string,
   ids: Readonly<{
     deliveryId: string;
@@ -264,7 +264,7 @@ export function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryE
     lifecycle_state: "active",
     created_at: "2026-05-05T00:00:00.000Z",
     updated_at: "2026-05-05T00:00:00.000Z",
-    created_by: "phase6-proof",
+    created_by: "accept-as-apply-proof",
     dimension: MemoryDimension.PREFERENCE,
     source_kind: SourceKind.USER,
     formation_kind: FormationKind.EXPLICIT,
@@ -319,7 +319,7 @@ export function createForeignProposal(overrides: Partial<Proposal> = {}): Propos
 }
 
 export async function createTempDataDir(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "alaya-phase6-agent-use-"));
+  const directory = await mkdtemp(join(tmpdir(), "alaya-accept-as-apply-agent-use-"));
   tempDirs.push(directory);
   return directory;
 }

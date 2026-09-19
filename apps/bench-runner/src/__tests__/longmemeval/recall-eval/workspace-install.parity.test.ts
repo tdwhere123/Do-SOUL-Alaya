@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { P00_PERFORMANCE_PROOF_CONTRACT } from
+import { PERFORMANCE_PROOF_CONTRACT } from
   "../../../runs/lifecycle/recall-eval/performance-proof/attribution-receipt.js";
 import { compareExactParity } from
   "../../../runs/lifecycle/recall-eval/performance-proof/exact-parity.js";
@@ -9,14 +9,14 @@ import {
 } from "../../../runs/lifecycle/recall-eval/performance-proof/provider-free-run.js";
 import {
   CLOCK_A_REASON,
-  P02_WORKSPACE_INSTALL_CONTRACT
+  WORKSPACE_INSTALL_CONTRACT
 } from "../../../runs/lifecycle/recall-eval/workspace-install/install.js";
 import { measureProviderFreeWorkspaceInstallBothModes } from
   "../../../runs/lifecycle/recall-eval/workspace-install/provider-free.js";
 
 describe("A4 workspace-install composed provider-free exact parity", () => {
-  it("keeps P00 control result bytes before any disk or wall claim", async () => {
-    expect(P02_WORKSPACE_INSTALL_CONTRACT.cites).toBe(P00_PERFORMANCE_PROOF_CONTRACT.name);
+  it("keeps control result bytes before any disk or wall claim", async () => {
+    expect(WORKSPACE_INSTALL_CONTRACT.cites).toBe(PERFORMANCE_PROOF_CONTRACT.name);
 
     const left = await runProviderFreePerformanceProof();
     const right = await runProviderFreePerformanceProof();

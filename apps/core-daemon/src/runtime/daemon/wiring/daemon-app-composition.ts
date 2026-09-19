@@ -118,8 +118,8 @@ type CreateCoreDaemonAppInput = Readonly<{
   proposalService: RouteField<"proposals", "proposalService">;
   proposalRepo: RouteField<"proposals", "proposalRepo">;
   healthIssueGroupRepo: RouteField<"healthInbox", "healthIssueGroupRepo">;
-  // A1 (HITL daemon backbone) — Inspector loopback HTTP routes call
-  // the same MCP handler that attached agents use.
+  // Inspector loopback HTTP routes call the same MCP handler that
+  // attached agents use.
   mcpMemoryToolHandler: RouteField<"proposals", "mcpMemoryToolHandler"> &
     RouteField<"soulSearch", "mcpMemoryToolHandler">;
   fileRepo: RouteField<"files", "fileRepo">;

@@ -1063,6 +1063,7 @@
     "apps/bench-runner/src/bench/summaries",
     "apps/bench-runner/src/bench/types",
     "apps/bench-runner/src/bench/window",
+    "apps/bench-runner/src/datasets/longmemeval/promotion/r3-spend-approval",
     "apps/bench-runner/src/locomo",
     "apps/bench-runner/src/locomo/adapter",
     "apps/bench-runner/src/locomo/dataset",

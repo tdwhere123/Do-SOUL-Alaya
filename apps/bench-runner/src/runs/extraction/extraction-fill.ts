@@ -28,7 +28,7 @@ import {
 import type { LongMemEvalVariant } from "../../datasets/longmemeval/ingestion/dataset.js";
 import type { LongMemEvalExpansionCapability } from
   "../../datasets/longmemeval/promotion/expansion/expansion-capability.js";
-import type { R3SpendApproval } from "../../datasets/longmemeval/promotion/r3-spend-approval.js";
+import type { ExpansionSpendApproval } from "../../datasets/longmemeval/promotion/expansion-spend-approval.js";
 import { createExtractionNoProgressWatchdog } from
   "./authority/no-progress-watchdog.js";
 import {
@@ -111,7 +111,7 @@ export interface ExtractionFillOptions {
   readonly cacheKeyAllowlist?: readonly string[];
   readonly tolerateProviderTaskFailures?: boolean;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
-  readonly r3SpendApproval?: R3SpendApproval;
+  readonly expansionSpendApproval?: ExpansionSpendApproval;
   readonly ingestionMode?: "precomputed_full" | "lazy_field";
   readonly semanticArtifactRoot?: string;
   readonly semanticTransport?: import("./fill/semantic-fill-executor.js").SemanticFillTransport;
@@ -267,7 +267,7 @@ function assertFillAuthorityOptions(
     );
   }
   if (authority?.receipt.direct_spend !== undefined &&
-      (options.expansionCapability !== undefined || options.r3SpendApproval !== undefined)) {
+      (options.expansionCapability !== undefined || options.expansionSpendApproval !== undefined)) {
     throw new ExtractionCacheInvariantError(
       "direct spend extraction cannot mix expansion evidence"
     );

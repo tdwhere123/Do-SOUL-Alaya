@@ -55,7 +55,7 @@ import {
   defaultView,
   identityAssociationCap
 } from "../conditional-field/reference/deployment.fixture.js";
-import { identitySet, plantSource, recallPlantedSource } from "./cp11-planted-source.js";
+import { identitySet, plantSource, recallPlantedSource } from "./planted-source.js";
 
 const databases = new Set<StorageDatabase>();
 afterEach(() => { for (const database of databases) database.close(); databases.clear(); });
@@ -69,7 +69,7 @@ const SOURCE_GOLD: SourceGoldUnit = {
   source_version: "v1", content_digest: DIGEST
 };
 
-describe("CP11 delivery falsifiers", () => {
+describe("delivery falsifiers", () => {
   it("E01: record-only retained source is recoverable without extraction", () => {
     const { records, reader } = plantSource((database) => databases.add(database), [
       { body: "NEEDLE original retained" }
@@ -237,7 +237,7 @@ describe("CP11 delivery falsifiers", () => {
     const b = fieldValue("b", 900);
     const first = projectAcceptingIndex(paged([a]));
     const second = continueAcceptingIndex(first, paged([a, b]));
-    const requestDigest = "cp11-t02-b-page";
+    const requestDigest = "issued-retry-b-page";
     rememberIssuedDelivery({
       query_key: `${QUERY_ID}\0${SNAPSHOT_ID}`, request_digest: requestDigest, index: second
     });

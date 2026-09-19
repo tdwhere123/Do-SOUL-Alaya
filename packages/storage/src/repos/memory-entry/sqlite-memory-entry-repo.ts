@@ -109,7 +109,7 @@ export class SqliteMemoryEntryRepo
   public get transitionLifecycleClearForgetStatement(): SqliteRunStatement {
     return this.workflowStatementHolder.active().transitionLifecycleClearForgetStatement;
   }
-  // invariant (N1): guarded dormant -> active revival; changes=0 when not dormant.
+  // invariant: guarded dormant -> active revival; changes=0 when not dormant.
   public get reviveDormantStatement(): SqliteRunStatement {
     return this.workflowStatementHolder.active().reviveDormantStatement;
   }

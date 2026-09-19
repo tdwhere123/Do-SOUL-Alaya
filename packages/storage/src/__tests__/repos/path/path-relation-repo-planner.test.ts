@@ -188,7 +188,7 @@ describe("SqlitePathRelationRepo SQL planner and cache behavior", () => {
     expect(recreated?.legitimacy.evidence_basis).toEqual(["evidence-recreated"]);
   });
 
-  it("findActive only returns rows that match the current Wave 1 lifecycle shape", async () => {
+  it("findActive only returns rows that match the current lifecycle shape", async () => {
     const { repo, database } = createRepo();
     const relation = createPathRelationFixture();
 

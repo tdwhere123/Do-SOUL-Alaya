@@ -268,7 +268,7 @@ describe("Auditor", () => {  it("assesses cold start and generates draft candida
   });
 
 
-  it("does not handle path_plasticity_update after the Gate-5F owner move", async () => {
+  it("does not handle path_plasticity_update after the Librarian owner move", async () => {
     const { auditor, scheduler } = createAuditor();
 
     const result = await auditor.run(

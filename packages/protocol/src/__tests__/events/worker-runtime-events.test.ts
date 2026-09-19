@@ -12,8 +12,8 @@ import {
 
 const validTimestamp = "2026-04-13T00:00:00.000Z";
 
-describe("Phase A3 event registry", () => {
-  it("exports the frozen worker runtime wire events and parses every A3 payload", () => {
+describe("worker-runtime events", () => {
+  it("exports the frozen worker runtime wire events and parses every worker-runtime payload", () => {
     const expectedEventTypes = [
       "worker.session_started",
       "worker.session_finished",
@@ -143,7 +143,7 @@ describe("Phase A3 event registry", () => {
     );
   });
 
-  it("rejects unknown names and invalid A3 payloads", () => {
+  it("rejects unknown names and invalid worker-runtime payloads", () => {
     expect(() => EventTypeSchema.parse("worker.message.delta")).toThrow();
     expect(() => EventTypeSchema.parse("worker.tool_call.started")).toThrow();
     expect(() => WorkerRuntimeEventTypeSchema.parse("worker.session")).toThrow();

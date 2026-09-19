@@ -4,9 +4,9 @@ import type { LongMemEvalQuestion, LongMemEvalVariant } from
 import type { LongMemEvalExpansionCapability } from
   "../../datasets/longmemeval/promotion/expansion/expansion-capability.js";
 import type {
-  R3SpendApproval,
-  VerifiedR3SpendApproval
-} from "../../datasets/longmemeval/promotion/r3-spend-approval.js";
+  ExpansionSpendApproval,
+  VerifiedExpansionSpendApproval
+} from "../../datasets/longmemeval/promotion/expansion-spend-approval.js";
 import type { LongMemEvalExpansionLineage } from
   "../../datasets/longmemeval/promotion/expansion/lineage/expansion-lineage-schema.js";
 import type { LongMemEvalExpansionSourceAnchor } from
@@ -22,7 +22,7 @@ export interface ExpansionFillAuthorityOptions {
   readonly dataDir?: string;
   readonly pinnedMetaRoot?: string;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
-  readonly r3SpendApproval?: R3SpendApproval;
+  readonly expansionSpendApproval?: ExpansionSpendApproval;
 }
 
 export interface PreparedExpansionFillAuthority {
@@ -31,7 +31,7 @@ export interface PreparedExpansionFillAuthority {
   readonly config: CompileSeedExtractionConfig;
   readonly datasetRevision: string;
   readonly sourceAnchor: LongMemEvalExpansionSourceAnchor;
-  readonly r3SpendApproval: VerifiedR3SpendApproval;
+  readonly expansionSpendApproval: VerifiedExpansionSpendApproval;
   readonly sourceTurns: readonly LongMemEvalExtractionTurn[];
   readonly nextTurns: readonly LongMemEvalExtractionTurn[];
   readonly nextQuestions: readonly LongMemEvalQuestion[];
@@ -41,7 +41,7 @@ export async function prepareExpansionFillAuthority(
   options: ExpansionFillAuthorityOptions,
   _cacheRoot: string
 ): Promise<PreparedExpansionFillAuthority | undefined> {
-  if (options.expansionCapability !== undefined || options.r3SpendApproval !== undefined) {
+  if (options.expansionCapability !== undefined || options.expansionSpendApproval !== undefined) {
     throw new Error("expansion fill is not supported");
   }
   return undefined;

@@ -18,7 +18,7 @@ export function assertReceiptBoundExpansionSpend(
   receipt: ExtractionAuthorityReceipt,
   expansion: PreparedExpansionFillAuthority
 ): void {
-  const approval = expansion.r3SpendApproval.approval;
+  const approval = expansion.expansionSpendApproval.approval;
   const limits = receipt.limits;
   if (receipt.action !== "fill" ||
       receipt.target_selection_digest === undefined ||
@@ -32,7 +32,7 @@ export function assertReceiptBoundExpansionSpend(
       limits.disk_floor_bytes < approval.spend.disk_floor_bytes ||
       receipt.price.estimated_upper_usd > approval.spend.estimated_cost_usd) {
     throw new ExtractionCacheInvariantError(
-      "500Q extraction authority receipt does not match the approved R3 spend envelope"
+      "500Q extraction authority receipt does not match the approved expansion spend envelope"
     );
   }
 }

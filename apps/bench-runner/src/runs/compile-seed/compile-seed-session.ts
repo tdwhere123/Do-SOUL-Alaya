@@ -71,7 +71,7 @@ export function buildSessionSynthesisInput(input: {
 }
 
 /**
- * @anchor longmemeval-d1-fanout — adjacent-turn derives_from handoff
+ * @anchor longmemeval-adjacent-turn-fanout — adjacent-turn derives_from handoff
  *
  * Compute the sourceMemoryRefs for the next turn's seed signal, given the
  * seed result of the current turn. Single-id semantics by design: only the
@@ -82,8 +82,9 @@ export function buildSessionSynthesisInput(input: {
  * fact in the current turn. Unioning N facts per turn would create
  * N x M edges per adjacent pair and scale as
  * session_count * turn_count * fact_per_turn^2; on a 500q LongMemEval run
- * that breaches the WSL2 memory ceiling. D-1's intent is "adjacent
- * sentence derives_from", not "every fact derives from every prior fact".
+ * that breaches the WSL2 memory ceiling. Adjacent-turn linking is
+ * "adjacent sentence derives_from", not "every fact derives from every
+ * prior fact".
  *
  * invariant: returns [] when the current turn produced no seeds — the
  * caller treats [] as "no prior turn", emitting the next signal with

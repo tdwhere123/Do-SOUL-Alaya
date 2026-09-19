@@ -67,7 +67,7 @@ describe("EdgeProposalService", () => {
     expect(service.listPending("workspace-1").proposals.map((p) => p.proposal_id)).not.toContain(p1.proposal_id);
   });
 
-  // invariant (FIX-2): a crash-window orphan — accepted/auto_accepted with no
+  // A crash-window orphan — accepted/auto_accepted with no path — is
   // path — is recovered by the bounded reconcile sweep. After the pass exactly
   // one path exists (re-driven mint applied), and re-running the pass is a
   // no-op (already_present, no second mint applied).
@@ -107,7 +107,7 @@ describe("EdgeProposalService", () => {
     expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.ACCEPTED);
   });
 
-  // invariant (FIX-2): a crash-window orphan whose owed path can never mint (a
+  // A crash-window orphan whose owed path can never mint (a
   // permanent anchor rejection) is moved to terminal rejected by the sweep, so
   // it leaves the accepted-awaiting-path set and the next pass does not re-scan it.
   it("reconcileStuckAccepts moves a permanently-rejected crash-window orphan to terminal rejected", async () => {

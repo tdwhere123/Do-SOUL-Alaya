@@ -177,7 +177,7 @@ describe("SqliteEdgeProposalRepo", () => {
     expect(repo.listPending("workspace-1").map((row) => row.proposal_id)).toEqual([]);
   });
 
-  // invariant (FIX-1): reverting an accepted row to pending collides with
+  // Reverting an accepted row to pending collides with
   // idx_edge_proposals_pending_unique when a duplicate pending re-proposal (P2)
   // already holds the same (workspace, source, target, type) tuple. The repo
   // catches the SQLITE_CONSTRAINT and falls back to terminal rejected
@@ -220,7 +220,7 @@ describe("SqliteEdgeProposalRepo", () => {
     expect(repo.listPending("workspace-1").map((row) => row.proposal_id)).toEqual(["proposal-2"]);
   });
 
-  // invariant (FIX-2): listAcceptedAwaitingPath returns accepted + auto_accepted
+  // listAcceptedAwaitingPath returns accepted + auto_accepted
   // rows (crash-window orphans owing a path) oldest-first, bounded by limit, and
   // excludes pending / terminal rows.
   it("lists accepted and auto_accepted proposals awaiting a path, oldest first, bounded", async () => {
@@ -416,7 +416,7 @@ describe("SqliteEdgeProposalRepo", () => {
     expect(repo.listAcceptedAwaitingPath("workspace-1", 1).map((row) => row.proposal_id)).toEqual(["orphan-real"]);
   });
 
-  // invariant (FIX-2): the await-path path-exists probe must ride the
+  // The await-path path-exists probe must ride the
   // migration 087 backing-object expression indexes, not degrade to a workspace
   // SCAN of path_relations per accepted proposal. A single OR across the
   // source-backing and target-backing expressions defeats the seek; the UNION

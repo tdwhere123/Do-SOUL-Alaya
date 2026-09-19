@@ -8,7 +8,7 @@ import {
 } from "./contract.js";
 import {
   exactTwoSidedMcNemarPValue,
-  LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY,
+  LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY,
   type LongMemEvalMaterialEffect
 } from "./material-effect.js";
 
@@ -44,18 +44,18 @@ const MaterialEffectSchema = z.object({
     measurement_attribution: z.literal("honest_in_both")
   }).strict(),
   paired_r_at_5: z.object({
-    answerable_count: z.literal(LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.answerableCount),
+    answerable_count: z.literal(LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY.answerableCount),
     control_hits: z.number().int().nonnegative().max(
-      LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.answerableCount
+      LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY.answerableCount
     ),
     product_hits: z.number().int().nonnegative().max(
-      LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.answerableCount
+      LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY.answerableCount
     ),
     gained: z.number().int().nonnegative(),
     lost: z.number().int().nonnegative(),
     net: z.number().int(),
     mcnemar: z.object({
-      method: z.literal(LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarMethod),
+      method: z.literal(LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY.mcnemarMethod),
       p_value: z.number().min(0).max(1)
     }).strict()
   }).strict()

@@ -163,7 +163,7 @@ export function parseFileApprovalEventPayload<T extends keyof typeof fileApprova
   const schema = fileApprovalPayloadSchemas[type];
 
   if (schema === undefined) {
-    throw new Error(`Unknown Phase 5 event type: ${String(type)}`);
+    throw new Error(`Unknown file-approval event type: ${String(type)}`);
   }
 
   return schema.parse(payload) as FileApprovalEventPayloadMap[T];

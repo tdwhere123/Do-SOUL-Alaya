@@ -17,8 +17,8 @@ import {
 
 const validTimestamp = "2026-04-15T00:00:00.000Z";
 
-describe("Phase B event registry", () => {
-  it("registers all Phase B event names and validates each payload type", () => {
+describe("obligation-trust-narrative events", () => {
+  it("registers all obligation-trust-narrative event names and validates each payload type", () => {
     const expectedEventTypes = [
       "obligation.created",
       "obligation.fulfilled",

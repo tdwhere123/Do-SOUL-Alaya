@@ -50,7 +50,7 @@ import {
 } from "./upgrade-expected.js";
 
 describe("conditional-field upgrade oracle (contract-only until real producers bind)", () => {
-  it("coverage matrix names every A/B row and inherited finding", () => {
+  it("coverage matrix names every required row", () => {
     expect(COVERAGE_ROWS.map((row) => row.id)).toEqual(requiredIds());
   });
 

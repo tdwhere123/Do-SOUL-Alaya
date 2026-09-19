@@ -309,7 +309,7 @@ export async function reviveDormantMemoryEntry(
   }
 }
 
-// invariant (§7 + N1): synchronous guarded revival for the single-transaction
+// invariant (§7): synchronous guarded revival for the single-transaction
 // karma path. Returns the row when it flipped dormant -> active, null when the
 // row was not dormant (changes=0), so an already-active row emits no revival
 // audit row. Runs inside the caller's transaction; no self-transaction here.

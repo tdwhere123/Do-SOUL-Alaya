@@ -5,8 +5,8 @@ type ParseableSchema = {
   readonly options?: readonly string[];
 };
 
-describe("Phase A1 event registry", () => {
-  it("exports the frozen wire events and parses the published A1 payloads", async () => {
+describe("tool-worker events", () => {
+  it("exports the frozen wire events and parses the published tool-worker payloads", async () => {
     const protocol = (await import("../../" + "index.js")) as Record<string, unknown>;
     const EventTypeSchema = protocol.EventTypeSchema as ParseableSchema;
     const ToolWorkerEventType = protocol.ToolWorkerEventType as Record<string, string>;
@@ -190,7 +190,7 @@ describe("Phase A1 event registry", () => {
     );
   });
 
-  it("rejects retired names, omitted required fields, and invalid A1 payloads", async () => {
+  it("rejects retired names, omitted required fields, and invalid tool-worker payloads", async () => {
     const protocol = (await import("../../" + "index.js")) as Record<string, unknown>;
     const EventTypeSchema = protocol.EventTypeSchema as ParseableSchema;
     const ToolWorkerEventType = protocol.ToolWorkerEventType as Record<string, string>;

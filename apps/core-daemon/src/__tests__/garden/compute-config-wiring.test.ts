@@ -9,14 +9,13 @@ import {
 import { resolveGardenOpenAiCredential } from "../../garden/index.js";
 
 /**
- * C1 wiring tests — verify the env readers honour the new
- * Garden-compute-only env vars introduced by Codex's diagnostic finding
- * B-PL1 (Garden config previously piggy-backed on embedding's secret).
+ * Verify the env readers honour the Garden-compute-only env vars
+ * (Garden config previously piggy-backed on embedding's secret).
  *
  * `readOfficialGardenSecretRef` resolves env: refs against process.env, so
  * tests that pass an env: ref must seed the corresponding key.
  */
-describe("Garden compute env readers (C1)", () => {
+describe("Garden compute env readers", () => {
   const seededKeys = new Set<string>();
   beforeEach(() => {
     seededKeys.clear();

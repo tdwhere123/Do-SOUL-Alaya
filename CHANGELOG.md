@@ -8,14 +8,20 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 4.15.0
+## Unreleased — protocol 5.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 4.15.0 can move
+heading (currently `## v0.3.11` below). Protocol 5.0.0 can move
 independently of the app semver. `@do-soul/alaya-engine-gateway` is
 `0.3.12` for the additive `soul.interpretation` tool surface.
+
+Protocol 5.0.0 is a major under handbook invariant §25: the advertised
+MCP/EventLog capture-execution fail-closed reason
+`psi_cycle_contract_failure` is renamed to `cycle_contract_failure`.
+Historical payloads still parse. New JSON Schema no longer lists the
+old token.
 
 Protocol 4.15.0 is an additive minor under handbook invariant §25.
 MCP/CLI expose `soul.interpretation` with four host operations
@@ -105,7 +111,7 @@ modality, trailing source tokens, and unsupported dependent scope. Extraction
 catalog version 3 requires demonstrated fragment independence, including
 adjacent dependent continuations. MCP, EventLog and config schemas are unchanged.
 
-Source `@do-soul/alaya-protocol` is **4.15.0** (`packages/protocol/package.json`).
+Source `@do-soul/alaya-protocol` is **5.0.0** (`packages/protocol/package.json`).
 `AlayaStatusSchema.mcp.catalog_health` is an additive optional field.
 GitHub `releases/latest` is a published tarball and is **not** this source tree;
 pin `ALAYA_VERSION` or install from a checkout. Local ONNX embeddings

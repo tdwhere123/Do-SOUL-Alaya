@@ -4,7 +4,7 @@ import {
   validTimestamp
 } from "./runtime-foundation-contract-support.js";
 
-describe("Phase A1 runtime foundation frozen templates", () => {
+describe("runtime foundation frozen templates", () => {
   it("parses frozen node template contracts", async () => {
     const {
       FrozenNodeTemplateContractsSchema,

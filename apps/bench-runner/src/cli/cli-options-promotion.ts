@@ -6,12 +6,24 @@ export function consumePromotionEvidencePathFlags(
   token: string,
   state: ParsedFlagsState
 ): number | undefined {
-  const r3SpendApproval = consumePathFlag(
+  const expansionSpendApproval = consumePathFlag(
+    args,
+    index,
+    token,
+    "--expansion-spend-approval",
+    "--expansion-spend-approval requires a path"
+  );
+  if (expansionSpendApproval !== undefined) {
+    state.expansionSpendApproval = expansionSpendApproval.value;
+    return expansionSpendApproval.nextIndex;
+  }
+  // Historical operator flag; same field as --expansion-spend-approval.
+  const historicalSpendApproval = consumePathFlag(
     args, index, token, "--r3-spend-approval", "--r3-spend-approval requires a path"
   );
-  if (r3SpendApproval === undefined) return undefined;
-  state.r3SpendApproval = r3SpendApproval.value;
-  return r3SpendApproval.nextIndex;
+  if (historicalSpendApproval === undefined) return undefined;
+  state.expansionSpendApproval = historicalSpendApproval.value;
+  return historicalSpendApproval.nextIndex;
 }
 
 function consumePathFlag(

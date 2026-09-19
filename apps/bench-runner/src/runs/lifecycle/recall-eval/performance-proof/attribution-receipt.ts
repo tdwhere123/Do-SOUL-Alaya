@@ -1,4 +1,4 @@
-export const P00_PERFORMANCE_PROOF_CONTRACT = Object.freeze({
+export const PERFORMANCE_PROOF_CONTRACT = Object.freeze({
   name: "recall-eval-performance-attribution-and-exact-parity.v1",
   attributionSchema: "recall-eval-performance-attribution.v1",
   paritySchema: "recall-eval-exact-parity.v1",
@@ -11,7 +11,7 @@ export const P00_PERFORMANCE_PROOF_CONTRACT = Object.freeze({
 });
 
 export const RECALL_EVAL_PERFORMANCE_ATTRIBUTION_RECEIPT =
-  P00_PERFORMANCE_PROOF_CONTRACT.attributionSchema;
+  PERFORMANCE_PROOF_CONTRACT.attributionSchema;
 
 export type ObservedFiniteNumber =
   | { readonly status: "observed"; readonly value: number }

@@ -250,10 +250,10 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
   });
 
-  // invariant (FIX-2): the 60s GardenScheduler pass re-drives owed path mints
-  // for accept->mint crash-window orphans, once per workspace, bounded. LOGs a
-  // tally only when it acted on a row (scanned > 0). When the port is unwired the
-  // pass is inert.
+  // The 60s GardenScheduler pass re-drives owed path mints for
+  // accept->mint crash-window orphans, once per workspace, bounded. It
+  // logs a tally only when it acted on a row (scanned > 0). When the
+  // port is unwired the pass is inert.
   it("the 60s pass re-drives the edge-proposal accept->mint reconcile sweep per workspace, bounded", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     const reconcileStuckAccepts = vi.fn(async (input: { readonly workspaceId: string; readonly limit: number }) => ({

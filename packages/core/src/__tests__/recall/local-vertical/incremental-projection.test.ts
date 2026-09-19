@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 describe("incremental projection and read-only recall", () => {
-  it("A1 raw recall hits planted evidence while enrichment is pending then updates only the changed view", async () => {
+  it("raw recall hits planted evidence while enrichment is pending then updates only the changed view", async () => {
     const f = await artifactFixture((database) => databases.add(database));
     await f.write(MEM.checklist, CONTENT.checklist);
     expect(f.slice.indexProjection.freshness(WS, MEM.checklist)).toMatchObject({
@@ -43,8 +43,8 @@ describe("incremental projection and read-only recall", () => {
     expect(enriched.membership).toContain(MEM.checklist);
   });
 
-  it("A2 restart, duplicate init, tombstone and concurrent reads preserve identity and freshness", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "w02-a2-"));
+  it("restart, duplicate init, tombstone and concurrent reads preserve identity and freshness", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "incremental-projection-"));
     const filename = join(directory, "source.sqlite");
     const first = await createSliceHarness((database) => databases.add(database), filename);
     await first.writeMemory(MEM.checklist, CONTENT.checklist, MemoryDimension.PROCEDURE, true);
@@ -60,7 +60,7 @@ describe("incremental projection and read-only recall", () => {
     const cursor = reopened.indexProjection.cursor(WS);
     const updateWithinTransaction = reopened.memoryEntryRepo.updateWithinTransaction;
     if (updateWithinTransaction === undefined) {
-      throw new Error("memory update transaction port is required for W02 tombstone");
+      throw new Error("memory update transaction port is required for tombstone");
     }
     updateWithinTransaction.call(reopened.memoryEntryRepo, MEM.orion, {
       retention_state: "tombstoned",
@@ -86,7 +86,7 @@ describe("incremental projection and read-only recall", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  it("A3 warm repeated recall makes zero extract, enqueue or source writes", async () => {
+  it("warm repeated recall makes zero extract, enqueue or source writes", async () => {
     const slice = await createSliceHarness((database) => databases.add(database));
     await slice.writeMemory(MEM.checklist, CONTENT.checklist, MemoryDimension.PROCEDURE, true);
     const beforeEnqueue = slice.counters.garden_enqueue;
@@ -104,7 +104,7 @@ describe("incremental projection and read-only recall", () => {
     expect(second.counters.full_tier_scan).toBe(0);
   });
 
-  it("A4 missing object and pending derived state stay explicit, never source absence", async () => {
+  it("missing object and pending derived state stay explicit, never source absence", async () => {
     const slice = await createSliceHarness((database) => databases.add(database));
     await slice.writeMemory(MEM.checklist, CONTENT.checklist, MemoryDimension.PROCEDURE, true);
     expect(slice.indexProjection.freshness(WS, MEM.checklist)).toMatchObject({

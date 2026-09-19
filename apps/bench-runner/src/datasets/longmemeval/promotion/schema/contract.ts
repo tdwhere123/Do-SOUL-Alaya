@@ -5,8 +5,8 @@ import {
   LongMemEvalPromotionCodeWireSchema
 } from "@do-soul/alaya-eval/authority";
 import { z } from "zod";
-import { LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY } from "./material-effect.js";
-import { LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY } from "./absolute-quality.js";
+import { LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY } from "./material-effect.js";
+import { LONGMEMEVAL_ABSOLUTE_QUALITY_POLICY } from "./absolute-quality.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
@@ -26,22 +26,22 @@ const AbsoluteQualityPolicySchema = z.object({
   metric: z.literal("r_at_5"),
   cohort: z.literal("answerable"),
   expected_denominator: z.literal(
-    LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY.answerableCount
+    LONGMEMEVAL_ABSOLUTE_QUALITY_POLICY.answerableCount
   ),
   control_minimum_hits: z.literal(
-    LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY.controlMinimumR5Hits
+    LONGMEMEVAL_ABSOLUTE_QUALITY_POLICY.controlMinimumR5Hits
   ),
   product_minimum_hits: z.literal(
-    LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY.productMinimumR5Hits
+    LONGMEMEVAL_ABSOLUTE_QUALITY_POLICY.productMinimumR5Hits
   )
 }).strict().readonly();
 
 const MaterialEffectPolicySchema = z.object({
   control_cell: z.literal("A"),
   product_cell: z.literal("B"),
-  answerable_count: z.literal(LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.answerableCount),
+  answerable_count: z.literal(LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY.answerableCount),
   declared_abstention_count: z.literal(
-    LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.declaredAbstentionCount
+    LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY.declaredAbstentionCount
   ),
   directional_metrics: z.tuple([
     z.literal("r_at_1"),
@@ -51,7 +51,7 @@ const MaterialEffectPolicySchema = z.object({
   ]).readonly(),
   token_diagnostic_metric: z.literal("token_saved_ratio_vs_full_prompt"),
   paired_r_at_5_diagnostic: z.object({
-    mcnemar_method: z.literal(LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarMethod)
+    mcnemar_method: z.literal(LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY.mcnemarMethod)
   }).strict().readonly()
 }).strict().readonly();
 

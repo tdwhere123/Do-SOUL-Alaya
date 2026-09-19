@@ -353,7 +353,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   it(
     "queryTokenMetrics derives the token economy from the EventLog end-to-end",
     async () => {
-      // Integration round-trip for the S6 token-economy KPI: a compile turn
+      // Integration round-trip for the token-economy KPI: a compile turn
       // that fans out into 2 fact signals, then a recall. The seed path
       // appends 2 SOUL_SIGNAL_EMITTED events and the recall path emits 1
       // SOUL_CONTEXT_LENS_ASSEMBLED event; queryTokenMetrics reads them all

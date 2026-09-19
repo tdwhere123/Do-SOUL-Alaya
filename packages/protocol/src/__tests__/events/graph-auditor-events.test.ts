@@ -14,7 +14,7 @@ import {
 
 const validTimestamp = "2026-03-28T00:00:00.000Z";
 
-describe("Phase 4B protocol schemas", () => {
+describe("graph-auditor events", () => {
   it("extends object kind unions for graph edges and orphan radar", () => {
     expect(ObjectKindSchema.parse("memory_graph_edge")).toBe("memory_graph_edge");
     expect(ControlPlaneObjectKindSchema.parse("orphan_radar")).toBe("orphan_radar");

@@ -32,7 +32,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => removeTempDirectory(root)));
 });
 
-describe("P00 exact-parity contract", () => {
+describe("exact-parity contract", () => {
   it("binds identity first and compares delivered IDs and order", () => {
     const left = freezeReceipt();
     const right = freezeReceipt({
@@ -116,7 +116,7 @@ describe("P00 exact-parity contract", () => {
   });
 });
 
-describe("P00 provider-free control run", () => {
+describe("provider-free control run", () => {
   it("produces a reproducible attribution and parity receipt without dataset or network", async () => {
     const first = await runProviderFreePerformanceProof();
     const second = await runProviderFreePerformanceProof();

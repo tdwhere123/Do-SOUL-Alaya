@@ -50,7 +50,7 @@ function createWorkerRun(overrides: Partial<DelegatedWorkerRun> = {}): Delegated
 }
 
 // Helper: in-test publisher that simulates the appendManyWithMutation contract
-// (sync mutate, batch-array first arg) used by DirtyStatePanicService after #BL-022.
+// (sync mutate, batch-array first arg) used by DirtyStatePanicService.
 function fakeAppendManyWithMutation(
   publishedEvents?: Array<EventLogEntry | Omit<EventLogEntry, "event_id" | "created_at" | "revision">>
 ): ReturnType<typeof vi.fn> {
@@ -71,7 +71,7 @@ function fakeAppendManyWithMutation(
 }
 
 describe("DirtyStatePanicService", () => {
-  it("appends panic + worker.state_changed and updates dossier/worker atomically (#BL-022)", async () => {
+  it("appends panic + worker.state_changed and updates dossier/worker atomically", async () => {
     const workerStore = new Map<string, DelegatedWorkerRun>([
       [
         "worker-run-1",
@@ -241,7 +241,7 @@ describe("DirtyStatePanicService", () => {
     expect(updateState).not.toHaveBeenCalled();
   });
 
-  it("accepts every B-8 panic trigger enum", async () => {
+  it("accepts every panic trigger enum", async () => {
     const triggerKinds: readonly DirtyStatePanicTrigger[] = [
       "evidence_corruption",
       "governance_bypass",

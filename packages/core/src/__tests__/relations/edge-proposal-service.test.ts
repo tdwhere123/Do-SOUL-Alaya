@@ -128,7 +128,7 @@ it("accept mints a governed path relation and reject does not", async () => {
     expect(repo.findById(rejected.proposal_id)?.status).toBe(EdgeProposalStatus.REJECTED);
   });
 
-// invariant (Wave-1): an AUTO_ACCEPTED negative edge_type mint is NOT a trust
+// An AUTO_ACCEPTED negative edge_type mint is NOT a trust
   // verdict — it must be born attention_only so it cannot suppress (suppression
   // gate requires recall_allowed; negative governance promotion is sign-guarded
   // off). recall_allowed for a negative path is reachable only via a trusted

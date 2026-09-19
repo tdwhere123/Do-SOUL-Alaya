@@ -164,7 +164,7 @@ describe("preflightExtractionCache", () => {
     ).not.toThrow();
   });
 
-  // @anchor finding-1-no-coverage-gap: a manifest WITHOUT a coverage field is a
+  // @anchor missing-coverage-is-a-gap: a manifest WITHOUT a coverage field is a
   // gap, not a silent pass. extraction-fill always writes coverage, so a
   // coverage-less manifest means the cache was never filled against a known
   // denominator.

@@ -85,7 +85,7 @@ function createHarness(memoryEntries: readonly MemoryEntry[], options: { readonl
         entriesById.set(objectId, updated);
         return Object.freeze({ ...updated });
       }),
-      // invariant (N1): SQL-accurate guarded revival fake — flips dormant ->
+      // invariant: SQL-accurate guarded revival fake — flips dormant ->
       // active and returns the row; returns null (no-op) when not dormant so the
       // service skips the spurious revival audit event for an already-active row.
       reviveDormant: vi.fn(async (objectId: string, updatedAt: string) => {
@@ -338,7 +338,7 @@ describe("DynamicsService", () => {
     expect(revivalEvents).toHaveLength(0);
   });
 
-  it("N1: revival via the SQL-guarded reviveDormant clears any stale forget marker", async () => {
+  it("revival via the SQL-guarded reviveDormant clears any stale forget marker", async () => {
     const { service, entriesById } = createHarness([
       createMemoryEntry({
         object_id: "memory-stale-marker",
@@ -354,7 +354,7 @@ describe("DynamicsService", () => {
 
     const revived = entriesById.get("memory-stale-marker");
     expect(revived?.lifecycle_state).toBe("active");
-    // A revived row must NOT carry a terminal-removal marker (I3 + N1).
+    // A revived row must NOT carry a terminal-removal marker.
     expect(revived?.forget_disposition).toBeNull();
     expect(revived?.forget_disposition_ref).toBeNull();
   });

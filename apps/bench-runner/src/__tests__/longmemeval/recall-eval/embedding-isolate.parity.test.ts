@@ -4,13 +4,13 @@ import { createEmbeddingIsolateDaemonAdapter } from
 import { freezeEmbeddingIsolateIdentity } from
   "../../../runs/lifecycle/recall-eval/embedding-isolate/identity.js";
 import {
-  P01_EMBEDDING_ISOLATE_CONTRACT,
+  EMBEDDING_ISOLATE_CONTRACT,
   createEmbeddingIsolateSession,
   type EmbeddingIsolateSession
 } from "../../../runs/lifecycle/recall-eval/embedding-isolate/session.js";
 import { createStubEmbeddingIsolateHost } from
   "../../../runs/lifecycle/recall-eval/embedding-isolate/stub-host.js";
-import { P00_PERFORMANCE_PROOF_CONTRACT } from
+import { PERFORMANCE_PROOF_CONTRACT } from
   "../../../runs/lifecycle/recall-eval/performance-proof/attribution-receipt.js";
 import { compareExactParity } from
   "../../../runs/lifecycle/recall-eval/performance-proof/exact-parity.js";
@@ -34,8 +34,8 @@ afterEach(async () => {
 });
 
 describe("A3 isolate-composed provider-free exact parity", () => {
-  it("keeps P00 control result bytes across two isolate-leased workspaces", async () => {
-    expect(P01_EMBEDDING_ISOLATE_CONTRACT.cites).toBe(P00_PERFORMANCE_PROOF_CONTRACT.name);
+  it("keeps control result bytes across two isolate-leased workspaces", async () => {
+    expect(EMBEDDING_ISOLATE_CONTRACT.cites).toBe(PERFORMANCE_PROOF_CONTRACT.name);
 
     const control = await runProviderFreePerformanceProof();
     const host = createStubEmbeddingIsolateHost();

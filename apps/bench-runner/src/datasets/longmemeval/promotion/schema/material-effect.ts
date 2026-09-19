@@ -1,12 +1,12 @@
 import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
 
-export const LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY = Object.freeze({
+export const LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY = Object.freeze({
   answerableCount: 94,
   declaredAbstentionCount: 6,
   mcnemarMethod: "exact_two_sided"
 } as const);
 
-const POLICY = LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY;
+const POLICY = LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY;
 
 export interface LongMemEvalMetricDelta {
   readonly control: number;

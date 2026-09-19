@@ -6,11 +6,11 @@ import {
 } from "../bridge.js";
 import type { McpMemoryToolCallContext } from "../../mcp-memory/tool/tool-handler.js";
 
-// A1 (HITL daemon backbone) — `alaya review` is a CLI fallback for the
-// same MCP handler attached agents use. Each verb routes through the
-// MemoryToolHandler so behavior, validation, and audit trails stay
-// identical between Codex/Claude attach and a human at a terminal. This
-// follows the `alaya tools list | tools call` precedent in
+// `alaya review` is a CLI fallback for the same MCP handler attached
+// agents use. Each verb routes through the MemoryToolHandler so
+// behavior, validation, and audit trails stay identical between
+// Codex/Claude attach and a human at a terminal. This follows the
+// `alaya tools list | tools call` precedent in
 // apps/core-daemon/src/cli/tools.ts.
 
 import {

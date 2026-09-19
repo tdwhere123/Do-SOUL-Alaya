@@ -67,7 +67,8 @@ export function createRuntimeInput(options: {
   // ConsolidationExecutor (else it is null and the consolidation cycle is
   // skipped). Default {} keeps the existing tests on the null-executor path.
   readonly databaseConnection?: GardenRuntimeInput["databaseConnection"];
-  // Legacy topology mutation is deliberately opt-in in non-S4 fixtures.
+  // Legacy topology mutation is deliberately opt-in in fixtures that
+  // still exercise the retired mutation path.
   readonly legacyTopologyMutationsEnabled?: boolean;
 } = {}): GardenRuntimeInput {
   let latestSnapshot: PathGraphSnapshot | null = null;

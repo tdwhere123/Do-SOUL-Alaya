@@ -69,9 +69,9 @@ describe("RuleBasedEntityExtractor", () => {
     expect(path?.surface).toBe("packages/core/src/recall/recall-service.ts");
   });
 
-  it("captures hash / BL / version task refs", async () => {
-    const hash = await kindsFor("#BL-042 is still open");
-    expect(hash.some((entry) => entry.startsWith("task_ref:"))).toBe(true);
+  it("captures hash / ticket / version task refs", async () => {
+    const hash = await kindsFor("ticket#TICKET-042 is still open");
+    expect(hash).toContain("task_ref:#TICKET-042");
 
     const release = await extractor.extract("does v0.3.11 close out the gap?");
     const rel = release.find((c) => c.kind === "task_ref" && c.surface.startsWith("v0.3"));
@@ -141,7 +141,7 @@ describe("RuleBasedEntityExtractor", () => {
   });
 
   it("is deterministic — same input yields byte-identical output", async () => {
-    const query = 'check `recall-service.ts` and #BL-001 and 召回路径 and Sam Altman';
+    const query = 'check `recall-service.ts` and #TICKET-001 and 召回路径 and Sam Altman';
     const a = await extractor.extract(query);
     const b = await extractor.extract(query);
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));

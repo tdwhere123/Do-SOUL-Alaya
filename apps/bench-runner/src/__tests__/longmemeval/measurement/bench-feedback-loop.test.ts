@@ -113,7 +113,7 @@ describe("per-plane recall coverage", () => {
   it("surfaces a plane not present in any static list once it appears in source_planes", () => {
     // source_planes is filtered against the diagnostic label set; a plane
     // that is not yet in that set is dropped here. buildPerPlaneRecallCoverage
-    // itself, which Phase 1 plane work feeds, is label-agnostic.
+    // itself is label-agnostic.
     const coverage = buildPerPlaneRecallCoverage(
       new Map([["trigram", 4]]),
       new Map([["trigram", 3]])

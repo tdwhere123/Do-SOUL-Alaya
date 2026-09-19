@@ -127,8 +127,8 @@ describe("MaterializationRouter ingest reconciliation", () => {
       factSignal({
         source_memory_refs: ["mem-prior-1", "mem-prior-2"],
         raw_payload: {
-          excerpt: "Derived fact for D-1 attribution.",
-          distilled_fact: "Derived fact for D-1 attribution."
+          excerpt: "Derived fact for prior-turn attribution.",
+          distilled_fact: "Derived fact for prior-turn attribution."
         }
       })
     );

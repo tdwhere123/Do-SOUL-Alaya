@@ -38,7 +38,7 @@ export function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     extractionAuthority: state.extractionAuthority,
     extractionTargetSelection: state.extractionTargetSelection,
     extractionPredecessorAuthority: state.extractionPredecessorAuthority,
-    r3SpendApproval: state.r3SpendApproval,
+    expansionSpendApproval: state.expansionSpendApproval,
     concurrency: state.concurrency,
     extractionInitialConcurrency: state.extractionInitialConcurrency,
     questionBatchLimit: state.questionBatchLimit,

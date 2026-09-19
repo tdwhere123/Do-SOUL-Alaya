@@ -25,7 +25,7 @@ import {
 
 const validTimestamp = "2026-04-17T00:00:00.000Z";
 
-describe("Phase C shared-contract foundation", () => {
+describe("shared path-compute contracts", () => {
   it("parses all PathAnchorRef variants", () => {
     const cases = [
       {

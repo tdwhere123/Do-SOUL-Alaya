@@ -114,7 +114,7 @@ function createHarness(
   const service = new WorkerRunLifecycleService({
     repo,
     eventPublisher: {
-      // WorkerRunLifecycleService now uses appendManyWithMutation (#BL-022).
+      // EventLog append and worker state mutate share one transaction.
       appendManyWithMutation: appendManyWithMutation
     } as unknown as EventPublisher,
     now: () => FIXED_NOW
@@ -368,7 +368,7 @@ describe("WorkerRunLifecycleService", () => {
     };
 
     const eventPublisher = {
-      // WorkerRunLifecycleService now uses appendManyWithMutation (#BL-022).
+      // EventLog append and worker state mutate share one transaction.
       appendManyWithMutation: vi.fn(
         async (
           events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,

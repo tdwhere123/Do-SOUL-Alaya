@@ -38,7 +38,7 @@ import {
   computeProviderRoutedPayload,
   bootstrappingPathsPlantedPayload} from "./runtime-governance-event-registry.fixtures.js";
 
-describe("Phase C event registry", () => {
+describe("runtime-governance events", () => {
   it("validates parseRuntimeGovernanceEventPayload coverage", () => {
     expect(
       parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.CANONICALIZATION_APPLIED, canonicalizationAppliedPayload)

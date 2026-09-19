@@ -133,7 +133,7 @@ function pushTokenEconomyDelta(
   // above is the headline; this surfaces a swelling per-recall payload even
   // when the ratio happens to stay flat (e.g. raw history grew in step).
   // Gated on BOTH sides carrying the event-sourced token_economy block so a
-  // pre-S6 baseline never produces a spurious delta. Reuses the latency
+  // older baseline never produces a spurious delta. Reuses the latency
   // growth classifier — a bigger recalled-context mean is "growth_bad".
   const currentEconomy = current.kpi.token_economy;
   const previousEconomy = previous.kpi.token_economy;

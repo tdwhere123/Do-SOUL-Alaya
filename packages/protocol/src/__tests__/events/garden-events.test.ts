@@ -19,7 +19,7 @@ import {
 
 const validTimestamp = "2026-03-27T00:00:00.000Z";
 
-describe("Phase 4A protocol schemas", () => {
+describe("garden events", () => {
   it("parses a valid GardenTaskDescriptor", () => {
     const descriptor = {
       task_id: "task-1",

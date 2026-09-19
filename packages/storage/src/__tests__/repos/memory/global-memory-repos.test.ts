@@ -343,7 +343,7 @@ function createGlobalMemoryEntry(overrides: Partial<GlobalMemoryEntry> = {}): Gl
     scope_class: ScopeClass.GLOBAL_CORE,
     content: "Run pnpm build before commit.",
     domain_tags: ["workflow", "build"],
-    provenance: "seed://lane-c22/test-fixture",
+    provenance: "seed://test-fixture",
     activation_score: 0.83,
     version: 2,
     created_at: "2026-04-23T00:00:00.000Z",

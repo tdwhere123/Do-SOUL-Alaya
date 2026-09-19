@@ -19,8 +19,8 @@ const edgeProposalStatusValues = [
 // invariant: trigger_source values map 1:1 to the edge producers +
 // governance entrypoints. `llm_supports` is reserved for the LLM
 // pair-classifier path; the rule-based local fallbacks tag themselves with
-// `local_supports` / `local_supersedes` / `local_derives_from` so KPI K3.2
-// per-trigger breakdown stays unambiguous (do not collapse local heuristics
+// `local_supports` / `local_supersedes` / `local_derives_from` so the
+// per-trigger edge-proposal-rate breakdown stays unambiguous (do not collapse local heuristics
 // back onto `system`).
 const edgeProposalTriggerSourceValues = [
   "explicit",

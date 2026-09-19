@@ -34,13 +34,13 @@ interface GroundedVariable {
 }
 
 const FIXTURE = JSON.parse(readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), "g8-live-q2q3-formations.json"),
+  join(dirname(fileURLToPath(import.meta.url)), "live-commute-formations.json"),
   "utf8"
 )) as Readonly<Record<string, SealedLiveFormation>>;
 
-export function rematerializeG8LiveFormation(key: keyof typeof FIXTURE) {
+export function rematerializeLiveFormation(key: keyof typeof FIXTURE) {
   const sealed = FIXTURE[key];
-  if (sealed === undefined) throw new Error(`missing G8 live formation ${String(key)}`);
+  if (sealed === undefined) throw new Error(`missing sealed live formation ${String(key)}`);
   const capture = materializeOpenSemanticFactorFormation({
     source_kind: sealed.source_kind,
     source_text: sealed.source_text,
@@ -55,7 +55,7 @@ export function rematerializeG8LiveFormation(key: keyof typeof FIXTURE) {
       capture.capture_digest !== sealed.capture_digest ||
       capture.producer_operator_id !== sealed.producer_operator_id ||
       capture.status !== "formed") {
-    throw new Error(`G8 live formation ${String(key)} drifted from sealed producer identity`);
+    throw new Error(`sealed live formation ${String(key)} drifted from sealed producer identity`);
   }
   return capture;
 }

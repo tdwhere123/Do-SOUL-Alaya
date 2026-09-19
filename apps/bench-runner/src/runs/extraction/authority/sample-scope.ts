@@ -108,7 +108,7 @@ export function assertSampleExecutionOptions(
       batch.limits.maxRequestsPerJob !== receipt.sample_scope!.keys.length ||
       batch.requestLimit !== undefined || options.questionBatchLimit !== undefined ||
       options.cacheKeyAllowlist !== undefined || options.predecessorAuthorityReceiptPath !== undefined ||
-      options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.r3SpendApproval !== undefined) {
+      options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.expansionSpendApproval !== undefined) {
     throw new Error("sample authority requires one exact Batch job without alternate selection or continuation");
   }
 }

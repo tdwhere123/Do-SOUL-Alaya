@@ -273,7 +273,7 @@ describe("ToolSpecService", () => {
     expect(Object.isFrozen(found)).toBe(true);
   });
 
-  it("does not expose a Wave 1 node-template binding API", () => {
+  it("does not expose a node-template binding API", () => {
     const { dependencies } = createDependencies();
     const service = new ToolSpecService(dependencies) as ToolSpecService & {
       bindToNodeTemplate?: unknown;

@@ -16,7 +16,7 @@ const validTimestamp = "2026-04-17T08:00:00.000Z";
 const workerDispatchFragmentId =
   "constitutional://workspace-1/hard_constraint/system.worker_dispatch-9c5ea45891f0";
 
-describe("Phase C event validation", () => {
+describe("runtime-governance events", () => {
   it("parses security initialization failures with optional diagnostics while keeping strict keys", () => {
     const basePayload = {
       workspace_id: "workspace-1",

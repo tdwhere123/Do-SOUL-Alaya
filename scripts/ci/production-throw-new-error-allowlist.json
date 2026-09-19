@@ -223,6 +223,10 @@
     "max": 9,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
+  "apps/bench-runner/src/datasets/longmemeval/promotion/expansion-spend-approval.ts": {
+    "max": 14,
+    "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
   "apps/bench-runner/src/datasets/longmemeval/promotion/expansion/authority/expansion-recall-authority.ts": {
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
@@ -245,10 +249,6 @@
   },
   "apps/bench-runner/src/datasets/longmemeval/promotion/product/product-formation-policy.ts": {
     "max": 3,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/datasets/longmemeval/promotion/r3-spend-approval.ts": {
-    "max": 14,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/datasets/longmemeval/promotion/schema/absolute-quality.ts": {

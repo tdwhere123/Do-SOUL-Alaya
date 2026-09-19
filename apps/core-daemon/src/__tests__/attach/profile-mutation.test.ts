@@ -393,7 +393,7 @@ describe("profile mutation", () => {
   });
 });
 
-describe("attached profile instructions drift detection (C3)", () => {
+describe("attached profile instructions drift detection", () => {
   it("extracts codex operator_instructions from a JSON-encoded toml value", () => {
     const stale = "soul.recall -> respond. (legacy v0.0.9 text)";
     const codexProfile = `

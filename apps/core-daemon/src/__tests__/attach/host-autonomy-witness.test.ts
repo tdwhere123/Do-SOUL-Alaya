@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// #BL-038 regression: an attached host (Codex / Claude Code over MCP stdio)
+// Regression: an attached host (Codex / Claude Code over MCP stdio)
 // autonomously called soul.recall and then soul.report_context_usage with
 // usage_state == "used" during a normal conversation, and the EventLog records
 // the linked chain. The fixture is a snapshot of real attached-host usage —
@@ -43,7 +43,7 @@ function loadFixtureEvents(): readonly FixtureEvent[] {
 // harness — the daemon's only path to these targets is `alaya mcp stdio`.
 const HOST_AGENT_TARGETS = new Set(["mcp", "claude-code", "codex"]);
 
-describe("host-autonomy witness (#BL-038)", () => {
+describe("attached host autonomy witness", () => {
   it("fixture metadata describes a live-usage witness", () => {
     const metadata = JSON.parse(readFileSync(path.join(fixtureDir, "metadata.json"), "utf8")) as {
       capture_kind: string;

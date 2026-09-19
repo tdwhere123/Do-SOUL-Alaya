@@ -1,29 +1,29 @@
-export const OWNERSHIP_CARDS = [
-  "C00",
-  "C01",
-  "C02",
-  "C03",
-  "C04",
-  "C05",
-  "C06",
-  "C07",
-  "W00",
-  "W01",
-  "W02",
-  "W03",
-  "U00",
-  "U01",
-  "U02",
-  "U03",
-  "U04",
-  "U05",
-  "U06",
-  "U07",
+export const OWNERSHIP_OWNERS = [
+  "max-min-field",
+  "tombstone-query-compiler",
+  "tombstone-observers",
+  "tombstone-field-engine",
+  "tombstone-evidence",
+  "tombstone-index",
+  "tombstone-oracles",
+  "tombstone-protocol-runtime",
+  "durable-write-intent",
+  "semantic-artifact-identity",
+  "recall-projection-schema",
+  "source-enrichment-runtime",
+  "protocol-freeze",
+  "query-compiler",
+  "field-engine",
+  "observers-and-readers",
+  "production-index",
+  "path-plasticity",
+  "oracles-and-falsifiers",
+  "protocol-runtime",
   "retired-deleted",
   "retained-exception"
 ] as const;
 
-export type OwnershipCard = (typeof OWNERSHIP_CARDS)[number];
+export type OwnershipOwner = (typeof OWNERSHIP_OWNERS)[number];
 
 export type OwnershipClassification =
   | "already-written"
@@ -37,7 +37,7 @@ export type OwnershipClassification =
   | "retained-exception";
 
 export type OwnershipRow = Readonly<{
-  readonly card: OwnershipCard;
+  readonly owner: OwnershipOwner;
   readonly paths: readonly string[];
   readonly classification: OwnershipClassification;
   readonly note: string;
@@ -54,9 +54,9 @@ export const ORDINARY_LANGUAGE_ADMISSION_STATUSES = [
 
 export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
   Object.freeze({
-    card: "C00",
+    owner: "max-min-field",
     classification: "already-written",
-    note: "Inherited C00 reference remainder after U-band transfers.",
+    note: "Graph max-min field, fair-work schedule, and leftover observer-index and source-slice tests.",
     paths: Object.freeze([
       "packages/graph-algorithms/src/max-min-field.ts",
       "packages/graph-algorithms/src/index.ts",
@@ -70,49 +70,49 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
     ])
   }),
   Object.freeze({
-    card: "C01",
+    owner: "tombstone-query-compiler",
     classification: "transferred",
-    note: "Query compiler transferred to U01.",
+    note: "Query compiler ownership moved to query-compiler.",
     paths: Object.freeze([])
   }),
   Object.freeze({
-    card: "C02",
+    owner: "tombstone-observers",
     classification: "transferred",
-    note: "Observers and native readers transferred to U03.",
+    note: "Observers and native readers moved to observers-and-readers.",
     paths: Object.freeze([])
   }),
   Object.freeze({
-    card: "C03",
+    owner: "tombstone-field-engine",
     classification: "transferred",
-    note: "Engine transferred to U02.",
+    note: "Field engine ownership moved to field-engine.",
     paths: Object.freeze([])
   }),
   Object.freeze({
-    card: "C04",
+    owner: "tombstone-evidence",
     classification: "transferred",
-    note: "Evidence transferred to U02.",
+    note: "Evidence ownership moved to field-engine.",
     paths: Object.freeze([])
   }),
   Object.freeze({
-    card: "C05",
+    owner: "tombstone-index",
     classification: "transferred",
-    note: "Index transferred to U04.",
+    note: "Index ownership moved to production-index.",
     paths: Object.freeze([])
   }),
   Object.freeze({
-    card: "C06",
+    owner: "tombstone-oracles",
     classification: "transferred",
-    note: "Oracle and consumer acceptance transferred to U06.",
+    note: "Oracle and consumer acceptance moved to oracles-and-falsifiers.",
     paths: Object.freeze([])
   }),
   Object.freeze({
-    card: "C07",
+    owner: "tombstone-protocol-runtime",
     classification: "transferred",
-    note: "Shared runner/MCP/CLI/worker transferred to U07.",
+    note: "Shared runner, MCP, CLI, and worker moved to protocol-runtime.",
     paths: Object.freeze([])
   }),
   Object.freeze({
-    card: "W00",
+    owner: "durable-write-intent",
     classification: "reuse",
     note: "Durable source/work intent already reviewed; not a parallel writer.",
     paths: Object.freeze([
@@ -123,39 +123,39 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
     ])
   }),
   Object.freeze({
-    card: "W01",
+    owner: "semantic-artifact-identity",
     classification: "reuse",
-    note: "Artifact identity retained; repo publication leaf transferred to U03.",
+    note: "Artifact identity retained; publication leaf lives with observers and bounded readers.",
     paths: Object.freeze([
       "packages/soul/src/garden/ingestion/official-api/semantic-artifact-identity.ts",
       "packages/protocol/src/garden/semantic-artifact.ts"
     ])
   }),
   Object.freeze({
-    card: "W02",
+    owner: "recall-projection-schema",
     classification: "reuse",
-    note: "Projection schema retained; observablePin leaf transferred to U03.",
+    note: "Projection schema retained; observablePin leaf lives with observers and bounded readers.",
     paths: Object.freeze([
       "packages/storage/src/repos/garden/indexed-recall-projection-schema.ts"
     ])
   }),
   Object.freeze({
-    card: "W03",
+    owner: "source-enrichment-runtime",
     classification: "reuse-gap",
-    note: "Daemon enrich runtime retained; worker admission transferred to U03.",
+    note: "Daemon enrich runtime retained; worker admission lives with observers and bounded readers.",
     paths: Object.freeze([
       "apps/core-daemon/src/garden/bulk-enrich/source-enrichment-runtime.ts",
       "apps/core-daemon/src/garden/bulk-enrich/bulk-enrich-runtime-runner.ts"
     ])
   }),
   Object.freeze({
-    card: "U00",
+    owner: "protocol-freeze",
     classification: "already-written",
-    note: "Freeze record only; protocol leaves transfer to U07 after this card.",
+    note: "Freeze record only; protocol leaves live with protocol-runtime.",
     paths: Object.freeze([])
   }),
   Object.freeze({
-    card: "U01",
+    owner: "query-compiler",
     classification: "reserved",
     note: "Query compiler, ordinary language, and interpret-query reference.",
     paths: Object.freeze([
@@ -166,7 +166,7 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
     ])
   }),
   Object.freeze({
-    card: "U02",
+    owner: "field-engine",
     classification: "reserved",
     note: "Field engine, evidence, and max-min reference, including untracked engine leaves.",
     paths: Object.freeze([
@@ -179,9 +179,9 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
     ])
   }),
   Object.freeze({
-    card: "U03",
+    owner: "observers-and-readers",
     classification: "reserved",
-    note: "Observers, bounded readers, snapshot pin, and W03 publication leftovers.",
+    note: "Observers, bounded readers, snapshot pin, and enrichment publication leftovers.",
     paths: Object.freeze([
       "packages/core/src/recall/conditional-field/observers/",
       "packages/core/src/__tests__/recall/conditional-field/observers/",
@@ -199,9 +199,9 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
     ])
   }),
   Object.freeze({
-    card: "U04",
+    owner: "production-index",
     classification: "reserved",
-    note: "Production index is the single representation authority; accepting-projection stays the C00 helper.",
+    note: "Production index is the single representation authority; accepting-projection is the index helper, not a second representation.",
     paths: Object.freeze([
       "packages/core/src/recall/conditional-field/index/",
       "packages/core/src/recall/conditional-field/reference/accepting-projection.ts",
@@ -209,9 +209,9 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
     ])
   }),
   Object.freeze({
-    card: "U05",
+    owner: "path-plasticity",
     classification: "reserved",
-    note: "Attribution, plasticity, and necessity. MCP usage handler stays U07.",
+    note: "Attribution, plasticity, and necessity. MCP usage handler stays with protocol-runtime.",
     paths: Object.freeze([
       "packages/core/src/relations/path-plasticity/causal-usage-projection.ts",
       "packages/core/src/governance/effects/causal-plasticity.ts",
@@ -220,7 +220,7 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
     ])
   }),
   Object.freeze({
-    card: "U06",
+    owner: "oracles-and-falsifiers",
     classification: "reserved",
     note: "Independent oracles and consumer falsifiers. No producer edits.",
     paths: Object.freeze([
@@ -229,7 +229,7 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
     ])
   }),
   Object.freeze({
-    card: "U07",
+    owner: "protocol-runtime",
     classification: "reserved",
     note: "Shared protocol, runner, worker/RPC, MCP/CLI, handbook.",
     paths: Object.freeze([
@@ -270,9 +270,9 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
     ])
   }),
   Object.freeze({
-    card: "retired-deleted",
+    owner: "retired-deleted",
     classification: "retired-deleted",
-    note: "Deleted retired decision/delivery and leftover ranking algorithms; not live Recall and not U-band writes.",
+    note: "Deleted retired decision/delivery and leftover ranking algorithms; not live Recall and not reserved-owner writes.",
     paths: Object.freeze([
       "packages/core/src/recall/decision/budget-aware-q/",
       "packages/core/src/recall/decision/query-proof/",
@@ -289,7 +289,7 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
     ])
   }),
   Object.freeze({
-    card: "retained-exception",
+    owner: "retained-exception",
     classification: "retained-exception",
     note: "field-contract SELECT_GAMMA_OPERATOR_ID is a generation-identity hash freeze, not a live walk.",
     paths: Object.freeze([

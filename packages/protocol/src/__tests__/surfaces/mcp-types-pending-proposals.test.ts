@@ -6,15 +6,15 @@ import {
   soulToolJsonSchemas
 } from "../../surfaces/mcp-types.js";
 
-// A1 (HITL daemon backbone) — locks the contract for the new pending-proposals
-// listing tool and the reviewer_identity field on the review request schema.
+// Locks the contract for the pending-proposals listing tool and the
+// reviewer_identity field on the review request schema.
 // Schemas are .strict() so unknown fields are rejected, matching the rest of
 // the public MCP surface.
 describe("soul.list_pending_proposals contract", () => {
-  it("parses an empty request (workspace bound server-side per finding-2)", () => {
-    // A1 fix-loop (finding-2): workspace_id was dropped from the public
-    // request schema to match soul.explore_graph; the daemon binds
-    // workspace from the trusted MCP call context (invariants §29).
+  it("parses an empty request (workspace bound server-side)", () => {
+    // workspace_id was dropped from the public request schema to match
+    // soul.explore_graph; the daemon binds workspace from the trusted MCP
+    // call context (invariants §29).
     expect(SoulListPendingProposalsRequestSchema.parse({})).toEqual({});
   });
 
@@ -31,7 +31,7 @@ describe("soul.list_pending_proposals contract", () => {
     expect(SoulListPendingProposalsRequestSchema.parse(request)).toEqual(request);
   });
 
-  it("rejects a workspace_id field (locked out by finding-2 fix)", () => {
+  it("rejects a workspace_id field (workspace is bound server-side)", () => {
     // strict() — workspace_id is not declared on the schema, so a
     // payload that tries to redirect the listing to a foreign workspace
     // is rejected at parse time, not just at runtime.

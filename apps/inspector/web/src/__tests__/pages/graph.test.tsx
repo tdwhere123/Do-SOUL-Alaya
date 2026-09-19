@@ -381,9 +381,9 @@ describe("GraphPage (react-force-graph driven)", () => {
     });
   });
 
-  // invariant G8: Inspector is read-only — right-click on the graph viewport
-  // never mounts a destructive context menu. See docs/handbook/invariants.md.
-  it("does not surface a destructive context menu on right-click (G8)", async () => {
+  // Inspector is read-only — right-click on the graph viewport never
+  // mounts a destructive context menu.
+  it("does not surface a destructive context menu on right-click", async () => {
     renderGraphWithEnv();
     const viewport = await screen.findByTestId("force-graph-2d");
     fireEvent.contextMenu(viewport);

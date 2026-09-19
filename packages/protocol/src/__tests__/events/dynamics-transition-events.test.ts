@@ -39,7 +39,7 @@ function transitionPayloadFor(eventType: string): Record<string, unknown> {
 }
 
 describe("EventType and TransitionRecord", () => {
-  it("includes Phase 0 + Phase 0.5 + Phase 1B+ event types", () => {
+  it("includes workspace-run, signal, and memory-governance event types", () => {
     const eventTypes = [
       WorkspaceRunEventType.RUN_CREATED,
       SignalEventType.SOUL_SIGNAL_EMITTED,
@@ -156,7 +156,7 @@ describe("EventType and TransitionRecord", () => {
     expect(MemoryGovernanceEventTypeSchema.options).toEqual(expectedValues);
   });
 
-  it("keeps Phase 0 event types backward-compatible in EventType union", () => {
+  it("keeps workspace-run event types backward-compatible in EventType union", () => {
     expect(EventTypeSchema.parse(WorkspaceRunEventType.WORKSPACE_CREATED)).toBe(WorkspaceRunEventType.WORKSPACE_CREATED);
   });
 });

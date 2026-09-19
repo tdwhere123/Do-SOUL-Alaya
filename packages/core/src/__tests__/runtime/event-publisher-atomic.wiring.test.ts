@@ -146,7 +146,7 @@ describe("EventPublisher.appendManyWithMutation wiring (fake EventLog repo)", ()
     expect(repo.rows).toEqual([]);
   });
 
-  it("rolls back the EventLog row when the synchronous mutate throws (#BL-022)", async () => {
+  it("rolls back the EventLog row when the synchronous mutate throws", async () => {
     const repo = buildFakeRepo();
     const publisher = new EventPublisher({
       eventLogRepo: repo,
@@ -179,7 +179,7 @@ describe("EventPublisher.appendManyWithMutation wiring (fake EventLog repo)", ()
     expect(repo.rows).toEqual([]);
   });
 
-  it("delivers the persisted entries to mutate so audit_event_id is exact (#BL-021)", async () => {
+  it("delivers the persisted entries to mutate so audit_event_id is exact", async () => {
     const repo = buildFakeRepo();
     const publisher = new EventPublisher({
       eventLogRepo: repo,
@@ -214,7 +214,6 @@ describe("EventPublisher.appendManyWithMutation wiring (fake EventLog repo)", ()
     expect(captured).not.toBeNull();
     expect(captured!).toHaveLength(1);
     // The mutate's `firstDefined(entries).event_id` is the SAME id as the persisted row.
-    // This is the proof that #BL-021's audit_event_id divergence is gone.
     expect(firstDefined(captured!).event_id).toBe(firstDefined(repo.rows).event_id);
     expect(result).toBe(firstDefined(repo.rows).event_id);
   });

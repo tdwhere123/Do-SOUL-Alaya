@@ -58,7 +58,7 @@ export interface ParsedFlags {
   /** Immutable target-root selection receipt linked from a normal authority receipt. */
   readonly extractionTargetSelection?: string;
   readonly extractionPredecessorAuthority?: string;
-  readonly r3SpendApproval?: string;
+  readonly expansionSpendApproval?: string;
   readonly concurrency?: number;
   readonly extractionInitialConcurrency?: number;
   readonly questionBatchLimit?: number;
@@ -108,7 +108,7 @@ export interface ParsedFlagsState {
   extractionAuthority?: string;
   extractionTargetSelection?: string;
   extractionPredecessorAuthority?: string;
-  r3SpendApproval?: string;
+  expansionSpendApproval?: string;
   concurrency?: number;
   extractionInitialConcurrency?: number;
   questionBatchLimit?: number;
@@ -130,6 +130,8 @@ export interface ParsedFlagsState {
 }
 
 export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
+  // Hidden --r3-spend-approval is a historical operator flag for the same field.
+  assertFlagAtMostOnce(args, ["--expansion-spend-approval", "--r3-spend-approval"]);
   assertFlagAtMostOnce(args, "--extraction-predecessor-authority");
   assertFlagAtMostOnce(args, "--fact-frame-retrofit-ledger");
   assertFlagAtMostOnce(args, "--seed-extraction-system-prompt");
@@ -144,9 +146,17 @@ export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   return finalizeParsedFlags(state);
 }
 
-function assertFlagAtMostOnce(args: ReadonlyArray<string>, flag: string): void {
-  const count = args.filter((token) => token === flag || token.startsWith(`${flag}=`)).length;
-  if (count > 1) throw new Error(`${flag} may be provided only once`);
+function assertFlagAtMostOnce(
+  args: ReadonlyArray<string>,
+  flag: string | readonly string[]
+): void {
+  const flags = typeof flag === "string" ? [flag] : flag;
+  const count = flags.reduce(
+    (total, name) =>
+      total + args.filter((token) => token === name || token.startsWith(`${name}=`)).length,
+    0
+  );
+  if (count > 1) throw new Error(`${flags[0]} may be provided only once`);
 }
 
 function createParsedFlagsState(): ParsedFlagsState {

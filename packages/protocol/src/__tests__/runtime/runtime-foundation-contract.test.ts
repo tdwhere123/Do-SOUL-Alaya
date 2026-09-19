@@ -6,7 +6,7 @@ import {
   validTimestamp
 } from "./runtime-foundation-contract-support.js";
 
-describe("Phase A1 runtime foundation protocol schemas", () => {
+describe("runtime foundation schemas", () => {
   it("parses core runtime foundation contracts and exposes the top-level exports", async () => {
     const runtime = await loadRuntimeFoundationContracts();
     for (const exportName of requiredRuntimeFoundationExports) {

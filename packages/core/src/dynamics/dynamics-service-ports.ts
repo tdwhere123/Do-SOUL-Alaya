@@ -107,7 +107,7 @@ export interface DynamicsServiceMemoryRepoPort {
     lifecycleState: MemoryEntry["lifecycle_state"],
     updatedAt: string
   ): Promise<Readonly<MemoryEntry>>;
-  // invariant (N1): guarded revival. Returns the row when it transitioned
+  // invariant: guarded revival. Returns the row when it transitioned
   // dormant -> active, or null when the row was NOT dormant (no-op). The caller
   // skips the revival audit event on null so an already-active row never emits a
   // spurious from_state="dormant" transition. Optional; absent => fall back to

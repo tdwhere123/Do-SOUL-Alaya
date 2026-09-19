@@ -3,7 +3,6 @@ export const COMPATIBILITY_DISPOSITIONS = [
   "ignore-on-target",
   "freeze-live",
   "forbidden-second-selector",
-  "deferred-D01",
   "unreachable-on-target"
 ] as const;
 

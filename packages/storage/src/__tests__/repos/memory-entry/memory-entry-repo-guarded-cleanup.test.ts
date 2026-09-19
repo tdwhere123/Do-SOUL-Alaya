@@ -161,7 +161,7 @@ describe("SqliteMemoryEntryRepo guarded lifecycle cleanup", () => {
     expect((await repo.findById(active.object_id))?.lifecycle_state).toBe("active");
   });
 
-  it("N1: reviveDormant flips a dormant row to active and clears the forget marker", async () => {
+  it("reviveDormant flips a dormant row to active and clears the forget marker", async () => {
     const { repo } = await createRepo();
     const dormant = createMemoryEntry({
       object_id: "eeeeeeee-0000-4000-8000-000000000001",
@@ -177,7 +177,7 @@ describe("SqliteMemoryEntryRepo guarded lifecycle cleanup", () => {
     expect(revived?.forget_disposition_ref).toBeNull();
   });
 
-  it("N1: reviveDormant is a guarded no-op (returns null) for an already-active row", async () => {
+  it("reviveDormant is a guarded no-op (returns null) for an already-active row", async () => {
     const { repo } = await createRepo();
     const active = createMemoryEntry({
       object_id: "eeeeeeee-0000-4000-8000-000000000002",
@@ -189,7 +189,7 @@ describe("SqliteMemoryEntryRepo guarded lifecycle cleanup", () => {
     expect((await repo.findById(active.object_id))?.lifecycle_state).toBe("active");
   });
 
-  // invariant (I-1): guarded active -> dormant demotion. onTransition (the
+  // invariant: guarded active -> dormant demotion. onTransition (the
   // active->dormant audit append) shares the UPDATE transaction; a 0-row guard
   // (row not active) is a benign no-op skip, never an audit and never a throw.
   it("transitionToDormantIfActive demotes an active row, clears the forget marker, and fires onTransition once", async () => {

@@ -277,7 +277,7 @@ describe("WorkspaceService", () => {
   // Package Dependency Direction.
 
   it("rolls back persisted workspace state when bootstrapping record persistence fails", async () => {
-    // Under #BL-022 the rollback is implicit: the entire mutate runs inside
+    // Rollback is implicit: the entire mutate runs inside
     // EventPublisher.appendManyWithMutation's SQLite transaction, so a throw
     // from any sync repo call (e.g. bootstrappingRecordRepo.create)
     // automatically rolls back the workspace insert. The fake publisher
@@ -347,7 +347,7 @@ describe("WorkspaceService", () => {
   });
 
   it("inserts bootstrap path relations in plan order inside the same transaction", async () => {
-    // Under #BL-022 the path-relation creates are now sync inserts inside
+    // Path-relation creates are sync inserts inside
     // the SQLite transaction, so they execute sequentially in plan order
     // rather than as a Promise.all batch. This test pins that the plan
     // order is preserved and that bootstrappingRecordRepo.create

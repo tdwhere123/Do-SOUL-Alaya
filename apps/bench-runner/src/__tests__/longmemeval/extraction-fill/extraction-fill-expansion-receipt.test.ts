@@ -57,7 +57,7 @@ vi.mock("../../../runs/extraction/fill/manifest/fill-root-guard.js", async (impo
 
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 
-describe("500Q R3 receipt binding", () => {
+describe("500Q expansion receipt binding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.prepareExpansion.mockResolvedValue(expansionFixture());
@@ -85,7 +85,7 @@ describe("500Q R3 receipt binding", () => {
     })).rejects.toThrow(/receipt-bound extraction authority/u);
   });
 
-  it("refuses a 500Q receipt whose attempt ceiling exceeds the R3 approval", async () => {
+  it("refuses a 500Q receipt whose attempt ceiling exceeds the expansion spend approval", async () => {
     mocks.readReceipt.mockReturnValue({
       ...receiptFixture(),
       limits: { ...receiptFixture().limits, maximum_attempts: 2_001 }
@@ -96,10 +96,10 @@ describe("500Q R3 receipt binding", () => {
       cacheRoot: "/must-not-lock",
       authorityReceiptPath: "/fixture/extraction-authority.json",
       targetSelectionReceiptPath: "/fixture/target-selection.json"
-    })).rejects.toThrow(/approved R3 spend envelope/u);
+    })).rejects.toThrow(/approved expansion spend envelope/u);
   });
 
-  it("refuses a 500Q receipt whose successful-shard ceiling exceeds the R3 approval", async () => {
+  it("refuses a 500Q receipt whose successful-shard ceiling exceeds the expansion spend approval", async () => {
     mocks.readReceipt.mockReturnValue({
       ...receiptFixture(),
       limits: { ...receiptFixture().limits, successful_shard_ceiling: 401 }
@@ -110,10 +110,10 @@ describe("500Q R3 receipt binding", () => {
       cacheRoot: "/must-not-lock",
       authorityReceiptPath: "/fixture/extraction-authority.json",
       targetSelectionReceiptPath: "/fixture/target-selection.json"
-    })).rejects.toThrow(/approved R3 spend envelope/u);
+    })).rejects.toThrow(/approved expansion spend envelope/u);
   });
 
-  it("admits monotonic partial-cache progress under the original R3 envelope", async () => {
+  it("admits monotonic partial-cache progress under the original expansion spend envelope", async () => {
     const receipt = receiptFixture();
     mocks.readReceipt.mockReturnValue({
       ...receipt,
@@ -132,7 +132,7 @@ describe("500Q R3 receipt binding", () => {
     })).rejects.toThrow(/write lease reached/u);
   });
 
-  it("refuses a resumed receipt whose missing inventory exceeds the R3 envelope", async () => {
+  it("refuses a resumed receipt whose missing inventory exceeds the expansion spend envelope", async () => {
     const receipt = receiptFixture();
     mocks.readReceipt.mockReturnValue({
       ...receipt,
@@ -147,7 +147,7 @@ describe("500Q R3 receipt binding", () => {
       cacheRoot: "/must-not-lock",
       authorityReceiptPath: "/fixture/extraction-authority.json",
       targetSelectionReceiptPath: "/fixture/target-selection.json"
-    })).rejects.toThrow(/approved R3 spend envelope/u);
+    })).rejects.toThrow(/approved expansion spend envelope/u);
   });
 
   it("admits a receipt-bound repair limited to the existing first 100Q cache", async () => {
@@ -171,7 +171,7 @@ describe("500Q R3 receipt binding", () => {
       limit: 500,
       cacheRoot: "/must-not-lock",
       authorityReceiptPath: "/fixture/extraction-authority.json"
-    })).rejects.toThrow(/approved R3 spend envelope/u);
+    })).rejects.toThrow(/approved expansion spend envelope/u);
     expect(mocks.prepareExpansion).toHaveBeenCalledOnce();
     expect(mocks.acquireWriteLease).not.toHaveBeenCalled();
   });
@@ -194,9 +194,9 @@ describe("500Q R3 receipt binding", () => {
 
 function expansionFixture() {
   return {
-    r3SpendApproval: {
+    expansionSpendApproval: {
       approval: {
-        r2: { final_cache_identity_sha256: "a".repeat(64) },
+        predecessor: { final_cache_identity_sha256: "a".repeat(64) },
         spend: {
           starting_missing: 400,
           maximum_attempts: 2_000,

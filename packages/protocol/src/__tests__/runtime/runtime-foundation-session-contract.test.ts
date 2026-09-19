@@ -4,7 +4,7 @@ import {
   validTimestamp
 } from "./runtime-foundation-contract-support.js";
 
-describe("Phase A1 runtime foundation session schemas", () => {
+describe("runtime foundation session schemas", () => {
   it("parses runtime session, config, event, and orphan contracts", async () => {
     const {
       RuntimeSessionSchema,

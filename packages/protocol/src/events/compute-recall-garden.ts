@@ -233,7 +233,7 @@ export function parseComputeRecallGardenEventPayload<
   const schema = computeRecallGardenPayloadSchemas[type];
 
   if (schema === undefined) {
-    throw new Error(`Unknown Phase C extension event type: ${String(type)}`);
+    throw new Error(`Unknown compute-recall-garden event type: ${String(type)}`);
   }
 
   return schema.parse(payload) as ComputeRecallGardenEventPayloadMap[T];

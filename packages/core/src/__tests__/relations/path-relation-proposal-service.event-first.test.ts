@@ -209,7 +209,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
     expect(capturedRunId).toBeNull();
   });
 
-  // invariant (FIX-4): a propagation failure AFTER the row+event committed is
+  // A propagation failure AFTER the row+event committed is
   // not a mint failure. EventPublisher.appendManyWithMutation commits the
   // path_relations row + PATH_RELATION_CREATED event in the transaction, runs
   // propagate() after, and surfaces a propagate() throw as
@@ -282,7 +282,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
     expect(warn).not.toHaveBeenCalledWith("PathRelation submitCandidate failed", expect.anything());
   });
 
-  // invariant (FIX-4): a genuine pre-commit failure (the row never committed)
+  // A genuine pre-commit failure (the row never committed)
   // is still "failed" — the post-commit guard must not mask a real mint failure.
   it("returns failed for a non-propagation throw (row never committed)", async () => {
     const appendManyWithMutation = vi.fn(async (): Promise<never> => {

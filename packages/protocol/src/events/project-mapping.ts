@@ -80,7 +80,7 @@ export function parseProjectMappingEventPayload<T extends keyof typeof projectMa
   const schema = projectMappingPayloadSchemas[type];
 
   if (schema === undefined) {
-    throw new Error(`Unknown Phase 4C event type: ${String(type)}`);
+    throw new Error(`Unknown project-mapping event type: ${String(type)}`);
   }
 
   return schema.parse(payload) as ProjectMappingEventPayloadMap[T];

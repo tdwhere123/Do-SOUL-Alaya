@@ -4,13 +4,13 @@ import type { PathMintOutcome } from "../../relations/edge-proposals/path-relati
 import { createDeps, createMemoryEntry, makePositiveAssociativePath } from "./edge-auto-producer-service-test-fixtures.js";
 
 describe("EdgeAutoProducerService", () => {
-// invariant (FIX-3): the per-memory MAX_EDGE_PROPOSALS budget counts only
+// invariant: the per-memory MAX_EDGE_PROPOSALS budget counts only
   // "applied" outcomes. already_present (an equivalent link already exists) and
   // failed (retried later) must NOT consume budget — otherwise already-linked or
   // transiently-failed neighbors starve genuinely-new neighbors past the cap.
   // With 7 eligible neighbors all returning already_present, every neighbor is
   // still attempted because budget never increments.
-  it("FIX-3 already_present / failed outcomes do not consume the per-memory proposal budget", async () => {
+  it("already_present / failed outcomes do not consume the per-memory proposal budget", async () => {
     const newMemory = createMemoryEntry();
     const neighbors = Array.from({ length: 7 }, (_unused, index) =>
       createMemoryEntry({
@@ -38,9 +38,9 @@ describe("EdgeAutoProducerService", () => {
     expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(7);
   });
 
-// invariant (FIX-3): the cap still bounds genuinely-applied proposals. With 7
+// invariant: the cap still bounds genuinely-applied proposals. With 7
   // eligible neighbors all applying, the loop stops at MAX_EDGE_PROPOSALS=5.
-  it("FIX-3 caps genuinely-applied proposals at MAX_EDGE_PROPOSALS", async () => {
+  it("caps genuinely-applied proposals at MAX_EDGE_PROPOSALS", async () => {
     const newMemory = createMemoryEntry();
     const neighbors = Array.from({ length: 7 }, (_unused, index) =>
       createMemoryEntry({
@@ -65,7 +65,7 @@ describe("EdgeAutoProducerService", () => {
     expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(5);
   });
 
-it("B-2 pregate skips the LLM port for structurally eligible but unrelated pairs", async () => {
+it("pregate skips the LLM port for structurally eligible but unrelated pairs", async () => {
     // Same workspace + dimension + scope as the new memory so the
     // structural eligibility check passes, but zero shared content
     // tokens and zero shared tags. This is the "obvious non-pair" the
@@ -106,7 +106,7 @@ it("B-2 pregate skips the LLM port for structurally eligible but unrelated pairs
     expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
   });
 
-it("B-2 pregate routes related pairs to the LLM port as before", async () => {
+it("pregate routes related pairs to the LLM port as before", async () => {
     // High token-Jaccard pair — pregate passes, LLM verdict propagates.
     const newMemory = createMemoryEntry({
       content: "pnpm is required for package scripts in this repository.",
@@ -140,7 +140,7 @@ it("B-2 pregate routes related pairs to the LLM port as before", async () => {
     );
   });
 
-it("B-2 pregate still allows tag-overlap-only pairs through to the LLM", async () => {
+it("pregate still allows tag-overlap-only pairs through to the LLM", async () => {
     // Zero content token overlap (different topics in text) but a shared
     // domain tag — the LLM should still get a chance to judge, because
     // tag overlap is an independent relatedness signal.
@@ -172,7 +172,7 @@ it("B-2 pregate still allows tag-overlap-only pairs through to the LLM", async (
     expect(llmPort.classifyPair).toHaveBeenCalledTimes(1);
   });
 
-// R0-B host-worker defer: when the edgeClassifyQueue is wired, the
+  // Host-worker defer: when the edgeClassifyQueue is wired, the
   // LLM-quality verdict is ENQUEUED (not called synchronously) and the
   // deterministic heuristic still produces the edge inline.
   it("host-worker defer: enqueues EDGE_CLASSIFY AND still submits the inline heuristic edge", async () => {

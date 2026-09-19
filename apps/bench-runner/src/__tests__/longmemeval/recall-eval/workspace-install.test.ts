@@ -13,14 +13,14 @@ import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import {
   isObserved,
   observedNumber,
-  P00_PERFORMANCE_PROOF_CONTRACT
+  PERFORMANCE_PROOF_CONTRACT
 } from "../../../runs/lifecycle/recall-eval/performance-proof/attribution-receipt.js";
 import {
   applyMeasuredWorkspaceInstall,
   CLOCK_A_REASON,
   CLONE_REUSE_PROVED,
   forceReflinkCopyFile,
-  P02_WORKSPACE_INSTALL_CONTRACT,
+  WORKSPACE_INSTALL_CONTRACT,
   phaseByName,
   PHYSICAL_BYTES_REASON,
   WORKSPACE_INSTALL_PHASES,
@@ -42,10 +42,10 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => removeTempDirectory(root)));
 });
 
-describe("P02 workspace-install contract", () => {
-  it("cites the P00 attribution and exact-parity contract", () => {
-    expect(P02_WORKSPACE_INSTALL_CONTRACT.cites).toBe(P00_PERFORMANCE_PROOF_CONTRACT.name);
-    expect(P02_WORKSPACE_INSTALL_CONTRACT.cites).toBe(
+describe("workspace-install contract", () => {
+  it("cites the attribution and exact-parity contract", () => {
+    expect(WORKSPACE_INSTALL_CONTRACT.cites).toBe(PERFORMANCE_PROOF_CONTRACT.name);
+    expect(WORKSPACE_INSTALL_CONTRACT.cites).toBe(
       "recall-eval-performance-attribution-and-exact-parity.v1"
     );
     expect(CLONE_REUSE_PROVED).toBe(false);
@@ -207,7 +207,7 @@ function reportPhases(
   readonly physicalBytesWritten: unknown;
   readonly counts: Record<string, number | "not_observed">;
 } {
-  expect(io.contract).toBe(P00_PERFORMANCE_PROOF_CONTRACT.name);
+  expect(io.contract).toBe(PERFORMANCE_PROOF_CONTRACT.name);
   expect(io.phases.map((phase) => phase.name)).toEqual([...WORKSPACE_INSTALL_PHASES]);
   const counts = Object.fromEntries(WORKSPACE_INSTALL_PHASES.map((name) => {
     const row = phaseByName(io.phases, name);

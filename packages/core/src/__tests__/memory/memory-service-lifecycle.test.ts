@@ -137,7 +137,7 @@ it("audits an active -> dormant demotion (SOUL_MEMORY_STATE_CHANGED) BEFORE the 
     });
   });
 
-// invariant (I-1): the audited active->dormant demotion is race-tolerant. A
+// invariant: the audited active->dormant demotion is race-tolerant. A
   // candidate that left active between snapshot and turn resolves "skipped" (no
   // audit, no throw); a row that actually transitions gets its active->dormant
   // audit appended atomically via onTransition.

@@ -5,7 +5,7 @@ import {
   identitySet,
   plantSource,
   recallPlantedSource
-} from "../../conditional-field-oracle/cp11-planted-source.js";
+} from "../../conditional-field-oracle/planted-source.js";
 
 const databases = new Set<StorageDatabase>();
 afterEach(() => { for (const database of databases) database.close(); databases.clear(); });

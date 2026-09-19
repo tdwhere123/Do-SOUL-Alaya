@@ -142,8 +142,8 @@ export interface ReconciliationRewriteAuthorizationPort {
 }
 
 // invariant: the rule-only, zero-cloud decision basis. Reconciliation
-// must run out of the box without any cloud call (R0 zero-cloud stance:
-// the cloud edge-LLM stays default-off). The identity NOOP (dedup) and
+// must run out of the box without any cloud call (the cloud edge-LLM
+// stays default-off). The identity NOOP (dedup) and
 // the below-floor ADD are decided in `decide()` BEFORE the port is ever
 // consulted, so a rule-only basis only has to resolve the ambiguous band
 // — and it resolves it conservatively to ADD: a rule-based UPDATE or

@@ -14,7 +14,7 @@ import { EngineBindingService } from "../../../runtime/runs/engine-binding-servi
 import { StubEventPublisher, fakeAppendManyWithMutation } from "../../support/event-publisher-stub.js";
 
 // Helper: in-test publisher that simulates the appendManyWithMutation contract
-// (sync mutate, batch-array first arg) used by EngineBindingService after #BL-022.
+// (sync mutate, batch-array first arg) used by EngineBindingService.
 function fakeAppendManyWithMutationForTest(publishedEvents?: Array<unknown>) {
   return fakeAppendManyWithMutation(
     publishedEvents as Parameters<typeof fakeAppendManyWithMutation>[0]

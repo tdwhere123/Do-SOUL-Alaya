@@ -4,13 +4,13 @@ import {
   notObserved,
   observedNumber,
   observedVerification,
-  P00_PERFORMANCE_PROOF_CONTRACT,
+  PERFORMANCE_PROOF_CONTRACT,
   type PerformanceAttributionReceipt
 } from "../../../runs/lifecycle/recall-eval/performance-proof/attribution-receipt.js";
 
-describe("P00 performance attribution receipt", () => {
-  it("names the citation contract later P-cards must use", () => {
-    expect(P00_PERFORMANCE_PROOF_CONTRACT).toEqual({
+describe("performance attribution receipt", () => {
+  it("names the citation contract later proofs must use", () => {
+    expect(PERFORMANCE_PROOF_CONTRACT).toEqual({
       name: "recall-eval-performance-attribution-and-exact-parity.v1",
       attributionSchema: "recall-eval-performance-attribution.v1",
       paritySchema: "recall-eval-exact-parity.v1",

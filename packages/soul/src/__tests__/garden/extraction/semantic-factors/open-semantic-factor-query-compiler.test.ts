@@ -78,27 +78,27 @@ describe("open semantic factor query compiler", () => {
     }))).toBeNull();
   });
 
-  it("rejects the observed overlapping G5 query and accepts the corrected relation", async () => {
-    const g5Obligation = g5QueryObligation();
+  it("rejects the observed overlapping degree query and accepts the corrected relation", async () => {
+    const degreeObligation = degreeQueryObligation();
     const badCompiler = createOpenSemanticFactorQueryCompiler({
-      extractor: responseExtractor(g5OverlappingQueryGraph())
+      extractor: responseExtractor(overlappingQueryGraph())
     });
-    await expect(badCompiler.compile("What degree did I graduate with?", g5Obligation))
+    await expect(badCompiler.compile("What degree did I graduate with?", degreeObligation))
       .resolves.toBeNull();
 
     const goodCompiler = createOpenSemanticFactorQueryCompiler({
-      extractor: responseExtractor(g5CorrectedQueryGraph())
+      extractor: responseExtractor(correctedQueryGraph())
     });
-    await expect(goodCompiler.compile("What degree did I graduate with?", g5Obligation))
-      .resolves.toMatchObject({ graph: g5CorrectedQueryGraph() });
+    await expect(goodCompiler.compile("What degree did I graduate with?", degreeObligation))
+      .resolves.toMatchObject({ graph: correctedQueryGraph() });
   });
 
   it("lets schema retry replace the observed known-subject variable graph", async () => {
-    const goodRaw = JSON.stringify({ semantic_factor_graph: g5CorrectedQueryGraph() });
+    const goodRaw = JSON.stringify({ semantic_factor_graph: correctedQueryGraph() });
     const extractor = {
       extract: vi.fn(async (input: Parameters<SignalExtractor["extract"]>[0]) => {
         expect(() => input.validateRawJson?.(JSON.stringify({
-          semantic_factor_graph: g7KnownSubjectVariableGraph()
+          semantic_factor_graph: knownSubjectVariableGraph()
         }))).toThrow(/query semantic factor graph missing or invalid/u);
         expect(() => input.validateRawJson?.(goodRaw)).not.toThrow();
         return { rawJson: goodRaw };
@@ -106,8 +106,8 @@ describe("open semantic factor query compiler", () => {
     };
     const compiler = createOpenSemanticFactorQueryCompiler({ extractor });
 
-    await expect(compiler.compile("What degree did I graduate with?", g5QueryObligation()))
-      .resolves.toMatchObject({ graph: g5CorrectedQueryGraph() });
+    await expect(compiler.compile("What degree did I graduate with?", degreeQueryObligation()))
+      .resolves.toMatchObject({ graph: correctedQueryGraph() });
   });
 
   it("renders every grounded constraint before the unique result variable", async () => {
@@ -245,7 +245,7 @@ function responseExtractor(graph: unknown) {
   };
 }
 
-function g7KnownSubjectVariableGraph() {
+function knownSubjectVariableGraph() {
   return {
     schema_version: 2 as const,
     source_kind: "query" as const,
@@ -266,7 +266,7 @@ function g7KnownSubjectVariableGraph() {
   };
 }
 
-function g5QueryObligation(): QueryFactFrameOsfObligation {
+function degreeQueryObligation(): QueryFactFrameOsfObligation {
   return obligation(
     "What degree did I graduate with?", "graduate", [18, 26],
     "I", [16, 17], "What degree", [0, 11]
@@ -334,7 +334,7 @@ function digest(value: string): string {
   return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
 }
 
-function g5OverlappingQueryGraph() {
+function overlappingQueryGraph() {
   return {
     schema_version: 2 as const,
     source_kind: "query" as const,
@@ -355,7 +355,7 @@ function g5OverlappingQueryGraph() {
   };
 }
 
-function g5CorrectedQueryGraph() {
+function correctedQueryGraph() {
   return {
     schema_version: 2 as const,
     source_kind: "query" as const,

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 const validTimestamp = "2026-03-31T00:00:00.000Z";
 const approvalResolvedAt = "2026-04-01T08:30:00.000Z";
 
-describe("Phase 5 protocol schemas", () => {
+describe("file-approval events", () => {
   it("parses file schemas and adds file-approval events to the global event union", async () => {
     const protocol = (await import("../../" + "index.js")) as Record<string, unknown>;
     const SupportedMimeTypeSchema = protocol.SupportedMimeTypeSchema as {

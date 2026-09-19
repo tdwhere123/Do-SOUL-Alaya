@@ -13,7 +13,7 @@ import {
 
 const validTimestamp = "2026-03-21T00:00:00.000Z";
 
-describe("Phase 2B event schemas", () => {
+describe("surface events", () => {
   it("keeps SurfaceEventType enum complete and closed", () => {
     const expected = [
       "soul.surface.created",

@@ -204,7 +204,7 @@ export function parseWorkerRuntimeEventPayload<T extends keyof typeof workerRunt
   const schema = workerRuntimePayloadSchemas[type];
 
   if (schema === undefined) {
-    throw new Error(`Unknown Phase A3 event type: ${String(type)}`);
+    throw new Error(`Unknown worker-runtime event type: ${String(type)}`);
   }
 
   return schema.parse(payload) as WorkerRuntimeEventPayloadMap[T];

@@ -187,7 +187,7 @@ function checkFileAndFunctionSize(context) {
         file,
         `${lines} lines; class=${classification.kind}; reason=${classification.reason}`,
         classification.kind === "handwritten"
-          ? "Review cohesion and record the reason to retain or the later-card split owner."
+          ? "Review cohesion and record the reason to retain or the named split owner."
           : "Keep the explicit classification current; do not silently skip this file."
       ));
     }
@@ -262,7 +262,7 @@ function checkDirectories({ files, policy, errors, advisories }) {
         "forbidden-rollout-ownership-directory",
         directory,
         `segment=${rolloutSegment}`,
-        "Use stable domain vocabulary; keep version/card/band identity in contracts or receipts, not ownership paths."
+        "Use stable domain vocabulary; keep version or experiment identity in plans, worklogs, or receipts, not ownership paths."
       ));
     }
   }
@@ -445,7 +445,7 @@ function checkEntryExports({ policy, parsedByFile, fileSet, sourceByFile, errors
       "workspace-entry-export-drift",
       entry.path,
       `specifier=${entry.specifier}; count=${bindings.size}/${entry.expected_count}; sha256=${digest}/${entry.expected_sha256}`,
-      "Restore the accepted binding set or obtain S08/SemVer authority and update the reviewed snapshot."
+      "Restore the accepted binding set or obtain SemVer authority for the public export surface and update the reviewed snapshot."
     ));
   }
 }

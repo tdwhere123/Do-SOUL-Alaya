@@ -246,11 +246,10 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     );
   });
 
-  // M-1 (Phase 2 review-loop): a second click of the same Inspector action
-  // button on the same memory must not spam-create duplicate pending
-  // proposals. The route should detect an existing pending proposal whose
-  // target + proposed_changes match and return its proposal_id with
-  // status=already_pending instead of creating another one.
+  // A second click of the same Inspector action on the same memory must
+  // not create duplicate pending proposals. The route should detect an
+  // existing pending proposal whose target + proposed_changes match and
+  // return its proposal_id with status=already_pending.
   it("dedupes a repeated retire click against an existing pending tombstone proposal", async () => {
     const app = new Hono();
     const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };

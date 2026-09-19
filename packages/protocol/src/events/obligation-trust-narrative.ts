@@ -214,7 +214,7 @@ export function parseObligationTrustNarrativeEventPayload<T extends keyof typeof
   const schema = obligationTrustNarrativePayloadSchemas[type];
 
   if (schema === undefined) {
-    throw new Error(`Unknown Phase B event type: ${String(type)}`);
+    throw new Error(`Unknown obligation-trust-narrative event type: ${String(type)}`);
   }
 
   return schema.parse(payload) as ObligationTrustNarrativeEventPayloadMap[T];

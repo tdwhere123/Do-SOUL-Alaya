@@ -46,7 +46,8 @@ import {
 } from "./compatibility-ledger.fixture.js";
 import {
   ORDINARY_LANGUAGE_ADMISSION_STATUSES,
-  OWNERSHIP_LEDGER
+  OWNERSHIP_LEDGER,
+  OWNERSHIP_OWNERS
 } from "./ownership-ledger.fixture.js";
 
 describe("conditional-field schemas", () => {
@@ -392,7 +393,7 @@ describe("conditional-field schemas", () => {
   });
 
   it("keeps an exclusive ownership ledger and ordinary-language admission statuses", () => {
-    expect(OWNERSHIP_LEDGER.length).toBeGreaterThan(0);
+    expect(OWNERSHIP_LEDGER.map((row) => row.owner)).toEqual([...OWNERSHIP_OWNERS]);
     const seen = new Set<string>();
     for (const row of OWNERSHIP_LEDGER) {
       for (const path of row.paths) {
@@ -408,14 +409,16 @@ describe("conditional-field schemas", () => {
       "malformed",
       "resource_rejected"
     ]);
-    const c00 = OWNERSHIP_LEDGER.find((row) => row.card === "C00");
-    const u01 = OWNERSHIP_LEDGER.find((row) => row.card === "U01");
-    expect(c00?.classification).toBe("already-written");
-    expect(u01?.paths).toContain("packages/core/src/recall/conditional-field/query/");
-    expect(OWNERSHIP_LEDGER.map((row) => row.card)).not.toContain("live-unowned");
-    expect(OWNERSHIP_LEDGER.find((row) => row.card === "retired-deleted")?.classification)
-      .toBe("retired-deleted");
-    expect(OWNERSHIP_LEDGER.find((row) => row.card === "retired-deleted")?.paths)
+    const leftoverReference = OWNERSHIP_LEDGER.find((row) =>
+      row.paths.includes("packages/graph-algorithms/src/max-min-field.ts")
+    );
+    const queryCompiler = OWNERSHIP_LEDGER.find((row) =>
+      row.paths.includes("packages/core/src/recall/conditional-field/query/")
+    );
+    expect(leftoverReference?.classification).toBe("already-written");
+    expect(queryCompiler?.paths).toContain("packages/core/src/recall/conditional-field/query/");
+    expect(OWNERSHIP_LEDGER.map((row) => row.owner)).not.toContain("live-unowned");
+    expect(OWNERSHIP_LEDGER.find((row) => row.classification === "retired-deleted")?.paths)
       .toEqual([
         "packages/core/src/recall/decision/budget-aware-q/",
         "packages/core/src/recall/decision/query-proof/",
@@ -430,9 +433,7 @@ describe("conditional-field schemas", () => {
         "packages/core/src/recall/scoring/integrated-flood-scoring.ts",
         "packages/core/src/recall/scoring/flood-slice-axis.ts"
       ]);
-    expect(OWNERSHIP_LEDGER.find((row) => row.card === "retained-exception")?.classification)
-      .toBe("retained-exception");
-    expect(OWNERSHIP_LEDGER.find((row) => row.card === "retained-exception")?.paths)
+    expect(OWNERSHIP_LEDGER.find((row) => row.classification === "retained-exception")?.paths)
       .toContain("packages/protocol/src/recall/field-contract/");
   });
 });

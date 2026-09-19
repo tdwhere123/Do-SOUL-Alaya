@@ -48,7 +48,7 @@ function createMemoryApplyPort() {
   };
 }
 
-describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
+describe("mcp memory governance — soul.list_pending_proposals", () => {
   it("forwards since/limit through to the proposalRepo summary projection", async () => {
     const findPendingSummaries = vi.fn(async () => [
       {

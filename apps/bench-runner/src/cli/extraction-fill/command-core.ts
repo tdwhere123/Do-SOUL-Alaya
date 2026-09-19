@@ -9,7 +9,7 @@ import type { runExtractionFill } from "../../runs/extraction/extraction-fill.js
 import type { ParsedFlags } from "../cli-options.js";
 import type { ExtractionFillLazyFlags } from "./lazy-field-flags.js";
 import type { ExtractionBatchOptions } from "./batch-flags.js";
-import type { readR3SpendApproval } from "../../datasets/longmemeval/promotion/r3-spend-approval.js";
+import type { readExpansionSpendApproval } from "../../datasets/longmemeval/promotion/expansion-spend-approval.js";
 import { pct } from "../result-format.js";
 import { countTerminalProviderFailures } from "../../runs/extraction/fill/fill-stats.js";
 import {
@@ -22,7 +22,7 @@ import type { ExtractionFillResult } from "../../runs/extraction/extraction-fill
 export interface ExtractionFillCommandDependencies {
   readonly runExtractionFill: typeof runExtractionFill;
   readonly signalSource: ExtractionFillSignalSource;
-  readonly readR3SpendApproval?: typeof readR3SpendApproval;
+  readonly readExpansionSpendApproval?: typeof readExpansionSpendApproval;
 }
 
 export async function runExtractionFillCommand(
@@ -56,11 +56,11 @@ export async function runExtractionFillCommand(
         "--extraction-predecessor-authority requires --extraction-authority"
       );
     }
-    const r3SpendApproval = opts.r3SpendApproval === undefined
+    const expansionSpendApproval = opts.expansionSpendApproval === undefined
       ? undefined
-      : deps.readR3SpendApproval === undefined
-        ? (() => { throw new Error("R3 spend approval reader is unavailable"); })()
-        : deps.readR3SpendApproval(opts.r3SpendApproval);
+      : deps.readExpansionSpendApproval === undefined
+        ? (() => { throw new Error("expansion spend approval reader is unavailable"); })()
+        : deps.readExpansionSpendApproval(opts.expansionSpendApproval);
     process.stdout.write(renderStart(opts, lazy));
     const result = await withExtractionFillSignalScope(
       deps.signalSource,
@@ -97,7 +97,7 @@ export async function runExtractionFillCommand(
         ...(opts.pinnedMetaRoot === undefined ? {} : {
           pinnedMetaRoot: opts.pinnedMetaRoot
         }),
-        ...(r3SpendApproval === undefined ? {} : { r3SpendApproval }),
+        ...(expansionSpendApproval === undefined ? {} : { expansionSpendApproval }),
         ...(lazy.ingestionMode === undefined ? {} : { ingestionMode: lazy.ingestionMode }),
         ...(lazy.semanticArtifactRoot === undefined ? {} : {
           semanticArtifactRoot: lazy.semanticArtifactRoot

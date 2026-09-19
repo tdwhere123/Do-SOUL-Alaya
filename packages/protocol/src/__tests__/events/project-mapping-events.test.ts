@@ -3,7 +3,7 @@ import { EventTypeSchema, ProjectMappingState } from "../../index.js";
 
 const validTimestamp = "2026-03-29T00:00:00.000Z";
 
-describe("Phase 4C event schemas", () => {
+describe("project-mapping events", () => {
   it("parses all project-mapping payloads and adds them to the global event union", async () => {
     const protocol = (await import("../../" + "index.js")) as Record<string, unknown>;
     const ProjectMappingEventType = protocol.ProjectMappingEventType as Record<string, string>;

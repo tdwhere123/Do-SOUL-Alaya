@@ -48,7 +48,7 @@ import {
 const SCHEMA = CONDITIONAL_FIELD_SCHEMA_VERSION;
 
 describe("residual influence and completeness", () => {
-  it("reproduces G07: unknown residual keeps logical-open from repairing a tight numeric upper", () => {
+  it("unknown residual keeps logical-open from repairing a tight numeric upper", () => {
     const known = createConditionalField({
       interpretation: interpretation(),
       budget: defaultBudget(),

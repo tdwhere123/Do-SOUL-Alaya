@@ -77,7 +77,7 @@ import {
   runtimeSideEffectFailedPayload
 } from "./runtime-governance-event-registry.fixtures.js";
 
-describe("Phase C event registry", () => {
+describe("runtime-governance events", () => {
   it("validates registered payload schemas", () => {
     expect(Object.values(RuntimeGovernanceEventType)).toEqual(expectedEventTypes);
     expect(RuntimeGovernanceEventTypeSchema.options).toEqual(expectedEventTypes);

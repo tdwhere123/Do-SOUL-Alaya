@@ -23,7 +23,7 @@ afterEach(cleanupGardenMcpHarnesses);
 
 describe("Garden MCP tools", () => {
 
-  // R0-B host-worker EDGE_CLASSIFY lifecycle + envelope discrimination.
+  // Host-worker EDGE_CLASSIFY lifecycle + envelope discrimination.
   describe("EDGE_CLASSIFY host-worker task", () => {
     function enqueueEdgeClassify(
       harness: GardenMcpHarness,

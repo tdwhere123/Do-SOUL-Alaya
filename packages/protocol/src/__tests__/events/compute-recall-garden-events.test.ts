@@ -15,8 +15,8 @@ import {
 
 const validTimestamp = "2026-04-23T08:00:00.000Z";
 
-describe("Phase C extension protocol schemas", () => {
-  it("pins the exact C-23 enum delta and garden permission wiring", () => {
+describe("compute-recall-garden events", () => {
+  it("pins garden task kinds and garden permission wiring", () => {
     expect(Object.values(GardenTaskKind)).toEqual([
       "ttl_cleanup",
       "hot_index_demotion",
@@ -55,7 +55,7 @@ describe("Phase C extension protocol schemas", () => {
       GARDEN_ROLE_PERMISSIONS[GardenRole.JANITOR].allowed_task_kinds
     ).not.toContain(GardenTaskKind.EMBEDDING_BACKFILL);
 
-    // Gate-5F 5F-D: path_plasticity_update belongs to the TIER_2 Librarian,
+    // path_plasticity_update belongs to the TIER_2 Librarian,
     // not the Auditor or Janitor.
     expect(GardenTaskKindSchema.parse("path_plasticity_update")).toBe("path_plasticity_update");
     expect(GardenTaskKind.PATH_PLASTICITY_UPDATE).toBe("path_plasticity_update");
@@ -149,7 +149,7 @@ describe("Phase C extension protocol schemas", () => {
     expect(HealthEventKind.RECALL_TUNING).toBe("recall_tuning");
   });
 
-  it("registers and parses all C-23 extension event payloads", () => {
+  it("registers and parses all compute-recall-garden event payloads", () => {
     const expectedEventTypes = [
       "compute.provider.call_started",
       "compute.provider.call_completed",

@@ -1,5 +1,5 @@
 import {
-  P00_PERFORMANCE_PROOF_CONTRACT,
+  PERFORMANCE_PROOF_CONTRACT,
   notObserved,
   observedNumber,
   type ObservedFiniteNumber
@@ -22,9 +22,9 @@ import {
 } from "./identity.js";
 import { createStubEmbeddingIsolateHost } from "./stub-host.js";
 
-export const P01_EMBEDDING_ISOLATE_CONTRACT = Object.freeze({
+export const EMBEDDING_ISOLATE_CONTRACT = Object.freeze({
   name: "recall-eval-benchmark-embedding-isolate.v1",
-  cites: P00_PERFORMANCE_PROOF_CONTRACT.name,
+  cites: PERFORMANCE_PROOF_CONTRACT.name,
   module:
     "apps/bench-runner/src/runs/lifecycle/recall-eval/embedding-isolate/session.ts"
 });
@@ -93,7 +93,7 @@ export interface EmbeddingIsolateRetainedState {
 }
 
 export interface EmbeddingIsolateAttribution {
-  readonly contract: typeof P00_PERFORMANCE_PROOF_CONTRACT.name;
+  readonly contract: typeof PERFORMANCE_PROOF_CONTRACT.name;
   readonly modelChildSpawnCount: ObservedFiniteNumber;
   readonly modelReadinessCount: ObservedFiniteNumber;
   readonly modelReadinessMs: ObservedFiniteNumber;
@@ -243,7 +243,7 @@ export class EmbeddingIsolateSession {
 
   public inspectAttribution(): EmbeddingIsolateAttribution {
     return Object.freeze({
-      contract: P00_PERFORMANCE_PROOF_CONTRACT.name,
+      contract: PERFORMANCE_PROOF_CONTRACT.name,
       modelChildSpawnCount: observedNumber(this.spawnCount),
       modelReadinessCount: observedNumber(this.readinessCount),
       modelReadinessMs: this.readinessMs === null

@@ -46,8 +46,8 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("W00 durable write garden intent", () => {
-  it("A1 acknowledges a write with no extraction transport and keeps source plus event durable", async () => {
+describe("durable write garden intent", () => {
+  it("acknowledges a write with no extraction transport and keeps source plus event durable", async () => {
     const harness = await openHarness();
     const created = await harness.writeMemory(IDS.checklist, "deployment checklist lives in docs/runbook.md");
     expect(created.object_id).toBe(IDS.checklist);
@@ -60,7 +60,7 @@ describe("W00 durable write garden intent", () => {
     expect(hits.map((row) => row.object_id)).toContain(IDS.checklist);
   });
 
-  it("A2 duplicate race coalesces one work intent under the sqlite unique key", async () => {
+  it("duplicate race coalesces one work intent under the sqlite unique key", async () => {
     const harness = await openHarness();
     const created = await harness.writeMemory(IDS.one, "same text");
     const revision = (await harness.storage.eventLogRepo.queryByEntity("memory_entry", created.object_id))[0]!.revision;
@@ -108,7 +108,7 @@ describe("W00 durable write garden intent", () => {
     ).toThrow(/different payload/);
   });
 
-  it("A3 distinct occurrences of identical text keep separate source bindings", async () => {
+  it("distinct occurrences of identical text keep separate source bindings", async () => {
     const harness = await openHarness();
     await harness.writeMemory(IDS.a, "identical observation text");
     await harness.writeMemory(IDS.b, "identical observation text");
@@ -117,7 +117,7 @@ describe("W00 durable write garden intent", () => {
     expect(harness.garden.peekPending(GardenRole.LIBRARIAN, WS, 8)).toHaveLength(2);
   });
 
-  it("A4 input mutation and foreign-workspace evidence still fail closed", async () => {
+  it("input mutation and foreign-workspace evidence still fail closed", async () => {
     const harness = await openHarness();
     const intentFields = { runId: RUN, sourceSignalId: "signal-1" };
     harness.queueMemoryId(IDS.mutate);

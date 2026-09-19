@@ -210,7 +210,7 @@ it("hard-deletes a compressed member only when the capsule is STILL live + refer
       "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
       expect.objectContaining({ requireLiveCapsuleRef: true })
     );
-    // I-2: exactly ONE "deleted" audit, appended via onDeleted (atomic with the
+    // Exactly ONE "deleted" audit, appended via onDeleted (atomic with the
     // physical delete), then notified post-commit.
     expect(appendSpy).toHaveBeenCalledTimes(1);
     expect(appendSpy.mock.calls[0]?.[0]).toMatchObject({
@@ -222,7 +222,7 @@ it("hard-deletes a compressed member only when the capsule is STILL live + refer
     });
   });
 
-it("I-2: the deleted-audit append runs INSIDE the delete (onDeleted) so an append failure fails the delete loud and never notifies", async () => {
+it("the deleted-audit append runs INSIDE the delete (onDeleted) so an append failure fails the delete loud and never notifies", async () => {
     // The audit append is the onDeleted callback, so it runs inside the guarded
     // delete transaction. If it throws, the real repo rolls the physical delete
     // back with it; the service must surface the failure and never notify a

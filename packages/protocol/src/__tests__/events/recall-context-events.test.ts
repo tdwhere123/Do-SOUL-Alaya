@@ -8,7 +8,7 @@ import {
 
 const validTimestamp = "2026-03-23T00:00:00.000Z";
 
-describe("Phase 3A event schemas", () => {
+describe("recall-context events", () => {
   it("keeps RecallContextEventType enum complete and closed", () => {
     const expected = [
       "soul.task_surface.created",

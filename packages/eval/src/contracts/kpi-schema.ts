@@ -357,7 +357,7 @@ const KpiCoreSchema = z.object({
   seed_extraction_path: SeedExtractionPathSchema.optional(),
   seed_fuel_inventory: SeedFuelInventorySchema.optional(),
   quality_metrics: QualityMetricsSchema.optional(),
-  // Edge Proposal KPI blocks (K3.2 + K3.4). Optional so older kpi.json
+  // Edge proposal rate and auto-accept blocks. Optional so older kpi.json
   // records stay schema-valid; new bench runs always populate them when
   // the bench-runner sources the edge proposal aggregator.
   edge_proposal_rate: EdgeProposalRateSchema.optional(),

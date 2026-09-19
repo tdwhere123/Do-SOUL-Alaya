@@ -67,8 +67,7 @@ export function assertInspectorWorkspace(
 }
 
 interface ProxyDaemonRequest {
-  // A1 (HITL daemon backbone): POST is added so the Inspector can
-  // forward accept/reject calls to the workspace-scoped daemon HTTP
+  // POST forwards accept/reject to the workspace-scoped daemon HTTP
   // wrapper around soul.review_memory_proposal.
   readonly method: "GET" | "PATCH" | "POST";
   readonly path: string;

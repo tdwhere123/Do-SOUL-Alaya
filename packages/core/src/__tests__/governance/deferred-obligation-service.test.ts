@@ -287,7 +287,7 @@ function createHarness(seed: readonly DeferredObligation[] = []): Harness {
   const service = new DeferredObligationService({
     repo,
     eventPublisher: {
-      // Migrated to atomic appendManyWithMutation (#BL-022).
+      // EventLog append and obligation mutate share one transaction.
       appendManyWithMutation: appendManyWithMutation
     } as unknown as EventPublisher,
     now: () => FIXED_NOW,

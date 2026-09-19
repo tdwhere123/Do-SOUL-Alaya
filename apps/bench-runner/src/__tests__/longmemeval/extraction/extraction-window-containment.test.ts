@@ -32,7 +32,7 @@ import { providerBackedExtractionResult } from "./extraction-cache-test-fixture.
 import { groundedExtractionResult } from "../extraction-fill/fixture.js";
 import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixture.js";
 
-// @anchor extraction-window-containment — I2: the cache coverage gate must
+// @anchor extraction-window-containment: the cache coverage gate must
 // validate THIS run's question window, not the (possibly narrower) window the
 // last extraction-fill recorded. A staged fill writing coverage=1.0 over a
 // small window must NOT let a wider run pass preflight and silently

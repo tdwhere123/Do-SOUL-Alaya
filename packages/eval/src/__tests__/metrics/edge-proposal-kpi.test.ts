@@ -227,7 +227,7 @@ describe("aggregateEdgeProposalRate", () => {
   });
 });
 
-describe("aggregateEdgeProposalRatePerQuestion (K3.2 bench-harness rollup)", () => {
+describe("aggregateEdgeProposalRatePerQuestion (bench-harness rollup)", () => {
   it("returns undefined when no chunks are supplied", () => {
     expect(aggregateEdgeProposalRatePerQuestion([])).toBeUndefined();
   });

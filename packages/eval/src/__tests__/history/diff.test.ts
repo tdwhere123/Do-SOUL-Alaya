@@ -297,7 +297,7 @@ describe("diffKpis", () => {
     expect(meanDelta?.verdict).toBe("fail");
   });
 
-  it("omits the token_economy delta when a pre-S6 baseline has no token_economy block", () => {
+  it("omits the token_economy delta when a baseline has no token_economy block", () => {
     const previous = buildPayload({});
     const current = buildPayload({
       token_economy: {

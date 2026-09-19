@@ -214,8 +214,7 @@ These rules always win over lower-level docs and task-card convenience.
     non-engineering users to install or operate Alaya. Surfaces that
     reach a non-engineering audience (e.g. xiaohongshu) require either
     a separate consumer-facing product or a charter amendment to §21
-    before publication. (Added 2026-05-03 in p5-system-review-r1;
-    closes `#BL-023`.)
+    before publication. (Added 2026-05-03.)
 21b. `reviewer_identity` on review records (`proposals.reviewer_identity`
     column, `caused_by` field on `SOUL_REVIEW_*` /
     `SOUL_PROPOSAL_RESOLVED` event_log rows, `reviewer_identity`
@@ -227,8 +226,7 @@ These rules always win over lower-level docs and task-card convenience.
     identity. When local binding is not configured, the field remains
     an agent-asserted attestation and operators MUST treat it as "the
     agent / human attested to this identity" rather than "the runtime
-    verified this identity". (Added in v0.1-closeout D2 MERGED-I21 /
-    red-team-I1; updated by Gate-5F `#BL-027`.)
+    verified this identity".
 22. MCP tool surface and CLI fallback share one runtime contract. CLI
     fallback parity with MCP is enforced by tests.
 23. Attach / Profile changes write only after preview + explicit
@@ -285,16 +283,14 @@ These rules always win over lower-level docs and task-card convenience.
     belongs to an offline migration and must not make mixed-schema
     formation or recall operational.
 
-    The recall unified-algorithm candidate (C01 TARGET) is also a
+    Changing ordinary Recall ranking or delivery semantics, rejecting
+    explicit legacy `delivery_path` / `ranking_authority` values, or
+    treating `soul.recall` as a passive-extraction enqueue path is a
     **major** under this section even when some Zod shapes stay
-    additive: it redefines ranking/delivery semantics, rejects explicit
-    legacy `delivery_path` / `ranking_authority` values, and stops
-    treating `soul.recall` as a passive-extraction enqueue path.
-    Publication is not authorized in this isolated tree. Historical
-    EventLog/`ranking_authority` readers may remain for old rows; they
-    must not execute an alternate algorithm. App 0.3.x keeps the MCP
-    response field parseable and ignored; deleting it is a later
-    protocol major, not a 0.3.x cleanup.
+    additive. Historical EventLog/`ranking_authority` readers may remain
+    for old rows; they must not execute an alternate algorithm.
+    Deleting a still-parseable ignored MCP response field is a later
+    protocol major.
 
     Removing a public symbol requires `@deprecated` JSDoc on the
     schema at least one minor release before removal, a
@@ -318,14 +314,14 @@ These rules always win over lower-level docs and task-card convenience.
 The v0.1-specific port invariants (vendor snapshot as source of
 truth, `trivial-copy` / `adapt-and-port` / `requires-redesign` port
 modes, no-self-rewrite rule) closed with v0.1.0 and the vendor
-snapshot was removed by Phase E vendor cleanup. The port-protocol
+snapshot was removed by vendor-snapshot cleanup. The port-protocol
 archive was deleted on 2026-08-24 (commit 2b23da6f2). New work scopes
-through a PR brief or task card.
+through a PR brief.
 
-## Defense-against-recurrence (added 2026-05-03 in p5-system-review-r1)
+## Defense-against-recurrence (added 2026-05-03)
 
-The following three invariants were extracted from the Cause Class
-Aggregation step of `p5-system-review-r1`. Each was a Cause Class that
+The following three invariants were extracted from a cause-class
+aggregation across independent reviews. Each was a cause class that
 appeared in ≥2 independent findings; abstracting them here is the
 required anti-recurrence step when a cause class recurs across independent reviews.
 

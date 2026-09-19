@@ -38,7 +38,7 @@ import {
 } from "./phases.js";
 
 export {
-  P02_WORKSPACE_INSTALL_CONTRACT,
+  WORKSPACE_INSTALL_CONTRACT,
   WORKSPACE_INSTALL_PHASES,
   decideWorkspaceInstallOptimization,
   phaseByName,

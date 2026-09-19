@@ -6,7 +6,7 @@ import {
 } from "../../../runs/lifecycle/recall-eval/embedding-isolate/identity.js";
 import {
   EmbeddingIsolateFailClosedError,
-  P01_EMBEDDING_ISOLATE_CONTRACT,
+  EMBEDDING_ISOLATE_CONTRACT,
   createEmbeddingIsolateSession,
   type EmbeddingIsolateHost,
   type EmbeddingIsolateSession
@@ -14,7 +14,7 @@ import {
 import { createStubEmbeddingIsolateHost } from
   "../../../runs/lifecycle/recall-eval/embedding-isolate/stub-host.js";
 import {
-  P00_PERFORMANCE_PROOF_CONTRACT,
+  PERFORMANCE_PROOF_CONTRACT,
   observedNumber
 } from "../../../runs/lifecycle/recall-eval/performance-proof/attribution-receipt.js";
 import { createRecallEvalPagerSession } from
@@ -37,10 +37,10 @@ afterEach(async () => {
   await Promise.all(sessions.splice(0).map((session) => session.close().catch(() => undefined)));
 });
 
-describe("P01 embedding isolate lifetime", () => {
-  it("cites the P00 attribution and exact-parity contract", () => {
-    expect(P01_EMBEDDING_ISOLATE_CONTRACT.cites).toBe(P00_PERFORMANCE_PROOF_CONTRACT.name);
-    expect(P01_EMBEDDING_ISOLATE_CONTRACT.cites).toBe(
+describe("embedding isolate lifetime", () => {
+  it("cites the attribution and exact-parity contract", () => {
+    expect(EMBEDDING_ISOLATE_CONTRACT.cites).toBe(PERFORMANCE_PROOF_CONTRACT.name);
+    expect(EMBEDDING_ISOLATE_CONTRACT.cites).toBe(
       "recall-eval-performance-attribution-and-exact-parity.v1"
     );
   });

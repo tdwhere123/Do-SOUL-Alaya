@@ -441,7 +441,7 @@ describe("SqliteMemoryEntryRepo", () => {
     }
   );
 
-  // invariant (I-2): the caller's deleted-audit append (onDeleted) shares the
+  // invariant: the caller's deleted-audit append (onDeleted) shares the
   // delete transaction, so the physical removal and the audit commit or roll
   // back together. onDeleted runs ONLY on changes>0 and a throw inside it undoes
   // the physical delete.

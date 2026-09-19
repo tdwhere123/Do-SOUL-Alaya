@@ -269,7 +269,7 @@ export function parseRuntimeGovernanceEventPayload<T extends keyof typeof Payloa
   const schema = Payloads.runtimeGovernancePayloadSchemas[type];
 
   if (schema === undefined) {
-    throw new Error(`Unknown Phase C event type: ${String(type)}`);
+    throw new Error(`Unknown runtime-governance event type: ${String(type)}`);
   }
 
   return schema.parse(payload) as RuntimeGovernanceEventPayloadMap[T];

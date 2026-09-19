@@ -7,10 +7,10 @@ import {
   type InspectorProxyOptions
 } from "./shared.js";
 
-// A1 (HITL daemon backbone) — Inspector tooling-loopback for the new
-// pending-proposals listing tool plus accept/reject. The Inspector is
-// not an agent surface; it never participates in agent control flow.
-// Both routes proxy to the daemon's workspace-scoped HTTP endpoints
+// Inspector tooling-loopback for pending-proposals listing plus
+// accept/reject. The Inspector is not an agent surface; it never
+// participates in agent control flow. Both routes proxy to the
+// daemon's workspace-scoped HTTP endpoints
 // (see apps/core-daemon/src/routes/proposals.ts), which themselves
 // invoke the same MCP handler attached agents call.
 export function registerInspectorProposalRoutes(app: Hono, options: InspectorProxyOptions): void {

@@ -269,7 +269,7 @@ describe("garden runtime consolidation cycle", () => {
 
   it.each([
     ["implicit fail-closed default", undefined],
-    ["explicit S4 fail-closed setting", false]
+    ["explicit fail-closed setting", false]
   ] as const)("does not enqueue or execute legacy consolidation for the %s", async (_mode, enabled) => {
     const findDormantAll = vi.fn(async (): Promise<readonly Readonly<PathRelation>[]> => []);
     const planCycleSpy = vi.spyOn(ConsolidationPlanner.prototype, "planCycle");
@@ -290,7 +290,7 @@ describe("garden runtime consolidation cycle", () => {
     await getService(runtime, "Librarian").task();
     expect(scheduler.queue.some((task) => task.task_kind === GardenTaskKind.CONSOLIDATION_CYCLE)).toBe(false);
 
-    // A task may have been persisted before the S4 cutover. It must complete
+    // A task may have been persisted before the temporal cutover. It must complete
     // as an explicit defer without invoking the legacy planner or executor.
     scheduler.queue.splice(0, scheduler.queue.length);
     scheduler.queue.push({

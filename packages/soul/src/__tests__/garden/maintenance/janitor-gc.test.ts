@@ -38,7 +38,7 @@ describe("Janitor GC task kinds", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
-  // invariant (I-1): the candidate snapshot can go stale before a candidate's
+  // invariant: the candidate snapshot can go stale before a candidate's
   // turn (concurrent revival / overlapping sweep / Inspector retire). A "skipped"
   // outcome (guarded 0-row, no audit, no throw) must NOT abort the batch and must
   // NOT be counted in objects_affected, so the result stays a truthful success.

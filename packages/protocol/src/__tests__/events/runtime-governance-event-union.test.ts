@@ -35,7 +35,7 @@ import {
   runtimeSideEffectFailedPayload
 } from "./runtime-governance-event-registry.fixtures.js";
 
-describe("Phase C event registry", () => {
+describe("runtime-governance events", () => {
   it("validates event unions and EventLog compatibility", () => {
     expect(
       RuntimeGovernanceEventUnionSchema.parse({

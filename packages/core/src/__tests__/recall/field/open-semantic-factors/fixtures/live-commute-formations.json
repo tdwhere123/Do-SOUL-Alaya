@@ -1,5 +1,5 @@
 {
-  "q2_query": {
+  "commute_query": {
     "source_kind": "query",
     "source_text": "How long is my daily commute to work?",
     "source_sha256": "sha256:092f4e554cd2fc97f90d1dce7badab62d9779c64d596789beef74fd878e2d64c",
@@ -26,7 +26,7 @@
       ]
     }
   },
-  "q2_evidence": {
+  "commute_evidence": {
     "source_kind": "evidence",
     "source_text": "I've been listening to audiobooks during my daily commute, which takes 45 minutes each way.",
     "source_sha256": "sha256:a3779296fb1bd14cbfab5cf005e40b220edf393e1b891681b6b44c760020b457",
@@ -53,7 +53,7 @@
       "variables": []
     }
   },
-  "q3_query": {
+  "coupon_query": {
     "source_kind": "query",
     "source_text": "Where did I redeem a $5 coupon on coffee creamer?",
     "source_sha256": "sha256:117c159b9968f5a32a76d74a797f1de8c5eac4d9523c5f3419323cdf706814a2",
@@ -82,7 +82,7 @@
       ]
     }
   },
-  "q3_evidence": {
+  "coupon_evidence": {
     "source_kind": "evidence",
     "source_text": "I actually redeemed a $5 coupon on coffee creamer last Sunday",
     "source_sha256": "sha256:12f5e612a81967e2a44773b429192199afbdc36823c86536aa4dd4e5e9b0b9a0",

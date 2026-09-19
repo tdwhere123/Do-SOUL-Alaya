@@ -3,14 +3,14 @@ import {
   isObserved,
   notObserved,
   observedNumber,
-  P00_PERFORMANCE_PROOF_CONTRACT,
+  PERFORMANCE_PROOF_CONTRACT,
   type CloneCopyObservation,
   type ObservedFiniteNumber
 } from "../performance-proof/attribution-receipt.js";
 
-export const P02_WORKSPACE_INSTALL_CONTRACT = Object.freeze({
+export const WORKSPACE_INSTALL_CONTRACT = Object.freeze({
   name: "recall-eval-workspace-install-io.v1",
-  cites: P00_PERFORMANCE_PROOF_CONTRACT.name,
+  cites: PERFORMANCE_PROOF_CONTRACT.name,
   module:
     "apps/bench-runner/src/runs/lifecycle/recall-eval/workspace-install/install.ts"
 });
@@ -33,7 +33,7 @@ export interface WorkspaceInstallPhaseTiming {
 }
 
 export interface WorkspaceInstallIoReceipt {
-  readonly contract: typeof P00_PERFORMANCE_PROOF_CONTRACT.name;
+  readonly contract: typeof PERFORMANCE_PROOF_CONTRACT.name;
   readonly role: "diagnostic_only";
   readonly workerId: string;
   readonly questionId: string;
@@ -134,7 +134,7 @@ export function decideWorkspaceInstallOptimization(input: {
   const dominantPhase = earliestCopyFsyncOwner(input.reflink, input.copyFallback);
   return Object.freeze({
     status: "OPTIMIZE_DOMINANT_OWNER",
-    owner: P02_WORKSPACE_INSTALL_CONTRACT.module,
+    owner: WORKSPACE_INSTALL_CONTRACT.module,
     dominantPhase,
     cloneReuseProved: true
   });
@@ -153,7 +153,7 @@ export function freezeWorkspaceInstallIoReceipt(input: {
   const phases = freezePhases(input.phases);
   const dominant = selectDominantPhase(phases);
   return freezeDeep({
-    contract: P00_PERFORMANCE_PROOF_CONTRACT.name,
+    contract: PERFORMANCE_PROOF_CONTRACT.name,
     role: "diagnostic_only" as const,
     workerId,
     questionId,

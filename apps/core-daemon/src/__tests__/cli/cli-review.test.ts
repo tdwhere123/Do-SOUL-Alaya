@@ -100,7 +100,7 @@ function createContext(overrides: Partial<AlayaCliContext> = {}): AlayaCliContex
   };
 }
 
-describe("alaya review (A1)", () => {
+describe("alaya review", () => {
 
   it("lists pending proposals via soul.list_pending_proposals", async () => {
     const stdout = new PassThrough();

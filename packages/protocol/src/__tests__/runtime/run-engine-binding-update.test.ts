@@ -61,8 +61,8 @@ describe("RunEngineBindingUpdatedPayloadSchema", () => {
   });
 
   it("accepts previous_engine_binding_id as null (first-time binding set)", () => {
-    // Failure Mode #12 context: when a run has never had a binding, the
-    // previous value is null. The schema must permit this.
+    // When a run has never had a binding, previous_engine_binding_id is
+    // null. The schema must permit this.
     const result = RunEngineBindingUpdatedPayloadSchema.safeParse({
       run_id: "run_abc123",
       engine_binding_id: "binding_new",

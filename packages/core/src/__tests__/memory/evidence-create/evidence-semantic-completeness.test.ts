@@ -9,8 +9,8 @@ import {
 } from "../../../memory/evidence-create/evidence-semantic-completeness.js";
 import { materializeOpenSemanticFactorFormation } from
   "../../../semantic/open-semantic-factor-formation.js";
-import { rematerializeG8LiveFormation } from
-  "../../recall/field/open-semantic-factors/fixtures/g8-live-formation.js";
+import { rematerializeLiveFormation } from
+  "../../recall/field/open-semantic-factors/fixtures/live-formation.js";
 
 const GARDEN_PRODUCER = "garden_source_bound_open_semantic_factor_v3";
 
@@ -79,8 +79,8 @@ describe("evidence semantic completeness", () => {
   it.each([
     {
       name: "source-bound duration",
-      query: "q2_query" as const,
-      evidence: "q2_evidence" as const,
+      query: "commute_query" as const,
+      evidence: "commute_evidence" as const,
       slots: [
         ["subject", "I"],
         ["relation", "listening"],
@@ -89,8 +89,8 @@ describe("evidence semantic completeness", () => {
     },
     {
       name: "location join",
-      query: "q3_query" as const,
-      evidence: "q3_evidence" as const,
+      query: "coupon_query" as const,
+      evidence: "coupon_evidence" as const,
       slots: [
         ["subject", "I"],
         ["relation", "actually"],
@@ -98,8 +98,8 @@ describe("evidence semantic completeness", () => {
       ] as const
     }
   ])("certifies the source-grounded $name formation", ({ evidence, slots }) => {
-    const upstream = rematerializeG8LiveFormation(evidence);
-    const source = evidence === "q2_evidence"
+    const upstream = rematerializeLiveFormation(evidence);
+    const source = evidence === "commute_evidence"
       ? "I've been listening to audiobooks during my daily commute, which takes 45 minutes each way."
       : "I actually redeemed a $5 coupon on coffee creamer last Sunday";
     const certified = certifyEvidenceSemanticCompleteness({

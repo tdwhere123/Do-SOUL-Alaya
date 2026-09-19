@@ -148,7 +148,7 @@ describe("SqliteEventLogRepo workspace and transaction queries", () => {
     await expect(eventLogRepo.getLatestWorkspaceEventId("ws_events")).resolves.toBe(deleted.event_id);
   });
 
-  describe("transactional + append (closes #BL-022)", () => {
+  describe("transactional + append", () => {
     it("append rolls back the row when transactional() callback throws", async () => {
       const { eventLogRepo } = await createEventLogRepos();
       expect(() =>

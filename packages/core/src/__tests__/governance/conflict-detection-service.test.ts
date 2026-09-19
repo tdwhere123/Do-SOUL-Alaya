@@ -46,18 +46,17 @@ it("rule-path contradicts seeds a WEAK attention_only path (agent-controllable v
     );
   });
 
-// invariant (two-entry truth-boundary lock): B-4 ConflictDetection is the
+// invariant (two-entry truth-boundary lock): ConflictDetection is the
   // direct-materialize entry — it submits to PathCandidateSink and NEVER routes
   // through the edge_proposals review queue (the service has no edge-proposal
   // dependency, so it structurally cannot create a proposal row). Every minted
   // path is born in a governed band (rule -> attention_only, llm -> recall_allowed)
   // and NEVER strictly_governed. Compare: the review-gated entry (manual
-  // soul.propose_edge + B-1 cross-link) creates an edge_proposals row and does
+  // soul.propose_edge + cross-link) creates an edge_proposals row and does
   // NOT call submitCandidate at propose time — locked in
   // edge-proposal-service.test.ts ("creates a pending proposal ...").
-  // see also: packages/core/src/relations/edge-proposals/edge-proposal-service.ts AUTO_ACCEPT_FLOOR_BY_TRIGGER;
-  //   docs/archive/v0.3-historical/v0.3.11/kpi-targets.md K4.1.
-  it("B-4 direct-materializes a governed weak path (rule attention_only / llm recall_allowed), never edge_proposals, never strictly_governed", async () => {
+  // see also: packages/core/src/relations/edge-proposals/edge-proposal-service.ts AUTO_ACCEPT_FLOOR_BY_TRIGGER.
+  it("direct-materializes a governed weak path (rule attention_only / llm recall_allowed), never edge_proposals, never strictly_governed", async () => {
     const ruleExisting = createMemoryEntry({ object_id: "mem-A", content: "I prefer dark roast coffee." });
     const ruleMemoryRepo = {
       findByDimension: vi.fn(async () => [ruleExisting]),
@@ -115,11 +114,11 @@ it("rule-path contradicts seeds a WEAK attention_only path (agent-controllable v
     // Non-vacuous channel-sole-mutation lock. The deps surface
     // (ConflictDetectionServiceDeps) has no edge-proposal port by
     // construction, so there is no proposal-creation mock to spy. Instead
-    // assert positively that across BOTH B-4 sub-paths (rule + LLM) the ONLY
+    // assert positively that across BOTH sub-paths (rule + LLM) the ONLY
     // write/mutation channel exercised is pathCandidatePort.submitCandidate:
     // the memoryRepo ports are read-only (findByDimension / findBySharedDomainTags)
     // and llmPort is a read-only classifier (classifyPair). If a future change
-    // ever routed a B-4 verdict through edge_proposals, it would have to invoke
+    // ever routed a ConflictDetection verdict through edge_proposals, it would have to invoke
     // some channel OTHER than submitCandidate, tripping this assertion.
     expect(ruleSink.submitCandidate).toHaveBeenCalled();
     expect(llmSink.submitCandidate).toHaveBeenCalled();

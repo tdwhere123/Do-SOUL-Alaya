@@ -9,7 +9,7 @@ import {
 
 const validTimestamp = "2026-03-24T00:00:00.000Z";
 
-describe("Phase 3B event schemas", () => {
+describe("green-governance events", () => {
   it("keeps GreenGovernanceEventType enum complete and closed", () => {
     const expected = [
       "soul.session_override.applied",

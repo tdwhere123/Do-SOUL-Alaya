@@ -236,7 +236,7 @@ export function parseGraphAuditorEventPayload<T extends keyof typeof graphAudito
   const schema = graphAuditorPayloadSchemas[type];
 
   if (schema === undefined) {
-    throw new Error(`Unknown Phase 4B event type: ${String(type)}`);
+    throw new Error(`Unknown graph-auditor event type: ${String(type)}`);
   }
 
   return schema.parse(payload) as GraphAuditorEventPayloadMap[T];

@@ -477,11 +477,11 @@ describe("repository structure guard", () => {
       path.join(repoRoot, "scripts/ci/repository-structure-policy.json")
     );
     const digest = createHash("sha256").update(canonicalizeLf(policyBytes)).digest("hex");
-    const pinned = "f8568fa5296d7f4a101e52e6ac12afb26d84cc97b343cf67d62ec15fe525caa0";
+    const pinned = "a9da3638fabbbd1c0903f87850975d4c4651ccaf4498d175ffaeb0e496ba16a2";
     expect(
       digest,
       `repository-structure-policy.json digest changed (${pinned} -> ${digest}). ` +
-        "Update this pin in the same commit as the policy file; it locks S08 export pins and shrink-only inventories together."
+        "Update this pin in the same commit as the policy file; it locks public export snapshots and shrink-only inventories together."
     ).toBe(pinned);
   });
 

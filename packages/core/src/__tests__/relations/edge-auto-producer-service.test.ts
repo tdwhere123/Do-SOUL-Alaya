@@ -5,7 +5,7 @@ import type { PathMintOutcome } from "../../relations/edge-proposals/path-relati
 import { createDeps, createMemoryEntry } from "./edge-auto-producer-service-test-fixtures.js";
 
 describe("EdgeAutoProducerService", () => {
-it("B-2 proposes supports for strong same-dimension local neighbors", async () => {
+it("proposes supports for strong same-dimension local neighbors", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
@@ -96,7 +96,7 @@ it("B-2 proposes supports for strong same-dimension local neighbors", async () =
     expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
   });
 
-it("B-2 proposes derives_from for deterministic derivation cues", async () => {
+it("proposes derives_from for deterministic derivation cues", async () => {
     const newMemory = createMemoryEntry({
       formation_kind: "derived",
       content: "Based on the repository pnpm workflow, all package scripts should use pnpm.",
@@ -127,7 +127,7 @@ it("B-2 proposes derives_from for deterministic derivation cues", async () => {
     );
   });
 
-it("B-3 proposes supersedes for newer replacement memories in the same topic", async () => {
+it("proposes supersedes for newer replacement memories in the same topic", async () => {
     const newMemory = createMemoryEntry({
       content: "The repo now uses pnpm commands for package scripts instead of npm commands.",
       domain_tags: ["package-manager", "workflow"],
@@ -165,10 +165,10 @@ it("B-3 proposes supersedes for newer replacement memories in the same topic", a
     );
   });
 
-// B7: the local contradicts heuristic — a high-overlap neighbor with an
+// The local contradicts heuristic — a high-overlap neighbor with an
   // explicit contradiction cue folds into a weak negative `contradicts` path
   // (attention_only, recall_bias -0.4), the sibling of the supersedes lane.
-  it("B7 proposes contradicts for a high-overlap neighbor carrying a contradiction cue", async () => {
+  it("proposes contradicts for a high-overlap neighbor carrying a contradiction cue", async () => {
     const newMemory = createMemoryEntry({
       content:
         "The claim that the repo uses npm commands for package scripts is not true.",
@@ -265,7 +265,7 @@ it("does not propose edges for weak, cross-scope, or cross-dimension neighbors",
     expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
   });
 
-it("B-2 LLM supports verdict above floor folds into the SUPPORTS path profile", async () => {
+it("LLM supports verdict above floor folds into the SUPPORTS path profile", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
@@ -304,7 +304,7 @@ it("B-2 LLM supports verdict above floor folds into the SUPPORTS path profile", 
     expect(submitArgs.why?.some((line) => line.includes("llm pair classifier"))).toBe(true);
   });
 
-it("B-2 LLM derives_from verdict folds into the DERIVES_FROM path profile", async () => {
+it("LLM derives_from verdict folds into the DERIVES_FROM path profile", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-source",
@@ -336,7 +336,7 @@ it("B-2 LLM derives_from verdict folds into the DERIVES_FROM path profile", asyn
     );
   });
 
-it("B-2 LLM below 0.85 floor falls back to the local supports profile", async () => {
+it("LLM below 0.85 floor falls back to the local supports profile", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
@@ -370,7 +370,7 @@ it("B-2 LLM below 0.85 floor falls back to the local supports profile", async ()
     expect(submitArgs.why?.some((line) => line.includes("local_supports"))).toBe(true);
   });
 
-it("B-2 LLM null verdict falls back to the local supports profile", async () => {
+it("LLM null verdict falls back to the local supports profile", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
@@ -438,14 +438,14 @@ it("B-2 LLM null verdict falls back to the local supports profile", async () => 
       expect.objectContaining({ relationKind: "supports", recallBiasSign: 1 })
     );
     // Verdict-null must NOT emit a warn — only adapter exceptions do.
-    // see also: B-2 LLM throwing port test above (warns + falls back).
+    // see also: LLM throwing port test above (warns + falls back).
     const adapterWarnCalls = warn.mock.calls.filter(([message]) =>
       typeof message === "string" && message.includes("edge auto producer llm port classify failed")
     );
     expect(adapterWarnCalls).toEqual([]);
   });
 
-it("B-2 LLM throwing port is non-fatal: falls back, warns, never aborts other neighbors", async () => {
+it("LLM throwing port is non-fatal: falls back, warns, never aborts other neighbors", async () => {
     const newMemory = createMemoryEntry();
     const neighborA = createMemoryEntry({
       object_id: "memory-A",

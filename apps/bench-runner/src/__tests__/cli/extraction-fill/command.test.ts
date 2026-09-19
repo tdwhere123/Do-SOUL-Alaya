@@ -116,32 +116,32 @@ it("rejects a predecessor receipt without its child extraction authority", async
   expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/requires --extraction-authority/u));
 });
 
-it("loads the R3 approval file before handing the fill to the runtime gate", async () => {
+it("loads the expansion spend approval file before handing the fill to the runtime gate", async () => {
   const signalSource = new FakeSignalSource();
-  const approval = { kind: "r3" };
-  const readR3SpendApproval = vi.fn(() => approval);
+  const approval = { kind: "longmemeval_expansion_spend_approval" };
+  const readExpansionSpendApproval = vi.fn(() => approval);
   const run = vi.fn(async () => completedFillResult());
   const command = runExtractionFillCommand as unknown as (
     opts: ParsedFlags,
     dependencies: {
       readonly runExtractionFill: typeof run;
       readonly signalSource: FakeSignalSource;
-      readonly readR3SpendApproval: typeof readR3SpendApproval;
+      readonly readExpansionSpendApproval: typeof readExpansionSpendApproval;
     }
   ) => Promise<number>;
 
   const exitCode = await command({
     variant: "longmemeval_oracle",
     extractionAuthority: "/fixture/extraction-authority.json",
-    r3SpendApproval: "/fixture/r3-spend-approval.json"
-  } as ParsedFlags, { runExtractionFill: run, signalSource, readR3SpendApproval });
+    expansionSpendApproval: "/fixture/expansion-spend-approval.json"
+  } as ParsedFlags, { runExtractionFill: run, signalSource, readExpansionSpendApproval });
 
   expect(exitCode).toBe(0);
-  expect(readR3SpendApproval).toHaveBeenCalledWith("/fixture/r3-spend-approval.json");
-  expect(run).toHaveBeenCalledWith(expect.objectContaining({ r3SpendApproval: approval }));
+  expect(readExpansionSpendApproval).toHaveBeenCalledWith("/fixture/expansion-spend-approval.json");
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({ expansionSpendApproval: approval }));
 });
 
-it("fail-closes when an R3 spend path is set but the reader dep is missing", async () => {
+it("fail-closes when an expansion spend path is set but the reader dep is missing", async () => {
   const signalSource = new FakeSignalSource();
   const run = vi.fn(async () => completedFillResult());
   const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
@@ -153,13 +153,13 @@ it("fail-closes when an R3 spend path is set but the reader dep is missing", asy
   const exitCode = await command({
     variant: "longmemeval_oracle",
     extractionAuthority: "/fixture/extraction-authority.json",
-    r3SpendApproval: "/fixture/r3-spend-approval.json"
+    expansionSpendApproval: "/fixture/expansion-spend-approval.json"
   } as ParsedFlags, { runExtractionFill: run, signalSource });
 
   expect(exitCode).toBe(2);
   expect(run).not.toHaveBeenCalled();
   expect(stderr).toHaveBeenCalledWith(
-    expect.stringMatching(/R3 spend approval reader is unavailable/u)
+    expect.stringMatching(/expansion spend approval reader is unavailable/u)
   );
 });
 

@@ -61,7 +61,7 @@ afterEach(async () => {
   }
 });
 
-describe("Gate-4 attached-agent MCP proof", () => {
+describe("attached-agent MCP proof", () => {
   it("drives the full soul.* memory sequence through one daemon runtime and MCP transport", async () => {
     const dataDir = await createTempDataDir();
     process.env.DATA_DIR = dataDir;
@@ -71,8 +71,8 @@ describe("Gate-4 attached-agent MCP proof", () => {
     process.env.ALAYA_CONFIG_DIR = join(dataDir, "config");
     process.env.CODEX_HOME = join(dataDir, "codex-home");
     process.env.HOME = join(dataDir, "home");
-    process.env.ALAYA_REVIEWER_IDENTITY = "user:gate4-proof";
-    process.env.ALAYA_REVIEWER_TOKEN = "gate4-review-token";
+    process.env.ALAYA_REVIEWER_IDENTITY = "user:attached-agent-proof";
+    process.env.ALAYA_REVIEWER_TOKEN = "attached-agent-review-token";
     await seedRecallFixture(dataDir);
 
     const runtime = await createAlayaDaemonRuntime();
@@ -85,11 +85,11 @@ describe("Gate-4 attached-agent MCP proof", () => {
         runId: "run-1",
         agentTarget: activeAgentTarget,
         sessionId: "attached-agent-mcp-proof-session",
-        surfaceId: "gate4-attached-agent-proof"
+        surfaceId: "attached-agent-proof"
       })
     });
     const client = new Client(
-      { name: "gate4-attached-agent-proof", version: "test" },
+      { name: "attached-agent-proof", version: "test" },
       { capabilities: {} }
     );
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -201,7 +201,7 @@ describe("Gate-4 attached-agent MCP proof", () => {
         proposed_changes: {
           content: "Use pnpm for all workspace commands; report usage through soul.report_context_usage."
         },
-        reason: "Gate-4 proof proposal path."
+        reason: "attached-agent proof proposal path."
       });
       transcript.push({ step: "soul.propose_memory_update", evidence: proposal });
       expect(proposal.status).toBe("created");
@@ -210,9 +210,9 @@ describe("Gate-4 attached-agent MCP proof", () => {
       const review = await callTool<SoulReviewMemoryProposalResponse>(client, "soul.review_memory_proposal", {
         proposal_id: proposal.proposal_id,
         verdict: "reject",
-        reason: "Gate-4 proof rejects the synthetic proposal.",
-        reviewer_identity: "user:gate4-proof",
-        reviewer_token: "gate4-review-token"
+        reason: "attached-agent proof rejects the synthetic proposal.",
+        reviewer_identity: "user:attached-agent-proof",
+        reviewer_token: "attached-agent-review-token"
       });
       transcript.push({ step: "soul.review_memory_proposal", evidence: review });
       expect(review).toEqual({
@@ -362,7 +362,7 @@ async function seedRecallFixture(dataDir: string): Promise<void> {
     await runRepo.create({
       run_id: "run-1",
       workspace_id: "workspace-1",
-      title: "Gate-4 proof run",
+      title: "attached-agent proof run",
       goal: null,
       run_mode: RunMode.CHAT,
       engine_binding_id: null,
@@ -414,7 +414,7 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     lifecycle_state: "active",
     created_at: "2026-05-01T00:00:00.000Z",
     updated_at: "2026-05-01T00:00:00.000Z",
-    created_by: "gate4-proof",
+    created_by: "attached-agent-proof",
     dimension: MemoryDimension.PREFERENCE,
     source_kind: SourceKind.USER,
     formation_kind: FormationKind.EXPLICIT,
@@ -442,7 +442,7 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
 }
 
 async function createTempDataDir(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "alaya-gate4-proof-"));
+  const directory = await mkdtemp(join(tmpdir(), "alaya-attached-agent-proof-"));
   tempDirs.push(directory);
   return directory;
 }

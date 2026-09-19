@@ -183,7 +183,7 @@ describe("splitLexicalTokens CJK word segmentation", () => {
     expect(probes.lexical_terms).toEqual(expect.arrayContaining(["喜欢", "咖啡"]));
   });
 
-  it("rejects jieba ASCII pieces from CJK-suffixed compound surfaces (RT-I-2)", () => {
+  it("rejects jieba ASCII pieces from CJK-suffixed compound surfaces", () => {
     // invariant: attacker appending a CJK char to an ASCII compound token
     // (admin_passwords -> admin_passwords你好) must NOT cause the compound
     // to auto-decompose via the CJK lane. surface lane keeps _/@/#/./-

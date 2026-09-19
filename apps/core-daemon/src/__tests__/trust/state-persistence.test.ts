@@ -72,7 +72,7 @@ async function callRuntimeMemoryTool<TOutput = unknown>(
       runId: "run-1",
       agentTarget: "codex",
       sessionId: "run-1",
-      surfaceId: "gate4-proof"
+      surfaceId: "attached-agent-proof"
     }
   });
 
@@ -124,7 +124,7 @@ async function seedRecallFixture(dataDir: string, memory: MemoryEntry = createMe
     await runRepo.create({
       run_id: "run-1",
       workspace_id: "workspace-1",
-      title: "Gate-4 proof run",
+      title: "attached-agent proof run",
       goal: null,
       run_mode: RunMode.CHAT,
       engine_binding_id: null,
@@ -207,7 +207,7 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     lifecycle_state: "active",
     created_at: "2026-05-01T00:00:00.000Z",
     updated_at: "2026-05-01T00:00:00.000Z",
-    created_by: "gate4-proof",
+    created_by: "attached-agent-proof",
     dimension: MemoryDimension.PREFERENCE,
     source_kind: SourceKind.USER,
     formation_kind: FormationKind.EXPLICIT,

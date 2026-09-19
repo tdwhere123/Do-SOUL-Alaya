@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Orchestrates the v0.3.11 ship-gate full-bench wave (K1.1 + K1.4).
+// Orchestrates sequential LongMemEval-S and LoCoMo embedding-off full benches
+// (step ids lme-s and locomo-off).
 //
 // Long-running bench-runner daemons are single-process (each step opens one
 // daemon and reuses it across every question via attachWorkspace). Within a
@@ -10,12 +11,12 @@
 // before launching the next. stdout/stderr per step land under
 // var/bench-logs/v0.3.11/.
 //
-// Ship-gate matrix (docs/handbook/release/v0.3.11/kpi-targets.md, Tier-1):
-//   K1.1  longmemeval-s   embedding=disabled         policy=chat  -> R@5 >= 90%
-//   K1.4  locomo          embedding=disabled         policy=chat  -> R@5 >= 55%
+// Operator matrix (docs/bench-history/README.md):
+//   lme-s       longmemeval-s   embedding=disabled         policy=chat  -> R@5 >= 90%
+//   locomo-off  locomo          embedding=disabled         policy=chat  -> R@5 >= 55%
 //
-// K1.2 (lme-mt), K1.3 (lme-cq), K1.5 (locomo-on) are deferred to a later
-// v0.3.11 wave and are not orchestrated by this script.
+// lme-mt, lme-cq, and locomo-on are deferred and are not orchestrated by this
+// script.
 //
 // Each step writes its archive under the matching docs/bench-history/<root>/
 // subtree; the script verifies a fresh archive slug appeared and contains
@@ -137,7 +138,7 @@ function readManifestExtractionModel() {
 const BENCH_STEPS = [
   {
     id: "lme-s",
-    label: "K1.1 LongMemEval-S embedding-off",
+    label: "lme-s LongMemEval-S embedding-off",
     archiveRoot: "public",
     args: (ctx) => [
       "longmemeval",
@@ -151,7 +152,7 @@ const BENCH_STEPS = [
   },
   {
     id: "locomo-off",
-    label: "K1.4 LoCoMo embedding-off",
+    label: "locomo-off LoCoMo embedding-off",
     archiveRoot: "public-locomo",
     args: (ctx) => [
       "locomo",
@@ -164,7 +165,7 @@ const BENCH_STEPS = [
   }
 ];
 
-const HELP_TEXT = `run-full-bench-v0311 — sequential v0.3.11 ship-gate orchestrator
+const HELP_TEXT = `run-full-bench-v0311 — sequential full-bench orchestrator
 
 Usage:
   node scripts/run-full-bench-v0311.mjs [flags]

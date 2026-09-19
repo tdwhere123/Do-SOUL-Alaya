@@ -198,7 +198,7 @@ describe("doctor CLI", () => {
     expect(harness.stdoutText()).not.toContain("graph health warnings:");
   });
 
-  it("reports Garden compute provider truth (C2) — kind / routing / model / cred", async () => {
+  it("reports Garden compute provider truth — kind / routing / model / cred", async () => {
     const daemon = {
       startupSteps: STARTUP_STEPS.map((step) => ({
         step,
@@ -252,7 +252,7 @@ describe("doctor CLI", () => {
     );
   });
 
-  it("reports a clean local_heuristics + none state when Garden is unconfigured (C2)", async () => {
+  it("reports a clean local_heuristics + none state when Garden is unconfigured", async () => {
     const daemon = {
       startupSteps: STARTUP_STEPS.map((step) => ({
         step,

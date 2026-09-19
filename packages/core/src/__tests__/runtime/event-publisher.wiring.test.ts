@@ -15,7 +15,7 @@ import {
 import { firstDefined, requireAt } from "../helpers/defined.js";
 
 describe("EventPublisher wiring (fake EventLog repo)", () => {
-  it("publishes A1 worker lifecycle events without requiring Phase 0 parsing", async () => {
+  it("publishes worker lifecycle events without requiring Phase 0 parsing", async () => {
     const recorded: string[] = [];
     const runHotStateService = {
       apply: vi.fn(async () => {

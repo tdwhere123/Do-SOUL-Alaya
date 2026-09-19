@@ -183,7 +183,7 @@ describe("cli registration", () => {
     });
   });
 
-  it("registers Phase 4 operator commands in bridge order", () => {
+  it("registers operator commands in bridge order", () => {
     const bridge = createAlayaCliBridge(createRuntime(), {
       stdin: new PassThrough(),
       stdout: new PassThrough(),
@@ -203,8 +203,8 @@ describe("cli registration", () => {
       "detach",
       "source-grounding-defers",
       "tools",
-      // A1 (HITL daemon backbone) — `alaya review pending|accept|reject`
-      // routes through the same MCP handler attached agents use.
+      // `alaya review pending|accept|reject` routes through the same
+      // MCP handler attached agents use.
       "review",
       "mcp",
       "temporal-cutover",

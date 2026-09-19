@@ -77,9 +77,8 @@ describe("POST /workspaces/:wsId/soul/search", () => {
     expect(mcpMemoryToolHandler.call).not.toHaveBeenCalled();
   });
 
-  // invariant: malformed since / until / time_field must reach the route
-  // boundary as a 400, not be silently coerced to undefined and bypass the
-  // recall-side schema. Phase 4 review M-VAL-1.
+  // malformed since / until / time_field must reach the route as a 400,
+  // not be silently coerced to undefined and bypass the recall-side schema.
   it("rejects malformed since / until / time_field with 400 instead of silent coerce", async () => {
     const { app, mcpMemoryToolHandler } = buildApp();
     const badSince = await app.request("/workspaces/ws-1/soul/search", {

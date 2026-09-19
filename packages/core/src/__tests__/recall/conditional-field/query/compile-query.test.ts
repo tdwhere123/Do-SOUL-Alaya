@@ -131,7 +131,7 @@ describe("conditional-field query compiler", () => {
     expect(moved.program).not.toEqual(interpretation.program);
   });
 
-  it.each(SUPPORTED_PARAPHRASES)("A01 close paraphrase compiles the supported program: %s", (text) => {
+  it.each(SUPPORTED_PARAPHRASES)("close paraphrase compiles the supported program: %s", (text) => {
     const interpretation = compileOrdinary(text);
     expect(interpretation.status).toBe(/complete information|of checkout|last week|prior same/u.test(text) ? "partial" : "resolved");
     const relations = collectRelations(interpretation.program);

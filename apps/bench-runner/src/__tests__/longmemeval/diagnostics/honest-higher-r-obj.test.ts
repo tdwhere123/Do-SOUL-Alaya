@@ -175,18 +175,18 @@ interface FindingsCase {
   readonly gammaAliasSelectionOrder?: number;
 }
 
-/** Mirrors the S11 close-out table: ten E0 near-top misses, fused_rank 6–8. */
-const S11_FINDINGS: readonly FindingsCase[] = [
-  { id: "g-s11-01", fusedRank: 6, family: "structural" },
-  { id: "g-s11-02", fusedRank: 6, family: "structural" },
-  { id: "g-s11-03", fusedRank: 6, family: "temporal_facet" },
-  { id: "g-s11-04", fusedRank: 7, family: "structural", gammaAliasSelectionOrder: 9 },
-  { id: "g-s11-05", fusedRank: 7, family: "temporal_facet" },
-  { id: "g-s11-06", fusedRank: 7, family: "structural" },
-  { id: "g-s11-07", fusedRank: 7, family: "temporal_facet", gammaAliasSelectionOrder: 10 },
-  { id: "g-s11-08", fusedRank: 8, family: "structural" },
-  { id: "g-s11-09", fusedRank: 8, family: "temporal_facet" },
-  { id: "g-s11-10", fusedRank: 8, family: "structural", gammaAliasSelectionOrder: 6 }
+/** Ten E0 near-top misses, fused_rank 6–8. */
+const NEAR_TOP_MISS_CASES: readonly FindingsCase[] = [
+  { id: "near-top-01", fusedRank: 6, family: "structural" },
+  { id: "near-top-02", fusedRank: 6, family: "structural" },
+  { id: "near-top-03", fusedRank: 6, family: "temporal_facet" },
+  { id: "near-top-04", fusedRank: 7, family: "structural", gammaAliasSelectionOrder: 9 },
+  { id: "near-top-05", fusedRank: 7, family: "temporal_facet" },
+  { id: "near-top-06", fusedRank: 7, family: "structural" },
+  { id: "near-top-07", fusedRank: 7, family: "temporal_facet", gammaAliasSelectionOrder: 10 },
+  { id: "near-top-08", fusedRank: 8, family: "structural" },
+  { id: "near-top-09", fusedRank: 8, family: "temporal_facet" },
+  { id: "near-top-10", fusedRank: 8, family: "structural", gammaAliasSelectionOrder: 6 }
 ];
 
 function findingsQuestion(entry: FindingsCase): LongMemEvalQuestionDiagnostic {
@@ -219,8 +219,8 @@ function findingsQuestion(entry: FindingsCase): LongMemEvalQuestionDiagnostic {
   });
 }
 
-describe("classifyHonestHigherRObj (S11 findings table)", () => {
-  it.each(S11_FINDINGS)(
+describe("classifyHonestHigherRObj (near-top miss table)", () => {
+  it.each(NEAR_TOP_MISS_CASES)(
     "classifies $id (fused_rank $fusedRank, $family) as honest_higher_r_obj",
     (entry) => {
       const question = findingsQuestion(entry);
@@ -252,7 +252,7 @@ describe("classifyHonestHigherRObj (S11 findings table)", () => {
   );
 
   it("keeps Gamma-alias selection_order out of the verdict", () => {
-    const aliased = S11_FINDINGS.filter(
+    const aliased = NEAR_TOP_MISS_CASES.filter(
       (entry) => entry.gammaAliasSelectionOrder !== undefined
     );
     expect(aliased.length).toBeGreaterThan(0);

@@ -12,16 +12,16 @@ afterEach(() => {
   databases.clear();
 });
 
-// A1 (HITL daemon backbone) — the proposals row gains:
+// The proposals row gains:
 //   reviewer_identity (NULL until reviewed)
 //   target_object_kind ('memory_entry' default for back-compat)
 //   proposed_change_summary (text)
-//   created_at (TEXT; backfilled from last_updated_at for pre-A1 rows)
+//   created_at (TEXT; backfilled from last_updated_at for older rows)
 //   proposal_reviewer_assignments (local reviewer + optional deadline)
 // findPending and findScopedById now project these so the
 // soul.list_pending_proposals MCP tool and the Inspector can show a
 // HITL queue without joining event_log payloads.
-describe("proposal-repo reviewer_identity (A1)", () => {
+describe("proposal-repo reviewer_identity", () => {
   it("persists reviewer_identity through updatePendingResolutionWithEvents", async () => {
     const { repo } = createRepo();
     const proposal = createProposal();
@@ -168,13 +168,11 @@ describe("proposal-repo reviewer_identity (A1)", () => {
     expect(limited).toHaveLength(2);
   });
 
-  // A1 fix-loop (finding-3): the previous default of 'memory_entry' on
-  // every create() mislabeled synthesis-derived and bankruptcy-derived
-  // proposals in the Inspector queue. The repo now persists the
-  // explicit target_object_kind, and findPendingSummaries surfaces it
-  // verbatim. These tests assert that for the two non-memory_entry
-  // creators the kind round-trips correctly.
-  it("surfaces target_object_kind=synthesis_capsule for synthesis-derived rows (finding-3)", async () => {
+  // The previous default of 'memory_entry' on every create() mislabeled
+  // synthesis-derived and bankruptcy-derived proposals in the Inspector
+  // queue. The repo now persists the explicit target_object_kind, and
+  // findPendingSummaries surfaces it verbatim.
+  it("surfaces target_object_kind=synthesis_capsule for synthesis-derived rows", async () => {
     const { repo } = createRepo();
     const proposal = createProposal({
       runtime_id: "33333333-3333-4333-8333-333333333333",
@@ -198,7 +196,7 @@ describe("proposal-repo reviewer_identity (A1)", () => {
     });
   });
 
-  it("surfaces target_object_kind=bankruptcy_dossier for bankruptcy-derived rows (finding-3)", async () => {
+  it("surfaces target_object_kind=bankruptcy_dossier for bankruptcy-derived rows", async () => {
     const { repo } = createRepo();
     const proposal = createProposal({
       runtime_id: "44444444-4444-4444-8444-444444444444",
@@ -222,12 +220,11 @@ describe("proposal-repo reviewer_identity (A1)", () => {
     });
   });
 
-  // A1 fix-loop (finding-5): every code path leading to
-  // resolution_state ∈ ('accepted','rejected') writes a non-null
-  // reviewer_identity. This contract test exercises both write paths
-  // (legacy updateResolution + new updatePendingResolutionWithEvents)
+  // Every code path leading to resolution_state ∈ ('accepted','rejected')
+  // writes a non-null reviewer_identity. This contract test exercises both
+  // write paths (legacy updateResolution + new updatePendingResolutionWithEvents)
   // and asserts the SQL-level invariant.
-  it("every accepted/rejected proposals row carries a non-null reviewer_identity (finding-5 contract)", async () => {
+  it("every accepted/rejected proposals row carries a non-null reviewer_identity", async () => {
     const { repo, database } = createRepo();
 
     const acceptedThroughLegacy = createProposal({
@@ -289,11 +286,10 @@ describe("proposal-repo reviewer_identity (A1)", () => {
     }
   });
 
-  // A1 fix-loop (finding-7): two-tx race against the same proposal —
-  // exactly one writer wins; the other receives a CONFLICT; event_log
-  // contains only the winning side's events (count == 3, not 6).
-  // Documents the v0.1 contract: "explicit CONFLICT + retry" (Q3).
-  it("second concurrent reviewer loses with CONFLICT and event_log contains only the winner (finding-7)", async () => {
+  // Two-tx race against the same proposal — exactly one writer wins;
+  // the other receives a CONFLICT; event_log contains only the winning
+  // side's events (count == 3, not 6).
+  it("second concurrent reviewer loses with CONFLICT and event_log contains only the winner", async () => {
     const { repo, database } = createRepo();
     const proposal = createProposal({
       runtime_id: "77777777-7777-4777-8777-777777777777",

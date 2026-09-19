@@ -3,7 +3,7 @@ import { computeNextTurnSeedRefs } from
   "../../../../runs/compile-seed.js";
 import { makeSeed } from "../compile-seed-fixture.js";
 
-describe("computeNextTurnSeedRefs — D-1 single-id fan-out invariant", () => {
+describe("computeNextTurnSeedRefs — single-id adjacent-turn fan-out", () => {
   // invariant: every assertion in this block guards the N x M edge-blowup
   // ceiling described in the helper anchor. A regression that re-introduces
   // the union-of-every-fact behavior must surface here, not in a

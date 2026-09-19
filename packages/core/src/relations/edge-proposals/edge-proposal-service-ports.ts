@@ -167,7 +167,7 @@ export function edgeTypeToRecallBiasSign(edgeType: MemoryGraphEdgeTypeValue): 1 
 }
 
 // invariant: system-policy auto-accept emits SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED
-// with this reviewer_identity so KPI K3.4 (auto_accept rate) can attribute
+// with this reviewer_identity so the auto-accept rate KPI can attribute
 // the decision and so audit-trail consumers can distinguish auto vs human.
 export const AUTO_ACCEPT_REVIEWER_IDENTITY = "system:auto_accept_policy";
 

@@ -276,7 +276,7 @@ describe("withWallClockTimeout", () => {
   });
 
   it("settles (not hangs) when operator pre-aborts before budget AND fn ignores abort and never settles", async () => {
-    // I-1 root-cause regression. Operator aborts BEFORE the budget fires, then
+    // Root-cause regression. Operator aborts BEFORE the budget fires, then
     // the inner fn is the abort-ignoring stalled socket (the exact Node-24
     // shape this helper targets) that never settles. Before the fix, fire()'s
     // `signal.aborted` guard returned WITHOUT rejecting the settlement, so

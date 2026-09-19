@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * @anchor edge-proposal-kpi-aggregator — pure EventLog → KPI fold for
- * K3.2 (edge_proposal_rate) and K3.4 (edge_proposal_auto_accept).
+ * edge_proposal_rate and edge_proposal_auto_accept.
  *
  * The fold is structurally identical to the token-economy reader pattern
  * in apps/bench-runner/src/harness/token-economy.ts: it accepts plain
@@ -39,9 +39,9 @@ import { z } from "zod";
 const EDGE_PROPOSAL_CREATED_EVENT_TYPE = "soul.graph.edge_proposal_created";
 const EDGE_PROPOSAL_REVIEWED_EVENT_TYPE = "soul.graph.edge_proposal_reviewed";
 
-// invariant: decided status set for the K3.4 denominator. EXPIRED is
+// invariant: decided status set for the auto-accept denominator. EXPIRED is
 // intentionally excluded — expiry is policy-driven, not a review verdict,
-// and including it would inflate the K3.4 denominator without a matching
+// and including it would inflate the auto-accept denominator without a matching
 // numerator.
 const STATUS_ACCEPTED = "accepted";
 const STATUS_AUTO_ACCEPTED = "auto_accepted";
@@ -88,7 +88,7 @@ import type {
  * @anchor edge-proposal-rate-per-question — under the
  * LongMemEval bench harness every question runs against the same
  * workspaceId, so per_workspace_per_day_* collapses to the run total
- * and K3.2's "40-80 proposals / workspace / day" intent cannot be
+ * and the "40-80 proposals / workspace / day" intent cannot be
  * verified from those fields alone. This per-question rollup buckets
  * created events by which question produced them (one bucket per chunk
  * passed in) and emits mean/p50/p95/max so the bench can still report
@@ -149,14 +149,14 @@ export interface ProposalsPerQuestionRollup {
 }
 
 /**
- * Aggregate K3.2 edge_proposal_rate from SOUL_GRAPH_EDGE_PROPOSAL_CREATED
+ * Aggregate edge_proposal_rate from SOUL_GRAPH_EDGE_PROPOSAL_CREATED
  * events. Returns `undefined` when no created events were observed, so
  * the bench-runner can leave the KPI field absent in honest reports.
  *
  * @param perQuestionChunks optional bench-harness rollup. When supplied,
  *   the result carries an additional `proposals_per_question` field with
  *   the per-question distribution (one bucket per chunk). This is the
- *   primary K3.2 distribution under the LongMemEval bench shape, where
+ *   primary per-question distribution under the LongMemEval bench shape, where
  *   every question shares one workspaceId and the per_workspace_per_day_*
  *   fields collapse to the run total. Caller invariant: when supplied,
  *   the chunks SHOULD partition `rows` by question; the aggregator does
@@ -217,7 +217,7 @@ export function aggregateEdgeProposalRate(
 }
 
 /**
- * Aggregate K3.4 edge_proposal_auto_accept from
+ * Aggregate edge_proposal_auto_accept from
  * SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED events, joined back to the originating
  * SOUL_GRAPH_EDGE_PROPOSAL_CREATED events so the per-trigger-source rate
  * is keyed by the proposal's trigger source (the reviewed event does not

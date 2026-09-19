@@ -69,7 +69,7 @@ describe("SurfaceDriftService", () => {
   it("acquires lease with EventLog-first mutation ordering", async () => {
     const order: string[] = [];
     const repo = createLeaseRepo({
-      // Sync siblings observe the in-transaction call order post-#BL-022.
+      // Sync siblings observe the in-transaction call order.
       deleteExpired: vi.fn(() => {
         order.push("repo_delete_expired");
         return 0;

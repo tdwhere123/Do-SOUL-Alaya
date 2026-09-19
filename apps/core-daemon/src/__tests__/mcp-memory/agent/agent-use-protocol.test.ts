@@ -73,18 +73,18 @@ import {
   originalHome,
   originalReviewerIdentity,
   originalReviewerToken,
-  PHASE6_AGENT_USE_TIMEOUT_MS,
+  AGENT_USE_PROTOCOL_TIMEOUT_MS,
   callTool,
   dispatchCli,
-  seedPhase6Fixture,
-  readPhase6Evidence,
+  seedAcceptAsApplyFixture,
+  readAcceptAsApplyEvidence,
   createMemoryEntry,
   createForeignProposal,
   createTempDataDir,
   restoreProcessEnv
 } from "./agent-use-protocol-fixture.js";
 
-describe("Phase-6 MCP agent-use protocol proof", () => {
+describe("accept-as-apply MCP agent-use protocol proof", () => {
 
   it("proves ordered MCP calls, CLI parity, and accept-path durability in one daemon lifetime", async () => {
     const dataDir = await createTempDataDir();
@@ -95,9 +95,9 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
     process.env.ALAYA_CONFIG_DIR = join(dataDir, "config");
     process.env.CODEX_HOME = join(dataDir, "codex-home");
     process.env.HOME = join(dataDir, "home");
-    process.env.ALAYA_REVIEWER_IDENTITY = "user:phase6-proof";
-    process.env.ALAYA_REVIEWER_TOKEN = "phase6-review-token";
-    await seedPhase6Fixture(dataDir);
+    process.env.ALAYA_REVIEWER_IDENTITY = "user:accept-as-apply-proof";
+    process.env.ALAYA_REVIEWER_TOKEN = "accept-as-apply-review-token";
+    await seedAcceptAsApplyFixture(dataDir);
 
     const runtime = await createAlayaDaemonRuntime();
     runtime.startBackgroundServices();
@@ -108,12 +108,12 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
         workspaceId: "workspace-1",
         runId: "run-1",
         agentTarget: activeAgentTarget,
-        sessionId: "phase6-session-1",
-        surfaceId: "phase6-agent-use-proof"
+        sessionId: "accept-as-apply-session-1",
+        surfaceId: "accept-as-apply-proof"
       })
     });
     const client = new Client(
-      { name: "phase6-agent-use-proof", version: "test" },
+      { name: "accept-as-apply-proof", version: "test" },
       { capabilities: {} }
     );
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -193,7 +193,7 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
         delivery_id: recall.delivery_id,
         usage_state: "used",
         used_object_ids: [objectId],
-        reason: "Phase 6 proof consumed recalled memory."
+        reason: "accept-as-apply proof consumed recalled memory."
       });
       transcript.push({ step: "soul.report_context_usage", evidence: usage });
       expect(usage).toEqual({ delivery_id: recall.delivery_id, status: "recorded" });
@@ -218,7 +218,7 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
       const proposal = await callTool<SoulProposeMemoryUpdateResponse>(client, "soul.propose_memory_update", {
         target_object_id: objectId,
         proposed_changes: { content: PROPOSED_CONTENT },
-        reason: "Phase 6 proof proposal for accept-as-apply."
+        reason: "proposal for accept-as-apply."
       });
       transcript.push({ step: "soul.propose_memory_update", evidence: proposal });
       expect(proposal.status).toBe("created");
@@ -258,9 +258,9 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
       const review = await callTool<SoulReviewMemoryProposalResponse>(client, "soul.review_memory_proposal", {
         proposal_id: proposal.proposal_id,
         verdict: "accept",
-        reason: "Phase 6 proof accepts proposal to validate durable apply.",
-        reviewer_identity: "user:phase6-proof",
-        reviewer_token: "phase6-review-token"
+        reason: "accept-as-apply proof accepts proposal to validate durable apply.",
+        reviewer_identity: "user:accept-as-apply-proof",
+        reviewer_token: "accept-as-apply-review-token"
       });
       transcript.push({ step: "soul.review_memory_proposal", evidence: review });
       expect(review).toEqual({
@@ -297,7 +297,7 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
       expect(cliPendingAfter.exitCode).toBe(0);
       expect(cliPendingAfterIds).toEqual(mcpPendingAfter.proposals.map((row) => row.proposal_id));
 
-      const durable = await readPhase6Evidence(dataDir, {
+      const durable = await readAcceptAsApplyEvidence(dataDir, {
         deliveryId: recall.delivery_id,
         memoryId: objectId,
         proposalId: proposal.proposal_id,
@@ -399,5 +399,5 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
       await server.close();
       await runtime.shutdown();
     }
-  }, PHASE6_AGENT_USE_TIMEOUT_MS);
+  }, AGENT_USE_PROTOCOL_TIMEOUT_MS);
 });

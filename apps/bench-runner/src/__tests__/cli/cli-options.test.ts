@@ -40,7 +40,7 @@ describe("parseFlags", () => {
       "--extraction-cache-root=/tmp/cache",
       "--experiment",
       "--backfill-missing-fact-frame-formations",
-      "--r3-spend-approval=/tmp/r3-spend-approval.json",
+      "--expansion-spend-approval=/tmp/expansion-spend-approval.json",
       "--concurrency=4",
       "--expected-reconciliation-basis=rule_only",
       "--extraction-initial-concurrency=8",
@@ -62,7 +62,7 @@ describe("parseFlags", () => {
     expect(parsed.extractionCacheRoot).toBe("/tmp/cache");
     expect(parsed.experiment).toBe(true);
     expect(parsed.backfillMissingFactFrameFormations).toBe(true);
-    expect(parsed.r3SpendApproval).toBe("/tmp/r3-spend-approval.json");
+    expect(parsed.expansionSpendApproval).toBe("/tmp/expansion-spend-approval.json");
     expect(parsed.concurrency).toBe(4);
     expect(parsed.expectedReconciliationBasis).toBe("rule_only");
     expect(parseFlags([
@@ -92,9 +92,19 @@ describe("parseFlags", () => {
     expect(() => parseFlags(["--question-manifest"])).toThrow(
       "--question-manifest requires a path"
     );
+    expect(() => parseFlags(["--expansion-spend-approval", "--limit", "500"])).toThrow(
+      "--expansion-spend-approval requires a path"
+    );
+    expect(parseFlags([
+      "--r3-spend-approval=/tmp/expansion-spend-approval.json"
+    ]).expansionSpendApproval).toBe("/tmp/expansion-spend-approval.json");
     expect(() => parseFlags(["--r3-spend-approval", "--limit", "500"])).toThrow(
       "--r3-spend-approval requires a path"
     );
+    expect(() => parseFlags([
+      "--expansion-spend-approval=/tmp/a.json",
+      "--r3-spend-approval=/tmp/b.json"
+    ])).toThrow("--expansion-spend-approval may be provided only once");
     expect(() => parseFlags([
       "--extraction-predecessor-authority", "/tmp/a.json",
       "--extraction-predecessor-authority=/tmp/b.json"

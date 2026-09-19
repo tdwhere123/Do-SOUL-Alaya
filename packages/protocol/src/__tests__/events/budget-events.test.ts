@@ -9,7 +9,7 @@ import {
 
 const validTimestamp = "2026-03-25T00:00:00.000Z";
 
-describe("Phase 3C event schemas", () => {
+describe("budget events", () => {
   it("keeps BudgetEventType enum complete and closed", () => {
     const expected = [
       "soul.budget.degraded",

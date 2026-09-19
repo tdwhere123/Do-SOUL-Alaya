@@ -100,7 +100,7 @@ function createContext(overrides: Partial<AlayaCliContext> = {}): AlayaCliContex
   };
 }
 
-describe("alaya review (A1)", () => {
+describe("alaya review", () => {
 
   it("rejects a foreign --run override before review reaches the handler", async () => {
     const stderr = new PassThrough();

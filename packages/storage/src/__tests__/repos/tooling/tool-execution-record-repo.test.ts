@@ -258,9 +258,9 @@ function seedWorkspace(database: ReturnType<typeof initDatabase>): void {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
-      "ws-a2-fast-path",
-      "A2 Fast Path",
-      "/tmp/a2-fast-path",
+      "ws-fast-path",
+      "Fast Path",
+      "/tmp/fast-path",
       "local_repo",
       null,
       "active",
@@ -278,7 +278,7 @@ function insertRun(database: ReturnType<typeof initDatabase>, runId: string): vo
     )
     .run(
       runId,
-      "ws-a2-fast-path",
+      "ws-fast-path",
       `Run ${runId}`,
       null,
       "build",
@@ -334,7 +334,7 @@ function insertWorkerRun(
     .run(
       options.workerRunId,
       options.principalRunId,
-      "ws-a2-fast-path",
+      "ws-fast-path",
       options.requestingPrincipalRunId,
       null,
       "coding_engine",

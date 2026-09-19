@@ -1,13 +1,13 @@
 import {
   freezeDeep,
   freezePerformanceAttributionReceipt,
-  P00_PERFORMANCE_PROOF_CONTRACT,
+  PERFORMANCE_PROOF_CONTRACT,
   type ObservedFiniteNumber,
   type PerformanceAttributionReceipt
 } from "./attribution-receipt.js";
 
 export const RECALL_EVAL_EXACT_PARITY_RECEIPT =
-  P00_PERFORMANCE_PROOF_CONTRACT.paritySchema;
+  PERFORMANCE_PROOF_CONTRACT.paritySchema;
 
 export interface ExactParityInputIdentity {
   readonly datasetRevision: string;

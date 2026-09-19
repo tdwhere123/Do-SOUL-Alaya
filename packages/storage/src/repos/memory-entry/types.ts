@@ -308,9 +308,9 @@ export interface MemoryEntryRepo {
     updatedAt: string,
     onTransition?: () => void
   ): Readonly<MemoryEntry>;
-  // invariant (N1): guarded reversible revival; null when the row was not dormant.
+  // invariant: guarded reversible revival; null when the row was not dormant.
   reviveDormant(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry> | null>;
-  // invariant (§7 + N1): synchronous guarded revival for the single-transaction karma path.
+  // invariant (§7): synchronous guarded revival for the single-transaction karma path.
   reviveDormantSync?(objectId: string, updatedAt: string): Readonly<MemoryEntry> | null;
   // invariant: active -> dormant audit runs in the demotion transaction only on changes>0.
   transitionToDormantIfActive(

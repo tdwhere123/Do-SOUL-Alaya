@@ -116,7 +116,7 @@ export type RecallEvalAttribution = z.infer<typeof RecallEvalAttributionSchema>;
 // derived from the bench run's EventLog (SOUL_SIGNAL_EMITTED for the
 // ingested/stored sides, SOUL_CONTEXT_LENS_ASSEMBLED for the recalled
 // side — see apps/bench-runner/src/harness/daemon.ts queryTokenMetrics).
-// The block is OPTIONAL so pre-S6 kpi.json records stay schema-valid;
+// The block is OPTIONAL so older kpi.json records stay schema-valid;
 // new LongMemEval runs always populate it. token_saved_ratio_vs_full_prompt
 // (KpiCore) is the headline ratio derived from these raw counts.
 // @anchor recall-token-economy: per-recall STRUCTURAL token instrument,
@@ -201,7 +201,7 @@ export const TokenEconomySchema = z
   .strict();
 export type TokenEconomy = z.infer<typeof TokenEconomySchema>;
 
-// @anchor edge-proposal-rate: K3.2 KPI — edge proposals produced per
+// @anchor edge-proposal-rate: edge proposals produced per
 // workspace-day across a bench run. Per-workspace-per-day stats let the
 // release gate detect the "edge auto-build rate 40-80 proposals /
 // workspace / day" target without re-aggregating from EventLog rows.
@@ -215,7 +215,7 @@ export type TokenEconomy = z.infer<typeof TokenEconomySchema>;
 // @anchor edge-proposal-rate-per-question: under the LongMemEval bench
 // harness every question runs against the same workspaceId
 // ("bench-workspace-1"), so per_workspace_per_day_* collapses to the
-// run total — K3.2's "40-80 proposals / workspace / day" target cannot
+// run total — the "40-80 proposals / workspace / day" target cannot
 // be interpreted directly off those fields under bench shape. The
 // optional per_question_* fields surface the row-level distribution
 // (one bucket per question) so the same KPI intent stays measurable
@@ -233,9 +233,9 @@ export const EdgeProposalRateSchema = z
     per_trigger_source: z.record(z.string(), z.number().int().nonnegative()),
     // Optional per-question distribution: one bucket = one bench
     // question's SOUL_GRAPH_EDGE_PROPOSAL_CREATED count. Absent when the
-    // aggregator caller does not pass per-question chunks (e.g. pre-Phase
-    // B archives, or non-bench runtime aggregations where "per question"
-    // is undefined). Populated by the bench-runner harness so K3.2's
+    // aggregator caller does not pass per-question chunks (older
+    // archives, or non-bench runtime aggregations where "per question"
+    // is undefined). Populated by the bench-runner harness so the
     // 40-80/workspace/day intent stays interpretable under the bench's
     // single-workspaceId shape.
     proposals_per_question: z
@@ -253,7 +253,7 @@ export const EdgeProposalRateSchema = z
   .strict();
 export type EdgeProposalRate = z.infer<typeof EdgeProposalRateSchema>;
 
-// @anchor edge-proposal-auto-accept: K3.4 KPI — fraction of reviewed
+// @anchor edge-proposal-auto-accept: fraction of reviewed
 // proposals decided by system-policy auto-accept. total_decided counts
 // SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED rows whose payload.status is one of
 // accepted / auto_accepted / rejected; auto_accepted is the numerator.
@@ -261,7 +261,7 @@ export type EdgeProposalRate = z.infer<typeof EdgeProposalRateSchema>;
 // per_trigger_source_rate is keyed by the originating proposal's
 // trigger_source — the aggregator joins reviewed events back to their
 // created counterparts; missing joins are dropped (the rate is
-// computed on the joined subset). Optional so pre-Phase-B kpi.json
+// computed on the joined subset). Optional so older kpi.json
 // records stay schema-valid.
 export const EdgeProposalAutoAcceptSchema = z
   .object({

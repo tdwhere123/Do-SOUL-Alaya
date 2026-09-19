@@ -11,7 +11,7 @@ import {
 
 const validTimestamp = "2026-03-21T00:00:00.000Z";
 
-describe("Phase 2A event schemas", () => {
+describe("slot events", () => {
   it("keeps SlotEventType enum complete and closed", () => {
     const expected = [
       "soul.slot.created",

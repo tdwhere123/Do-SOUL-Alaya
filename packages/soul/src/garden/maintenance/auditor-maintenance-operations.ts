@@ -95,7 +95,7 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
         event_kind: HealthEventKind.POINTER_FAILURE,
         workspace_id: task.workspace_id,
         run_id: task.run_id,
-        summary: `Pointer health check: ${batch.length} broken references detected (no repair in Phase 4A)`,
+        summary: `Pointer health check: ${batch.length} broken references detected (pointer repair is not in this auditor pass)`,
         detail_json: {
           broken_count: batch.length,
           sample_broken: batch.slice(0, 5).map((record) => ({
