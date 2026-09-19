@@ -8,6 +8,7 @@ import {
 } from "../turn-contents.js";
 
 interface ExtractionFillWindowOptions {
+  readonly openSemantics?: boolean;
   readonly sourcePacking?: ExtractionSourcePacking;
   readonly variant: LongMemEvalVariant;
   readonly limit?: number;
@@ -51,7 +52,7 @@ function prepareExpansionWindow(
   if (options.questionBatchLimit !== undefined) {
     throw new Error("question-bounded extraction cannot mix an expansion capability");
   }
-  const keySpace = inspectTurnContentKeySpace(expansion.nextQuestions, options.sourcePacking);
+  const keySpace = inspectTurnContentKeySpace(expansion.nextQuestions, options.sourcePacking, options.openSemantics);
   assertSameTurnWindow(keySpace.distinctExtractionTurns, expansion.nextTurns);
   const turnContents = expansion.nextTurns.map(({ turnContent }) => turnContent);
   return {
@@ -84,10 +85,10 @@ async function prepareDatasetWindow(
     : offset + options.limit;
   const questions = dataset.questions.slice(offset, sliceEnd);
   const batchLimit = resolveQuestionBatchLimit(options.questionBatchLimit, questions.length);
-  const windowKeySpace = inspectTurnContentKeySpace(questions, options.sourcePacking);
+  const windowKeySpace = inspectTurnContentKeySpace(questions, options.sourcePacking, options.openSemantics);
   const executionKeySpace = batchLimit === questions.length
     ? windowKeySpace
-    : inspectTurnContentKeySpace(questions.slice(0, batchLimit), options.sourcePacking);
+    : inspectTurnContentKeySpace(questions.slice(0, batchLimit), options.sourcePacking, options.openSemantics);
   const distinctTurns = windowKeySpace.distinctTurnContents;
   const executionTurns = executionKeySpace.distinctTurnContents;
   return {

@@ -178,7 +178,11 @@ export async function runCurrentEnrichmentPreflight(options: {
       workset.requests.map((item) => item.line),
       options.frozenRows
     );
-    const packs = planCurrentPacks(workset.units, packing);
+    const units = workset.units.map((unit) => {
+      if (!("semanticKey" in unit)) throw new TypeError("Garden enrichment requires assertion semantic units");
+      return unit;
+    });
+    const packs = planCurrentPacks(units, packing);
     const bounds = sizeWorksetLines(workset.lines);
     const semanticFill = captureSemanticFill(options, executionTurns);
     const provenance = collectEnrichmentOccurrenceProvenance(occurrenceTurns ?? executionTurns, datasetRevision);
@@ -218,7 +222,7 @@ export async function runCurrentEnrichmentPreflight(options: {
         });
       })),
       packs: packs.packs,
-      units: workset.units,
+      units,
       bounds: Object.freeze({
         max_output_tokens: ENRICHMENT_PREFLIGHT_MAX_OUTPUT_TOKENS,
         dispatch_authorized: false as const,

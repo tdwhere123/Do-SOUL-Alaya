@@ -12,6 +12,7 @@ import {
 } from "../../../runs/extraction/turn-contents.js";
 import type { PreparedExtractionFill } from "../../../runs/extraction/fill/fill-preparation.js";
 import { buildExtractionFillQuestion, buildGroundedInterpretationResponse } from "./fixture.js";
+import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 
 const config = {
   model: "gemini-2.5-flash-lite", requestProfile: "provider-default-v1" as const,
@@ -32,6 +33,28 @@ describe("fresh Batch source workset", () => {
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), "batch-workset-")); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
+  it("retains distinct question rounds, conditionals and assistant context before open semantic request planning", () => {
+    const questions = [buildExtractionFillQuestion("questions", "Where is the atlas?", "When will Talia leave?")];
+    const inspected = inspectTurnContentKeySpace(questions, undefined, true);
+    expect(inspected.distinctExtractionTurns).toHaveLength(2);
+    expect(inspected.distinctExtractionRequestCount).toBe(2);
+    const source = turn("If Talia calls, Niko will leave. Talia placed an atlas on the desk. She then opened it.");
+    const plan = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: {
+      ...prepared([...inspected.distinctExtractionTurns, source]),
+      config: { ...config, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION }
+    } });
+    expect(plan.lines).toHaveLength(3);
+    expect(plan.deterministicEmptyRequests).toEqual([]);
+    const texts = plan.requests.flatMap((item) => item.request.source_assertions.map((row) => row.text));
+    expect(texts).toEqual(expect.arrayContaining([
+      "User: Where is the atlas?", "User: When will Talia leave?", "Assistant: Acknowledged.",
+      "User: If Talia calls, Niko will leave.", "She then opened it."
+    ]));
+    expect(plan.units).toHaveLength(6);
+    expect(plan.units.every((unit) => !("semanticKey" in unit))).toBe(true);
+    expect(plan.lines.every((line) => JSON.parse(line.userPrompt).source_request.source_unit_contract === "source-semantic-units-v1")).toBe(true);
+  });
+
   it("shares duplicate request work while retaining distinct original message occurrences", () => {
     const first = turn("I moved to Berlin in March.", "one");
     const second = turn(first.turnContent, "two");
@@ -40,9 +63,9 @@ describe("fresh Batch source workset", () => {
     } });
     expect(plan.lines).toHaveLength(1);
     expect(plan.units).toHaveLength(2);
-    expect(new Set(plan.units.map((unit) => unit.semanticKey)).size).toBe(1);
+    expect(new Set(plan.units.map((unit) => "semanticKey" in unit ? unit.semanticKey : undefined)).size).toBe(1);
     expect(new Set(plan.lines[0]!.unitKeys).size).toBe(2);
-    expect(plan.units.every((unit) => unit.binding.datasetRevision === "synthetic-revision")).toBe(true);
+    expect(plan.units.every((unit) => "datasetRevision" in unit.binding && unit.binding.datasetRevision === "synthetic-revision")).toBe(true);
     expect(plan.lines[0]!.key).toBe(computeExtractionTurnCacheKeys(
       config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, first
     )[0]);

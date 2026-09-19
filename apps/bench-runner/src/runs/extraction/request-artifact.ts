@@ -7,7 +7,7 @@ import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   OFFICIAL_API_SYSTEM_PROMPT, OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT, SOURCE_SEMANTIC_SYSTEM_PROMPT,
   buildOfficialApiSourceCorpus, collectOfficialApiExtractionCoverage, buildOfficialApiSourcePacketRequest,
-  buildSourceSemanticRequest, stringifyOfficialApiExtractionRequest, type OfficialApiExtractionRequest,
+  buildSourceSemanticRequest, collectSourceSemanticUnitPacks, stringifyOfficialApiExtractionRequest, type OfficialApiExtractionRequest,
   type OfficialApiSourcePacketRequest, type SourceSemanticRequest
 } from "@do-soul/alaya-soul";
 import type { LongMemEvalExtractionTurn } from "./turn-contents.js";
@@ -62,25 +62,30 @@ export function extractionArtifactPrompt(
   return profile === undefined ? OFFICIAL_API_SYSTEM_PROMPT : OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT;
 }
 
-/** Packing and source membership remain owned by the existing source request catalog. */
+export type ExtractionArtifactSource = OfficialApiExtractionRequest | ReturnType<typeof collectSourceSemanticUnitPacks>[number];
+
+/** Each extraction generation owns its source membership and packing. */
 export function extractionArtifactRequests(turn: Pick<LongMemEvalExtractionTurn, "turnContent"> &
   Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>, packing?: ExtractionSourcePacking,
   profile?: SourceInterpretationProfile, openSemantics?: ExtractionOpenSemanticsGeneration): readonly Readonly<{
-    source: OfficialApiExtractionRequest; packet?: OfficialApiSourcePacketRequest;
+    source: ExtractionArtifactSource; packet?: OfficialApiSourcePacketRequest;
     semantic?: SourceSemanticRequest; userPrompt: string;
   }>[] {
   assertExclusiveExtractionGeneration({ sourceInterpretationProfile: profile, openSemantics });
-  return collectOfficialApiExtractionCoverage(turn.turnContent, turn.turnMessages ?? [], packing).requests.map((source) => {
-    if (openSemantics !== undefined) {
+  if (openSemantics !== undefined) {
+    const sourceCorpus = buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages ?? []);
+    return collectSourceSemanticUnitPacks(sourceCorpus, packing).map((source) => {
       const semantic = buildSourceSemanticRequest({
-        sourceCorpus: buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages ?? []),
+        sourceCorpus,
         assertionIds: source.source_assertions.map((row) => row.assertion_id),
         source_id: "unbound", source_version: "unbound",
         producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
         producer_version: SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
       });
       return { source, semantic, userPrompt: JSON.stringify(semantic) };
-    }
+    });
+  }
+  return collectOfficialApiExtractionCoverage(turn.turnContent, turn.turnMessages ?? [], packing).requests.map((source) => {
     if (profile === undefined) return { source, userPrompt: stringifyOfficialApiExtractionRequest(source) };
     const packet = buildOfficialApiSourcePacketRequest(buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages ?? []),
       source.source_assertions.map((row) => row.assertion_id), profile);

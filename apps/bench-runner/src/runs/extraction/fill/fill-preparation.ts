@@ -262,7 +262,7 @@ async function inspectPreparedFillWindow(input: {
   readonly config: CompileSeedExtractionConfig;
   readonly expansion: PreparedExpansionFillAuthority | undefined;
 }) {
-  const window = await prepareExtractionFillWindow({ ...input.options, sourcePacking: input.config.sourcePacking }, input.expansion);
+  const window = await prepareExtractionFillWindow({ ...input.options, sourcePacking: input.config.sourcePacking, openSemantics: input.config.openSemantics !== undefined }, input.expansion);
   assertPreparationIdentityUnchanged(
     input.startingIdentity,
     readExtractionCacheManifestIdentity(input.cacheRoot)

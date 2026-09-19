@@ -87,7 +87,7 @@ export async function inspectExtractionAuthority(input: {
       `extraction authority refuses obsolete request profile ${config.requestProfile}`
     );
   }
-  const window = await prepareExtractionFillWindow({ ...input, sourcePacking: config.sourcePacking }, undefined);
+  const window = await prepareExtractionFillWindow({ ...input, sourcePacking: config.sourcePacking, openSemantics: config.openSemantics !== undefined }, undefined);
   const authorizedTurns = input.repairInvalidShards === true
     ? window.executionExtractionTurns
     : window.distinctExtractionTurns;

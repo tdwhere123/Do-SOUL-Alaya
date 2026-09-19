@@ -1,7 +1,7 @@
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import {
-  collectOfficialApiExtractionCoverage,
+  collectOfficialApiExtractionCoverage, collectSourceSemanticUnitPacks, buildOfficialApiSourceCorpus,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
@@ -38,7 +38,8 @@ export interface TurnContentKeySpace {
 
 export function inspectTurnContentKeySpace(
   questions: readonly LongMemEvalQuestion[],
-  sourcePacking?: ExtractionSourcePacking
+  sourcePacking?: ExtractionSourcePacking,
+  openSemantics = false
 ): TurnContentKeySpace {
   let turnOccurrences = 0;
   let distinctExtractionRequestCount = 0;
@@ -55,7 +56,7 @@ export function inspectTurnContentKeySpace(
           round,
           `${question.question_id}-fill-s${sessionIndex}-r${roundIndex}`
         );
-        const coverage = coverageForTurn(normalized, turnMessages, sourcePacking, coverageMemo);
+        const coverage = coverageForTurn(normalized, turnMessages, sourcePacking, coverageMemo, openSemantics);
         turnOccurrences += 1;
         const occurrence = Object.freeze({ turnContent: normalized, turnMessages });
         occurrences.push(occurrence);
@@ -96,7 +97,7 @@ export function extractionRequestCoverageMemoKey(
 }
 
 interface CachedTurnCoverage {
-  readonly requests: ReturnType<typeof collectOfficialApiExtractionCoverage>["requests"];
+  readonly requests: readonly unknown[];
   readonly identity: string;
 }
 
@@ -104,16 +105,21 @@ function coverageForTurn(
   turnContent: string,
   turnMessages: readonly LongMemEvalRoundMessage[],
   sourcePacking: ExtractionSourcePacking | undefined,
-  memo: Map<string, CachedTurnCoverage>
+  memo: Map<string, CachedTurnCoverage>,
+  openSemantics: boolean
 ): CachedTurnCoverage {
   const memoKey = extractionRequestCoverageMemoKey(turnContent, turnMessages, sourcePacking);
   const cached = memo.get(memoKey);
   if (cached !== undefined) return cached;
-  const requests = collectOfficialApiExtractionCoverage(turnContent, turnMessages, sourcePacking).requests;
-  const coverage = Object.freeze({
-    requests,
-    identity: JSON.stringify(requests.map(stringifyOfficialApiExtractionRequest))
-  });
+  const coverage = openSemantics
+    ? (() => {
+      const requests = collectSourceSemanticUnitPacks(buildOfficialApiSourceCorpus(turnContent, turnMessages), sourcePacking);
+      return Object.freeze({ requests, identity: JSON.stringify(requests) });
+    })()
+    : (() => {
+      const requests = collectOfficialApiExtractionCoverage(turnContent, turnMessages, sourcePacking).requests;
+      return Object.freeze({ requests, identity: JSON.stringify(requests.map(stringifyOfficialApiExtractionRequest)) });
+    })();
   memo.set(memoKey, coverage);
   return coverage;
 }

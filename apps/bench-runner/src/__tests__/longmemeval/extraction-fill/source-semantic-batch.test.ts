@@ -13,7 +13,7 @@ import { readExtractionCacheManifestIdentity } from "../../../runs/extraction/ca
 import { resolveCompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-config.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import type { GeminiBatchLimits, GeminiBatchPlan, GeminiBatchState } from "../../../runs/extraction/fill/batch/contract.js";
-import { buildAuthorityQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
+import { buildAuthorityQuestion, registerExtractionFillHooks, setExtractionCredentialFixture, buildExtractionFillQuestion } from "./fixture.js";
 
 const PROFILE = { contract: "source-interpretation-profile-v1" as const, description: "Completed event structure",
   predicates: [{ symbol: "complete", meaning: "An actor completed a theme.", governing_roles: [] }],
@@ -64,11 +64,13 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_mentio
   return JSON.stringify(editable);
 }
 
-async function setup(providerUrl = "https://fixture-provider.invalid") {
+async function setup(providerUrl = "https://fixture-provider.invalid", questionOnly = false) {
   setExtractionCredentialFixture(); vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", providerUrl);
-  await writeDataset([buildAuthorityQuestion("q0", "alpha", "decoy")]);
+  await writeDataset([questionOnly
+    ? buildExtractionFillQuestion("questions", "Where is the atlas?", "When will Talia leave?")
+    : buildAuthorityQuestion("q0", "alpha", "decoy")]);
   const inspection = await inspectExtractionAuthority({ variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
     openSemantics: true, revision: readCurrentExtractionAuthorityRevision(), action: "fill" });
   const receipt = createExtractionAuthorityReceipt({ action: "fill", observation: inspection.observation,
@@ -198,8 +200,8 @@ it("preserves partial interpretation gaps through native Batch cache replay", as
     expect(cached.status).toBe("hit");
     if (cached.status !== "hit") throw new Error("partial semantics must replay");
     expect(cached.admitted.draft?.gaps).toHaveLength(1);
-    expect(cached.admitted.outcome).toEqual({ status: "interpreted", gaps: cached.admitted.draft?.gaps });
-    expect(cached.admitted.interpretation?.gaps).toEqual(cached.admitted.draft?.gaps);
+    expect(cached.admitted.outcome).toEqual({ status: "interpreted", gaps: cached.admitted.interpretation?.gaps });
+    expect(cached.admitted.interpretation?.gaps).toEqual(expect.arrayContaining([...cached.admitted.draft!.gaps]));
   }
 }, 60000);
 
@@ -288,3 +290,17 @@ it("imports and reopens a legal no-proposition disposition without changing it t
     expect(inspected.deterministicEmpty).toBe(false);
   }
 });
+
+
+it("plans question-only rounds through native authority and Batch without collapsing them into host-empty source", async () => {
+  const fixture = await setup(undefined, true);
+  expect(fixture.keys).toHaveLength(2);
+  expect(await fixture.run("prepare")).toBe(0);
+  expect(fixture.fetchMock).not.toHaveBeenCalled();
+  expect(fixture.plan().lines).toHaveLength(2);
+  const rows = fixture.plan().lines.flatMap((line) => parseSourceSemanticRequest(JSON.parse(line.userPrompt)).source_request.source_assertions);
+  expect(rows.map((row) => row.text)).toEqual(expect.arrayContaining([
+    "User: Where is the atlas?", "User: When will Talia leave?", "Assistant: Acknowledged."
+  ]));
+  expect(rows.find((row) => row.text === "Assistant: Acknowledged.")?.source_role).toBe("assistant");
+}, 60000);

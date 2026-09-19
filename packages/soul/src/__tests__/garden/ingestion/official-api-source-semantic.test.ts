@@ -468,7 +468,8 @@ it("retains a located no-proposition disposition without confusing it with abste
 
 it("replays explicitly historical requests without upgrading their normalizer or salvaging current envelopes", () => {
   const input = sourceInput(), current = buildSourceSemanticRequest(input);
-  const { proposal_contract: _proposalContract, ...legacyBody } = current.source_request;
+  const { proposal_contract: _proposalContract, source_unit_contract: _unitContract, ...body } = current.source_request;
+  const legacyBody = { ...body, source_assertions: body.source_assertions.map(({ assertion_id, text }) => ({ assertion_id, text })) };
   const legacy = parseSourceSemanticRequest({ ...current, source_request: {
     ...legacyBody, normalizer_version: "source-semantic-normalizer-v3"
   } });

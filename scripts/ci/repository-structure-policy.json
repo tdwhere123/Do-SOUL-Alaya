@@ -1202,8 +1202,8 @@
     {
       "specifier": "@do-soul/alaya-soul",
       "path": "packages/soul/src/index.ts",
-      "expected_count": 295,
-      "expected_sha256": "220e0ea45a3a61e45dc4dda01dc6af1bda0c52cd85956b071cf1306b760b5e4c"
+      "expected_count": 297,
+      "expected_sha256": "097f5aded27396cafcca8b0392730cb3e91dc95a1bdae80fa70ccd6a95423351"
     },
     {
       "specifier": "@do-soul/alaya-storage",

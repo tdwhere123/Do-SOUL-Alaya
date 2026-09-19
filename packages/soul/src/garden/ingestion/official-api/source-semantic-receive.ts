@@ -4,7 +4,7 @@ import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticAlignmentSchema,
   SourceSemanticOutcomeSchema, SourceSemanticQuerySchema, SourceSemanticResponseEnvelopeSchema,
   SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
-  materializeSourceSemanticProposal,
+  materializeSourceSemanticProposal, buildSourceReferenceCatalog,
   normalizeSourceSemantics, sourceSemanticQueryIdentity, verifySourceSemanticDisposition, canonicalJson,
   type SourceSemanticAlignment, type SourceSemanticDraft, type SourceSemanticInterpretation,
   type SourceSemanticOutcome, type SourceSemanticQuery
@@ -18,6 +18,9 @@ import {
   type SourceSemanticHDescriptor, type SourceSemanticProposalInput, type SourceSemanticQueryProposalInput,
   type SourceSemanticQueryRequest, type SourceSemanticRequest
 } from "./source-semantic-request.js";
+
+import { buildOfficialApiSourceRequest } from "./extraction-request.js";
+import { indexOfficialApiSourceAssertions } from "../../triage/grounding/source-locator.js";
 
 export const MAX_SOURCE_SEMANTIC_RESPONSE_BYTES = 1024 * 1024;
 const HOST_ONLY_OUTCOMES = new Set(["no_eligible_source", "unavailable", "unexercised", "preparation_required"]);
@@ -83,11 +86,8 @@ export function completeEmptySourceSemantics(
   if (request.source_request.source_assertions.length !== 0 || input.assertionIds.length !== 0) {
     throw new AlayaError("CONFLICT", "deterministic empty source semantics requires no eligible assertions");
   }
-  const received = proposeSourceSemantics({ ...input, assertionIds: [] });
-  if (received.outcome.status !== "no_eligible_source" || received.provider_attempts !== 0) {
-    throw new AlayaError("CONFLICT", "deterministic empty source semantics cannot contain a proposal");
-  }
-  return received;
+  bindSource(request, input);
+  return { outcome: { status: "no_eligible_source", provider_attempts: 0 }, provider_attempts: 0, request };
 }
 
 export function receiveSourceSemantics(
@@ -253,14 +253,31 @@ function admitInterpretedDraft(
 }
 
 function bindSource(request: SourceSemanticRequest, input: SourceSemanticProposalInput): void {
-  const expected = buildSourceSemanticRequest({ ...input, assertionIds: request.source_request.source_assertions.map((row) => row.assertion_id) });
+  const ids = request.source_request.source_assertions.map((row) => row.assertion_id);
+  const expected = request.source_request.source_unit_contract === undefined
+    ? historicalSourceBinding(input.sourceCorpus, ids)
+    : buildSourceSemanticRequest({ ...input, assertionIds: ids });
   if (canonicalJson(expected.source_catalog) !== canonicalJson(request.source_catalog) ||
+    canonicalJson(expected.source_request.source_assertions) !== canonicalJson(request.source_request.source_assertions) ||
     request.source_request.assertion_locations !== undefined && canonicalJson(expected.source_request.assertion_locations) !== canonicalJson(request.source_request.assertion_locations)) {
     throw new AlayaError("CONFLICT", "source semantic assertion locations differ from the source owner");
   }
   if (semanticSha256(input.sourceCorpus) !== request.source_catalog.source_digest) {
     throw new AlayaError("CONFLICT", "source semantic source generation mismatch");
   }
+}
+
+/** Retained raw/cache requests predate source units. Remove after offline archive migration. */
+function historicalSourceBinding(sourceCorpus: string, ids: readonly number[]) {
+  const source = buildOfficialApiSourceRequest(sourceCorpus, ids);
+  const selectedIds = new Set(ids);
+  const indexed = indexOfficialApiSourceAssertions(sourceCorpus).filter((row) => selectedIds.has(row.assertion_id));
+  return {
+    source_catalog: buildSourceReferenceCatalog(semanticSha256(sourceCorpus), source.source_assertions, semanticSha256),
+    source_request: { source_assertions: source.source_assertions, assertion_locations: indexed.map((row) => {
+      return { assertion_id: row.assertion_id, source_utf8_span: [Buffer.byteLength(sourceCorpus.slice(0, row.start)), Buffer.byteLength(sourceCorpus.slice(0, row.end))] };
+    }) }
+  };
 }
 
 function bindAttempt<T>(rawJson: string, request: T): Attempt<T> {

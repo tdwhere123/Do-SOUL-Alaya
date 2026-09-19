@@ -719,6 +719,15 @@ and response-envelope shapes remain unchanged. Marker-absent normalizer-v3
 requests retain an explicit historical replay path; new publication requires
 normalizer-v4. Request/schema identities distinguish the new producer wire.
 
+New source requests also declare `source-semantic-units-v1`. SOUL owns their
+unfiltered lexical units, exact source locations and message-role provenance;
+questions, directives, fragments and assistant text remain available for
+interpretation. Bench uses that same owner for packing, request deduplication
+and transport occurrence identity. Garden factual eligibility is not an input
+filter for this channel. Marker-absent requests retain their historical Garden
+assertion binding for offline replay. A source role records who supplied text;
+it does not certify the text as a fact or resolve its semantic context.
+
 Normalizer-v4 accounts for selected assertions without connected evidence,
 orphan mentions/referents, unresolved slots and embedded occurrences without
 parent bindings as located gaps. It never invents missing relations or bindings.

@@ -1,12 +1,11 @@
 import { assertSourcePacketShardCapacity } from "../cache/source-packet-artifact.js";
 import { assertSourceSemanticShardCapacity } from "../cache/source-semantic-artifact.js";
-import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
-import { extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode } from "../request-artifact.js";
+import { buildOfficialApiSourceCorpus, sourceSemanticTransportUnits } from "@do-soul/alaya-soul";
+import { extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode, type ExtractionArtifactSource } from "../request-artifact.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
 import { createHash } from "node:crypto";
 import {
-  planOfficialApiSemanticWorkset,
-  type OfficialApiExtractionRequest
+  planOfficialApiSemanticWorkset
 } from "@do-soul/alaya-soul";
 import {
   computeCacheKey,
@@ -22,11 +21,11 @@ import type { PreparedExtractionFill } from "./fill-preparation.js";
 
 export type BatchExtractionSourceUnit = ReturnType<
   typeof planOfficialApiSemanticWorkset
->["units"][number];
+>["units"][number] | ReturnType<typeof sourceSemanticTransportUnits>[number];
 
 export interface BatchExtractionRequest {
   readonly line: GeminiBatchLine;
-  readonly request: OfficialApiExtractionRequest;
+  readonly request: ExtractionArtifactSource;
   readonly sourceTurn: LongMemEvalExtractionTurn;
   readonly units: readonly BatchExtractionSourceUnit[];
 }
@@ -100,13 +99,13 @@ function collectBatchRequests(
   selectedKeys: ReadonlySet<string>
 ): readonly BatchExtractionRequest[] {
   const collected = new Map<string, {
-    request: OfficialApiExtractionRequest;
+    request: ExtractionArtifactSource;
     sourceTurn: LongMemEvalExtractionTurn;
     userPrompt: string;
     units: Map<string, BatchExtractionSourceUnit>;
   }>();
   const coverageMemo = new Map<string, readonly {
-    request: OfficialApiExtractionRequest;
+    request: ExtractionArtifactSource;
     userPrompt: string;
     key: string;
   }[]>();
@@ -114,10 +113,11 @@ function collectBatchRequests(
   for (const turn of occurrences) {
     const prompts = coveragePrompts(prepared, turn, coverageMemo);
     if (!prompts.some((item) => selectedKeys.has(item.key))) continue;
-    const workset = planOfficialApiSemanticWorkset(
-      turn.turnContent, turn.turnMessages, prepared.datasetRevision
-    );
-    const byAssertion = new Map(workset.units.map((unit) => [unit.assertionId, unit]));
+    const units: readonly BatchExtractionSourceUnit[] = prepared.config.openSemantics === undefined
+      ? planOfficialApiSemanticWorkset(turn.turnContent, turn.turnMessages, prepared.datasetRevision).units
+      : sourceSemanticTransportUnits(buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages),
+        turn.turnMessages.map((message) => message.message_id), prepared.datasetRevision);
+    const byAssertion = new Map(units.map((unit) => [unit.assertionId, unit]));
     for (const { request, userPrompt, key } of prompts) {
       if (!selectedKeys.has(key)) continue;
       const item = collected.get(key) ?? {
@@ -159,12 +159,12 @@ function coveragePrompts(
   prepared: BatchPreparedSources,
   turn: LongMemEvalExtractionTurn,
   memo: Map<string, readonly {
-    request: OfficialApiExtractionRequest;
+    request: ExtractionArtifactSource;
     userPrompt: string;
     key: string;
   }[]>
 ): readonly {
-  request: OfficialApiExtractionRequest;
+  request: ExtractionArtifactSource;
   userPrompt: string;
   key: string;
 }[] {

@@ -9,8 +9,7 @@ import {
   buildSourceReferenceCatalog, canonicalJson,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
-import { indexOfficialApiSourceAssertions } from "../../triage/grounding/source-locator.js";
-import { buildOfficialApiSourceRequest } from "./extraction-request.js";
+import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, selectSourceSemanticUnits } from "./source-semantic-units.js";
 
 export const SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT = "source-semantic-query-request-v2" as const;
 export const SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT = "source-semantic-query-response-v2" as const;
@@ -38,16 +37,23 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   k_version: z.literal(SOURCE_SEMANTIC_K_VERSION),
   normalizer_version: z.enum([SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION]),
   proposal_contract: z.literal(SOURCE_SEMANTIC_PROPOSAL_CONTRACT).optional(),
+  source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT).optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
   assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(8).readonly().optional(),
   source_assertions: z.array(z.object({
-    assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1)
+    assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1), source_role: z.enum(["user", "assistant"]).optional()
   }).strict().readonly()).max(8).readonly()
 }).strict().superRefine((request, context) => {
   const current = request.proposal_contract === SOURCE_SEMANTIC_PROPOSAL_CONTRACT;
   if (current !== (request.normalizer_version === SOURCE_SEMANTIC_NORMALIZER_VERSION)) {
     context.addIssue({ code: "custom", message: "proposal contract and normalizer version must agree" });
+  }
+  if (request.source_unit_contract === undefined && request.source_assertions.some((row) => row.source_role !== undefined)) {
+    context.addIssue({ code: "custom", message: "source roles require the source unit contract" });
+  }
+  if (request.source_unit_contract !== undefined && (!current || request.source_assertions.some((row) => row.source_role === undefined))) {
+    context.addIssue({ code: "custom", message: "source units require the current proposal contract and explicit source roles" });
   }
 }).readonly();
 
@@ -166,17 +172,18 @@ export function parseSourceSemanticRequest(value: unknown): SourceSemanticReques
 
 export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): SourceSemanticRequest {
   rejectForbiddenProposalInput(input);
-  const extraction = buildOfficialApiSourceRequest(input.sourceCorpus, input.assertionIds);
+  const units = selectSourceSemanticUnits(input.sourceCorpus, input.assertionIds);
   const source_request = SourceSemanticOpenRequestBodySchema.parse({
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     proposal_contract: SOURCE_SEMANTIC_PROPOSAL_CONTRACT,
+    source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
-    assertion_locations: indexOfficialApiSourceAssertions(input.sourceCorpus).filter((row) => input.assertionIds.includes(row.assertion_id)).map((row) => ({
+    assertion_locations: units.map((row) => ({
       assertion_id: row.assertion_id, source_utf8_span: [Buffer.byteLength(input.sourceCorpus.slice(0, row.start)), Buffer.byteLength(input.sourceCorpus.slice(0, row.end))]
     })),
-    source_assertions: extraction.source_assertions
+    source_assertions: units.map(({ assertion_id, text, source_role }) => ({ assertion_id, text, source_role }))
   });
   return parseSourceSemanticRequest({
     schema_version: SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION,
