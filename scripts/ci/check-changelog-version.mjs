@@ -30,20 +30,25 @@ const packageJsonPaths = [
   ...listPackageJsons("apps")
 ].sort();
 
+const unreleased = changelog.match(/^## Unreleased\b[^\n]*\n([\s\S]*?)(?=^## |$(?![\s\S]))/mu)?.[0] ?? "";
+const protocolVersion = unreleased.match(/protocol (\d+\.\d+\.\d+)/u)?.[1];
+// Gateway has its own MCP-tool SemVer sidecar; validate the explicit unreleased
+// declaration rather than forcing it back to the app version after an API bump.
+const gatewayVersion = unreleased.match(/`@do-soul\/alaya-engine-gateway` is\s*`(\d+\.\d+\.\d+)`/u)?.[1];
 const mismatches = [];
 for (const packageJsonPath of packageJsonPaths) {
   const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-  if (packageJson.name === "@do-soul/alaya-protocol") {
-    continue;
-  }
-  if (packageJson.version !== expectedVersion) {
-    mismatches.push(`${packageJsonPath}: ${packageJson.version ?? "<missing>"} (expected ${expectedVersion})`);
+  if (packageJson.name === "@do-soul/alaya-protocol" && protocolVersion === undefined) continue;
+  const expected = packageJson.name === "@do-soul/alaya-protocol" ? protocolVersion
+    : packageJson.name === "@do-soul/alaya-engine-gateway" ? gatewayVersion ?? expectedVersion : expectedVersion;
+  if (expected === undefined || packageJson.version !== expected) {
+    mismatches.push(`${packageJsonPath}: ${packageJson.version ?? "<missing>"} (expected ${expected ?? "an explicit unreleased protocol declaration"})`);
   }
 }
 
 if (mismatches.length > 0) {
   console.error(
-    `App package versions must match latest published CHANGELOG section ${latestPublished}:`
+    `Package versions must match CHANGELOG (app ${latestPublished}, independently declared MCP packages):`
   );
   for (const mismatch of mismatches) {
     console.error(`- ${mismatch}`);
@@ -52,7 +57,7 @@ if (mismatches.length > 0) {
 }
 
 console.log(
-  `check-changelog-version: ok (${latestPublished} matches ${packageJsonPaths.length - 1} app package.json files)`
+  `check-changelog-version: ok (${packageJsonPaths.length} packages; app ${latestPublished}, explicit Protocol/Gateway versions)`
 );
 
 function listPackageJsons(root) {

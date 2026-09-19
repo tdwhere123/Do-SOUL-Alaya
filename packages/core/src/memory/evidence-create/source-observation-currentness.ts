@@ -28,15 +28,15 @@ export function resolveCurrentSource(
     (row) => row.source_id === located.artifact_key
   );
   if (records.length === 0) {
-    throw new CoreError("VALIDATION", "source is not currently admitted");
+    throw new CoreError("VALIDATION", "source is not currently admitted", { details: { admission: "no_eligible_source" } });
   }
   const current = records.reduce(newerRecord);
   const stored = stores.getStoredRecord(workspaceId, current.identity);
   if (stored === null) {
-    throw new CoreError("VALIDATION", "current source body is not available");
+    throw new CoreError("VALIDATION", "current source body is not available", { details: { admission: "unavailable", unavailable: "source_body" } });
   }
   if (stored.record.content_digest !== expectedDigest) {
-    throw new CoreError("VALIDATION", "source digest is not current");
+    throw new CoreError("VALIDATION", "source digest is not current", { details: { admission: "filtered" } });
   }
   if (hashContentDigest(stored.content_bytes, sha256) !== stored.record.content_digest) {
     throw new CoreError("OBLIGATION_VIOLATION", "stored source body does not match its digest");

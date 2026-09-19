@@ -1,168 +1,150 @@
 import {
-  interpretationNodeIdentity,
-  type InterpretationNodeCoordinate,
-  type SourceEvidenceTarget,
-  type SourceSemanticAlignment,
-  type SourceSemanticConsumedLeaf,
-  type SourceSemanticContextOwner,
-  type SourceSemanticInterpretation,
-  type SourceSemanticOperator
+  interpretationNodeIdentity, sourceSemanticStructuralEdges, sourceSemanticSlotNodeId, SourceSemanticResourceLedger,
+  type InterpretationNodeCoordinate, type SourceEvidenceTarget, type SourceSemanticAlignment,
+  type SourceSemanticConsumedLeaf, type SourceSemanticInterpretation
 } from "@do-soul/alaya-protocol";
+import { CoreError } from "../../shared/errors.js";
 import type { ObserverReaders, RelationObserverRow, SourceObserverRow } from "../conditional-field/observers/observe.js";
-
-/** Traversal activation is not assertion; empty-premise rules must not vacuous-fire. */
-export class SourceSemanticPreparationLimit extends Error {
-  constructor(readonly work: number) { super("source semantic preparation budget exhausted"); }
-}
 
 export function sourceSemanticRelationKey(...parts: readonly (string | number)[]): string {
   return JSON.stringify(["source-interpretation-v3", ...parts]);
 }
-
 export type SourceSemanticPremisePopulation = Readonly<{
-  readonly nodes: ReadonlyMap<string, SourceObserverRow>;
-  readonly rows: readonly RelationObserverRow[];
-  readonly coordinates: ReadonlyMap<string, InterpretationNodeCoordinate>;
-  readonly adjacency: ReadonlyMap<string, RelationObserverRow[]>;
-  readonly positions: ReadonlyMap<string, number>;
-  readonly origins: ReadonlyMap<string, SourceSemanticConsumedLeaf>;
-  readonly work: number;
-  readonly bytes: number;
+  nodes: ReadonlyMap<string, SourceObserverRow>;
+  rows: readonly RelationObserverRow[];
+  coordinates: ReadonlyMap<string, InterpretationNodeCoordinate>;
+  adjacency: ReadonlyMap<string, RelationObserverRow[]>;
+  positions: ReadonlyMap<string, number>;
+  origins: ReadonlyMap<string, SourceSemanticConsumedLeaf>;
+  work: number;
+  bytes: number;
+}>;
+type Input = Readonly<{
+  interpretation: SourceSemanticInterpretation; alignment: SourceSemanticAlignment;
+  context_id: string; interpretation_id: string; scope: string; source_target: SourceEvidenceTarget;
+  meter: SourceSemanticResourceLedger;
+  sourceValidity?: Readonly<{ valid_from: string | null; valid_to: string | null }>;
 }>;
 
-export function compileSourceSemanticPremises(input: Readonly<{
-  interpretation: SourceSemanticInterpretation;
-  alignment: SourceSemanticAlignment;
-  context_id: string;
-  interpretation_id: string;
-  scope: string;
-  source_target: SourceEvidenceTarget;
-  budget: Readonly<{ work_units: number; memory_bytes: number }>;
-  sourceValidity?: Readonly<{ valid_from: string | null; valid_to: string | null }>;
-}>): SourceSemanticPremisePopulation {
-  let work = 1 + input.interpretation.mentions.length;
-  let bytes = Buffer.byteLength(JSON.stringify(input.interpretation));
-  const charge = (value: unknown) => {
-    const size = Buffer.byteLength(JSON.stringify(value));
-    if (work + 1 >= input.budget.work_units || bytes + size >= input.budget.memory_bytes) {
-      throw new SourceSemanticPreparationLimit(work);
-    }
-    work += 1;
-    bytes += size;
-  };
-  const validity = input.sourceValidity === undefined
-    ? {}
-    : { valid_from: input.sourceValidity.valid_from, valid_to: input.sourceValidity.valid_to };
-  const nodes = new Map<string, SourceObserverRow>();
-  const coordinates = new Map<string, InterpretationNodeCoordinate>();
-  const occurrences = [...input.interpretation.frames, ...input.interpretation.operators];
-  const referents = input.interpretation.referents;
-  for (const node of [...referents, ...occurrences]) {
-    const coordinate = {
-      packet_id: input.interpretation_id,
-      hypothesis_id: input.context_id,
-      node_id: node.id
-    };
-    const id = interpretationNodeIdentity(coordinate);
-    charge([node.id, coordinate, id]);
-    coordinates.set(node.id, coordinate);
-    nodes.set(id, {
-      object_id: id,
-      sourceRevision: input.interpretation_id,
-      target: input.source_target,
-      interpretation_node: coordinate,
-      lifecycle_state: "active",
-      scope_class: input.scope,
-      ...validity
-    });
+/** H forms bindings independently; A supplies endpoint-bound adapters, not answer seeds. */
+export function compileSourceSemanticPremises(input: Input): SourceSemanticPremisePopulation {
+  const { meter, interpretation: h } = input;
+  const workBefore = meter.spentWork, bytesBefore = meter.spentBytes;
+  meter.retain(h, "premise preparation");
+  const builder = new PremiseBuilder(input);
+  for (const row of [...h.referents, ...h.frames, ...h.operators]) builder.node(row.id);
+  for (const [fi, frame] of h.frames.entries()) for (const [si, slot] of frame.slots.entries()) {
+    const id = sourceSemanticSlotNodeId(fi, si);
+    builder.slotNodes.set(JSON.stringify([frame.id, slot.id]), id); builder.node(id);
   }
-  const rows: RelationObserverRow[] = [];
-  const adjacency = new Map<string, RelationObserverRow[]>();
-  const positions = new Map<string, number>();
-  const origins = new Map<string, SourceSemanticConsumedLeaf>();
-  const emit = (from: string, to: string, predicate: string, leaf?: SourceSemanticConsumedLeaf) => {
-    const source = coordinates.get(from)!;
-    const target = coordinates.get(to)!;
+  populateOccurrences(builder, h); populateStructure(builder, h); populateBindings(builder, h);
+  populateAlignment(builder, input.alignment);
+  return { nodes: builder.nodes, rows: builder.rows, coordinates: builder.coordinates,
+    adjacency: builder.adjacency, positions: builder.positions, origins: builder.origins,
+    work: meter.spentWork - workBefore, bytes: meter.spentBytes - bytesBefore };
+}
+
+class PremiseBuilder {
+  readonly nodes = new Map<string, SourceObserverRow>();
+  readonly coordinates = new Map<string, InterpretationNodeCoordinate>();
+  readonly rows: RelationObserverRow[] = [];
+  readonly adjacency = new Map<string, RelationObserverRow[]>();
+  readonly positions = new Map<string, number>();
+  readonly origins = new Map<string, SourceSemanticConsumedLeaf>();
+  readonly slotNodes = new Map<string, string>();
+  constructor(readonly input: Input) {}
+  node(id: string): void {
+    this.input.meter.charge(1, 1024, "premise node");
+    const coordinate = { packet_id: this.input.interpretation_id, hypothesis_id: this.input.context_id, node_id: id };
+    const objectId = interpretationNodeIdentity(coordinate);
+    this.coordinates.set(id, coordinate);
+    this.nodes.set(objectId, { object_id: objectId, sourceRevision: this.input.interpretation_id,
+      target: this.input.source_target, interpretation_node: coordinate, lifecycle_state: "active",
+      scope_class: this.input.scope, ...this.input.sourceValidity });
+  }
+  edge(from: string, to: string, predicate: string, leaf?: SourceSemanticConsumedLeaf): void {
+    const source = this.coordinates.get(from), target = this.coordinates.get(to);
+    if (source === undefined || target === undefined) throw new CoreError("OBLIGATION_VIOLATION", "premise endpoint is absent");
+    this.input.meter.charge(1, 2048 + 4 * predicate.length, "premise edge");
     const row: RelationObserverRow = {
-      assertionId: `${input.context_id}/${String(rows.length).padStart(5, "0")}`,
-      sourceObjectId: interpretationNodeIdentity(source),
-      targetObjectId: interpretationNodeIdentity(target),
-      resultObjectId: interpretationNodeIdentity(target),
-      predicate,
-      validity: { kind: "interpretation", packet_id: input.interpretation_id, hypothesis_id: input.context_id },
-      interpretation_source: source,
-      interpretation_target: target,
-      source_revision: input.interpretation_id
+      assertionId: `${this.input.context_id}/${String(this.rows.length).padStart(6, "0")}`,
+      sourceObjectId: interpretationNodeIdentity(source), targetObjectId: interpretationNodeIdentity(target),
+      resultObjectId: interpretationNodeIdentity(target), predicate,
+      validity: { kind: "interpretation", packet_id: this.input.interpretation_id, hypothesis_id: this.input.context_id },
+      interpretation_source: source, interpretation_target: target, source_revision: this.input.interpretation_id
     };
-    const key = JSON.stringify([row.sourceObjectId, row.predicate]);
-    charge([row, key, leaf]);
-    if (leaf !== undefined) origins.set(row.assertionId, leaf);
-    const bucket = adjacency.get(key) ?? [];
-    positions.set(row.assertionId, bucket.length);
-    bucket.push(row);
-    adjacency.set(key, bucket);
-    rows.push(row);
-  };
-  const presence = (id: string) => emit(id, id, sourceSemanticRelationKey("h_presence"), {
-    leaf_kind: "h_presence", occurrence: id
-  });
-  const asserted = new Set(input.interpretation.asserted_at_scope);
-  for (const row of occurrences) {
-    presence(row.id);
-    if (asserted.has(row.id)) {
-      emit(row.id, row.id, sourceSemanticRelationKey("h_assertion_permission"), {
-        leaf_kind: "h_assertion_permission", occurrence: row.id
-      });
-    } else {
-      emit(row.id, row.id, sourceSemanticRelationKey("open_context"));
-    }
-    const owner = row.context_owner;
-    if (owner.kind === "source_act") {
-      emit(row.id, row.id, sourceSemanticRelationKey("source_act", owner.source_act));
-    }
-    if (owner.kind === "embedding" || owner.kind === "operator") {
-      emit(row.id, row.id, sourceSemanticRelationKey("h_embedded"), {
-        leaf_kind: "h_content", occurrence: row.id
-      });
-    }
-    emit(row.id, row.id, sourceSemanticRelationKey("candidate_route"));
+    if (leaf !== undefined) this.origins.set(row.assertionId, leaf);
+    const key = JSON.stringify([row.sourceObjectId, predicate]), bucket = this.adjacency.get(key) ?? [];
+    this.positions.set(row.assertionId, bucket.length);
+    bucket.push(row); this.adjacency.set(key, bucket); this.rows.push(row);
   }
-  for (const row of occurrences) {
-    if (row.context_owner.kind !== "embedding") continue;
-    emitContent(emit, row.context_owner.parent_frame, row.id, "content");
+  self(id: string, parts: readonly (string | number)[], leaf?: SourceSemanticConsumedLeaf): void {
+    this.edge(id, id, sourceSemanticRelationKey(...parts), leaf);
   }
-  for (const operator of input.interpretation.operators) emitOperatorContent(emit, operator);
-  const children = dominationChildren(input.interpretation);
-  for (const row of occurrences) {
-    for (const descendant of descendants(children, row.id)) {
-      emit(row.id, descendant, sourceSemanticRelationKey("candidate_route"));
+}
+
+function populateOccurrences(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
+  const asserted = new Set(h.asserted_at_scope);
+  for (const row of [...h.frames, ...h.operators]) {
+    builder.self(row.id, ["h_presence"], { leaf_kind: "h_presence", occurrence: row.id });
+    const sort = "operator" in row ? "context" : "proposition";
+    builder.self(row.id, ["h_sort", sort], { leaf_kind: "h_sort", occurrence: row.id, value: sort });
+    if ("operator" in row) builder.self(row.id, ["h_operator", row.operator], { leaf_kind: "h_operator", occurrence: row.id, value: row.operator });
+    if (asserted.has(row.id)) builder.self(row.id, ["h_assertion_permission"], { leaf_kind: "h_assertion_permission", occurrence: row.id });
+    else builder.self(row.id, ["open_context"], { leaf_kind: "h_context", occurrence: row.id });
+    if (row.context_owner.kind === "source_act") builder.self(row.id, ["source_act", row.context_owner.source_act],
+      { leaf_kind: "h_source_act", occurrence: row.id, value: row.context_owner.source_act });
+    builder.self(row.id, ["candidate_route"]); builder.self(row.id, ["accept"]);
+  }
+  for (const row of h.referents) if (row.referent_kind === "grouped" || row.referent_kind === "unexpressed") {
+    builder.self(row.id, ["h_sort", "entity"], { leaf_kind: "h_sort", occurrence: row.id, value: "entity" });
+  }
+}
+
+function populateStructure(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
+  const parents = new Map<string, string>();
+  for (const edge of sourceSemanticStructuralEdges(h)) {
+    const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "h_content", occurrence: edge.to,
+      parent: edge.from, relation_kind: edge.kind, role: edge.role };
+    builder.edge(edge.from, edge.to, sourceSemanticRelationKey("h_content", edge.kind, edge.role), leaf);
+    builder.edge(edge.to, edge.from, sourceSemanticRelationKey("h_content_inv", edge.kind, edge.role), leaf);
+    if (edge.governing) { parents.set(edge.to, edge.from); builder.self(edge.to, ["h_embedded"], leaf); }
+  }
+  for (const row of [...h.frames, ...h.operators]) {
+    let ancestor = parents.get(row.id);
+    const visited = new Set<string>([row.id]);
+    while (ancestor !== undefined) {
+      if (visited.has(ancestor)) throw new CoreError("OBLIGATION_VIOLATION", "cyclic source domination");
+      visited.add(ancestor);
+      builder.edge(ancestor, row.id, sourceSemanticRelationKey("candidate_route")); ancestor = parents.get(ancestor);
     }
   }
-  const frames = new Map(input.interpretation.frames.map((row) => [row.id, row]));
-  for (const [index, correspondence] of input.alignment.correspondences.entries()) {
-    const query = correspondence.query_endpoint;
-    const source = correspondence.source_endpoint;
-    if (query.kind === "predicate") {
-      if (source.kind !== "frame") continue;
-      emit(source.frame, source.frame, sourceSemanticRelationKey("a_predicate", query.alternative, query.frame), {
-        leaf_kind: "a_predicate", occurrence: source.frame, correspondence_index: index
-      });
-      continue;
-    }
-    if (source.kind !== "slot") continue;
-    const frame = frames.get(source.frame);
-    emit(source.frame, source.frame, sourceSemanticRelationKey("a_slot", query.alternative, query.frame, query.slot), {
-      leaf_kind: "a_slot", occurrence: source.frame, slot_id: source.slot, correspondence_index: index
-    });
-    const binding = frame?.bindings.find((row) => row.slot_id === source.slot);
-    if (binding === undefined || binding.target.kind !== "node") continue;
-    const leaf: SourceSemanticConsumedLeaf = {
-      leaf_kind: "h_binding", occurrence: source.frame, slot_id: source.slot
-    };
-    emit(source.frame, binding.target.id, sourceSemanticRelationKey("h_binding", query.alternative, query.frame, query.slot), leaf);
-    emit(binding.target.id, source.frame, sourceSemanticRelationKey("h_binding_inv", query.alternative, query.frame, query.slot), leaf);
+}
+
+function populateBindings(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
+  for (const frame of h.frames) for (const binding of frame.bindings) {
+    if (binding.target.kind !== "node") continue;
+    const slot = builder.slotNodes.get(JSON.stringify([frame.id, binding.slot_id]))!;
+    const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "h_binding", occurrence: frame.id, slot_id: binding.slot_id, target: binding.target.id };
+    builder.edge(slot, binding.target.id, sourceSemanticRelationKey("h_binding"), leaf);
+    builder.edge(binding.target.id, slot, sourceSemanticRelationKey("h_binding_inv"), leaf);
   }
-  return { nodes, rows, coordinates, adjacency, positions, origins, work, bytes };
+}
+
+function populateAlignment(builder: PremiseBuilder, alignment: SourceSemanticAlignment): void {
+  for (const [index, correspondence] of alignment.correspondences.entries()) {
+    const query = correspondence.query_endpoint, source = correspondence.source_endpoint;
+    if (query.kind === "referent" && source.kind === "referent") {
+      builder.self(source.referent, ["a_referent", query.variable], { leaf_kind: "a_referent", occurrence: source.referent, correspondence_index: index });
+    } else if (query.kind === "predicate" && source.kind === "frame") {
+      builder.self(source.frame, ["a_predicate", query.alternative, query.frame], { leaf_kind: "a_predicate", occurrence: source.frame, correspondence_index: index });
+    } else if (query.kind === "slot" && source.kind === "slot") {
+      const slot = builder.slotNodes.get(JSON.stringify([source.frame, source.slot]))!;
+      const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "a_slot", occurrence: source.frame, slot_id: source.slot, correspondence_index: index };
+      builder.edge(source.frame, slot, sourceSemanticRelationKey("a_slot", query.alternative, query.frame, query.slot), leaf);
+      builder.edge(slot, source.frame, sourceSemanticRelationKey("a_slot_inv", query.alternative, query.frame, query.slot), leaf);
+    }
+  }
 }
 
 export function sourceSemanticReaders(
@@ -213,68 +195,4 @@ export function sourceSemanticReaders(
       };
     }
   };
-}
-
-function emitContent(
-  emit: (from: string, to: string, predicate: string, leaf?: SourceSemanticConsumedLeaf) => void,
-  from: string,
-  to: string,
-  role: string
-): void {
-  const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "h_content", occurrence: to };
-  emit(from, to, sourceSemanticRelationKey("h_content", role), leaf);
-  emit(to, from, sourceSemanticRelationKey("h_content_inv", role), leaf);
-}
-
-function emitOperatorContent(
-  emit: (from: string, to: string, predicate: string, leaf?: SourceSemanticConsumedLeaf) => void,
-  operator: SourceSemanticOperator
-): void {
-  if (operator.operator === "conditional") {
-    emitContent(emit, operator.id, operator.antecedent, "antecedent");
-    emitContent(emit, operator.id, operator.consequent, "consequent");
-    return;
-  }
-  if (operator.operator === "opaque") {
-    for (const operand of operator.operands) emitContent(emit, operator.id, operand, "content");
-    return;
-  }
-  emitContent(emit, operator.id, operator.content, "content");
-}
-
-function dominationChildren(interpretation: SourceSemanticInterpretation): Map<string, string[]> {
-  const children = new Map<string, string[]>();
-  const add = (from: string, to: string) => {
-    const list = children.get(from) ?? [];
-    if (!list.includes(to)) list.push(to);
-    children.set(from, list);
-  };
-  for (const operator of interpretation.operators) {
-    if (operator.operator === "conditional") {
-      add(operator.id, operator.antecedent);
-      add(operator.id, operator.consequent);
-    } else if (operator.operator === "opaque") {
-      for (const id of operator.operands) add(operator.id, id);
-    } else add(operator.id, operator.content);
-  }
-  for (const row of [...interpretation.frames, ...interpretation.operators]) {
-    const owner: SourceSemanticContextOwner = row.context_owner;
-    if (owner.kind === "embedding") add(owner.parent_frame, row.id);
-    else if (owner.kind === "operator") add(owner.operator_handle, row.id);
-  }
-  return children;
-}
-
-function descendants(children: Map<string, string[]>, start: string): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const stack = [...(children.get(start) ?? [])];
-  while (stack.length > 0) {
-    const id = stack.pop()!;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
-    stack.push(...(children.get(id) ?? []));
-  }
-  return out;
 }

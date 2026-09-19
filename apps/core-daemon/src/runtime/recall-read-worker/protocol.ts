@@ -1,3 +1,4 @@
+import type { CoreError } from "@do-soul/alaya-core";
 import { z } from "zod";
 import {
   AssociationCapContractSchema,
@@ -185,5 +186,6 @@ export type RecallReadWorkerResponse =
         readonly name: string;
         readonly message: string;
         readonly stack?: string;
+        readonly core?: Pick<CoreError, "code" | "subCode" | "details">;
       }>;
     }>;

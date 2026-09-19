@@ -1,3 +1,7 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +38,13 @@ const BUDGET = {
   schema_version: 1 as const, work_units: 200000, memory_bytes: 20000000,
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10
 };
+
+const ALICE_CORRESPONDENCES: import("@do-soul/alaya-protocol").SourceSemanticAlignment["correspondences"] = [
+  { relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
+    source_endpoint: { kind: "referent", referent: "rAlice" }, query_support: { kind: "query_text", excerpt: "Alice" }, source_semantic_support: [{ kind: "lexical", mentions: ["mAlice"] }] },
+  { relation: "contextual_equivalence", query_endpoint: { kind: "slot", alternative: 0, frame: "qUse", slot: "agent" },
+    source_endpoint: { kind: "slot", frame: "fUse", slot: "agent" }, query_support: { kind: "query_text", excerpt: "Alice" }, source_semantic_support: [{ kind: "lexical", mentions: ["mAlice"] }] }
+];
 
 type Execute = NonNullable<RecallReadWorkerClient["sourceSemanticsPort"]>["execute"];
 
@@ -83,11 +94,11 @@ function queryOf(): SourceSemanticQuery {
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
     contract_version: "source-semantic-query-v1",
-    variables: [{ id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }],
+    variables: [{ id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } }, { id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }],
     alternatives: [{
       frames: [{
         id: "qUse", variable: "fUse", predicate_reading: "use",
-        role_requirements: [{
+        role_requirements: [{ id: "agent", role_reading: "agent", target_variable: "actor", support: { kind: "query_text", excerpt: "Alice" } }, {
           id: "theme", role_reading: "theme", target_variable: "tools",
           support: { kind: "query_text", excerpt: "tools" }
         }]
@@ -108,6 +119,7 @@ function alignmentOf(hId: string, q: SourceSemanticQuery): SourceSemanticAlignme
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
     producer_version: "1", contract_version: "source-semantic-alignment-v1",
     correspondences: [
+      ...ALICE_CORRESPONDENCES,
       {
         relation: "contextual_equivalence",
         query_endpoint: { kind: "predicate", alternative: 0, frame: "qUse" },
@@ -127,13 +139,13 @@ function alignmentOf(hId: string, q: SourceSemanticQuery): SourceSemanticAlignme
 }
 
 async function withPublished(body: (input: {
-  hId: string; execute: Execute; filename: string; client: RecallReadWorkerClient;
+  hId: string; allIds: readonly string[]; execute: Execute; filename: string; client: RecallReadWorkerClient;
 }) => Promise<void>, options: Readonly<{
   valid_from?: string; valid_to?: string; state?: "erased" | "superseded";
-  scope?: "project" | "global_core";
+  scope?: "project" | "global_core"; count?: number; large?: boolean;
 }> = {}) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-reasoning-"));
-  const filename = join(directory, "memory.sqlite");
+  const filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const runtimeNotifier = { notifyEntry: async () => undefined };
@@ -156,6 +168,22 @@ async function withPublished(body: (input: {
     provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
     producer_version: "p1", contract_version: "source-interpretation-v3"
   });
+  const allIds = [published.bound.interpretation_id];
+  for (let index = 1; index < (options.count ?? 1); index += 1) {
+    const draft = usesDraft(catalog, ASSERTION);
+    const extra = await createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 }).publish({
+      workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE, catalog,
+      provenance: { producer_id: "test-author" }, draft: { ...draft,
+        gaps: options.large && index === (options.count ?? 1) - 1 ? Array.from({ length: 40 }, () => ({
+          kind: "unsupported_meaning", affected_ids: [], support: [], description: "字".repeat(800)
+        })) : [] }, producer_version: `p${index + 1}`, contract_version: "source-interpretation-v3"
+    });
+    if (options.large && index === (options.count ?? 1) - 1) {
+      expect(JSON.stringify(extra.bound).length).toBeLessThan(65536);
+      expect(Buffer.byteLength(JSON.stringify(extra.bound))).toBeGreaterThan(65536);
+    }
+    allIds.push(extra.bound.interpretation_id);
+  }
   expect(database.connection.prepare("SELECT count(*) AS n FROM memory_entries").get()).toEqual({ n: 0 });
   expect(database.connection.prepare("SELECT count(*) AS n FROM relation_assertions").get()).toEqual({ n: 0 });
   if (options.state === "superseded") {
@@ -180,7 +208,7 @@ async function withPublished(body: (input: {
   try {
     await client.ready();
     await body({
-      hId: published.bound.interpretation_id, execute: (input) => client.sourceSemanticsPort!.execute(input),
+      hId: published.bound.interpretation_id, allIds, execute: (input) => client.sourceSemanticsPort!.execute(input),
       filename, client
     });
   } finally {
@@ -353,3 +381,108 @@ it("does not let a cache hit bypass erasure in the worker snapshot", async () =>
     })).rejects.toThrow();
   });
 }, 30000);
+
+it("paginates current interpretations including a large H and exposes the semantic body needed by A", async () => {
+  await withPublished(async ({ allIds, execute }) => {
+    const q = queryOf(), seen = new Set<string>();
+    let continuation: string | undefined;
+    let count = 0;
+    do {
+      const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q, budget: BUDGET,
+        ...(continuation === undefined ? {} : { continuation_handle: continuation }) });
+      expect(page.kind).toBe("prepare_query");
+      if (page.kind !== "prepare_query") throw new Error("expected query page");
+      for (const descriptor of page.candidates) {
+        expect(seen.has(descriptor.interpretation_id)).toBe(false);
+        expect(descriptor.interpretation?.frames[0]?.bindings.length).toBe(2);
+        expect(descriptor.interpretation?.mentions[0]?.source_ref).toBeDefined();
+        seen.add(descriptor.interpretation_id);
+      }
+      continuation = page.continuation_handle;
+      if (continuation === undefined) expect(page.coverage.discovery).toBe("complete");
+      expect(++count).toBeLessThan(10);
+    } while (continuation !== undefined);
+    expect([...seen].sort()).toEqual([...allIds].sort());
+    expect(count).toBeGreaterThan(1);
+  }, { count: 20, large: true });
+}, 30000);
+
+it("does not disclose unauthorized or obsolete descriptors", async () => {
+  await withPublished(async ({ execute }) => {
+    const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q: queryOf(), budget: BUDGET });
+    if (page.kind !== "prepare_query") throw new Error("expected query page");
+    expect(page.candidates).toEqual([]);
+  }, { scope: "global_core" });
+  await withPublished(async ({ execute }) => {
+    const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q: queryOf(), budget: BUDGET });
+    if (page.kind !== "prepare_query") throw new Error("expected query page");
+    expect(page.candidates).toEqual([]);
+  }, { state: "superseded" });
+});
+
+it("binds query handles to Q, candidates and permissions and keeps one-shot discovery unexercised", async () => {
+  await withPublished(async ({ hId, execute }) => {
+    const q = queryOf(), a = alignmentOf(hId, q);
+    const prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q, budget: BUDGET }, { principal: "owner" });
+    if (prepared.kind !== "prepare_query" || prepared.query_handle === undefined) throw new Error("expected query lease");
+    const request = { kind: "reason" as const, accepts_unreviewed_conditional_results: true as const,
+      query_handle: prepared.query_handle, a, budget: BUDGET, output_byte_limit: 1000000 };
+    await expect(call(execute, { ...request, q: { ...q, gaps: [{ kind: "comparison", affected_ids: [], support: [] }] } }, { principal: "owner" })).rejects.toThrow(/retargeted/);
+    await expect(call(execute, { ...request, h_id: `sha256:${"f".repeat(64)}` }, { principal: "owner" })).rejects.toThrow(/candidates/);
+    await expect(call(execute, request, { principal: "owner", authorized_scopes: { mode: "unrestricted" } })).rejects.toThrow(/scope admission/);
+    await expect(call(execute, request, { principal: "other" })).rejects.toThrow(/principal/);
+    const leased = await call(execute, request, { principal: "owner" });
+    const direct = await call(execute, { kind: "reason", accepts_unreviewed_conditional_results: true,
+      h_id: hId, q, a, original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1000000 }, { principal: "owner" });
+    if (leased.kind !== "reason" || direct.kind !== "reason") throw new Error("expected reason");
+    expect(leased.result.c_id).toBe(direct.result.c_id);
+    expect(leased.coverage.discovery).toBe("complete");
+    expect(direct.coverage.discovery).toBe("unexercised");
+    expect(leased.coverage.h).toBe("open"); expect(leased.coverage.a).toBe("open");
+    expect(leased.result.answers).toEqual(direct.result.answers);
+    expect(direct.work.logical_work).toBeGreaterThan(direct.work.native_work);
+  });
+});
+
+it("retains typed domain errors and measured work across the real worker boundary", async () => {
+  await withPublished(async ({ execute }) => {
+    await expect(call(execute, { kind: "prepare_source", source_id: "absent-source", budget: BUDGET }))
+      .rejects.toMatchObject({ name: "CoreError", code: "NOT_FOUND", details: { work: { native_work: expect.any(Number), logical_work: expect.any(Number) } } });
+  });
+});
+
+it("reports a failed alignment as invalid instead of charging a default Core budget", async () => {
+  await withPublished(async ({ hId, execute }) => {
+    const q = queryOf();
+    const a = alignmentOf(hId, q);
+    const forged = { ...a, correspondences: a.correspondences.map((row) => ({
+      ...row, query_support: { kind: "query_text" as const, excerpt: "invented support" }
+    })) };
+    const result = await call(execute, {
+      kind: "reason", accepts_unreviewed_conditional_results: true,
+      h_id: hId, q, a: forged, original_query: ORIGINAL,
+      budget: { ...BUDGET, work_units: 4000, memory_bytes: 200000 }, output_byte_limit: 1000000
+    });
+    if (result.kind !== "reason") throw new Error("expected reason");
+    expect(result.result.outcome).toEqual({ status: "invalid", reason: "malformed_alignment" });
+    expect(result.coverage.computation).toBe("unexercised");
+  });
+});
+
+it("delivers qualified answers through the actual CLI executable with no provider credentials", async () => {
+  await withPublished(async ({ hId, filename, client }) => {
+    await client.close();
+    const q = queryOf(), args = { operation: "reason", accepts_unreviewed_conditional_results: true,
+      h_id: hId, q, a: alignmentOf(hId, q), original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1000000 };
+    const root = dirname(filename), binary = fileURLToPath(new URL("../../../../../../bin/alaya.mjs", import.meta.url));
+    const output = await promisify(execFile)(process.execPath, [binary, "tools", "call", "soul.interpretation", JSON.stringify(args),
+      "--workspace", WS, "--run", RUN, "--agent", "codex", "--json"], {
+      cwd: root, timeout: 30000, maxBuffer: 2_000_000,
+      env: { PATH: process.env.PATH, HOME: root, USERPROFILE: root, XDG_CONFIG_HOME: root, DATA_DIR: root }
+    });
+    const parsed = JSON.parse(output.stdout);
+    expect(parsed).toMatchObject({ result: { outcome: { status: "interpreted" }, world_claim: "unknown", semantic_status: "unreviewed" }, provider_attempts: 0 });
+    expect(parsed.result.answers[0].returned.tools.node_id).toBe("rTools");
+    expect(parsed.interpretation).toBeDefined(); expect(parsed.alignment).toBeDefined();
+  });
+}, 45000);

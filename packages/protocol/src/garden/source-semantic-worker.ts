@@ -30,11 +30,13 @@ export const SourceSemanticHandleDescriptorSchema = z.object({
   content_digest: Sha256DigestSchema,
   producer_id: BoundedIdSchema,
   producer_version: BoundedLabelSchema,
-  contract_version: BoundedLabelSchema
+  contract_version: BoundedLabelSchema,
+  interpretation: SourceSemanticInterpretationSchema.optional()
 }).strict().readonly();
 
 export const SourceSemanticWorkerWorkSchema = z.object({
   native_work: z.number().int().nonnegative(),
+  logical_work: z.number().int().nonnegative().optional(),
   native_bytes: z.number().int().nonnegative(),
   logical_memory_bytes: z.number().int().nonnegative(),
   rss_bytes: z.number().int().nonnegative()
@@ -51,7 +53,12 @@ const PrepareQueryRequestSchema = z.object({
   original_query: z.string().min(1).max(8192),
   q: SourceSemanticQuerySchema.optional(),
   source_handle: BoundedIdSchema.optional(),
+  continuation_handle: BoundedIdSchema.optional(),
   budget: RequestBudgetSchema
+}).strict().readonly();
+
+const ValidateSourceRequestSchema = z.object({
+  kind: z.literal("validate_source"), source_handle: BoundedIdSchema, budget: RequestBudgetSchema
 }).strict().readonly();
 
 const ReasonRequestSchema = z.object({
@@ -77,7 +84,7 @@ const ReasonRequestSchema = z.object({
 }).readonly();
 
 export const SourceSemanticWorkerRequestSchema = z.discriminatedUnion("kind", [
-  PrepareSourceRequestSchema, PrepareQueryRequestSchema, ReasonRequestSchema
+  PrepareSourceRequestSchema, ValidateSourceRequestSchema, PrepareQueryRequestSchema, ReasonRequestSchema
 ]);
 
 const CoverageWork = {
@@ -86,6 +93,11 @@ const CoverageWork = {
 };
 
 export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("validate_source"), source_id: BoundedIdSchema, source_version: BoundedIdSchema,
+    content_digest: Sha256DigestSchema, source: z.string().max(65536), catalog: SourceReferenceCatalogSchema,
+    ...CoverageWork
+  }).strict().readonly(),
   z.object({
     kind: z.literal("prepare_source"),
     source_handle: BoundedIdSchema,
@@ -98,6 +110,7 @@ export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("prepare_query"),
     query_handle: BoundedIdSchema.optional(),
+    continuation_handle: BoundedIdSchema.optional(),
     q_id: Sha256DigestSchema.optional(),
     outcome: SourceSemanticOutcomeSchema.optional(),
     candidates: z.array(SourceSemanticHandleDescriptorSchema).max(64).readonly(),

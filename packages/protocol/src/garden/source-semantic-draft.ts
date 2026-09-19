@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sourceSemanticOwnershipProblems, sourceSemanticStructuralEdges } from "./source-semantic-structure.js";
 import { SourceAssertionIdSchema } from "../evidence/source-selection.js";
 import { SourceReferenceSchema } from "../evidence/source-reference.js";
 
@@ -181,6 +182,7 @@ export function refineSourceSemanticGraph(graph: SourceSemanticGraph, context: I
     refineContextOwner(operator.id, operator.context_owner, { frames, operators, occurrences }, problem);
     refineOperatorOperands(operator, { referents, occurrences }, problem);
   }
+  for (const issue of sourceSemanticOwnershipProblems(graph)) problem(issue);
   refineDomination(graph, problem);
 }
 
@@ -226,17 +228,7 @@ function refineOperatorOperands(
 }
 
 function dominationChildren(graph: SourceSemanticGraph, id: string): readonly string[] {
-  const operator = graph.operators.find((row) => row.id === id);
-  if (operator !== undefined) {
-    if (operator.operator === "conditional") return [operator.antecedent, operator.consequent];
-    if (operator.operator === "opaque") return operator.operands;
-    return [operator.content];
-  }
-  return graph.frames.flatMap((frame) =>
-    frame.context_owner.kind === "embedding" && frame.context_owner.parent_frame === id
-      ? [frame.id] : []).concat(graph.operators.flatMap((row) =>
-    row.context_owner.kind === "embedding" && row.context_owner.parent_frame === id
-      ? [row.id] : []));
+  return sourceSemanticStructuralEdges(graph).filter((edge) => edge.governing && edge.from === id).map((edge) => edge.to);
 }
 
 function refineDomination(graph: SourceSemanticGraph, problem: (message: string) => void): void {

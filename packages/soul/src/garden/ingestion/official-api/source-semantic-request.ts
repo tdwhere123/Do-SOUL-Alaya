@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
-  AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticHandleSchema,
+  AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
   SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema, SourceSemanticResponseEnvelopeSchema,
-  SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
-  SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT, SOURCE_SEMANTIC_QUERY_CONTRACT,
+  SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
+  SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
   buildSourceReferenceCatalog, canonicalJson,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
+import { indexOfficialApiSourceAssertions } from "../../triage/grounding/source-locator.js";
 import { buildOfficialApiSourceRequest } from "./extraction-request.js";
 
 export const SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT = "source-semantic-query-request-v1" as const;
@@ -37,6 +38,7 @@ export const SourceSemanticOpenRequestBodySchema = z.object({
   normalizer_version: z.literal(SOURCE_SEMANTIC_NORMALIZER_VERSION),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
+  assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(8).readonly().optional(),
   source_assertions: z.array(z.object({
     assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1)
   }).strict().readonly()).max(8).readonly()
@@ -48,16 +50,12 @@ const ApprovedContextSchema = z.object({
 
 export const SourceSemanticHDescriptorSchema = z.object({
   h_id: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
-  source_id: BoundedIdSchema,
-  source_version: BoundedIdSchema,
-  frames: z.array(z.object({
-    id: SourceSemanticHandleSchema,
-    predicate_reading: z.string().min(1).max(256),
-    slots: z.array(z.object({
-      id: SourceSemanticHandleSchema, role_reading: z.string().min(1).max(256)
-    }).strict().readonly()).max(8).readonly()
-  }).strict().readonly()).max(256).readonly()
-}).strict().readonly();
+  interpretation: SourceSemanticInterpretationSchema
+}).strict().superRefine((descriptor, context) => {
+  if (sourceSemanticInterpretationIdentity(descriptor.interpretation, semanticSha256) !== descriptor.h_id) {
+    context.addIssue({ code: "custom", message: "alignment descriptor identity differs from its interpretation" });
+  }
+}).readonly();
 
 export type SourceSemanticResourceLimits = z.infer<typeof SourceSemanticResourceLimitsSchema>;
 export type SourceSemanticOpenRequestBody = z.infer<typeof SourceSemanticOpenRequestBodySchema>;
@@ -167,6 +165,9 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
+    assertion_locations: indexOfficialApiSourceAssertions(input.sourceCorpus).filter((row) => input.assertionIds.includes(row.assertion_id)).map((row) => ({
+      assertion_id: row.assertion_id, source_utf8_span: [Buffer.byteLength(input.sourceCorpus.slice(0, row.start)), Buffer.byteLength(input.sourceCorpus.slice(0, row.end))]
+    })),
     source_assertions: extraction.source_assertions
   });
   return parseSourceSemanticRequest({
@@ -207,6 +208,7 @@ export function buildSourceSemanticAlignmentRequest(
   rejectForbiddenProposalInput(input);
   const admitted_q = SourceSemanticQuerySchema.parse(input.admitted_q);
   const h_descriptors = z.array(SourceSemanticHDescriptorSchema).min(1).max(64).parse(input.h_descriptors);
+  if (Buffer.byteLength(JSON.stringify(h_descriptors)) > 1_000_000) throw new AlayaError("VALIDATION", "alignment descriptors exceed input budget");
   return {
     contract: SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,

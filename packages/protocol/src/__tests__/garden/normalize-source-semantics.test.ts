@@ -285,7 +285,7 @@ it("rejects a domination cycle as invalid H and admits an ordinary binding cycle
     operators: [
       {
         id: "opA", operator: "not", content: "opB", assertion_ids: [1],
-        context_owner: { kind: "source_act", source_act: "assertion" }, additional_support: []
+        context_owner: { kind: "operator", operator_handle: "opB" }, additional_support: []
       },
       {
         id: "opB", operator: "not", content: "opA", assertion_ids: [1],

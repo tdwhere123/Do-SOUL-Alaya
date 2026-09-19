@@ -30,7 +30,7 @@ export type CachedSourceSemantic = Readonly<{
   contract: typeof SOURCE_SEMANTIC_CACHE_CONTRACT;
   source_binding: "unbound";
   interpretation_contract: typeof SOURCE_SEMANTIC_PACKET_CONTRACT;
-  completion: "interpreted" | "abstained" | "no_eligible_source";
+  completion: "interpreted" | "abstained" | "no_executable_proposition" | "no_eligible_source";
   source_corpus: string;
   producer_id: string;
 }> & (
@@ -70,8 +70,8 @@ export function assertSourceSemanticShardCapacity(sourceCorpus: string, line: Ge
   }
 }
 
-function retainableOutcome(result: SourceSemanticProposalResult): "interpreted" | "abstained" | undefined {
-  if (result.outcome.status === "interpreted" || result.outcome.status === "abstained") return result.outcome.status;
+function retainableOutcome(result: SourceSemanticProposalResult): "interpreted" | "abstained" | "no_executable_proposition" | undefined {
+  if (result.outcome.status === "interpreted" || result.outcome.status === "abstained" || result.outcome.status === "no_executable_proposition") return result.outcome.status;
   return undefined;
 }
 

@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { sourceSemanticStanceLists } from "./source-semantic-structure.js";
+export { sourceSemanticStanceLists } from "./source-semantic-structure.js";
+import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted } from "./source-semantic-resources.js";
 import { AlayaError } from "../shared/alaya-error.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import {
@@ -7,7 +10,7 @@ import {
 } from "../evidence/source-reference.js";
 import {
   SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticDraftSchema,
-  type SourceSemanticContextOwner, type SourceSemanticDraft, type SourceSemanticMention
+  type SourceSemanticDraft, type SourceSemanticMention
 } from "./source-semantic-draft.js";
 import {
   SourceSemanticInterpretationSchema, SourceSemanticSourceBindingSchema,
@@ -15,8 +18,8 @@ import {
   type SourceSemanticSourceBinding
 } from "./source-semantic-interpretation.js";
 
-export const SOURCE_SEMANTIC_K_VERSION = "source-semantic-k-v1" as const;
-export const SOURCE_SEMANTIC_NORMALIZER_VERSION = "source-semantic-normalizer-v1" as const;
+export const SOURCE_SEMANTIC_K_VERSION = "source-semantic-k-v2" as const;
+export const SOURCE_SEMANTIC_NORMALIZER_VERSION = "source-semantic-normalizer-v2" as const;
 
 export type SourceSemanticNormalizationBudget = Readonly<{
   readonly work_units: number;
@@ -32,6 +35,7 @@ export type SourceSemanticNormalizationInput = Readonly<{
   readonly producer_version: string;
   readonly contract_version: string;
   readonly budget?: SourceSemanticNormalizationBudget;
+  readonly meter?: SourceSemanticResourceLedger;
 }>;
 
 export type SourceSemanticHandleMap = Readonly<Record<string, string>>;
@@ -62,16 +66,16 @@ export function normalizeSourceSemantics(
 function gateResources(
   input: SourceSemanticNormalizationInput
 ): SourceSemanticNormalizationResult | undefined {
-  if (input.budget === undefined) return undefined;
   try {
+    const meter = input.meter ?? new SourceSemanticResourceLedger(input.budget ?? { work_units: 200000, memory_bytes: 20000000 });
+    meter.retain(input.draft, "normalization input");
+    meter.retain(input.catalog, "normalization catalog");
     const catalog = SourceReferenceCatalogSchema.parse(input.catalog);
     const cost = sourceReferencePreparationCost(catalog.assertions.map((row) => ({
       assertion_id: row.assertion_id,
       text: row.segments.map((segment) => segment.text).join("")
     })));
-    if (cost.work_units > input.budget.work_units || cost.memory_bytes > input.budget.memory_bytes) {
-      return { status: "resource_exhausted" };
-    }
+    meter.charge(cost.work_units, cost.memory_bytes, "reference normalization");
     return undefined;
   } catch (error) {
     return fromCaught(error);
@@ -99,7 +103,8 @@ function resolveMentions(
           assertion_id: mention.assertion_id,
           source_ref: mention.source_ref,
           text: located.text,
-          // Catalog code-unit span; Core UTF-8 conversion is a later publication concern.
+          // The unit tag prevents a durable span being converted a second time.
+          span_space: "assertion_code_units" as const,
           utf8_span: located.span
         };
       })
@@ -140,17 +145,6 @@ function assemble(
   };
 }
 
-export function sourceSemanticStanceLists(
-  occurrences: readonly Readonly<{ id: string; context_owner: SourceSemanticContextOwner }>[]
-): Readonly<{ entry_roots: readonly string[]; asserted_at_scope: readonly string[] }> {
-  const sourceActs = occurrences.filter((row) => row.context_owner.kind === "source_act");
-  return {
-    entry_roots: sourceActs.map((row) => row.id),
-    asserted_at_scope: sourceActs.filter((row) => row.context_owner.kind === "source_act"
-      && row.context_owner.source_act === "assertion").map((row) => row.id)
-  };
-}
-
 function identityMap(draft: SourceSemanticDraft): Record<string, string> {
   const ids = [
     ...draft.mentions.map((row) => row.id),
@@ -162,6 +156,7 @@ function identityMap(draft: SourceSemanticDraft): Record<string, string> {
 }
 
 function fromCaught(error: unknown): SourceSemanticNormalizationResult {
+  if (error instanceof SourceSemanticResourceExhausted) return { status: "resource_exhausted" };
   if (error instanceof AlayaError) return fromIssues([{ message: error.message }]);
   if (error instanceof z.ZodError) return fromIssues(error.issues);
   throw error;

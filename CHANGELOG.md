@@ -8,14 +8,29 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 5.0.0
+## Unreleased — protocol 5.1.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 5.0.0 can move
+heading (currently `## v0.3.11` below). Protocol 5.1.0 can move
 independently of the app semver. `@do-soul/alaya-engine-gateway` is
 `0.3.12` for the additive `soul.interpretation` tool surface.
+
+Protocol 5.1.0 is an additive minor under handbook invariant §25. The
+opt-in `soul.interpretation` channel adds qualified answer bindings,
+per-answer proof forests, located `no_executable_proposition`
+dispositions, host-only `unavailable` source reads, optional
+`authorized_scopes` admission on the four host operations, and paged
+full-H preparation. Structural/normalizer/lowering versions are 2;
+version-1 open hypotheses require new explicit preparation, not
+relabeling. Operator ownership, named query referents, variable sorts,
+non-tree query incidences and fixed-C completion are enforced before
+qualified delivery. Source references are revalidated on publish and
+reopen. Bounded preparation leases retain candidate/Q/scope identity;
+one-shot results do not replay another run's coverage. Ordinary Recall,
+Garden v1 and profile-bound v2 contracts are unchanged. Real-model
+quality and default activation remain unexercised.
 
 Protocol 5.0.0 is a major under handbook invariant §25: the advertised
 MCP/EventLog capture-execution fail-closed reason

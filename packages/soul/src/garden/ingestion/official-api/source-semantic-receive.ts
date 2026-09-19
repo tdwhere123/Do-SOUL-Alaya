@@ -3,21 +3,21 @@ import {
   AlayaError, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_PACKET_CONTRACT,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticAlignmentSchema,
   SourceSemanticOutcomeSchema, SourceSemanticQuerySchema, SourceSemanticResponseEnvelopeSchema,
-  normalizeSourceSemantics, sourceSemanticQueryIdentity,
+  normalizeSourceSemantics, sourceSemanticQueryIdentity, verifySourceSemanticDisposition, canonicalJson,
   type SourceSemanticAlignment, type SourceSemanticDraft, type SourceSemanticInterpretation,
   type SourceSemanticOutcome, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import {
   SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT, SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT,
   buildSourceSemanticAlignmentRequest, buildSourceSemanticQueryRequest, buildSourceSemanticRequest,
-  parseSourceSemanticRequest, semanticSha256,
+  parseSourceSemanticRequest, semanticSha256, rejectForbiddenProposalInput,
   type SourceSemanticAlignmentProposalInput, type SourceSemanticAlignmentRequest,
   type SourceSemanticHDescriptor, type SourceSemanticProposalInput, type SourceSemanticQueryProposalInput,
   type SourceSemanticQueryRequest, type SourceSemanticRequest
 } from "./source-semantic-request.js";
 
 export const MAX_SOURCE_SEMANTIC_RESPONSE_BYTES = 1024 * 1024;
-const HOST_ONLY_OUTCOMES = new Set(["no_eligible_source", "unexercised", "preparation_required"]);
+const HOST_ONLY_OUTCOMES = new Set(["no_eligible_source", "unavailable", "unexercised", "preparation_required"]);
 
 export type SourceSemanticProposalResult = Readonly<{
   outcome: SourceSemanticOutcome;
@@ -102,6 +102,10 @@ export function receiveSourceSemantics(
   const { outcome, draft } = envelope.data;
   if (HOST_ONLY_OUTCOMES.has(outcome.status)) {
     return { ...attempt, outcome: { status: "invalid", reason: "host_only_outcome" } };
+  }
+  if (outcome.status === "no_executable_proposition") {
+    try { return { ...attempt, outcome: verifySourceSemanticDisposition(outcome, request.source_catalog, semanticSha256) }; }
+    catch { return { ...attempt, outcome: { status: "invalid", reason: "unbound_disposition_support" } }; }
   }
   if (outcome.status !== "interpreted" || draft === undefined) return { ...attempt, outcome };
   return admitInterpretedDraft(draft, request, input, attempt);
@@ -210,7 +214,8 @@ function admitInterpretedDraft(
     draft, catalog: request.source_catalog, sha256: semanticSha256,
     source: {
       source_id: input.source_id, source_version: input.source_version,
-      content_digest: `sha256:${semanticSha256(input.sourceCorpus)}`
+      content_digest: `sha256:${semanticSha256(input.sourceCorpus)}`,
+      ...(request.source_request.assertion_locations === undefined ? {} : { assertion_locations: request.source_request.assertion_locations })
     },
     producer_id: request.source_request.producer_capability.producer_id,
     producer_version: request.source_request.producer_capability.producer_version,
@@ -229,6 +234,11 @@ function admitInterpretedDraft(
 }
 
 function bindSource(request: SourceSemanticRequest, input: SourceSemanticProposalInput): void {
+  const expected = buildSourceSemanticRequest({ ...input, assertionIds: request.source_request.source_assertions.map((row) => row.assertion_id) });
+  if (canonicalJson(expected.source_catalog) !== canonicalJson(request.source_catalog) ||
+    request.source_request.assertion_locations !== undefined && canonicalJson(expected.source_request.assertion_locations) !== canonicalJson(request.source_request.assertion_locations)) {
+    throw new AlayaError("CONFLICT", "source semantic assertion locations differ from the source owner");
+  }
   if (semanticSha256(input.sourceCorpus) !== request.source_catalog.source_digest) {
     throw new AlayaError("CONFLICT", "source semantic source generation mismatch");
   }
@@ -250,16 +260,14 @@ function parseResponseJson<T>(rawJson: string, attempt: Attempt<T>):
   { status: "ok"; value: unknown } | { status: "fail"; result: Attempt<T> & { outcome: SourceSemanticOutcome } } {
   try {
     return { status: "ok", value: JSON.parse(rawJson) };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    const truncated = /end of JSON|Unterminated string|Unexpected end|Expected ',' or '\}'|Expected property name/iu.test(message);
-    return { status: "fail", result: { ...attempt, outcome: truncated
-      ? { status: "truncated" } : { status: "invalid", reason: "malformed_json" } } };
+  } catch {
+    return { status: "fail", result: { ...attempt, outcome: { status: "invalid", reason: "malformed_json" } } };
   }
 }
 
 function materializeQuery(body: unknown, request: SourceSemanticQueryRequest): SourceSemanticQuery {
   const record = asRecord(body);
+  rejectForbiddenProposalInput(record);
   return SourceSemanticQuerySchema.parse({
     contract: SOURCE_SEMANTIC_QUERY_CONTRACT,
     original_query_digest: request.original_query_digest,
@@ -273,6 +281,7 @@ function materializeQuery(body: unknown, request: SourceSemanticQueryRequest): S
 
 function materializeAlignment(body: unknown, request: SourceSemanticAlignmentRequest): unknown {
   const record = asRecord(body);
+  rejectForbiddenProposalInput(record);
   const h_id = typeof record.h_id === "string" ? record.h_id : singleHId(request.h_descriptors);
   return {
     contract: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,

@@ -15,7 +15,8 @@ const Handle = SourceSemanticHandleSchema;
 
 export const SourceSemanticQueryVariableSchema = z.object({
   id: Handle,
-  sort: z.enum(["entity", "proposition", "context"])
+  sort: z.enum(["entity", "proposition", "context"]),
+  reference: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly().optional()
 }).strict().readonly();
 
 export const SourceSemanticQueryRoleRequirementSchema = z.object({
@@ -29,6 +30,7 @@ export const SourceSemanticQueryFrameSchema = z.object({
   id: Handle,
   variable: Handle,
   predicate_reading: SourceSemanticReadingSchema,
+  operator: z.enum(["not", "possible", "reported", "conditional", "opaque"]).optional(),
   role_requirements: z.array(SourceSemanticQueryRoleRequirementSchema).max(8).readonly(),
   source_act: z.enum(["question", "directive"]).optional()
 }).strict().readonly();
@@ -69,7 +71,22 @@ export const SourceSemanticQuerySchema = z.object({
   if (variables.size !== query.variables.length) problem("duplicate handles rejected");
   if (query.return_variables.some((id) => !variables.has(id))) problem("unknown cross-reference");
   if (new Set(query.return_variables).size !== query.return_variables.length) problem("duplicate handles rejected");
-  for (const alternative of query.alternatives) refineAlternative(alternative, variables, problem);
+  const sorts = new Map(query.variables.map((row) => [row.id, row.sort]));
+  for (const variable of query.variables) {
+    if (variable.reference !== undefined && variable.sort !== "entity") problem("query reference requires an entity variable");
+  }
+  for (const alternative of query.alternatives) {
+    refineAlternative(alternative, variables, problem);
+    const used = new Set(alternative.frames.flatMap((row) => [row.variable, ...row.role_requirements.map((role) => role.target_variable)]));
+    if (query.return_variables.some((id) => !used.has(id))) problem("return variable is unbound in an alternative");
+    for (const frame of alternative.frames) {
+      if (sorts.get(frame.variable) !== (frame.operator === undefined ? "proposition" : "context")) problem("frame variable has wrong sort");
+      if (frame.operator !== undefined && frame.role_requirements.some((role) =>
+        frame.operator !== "reported" || role.id !== "reporter" || sorts.get(role.target_variable) !== "entity")) {
+        problem("operator roles require typed reporter participation");
+      }
+    }
+  }
 }).readonly();
 
 function refineAlternative(
@@ -94,6 +111,20 @@ function refineAlternative(
       problem("unknown cross-reference");
     }
   }
+  const byId = new Map(alternative.frames.map((row) => [row.id, row]));
+  for (const obligation of alternative.context_obligations) {
+    const edge = obligation.incidence;
+    if (edge === undefined) continue;
+    if (edge.other_frame === obligation.frame) problem("query incidence cannot govern itself");
+    const parent = byId.get(edge.other_frame);
+    if (parent === undefined) continue;
+    const role = edge.role ?? "content";
+    if (edge.kind === "embedding" && (parent.operator !== undefined || role !== "content")) problem("embedding requires an ordinary content owner");
+    if (edge.kind === "operator_operand" && (parent.operator === undefined || role === "reporter" ||
+      (parent.operator === "conditional" ? role !== "antecedent" && role !== "consequent" : role !== "content"))) {
+      problem("operator incidence requires its declared operand type");
+    }
+  }
   if (!queryAlternativeConnected(alternative)) problem("disconnected query is invalid");
 }
 
@@ -111,6 +142,7 @@ export function queryAlternativeConnected(
     return root;
   };
   const unite = (left: string, right: string) => {
+    if (!parent.has(left) || !parent.has(right)) return;
     const a = find(left), b = find(right);
     if (a !== b) parent.set(a, b);
   };

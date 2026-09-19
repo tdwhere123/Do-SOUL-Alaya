@@ -98,7 +98,7 @@ it("distinguishes opaque wrapping from unresolved source_act", () => {
       id: "opOpaque", operator: "opaque", operands: ["fSend"], assertion_ids: [1],
       context_owner: { kind: "source_act", source_act: "assertion" }, additional_support: []
     }]
-  })).success).toBe(true);
+  })).success).toBe(false);
 });
 
 it("rejects invalid operator operands, reporter targets, and unknown operator names", () => {

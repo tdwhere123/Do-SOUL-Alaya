@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sourceReferenceResolver, type SourceInterpretationProfile } from "@do-soul/alaya-protocol";
+import { sourceReferenceResolver, sourceSemanticInterpretationIdentity, type SourceInterpretationProfile } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/official-api/source-packet-request.js";
 import {
@@ -116,7 +116,7 @@ describe("open source semantic proposal producer", () => {
     expect(request.schema_version).toBe(4);
     expect(request.interpretation_contract).toBe("source-interpretation-v3");
     expect(request.profile).toBeUndefined();
-    expect(request.source_request.k_version).toBe("source-semantic-k-v1");
+    expect(request.source_request.k_version).toBe("source-semantic-k-v2");
     expect(request.source_request.producer_capability.proposes).toBe("draft_semantics");
     expect(request.source_request.resource_limits.output_byte_limit).toBe(1024 * 1024);
     expect(request.source_catalog.assertions.length).toBe(1);
@@ -209,12 +209,12 @@ describe("open source semantic proposal producer", () => {
     expect(received.draft).toBeUndefined();
   });
 
-  it("reports truncated incomplete JSON before treating it as abstention", () => {
-    const received = proposeSourceSemantics(sourceInput(), {
-      rawJson: '{"contract":"source-interpretation-response-v3"'
-    });
-    expect(received.outcome.status).toBe("truncated");
-    expect(received.provider_attempts).toBe(1);
+  it("keeps incomplete JSON as invalid rather than truncated or abstained", () => {
+    for (const rawJson of ['{"contract":"source-interpretation-response-v3"', '{"a":', "[", '{"a":"']) {
+      const received = proposeSourceSemantics(sourceInput(), { rawJson });
+      expect(received.outcome, rawJson).toEqual({ status: "invalid", reason: "malformed_json" });
+      expect(received.provider_attempts).toBe(1);
+    }
   });
 
   it("bounds raw response bytes before JSON parse", () => {
@@ -269,11 +269,12 @@ describe("query and alignment proposal entry points", () => {
   });
 
   it("accepts admitted Q plus H descriptors and rejects ranking or seeds", () => {
+    const input = sourceInput(), request = buildSourceSemanticRequest(input);
+    const h = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
     const received = proposeAlignmentSemantics({
       admitted_q: admittedQuery(),
       h_descriptors: [{
-        h_id: digest, source_id: "src", source_version: "1",
-        frames: [{ id: "fAccession", predicate_reading: "accession", slots: [{ id: "bay", role_reading: "bay" }] }]
+        h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h
       }],
       producer_id: "align-producer", producer_version: "1"
     }, {
@@ -293,6 +294,8 @@ describe("query and alignment proposal entry points", () => {
     });
     expect(received.request.contract).toBe(SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT);
     expect(received.alignment?.correspondences).toHaveLength(1);
+    expect(received.request.h_descriptors[0]!.interpretation.mentions.length).toBe(6);
+    expect(received.request.h_descriptors[0]!.interpretation.frames[0]!.bindings.length).toBe(3);
     expect(() => proposeAlignmentSemantics({
       admitted_q: admittedQuery(),
       h_descriptors: [{ h_id: digest, source_id: "src", source_version: "1", frames: [] }],
@@ -300,4 +303,18 @@ describe("query and alignment proposal entry points", () => {
       ranking: [digest], seeds: ["fAccession"]
     } as never)).toThrow(/ranking|seeds/u);
   });
+});
+
+it("retains a located no-proposition disposition without confusing it with abstention", () => {
+  const input = sourceInput("Thank you very much for the detailed response and helpful explanation."), request = buildSourceSemanticRequest(input);
+  const row = request.source_catalog.assertions[0]!;
+  const disposition = { status: "no_executable_proposition", description: "Acknowledgement without an executable proposition",
+    context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
+      source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }] };
+  const received = proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-interpretation-response-v3", outcome: disposition }) });
+  expect(received.outcome).toEqual(disposition);
+  expect(received.provider_attempts).toBe(1); expect(received.draft).toBeUndefined(); expect(received.raw_response_id).toBeDefined();
+  const forged = { ...disposition, context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
+    source_ref: { first: "a999s0", last: "a999s0" } }] };
+  expect(proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-interpretation-response-v3", outcome: forged }) }).outcome.status).toBe("invalid");
 });

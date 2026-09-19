@@ -698,3 +698,64 @@ descriptions are preserved in the
 [historical handbook](../archive/recall-before-retirement-2026-09-08.md).
 Their scores and approval records are historical evidence, not current
 implementation guidance or target KPI certification.
+
+
+## Opt-in open source semantics
+
+The `soul.interpretation` channel retains its source-local H, source-independent
+Q, explicit A, and selected C. It does not replace ordinary `soul.recall` or
+Garden v1. Protocol 4.16.0 uses `source-semantic-k-v2`,
+`source-semantic-normalizer-v2` and `source-semantic-lowering-v2`. An older open
+H is not relabeled or silently promoted; recreate its interpretation explicitly.
+The profile-bound source-interpretation-v2 route and its recorded bytes remain
+separate regression contracts.
+
+Protocol owns operator/embedding incidence and the exact host-derived entry
+roots and assertion permissions. Entry activation is not assertion. Conflicting
+operand and context-owner declarations are invalid. Reporters are participants,
+not governed content. Query operators, role targets, variable sorts, named
+referent correspondences and all incidence obligations lower onto the existing
+conditional-field engine. Iterative traversal visits reverse and non-tree
+incidences with shared variable binding; it is not a second answer matcher.
+
+Core publishes source UTF-8 assertion locations and re-resolves mention
+selectors at both the normalized-IR entrance and SQLite reopen. Ambiguous
+repeated text requires explicit host locations. The unique-text compatibility
+adapter is not permission to guess an occurrence. Source revision, authorized
+scope and erasure still govern every read and audited publication.
+
+`prepare_query` returns bounded current full-H descriptors and optional
+`continuation_handle` pages. Q generation is source-independent; A generation
+uses these exact descriptors, including roles, bindings, mentions and contexts.
+Host operations accept the same `authorized_scopes` admission as ordinary Recall
+(`unrestricted`, `named`, or `denied`); omitting it stays unrestricted for the
+attached-agent default. Source/query/page handles have distinct operations,
+principal/workspace/scope bindings and finite process-local lifetimes. They do
+not survive worker loss.
+Query/page handles conservatively invalidate on the worker database revision;
+reprepare after changes. One-shot reasoning is supported without claiming that
+library discovery ran. There is no cross-run semantic result/coverage cache.
+
+Results expose actual accepting bindings and returned variables, per-answer
+explanation roots, the existing derivation forest, and exact observation-to-leaf
+attribution. `consumed_leaves` is only a summary, not a replacement for the proof
+forest. A source or query gap is not filled by a structural match. In particular,
+query gaps retain `query_complete=false`; fixed-C computation completion does
+not certify H, Q, A fidelity or exhaust possible interpretations.
+
+Work, logical memory, native I/O and process RSS remain separately labeled.
+Preparation, compilation, solving, projection and proof materialization share
+remaining budgets. Incomplete observation/solver/index/proof or a page/output
+cap must not become complete-empty. When the output cap cannot retain proof and
+qualifiers, conclusions are removed rather than delivered without assumptions.
+The generic evidence-capsule text-size bound still applies before durable H
+publication; successful source parsing alone does not establish publication.
+
+A nonempty source with no executable proposition may carry a located, unreviewed
+`no_executable_proposition` disposition. It is distinct from abstention,
+no eligible source, an admitted source whose current body is `unavailable`,
+invalid output, transport failure and unexercised work.
+Batch retains the request-bound raw response; MCP can return the source-bound
+disposition without minting an empty H or a memory object. The host operations
+remain provider-free. Authored/native regressions establish engineering
+behavior, not real-model extraction quality or benchmark utility.

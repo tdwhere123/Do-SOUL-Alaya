@@ -1,3 +1,4 @@
+import { CoreError } from "@do-soul/alaya-core";
 import { Worker } from "node:worker_threads";
 import { indexEntryCacheKey, type SourceInterpretationReasoningResult, type SourceSemanticWorkerResult, type PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
@@ -284,7 +285,8 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   public readonly sourceSemanticsPort = {
     execute: async (input: WorkerOperationPayload<"conditionalField.sourceSemantics">): Promise<SourceSemanticWorkerResult> => {
       const handle = input.request.kind === "reason" ? input.request.query_handle
-        : input.request.kind === "prepare_query" ? input.request.source_handle : undefined;
+        : input.request.kind === "prepare_query" ? input.request.continuation_handle ?? input.request.source_handle
+        : input.request.kind === "validate_source" ? input.request.source_handle : undefined;
       const worker = handle === undefined
         ? this.requireWorker("conditionalField.sourceSemantics")
         : this.deliveryOwner(handle);
@@ -293,6 +295,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       const issued = parsed.kind === "prepare_source" ? parsed.source_handle
         : parsed.kind === "prepare_query" ? parsed.query_handle : undefined;
       if (issued !== undefined) this.deliveryOwners.set(issued, worker);
+      if (parsed.kind === "prepare_query" && parsed.continuation_handle !== undefined) this.deliveryOwners.set(parsed.continuation_handle, worker);
       while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
       return parsed;
     }
@@ -513,7 +516,8 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       return;
     }
     this.pending.delete(message.id);
-    const error = new Error(message.error.message);
+    const error = message.error.core === undefined ? new Error(message.error.message)
+      : new CoreError(message.error.core.code, message.error.message, { subCode: message.error.core.subCode, details: message.error.core.details });
     error.name = message.error.name;
     if (message.error.stack !== undefined) {
       error.stack = message.error.stack;

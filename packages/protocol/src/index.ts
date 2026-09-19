@@ -24,6 +24,8 @@
  * - `shared` — primitives shared across the above.
  */
 export type { EnvLookup } from "./config/env-lookup.js";
+export * from "./garden/source-semantic-resources.js";
+export { sourceSemanticStructuralEdges, sourceSemanticContextContains, sourceSemanticSlotNodeId } from "./garden/source-semantic-structure.js";
 export {
   ENV_BOOLEAN_FALSE_TOKENS,
   ENV_BOOLEAN_TRUE_TOKENS,

@@ -40,7 +40,8 @@ describe("MCP memory catalog", () => {
 
 function isObjectInputSchema(schema: unknown): boolean {
   if (typeof schema !== "object" || schema === null) return false;
-  const candidate = schema as { readonly type?: string; readonly anyOf?: readonly unknown[] };
+  const candidate = schema as { readonly type?: string; readonly anyOf?: readonly unknown[]; readonly oneOf?: readonly unknown[] };
   if (candidate.type === "object") return true;
-  return candidate.anyOf?.every((branch) => isObjectInputSchema(branch)) === true;
+  const branches = candidate.anyOf ?? candidate.oneOf;
+  return branches?.every((branch) => isObjectInputSchema(branch)) === true;
 }

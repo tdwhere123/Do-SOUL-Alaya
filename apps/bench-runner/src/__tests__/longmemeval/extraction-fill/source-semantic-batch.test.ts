@@ -72,7 +72,7 @@ async function setup(providerUrl = "https://fixture-provider.invalid") {
     maxUsd: receipt.price.estimated_upper_usd, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
     deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 };
   const limitsPath = join(cacheRoot, "limits.json"); writeFileSync(limitsPath, JSON.stringify(limits));
-  let creates = 0, displayName = "", failCreate = false, responseMode: "semantic" | "oversize" = "semantic";
+  let creates = 0, displayName = "", failCreate = false, responseMode: "semantic" | "oversize" | "disposition" = "semantic";
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
     const path = new URL(String(url)).pathname;
     if (path === "/upload/v1beta/files") return new Response(null, { headers: { "x-goog-upload-url": "https://fixture-provider.invalid/upload-session" } });
@@ -86,7 +86,7 @@ async function setup(providerUrl = "https://fixture-provider.invalid") {
       model: `models/${MODEL}`, state: "BATCH_STATE_SUCCEEDED", inputConfig: { fileName: "files/input" }, output: { responsesFile: "files/output" } } });
     if (path === "/download/v1beta/files/output:download") return new Response(plan().lines.map((line) => JSON.stringify({ key: line.key,
       response: { candidates: [{ finishReason: "STOP", content: { parts: [{ text: responseMode === "semantic"
-        ? authoredResponse(line.userPrompt) : "x".repeat(1024 * 1024 + 1) }] } }],
+        ? authoredResponse(line.userPrompt) : responseMode === "disposition" ? dispositionResponse(line.userPrompt) : "x".repeat(1024 * 1024 + 1) }] } }],
         usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } } })).join("\n"));
     throw new Error(`unexpected offline request ${path}`);
   });
@@ -216,3 +216,27 @@ it("enforces the 32 MiB shard bound and the 1 MiB envelope before reservation or
     expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
   }
 }, 60000);
+
+function dispositionResponse(userPrompt: string): string {
+  const request = parseSourceSemanticRequest(JSON.parse(userPrompt)), row = request.source_catalog.assertions[0]!;
+  return JSON.stringify({ contract: "source-interpretation-response-v3", outcome: {
+    status: "no_executable_proposition", description: "Unreviewed producer disposition",
+    context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
+      source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }]
+  } });
+}
+it("imports and reopens a legal no-proposition disposition without changing it to abstention", async () => {
+  const fixture = await setup(); fixture.mode("disposition");
+  expect(await fixture.run("prepare")).toBe(0); expect(await fixture.run("submit")).toBe(0);
+  expect(await fixture.run("resume")).toBe(0);
+  expect(await fixture.run("import")).toBe(0);
+  for (const line of fixture.plan().lines) {
+    const inspected = inspectCachedSourceSemantic(cacheRoot, line.key, MODEL, REQUEST_PROFILE);
+    expect(inspected.status).toBe("hit");
+    if (inspected.status !== "hit") throw new Error("disposition must remain a retained cache hit");
+    expect(inspected.admitted.outcome.status).toBe("no_executable_proposition");
+    expect(inspected.admitted.draft).toBeUndefined();
+    expect(inspected.parsedDraftCount).toBe(0);
+    expect(inspected.deterministicEmpty).toBe(false);
+  }
+});

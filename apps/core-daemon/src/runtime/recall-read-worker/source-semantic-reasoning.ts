@@ -1,421 +1,231 @@
-import { randomUUID } from "node:crypto";
 import {
-  SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SourceSemanticPublishedInterpretationSchema,
-  SourceSemanticWorkerResultSchema, buildSourceReferenceCatalog, canonicalJson,
-  sourceReferencePreparationCost, type SourceRecordIdentity, type SourceSemanticCoverage,
-  type SourceSemanticHandleDescriptor, type SourceSemanticQuery,
+  SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SOURCE_SEMANTIC_K_VERSION, SourceSemanticPublishedInterpretationSchema,
+  SourceSemanticWorkerResultSchema, SourceSemanticResourceExhausted, buildSourceReferenceCatalog, canonicalJson,
+  sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticHandleDescriptor,
   type SourceSemanticWorkerResult
 } from "@do-soul/alaya-protocol";
-import {
-  CoreError, admitSourceSemanticAlignment, admitSourceSemanticQuery, authorizedScopesFromAdmission,
+import { CoreError, admitSourceSemanticAlignment, admitSourceSemanticQuery, authorizedScopesFromAdmission,
   fieldContractSha256, reasonSourceSemanticInterpretation, semanticInterpretationEvidenceId,
-  verifyPublishedSourceSemanticInterpretation, type FieldFormationStores
-} from "@do-soul/alaya-core";
-import {
-  RETAINED_SOURCE_READ_RESERVATION, SqliteFieldSourceRecordRepo, SqliteSourceHintReader,
-  sourceRecordFromRow, type StorageDatabase
-} from "@do-soul/alaya-storage";
+  verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
+import { SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
+import { sourceSemanticReadStores, currentSemanticSource, authorizeSemanticScope, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
+import { issueSemanticLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticRevision, type SourceSemanticLease } from "./source-semantic-leases.js";
 
 type Payload = WorkerOperationPayload<"conditionalField.sourceSemantics">;
-type Lease = Readonly<{
-  workspace_id: string; principal: string; as_of: string;
-  authorized: readonly string[] | null; expires_at: string | null;
-  source_id?: string; source_version?: string; content_digest?: string;
-  original_query?: string; q?: SourceSemanticQuery; q_id?: string;
-  q_producer?: string; q_contract?: string;
-  candidates?: readonly SourceSemanticHandleDescriptor[]; truncated?: boolean;
-}>;
-type CacheRow = Readonly<{ key: string; result: SourceSemanticWorkerResult; h_id: string }>;
+const IDLE: SourceSemanticCoverage = { discovery: "unexercised", h: "unexercised", q: "unexercised", a: "unexercised", computation: "unexercised", payload: "complete" };
 
-const LEASES = new WeakMap<RecallReadWorkerRuntime, Map<string, Lease>>();
-const CACHE = new WeakMap<RecallReadWorkerRuntime, Map<string, CacheRow>>();
-const IDLE: SourceSemanticCoverage = {
-  discovery: "unexercised", h: "unexercised", q: "unexercised",
-  a: "unexercised", computation: "unexercised", payload: "complete"
-};
-
-/** Snapshot-local open-semantics preparation and one-shot reason. Live v2 interpretation is unchanged. */
-export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload) {
-  const run = () => runWithinSnapshot(runtime, payload);
-  return runtime.database.connection.inTransaction ? run() : runtime.database.connection.transaction(run)();
+/** Snapshot-owned source preparation and one-shot reasoning. No cross-run result/coverage cache. */
+export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerResult {
+  const meter = new SourceSemanticReadBudget(payload.request.budget);
+  const run = () => {
+    const scopes = authorizedScopesFromAdmission(payload.authorized_scopes).authorized_scopes;
+    if (scopes === undefined) throw new CoreError("VALIDATION", "source semantics requires explicit scope admission");
+    const authorized = scopes === null ? null : [...scopes].sort();
+    if (payload.request.kind === "prepare_source" || payload.request.kind === "validate_source") return prepareSource(runtime, payload, authorized, meter);
+    if (payload.request.kind === "prepare_query") return prepareQuery(runtime, payload, authorized, meter);
+    return reasonSemantics(runtime, payload, authorized, meter);
+  };
+  try { return runtime.database.connection.inTransaction ? run() : runtime.database.connection.transaction(run)(); }
+  catch (error) {
+    if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work: workOf(meter) } });
+    if (error instanceof CoreError) throw new CoreError(error.code, error.message, { subCode: error.subCode, details: { ...error.details, work: workOf(meter) } });
+    throw error;
+  }
 }
 
-function runWithinSnapshot(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerResult {
-  const authorized = scopes(payload);
-  const meter = new SourceReadBudget(payload.request.budget);
-  if (payload.request.kind === "prepare_source") {
-    return prepareSource(runtime, payload, authorized, meter);
-  }
-  if (payload.request.kind === "prepare_query") {
-    return prepareQuery(runtime, payload, authorized, meter);
-  }
-  return reasonSemantics(runtime, payload, authorized, meter);
+function leaseBase(runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null) {
+  return { workspace_id: payload.workspace_id, principal: payload.principal ?? "", as_of: payload.as_of,
+    authorized, expires_at: semanticLeaseExpiry(payload.as_of, payload.expires_at), revision: sourceSemanticRevision(runtime) };
 }
 
-function prepareSource(
-  runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null, meter: SourceReadBudget
-): SourceSemanticWorkerResult {
+function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null,
+  meter: SourceSemanticReadBudget): SourceSemanticWorkerResult {
   const request = payload.request;
-  if (request.kind !== "prepare_source") throw new CoreError("VALIDATION", "prepare_source kind mismatch");
-  meter.reserve(1, 16);
-  const stores = boundedSourceStores(runtime.database, payload.workspace_id, request.source_id, meter, authorized);
-  const stored = currentStored(stores, payload.workspace_id, request.source_id);
-  authorizeScope(stored.record.scope_class, authorized);
-  const assertions = [{ assertion_id: 1, text: stored.content_bytes }];
-  const preparation = sourceReferencePreparationCost(assertions);
-  meter.reserve(preparation.work_units, preparation.memory_bytes, "source reference preparation");
-  meter.charge(preparation.work_units, 0);
-  meter.bytes -= preparation.memory_bytes;
+  if (request.kind !== "prepare_source" && request.kind !== "validate_source") throw new CoreError("VALIDATION", "source preparation kind mismatch");
+  const lease = request.kind === "validate_source" ? readSemanticLease(runtime, payload, request.source_handle, authorized, "source") : undefined;
+  const sourceId = request.kind === "prepare_source" ? request.source_id : lease!.source_id!;
+  const stores = sourceSemanticReadStores(runtime.database, payload.workspace_id, sourceId, meter, authorized);
+  const stored = currentSemanticSource(stores, payload.workspace_id, sourceId);
+  authorizeSemanticScope(stored.record.scope_class, authorized);
+  if (lease !== undefined && (lease.source_version !== stored.record.source_version || lease.content_digest !== stored.record.content_digest)) {
+    throw new CoreError("VALIDATION", "preparation source is no longer current", { details: { admission: "filtered" } });
+  }
+  const assertions = stored.content_bytes.length === 0 ? [] : [{ assertion_id: 1, text: stored.content_bytes }];
+  const cost = sourceReferencePreparationCost(assertions);
+  meter.charge(cost.work_units, cost.memory_bytes, "source references");
   const catalog = buildSourceReferenceCatalog(fieldContractSha256(stored.content_bytes), assertions, fieldContractSha256);
-  meter.bytes += preparation.memory_bytes;
-  const handle = issueLease(runtime, {
-    workspace_id: payload.workspace_id, principal: principalOf(payload), as_of: payload.as_of,
-    authorized, expires_at: payload.expires_at ?? null, source_id: stored.record.source_id,
-    source_version: stored.record.source_version, content_digest: stored.record.content_digest
+  const fields = { source_id: sourceId, source_version: stored.record.source_version, content_digest: stored.record.content_digest, catalog };
+  if (request.kind === "validate_source") return SourceSemanticWorkerResultSchema.parse({
+    kind: request.kind, ...fields, source: stored.content_bytes, coverage: { ...IDLE, discovery: "complete" }, work: workOf(meter)
   });
-  return SourceSemanticWorkerResultSchema.parse({
-    kind: "prepare_source", source_handle: handle, source_id: stored.record.source_id,
-    source_version: stored.record.source_version, content_digest: stored.record.content_digest,
-    catalog, coverage: { ...IDLE, discovery: "complete" }, work: workOf(meter)
-  });
+  const source_handle = issueSemanticLease(runtime, { ...leaseBase(runtime, payload, authorized), kind: "source",
+    source_id: sourceId, source_version: stored.record.source_version, content_digest: stored.record.content_digest }, meter);
+  return SourceSemanticWorkerResultSchema.parse({ kind: request.kind, ...fields, source_handle,
+    coverage: { ...IDLE, discovery: "complete" }, work: workOf(meter) });
 }
 
-function prepareQuery(
-  runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null, meter: SourceReadBudget
-): SourceSemanticWorkerResult {
+function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null,
+  meter: SourceSemanticReadBudget): SourceSemanticWorkerResult {
   const request = payload.request;
-  if (request.kind !== "prepare_query") throw new CoreError("VALIDATION", "prepare_query kind mismatch");
-  const sourceLease = request.source_handle === undefined ? undefined : readLease(runtime, payload, request.source_handle);
+  if (request.kind !== "prepare_query") throw new CoreError("VALIDATION", "query preparation kind mismatch");
+  const source = request.source_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.source_handle, authorized, "source");
+  const prior = request.continuation_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.continuation_handle, authorized, "page");
+  meter.retain(request.q, "query admission");
   const admission = admitSourceSemanticQuery(request.q, request.original_query);
-  const discovered = discoverDescriptors(runtime.database, payload.workspace_id, meter, sourceLease?.source_id);
+  const qid = admission.kind === "admitted" ? admission.query_id : undefined;
+  if (prior !== undefined && (prior.original_query !== request.original_query || prior.q_id !== qid
+    || source !== undefined && prior.source_id !== source.source_id)) {
+    throw new CoreError("VALIDATION", "preparation continuation query changed", { details: { admission: "bound" } });
+  }
+  const scopeLease = prior ?? source;
+  if (scopeLease?.source_id !== undefined) {
+    const stored = currentSemanticSource(sourceSemanticReadStores(runtime.database, payload.workspace_id, scopeLease.source_id, meter, authorized), payload.workspace_id, scopeLease.source_id);
+    if (stored.record.source_version !== scopeLease.source_version || stored.record.content_digest !== scopeLease.content_digest) {
+      throw new CoreError("VALIDATION", "preparation source is no longer current", { details: { admission: "filtered" } });
+    }
+  }
+  const discovery = discover(runtime, payload, authorized, meter, prior?.after_cursor ?? null, scopeLease?.source_id);
+  const open = discovery.open || prior?.discovery_open === true;
+  const coverage: SourceSemanticCoverage = { ...IDLE, discovery: discovery.truncated || open ? "truncated" : "complete",
+    h: "open", q: admission.kind === "admitted" && admission.query.gaps.length === 0 ? "complete" : "open" };
+  const base: Omit<SourceSemanticLease, "kind"> = { ...leaseBase(runtime, payload, authorized),
+    ...(scopeLease === undefined ? {} : { source_id: scopeLease.source_id, source_version: scopeLease.source_version, content_digest: scopeLease.content_digest }),
+    original_query: request.original_query, q_id: qid, q: admission.kind === "admitted" ? admission.query : undefined,
+    candidates: discovery.candidates.map((row) => row.interpretation_id), truncated: discovery.truncated || open,
+    after_cursor: discovery.cursor, discovery_open: open };
+  const query_handle = admission.kind === "admitted" ? issueSemanticLease(runtime, { ...base, kind: "query" }, meter) : undefined;
+  const continuation_handle = discovery.truncated && discovery.cursor !== null && discovery.cursor !== (prior?.after_cursor ?? null)
+    ? issueSemanticLease(runtime, { ...base, kind: "page" }, meter) : undefined;
+  const outcome = admission.kind === "admitted" ? undefined : admission.kind === "absent"
+    ? { status: "preparation_required" as const, missing: "q" as const }
+    : { status: "invalid" as const, reason: admission.kind === "unsupported" ? "unsupported_producer" : "malformed_query" };
+  return SourceSemanticWorkerResultSchema.parse({ kind: "prepare_query", query_handle, continuation_handle, q_id: qid,
+    candidates: discovery.candidates, truncated: discovery.truncated || open, outcome, coverage, work: workOf(meter) });
+}
+
+function discover(runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null,
+  meter: SourceSemanticReadBudget, after: string | null, sourceId?: string) {
+  const page = new SqliteSourceHintReader(runtime.database.connection).pageBoundInterpretations({
+    workspaceId: payload.workspace_id, limit: 16, nativeLimit: Math.min(32, meter.work), afterCursor: after,
+    nativeByteLimit: Math.min(meter.bytes, 1_000_000), maxGistBytes: 1_000_000, activeOnly: true,
+    matches: (gist) => { try { return JSON.parse(gist)?.contract === SOURCE_SEMANTIC_PUBLISHED_CONTRACT; } catch { return false; } }
+  });
+  meter.read(page.nativeVisits, page.bytesRead);
+  const candidates: SourceSemanticHandleDescriptor[] = [];
+  let open = page.unavailable || page.resourceLimited === true, cursor = after, outputBytes = 0, stopped = false;
+  for (const row of page.rows) {
+    const parsed = SourceSemanticPublishedInterpretationSchema.safeParse(JSON.parse(row.gist));
+    if (!parsed.success) { open = true; cursor = row.cursor; continue; }
+    if (sourceId !== undefined && parsed.data.interpretation.source.source_id !== sourceId) { cursor = row.cursor; continue; }
+    try {
+      const checked = loadVerified(runtime, payload.workspace_id, parsed.data.interpretation_id, authorized, meter);
+      if (checked.bound.interpretation.k_version !== SOURCE_SEMANTIC_K_VERSION) { open = true; cursor = row.cursor; continue; }
+      const h = checked.bound.interpretation;
+      const candidate: SourceSemanticHandleDescriptor = { interpretation_id: checked.bound.interpretation_id,
+        source_id: h.source.source_id, source_version: h.source.source_version, content_digest: h.source.content_digest,
+        producer_id: h.producer_id, producer_version: h.producer_version, contract_version: h.contract_version, interpretation: h };
+      const size = Buffer.byteLength(JSON.stringify(candidate));
+      if (outputBytes + size > 800_000) { stopped = true; break; }
+      meter.retain(candidate, "descriptor delivery"); candidates.push(candidate); outputBytes += size; cursor = row.cursor;
+    } catch (error) {
+      if (!(error instanceof CoreError)) throw error;
+      const admission = admissionOf(error);
+      if (admission !== "filtered" && admission !== "no_eligible_source" && error.code !== "NOT_FOUND") open = true;
+      cursor = row.cursor;
+    }
+  }
+  if (!stopped) cursor = page.committedThrough;
+  return { candidates, open, cursor, truncated: stopped || page.truncated };
+}
+
+function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, hId: string,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget) {
+  meter.reserve(1, 16);
+  const capsule = new SqliteSourceHintReader(runtime.database.connection).readBoundInterpretation(
+    workspace, semanticInterpretationEvidenceId(hId, fieldContractSha256), meter.bytes);
+  meter.read(capsule.nativeVisits, capsule.bytesRead);
+  if (capsule.status !== "complete" || capsule.gist === null) {
+    throw new CoreError("CONFLICT", `source semantic interpretation read is ${capsule.status}`, { details: { admission: "unavailable", unavailable: capsule.status } });
+  }
+  meter.charge(1, capsule.bytesRead * 4, "interpretation decoding");
+  const bound = SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(capsule.gist));
+  if (bound.interpretation_id !== hId) throw new CoreError("VALIDATION", "interpretation identity mismatch");
+  const stores = sourceSemanticReadStores(runtime.database, workspace, bound.interpretation.source.source_id, meter, authorized);
+  meter.retain(bound, "interpretation verification");
+  return verifyPublishedSourceSemanticInterpretation({ stores, sha256: fieldContractSha256, meter }, bound, workspace);
+}
+
+function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null,
+  meter: SourceSemanticReadBudget): SourceSemanticWorkerResult {
+  const request = payload.request;
+  if (request.kind !== "reason") throw new CoreError("VALIDATION", "reason kind mismatch");
+  const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.query_handle, authorized, "query");
+  if (lease !== undefined && (request.original_query !== undefined && request.original_query !== lease.original_query
+    || request.q !== undefined && canonicalJson(request.q) !== canonicalJson(lease.q))) {
+    throw new CoreError("VALIDATION", "query handle cannot be retargeted", { details: { admission: "bound" } });
+  }
+  const original = lease?.original_query ?? request.original_query, q = lease?.q ?? request.q, a = request.a;
+  const hid = request.h_id ?? a?.h_id;
+  if (lease !== undefined && (hid === undefined || !lease.candidates?.includes(hid))) {
+    throw new CoreError("VALIDATION", "H is outside this preparation's candidates", { details: { admission: "bound" } });
+  }
+  if (original === undefined || q === undefined || a === undefined || hid === undefined) {
+    throw new CoreError("VALIDATION", "reason lacks its prepared H/Q/A");
+  }
+  const checked = loadVerified(runtime, payload.workspace_id, hid, authorized, meter);
+  meter.retain(q, "query admission"); meter.retain(a, "alignment admission");
+  const admission = admitSourceSemanticAlignment({ alignment: a, h: checked.bound.interpretation, q, original_query: original });
+  const discovery = lease === undefined ? "unexercised" as const : lease.truncated ? "truncated" as const : "complete" as const;
+  const qCoverage = q.gaps.length === 0 ? "complete" as const : "open" as const;
   if (admission.kind !== "admitted") {
     return SourceSemanticWorkerResultSchema.parse({
-      kind: "prepare_query", candidates: discovered.candidates, truncated: discovered.truncated,
-      outcome: admission.kind === "absent"
-        ? { status: "preparation_required", missing: "q" }
-        : { status: "invalid", reason: admission.kind === "unsupported" ? "unsupported_producer" : "malformed_query" },
-      coverage: {
-        ...IDLE, discovery: discovered.truncated ? "truncated" : "complete",
-        q: admission.kind === "absent" ? "open" : "complete", payload: "complete"
+      kind: "reason",
+      result: {
+        contract: "source-interpretation-reasoning-v2", semantic_status: "unreviewed",
+        conclusion_scope: "conditional_on_interpretation", world_claim: "unknown",
+        outcome: { status: "invalid", reason: admission.kind === "unsupported" ? "unsupported_producer" : "malformed_alignment" },
+        consumed_leaves: []
       },
+      coverage: { discovery, h: "open", q: qCoverage, a: "open", computation: "unexercised", payload: "complete" },
       work: workOf(meter)
     });
   }
-  const handle = issueLease(runtime, {
-    workspace_id: payload.workspace_id, principal: principalOf(payload), as_of: payload.as_of,
-    authorized, expires_at: payload.expires_at ?? null, source_id: sourceLease?.source_id,
-    source_version: sourceLease?.source_version, content_digest: sourceLease?.content_digest,
-    original_query: request.original_query, q: admission.query, q_id: admission.query_id,
-    q_producer: admission.query.producer_id, q_contract: admission.query.contract_version,
-    candidates: discovered.candidates, truncated: discovered.truncated
-  });
-  return SourceSemanticWorkerResultSchema.parse({
-    kind: "prepare_query", query_handle: handle, q_id: admission.query_id,
-    candidates: discovered.candidates, truncated: discovered.truncated,
-    coverage: {
-      ...IDLE, discovery: discovered.truncated ? "truncated" : "complete",
-      q: "complete", h: discovered.truncated ? "open" : "complete"
-    },
-    work: workOf(meter)
-  });
-}
-
-function reasonSemantics(
-  runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null, meter: SourceReadBudget
-): SourceSemanticWorkerResult {
-  const request = payload.request;
-  if (request.kind !== "reason") throw new CoreError("VALIDATION", "reason kind mismatch");
-  const lease = request.query_handle === undefined ? undefined : readLease(runtime, payload, request.query_handle);
-  const original = request.original_query ?? lease?.original_query;
-  const q = request.q ?? lease?.q;
-  const a = request.a;
-  if (original === undefined || q === undefined || a === undefined) {
-    return qualifyReason({
-      result: reasonSourceSemanticInterpretation({
-        h: {}, q, a, original_query: original, workspaceId: payload.workspace_id,
-        scope: "project", authorizedScopes: authorized, asOf: payload.as_of
-      }),
-      coverage: { ...IDLE, q: q === undefined ? "open" : "complete", a: a === undefined ? "open" : "unexercised" },
-      meter, outputLimit: request.output_byte_limit
-    });
-  }
-  const hid = request.h_id ?? a.h_id;
-  const checked = loadVerified(runtime.database, payload.workspace_id, hid, authorized, meter);
-  authorizeScope(checked.stored.record.scope_class, authorized);
-  const admission = admitSourceSemanticAlignment({ alignment: a, h: checked.bound.interpretation, q, original_query: original });
-  meter.charge(1, Buffer.byteLength(JSON.stringify([q, a])));
-  const cacheKey = canonicalJson({
-    c: admission.kind === "admitted" ? admission.context_id : hid,
-    workspace: payload.workspace_id, principal: principalOf(payload), scopes: authorized,
-    as_of: payload.as_of, source: checked.bound.interpretation.source, limit: request.output_byte_limit,
-    work_units: request.budget.work_units, memory_bytes: request.budget.memory_bytes,
-    page_budget: request.budget.page_budget
-  });
-  const cached = CACHE.get(runtime)?.get(cacheKey);
-  if (cached !== undefined && cached.h_id === hid) {
-    meter.charge(1, 0);
-    return withWork(cached.result, meter);
-  }
-  const remaining = {
-    ...request.budget, work_units: meter.work, memory_bytes: meter.bytes
-  };
   const result = reasonSourceSemanticInterpretation({
-    request: admission.kind === "admitted" ? {
+    request: {
       contract: "source-interpretation-reasoning-v2", accepts_unreviewed_conditional_results: true,
       h_id: admission.interpretation_id, q_id: admission.query_id, a_id: admission.alignment_id,
-      original_query: original, budget: remaining, output_byte_limit: request.output_byte_limit
-    } : undefined,
+      original_query: original, budget: { ...request.budget, ...meter.remaining() }, output_byte_limit: request.output_byte_limit
+    },
     h: checked.bound, q, a, original_query: original, workspaceId: payload.workspace_id,
     scope: checked.stored.record.scope_class ?? "project", authorizedScopes: authorized,
-    asOf: payload.as_of, sourceValidity: checked.stored.record, source_target: checked.bound.source_target
+    asOf: lease?.as_of ?? payload.as_of, sourceValidity: checked.stored.record, source_target: checked.bound.source_target
   });
-  const coverage: SourceSemanticCoverage = {
-    discovery: lease?.truncated === true ? "truncated" : "complete",
-    h: "complete", q: "complete",
-    a: admission.kind === "admitted" ? "complete" : "open",
-    computation: computationCoverage(result.outcome.status),
-    payload: result.outcome.status === "truncated" ? "truncated" : "complete"
+  if (result.resource_usage !== undefined) meter.charge(result.resource_usage.work_units, result.resource_usage.memory_bytes, "reason computation");
+  const coverage = {
+    discovery, h: "open" as const, q: qCoverage, a: "open" as const,
+    computation: result.outcome.status === "interpreted" ? "complete" as const : "open" as const,
+    payload: result.outcome.status === "truncated" ? "truncated" as const : "complete" as const
   };
-  const packages = admission.kind === "admitted" ? {
-    interpretation: admission.interpretation, query: admission.query,
-    alignment: admission.alignment, context: admission.context
-  } : {};
-  const delivered = qualifyReason({ result, packages, coverage, meter, outputLimit: request.output_byte_limit });
-  remember(runtime, cacheKey, hid, delivered);
-  return delivered;
-}
-
-function loadVerified(
-  database: StorageDatabase, workspace: string, hId: string,
-  authorized: readonly string[] | null, meter: SourceReadBudget
-) {
-  meter.reserve(1, 16);
-  const capsule = new SqliteSourceHintReader(database.connection).readBoundInterpretation(
-    workspace, semanticInterpretationEvidenceId(hId, fieldContractSha256), meter.bytes);
-  meter.charge(capsule.nativeVisits, capsule.bytesRead);
-  if (capsule.status !== "complete" || capsule.gist === null) {
-    throw new CoreError("CONFLICT", `source semantic interpretation read is ${capsule.status}`);
-  }
-  const bound = SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(capsule.gist));
-  const artifact = bound.interpretation.source.source_id;
-  const stores = boundedSourceStores(database, workspace, artifact, meter, authorized);
-  const reference = sourceReferencePreparationCost([{ assertion_id: 1, text: "" }]);
-  meter.reserve(bound.interpretation.mentions.length + 1, 0);
-  meter.charge(bound.interpretation.mentions.length + 1, 0);
-  meter.reserve(reference.work_units, 0, "source reference preparation");
-  return verifyPublishedSourceSemanticInterpretation({ stores, sha256: fieldContractSha256 }, bound, workspace);
-}
-
-function discoverDescriptors(
-  database: StorageDatabase, workspace: string, meter: SourceReadBudget, sourceId: string | undefined
-): { candidates: SourceSemanticHandleDescriptor[]; truncated: boolean } {
-  const reader = new SqliteSourceHintReader(database.connection);
-  const page = reader.pageBoundInterpretations({
-    workspaceId: workspace, limit: 16, nativeLimit: Math.max(1, Math.min(32, meter.work)),
-    afterCursor: null, nativeByteLimit: meter.bytes,
-    matches: (gist) => {
-      try { return JSON.parse(gist)?.contract === SOURCE_SEMANTIC_PUBLISHED_CONTRACT; }
-      catch { return false; }
-    }
-  });
-  meter.charge(page.nativeVisits, page.bytesRead);
-  const candidates: SourceSemanticHandleDescriptor[] = [];
-  for (const row of page.rows) {
-    const parsed = SourceSemanticPublishedInterpretationSchema.safeParse(JSON.parse(row.gist));
-    if (!parsed.success) continue;
-    const source = parsed.data.interpretation.source;
-    if (sourceId !== undefined && source.source_id !== sourceId) continue;
-    candidates.push({
-      interpretation_id: parsed.data.interpretation_id, source_id: source.source_id,
-      source_version: source.source_version, content_digest: source.content_digest,
-      producer_id: parsed.data.interpretation.producer_id,
-      producer_version: parsed.data.interpretation.producer_version,
-      contract_version: parsed.data.interpretation.contract_version
-    });
-  }
-  return { candidates, truncated: page.truncated === true };
-}
-
-function qualifyReason(input: {
-  result: ReturnType<typeof reasonSourceSemanticInterpretation>;
-  packages?: {
-    interpretation?: unknown; query?: unknown; alignment?: unknown; context?: unknown;
-  };
-  coverage: SourceSemanticCoverage; meter: SourceReadBudget; outputLimit: number;
-}): SourceSemanticWorkerResult {
-  const full = SourceSemanticWorkerResultSchema.parse({
-    kind: "reason", result: input.result, coverage: input.coverage, work: workOf(input.meter),
-    ...input.packages
-  });
-  if (Buffer.byteLength(JSON.stringify(full)) <= input.outputLimit) return full;
-  const limited = SourceSemanticWorkerResultSchema.parse({
-    kind: "reason",
-    result: { ...input.result, outcome: { status: "truncated" }, consumed_leaves: [] },
-    coverage: { ...input.coverage, payload: "truncated" }, work: workOf(input.meter)
-  });
-  if (Buffer.byteLength(JSON.stringify(limited)) > input.outputLimit) {
-    throw new CoreError("VALIDATION", "output budget cannot retain mandatory interpretation qualifier");
-  }
+  const packages = { interpretation: admission.interpretation, query: admission.query,
+    alignment: admission.alignment, context: admission.context };
+  const full = SourceSemanticWorkerResultSchema.parse({ kind: "reason", result, ...packages, coverage, work: workOf(meter) });
+  if (Buffer.byteLength(JSON.stringify(full)) <= request.output_byte_limit) return full;
+  const limited = SourceSemanticWorkerResultSchema.parse({ kind: "reason",
+    result: { contract: result.contract, c_id: result.c_id, h_id: result.h_id, q_id: result.q_id, a_id: result.a_id,
+      semantic_status: result.semantic_status, conclusion_scope: result.conclusion_scope, world_claim: result.world_claim,
+      outcome: { status: "truncated" }, consumed_leaves: [] },
+    coverage: { ...coverage, payload: "truncated" }, work: workOf(meter) });
+  if (Buffer.byteLength(JSON.stringify(limited)) > request.output_byte_limit) throw new CoreError("VALIDATION", "output budget cannot retain interpretation qualifiers");
   return limited;
 }
 
-function boundedSourceStores(
-  database: StorageDatabase, workspace: string, artifact: string,
-  meter: SourceReadBudget, authorized: readonly string[] | null
-): Pick<FieldFormationStores, "listRecords" | "getStoredRecord"> {
-  const repo = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
-  let records: SourceRecordIdentity[] | undefined;
-  const stored = new Map<string, NonNullable<ReturnType<FieldFormationStores["getStoredRecord"]>>>();
-  return {
-    listRecords: (workspaceId) => {
-      if (workspaceId !== workspace) throw new CoreError("VALIDATION", "source workspace mismatch");
-      if (records !== undefined) return records;
-      records = [];
-      let afterRecordedAt = "";
-      let afterRecordId = "";
-      while (true) {
-        meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
-        const page = repo.listPageBounded(workspace, { limit: 1, afterRecordedAt, afterRecordId }, 1);
-        meter.charge(5, page.rows.reduce((sum, row) => sum + row.nativeBytes + row.metadataBytes, 0));
-        if (page.unavailable) throw new CoreError("CONFLICT", "source catalog is unavailable");
-        const row = page.rows[0]?.record;
-        if (row == null) {
-          if (page.rows.length !== 0) throw new CoreError("CONFLICT", "source metadata is unavailable");
-          break;
-        }
-        if (row.source_id === artifact) records.push(sourceRecordFromRow(row));
-        afterRecordedAt = row.recorded_at; afterRecordId = row.record_id;
-        if (!page.truncated) break;
-      }
-      return records;
-    },
-    getStoredRecord: (workspaceId, id) => {
-      if (workspaceId !== workspace) throw new CoreError("VALIDATION", "source workspace mismatch");
-      const cached = stored.get(id);
-      if (cached !== undefined) return cached;
-      let offset = 0;
-      const chunks: string[] = [];
-      let record: SourceRecordIdentity | undefined;
-      while (true) {
-        meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
-        const page = repo.findByIdBounded(workspace, id, 4096, offset);
-        meter.charge(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
-        if (page?.record == null || page.record.source_body === null || page.invalidOffset) return null;
-        record = sourceRecordFromRow(page.record);
-        authorizeScope(record.scope_class, authorized);
-        const content = page.record.source_body;
-        const bytes = Buffer.byteLength(content);
-        chunks.push(content); offset += bytes;
-        if (offset >= page.bodyBytes) break;
-        if (bytes === 0) throw new CoreError("CONFLICT", "source chunk did not advance");
-      }
-      const result = { record, content_bytes: chunks.join("") };
-      stored.set(id, result);
-      return result;
-    }
-  };
+function workOf(meter: SourceSemanticReadBudget) {
+  return { native_work: meter.nativeWork, logical_work: meter.spentWork, native_bytes: meter.nativeBytes,
+    logical_memory_bytes: meter.spentBytes, rss_bytes: process.memoryUsage().rss };
 }
-
-function currentStored(
-  stores: Pick<FieldFormationStores, "listRecords" | "getStoredRecord">, workspace: string, sourceId: string
-) {
-  const matched = stores.listRecords(workspace).filter((row) => row.source_id === sourceId);
-  if (matched.length === 0) throw new CoreError("VALIDATION", "source is not currently admitted");
-  const current = matched.reduce((best, row) =>
-    row.recorded_at > best.recorded_at || (row.recorded_at === best.recorded_at && row.identity > best.identity)
-      ? row : best);
-  const stored = stores.getStoredRecord(workspace, current.identity);
-  if (stored === null) throw new CoreError("VALIDATION", "current source body is not available");
-  return stored;
-}
-
-function issueLease(runtime: RecallReadWorkerRuntime, lease: Lease): string {
-  let table = LEASES.get(runtime);
-  if (table === undefined) { table = new Map(); LEASES.set(runtime, table); }
-  const id = randomUUID();
-  table.set(id, lease);
-  while (table.size > 32) table.delete(table.keys().next().value!);
-  return id;
-}
-
-function readLease(runtime: RecallReadWorkerRuntime, payload: Payload, id: string): Lease {
-  const lease = LEASES.get(runtime)?.get(id);
-  if (lease === undefined) throw new CoreError("VALIDATION", "source semantic preparation handle expired");
-  if (lease.workspace_id !== payload.workspace_id || lease.principal !== principalOf(payload)) {
-    throw new CoreError("VALIDATION", "source semantic preparation handle is bound to another principal");
-  }
-  if (lease.expires_at !== null && payload.as_of >= lease.expires_at) {
-    LEASES.get(runtime)?.delete(id);
-    throw new CoreError("VALIDATION", "source semantic preparation handle expired");
-  }
-  return lease;
-}
-
-function remember(runtime: RecallReadWorkerRuntime, key: string, hId: string, result: SourceSemanticWorkerResult): void {
-  if (result.kind !== "reason") return;
-  const status = result.result.outcome.status;
-  if (status === "resource_exhausted" || status === "truncated") return;
-  let table = CACHE.get(runtime);
-  if (table === undefined) { table = new Map(); CACHE.set(runtime, table); }
-  table.set(key, { key, result, h_id: hId });
-  while (table.size > 16) table.delete(table.keys().next().value!);
-}
-
-function withWork(result: SourceSemanticWorkerResult, meter: SourceReadBudget): SourceSemanticWorkerResult {
-  return SourceSemanticWorkerResultSchema.parse({ ...result, work: workOf(meter) });
-}
-
-function scopes(payload: Payload): readonly string[] | null {
-  const admitted = authorizedScopesFromAdmission(payload.authorized_scopes);
-  if (admitted.authorized_scopes === undefined) {
-    throw new CoreError("VALIDATION", "source semantics requires explicit scope admission");
-  }
-  return admitted.authorized_scopes;
-}
-
-function authorizeScope(scope: string | null | undefined, authorized: readonly string[] | null): void {
-  if (scope == null) throw new CoreError("VALIDATION", "source semantic source has no governed scope");
-  if (authorized !== null && !authorized.includes(scope)) {
-    throw new CoreError("VALIDATION", "source semantic source is outside authorized scopes");
-  }
-}
-
-function principalOf(payload: Payload): string {
-  return payload.principal ?? "";
-}
-
-function computationCoverage(status: string): SourceSemanticCoverage["computation"] {
-  if (status === "interpreted") return "complete";
-  if (status === "resource_exhausted" || status === "truncated") return "open";
-  if (status === "preparation_required" || status === "unexercised") return "unexercised";
-  return "open";
-}
-
-function workOf(meter: SourceReadBudget) {
-  return {
-    native_work: meter.spentWork, native_bytes: meter.spentBytes,
-    logical_memory_bytes: meter.spentBytes, rss_bytes: process.memoryUsage().rss
-  };
-}
-
-class SourceReadBudget {
-  public work: number;
-  public bytes: number;
-  public spentWork = 0;
-  public spentBytes = 0;
-  public constructor(budget: Readonly<{ work_units: number; memory_bytes: number }>) {
-    this.work = budget.work_units; this.bytes = budget.memory_bytes;
-  }
-  public reserve(work: number, bytes: number, operation = "source read"): void {
-    if (work > this.work || bytes > this.bytes) {
-      throw new CoreError("CONFLICT", `source semantic ${operation} budget exhausted`,
-        { subCode: "RETRYABLE_BACKPRESSURE" });
-    }
-  }
-  public charge(work: number, bytes: number): void {
-    this.reserve(work, bytes);
-    this.work -= work; this.bytes -= bytes; this.spentWork += work; this.spentBytes += bytes;
-  }
+function admissionOf(error: CoreError): string | undefined {
+  const value = error.details?.admission;
+  return typeof value === "string" ? value : undefined;
 }

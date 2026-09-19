@@ -11,11 +11,13 @@ export const SOURCE_SEMANTIC_ALIGNMENT_RELATION = "contextual_equivalence" as co
 const Handle = SourceSemanticHandleSchema;
 
 export const SourceSemanticQueryEndpointSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("referent"), variable: Handle }).strict().readonly(),
   z.object({ kind: z.literal("predicate"), alternative: z.number().int().nonnegative(), frame: Handle }).strict().readonly(),
   z.object({ kind: z.literal("slot"), alternative: z.number().int().nonnegative(), frame: Handle, slot: Handle }).strict().readonly()
 ]);
 
 export const SourceSemanticSourceEndpointSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("referent"), referent: Handle }).strict().readonly(),
   z.object({ kind: z.literal("frame"), frame: Handle }).strict().readonly(),
   z.object({ kind: z.literal("slot"), frame: Handle, slot: Handle }).strict().readonly()
 ]);
@@ -36,7 +38,7 @@ export const SourceSemanticAlignmentSchema = z.object({
   producer_id: BoundedIdSchema,
   producer_version: BoundedLabelSchema,
   contract_version: BoundedLabelSchema,
-  correspondences: z.array(SourceSemanticCorrespondenceSchema).min(1).max(256).readonly()
+  correspondences: z.array(SourceSemanticCorrespondenceSchema).max(256).readonly()
 }).strict().superRefine((alignment, context) => {
   if (new TextEncoder().encode(JSON.stringify(alignment)).length > SOURCE_SEMANTIC_MAX_BYTES) {
     context.addIssue({ code: "custom", message: "source semantic alignment exceeds its byte bound" });

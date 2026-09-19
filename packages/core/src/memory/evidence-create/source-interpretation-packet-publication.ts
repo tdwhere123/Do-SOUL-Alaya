@@ -1,12 +1,13 @@
 import {
-  canonicalJson, buildSourceReferenceCatalog, sourceReferenceResolver, assertSourceInterpretationPacketProfile, SourceInterpretationPacketSchema,
+  SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type RequestBudget, canonicalJson, buildSourceReferenceCatalog, sourceReferenceResolver, assertSourceInterpretationPacketProfile, SourceInterpretationPacketSchema,
   PublishedSourceInterpretationPacketSchema, sourceRecallTarget, sourceEvidenceRootTarget,
   normalizeSourceSemantics, sourceSemanticInterpretationIdentity, sourceSemanticStanceLists,
   SourceReferenceCatalogSchema, SourceSemanticInterpretationSchema, SourceSemanticPublishedInterpretationSchema,
   type PublishedSourceInterpretationPacket, type FieldContractSha256,
-  type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticNormalizedMention,
+  type SourceReferenceCatalog, type SourceSemanticInterpretation,
   type SourceSemanticPublishedInterpretation
 } from "@do-soul/alaya-protocol";
+import { bindSourceSemanticLocations, verifySourceSemanticLocations } from "./source-semantic-location.js";
 import { CoreError } from "../../shared/errors.js";
 import type { FieldFormationStores } from "./field-stores.js";
 import type { EvidenceService } from "../evidence-service.js";
@@ -21,7 +22,7 @@ type PacketInput = Readonly<{
   provenance: PublishedSourceInterpretationPacket["provenance"];
 }>;
 type Owner = Readonly<{ stores: Pick<FieldFormationStores, "listRecords" | "getStoredRecord">; sha256: FieldContractSha256;
-  evidenceService: Pick<EvidenceService, "create" | "findByIdScoped"> }>;
+  evidenceService: Pick<EvidenceService, "create" | "findByIdScoped">; meter?: SourceSemanticResourceLedger }>;
 
 /** Publishes a source interpretation as evidence, without forming memory or temporal relation truth. */
 export function createSourceInterpretationPacketPublication(owner: Owner) {
@@ -142,6 +143,8 @@ type SemanticInput = Readonly<{
   provenance: SourceSemanticPublishedInterpretation["provenance"];
   profile?: SourceSemanticPublishedInterpretation["profile"];
   interpretation?: unknown; draft?: unknown;
+  assertion_locations?: SourceSemanticInterpretation["source"]["assertion_locations"];
+  budget?: RequestBudget; meter?: SourceSemanticResourceLedger;
   producer_version?: string; contract_version?: string;
 }>;
 
@@ -149,9 +152,12 @@ type SemanticInput = Readonly<{
 export function createSourceSemanticInterpretationPublication(owner: Owner) {
   return {
     async publish(input: SemanticInput) {
-      const bound = bindSemanticInterpretation(owner, input);
+      const meter = input.meter ?? new SourceSemanticResourceLedger(input.budget ?? { work_units: 200000, memory_bytes: 20000000 });
+      meter.retain(input.draft ?? input.interpretation, "publication input");
+      const activeOwner = { ...owner, meter };
+      const bound = bindSemanticInterpretation(activeOwner, input);
       const objectId = semanticInterpretationEvidenceId(bound.interpretation_id, owner.sha256);
-      const current = () => verifyPublishedSourceSemanticInterpretation(owner, bound, input.workspaceId);
+      const current = () => verifyPublishedSourceSemanticInterpretation(activeOwner, bound, input.workspaceId);
       const existing = await owner.evidenceService.findByIdScoped(objectId, input.workspaceId);
       current();
       if (existing !== null) {
@@ -159,7 +165,7 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
         if (existing.lifecycle_state !== "active" || publicationIdentity(stored) !== publicationIdentity(bound)) {
           throw new CoreError("VALIDATION", "published interpretation differs from its source binding");
         }
-        return { bound: stored, evidence: existing };
+        return { bound: stored, evidence: existing, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } };
       }
       let evidence;
       try { evidence = await owner.evidenceService.create({ object_id: objectId,
@@ -179,12 +185,12 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
         evidence = raced;
       }
       current();
-      return { bound, evidence };
+      return { bound, evidence, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } };
     }
   };
 }
 
-function bindSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256">, input: SemanticInput):
+function bindSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">, input: SemanticInput):
   SourceSemanticPublishedInterpretation {
   if (input.interpretation !== undefined && input.draft !== undefined) {
     throw new CoreError("VALIDATION", "source semantic publication accepts a draft or a normalized interpretation, not both");
@@ -192,12 +198,13 @@ function bindSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256">, inp
   const stored = resolveCurrentSource(owner.stores, input.workspaceId,
     { artifact_key: input.artifactKey, source_corpus_digest: owner.sha256(input.source) }, owner.sha256);
   const catalog = SourceReferenceCatalogSchema.parse(input.catalog);
-  const interpretation = durableSemanticInterpretation(
-    stored.content_bytes, incomingInterpretation(owner, stored, input, catalog), catalog);
+  const interpretation = bindSourceSemanticLocations({ source: stored.content_bytes,
+    interpretation: incomingInterpretation(owner, stored, input, catalog), catalog,
+    locations: input.assertion_locations, sha256: owner.sha256, meter: owner.meter });
   return assemblePublishedInterpretation(owner.sha256, stored, input.workspaceId, interpretation, input.provenance, input.profile);
 }
 
-function incomingInterpretation(owner: Pick<Owner, "sha256">, stored: ReturnType<typeof resolveCurrentSource>,
+function incomingInterpretation(owner: Pick<Owner, "sha256" | "meter">, stored: ReturnType<typeof resolveCurrentSource>,
   input: SemanticInput, catalog: SourceReferenceCatalog): SourceSemanticInterpretation {
   const source = {
     source_id: stored.record.source_id,
@@ -206,19 +213,20 @@ function incomingInterpretation(owner: Pick<Owner, "sha256">, stored: ReturnType
   };
   if (input.interpretation !== undefined) {
     return hostStanceInterpretation(SourceSemanticInterpretationSchema.parse({
-      ...SourceSemanticInterpretationSchema.parse(input.interpretation), source
+      ...SourceSemanticInterpretationSchema.parse(input.interpretation),
+      source: { ...SourceSemanticInterpretationSchema.parse(input.interpretation).source, ...source }
     }));
   }
   if (input.draft === undefined || input.producer_version === undefined || input.contract_version === undefined) {
     throw new CoreError("VALIDATION", "source semantic publication requires a draft or a normalized interpretation");
   }
   const normalized = normalizeSourceSemantics({
-    draft: input.draft, catalog, sha256: owner.sha256, source,
+    draft: input.draft, catalog, sha256: owner.sha256, source, meter: owner.meter,
     producer_id: input.provenance.producer_id,
     producer_version: input.producer_version, contract_version: input.contract_version
   });
   if (normalized.status === "resource_exhausted") {
-    throw new CoreError("VALIDATION", "source semantic normalization exhausted its budget");
+    throw new SourceSemanticResourceExhausted("normalization");
   }
   if (normalized.status !== "normalized") throw new CoreError("VALIDATION", normalized.reason);
   return hostStanceInterpretation(normalized.interpretation);
@@ -243,37 +251,6 @@ function publicationIdentity(bound: SourceSemanticPublishedInterpretation): stri
   });
 }
 
-function durableSemanticInterpretation(source: string, interpretation: SourceSemanticInterpretation,
-  catalog: SourceReferenceCatalog): SourceSemanticInterpretation {
-  return SourceSemanticInterpretationSchema.parse({
-    ...interpretation,
-    mentions: interpretation.mentions.map((mention) => durableMention(source, mention, catalog))
-  });
-}
-
-function durableMention(source: string, mention: SourceSemanticNormalizedMention,
-  catalog: SourceReferenceCatalog): SourceSemanticNormalizedMention {
-  const origin = assertionOrigin(source, catalog, mention.assertion_id);
-  const absolute = [origin + mention.utf8_span[0], origin + mention.utf8_span[1]] as const;
-  if (source.slice(...absolute) !== mention.text) {
-    throw new CoreError("VALIDATION", "interpretation mention is not exact source text");
-  }
-  return { ...mention, utf8_span: durableSpan(source, absolute) };
-}
-
-function assertionOrigin(source: string, catalog: SourceReferenceCatalog, assertionId: number): number {
-  const assertion = catalog.assertions.find((row) => row.assertion_id === assertionId);
-  if (assertion === undefined) {
-    throw new CoreError("VALIDATION", "interpretation assertion is missing from the source catalog");
-  }
-  const text = assertion.segments.map((row) => row.text).join("");
-  const start = source.indexOf(text);
-  if (start < 0 || source.indexOf(text, start + 1) >= 0) {
-    throw new CoreError("VALIDATION", "catalog assertion is not a unique exact source text");
-  }
-  return start;
-}
-
 function assemblePublishedInterpretation(sha256: FieldContractSha256, stored: ReturnType<typeof resolveCurrentSource>,
   workspaceId: string, interpretation: SourceSemanticInterpretation,
   provenance: SourceSemanticPublishedInterpretation["provenance"],
@@ -296,7 +273,7 @@ export function semanticInterpretationEvidenceId(interpretationId: string, sha25
   return uuidFromHex(sha256(`source-semantic-interpretation:${interpretationId}`));
 }
 
-export function verifyPublishedSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256">,
+export function verifyPublishedSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,
   value: unknown, workspaceId: string) {
   const bound = SourceSemanticPublishedInterpretationSchema.parse(value);
   if (sourceSemanticInterpretationIdentity(bound.interpretation, owner.sha256) !== bound.interpretation_id) {
@@ -312,19 +289,11 @@ export function verifyPublishedSourceSemanticInterpretation(owner: Pick<Owner, "
     content_digest: stored.record.content_digest, evidence_object_id: stored.record.evidence_object_id
   });
   if (canonicalJson(target) !== canonicalJson(sourceEvidenceRootTarget(bound.source_target))) {
-    throw new CoreError("VALIDATION", "interpretation source is no longer current");
+    throw new CoreError("VALIDATION", "interpretation source is no longer current", { details: { admission: "filtered" } });
   }
-  const source = stored.content_bytes;
-  const mentions = bound.interpretation.mentions.map((row) => {
-    const text = sliceUtf8Span(source, {
-      start_offset: row.utf8_span[0], end_offset: row.utf8_span[1], purpose: "native_structure"
-    });
-    if (text !== row.text) throw new CoreError("VALIDATION", "stored interpretation mention differs from source text");
-    const prefix = Buffer.from(source, "utf8").subarray(0, row.utf8_span[0]).toString("utf8");
-    return { ...row, utf8_span: durableSpan(source, [prefix.length, prefix.length + text.length]) };
-  });
+  const located = verifySourceSemanticLocations(stored.content_bytes, bound.interpretation, owner.sha256, owner.meter);
   const rebound = assemblePublishedInterpretation(owner.sha256, stored, workspaceId,
-    SourceSemanticInterpretationSchema.parse({ ...bound.interpretation, mentions }), bound.provenance, bound.profile);
+    located, bound.provenance, bound.profile);
   if (canonicalJson(rebound) !== canonicalJson(bound)) {
     throw new CoreError("VALIDATION", "stored interpretation location binding differs from source");
   }

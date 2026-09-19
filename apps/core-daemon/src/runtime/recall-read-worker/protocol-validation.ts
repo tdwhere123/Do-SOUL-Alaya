@@ -1,3 +1,4 @@
+import { CoreError } from "@do-soul/alaya-core";
 import {
   RecallReadWorkerEnvelopeSchema,
   type RecallReadWorkerRequest,
@@ -14,6 +15,7 @@ export function serializeWorkerError(error: unknown): WorkerError {
     return {
       name: error.name,
       message: error.message,
+      ...(error instanceof CoreError ? { core: { code: error.code, subCode: error.subCode, details: error.details } } : {}),
       ...(error.stack === undefined ? {} : { stack: error.stack })
     };
   }

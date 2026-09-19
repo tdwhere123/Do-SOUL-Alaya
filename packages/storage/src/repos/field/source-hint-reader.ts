@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type { SqliteConnection } from "../../sqlite/db.js";
 import type { SourceRootPage, SourceRootRow } from "./bounded-source-root-reader.js";
 
@@ -37,10 +38,13 @@ export class SqliteSourceHintReader {
   public pageBoundInterpretations(input: Readonly<{
     workspaceId: string; limit: number; nativeLimit: number; afterCursor: string | null;
     matches?: (gist: string) => boolean; nativeByteLimit?: number;
+    activeOnly?: boolean; maxGistBytes?: number;
   }>): BoundInterpretationHintPage {
     const limit = boundedLimit(input.limit);
     const nativeLimit = limit === 0 ? 0 : boundedLimit(input.nativeLimit);
     const byteBudget = boundedBytes(input.nativeByteLimit);
+    const gistMax = input.maxGistBytes ?? GIST_BYTE_MAX;
+    if (!Number.isSafeInteger(gistMax) || gistMax < 1 || gistMax > 1_000_000) throw new AlayaError("VALIDATION", "invalid interpretation gist limit");
     if (byteBudget < 520) return { rows: [], nativeVisits: 0, nativeWork: 0, nativeBytes: 0,
       rowsRead: 0, bytesRead: 0, truncated: true, committedThrough: input.afterCursor,
       unavailable: false, resourceLimited: true };
@@ -62,19 +66,19 @@ export class SqliteSourceHintReader {
       octet_length(gist) AS gist_bytes,
       CASE WHEN octet_length(gist) <= ? THEN gist ELSE NULL END AS gist
       FROM evidence_capsules INDEXED BY idx_evidence_capsules_source_cursor
-      WHERE workspace_id=? AND (created_at,object_id)>(?,?)
+      WHERE workspace_id=? AND (?=0 OR lifecycle_state='active') AND (created_at,object_id)>(?,?)
       ORDER BY evidence_capsules.created_at,evidence_capsules.object_id LIMIT 1`);
     while (visits < nativeLimit) {
       if (byteBudget - bytes < 584) { oversized = true; break; }
       visits++;
-      const row = candidate.get(Math.min(GIST_BYTE_MAX, byteBudget - bytes - 584),
-        input.workspaceId, ...seek) as { object_id: string | null; created_at: string | null; gist: string | null; gist_bytes: number } | undefined;
+      const row = candidate.get(Math.min(gistMax, byteBudget - bytes - 584),
+        input.workspaceId, input.activeOnly === true ? 1 : 0, ...seek) as { object_id: string | null; created_at: string | null; gist: string | null; gist_bytes: number } | undefined;
       if (row === undefined) { exhausted = true; break; }
       rowsRead++;
       bytes += 8;
       if (row.object_id === null || row.created_at === null) { oversized = true; break; }
       bytes += Buffer.byteLength(row.object_id, "utf8") + Buffer.byteLength(row.created_at, "utf8") + Buffer.byteLength(row.gist ?? "", "utf8");
-      if (row.gist === null && row.gist_bytes <= GIST_BYTE_MAX) { oversized = true; break; }
+      if (row.gist === null && row.gist_bytes <= gistMax) { oversized = true; break; }
       seek = [row.created_at, row.object_id];
       committed = JSON.stringify(seek);
       if (row.gist === null) { oversized = true; continue; }
@@ -84,7 +88,7 @@ export class SqliteSourceHintReader {
     }
     return { rows, nativeVisits: visits, nativeBytes: 0, nativeWork: visits,
       rowsRead, bytesRead: bytes,
-      truncated: !exhausted && (oversized || visits === nativeLimit || rows.length === limit),
+      truncated: oversized || !exhausted && (visits === nativeLimit || rows.length === limit),
       committedThrough: committed, unavailable: false,
       ...(oversized ? { resourceLimited: true } : {}) };
   }

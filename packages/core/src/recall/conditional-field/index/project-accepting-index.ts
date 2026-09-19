@@ -3,7 +3,8 @@ import {
   productStateKeyFromIndexEntry,
   reachableMilligradesOf,
   sharedProductIdentity,
-  sameSourceEvidenceRoot,
+  sameSourceEvidenceRoot, sourceSemanticSlotNodeId, sourceSemanticInterpretationIdentity, sourceSemanticContextIdentity,
+  type SourceSemanticInterpretation, type SourceSemanticEvaluationContext, type SourceEvidenceTarget,
   type PublishedSourceInterpretationPacket,
   type ClaimState,
   type Continuation,
@@ -26,6 +27,7 @@ import {
 import { associativeCapDomainAdmission } from "../query/query-admission.js";
 import { capContractId } from "../cap-contract.js";
 import { CoreError } from "../../../shared/errors.js";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { groundedOutputDerivations, type GroundingProgress } from "../engine/output-derivations.js";
 import {
   type FacetVisitIndex,
@@ -133,6 +135,7 @@ export type AcceptingProjectionInput = Readonly<{
   readonly observer?: ObserverCoverage;
   readonly interpretation_status?: QueryInterpretationStatus;
   readonly selected_interpretation?: PublishedSourceInterpretationPacket;
+  readonly selected_semantics?: Readonly<{ h: SourceSemanticInterpretation; context: SourceSemanticEvaluationContext; source_target: SourceEvidenceTarget }>;
   readonly interpretation_id?: string;
   readonly interpretation_clock?: string;
   readonly model_id?: string;
@@ -173,7 +176,7 @@ function workIsOpen(status: "complete" | "open" | undefined): boolean {
 
 export function projectAcceptingIndex(input: AcceptingProjectionInput): InformationIndex {
   const representation = representationDecision(input.budget.page_budget);
-  if (input.selected_interpretation !== undefined) {
+  if (input.selected_interpretation !== undefined || input.selected_semantics !== undefined) {
     const scoped = admitSelectedInterpretation(input);
     if (scoped === null) return closedIndex(input, representation, resourceRejectedCompleteness());
     input = scoped;
@@ -199,18 +202,29 @@ export function projectAcceptingIndex(input: AcceptingProjectionInput): Informat
 
 /** A finite source packet defines this computation domain; a hypothesis string alone does not. */
 function admitSelectedInterpretation(input: AcceptingProjectionInput): AcceptingProjectionInput | null {
-  const bound = input.selected_interpretation!;
-  if (bound.packet_id !== bound.hypothesis_id) throw new CoreError("VALIDATION", "selected interpretation identity mismatch");
-  const count = bound.packet.referents.length + bound.packet.propositions.length + bound.packet.operators.length;
+  const semantic = input.selected_semantics;
+  const bound = input.selected_interpretation;
+  if ((semantic === undefined) === (bound === undefined)) throw new CoreError("VALIDATION", "select exactly one interpretation domain");
+  const packetId = semantic?.context.h_id ?? bound!.packet_id;
+  const hypothesisId = semantic === undefined ? bound!.hypothesis_id : sourceSemanticContextIdentity(semantic.context, fieldContractSha256);
+  const target = semantic?.source_target ?? bound!.source_target;
+  const ids = semantic === undefined
+    ? [...bound!.packet.referents, ...bound!.packet.propositions, ...bound!.packet.operators].map((row) => row.id)
+    : [...semantic.h.referents, ...semantic.h.frames, ...semantic.h.operators].map((row) => row.id)
+      .concat(semantic.h.frames.flatMap((frame, fi) => frame.slots.map((_slot, si) => sourceSemanticSlotNodeId(fi, si))));
+  const count = ids.length;
   const work = count + input.snapshot.seeds.length + input.snapshot.values.length + 2 * input.snapshot.retained_transitions.length + 1;
   const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
   if (work > allowance || count * 128 > (input.remaining_memory_bytes ?? input.budget.memory_bytes)) return null;
-  const nodes = new Set([...bound.packet.referents, ...bound.packet.propositions, ...bound.packet.operators].map((row) => row.id));
+  if (semantic === undefined ? packetId !== hypothesisId : sourceSemanticInterpretationIdentity(semantic.h, fieldContractSha256) !== packetId) {
+    throw new CoreError("VALIDATION", "selected interpretation identity mismatch");
+  }
+  const nodes = new Set(ids);
   const check = (product: ProductStateKey) => {
     const node = product.interpretation_node;
-    if (node === undefined || node.packet_id !== bound.packet_id || node.hypothesis_id !== bound.hypothesis_id ||
-        product.hypothesis_id !== bound.hypothesis_id || !nodes.has(node.node_id) || product.target.kind !== "source_evidence" ||
-        !sameSourceEvidenceRoot(product.target, bound.source_target)) {
+    if (node === undefined || node.packet_id !== packetId || node.hypothesis_id !== hypothesisId ||
+        product.hypothesis_id !== hypothesisId || !nodes.has(node.node_id) || product.target.kind !== "source_evidence" ||
+        !sameSourceEvidenceRoot(product.target, target)) {
       throw new CoreError("VALIDATION", "projection leaves its selected interpretation domain");
     }
   };
@@ -492,7 +506,7 @@ function indexCompleteness(
     ...extra,
     observer: extra.observer ?? input.observer,
     interpretation_status: extra.interpretation_status ?? input.interpretation_status,
-    selected_hypothesis_domain: input.selected_interpretation !== undefined,
+    selected_hypothesis_domain: input.selected_interpretation !== undefined || input.selected_semantics !== undefined,
     query_id: extra.query_id ?? input.query_id,
     residuals,
     result_kind_view: extra.result_kind_view ?? input.view.result_kind_view,

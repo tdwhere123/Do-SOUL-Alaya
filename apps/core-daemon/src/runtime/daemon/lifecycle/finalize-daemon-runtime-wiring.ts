@@ -1,3 +1,5 @@
+import { SourceSemanticResourceExhausted } from "@do-soul/alaya-protocol";
+import { sourceSemanticReadStores, SourceSemanticReadBudget } from "../../field/source-semantic-read-stores.js";
 import type { AlayaDaemonRuntime } from "./daemon-runtime-types.js";
 import { SqliteSourceRootRecallReader } from "@do-soul/alaya-storage";
 import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
@@ -112,22 +114,25 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
 function createSourceSemanticPublication(
   input: FinalizeDaemonRuntimeWiringInput
 ): SourceSemanticPublicationPort {
-  const stores = input.fieldComposition.stores;
-  const publication = createSourceSemanticInterpretationPublication({
-    stores,
-    evidenceService: input.evidenceService,
-    sha256: fieldContractSha256
-  });
   return {
-    publish: (request) => publication.publish(request),
-    resolveSource: (workspaceId, sourceId, contentDigest) => {
-      const stored = stores.listStoredRecords(workspaceId).find(
-        (row) => row.record.source_id === sourceId && row.record.content_digest === contentDigest
-      );
-      if (stored === undefined) {
-        throw new CoreError("VALIDATION", "source is not currently admitted");
+    publish: async (request) => {
+      const meter = new SourceSemanticReadBudget(request.budget ?? { work_units: 200000, memory_bytes: 20000000 });
+      const stores = sourceSemanticReadStores(input.database, request.workspaceId, request.artifactKey, meter, null);
+      try {
+        const result = await createSourceSemanticInterpretationPublication({ stores, evidenceService: input.evidenceService,
+          sha256: fieldContractSha256 }).publish({ ...request, meter });
+        return { ...result, resource_usage: { ...result.resource_usage, native_work: meter.nativeWork, native_bytes: meter.nativeBytes } };
+      } catch (error) {
+        const work = { native_work: meter.nativeWork, native_bytes: meter.nativeBytes,
+          logical_work: meter.spentWork, logical_memory_bytes: meter.spentBytes, rss_bytes: process.memoryUsage().rss };
+        if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, {
+          subCode: "RETRYABLE_BACKPRESSURE", details: { work }
+        });
+        if (error instanceof CoreError) throw new CoreError(error.code, error.message, {
+          subCode: error.subCode, details: { ...error.details, work }
+        });
+        throw error;
       }
-      return { content_bytes: stored.content_bytes };
     }
   };
 }

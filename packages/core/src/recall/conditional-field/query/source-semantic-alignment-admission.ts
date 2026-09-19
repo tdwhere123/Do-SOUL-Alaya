@@ -5,6 +5,7 @@ import {
   sourceSemanticAlignmentIdentity,
   sourceSemanticContextIdentity,
   sourceSemanticInterpretationIdentity,
+  sourceSemanticContextContains,
   type SourceSemanticAlignment,
   type SourceSemanticConsumedLeaf,
   type SourceSemanticCorrespondence,
@@ -28,7 +29,7 @@ import {
  * engine) owns the actual lowering; this admission only records the version.
  * Distinct lowering versions must not splice into one C.
  */
-export const SOURCE_SEMANTIC_LOWERING_VERSION = "source-semantic-lowering-v1" as const;
+export const SOURCE_SEMANTIC_LOWERING_VERSION = "source-semantic-lowering-v2" as const;
 
 export type SourceSemanticAlignmentAdmissionInput = Readonly<{
   readonly alignment: unknown;
@@ -89,6 +90,7 @@ export function admitSourceSemanticAlignment(
   if (producer === undefined || !producer.capabilities.includes("semantic_alignment")) {
     return { kind: "unsupported" };
   }
+  if (parsed.data.correspondences.some((row) => !input.original_query.includes(row.query_support.excerpt))) return { kind: "invalid" };
   const leaves = alignmentLeaves(parsed.data, interpretation.data, queryAdmission.query);
   if (leaves === undefined) return { kind: "invalid" };
   const alignmentId = sourceSemanticAlignmentIdentity(parsed.data, fieldContractSha256);
@@ -136,15 +138,22 @@ function correspondenceLeaf(
   query: SourceSemanticQuery
 ): SourceSemanticConsumedLeaf | undefined {
   if (!supportOnInterpretation(correspondence.source_semantic_support, interpretation)) return undefined;
-  if (correspondence.applicable_context !== undefined &&
-      occurrenceOf(interpretation, correspondence.applicable_context) === undefined) {
-    return undefined;
-  }
   const queryEndpoint = correspondence.query_endpoint;
   const sourceEndpoint = correspondence.source_endpoint;
+  const context = correspondence.applicable_context;
+  if (queryEndpoint.kind === "referent") {
+    if (sourceEndpoint.kind !== "referent" || context !== undefined) return undefined;
+    const variable = query.variables.find((row) => row.id === queryEndpoint.variable);
+    const referent = interpretation.referents.find((row) => row.id === sourceEndpoint.referent);
+    if (variable?.reference === undefined || variable.sort !== "entity" || referent === undefined
+      || referent.referent_kind !== "grouped") return undefined;
+    return { leaf_kind: "a_referent", occurrence: referent.id, correspondence_index: index };
+  }
+  if (sourceEndpoint.kind === "referent") return undefined;
+  if (context !== undefined && !sourceSemanticContextContains(interpretation, context, sourceEndpoint.frame)) return undefined;
   const queryFrame = queryFrameOf(query, queryEndpoint);
   const sourceFrame = sourceFrameOf(interpretation, sourceEndpoint);
-  if (queryFrame === undefined || sourceFrame === undefined) return undefined;
+  if (queryFrame === undefined || sourceFrame === undefined || queryFrame.operator !== undefined) return undefined;
   if (queryEndpoint.kind === "predicate") {
     if (sourceEndpoint.kind !== "frame") return undefined;
     return { leaf_kind: "a_predicate", correspondence_index: index, occurrence: sourceFrame.id };
@@ -161,18 +170,13 @@ function correspondenceLeaf(
   };
 }
 
-function queryFrameOf(query: SourceSemanticQuery, endpoint: SourceSemanticQueryEndpoint) {
+function queryFrameOf(query: SourceSemanticQuery, endpoint: Exclude<SourceSemanticQueryEndpoint, { kind: "referent" }>) {
   const alternative = query.alternatives[endpoint.alternative];
   return alternative?.frames.find((frame) => frame.id === endpoint.frame);
 }
 
-function sourceFrameOf(interpretation: SourceSemanticInterpretation, endpoint: SourceSemanticSourceEndpoint) {
+function sourceFrameOf(interpretation: SourceSemanticInterpretation, endpoint: Exclude<SourceSemanticSourceEndpoint, { kind: "referent" }>) {
   return interpretation.frames.find((frame) => frame.id === endpoint.frame);
-}
-
-function occurrenceOf(interpretation: SourceSemanticInterpretation, id: string) {
-  return interpretation.frames.find((frame) => frame.id === id) ??
-    interpretation.operators.find((operator) => operator.id === id);
 }
 
 function supportOnInterpretation(

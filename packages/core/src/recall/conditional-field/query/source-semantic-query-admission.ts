@@ -34,6 +34,11 @@ export function admitSourceSemanticQuery(
   if (parsed.data.original_query_digest !== digestOriginalQuery(originalQuery)) {
     return { kind: "invalid" };
   }
+  const excerpts = [
+    ...parsed.data.variables.flatMap((row) => row.reference === undefined ? [] : [row.reference.excerpt]),
+    ...parsed.data.alternatives.flatMap((row) => row.frames.flatMap((frame) => frame.role_requirements.map((role) => role.support.excerpt)))
+  ];
+  if (excerpts.some((excerpt) => !originalQuery.includes(excerpt))) return { kind: "invalid" };
   const producer = registry.lookup(parsed.data.producer_id, parsed.data.producer_version);
   if (producer === undefined || !producer.capabilities.includes("semantic_query")) {
     return { kind: "unsupported" };

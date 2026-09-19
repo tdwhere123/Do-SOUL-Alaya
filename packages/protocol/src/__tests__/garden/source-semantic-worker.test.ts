@@ -34,6 +34,7 @@ it("admits prepare and one-shot reason without a continuation token", () => {
     coverage: { ...coverage, payload: "truncated", computation: "open" }, work
   });
   expect("continuation" in result).toBe(false);
+  if (result.kind !== "reason") throw new Error("expected a reasoning result");
   expect(result.result.semantic_status).toBe("unreviewed");
   expect(result.result.world_claim).toBe("unknown");
   expect(MemorySearchResultSchema.safeParse(result).success).toBe(false);

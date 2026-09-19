@@ -22,7 +22,7 @@ import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-rea
 import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/memory/evidence-create/source-span-views.js";
 import { digestOriginalQuery } from "../../../../../../packages/core/src/recall/conditional-field/query/compile-query-identity.js";
 import {
-  decodeEngineBindings, oracleBindingsMatchEngine, oracleNecessaryLeavesHeld,
+  decodeEngineBindings, oracleBindingsMatchEngine, oracleNecessaryLeavesHeld, oracleProofsMatchEngine,
   oracleSourceSemanticJoin
 } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-relational-oracle.js";
 import {
@@ -43,6 +43,13 @@ const BUDGET = {
   finalization_reserve: 10000,
   min_envelope: 10
 };
+
+const ALICE_CORRESPONDENCES: import("@do-soul/alaya-protocol").SourceSemanticAlignment["correspondences"] = [
+  { relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
+    source_endpoint: { kind: "referent", referent: "rAlice" }, query_support: { kind: "query_text", excerpt: "Alice" }, source_semantic_support: [{ kind: "lexical", mentions: ["mAlice"] }] },
+  { relation: "contextual_equivalence", query_endpoint: { kind: "slot", alternative: 0, frame: "qUse", slot: "agent" },
+    source_endpoint: { kind: "slot", frame: "fUse", slot: "agent" }, query_support: { kind: "query_text", excerpt: "Alice" }, source_semantic_support: [{ kind: "lexical", mentions: ["mAlice"] }] }
+];
 
 it("runs prepare_source through the worker on MCP and the same handler", async () => {
   const directory = await mkdtemp(join(tmpdir(), "soul-interpretation-mcp-"));
@@ -93,7 +100,7 @@ it("runs prepare_source through the worker on MCP and the same handler", async (
   try {
     await client.ready();
     const args = { operation: "prepare_source", source_id: "artifact-1", budget: BUDGET };
-    const direct = await handler.call({ toolName: "soul.interpretation", arguments: args, context });
+    const direct = await callInterpretation(handler, { toolName: "soul.interpretation", arguments: args, context });
     const mcp = await callAlayaMcpMemoryTool(
       { memoryToolHandler: handler, contextProvider: () => context },
       "soul.interpretation",
@@ -165,11 +172,11 @@ function queryOf(): SourceSemanticQuery {
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
     contract_version: "source-semantic-query-v1",
-    variables: [{ id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }],
+    variables: [{ id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } }, { id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }],
     alternatives: [{
       frames: [{
         id: "qUse", variable: "fUse", predicate_reading: "use",
-        role_requirements: [{
+        role_requirements: [{ id: "agent", role_reading: "agent", target_variable: "actor", support: { kind: "query_text", excerpt: "Alice" } }, {
           id: "theme", role_reading: "theme", target_variable: "tools",
           support: { kind: "query_text", excerpt: "tools" }
         }]
@@ -213,6 +220,7 @@ function themeAlignment(hId: string, qId: string) {
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
     producer_version: "1", contract_version: "source-semantic-alignment-v1",
     correspondences: [
+      ...ALICE_CORRESPONDENCES,
       {
         relation: "contextual_equivalence" as const,
         query_endpoint: { kind: "predicate" as const, alternative: 0, frame: "qUse" },
@@ -291,14 +299,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
     now: () => CLOCK,
     sourceSemanticsPort: client.sourceSemanticsPort,
     sourceSemanticPublication: {
-      publish: (input) => publication.publish(input),
-      resolveSource: (workspaceId, sourceId, contentDigest) => {
-        const stored = publishStores.listStoredRecords(workspaceId).find(
-          (row) => row.record.source_id === sourceId && row.record.content_digest === contentDigest
-        );
-        if (stored === undefined) throw new Error("source is not currently admitted");
-        return { content_bytes: stored.content_bytes };
-      }
+      publish: (input) => publication.publish(input)
     }
   });
   try {
@@ -306,7 +307,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
     const prepareArgs = SoulInterpretationRequestSchema.parse({
       operation: "prepare_source", source_id: "artifact-1", budget: BUDGET
     });
-    const prepared = await handler.call({ toolName: "soul.interpretation", arguments: prepareArgs, context });
+    const prepared = await callInterpretation(handler, { toolName: "soul.interpretation", arguments: prepareArgs, context });
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) throw new Error("prepare_source must succeed");
     expect(prepared.output.provider_attempts).toBe(0);
@@ -322,7 +323,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       producer_version: "p1",
       contract_version: "source-interpretation-v3"
     });
-    const proposed = await handler.call({ toolName: "soul.interpretation", arguments: proposeArgs, context });
+    const proposed = await callInterpretation(handler, { toolName: "soul.interpretation", arguments: proposeArgs, context });
     expect(proposed.ok).toBe(true);
     if (!proposed.ok) throw new Error("propose must succeed");
     expect(proposed.output.provider_attempts).toBe(0);
@@ -352,7 +353,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       const prepareQueryArgs = SoulInterpretationRequestSchema.parse({
         operation: "prepare_query", original_query: ORIGINAL, q, budget: BUDGET
       });
-      const preparedQuery = await freshHandler.call({
+      const preparedQuery = await callInterpretation(freshHandler, {
         toolName: "soul.interpretation", arguments: prepareQueryArgs, context
       });
       expect(preparedQuery.ok).toBe(true);
@@ -370,6 +371,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
         producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
         producer_version: "1", contract_version: "source-semantic-alignment-v1",
         correspondences: [
+      ...ALICE_CORRESPONDENCES,
           {
             relation: "contextual_equivalence" as const,
             query_endpoint: { kind: "predicate" as const, alternative: 0, frame: "qUse" },
@@ -392,7 +394,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
         query_handle: preparedQuery.output.query_handle,
         a, budget: BUDGET, output_byte_limit: 1000000
       });
-      const direct = await freshHandler.call({
+      const direct = await callInterpretation(freshHandler, {
         toolName: "soul.interpretation", arguments: reasonArgs, context
       });
       const mcp = await callAlayaMcpMemoryTool(
@@ -421,16 +423,17 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       expect(direct.output.coverage.computation).toBe("complete");
       expect(direct.output.coverage.discovery).not.toBe("unexercised");
       const interpretation = direct.output.interpretation;
-      const alignment = direct.output.alignment ?? a;
+      const alignment = direct.output.alignment;
+      expect(alignment).toBeDefined();
+      if (alignment === undefined) throw new Error("reason must return A");
       expect(interpretation).toBeDefined();
       if (interpretation === undefined) throw new Error("reason must return H");
       const oracle = oracleSourceSemanticJoin(interpretation, q, alignment);
-      const decoded = decodeEngineBindings(
-        interpretation, q, alignment, direct.output.result.consumed_leaves
-      );
+      const decoded = decodeEngineBindings(direct.output.result);
       expect(oracleBindingsMatchEngine(oracle, decoded, ["tools", "fUse"])).toBe(true);
       expect(oracleNecessaryLeavesHeld(oracle, direct.output.result.consumed_leaves)).toBe(true);
-      expect(decoded).toEqual([{ tools: "rTools", fUse: "fUse" }]);
+      expect(oracleProofsMatchEngine(oracle, direct.output.result)).toBe(true);
+      expect(decoded).toEqual([{ actor: "rAlice", tools: "rTools", fUse: "fUse" }]);
     } finally {
       await reopened.close();
     }
@@ -480,19 +483,12 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
   const handler = createMcpMemoryToolHandler({
     ...createDeps(), now: () => CLOCK, sourceSemanticsPort: client.sourceSemanticsPort,
     sourceSemanticPublication: {
-      publish: (input) => publication.publish(input),
-      resolveSource: (workspaceId, sourceId, contentDigest) => {
-        const stored = publishStores.listStoredRecords(workspaceId).find(
-          (row) => row.record.source_id === sourceId && row.record.content_digest === contentDigest
-        );
-        if (stored === undefined) throw new Error("source is not currently admitted");
-        return { content_bytes: stored.content_bytes };
-      }
+      publish: (input) => publication.publish(input)
     }
   });
   try {
     await client.ready();
-    const prepared = await handler.call({
+    const prepared = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "prepare_source", source_id: "artifact-1", budget: BUDGET
@@ -506,7 +502,7 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
     }
     const catalog = prepared.output.catalog;
     const handle = prepared.output.source_handle;
-    const first = await handler.call({
+    const first = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "propose", source_handle: handle, draft: usesDraft(catalog, SOURCE),
@@ -523,7 +519,7 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
     const q = queryOf();
     const admitted = admitSourceSemanticQuery(q, ORIGINAL);
     if (admitted.kind !== "admitted") throw new Error("theme query must admit");
-    const before = await handler.call({
+    const before = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
@@ -538,7 +534,7 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
     }
     expect(before.output.result.outcome.status).toBe("interpreted");
     expect(before.output.result.consumed_leaves.some((row) => row.leaf_kind === "h_binding" && row.slot_id === "theme")).toBe(true);
-    const ablated = await handler.call({
+    const ablated = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "propose", source_handle: handle,
@@ -555,7 +551,7 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
     expect(hId2).not.toBe(hId1);
     expect(ablated.output.published.interpretation.frames[0]?.slots.some((row) => row.id === "theme")).toBe(true);
     expect(ablated.output.published.interpretation.frames[0]?.bindings.some((row) => row.slot_id === "theme")).toBe(false);
-    const stale = await handler.call({
+    const stale = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
@@ -569,7 +565,7 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
       throw new Error("stale A must return a reason result");
     }
     expect(stale.output.result.outcome).toEqual({ status: "invalid", reason: "malformed_alignment" });
-    const rebound = await handler.call({
+    const rebound = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
@@ -586,7 +582,7 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
     const who = agentQuery();
     const admittedWho = admitSourceSemanticQuery(who, WHO);
     if (admittedWho.kind !== "admitted") throw new Error("agent query must admit");
-    const remaining = await handler.call({
+    const remaining = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
@@ -632,3 +628,10 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
     await rm(directory, { recursive: true, force: true });
   }
 }, 30000);
+
+async function callInterpretation(handler: ReturnType<typeof createMcpMemoryToolHandler>,
+  input: Parameters<ReturnType<typeof createMcpMemoryToolHandler>["call"]>[0]) {
+  const result = await handler.call(input);
+  if (result.ok && result.tool_name !== "soul.interpretation") throw new Error("handler dispatched a different tool");
+  return result;
+}

@@ -68,11 +68,12 @@ it("keeps published provenance out of parse identity of the IR body", () => {
 it("keeps evaluation states distinct and refuses packet:null collapse", () => {
   expect(SourceSemanticOutcomeSchema.parse({ status: "no_eligible_source", provider_attempts: 0 }).status)
     .toBe("no_eligible_source");
+  expect(SourceSemanticOutcomeSchema.parse({ status: "unavailable", reason: "source_body" }).status).toBe("unavailable");
   expect(SourceSemanticOutcomeSchema.parse({ status: "abstained" }).status).toBe("abstained");
   expect(SourceSemanticOutcomeSchema.parse({ status: "unexercised" }).status).toBe("unexercised");
   expect(SourceSemanticOutcomeSchema.safeParse({ status: "no_eligible_source", provider_attempts: 1 }).success).toBe(false);
   expect(SourceSemanticOutcomeSchema.parse({
-    status: "no_executable_proposition", description: "no event", context_support: []
+    status: "no_executable_proposition", description: "no event", context_support: [{ kind: "source_reference", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" } }]
   }).status).toBe("no_executable_proposition");
   expect(SourceSemanticResponseEnvelopeSchema.safeParse({
     contract: "source-interpretation-response-v3",

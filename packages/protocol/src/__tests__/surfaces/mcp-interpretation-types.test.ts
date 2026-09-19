@@ -60,6 +60,6 @@ it("parses the four soul.interpretation operations and rejects unknown operation
     budget: BUDGET
   }).success).toBe(false);
   expect(soulToolJsonSchemas["soul.interpretation"]).toMatchObject({
-    type: "object"
+    oneOf: [{ type: "object" }, { type: "object" }, { type: "object" }, { type: "object" }]
   });
 });

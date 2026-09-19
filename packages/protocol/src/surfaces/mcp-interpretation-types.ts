@@ -2,13 +2,14 @@ import { z } from "zod";
 import { BoundedIdSchema, BoundedLabelSchema } from "../shared/schema-primitives.js";
 import { SourceReferenceCatalogSchema } from "../evidence/source-reference.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
+import { AuthorizedScopesAdmissionSchema } from "../governance/active-constraints-policy.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceSemanticQuerySchema } from "../recall/conditional-field/semantic-query.js";
 import { SourceSemanticAlignmentSchema } from "../recall/conditional-field/semantic-alignment.js";
 import { SourceSemanticEvaluationContextSchema } from "../recall/conditional-field/interpretation-context.js";
 import { SourceSemanticDraftSchema } from "../garden/source-semantic-draft.js";
 import {
-  SourceSemanticInterpretationSchema,
+  SourceSemanticInterpretationSchema, SourceSemanticNoPropositionOutcomeSchema, SourceSemanticSourceBindingSchema,
   SourceSemanticOutcomeSchema,
   SourceSemanticPublishedInterpretationSchema,
   SourceSemanticReasoningResultSchema
@@ -31,24 +32,32 @@ const CoverageWork = {
 export const SoulInterpretationPrepareSourceRequestSchema = z.object({
   operation: z.literal("prepare_source"),
   source_id: BoundedIdSchema,
-  budget: RequestBudgetSchema
+  budget: RequestBudgetSchema,
+  authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
 }).strict().readonly();
 
 export const SoulInterpretationProposeRequestSchema = z.object({
   operation: z.literal("propose"),
   source_handle: BoundedIdSchema,
-  draft: SourceSemanticDraftSchema,
+  draft: SourceSemanticDraftSchema.optional(),
+  disposition: SourceSemanticNoPropositionOutcomeSchema.optional(),
   producer_id: BoundedIdSchema,
   producer_version: BoundedLabelSchema,
-  contract_version: BoundedLabelSchema
-}).strict().readonly();
+  contract_version: BoundedLabelSchema,
+  budget: RequestBudgetSchema.optional(),
+  authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
+}).strict().superRefine((request, context) => {
+  if ((request.draft === undefined) === (request.disposition === undefined)) context.addIssue({ code: "custom", message: "propose requires a draft or an explicit no-proposition disposition" });
+}).readonly();
 
 export const SoulInterpretationPrepareQueryRequestSchema = z.object({
   operation: z.literal("prepare_query"),
   original_query: z.string().min(1).max(8192),
   q: SourceSemanticQuerySchema.optional(),
   source_handle: BoundedIdSchema.optional(),
-  budget: RequestBudgetSchema
+  continuation_handle: BoundedIdSchema.optional(),
+  budget: RequestBudgetSchema,
+  authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
 }).strict().readonly();
 
 export const SoulInterpretationReasonRequestSchema = z.object({
@@ -60,7 +69,8 @@ export const SoulInterpretationReasonRequestSchema = z.object({
   a: SourceSemanticAlignmentSchema.optional(),
   original_query: z.string().min(1).max(8192).optional(),
   budget: RequestBudgetSchema,
-  output_byte_limit: z.number().int().min(1024).max(1_000_000)
+  output_byte_limit: z.number().int().min(1024).max(1_000_000),
+  authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
 }).strict().readonly();
 
 export const SoulInterpretationRequestSchema = z.discriminatedUnion("operation", [
@@ -84,6 +94,8 @@ export const SoulInterpretationPrepareSourceResponseSchema = z.object({
 export const SoulInterpretationProposeResponseSchema = z.object({
   operation: z.literal("propose"),
   outcome: SourceSemanticOutcomeSchema,
+  source_binding: SourceSemanticSourceBindingSchema.optional(),
+  semantic_status: z.literal("unreviewed").optional(),
   published: SourceSemanticPublishedInterpretationSchema.optional(),
   evidence_object_id: BoundedIdSchema.optional(),
   ...CoverageWork
@@ -92,6 +104,7 @@ export const SoulInterpretationProposeResponseSchema = z.object({
 export const SoulInterpretationPrepareQueryResponseSchema = z.object({
   operation: z.literal("prepare_query"),
   query_handle: BoundedIdSchema.optional(),
+  continuation_handle: BoundedIdSchema.optional(),
   q_id: Sha256DigestSchema.optional(),
   outcome: SourceSemanticOutcomeSchema.optional(),
   candidates: z.array(SourceSemanticHandleDescriptorSchema).max(64).readonly(),

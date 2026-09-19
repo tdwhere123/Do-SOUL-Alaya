@@ -18,9 +18,8 @@ import { admitSourceSemanticQuery } from "../../../recall/conditional-field/quer
 import { admitSourceSemanticAlignment } from "../../../recall/conditional-field/query/source-semantic-alignment-admission.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { reasonSourceSemanticInterpretation } from "../../../recall/runtime/source-semantic-reasoning.js";
-import { reasonSourceInterpretation } from "../../../recall/runtime/source-interpretation-reasoning.js";
 import {
-  decodeEngineBindings, oracleBindingsMatchEngine, oracleNecessaryLeavesHeld,
+  decodeEngineBindings, oracleBindingsMatchEngine, oracleNecessaryLeavesHeld, oracleProofsMatchEngine,
   oracleSourceSemanticJoin
 } from "./source-semantic-relational-oracle.js";
 
@@ -71,10 +70,10 @@ function sendInspectQuery(original = AND_QUERY) {
 function joinQuery() {
   return queryOf(JOIN_QUERY, [{
     id: "qSend", variable: "fSend", predicate_reading: "send",
-    role_requirements: [role("object", "parcel", "parcel"), role("recipient", "recipient", "Vega")]
+    role_requirements: [role("object", "parcel", "parcel"), role("recipient", "recipient", "recipient")]
   }, {
     id: "qPromise", variable: "fPromise", predicate_reading: "promise",
-    role_requirements: [role("promisor", "recipient", "Vega")]
+    role_requirements: [role("promisor", "recipient", "recipient")]
   }, {
     id: "qInspect", variable: "fInspect", predicate_reading: "inspect",
     role_requirements: [role("object", "parcel", "parcel")]
@@ -290,9 +289,9 @@ function joinCorrespondences(inspectMention = "mP2"): SourceSemanticCorresponden
   return [
     correspondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
     correspondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mP1"),
-    correspondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "recipient" }, { kind: "slot", frame: "fSend", slot: "recipient" }, "Vega", "mVega1"),
+    correspondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "recipient" }, { kind: "slot", frame: "fSend", slot: "recipient" }, "recipient", "mVega1"),
     correspondence({ kind: "predicate", alternative: 0, frame: "qPromise" }, { kind: "frame", frame: "fPromise" }, "promised", "mPromised"),
-    correspondence({ kind: "slot", alternative: 0, frame: "qPromise", slot: "promisor" }, { kind: "slot", frame: "fPromise", slot: "promisor" }, "Vega", "mVega2"),
+    correspondence({ kind: "slot", alternative: 0, frame: "qPromise", slot: "promisor" }, { kind: "slot", frame: "fPromise", slot: "promisor" }, "recipient", "mVega2"),
     correspondence({ kind: "predicate", alternative: 0, frame: "qInspect" }, { kind: "frame", frame: "fInspect" }, "inspect", "mInspect"),
     correspondence({ kind: "slot", alternative: 0, frame: "qInspect", slot: "object" }, { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", inspectMention)
   ];
@@ -323,9 +322,10 @@ function assertOracle(
   result: ReturnType<typeof reason>, variables: readonly string[]
 ) {
   const oracle = oracleSourceSemanticJoin(h, q, a);
-  const decoded = decodeEngineBindings(h, q, a, result.consumed_leaves);
+  const decoded = decodeEngineBindings(result);
   expect(oracleBindingsMatchEngine(oracle, decoded, variables)).toBe(true);
   expect(oracleNecessaryLeavesHeld(oracle, result.consumed_leaves)).toBe(true);
+  expect(oracleProofsMatchEngine(oracle, result)).toBe(true);
   return oracle;
 }
 
@@ -674,7 +674,10 @@ describe("source semantic query compilation", () => {
     expect(result.semantic_status).toBe("unreviewed");
   });
 
-  it("does not retarget live v2 packet reasoning", () => {
-    expect(reasonSourceInterpretation).not.toBe(reasonSourceSemanticInterpretation);
+  it("refuses a legacy packet as an open source interpretation", () => {
+    const h = mixedH(), q = sendInspectQuery(), a = alignmentOf(h, q, AND_QUERY, SEND_AND);
+    expect(reasonSourceSemanticInterpretation({ h: { ...h, contract: "source-interpretation-v2" }, q, a,
+      original_query: AND_QUERY, workspaceId: "ws-semantic", scope: "project", authorizedScopes: ["project"], asOf: CLOCK
+    }).outcome).toEqual({ status: "invalid", reason: "malformed_interpretation" });
   });
 });

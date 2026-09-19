@@ -27,7 +27,7 @@ export function sourceSemanticInterpretationPreimage(interpretation: SourceSeman
     contract_version: value.contract_version,
     body: {
       contract: value.contract,
-      mentions: value.mentions.map(({ utf8_span: _span, ...mention }) => mention),
+      mentions: value.mentions.map(({ utf8_span: _span, span_space: _space, ...mention }) => mention),
       referents: value.referents,
       frames: value.frames,
       operators: value.operators,

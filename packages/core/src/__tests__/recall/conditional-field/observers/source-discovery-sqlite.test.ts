@@ -62,7 +62,7 @@ describe("source discovery sqlite lookup", () => {
     expect(resumed).toMatchObject({ rows: [], rowsRead: 1, nativeWork: 2, truncated: false });
     expect(matches).toHaveBeenCalledTimes(3);
     for (const seek of [["", ""], JSON.parse(first.committedThrough!)]) {
-      const plan = database.connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(65536, "workspace-1", ...seek) as { detail: string }[];
+      const plan = database.connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(65536, "workspace-1", 0, ...seek) as { detail: string }[];
       expect(plan.some((row) => row.detail.includes("SEARCH evidence_capsules USING INDEX idx_evidence_capsules_source_cursor") &&
         row.detail.includes("(created_at,object_id)>(?,?)"))).toBe(true);
       expect(plan.some((row) => /TEMP B-TREE|SCAN evidence_capsules/.test(row.detail))).toBe(false);

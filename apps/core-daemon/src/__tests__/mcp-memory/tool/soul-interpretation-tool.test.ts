@@ -68,6 +68,8 @@ const DRAFT = {
 };
 
 function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorkerResult {
+  if (request.kind === "validate_source") return { kind: "validate_source", source_id: "artifact-1", source_version: "1",
+    content_digest: `sha256:${fieldContractSha256(SOURCE)}`, source: SOURCE, catalog: CATALOG, coverage: IDLE, work: WORK };
   if (request.kind === "prepare_source") {
     return {
       kind: "prepare_source",
@@ -97,8 +99,8 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
       semantic_status: "unreviewed",
       world_claim: "unknown",
       consumed_leaves: [],
-      limitations: [],
-      conclusion_leaves: []
+      conclusion_scope: "conditional_on_interpretation",
+      outcome: { status: "interpreted", gaps: [] }
     },
     coverage: { ...IDLE, computation: "complete" },
     work: WORK
@@ -228,7 +230,6 @@ describe("soul.interpretation MCP/CLI surface", () => {
   it("awaits Core publish before returning propose", async () => {
     let finished = false;
     const publication: SourceSemanticPublicationPort = {
-      resolveSource: () => ({ content_bytes: SOURCE }),
       publish: async () => {
         await Promise.resolve();
         finished = true;
@@ -269,12 +270,12 @@ describe("soul.interpretation MCP/CLI surface", () => {
     });
     const handler = createHandler({
       sourceSemanticsPort: createPort(async ({ request }) => {
-        if (request.kind === "prepare_query") {
-          throw new CoreError("VALIDATION", "source semantic preparation handle expired");
+        if (request.kind === "validate_source") {
+          throw new CoreError("VALIDATION", "source semantic preparation handle expired", { details: { admission: "expired" } });
         }
         return workerResult(request);
       }),
-      publication: { resolveSource: () => ({ content_bytes: SOURCE }), publish }
+      publication: { publish }
     });
     const prepared = await callInterpretation(handler, {
       operation: "prepare_source", source_id: "artifact-1", budget: BUDGET
@@ -320,4 +321,70 @@ describe("soul.interpretation MCP/CLI surface", () => {
     expect(recall.tool_name).toBe("soul.recall");
     expect("delivery_id" in recall.output || "index" in recall.output || "results" in recall.output).toBe(true);
   });
+});
+
+it("forwards named scope admission to the worker instead of hard-wiring unrestricted", async () => {
+  const execute = vi.fn<SourceSemanticHostPort["execute"]>(async ({ request, authorized_scopes }) => {
+    expect(authorized_scopes).toEqual({ mode: "named", scopes: ["project"] });
+    return workerResult(request);
+  });
+  const result = await callInterpretation(createHandler({ sourceSemanticsPort: { execute } }), {
+    operation: "prepare_source", source_id: "artifact-1", budget: BUDGET,
+    authorized_scopes: { mode: "named", scopes: ["project"] }
+  });
+  expect(result.ok).toBe(true);
+  expect(execute).toHaveBeenCalled();
+});
+
+it("does not reinterpret an unavailable body as no eligible source", async () => {
+  const unavailable = await callInterpretation(createHandler({ sourceSemanticsPort: createPort(async () => {
+    throw new CoreError("CONFLICT", "current source body is not available", {
+      details: { admission: "unavailable", unavailable: "source_body", work: WORK }
+    });
+  }) }), { operation: "prepare_source", source_id: "artifact-1", budget: BUDGET });
+  expect(unavailable).toMatchObject({ ok: true, output: { outcome: { status: "unavailable", reason: "source_body" },
+    coverage: { discovery: "open" }, work: WORK } });
+  const absent = await callInterpretation(createHandler({ sourceSemanticsPort: createPort(async () => {
+    throw new CoreError("NOT_FOUND", "source is not currently admitted", { details: { admission: "no_eligible_source", work: WORK } });
+  }) }), { operation: "prepare_source", source_id: "artifact-1", budget: BUDGET });
+  expect(absent).toMatchObject({ ok: true, output: { outcome: { status: "no_eligible_source", provider_attempts: 0 }, work: WORK } });
+});
+
+it("does not fold an unavailable body during propose into malformed interpretation", async () => {
+  const publish = vi.fn<SourceSemanticPublicationPort["publish"]>(async () => {
+    throw new CoreError("VALIDATION", "current source body is not available", {
+      details: { admission: "unavailable", unavailable: "source_body", work: WORK }
+    });
+  });
+  const result = await callInterpretation(createHandler({ sourceSemanticsPort: createPort(), publication: { publish } }), {
+    operation: "propose", source_handle: "source-handle", draft: DRAFT,
+    producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v3", budget: BUDGET
+  });
+  expect(result).toMatchObject({ ok: true, output: { outcome: { status: "unavailable", reason: "source_body" }, provider_attempts: 0 } });
+});
+
+it("accepts a located no-proposition disposition without publishing a fictitious H", async () => {
+  const publish = vi.fn<SourceSemanticPublicationPort["publish"]>(async () => { throw new Error("no H should be published"); });
+  const handler = createHandler({ sourceSemanticsPort: createPort(), publication: { publish } });
+  const row = CATALOG.assertions[0]!;
+  const result = await callInterpretation(handler, { operation: "propose", source_handle: "source-handle",
+    disposition: { status: "no_executable_proposition", description: "Producer disposition under an unreviewed interpretation",
+      context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
+        source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }] },
+    producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v3", budget: BUDGET });
+  expect(result).toMatchObject({ ok: true, output: { outcome: { status: "no_executable_proposition" },
+    semantic_status: "unreviewed", source_binding: { source_id: "artifact-1" }, provider_attempts: 0 } });
+  expect(publish).not.toHaveBeenCalled();
+});
+
+it("preserves publication budget exhaustion and adds post-preparation failure cost", async () => {
+  const publish: SourceSemanticPublicationPort["publish"] = async () => { throw new CoreError("CONFLICT", "publication budget exhausted", {
+    subCode: "RETRYABLE_BACKPRESSURE", details: { work: { native_work: 4, native_bytes: 80, logical_work: 12, logical_memory_bytes: 400, rss_bytes: 1 } }
+  }); };
+  const handler = createHandler({ sourceSemanticsPort: createPort(), publication: { publish } });
+  const result = await callInterpretation(handler, { operation: "propose", source_handle: "source-handle", draft: DRAFT,
+    producer_id: "test-author", producer_version: "1", contract_version: "source-interpretation-v3", budget: BUDGET });
+  expect(result).toMatchObject({ ok: true, output: { outcome: { status: "resource_exhausted" },
+    work: { native_work: WORK.native_work + 4, logical_work: WORK.native_work + 12,
+      logical_memory_bytes: WORK.logical_memory_bytes + 400 }, provider_attempts: 0 } });
 });

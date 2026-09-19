@@ -21,9 +21,9 @@ import {
 
 const SAME_PARCEL = "which parcel was packed and inspected?";
 const COMPLETED_SEND = "which parcel has already been sent by Bob to Alice?";
-const PROMISED_SEND = "what did Bob promise to send to Alice?";
-const ASKED_SEND = "what sending was asked about?";
-const UNRESOLVED_SEND = "which sending is not required to be a completed event?";
+const PROMISED_SEND = "which parcel did Bob promise to send to Alice?";
+const ASKED_SEND = "which parcel sending was asked about?";
+const UNRESOLVED_SEND = "which parcel sending is not required to be a completed event?";
 
 const role = (id: string, variable: string, excerpt: string) => ({
   id,
