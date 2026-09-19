@@ -25,6 +25,11 @@ requests retain their original scope and limits; closed extraction generations
 reject this packing. Input completeness does not certify semantic coverage or
 relax interpretation and resource limits.
 
+Batch extraction adds explicit, exact-job observation recovery after local
+poll bounds. A repaired observer can retain the original submitted authority
+and plan without dispatching or importing under a changed execution revision.
+Ordinary polling stays bounded and unobserved remote work retains unknown cost.
+
 Protocol 6.5.0 adds a bounded generation schema derived from the same semantic
 expression shapes and canonical depth limit. Shared acyclic definitions carry
 the complete legal nesting envelope to structured decoders. SOUL pins this

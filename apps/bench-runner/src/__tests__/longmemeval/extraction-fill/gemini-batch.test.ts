@@ -45,6 +45,7 @@ describe("durable Gemini Batch HTTP extraction", () => {
   let ambiguousCreate: boolean;
   let foreignOperation: boolean;
   let cancels: number;
+  let observations: number;
   let metadataOverride: Record<string, unknown>;
   const admitted = new Set<string>();
   const reserve = vi.fn<GeminiBatchInvocation["reserveSubmission"]>(async (lines) =>
@@ -55,7 +56,7 @@ describe("durable Gemini Batch HTTP extraction", () => {
     root = mkdtempSync(join(tmpdir(), "alaya-gemini-batch-"));
     creates = 0; uploads = []; displayName = ""; state = "BATCH_STATE_RUNNING";
     output = result("line-a") + result("line-b");
-    ambiguousCreate = false; foreignOperation = false; cancels = 0;
+    ambiguousCreate = false; foreignOperation = false; cancels = 0; observations = 0;
     metadataOverride = {};
     admitted.clear(); reserve.mockClear(); importer.mockClear();
     importer.mockImplementation(async ({ line }) => { admitted.add(line.key); });
@@ -82,6 +83,7 @@ describe("durable Gemini Batch HTTP extraction", () => {
       } else if (req.url === "/v1beta/batches/job:cancel") {
         expect(req.method).toBe("POST"); cancels += 1; res.end("{}");
       } else if (req.url === "/v1beta/batches/job") {
+        observations += 1;
         res.end(JSON.stringify({
           name: foreignOperation ? "batches/foreign" : "batches/job",
           metadata: {
@@ -112,6 +114,7 @@ describe("durable Gemini Batch HTTP extraction", () => {
     const lease = acquireExtractionCacheWriteLease(root);
     return withExtractionCacheWriteLease(lease, () => executeGeminiBatchOperation({
       operation, root, lease, plan: plan(),
+      ...(operation === "recover" ? { recoveryRevision: { authority: "original", observer: "repaired" } } : {}),
       http: createGeminiBatchHttp({ endpoint, apiKey: "synthetic-key", timeoutMs: 1_000 }),
       importLine: importer, reserveSubmission: reserve, ...changes
     }));
@@ -424,6 +427,96 @@ describe("durable Gemini Batch HTTP extraction", () => {
     expect(stopped.jobs[0]?.status).toBe("running");
     expect(stopped.jobs[0]?.polls).toBe(1);
     expect(stopped.jobs[0]?.diagnostic).toContain("unresolved");
+  });
+
+  it.each(["deadline", "poll count"])("recovers one exact remote observation after %s without redispatch or import", async (bound) => {
+    const limited = { ...plan(), limits: { ...plan().limits, maxPolls: 1 } };
+    await run("prepare", { plan: limited });
+    const submitted = await run("submit", { plan: limited });
+    const job = submitted.jobs[0]!;
+    if (bound === "deadline") vi.spyOn(Date, "now").mockReturnValue(job.submittedAt! + limited.limits.deadlineMs);
+    else await run("status", { plan: limited });
+    const before = observations;
+    await run("resume", { plan: limited });
+    expect(observations).toBe(before);
+    const reconcile = { localJob: job.id, remoteJob: job.remoteJob! };
+    const running = await run("recover", { plan: limited, reconcile });
+    expect(observations).toBe(before + 1);
+    expect(running.jobs[0]).toMatchObject({ status: "running", usageUnknown: true, submittedAt: job.submittedAt,
+      attemptOrdinals: job.attemptOrdinals, outcomes: {} });
+    state = "BATCH_STATE_SUCCEEDED";
+    const recovered = await run("recover", { plan: limited, reconcile });
+    expect(observations).toBe(before + 2);
+    expect(recovered.jobs[0]).toMatchObject({ status: "succeeded", outcomes: {}, usageUnknown: true });
+    expect(importer).not.toHaveBeenCalled();
+    const witness = JSON.parse(readFileSync(join(root,
+      `batch-poll-${batchDigest(`${job.id}:${recovered.jobs[0]!.polls}`)}.json`), "utf8"));
+    expect(witness.recovery).toEqual({ authority: "original", observer: "repaired" });
+    const imported = await run("import", { plan: limited });
+    expect(Object.keys(imported.jobs[0]!.outcomes)).toHaveLength(2);
+    await run("recover", { plan: limited, reconcile });
+    expect(observations).toBe(before + 2);
+    expect(creates).toBe(1); expect(uploads).toHaveLength(1); expect(reserve).toHaveBeenCalledTimes(1);
+    expect(cancels).toBe(0);
+  });
+
+  it("rejects recovery without exact acknowledged identities and conflicting remote metadata", async () => {
+    const prepared = await run("prepare");
+    const reconcile = { localJob: prepared.jobs[0]!.id, remoteJob: "batches/job" };
+    await expect(run("recover", { reconcile })).rejects.toThrow("acknowledged remote job");
+    await run("submit");
+    await expect(run("recover")).rejects.toThrow("exact identities");
+    await expect(run("recover", { reconcile: { ...reconcile, remoteJob: "batches/foreign" } })).rejects.toThrow("exact identities");
+    expect(observations).toBe(0);
+    metadataOverride = { model: "models/foreign" };
+    await expect(run("recover", { reconcile })).rejects.toThrow("binding mismatch");
+    metadataOverride = { inputConfig: undefined };
+    await expect(run("recover", { reconcile })).rejects.toThrow("binding mismatch");
+    expect(creates).toBe(1); expect(importer).not.toHaveBeenCalled();
+  });
+
+  it("replays the retained recovery observation after interruption before the final state save", async () => {
+    await run("prepare"); const submitted = await run("submit");
+    const job = submitted.jobs[0]!;
+    const reconcile = { localJob: job.id, remoteJob: job.remoteJob! };
+    state = "BATCH_STATE_SUCCEEDED";
+    const original = batchStore.saveBatchState;
+    const save = vi.spyOn(batchStore, "saveBatchState").mockImplementation((lease, plan, state) => {
+      if (state.jobs[0]?.status === "succeeded") throw new Error("interrupted after observation receipt");
+      return original(lease, plan, state);
+    });
+    await expect(run("recover", { reconcile })).rejects.toThrow("interrupted after observation receipt");
+    save.mockRestore();
+    const imported = await run("import");
+    expect(imported.jobs[0]?.status).toBe("succeeded");
+    expect(Object.keys(imported.jobs[0]!.outcomes)).toHaveLength(2);
+    expect(observations).toBe(1); expect(creates).toBe(1); expect(reserve).toHaveBeenCalledTimes(1);
+  });
+
+  it("observes only the explicitly selected job and preserves failed observations as unresolved", async () => {
+    const split = { ...plan(), limits: { ...plan().limits, maxRequestsPerJob: 1, maxJobs: 2 } };
+    const names = new Map<string, string>();
+    const get = vi.fn(async (remote: string) => ({ name: remote, metadata: {
+      state: "BATCH_STATE_RUNNING", model: split.model, inputConfig: { fileName: "files/input" }, displayName: names.get(remote)
+    } }));
+    const http = { endpoint, upload: vi.fn(async () => "files/input"), get,
+      create: vi.fn(async (_model: string, _input: string, display: string) => {
+        const remote = `batches/${names.size}`; names.set(remote, display); return { name: remote };
+      }), cancel: vi.fn(), download: vi.fn() };
+    await run("prepare", { plan: split, http });
+    const submitted = await run("submit", { plan: split, http });
+    const target = submitted.jobs[1]!;
+    const reconcile = { localJob: target.id, remoteJob: target.remoteJob! };
+    const recovered = await run("recover", { plan: split, http, reconcile });
+    expect(get).toHaveBeenCalledExactlyOnceWith(target.remoteJob, undefined);
+    expect(recovered.jobs[0]).toEqual(submitted.jobs[0]);
+    get.mockRejectedValueOnce(new Error("request timed out"));
+    await expect(run("recover", { plan: split, http, reconcile })).rejects.toThrow("timed out");
+    const reopened = await run("import", { plan: split, http });
+    expect(reopened.jobs[1]).toMatchObject({ status: "running", usageUnknown: true, outcomes: {}, polls: 2 });
+    expect(accountedCost(reopened.jobs[1]!, { plan: split })).toBe(target.costBoundUsd);
+    expect(http.create).toHaveBeenCalledTimes(2); expect(http.cancel).not.toHaveBeenCalled();
+    expect(http.download).not.toHaveBeenCalled(); expect(importer).not.toHaveBeenCalled();
   });
 
   it.each(["model", "inputFile", "displayName"])("rejects conflicting %s identity on ordinary polling", async (field) => {

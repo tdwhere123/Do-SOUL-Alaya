@@ -28,8 +28,8 @@ export function peelExtractionBatchFlags(args: readonly string[]): {
   if (values.size === 0) return { rest };
   const operation = values.get("--batch-operation");
   const path = values.get("--batch-limits");
-  if (!operation || !["prepare", "submit", "status", "resume", "import", "cancel"].includes(operation) || !path) {
-    throw new Error("Batch requires --batch-operation prepare|submit|status|resume|import|cancel and --batch-limits <json>");
+  if (!operation || !["prepare", "submit", "status", "resume", "recover", "import", "cancel"].includes(operation) || !path) {
+    throw new Error("Batch requires --batch-operation prepare|submit|status|resume|recover|import|cancel and --batch-limits <json>");
   }
   const localJob = values.get("--batch-local-job");
   const window = values.get("--batch-window");
@@ -37,6 +37,7 @@ export function peelExtractionBatchFlags(args: readonly string[]): {
   if (window !== undefined && !/^[a-zA-Z0-9_-]{1,64}$/u.test(window)) throw new Error("invalid Batch window name");
   const remoteJob = values.get("--batch-remote-job");
   if ((localJob === undefined) !== (remoteJob === undefined)) throw new Error("Batch reconciliation requires both job identities");
+  if (operation === "recover" && localJob === undefined) throw new Error("Batch recovery requires both job identities");
   const limits = JSON.parse(readBoundedCanonicalUtf8Artifact({ path, maxBytes: 16_384, label: "Batch limits" })) as GeminiBatchLimits;
   return { rest, batch: {
     operation: operation as GeminiBatchOperation, limits,

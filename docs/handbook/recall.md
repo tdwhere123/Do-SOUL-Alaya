@@ -171,6 +171,16 @@ submission intent before reservation. Unknown submission and prior submitted
 jobs block redispatch; sync, repair and continuation cannot reuse this scope.
 Sample settlement remains partial and cannot promote the cache or snapshot.
 
+Batch poll count and deadline bound ordinary `status`/`resume` observation;
+they do not establish remote termination or release reserved spend. Explicit
+`recover`, with both exact local and acknowledged remote job identities, makes
+at most one timeout-bounded status request even after those bounds. It retains
+the original plan, wire bytes, submission time, attempts and cumulative poll
+count, and never submits, cancels or imports. A repaired observer may verify
+the original receipt revision for this operation alone; request/plan, source,
+authority and remote binding checks still apply. Import and semantic admission
+remain subject to their original execution revision and authority.
+
 Historical capture and certificate bytes remain intact, while current qualified
 OSF and fact-key reads reject incomplete source obligations, including the
 pre-capture Signal fallback. Raw field factor rows participate in immutable

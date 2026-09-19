@@ -178,7 +178,9 @@ function extractionInspectionInput(input: {
     cacheRoot,
     ...(options.dataDir === undefined ? {} : { dataDir: options.dataDir }),
     ...(options.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: options.pinnedMetaRoot }),
-    revision: receipt.direct_spend === undefined
+    // Recovery observes one already acknowledged job; it cannot dispatch or import.
+    // Its retained plan and exact wire bytes remain independently verified.
+    revision: receipt.direct_spend === undefined && options.batch?.operation !== "recover"
       ? readCurrentExtractionAuthorityRevision()
       : receipt.observation.revision,
     action: receipt.action,

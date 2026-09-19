@@ -2,7 +2,7 @@ import type { OfficialApiInterpretationEntryRejection } from "@do-soul/alaya-sou
 import type { GeminiGenerateContentSettings } from "./native-codec.js";
 import type { ExtractionCacheWriteLease } from "../manifest/fill-root-guard.js";
 
-export type GeminiBatchOperation = "prepare" | "submit" | "status" | "resume" | "import" | "cancel";
+export type GeminiBatchOperation = "prepare" | "submit" | "status" | "resume" | "recover" | "import" | "cancel";
 
 export type GeminiBatchLineOutcome = {
   readonly status: "admitted" | "failed" | "quarantined";
@@ -99,8 +99,10 @@ export interface GeminiBatchInvocation {
   readonly plan: GeminiBatchPlan;
   readonly http: GeminiBatchHttp;
   readonly signal?: AbortSignal;
-  /** Explicit operator reconciliation; fetched metadata must bind the known input file. */
+  /** Exact identities for ambiguous submission reconciliation or explicit observation recovery. */
   readonly reconcile?: { readonly localJob: string; readonly remoteJob: string };
+  /** Recovery records its actual observer separately from the submitted authority. */
+  readonly recoveryRevision?: { readonly authority: string; readonly observer: string };
   /** Shared parser/admission/cache owner; must be idempotent after a partial commit. */
   readonly importLine: (input: {
     readonly line: GeminiBatchLine;

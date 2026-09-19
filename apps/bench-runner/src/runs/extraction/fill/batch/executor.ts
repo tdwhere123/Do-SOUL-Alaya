@@ -19,6 +19,19 @@ export async function executeGeminiBatchOperation(invocation: GeminiBatchInvocat
     if (batchDigest(wire) !== job.inputSha256) throw new Error("Batch input binding mismatch");
     publishArtifact(input.lease, `batch-input-${job.id}.jsonl`, wire);
   }
+  if (input.operation === "recover") {
+    const requested = input.reconcile;
+    const job = state.jobs.find((candidate) => candidate.id === requested?.localJob);
+    if (requested === undefined || job === undefined || job.remoteJob === undefined ||
+        job.remoteJob !== requested.remoteJob || job.submittedAt === undefined || job.inputFile === undefined) {
+      throw new Error("Batch recovery requires exact identities of an acknowledged remote job");
+    }
+    if (!input.recoveryRevision?.authority || !input.recoveryRevision.observer) {
+      throw new Error("Batch recovery requires authority and observer revisions");
+    }
+    await poll(input, state, job, true);
+    return structuredClone(state);
+  }
   if (input.reconcile !== undefined) await reconcile(input, state);
   for (const job of state.jobs) {
     input.signal?.throwIfAborted();
@@ -95,10 +108,11 @@ async function submit(input: GeminiBatchInvocation, state: GeminiBatchState, job
   }
 }
 
-async function poll(input: GeminiBatchInvocation, state: GeminiBatchState, job: GeminiBatchJob): Promise<void> {
+async function poll(input: GeminiBatchInvocation, state: GeminiBatchState, job: GeminiBatchJob,
+  explicitRecovery = false): Promise<void> {
   if (job.remoteJob === undefined || terminal.has(job.status)) return;
-  if (job.polls >= input.plan.limits.maxPolls ||
-      Date.now() - job.submittedAt! >= input.plan.limits.deadlineMs) {
+  if (!explicitRecovery && (job.polls >= input.plan.limits.maxPolls ||
+      Date.now() - job.submittedAt! >= input.plan.limits.deadlineMs)) {
     job.diagnostic = "poll limit/deadline reached; remote work remains unresolved";
     saveBatchState(input.lease, input.plan, state);
     return;
@@ -107,9 +121,11 @@ async function poll(input: GeminiBatchInvocation, state: GeminiBatchState, job: 
   saveBatchState(input.lease, input.plan, state);
   const operation = await input.http.get(job.remoteJob, input.signal);
   input.lease.assertOwned();
+  if (explicitRecovery) assertRemoteBatchBinding(job, input.plan, operation, true);
   applyRemoteOperation(job, input.plan, operation);
   publishArtifact(input.lease, `batch-poll-${batchDigest(`${job.id}:${job.polls}`)}.json`,
-    JSON.stringify(batchRemoteWitness(job, input.plan, operation)));
+    JSON.stringify({ ...batchRemoteWitness(job, input.plan, operation),
+      ...(explicitRecovery ? { recovery: input.recoveryRevision } : {}) }));
   saveBatchState(input.lease, input.plan, state);
 }
 

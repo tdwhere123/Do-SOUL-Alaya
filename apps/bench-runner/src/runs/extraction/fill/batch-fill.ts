@@ -1,4 +1,5 @@
 import { retainBatchAuthority } from "./batch/retained-authority.js";
+import { readCurrentExtractionAuthorityRevision } from "../authority/inspection.js";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { SourcePacketAdmissionError, writeDeterministicSourcePacketArtifact, importSourcePacketArtifact } from "../cache/source-packet-artifact.js";
 import { SourceSemanticAdmissionError, writeDeterministicSourceSemanticArtifact, importSourceSemanticArtifact } from "../cache/source-semantic-artifact.js";
@@ -98,6 +99,9 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
     operation: batch.operation, root: input.cacheRoot, lease: input.writeLease, plan, http,
     ...(input.options.signal === undefined ? {} : { signal: input.options.signal }),
     ...(batch.reconcile === undefined ? {} : { reconcile: batch.reconcile }),
+    ...(batch.operation === "recover" ? { recoveryRevision: {
+      authority: authority.receipt.observation.revision, observer: readCurrentExtractionAuthorityRevision()
+    } } : {}),
     reserveSubmission: async (lines) => {
       if (authority.receipt.sample_scope !== undefined) {
         if (authority.reserveSampleBatch === undefined) throw new Error("sample reservation authority is missing");

@@ -6,6 +6,7 @@ import { parseSourceSemanticRequest, prepareSourceSemanticRevision } from "@do-s
 import { runCli } from "../../../cli/cli.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
+import * as authorityInspection from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
 import { assertSourceSemanticShardCapacity, inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { inspectCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
@@ -14,6 +15,7 @@ import { readExtractionCacheManifestIdentity } from "../../../runs/extraction/ca
 import { resolveCompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-config.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, extractionArtifactRequests } from "../../../runs/extraction/request-artifact.js";
 import { decodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
+import { batchDigest } from "../../../runs/extraction/fill/batch/plan.js";
 import type { GeminiBatchLimits, GeminiBatchPlan, GeminiBatchState } from "../../../runs/extraction/fill/batch/contract.js";
 import { buildAuthorityQuestion, registerExtractionFillHooks, setExtractionCredentialFixture, buildExtractionFillQuestion } from "./fixture.js";
 
@@ -161,6 +163,32 @@ it("rejects complete-source before preparing a closed extraction generation", ()
   expect(() => extractionArtifactRequests({ turnContent: "I completed alpha." }, "complete-source", PROFILE))
     .toThrow(/complete-source packing requires open semantics/u);
 });
+
+it("allows a repaired observer to recover the retained plan while keeping import and dispatch revision-pinned", async () => {
+  const fixture = await setup();
+  expect(await fixture.run("prepare")).toBe(0);
+  expect(await fixture.run("submit")).toBe(0);
+  const before = fixture.state().jobs[0]!;
+  const planBefore = fixture.plan();
+  const originalRevision = readCurrentExtractionAuthorityRevision();
+  const revision = vi.spyOn(authorityInspection, "readCurrentExtractionAuthorityRevision").mockReturnValue("f".repeat(40));
+  expect(await fixture.run("recover")).toBe(2);
+  expect(await fixture.run("recover", ["--batch-local-job", before.id, "--batch-remote-job", before.remoteJob!])).toBe(0);
+  expect(fixture.state().jobs[0]).toMatchObject({ status: "succeeded", outcomes: {}, submittedAt: before.submittedAt,
+    attemptOrdinals: before.attemptOrdinals, usageUnknown: true });
+  expect(fixture.plan()).toEqual(planBefore);
+  const recovered = fixture.state().jobs[0]!;
+  const witness = JSON.parse(readFileSync(join(cacheRoot,
+    `batch-poll-${batchDigest(`${recovered.id}:${recovered.polls}`)}.json`), "utf8"));
+  expect(witness.recovery).toEqual({ authority: originalRevision, observer: "f".repeat(40) });
+  const calls = fixture.fetchMock.mock.calls.length;
+  for (const operation of ["submit", "resume", "status", "import"]) expect(await fixture.run(operation)).toBe(2);
+  expect(fixture.fetchMock).toHaveBeenCalledTimes(calls);
+  revision.mockReturnValue(originalRevision);
+  expect(await fixture.run("import")).toBe(0);
+  expect(fixture.creates()).toBe(1);
+  for (const key of fixture.keys) expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE)).toMatchObject({ status: "hit" });
+}, 60000);
 
 it.each([true, "complete_invalid_json"] as const)("binds explicit revisions (%s) through native authority, plan, import and reopened typed cache", async (revisionMode) => {
   const fixture = await setup("https://fixture-provider.invalid", false, revisionMode);
