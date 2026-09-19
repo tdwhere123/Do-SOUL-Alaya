@@ -1,6 +1,7 @@
 import { isNativeGeminiRequestProfile, type NativeGeminiRequestProfile } from "../../request-profile.js";
 import { findProviderBinding, supportsProviderRequestProfile } from "../../../provider/catalog.js";
 import { officialApiExtractionResponseSchema } from "@do-soul/alaya-soul";
+import { projectGeminiGenerationSchema } from "./generation-schema.js";
 
 export interface GeminiGenerateContentSettings {
   readonly model: string;
@@ -29,36 +30,12 @@ export function encodeGeminiGenerateContent(
     contents: [{ role: "user", parts: [{ text: line.userPrompt }] }],
     generationConfig: {
       responseMimeType: "application/json", maxOutputTokens: settings.maxOutputTokens,
-      ...(responseJsonSchema === undefined ? {} : { responseJsonSchema: normalizeGeminiSchema(responseJsonSchema) }),
+      ...(responseJsonSchema === undefined ? {} : { responseJsonSchema: projectGeminiGenerationSchema(responseJsonSchema).schema }),
       ...(isNativeGeminiRequestProfile(settings.requestProfile) ? {
         thinkingConfig: THINKING_CONFIG[settings.requestProfile]
       } : {})
     }
   };
-}
-
-function normalizeGeminiSchema(schema: unknown): unknown {
-  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) return schema;
-  // Nested array upper bounds can make Gemini reject generation schemas; the
-  // rejection threshold is unknown. Local admission still owns cardinality limits.
-  return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== "maxItems").map(([key, value]) => {
-    // Visit schema positions only: property names and annotation data are not keywords.
-    if (key === "additionalProperties" && typeof value === "object" && value !== null &&
-        !Array.isArray(value) && Object.keys(value).length === 0) return [key, true];
-    if (["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"].includes(key) &&
-        typeof value === "object" && value !== null && !Array.isArray(value)) {
-      return [key, Object.fromEntries(Object.entries(value).map(([name, child]) =>
-        [name, normalizeGeminiSchema(child)]))];
-    }
-    if (["allOf", "anyOf", "oneOf", "prefixItems"].includes(key) && Array.isArray(value)) {
-      return [key, value.map(normalizeGeminiSchema)];
-    }
-    if (["items", "additionalProperties", "contains", "not", "if", "then", "else",
-      "propertyNames", "unevaluatedProperties", "unevaluatedItems"].includes(key)) {
-      return [key, normalizeGeminiSchema(value)];
-    }
-    return [key, structuredClone(value)];
-  }));
 }
 
 export function decodeGeminiGenerateContent(value: unknown): {

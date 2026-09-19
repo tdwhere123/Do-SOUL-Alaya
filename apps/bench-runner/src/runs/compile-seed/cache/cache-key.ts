@@ -2,6 +2,7 @@ import { extractionArtifactRequests } from "../../extraction/request-artifact.js
 import type { SourceInterpretationProfile, ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import type { ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
 import { createHash } from "node:crypto";
+import { geminiGenerationSchemaCacheMaterial } from "../../extraction/fill/batch/generation-schema.js";
 import {
   officialApiExtractionResponseSchemaPreimage
 } from "@do-soul/alaya-soul";
@@ -29,7 +30,7 @@ export function computeCacheKey(
     requestProfile,
     systemPrompt,
     extractionRequest,
-    generationSchemaCacheMaterial(extractionRequest)
+    generationSchemaCacheMaterial(extractionRequest, model)
   );
 }
 
@@ -42,8 +43,9 @@ export function computeOfficialApiRequestCacheKey(
   return computeCacheKey(model, requestProfile, systemPrompt, extractionRequest);
 }
 
-function generationSchemaCacheMaterial(extractionRequest: string): string {
-  return officialApiExtractionResponseSchemaPreimage(extractionRequest);
+function generationSchemaCacheMaterial(extractionRequest: string, model: string): string {
+  const preimage = officialApiExtractionResponseSchemaPreimage(extractionRequest);
+  return model.startsWith("gemini-") ? geminiGenerationSchemaCacheMaterial(preimage) : preimage;
 }
 
 export function computeExtractionTurnCacheKey(

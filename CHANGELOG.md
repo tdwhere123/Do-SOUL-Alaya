@@ -25,6 +25,12 @@ choices. SOUL selects schemas, prompts and revision validation by the recorded
 producer contract, preserving v2 raw replay. Canonical H and consumer admission
 remain unchanged; this interface does not certify semantic completeness.
 
+The native Gemini codec projects recursive decoding properties to the provider's
+non-required-reference subset while preserving strict local admission. Recursive
+request cache identities bind the source and actual projected schema; historical
+acyclic identities remain unchanged. Batch and interactive transport share this
+projection owner.
+
 Protocol 6.3.0 exposes the shared bounded diagnostics schema and preserves exact
 producer alias/ownership paths. SOUL adds explicit source-bound revision
 preparation with immutable prior raw, verified parent requests and at most three

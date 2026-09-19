@@ -129,6 +129,34 @@ describe("native Gemini interactive extraction", () => {
     expect(soul.officialApiExtractionResponseSchema(userPrompt)).toEqual(originalSnapshot);
   });
 
+  it("transmits recursive decoding guidance over HTTP and admits complete source expressions locally", async () => {
+    const source = { sourceCorpus: "Mira promised to lend the atlas. Every visitor might read it.", assertionIds: [1, 2],
+      source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
+    const request = soul.buildSourceSemanticRequest(source);
+    const raw = soul.SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
+    let observed = false;
+    await withServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        const schema = JSON.parse(Buffer.concat(chunks).toString("utf8")).generationConfig.responseJsonSchema;
+        expect(schema.properties.content.required).toContain("roots");
+        expect(schema.$defs.__schema0.oneOf[0].required).toContain("arguments");
+        expect(schema.$defs.__schema0.oneOf[1].required).not.toContain("content");
+        observed = true;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: raw }] } }] }));
+      });
+    }, async (origin) => {
+      const result = await createGardenHttpExtractor({ ...config, providerUrl: origin }).extract({ ...input,
+        systemPrompt: soul.SOURCE_SEMANTIC_SYSTEM_PROMPT, userPrompt: JSON.stringify(request),
+        validateRawJson: value => { expect(soul.receiveSourceSemantics(value, request, source).outcome.status).toBe("interpreted"); }
+      });
+      expect(result.rawJson).toBe(raw);
+    });
+    expect(observed).toBe(true);
+  });
+
   it("adapts generation array bounds and empty additional-property schemas without changing other constraints or property names", () => {
     const shared = {
       type: "object", additionalProperties: {},
