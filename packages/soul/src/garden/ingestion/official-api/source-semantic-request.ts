@@ -13,6 +13,7 @@ import {
 import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, selectSourceSemanticUnits } from "./source-semantic-units.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
 import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canonical-prompt.js";
+import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT = "source-semantic-query-request-v2" as const;
@@ -42,6 +43,7 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   normalizer_version: z.enum([SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION]),
   proposal_contract: z.enum([SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT]).optional(),
   source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT).optional(),
+  revision: SourceSemanticRevisionSchema.optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
   assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(8).readonly().optional(),
@@ -61,6 +63,9 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   }
   if (request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT && request.source_unit_contract === undefined) {
     context.addIssue({ code: "custom", message: "content proposals require complete source units" });
+  }
+  if (request.revision !== undefined && request.proposal_contract !== SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT) {
+    context.addIssue({ code: "custom", message: "revision requires the semantic content proposal contract" });
   }
 }).readonly();
 
@@ -99,6 +104,7 @@ export type SourceSemanticProposalInput = Readonly<{
   producer_version: string;
   resource_limits?: Partial<SourceSemanticResourceLimits>;
   profile?: SourceInterpretationProfile;
+  revision?: SourceSemanticRevision;
 }>;
 
 export type SourceSemanticQueryProposalInput = Readonly<{
@@ -161,6 +167,9 @@ function producerCapability(producer_id: string, producer_version: string) {
 }
 
 export function parseSourceSemanticRequest(value: unknown): SourceSemanticRequest {
+  if (Buffer.byteLength(JSON.stringify(value) ?? "", "utf8") > 1_000_000) {
+    throw new AlayaError("VALIDATION", "source semantic request exceeds its byte bound");
+  }
   const parsed = SourceSemanticRequestEnvelopeSchema.parse(value);
   const source_request = SourceSemanticOpenRequestBodySchema.parse(parsed.source_request);
   if (new Set(source_request.source_assertions.map((row) => row.assertion_id)).size !== source_request.source_assertions.length) {
@@ -171,6 +180,7 @@ export function parseSourceSemanticRequest(value: unknown): SourceSemanticReques
     throw new AlayaError("CONFLICT", "source semantic request catalog mismatch");
   }
   const request = { ...parsed, source_request } as SourceSemanticRequest;
+  if (source_request.revision !== undefined) validateSourceSemanticRevision(request, source_request.revision);
   if (Buffer.byteLength(JSON.stringify(request), "utf8") > 1_000_000) {
     throw new AlayaError("VALIDATION", "source semantic request exceeds its byte bound");
   }
@@ -192,13 +202,15 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
     })),
     source_assertions: units.map(({ assertion_id, text, source_role }) => ({ assertion_id, text, source_role }))
   });
-  return parseSourceSemanticRequest({
+  const request = parseSourceSemanticRequest({
     schema_version: SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION,
     interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
     source_request,
     source_catalog: buildSourceReferenceCatalog(semanticSha256(input.sourceCorpus), source_request.source_assertions, semanticSha256),
     ...(input.profile !== undefined ? { profile: input.profile } : {})
   });
+  return input.revision === undefined ? request : parseSourceSemanticRequest({ ...request,
+    source_request: { ...request.source_request, revision: input.revision } });
 }
 
 export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryProposalInput): SourceSemanticQueryRequest {

@@ -21,7 +21,7 @@ import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import { readRetainedBatchAuthority } from "../fill/batch/retained-authority.js";
 import { readRetainedBatchLine } from "../fill/batch/retained-line.js";
 import {
-  EXTRACTION_OPEN_SEMANTICS_GENERATION, SOURCE_SEMANTIC_BATCH_PRODUCER_ID, SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
+  SOURCE_SEMANTIC_BATCH_PRODUCER_ID, SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
 } from "../request-artifact.js";
 
 export class SourceSemanticAdmissionError extends Error {}
@@ -144,7 +144,6 @@ export function inspectCachedSourceSemantic(cacheRoot: string, cacheKey: string,
     const inspected = inspectSourceSemanticEntry(cached.entry, cacheRoot);
     const manifest = readExtractionCacheManifestIdentity(cacheRoot)?.manifest;
     if (manifest?.source_semantic_generation === undefined ||
-        canonicalJson(manifest.source_semantic_generation) !== canonicalJson(EXTRACTION_OPEN_SEMANTICS_GENERATION) ||
         extractionAdmissionGenerationSha256(manifest) !== cached.entry.admission_identity!.generation_sha256) {
       throw new AlayaError("CONFLICT", "typed open-semantics generation binding mismatch");
     }

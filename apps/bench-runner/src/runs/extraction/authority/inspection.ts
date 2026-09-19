@@ -3,7 +3,7 @@ import {
   type ExtractionOpenSemanticsGeneration
 } from "../request-artifact.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
-import type { SourceInterpretationProfile, ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { AlayaError, type SourceInterpretationProfile, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, statfsSync } from "node:fs";
@@ -237,11 +237,16 @@ function collectShardStatus(
   const nonemptyKeys: string[] = [];
   const invalidShards: ExtractionRepairShard[] = [];
   const validEntries: ExtractionContentClosureEntry[] = [];
+  const revisionsSeen = new Set<string>();
   for (const turn of turns) {
     const keys = computeExtractionTurnCacheKeys(
       config.model, config.requestProfile, extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics), turn, config.sourcePacking, config.sourceInterpretationProfile, config.openSemantics
     );
     const requests = extractionArtifactRequests(turn, config.sourcePacking, config.sourceInterpretationProfile, config.openSemantics);
+    for (const request of requests) {
+      const revision = request.semantic?.source_request.revision;
+      if (revision !== undefined) revisionsSeen.add(revision.base_request_sha256);
+    }
     for (const [index, key] of keys.entries()) {
       if (requests[index]!.source.source_assertions.length > 0) nonemptyKeys.push(key);
       const shard = inspectCachedExtractionArtifact(
@@ -262,6 +267,9 @@ function collectShardStatus(
         invalidShards.push({ cache_key: key, raw_json_sha256: shard.rawJsonSha256 });
       }
     }
+  }
+  if (config.openSemantics?.revisions?.some((row) => !revisionsSeen.has(row.base_request_sha256))) {
+    throw new AlayaError("CONFLICT", "source revision registry is not covered by the original source inventory");
   }
   return {
     missingKeys: missingKeys.sort(),

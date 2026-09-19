@@ -308,6 +308,10 @@ export {
   sourceSemanticResponseJsonSchema, type SourceSemanticRequest, type SourceSemanticProposalInput
 } from "./garden/ingestion/official-api/source-semantic-request.js";
 export {
+  SourceSemanticRevisionSchema, prepareSourceSemanticRevision, sourceSemanticBaseRequestDigest,
+  type SourceSemanticRevision
+} from "./garden/ingestion/official-api/source-semantic-revision.js";
+export {
   receiveSourceSemantics, completeEmptySourceSemantics, proposeSourceSemantics,
   MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, type SourceSemanticProposalResult
 } from "./garden/ingestion/official-api/source-semantic-receive.js";

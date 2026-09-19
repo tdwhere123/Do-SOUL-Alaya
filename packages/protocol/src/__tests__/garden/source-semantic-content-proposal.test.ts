@@ -5,6 +5,8 @@ import { SourceSemanticResponseEnvelopeSchema } from "../../garden/source-semant
 import { createHash } from "node:crypto";
 import { buildSourceReferenceCatalog } from "../../evidence/source-reference.js";
 import { normalizeSourceSemantics } from "../../garden/normalize-source-semantics.js";
+import { sourceSemanticValidationDiagnostics } from "../../garden/source-semantic-diagnostics.js";
+import { z } from "zod";
 
 const anchor = (index = 0, assertion_id = 1) => ({ assertion_id,
   source_ref: { first: `a${assertion_id}s${index}`, last: `a${assertion_id}s${index}` } });
@@ -164,6 +166,54 @@ describe("source-bound content proposal compiler", () => {
     expect(() => compile(value)).toThrow();
   });
 
+  it("reports independent alias and orphan failures at the original proposal locations without altering input", () => {
+    const value = proposal({ statements: [statement("send", [argument("entity", "missing"), argument("reference", "alice")]),
+      statement("orphan")], gaps: [{ kind: "uninterpreted_clause", evidence: [anchor()], affected: ["absent"] }] });
+    const before = JSON.stringify(value), diagnostics = diagnosticsOf(value);
+    expect(diagnostics).toEqual([
+      expect.objectContaining({ code: "unknown_alias", reference: "missing", path: ["content", "statements", 0, "arguments", 0, "target", "id"] }),
+      expect.objectContaining({ code: "wrong_alias_kind", reference: "alice", path: ["content", "statements", 0, "arguments", 1, "target", "id"] }),
+      expect.objectContaining({ code: "unknown_gap_alias", reference: "absent", path: ["content", "gaps", 0, "affected", 0] }),
+      expect.objectContaining({ code: "unowned_occurrence", reference: "orphan", path: ["content", "statements", 1, "id"] })
+    ]);
+    expect(JSON.stringify(value)).toBe(before);
+  });
+
+  it("locates conflicting ownership at both declarations without choosing a semantic repair", () => {
+    const value = quantified() as Record<string, any>;
+    value.content.statements[0].arguments[0].target.id = "send";
+    value.content.acts.push(act("everyone"));
+    const diagnostics = diagnosticsOf(value);
+    expect(diagnostics).toEqual([expect.objectContaining({ code: "conflicting_owner", reference: "send",
+      path: ["content", "operators", 0, "content"] })]);
+    expect(diagnostics[0]!.message).toContain('["content","statements",0,"arguments",0,"target","id"]');
+    const duplicate = diagnosticsOf(proposal({ acts: [act("send"), act("send")] }));
+    expect(duplicate[0]).toMatchObject({ code: "conflicting_owner", reference: "send", path: ["content", "acts", 1, "occurrence"] });
+  });
+
+  it("locates missing operator operands and duplicate aliases at producer fields", () => {
+    const diagnostics = diagnosticsOf(proposal({ entities: [entity(), entity("send")], operators: [
+      { id: "opaque", operator: "opaque", operands: ["missing"], evidence: [anchor()] }
+    ], acts: [act("send"), act("opaque")] }));
+    expect(diagnostics).toEqual([
+      expect.objectContaining({ code: "duplicate_alias", reference: "send", path: ["content", "statements", 0, "id"] }),
+      expect.objectContaining({ code: "unknown_owner_target", reference: "missing", path: ["content", "operators", 0, "operands", 0] })
+    ]);
+  });
+
+  it("bounds aggregated structural diagnostics and charges their retained work to the shared ledger", () => {
+    const value = proposal({ statements: Array.from({ length: 40 }, (_, index) => statement(`orphan${index}`)), acts: [] });
+    const diagnostics = diagnosticsOf(value);
+    expect(diagnostics).toHaveLength(32);
+    expect(diagnostics[0]).toMatchObject({ code: "unowned_occurrence", reference: "orphan0" });
+    expect(diagnostics[31]).toMatchObject({ reference: "orphan31" });
+    expect(JSON.stringify(diagnostics).length).toBeLessThanOrEqual(8192);
+    const meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 });
+    expect(() => materializeSourceSemanticContentProposal(value, meter)).toThrow(z.ZodError);
+    const bounded = new SourceSemanticResourceLedger({ work_units: meter.spentWork - 1, memory_bytes: 20000000 });
+    expect(() => materializeSourceSemanticContentProposal(value, bounded)).toThrow(SourceSemanticResourceExhausted);
+  });
+
   it("retains non-interpretation outcomes and rejects legacy or canonical fields", () => {
     expect(materializeSourceSemanticContentProposal({ contract: "source-semantic-proposal-v2", outcome: { status: "abstained" } }).outcome).toEqual({ status: "abstained" });
     expect(() => compile({ ...proposal(), outcome: { status: "abstained" } })).toThrow();
@@ -225,4 +275,13 @@ function quantified() {
     statement("send", [{ role: "agent", target: { kind: "bound_variable", quantifier: "everyone" }, evidence: [anchor(2)] }])],
   operators: [{ id: "everyone", operator: "forall", domain: "people", restriction: null, content: "send", evidence: [anchor(2)] }],
   domains: [domain("promise")], acts: [act("promise")] });
+}
+
+function diagnosticsOf(value: unknown) {
+  try { materializeSourceSemanticContentProposal(value); }
+  catch (error) {
+    if (!(error instanceof z.ZodError)) throw error;
+    return sourceSemanticValidationDiagnostics(error);
+  }
+  throw new Error("Expected rejected content proposal");
 }

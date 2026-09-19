@@ -32,6 +32,7 @@ export function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     extractionCacheRoot: state.extractionCacheRoot,
     extractionSourcePacking: state.extractionSourcePacking,
     extractionPacketProfile: state.extractionPacketProfile,
+    extractionSourceRevisions: state.extractionSourceRevisions,
     extractionOpenSemantics: state.extractionOpenSemantics,
     extractionPreflightOut: state.extractionPreflightOut,
     extractionPreflightKeys: state.extractionPreflightKeys,

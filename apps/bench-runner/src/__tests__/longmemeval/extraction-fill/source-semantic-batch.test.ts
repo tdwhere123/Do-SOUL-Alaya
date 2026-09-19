@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, prepareSourceSemanticRevision } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
@@ -57,25 +57,39 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   return JSON.stringify(editable);
 }
 
-async function setup(providerUrl = "https://fixture-provider.invalid", questionOnly = false) {
+async function setup(providerUrl = "https://fixture-provider.invalid", questionOnly = false, revise = false) {
   setExtractionCredentialFixture(); vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", providerUrl);
   await writeDataset([questionOnly
     ? buildExtractionFillQuestion("questions", "Where is the atlas?", "When will Talia leave?")
     : buildAuthorityQuestion("q0", "alpha", "decoy")]);
+  const limits: GeminiBatchLimits = { maxJobs: 1, maxRequestsPerJob: 100, maxFileBytes: 1000000,
+    maxInputTokensPerJob: 1000000, maxEnqueuedTokens: 1000000, maxOutputTokens: 4096,
+    maxUsd: 1, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
+    deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 };
+  const limitsPath = join(cacheRoot, "limits.json"); writeFileSync(limitsPath, JSON.stringify(limits));
+  const revisionPath = join(cacheRoot, "revisions.json");
+  let generation = EXTRACTION_OPEN_SEMANTICS_GENERATION;
+  if (revise) {
+    const preview = join(cacheRoot, "base-preview.json");
+    expect(await runCli(["extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
+      "--extraction-cache-root", cacheRoot, "--extraction-open-semantics", "--batch-operation", "prepare",
+      "--batch-limits", limitsPath, "--extraction-preflight-out", preview])).toBe(0);
+    const lines = JSON.parse(readFileSync(preview, "utf8")).planned_requests as GeminiBatchPlan["lines"];
+    const revisions = lines.map((line) => prepareSourceSemanticRevision(parseSourceSemanticRequest(JSON.parse(line.userPrompt)),
+      authoredResponse(line.userPrompt, "unknown_alias")));
+    generation = { ...generation, revisions };
+    writeFileSync(revisionPath, JSON.stringify(revisions));
+  }
   const inspection = await inspectExtractionAuthority({ variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
-    openSemantics: true, revision: readCurrentExtractionAuthorityRevision(), action: "fill" });
+    openSemantics: generation, revision: readCurrentExtractionAuthorityRevision(), action: "fill" });
   const receipt = createExtractionAuthorityReceipt({ action: "fill", observation: inspection.observation,
     outputTokenCap: { field: "maxOutputTokens", value: 4096 }, diskFloorBytes: 0,
     priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2, maximumInputTokensPerAttempt: 100000 },
     inspection });
   const receiptPath = join(cacheRoot, "authority.json"); writeExtractionAuthorityReceipt(receiptPath, receipt);
-  const limits: GeminiBatchLimits = { maxJobs: 1, maxRequestsPerJob: 100, maxFileBytes: 1000000,
-    maxInputTokensPerJob: 1000000, maxEnqueuedTokens: 1000000, maxOutputTokens: 4096,
-    maxUsd: receipt.price.estimated_upper_usd, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
-    deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 };
-  const limitsPath = join(cacheRoot, "limits.json"); writeFileSync(limitsPath, JSON.stringify(limits));
+  writeFileSync(limitsPath, JSON.stringify({ ...limits, maxUsd: receipt.price.estimated_upper_usd }));
   let creates = 0, displayName = "", failCreate = false;
   let responseMode: "semantic" | "oversize" | "disposition" | "unknown_alias" | "duplicate_gap_channel" | "partial" = "semantic";
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
@@ -97,7 +111,8 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
   });
   vi.stubGlobal("fetch", fetchMock);
   const args = ["extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
-    "--extraction-cache-root", cacheRoot, "--extraction-open-semantics", "--batch-limits", limitsPath];
+    "--extraction-cache-root", cacheRoot, "--extraction-open-semantics", "--batch-limits", limitsPath,
+    ...(revise ? ["--extraction-source-revisions", revisionPath] : [])];
   const run = (operation: string, extra: readonly string[] = []) => runCli([...args, "--extraction-authority", receiptPath,
     "--batch-operation", operation, ...extra]);
   const plan = () => JSON.parse(readFileSync(join(cacheRoot, "gemini-batch-plan.json"), "utf8")) as GeminiBatchPlan;
@@ -106,6 +121,26 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
     creates: () => creates, failCreate: (value: boolean) => { failCreate = value; },
     mode: (mode: typeof responseMode) => { responseMode = mode; } };
 }
+
+it("binds explicit revisions through native authority, plan, import and reopened typed cache", async () => {
+  const fixture = await setup("https://fixture-provider.invalid", false, true);
+  expect(await fixture.run("prepare")).toBe(0);
+  expect(fixture.fetchMock).not.toHaveBeenCalled();
+  for (const line of fixture.plan().lines) {
+    const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+    expect(request.source_request.revision?.revision_number).toBe(1);
+    expect(request.source_request.revision?.structural_diagnostics.length).toBeGreaterThan(0);
+  }
+  expect(await fixture.run("submit")).toBe(0);
+  expect(await fixture.run("resume")).toBe(0);
+  expect(fixture.creates()).toBe(1);
+  const manifest = readExtractionCacheManifestIdentity(cacheRoot)!.manifest;
+  expect(manifest.source_semantic_generation?.revisions).toHaveLength(2);
+  expect(() => resolveCompileSeedExtractionConfig(process.env, manifest, undefined, undefined, true)).toThrow(/generation/u);
+  for (const line of fixture.plan().lines) {
+    expect(inspectCachedSourceSemantic(cacheRoot, line.key, MODEL, REQUEST_PROFILE)).toMatchObject({ status: "hit" });
+  }
+});
 
 it("preflights without a grant, then prepare-submit-resume-import-reopen stays offline and unbound", async () => {
   const fixture = await setup();
@@ -171,7 +206,7 @@ it.each(["unknown_alias", "duplicate_gap_channel"] as const)("retains %s admissi
   for (const line of fixture.plan().lines) {
     const outcome = outcomes[line.key]!;
     expect(outcome.status).toBe("quarantined");
-    expect(outcome.reason).toContain(mode === "unknown_alias" ? "unknown or wrong-kind semantic alias" : "unrecognized_keys");
+    expect(outcome.reason).toContain(mode === "unknown_alias" ? '"code":"unknown_alias"' : "unrecognized_keys");
     if (mode === "duplicate_gap_channel") expect(outcome.reason).toContain('"path":["outcome"]');
     expect(outcome.reason).toContain("raw_response_id=sha256:");
     expect(outcome.reason!.length).toBeLessThan(16384);

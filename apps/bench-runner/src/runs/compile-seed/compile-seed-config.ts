@@ -1,6 +1,6 @@
 import { AlayaError, canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, parseDefaultOnFlag, parseEnvBoolean, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
-  EXTRACTION_OPEN_SEMANTICS_GENERATION, assertExclusiveExtractionGeneration,
+  EXTRACTION_OPEN_SEMANTICS_GENERATION, assertExclusiveExtractionGeneration, parseExtractionOpenSemanticsGeneration,
   type ExtractionOpenSemanticsGeneration
 } from "../extraction/request-artifact.js";
 import { dirname, resolve } from "node:path";
@@ -172,10 +172,7 @@ function pinOpenSemanticsGeneration(
 ): ExtractionOpenSemanticsGeneration | undefined {
   if (value === undefined || value === false) return undefined;
   const identity = value === true ? EXTRACTION_OPEN_SEMANTICS_GENERATION : value;
-  if (canonicalJson(identity) !== canonicalJson(EXTRACTION_OPEN_SEMANTICS_GENERATION)) {
-    throw new AlayaError("CONFLICT", "open semantics generation differs from live K/normalizer/request/response identity");
-  }
-  return EXTRACTION_OPEN_SEMANTICS_GENERATION;
+  return parseExtractionOpenSemanticsGeneration(identity);
 }
 
 export function resolveExtractionSourcePacking(

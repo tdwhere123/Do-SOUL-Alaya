@@ -1,5 +1,5 @@
 import { AlayaError, canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
-import { EXTRACTION_OPEN_SEMANTICS_GENERATION, type ExtractionOpenSemanticsGeneration } from "../request-artifact.js";
+import { parseExtractionOpenSemanticsGeneration } from "../request-artifact.js";
 import {
   mkdirSync,
   renameSync,
@@ -289,7 +289,7 @@ function validateManifest(
       source_interpretation_profile: SourceInterpretationProfileSchema.parse(record.source_interpretation_profile)
     }),
     ...(record.source_semantic_generation === undefined ? {} : {
-      source_semantic_generation: parseOpenSemanticsGeneration(record.source_semantic_generation)
+      source_semantic_generation: parseExtractionOpenSemanticsGeneration(record.source_semantic_generation)
     }),
     extraction_model: requireNonEmptyString(record.extraction_model, "extraction_model", filePath),
     provider_url: requireNonEmptyString(record.provider_url, "provider_url", filePath),
@@ -331,14 +331,6 @@ function requireSchemaVersion(
   throw new Error(
     `extraction cache manifest at ${filePath} has unsupported schema_version ${version}`
   );
-}
-
-function parseOpenSemanticsGeneration(value: unknown): ExtractionOpenSemanticsGeneration {
-  const parsed = value as ExtractionOpenSemanticsGeneration;
-  if (canonicalJson(parsed) !== canonicalJson(EXTRACTION_OPEN_SEMANTICS_GENERATION)) {
-    throw new AlayaError("CONFLICT", "open semantics generation differs from live K/normalizer/request/response identity");
-  }
-  return EXTRACTION_OPEN_SEMANTICS_GENERATION;
 }
 
 function readVersionedManifest(

@@ -1,14 +1,15 @@
 import {
   AlayaError, SOURCE_SEMANTIC_CACHE_CONTRACT, SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION,
   SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
-  SOURCE_SEMANTIC_RESPONSE_CONTRACT, type SourceInterpretationProfile
+  SOURCE_SEMANTIC_RESPONSE_CONTRACT, canonicalJson, type SourceInterpretationProfile
 } from "@do-soul/alaya-protocol";
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   OFFICIAL_API_SYSTEM_PROMPT, OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT, SOURCE_SEMANTIC_SYSTEM_PROMPT,
   buildOfficialApiSourceCorpus, collectOfficialApiExtractionCoverage, buildOfficialApiSourcePacketRequest,
   buildSourceSemanticRequest, collectSourceSemanticUnitPacks, stringifyOfficialApiExtractionRequest, type OfficialApiExtractionRequest,
-  type OfficialApiSourcePacketRequest, type SourceSemanticRequest
+  type OfficialApiSourcePacketRequest, type SourceSemanticRequest,
+  SourceSemanticRevisionSchema, sourceSemanticBaseRequestDigest, type SourceSemanticRevision
 } from "@do-soul/alaya-soul";
 import type { LongMemEvalExtractionTurn } from "./turn-contents.js";
 
@@ -22,6 +23,7 @@ export type ExtractionOpenSemanticsGeneration = Readonly<{
   envelope_schema_version: typeof SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION;
   response_contract: typeof SOURCE_SEMANTIC_RESPONSE_CONTRACT;
   cache_contract: typeof SOURCE_SEMANTIC_CACHE_CONTRACT;
+  revisions?: readonly SourceSemanticRevision[];
 }>;
 
 export const EXTRACTION_OPEN_SEMANTICS_GENERATION: ExtractionOpenSemanticsGeneration = Object.freeze({
@@ -32,6 +34,25 @@ export const EXTRACTION_OPEN_SEMANTICS_GENERATION: ExtractionOpenSemanticsGenera
   response_contract: SOURCE_SEMANTIC_RESPONSE_CONTRACT,
   cache_contract: SOURCE_SEMANTIC_CACHE_CONTRACT
 });
+
+/** One generation owner for configuration, manifest replay and typed cache admission. */
+export function parseExtractionOpenSemanticsGeneration(value: unknown): ExtractionOpenSemanticsGeneration {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new AlayaError("CONFLICT", "invalid open semantics generation");
+  const { revisions, ...base } = value as Record<string, unknown>;
+  if (canonicalJson(base) !== canonicalJson(EXTRACTION_OPEN_SEMANTICS_GENERATION)) {
+    throw new AlayaError("CONFLICT", "open semantics generation differs from live K/normalizer/request/response identity");
+  }
+  if (revisions === undefined) return EXTRACTION_OPEN_SEMANTICS_GENERATION;
+  if (!Array.isArray(revisions) || revisions.length === 0 || revisions.length > 256 ||
+      Buffer.byteLength(JSON.stringify(revisions), "utf8") > 1_000_000) {
+    throw new AlayaError("VALIDATION", "source revisions exceed their bounded registry");
+  }
+  const parsed = revisions.map((row) => SourceSemanticRevisionSchema.parse(row));
+  if (new Set(parsed.map((row) => row.base_request_sha256)).size !== parsed.length) {
+    throw new AlayaError("CONFLICT", "source revision registry repeats an original request");
+  }
+  return Object.freeze({ ...EXTRACTION_OPEN_SEMANTICS_GENERATION, revisions: Object.freeze(parsed) });
+}
 
 export type ExtractionTypedArtifactMode = "source_packet" | "open_semantics";
 
@@ -75,13 +96,16 @@ export function extractionArtifactRequests(turn: Pick<LongMemEvalExtractionTurn,
   if (openSemantics !== undefined) {
     const sourceCorpus = buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages ?? []);
     return collectSourceSemanticUnitPacks(sourceCorpus, packing).map((source) => {
-      const semantic = buildSourceSemanticRequest({
+      const proposal = {
         sourceCorpus,
         assertionIds: source.source_assertions.map((row) => row.assertion_id),
         source_id: "unbound", source_version: "unbound",
         producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
         producer_version: SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
-      });
+      };
+      const base = buildSourceSemanticRequest(proposal);
+      const revision = openSemantics.revisions?.find((row) => row.base_request_sha256 === sourceSemanticBaseRequestDigest(base));
+      const semantic = revision === undefined ? base : buildSourceSemanticRequest({ ...proposal, revision });
       return { source, semantic, userPrompt: JSON.stringify(semantic) };
     });
   }

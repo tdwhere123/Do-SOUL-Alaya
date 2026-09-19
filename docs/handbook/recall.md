@@ -704,7 +704,7 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local H, source-independent
 Q, explicit A, and selected C. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 6.2.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
+Garden v1. Protocol 6.3.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
 reasoning/cache v3, `source-semantic-k-v3`,
 `source-semantic-normalizer-v4` and `source-semantic-lowering-v3`. An older open
 H is not relabeled or silently promoted; recreate its interpretation explicitly.
@@ -728,6 +728,19 @@ normalizer-v4. Request/schema identities distinguish the new producer wire.
 Canonical-envelope archives retain native request/response replay with their
 original prompt. Their normalizer-v3 manifests remain ineligible for current
 cache reuse; replay does not upgrade or publish an old interpretation.
+
+SOUL can prepare an explicit `source-semantic-revision-v1` input after a complete
+retained response. It binds the unchanged base request, immediate parent request
+and prior raw bytes; the chain is validated before use and capped at three
+revisions. The shared compiler rederives structural diagnostics, including exact
+alias and ownership paths. Separately labeled source-review comments are bounded
+to selected assertions and remain proposed interpretations. Revision input does
+not become H evidence or relax admission. Preparation is provider-free and never
+automatically retries. The native Batch flag `--extraction-source-revisions`
+requires `--extraction-open-semantics` and a bounded registry produced by SOUL.
+The registry is pinned in generation identity and must match the source inventory;
+changed requests require fresh native authority, reservation and attempt receipts.
+Original failures and every paid attempt remain in the case's evidence history.
 
 New source requests also declare `source-semantic-units-v1`. SOUL owns their
 unfiltered lexical units, exact source locations and message-role provenance;

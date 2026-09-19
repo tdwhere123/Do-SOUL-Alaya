@@ -50,6 +50,7 @@ export interface ParsedFlags {
   readonly extractionCacheRoot?: string;
   readonly extractionSourcePacking?: ExtractionSourcePacking;
   readonly extractionPacketProfile?: string;
+  readonly extractionSourceRevisions?: string;
   readonly extractionOpenSemantics?: boolean;
   readonly extractionPreflightOut?: string;
   readonly extractionPreflightKeys?: string;
@@ -102,6 +103,7 @@ export interface ParsedFlagsState {
   extractionCacheRoot?: string;
   extractionSourcePacking?: ExtractionSourcePacking;
   extractionPacketProfile?: string;
+  extractionSourceRevisions?: string;
   extractionOpenSemantics?: boolean;
   extractionPreflightOut?: string;
   extractionPreflightKeys?: string;
@@ -351,6 +353,11 @@ function consumeSnapshotCachePathFlags(
   if (matchFlagToken(token, "--extraction-packet-profile")) {
     if (state.extractionPacketProfile !== undefined) throw new AlayaError("VALIDATION", "packet profile may be supplied only once");
     state.extractionPacketProfile = readFlagValue(args, index, token, "--extraction-packet-profile");
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--extraction-source-revisions")) {
+    if (state.extractionSourceRevisions !== undefined) throw new AlayaError("VALIDATION", "source revisions may be supplied only once");
+    state.extractionSourceRevisions = readFlagValue(args, index, token, "--extraction-source-revisions");
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--extraction-preflight-keys")) {

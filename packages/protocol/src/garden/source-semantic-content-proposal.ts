@@ -101,10 +101,12 @@ function lowerContent(content: ContentValue, meter: SourceSemanticResourceLedger
   const aliases = [...content.entities, ...content.statements, ...content.operators,
     ...content.domains ?? [], ...content.measurements ?? []].map((row) => row.id);
   const used = new Set(aliases);
-  if (used.size !== aliases.length) invalid("duplicate semantic aliases");
   const entities = new Set(content.entities.map((row) => row.id));
   const occurrences = new Set([...content.statements, ...content.operators].map((row) => row.id));
-  const owners = collectOwners(content, occurrences);
+  const diagnostics = new ContentDiagnostics(meter);
+  validateAliases(content, entities, occurrences, diagnostics);
+  const owners = collectOwners(content, occurrences, diagnostics);
+  diagnostics.assertValid();
   const anchors = new AnchorInterner(used, meter);
   const referents = content.entities.map((row) => ({ id: row.id, referent_kind: row.referent_kind,
     mentions: anchors.ids(row.mentions) }));
@@ -113,7 +115,7 @@ function lowerContent(content: ContentValue, meter: SourceSemanticResourceLedger
     const predicate = anchors.ids(row.predicate.evidence);
     const arguments_ = row.arguments.map((argument, index) => ({ id: `argument${index}`,
       role_reading: argument.role, support: anchors.support(argument.evidence),
-      target: lowerTarget(argument.target, entities, occurrences) }));
+      target: lowerTarget(argument.target) }));
     return { id: row.id, assertion_ids: assertionIds([...row.predicate.evidence, ...row.arguments.flatMap((argument) => argument.evidence)]),
       context_owner: owners.get(row.id)!, additional_support: [],
       predicate_support: row.predicate.kind === "explicit"
@@ -128,48 +130,95 @@ function lowerContent(content: ContentValue, meter: SourceSemanticResourceLedger
   const domains = content.domains?.map(({ support, ...row }) => ({ ...row, support: anchors.support(support) }));
   const measurements = content.measurements?.map(({ support, ...row }) => ({ ...row, support: anchors.support(support) }));
   const gaps = content.gaps.map(({ evidence, affected, ...row }) => {
-    for (const id of affected ?? []) if (!entities.has(id) && !occurrences.has(id)) invalid("gap affected alias must name a semantic entity or occurrence");
     return { ...row, affected_ids: [...new Set([...affected ?? [], ...anchors.ids(evidence)])], support: anchors.support(evidence) };
   });
   return { contract: SOURCE_SEMANTIC_PACKET_CONTRACT, mentions: anchors.mentions, referents, frames, operators, gaps,
     ...(domains === undefined ? {} : { domains }), ...(measurements === undefined ? {} : { measurements }) };
 }
 
-function collectOwners(content: ContentValue, occurrences: ReadonlySet<string>) {
+function validateAliases(content: ContentValue, entities: ReadonlySet<string>, occurrences: ReadonlySet<string>, diagnostics: ContentDiagnostics) {
+  const declared = new Map<string, (string | number)[]>();
+  for (const kind of ["entities", "statements", "operators", "domains", "measurements"] as const) {
+    (content[kind] ?? []).forEach((row, index) => {
+      const path = ["content", kind, index, "id"], previous = declared.get(row.id);
+      if (previous !== undefined) diagnostics.add("duplicate_alias", path, row.id, `Alias is already declared at ${JSON.stringify(previous)}.`);
+      else declared.set(row.id, path);
+    });
+  }
+  content.statements.forEach((row, index) => row.arguments.forEach((argument, argumentIndex) => {
+    const target = argument.target;
+    if (target.kind === "unresolved" || target.kind === "bound_variable") return;
+    if ((target.kind === "entity" ? entities : occurrences).has(target.id)) return;
+    diagnostics.add(declared.has(target.id) ? "wrong_alias_kind" : "unknown_alias",
+      ["content", "statements", index, "arguments", argumentIndex, "target", "id"], target.id,
+      `Argument target requires a declared ${target.kind === "entity" ? "entity" : "statement or operator"} alias.`);
+  }));
+  content.gaps.forEach((row, index) => row.affected?.forEach((id, affectedIndex) => {
+    if (!entities.has(id) && !occurrences.has(id)) diagnostics.add("unknown_gap_alias",
+      ["content", "gaps", index, "affected", affectedIndex], id, "Gap affected alias must name a semantic entity or occurrence.");
+  }));
+}
+
+function collectOwners(content: ContentValue, occurrences: ReadonlySet<string>, diagnostics: ContentDiagnostics) {
   const owners = new Map<string, SourceSemanticContextOwner>();
-  const own = (id: string, owner: SourceSemanticContextOwner, explicitAct = false) => {
-    if (!occurrences.has(id)) invalid("ownership requires a declared occurrence");
-    const previous = owners.get(id);
-    if (previous !== undefined) {
-      if (explicitAct || JSON.stringify(previous) !== JSON.stringify(owner)) invalid("occurrence has conflicting or duplicate ownership declarations");
+  const ownerPaths = new Map<string, (string | number)[]>();
+  const own = (id: string, owner: SourceSemanticContextOwner, path: (string | number)[], explicitAct = false) => {
+    if (!occurrences.has(id)) {
+      diagnostics.add("unknown_owner_target", path, id, "Ownership requires a declared statement or operator.");
       return;
     }
-    owners.set(id, owner);
+    const previous = owners.get(id);
+    if (previous !== undefined) {
+      if (explicitAct || JSON.stringify(previous) !== JSON.stringify(owner)) diagnostics.add("conflicting_owner", path, id,
+        `Occurrence has conflicting or duplicate ownership; prior declaration at ${JSON.stringify(ownerPaths.get(id))}.`);
+      return;
+    }
+    owners.set(id, owner); ownerPaths.set(id, path);
   };
-  for (const row of content.acts) own(row.occurrence, { kind: "source_act", source_act: row.act }, true);
-  for (const statement of content.statements) for (const argument of statement.arguments) {
+  content.acts.forEach((row, index) => own(row.occurrence, { kind: "source_act", source_act: row.act }, ["content", "acts", index, "occurrence"], true));
+  content.statements.forEach((statement, index) => statement.arguments.forEach((argument, argumentIndex) => {
     if (argument.target.kind === "content") own(argument.target.id,
-      { kind: "embedding", parent_frame: statement.id, content_argument: argument.target.id });
+      { kind: "embedding", parent_frame: statement.id, content_argument: argument.target.id },
+      ["content", "statements", index, "arguments", argumentIndex, "target", "id"]);
+  }));
+  content.operators.forEach((operator, index) => {
+    for (const [operand, field] of operands(operator)) own(operand, { kind: "operator", operator_handle: operator.id },
+      ["content", "operators", index, ...field]);
+  });
+  for (const kind of ["statements", "operators"] as const) {
+    content[kind].forEach((row, index) => {
+      if (!owners.has(row.id)) diagnostics.add("unowned_occurrence", ["content", kind, index, "id"], row.id,
+        "Occurrence requires an explicit source act or governing content edge.");
+    });
   }
-  for (const operator of content.operators) for (const operand of operands(operator)) {
-    own(operand, { kind: "operator", operator_handle: operator.id });
-  }
-  for (const id of occurrences) if (!owners.has(id)) invalid("occurrence requires an explicit source act or governing content edge");
   return owners;
 }
 
-function operands(operator: OperatorValue): readonly string[] {
-  if (operator.operator === "conditional") return [operator.antecedent, operator.consequent];
-  if (operator.operator === "opaque") return operator.operands;
-  if (operator.operator === "forall" && operator.restriction !== null) return [operator.restriction, operator.content];
-  return [operator.content];
+function operands(operator: OperatorValue): readonly (readonly [string, (string | number)[]])[] {
+  if (operator.operator === "conditional") return [[operator.antecedent, ["antecedent"]], [operator.consequent, ["consequent"]]];
+  if (operator.operator === "opaque") return operator.operands.map((id, index) => [id, ["operands", index]] as const);
+  if (operator.operator === "forall" && operator.restriction !== null) return [[operator.restriction, ["restriction"]], [operator.content, ["content"]]];
+  return [[operator.content, ["content"]]];
 }
 
-function lowerTarget(target: z.infer<typeof Target>, entities: ReadonlySet<string>, occurrences: ReadonlySet<string>) {
+function lowerTarget(target: z.infer<typeof Target>) {
   if (target.kind === "unresolved") return target;
   if (target.kind === "bound_variable") return { ...target, binder: "member" };
-  if (!(target.kind === "entity" ? entities : occurrences).has(target.id)) invalid("argument target references an unknown or wrong-kind semantic alias");
   return { kind: "node" as const, id: target.id };
+}
+
+/** Independent structural failures are feedback, never instructions for host repair. */
+class ContentDiagnostics {
+  private readonly issues: z.ZodIssue[] = [];
+  constructor(private readonly meter: SourceSemanticResourceLedger) {}
+  add(code: string, path: (string | number)[], reference: string, message: string): void {
+    this.meter.charge(1, 0, "content structural diagnostics");
+    if (this.issues.length >= 32) return;
+    const issue: z.ZodIssue = { code: "custom", path, message, params: { diagnostic_code: code, reference } };
+    this.meter.retain(issue, "content structural diagnostics");
+    this.issues.push(issue);
+  }
+  assertValid(): void { if (this.issues.length > 0) throw new z.ZodError(this.issues); }
 }
 
 class AnchorInterner {
