@@ -704,20 +704,30 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local H, source-independent
 Q, explicit A, and selected C. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 6.1.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
+Garden v1. Protocol 6.2.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
 reasoning/cache v3, `source-semantic-k-v3`,
 `source-semantic-normalizer-v4` and `source-semantic-lowering-v3`. An older open
 H is not relabeled or silently promoted; recreate its interpretation explicitly.
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
 
-New H extraction uses the producer-only `source-semantic-proposal-v1` contract.
-Protocol derives each embedded occurrence's self-reference and the canonical
-outcome gap list from its containing draft. The producer still owns parent
-selection, argument bindings and all language interpretation. The canonical H
-and response-envelope shapes remain unchanged. Marker-absent normalizer-v3
+New H extraction uses the producer-only `source-semantic-proposal-v2` contract.
+The producer owns predicate/role readings, co-reference, semantic scope, speech
+acts, domain membership/closure and measurement context. It provides source
+anchors inline, one argument list and each governing relationship once.
+Protocol compiles mentions, slot/binding pairs, reciprocal context owners,
+assertion membership, quantifier binders and canonical outcome gaps. A plain
+occurrence reference does not embed its target. Unowned or conflicting scopes
+are rejected; the compiler never guesses assertion permission or domain facts.
+Compilation and normalization share one resource ledger. Structural admission
+and located gaps cannot certify language completeness. The canonical H and
+response-envelope shapes remain unchanged. Recorded v1 proposals select their
+original prompt/schema explicitly for replay. Marker-absent normalizer-v3
 requests retain an explicit historical replay path; new publication requires
 normalizer-v4. Request/schema identities distinguish the new producer wire.
+Canonical-envelope archives retain native request/response replay with their
+original prompt. Their normalizer-v3 manifests remain ineligible for current
+cache reuse; replay does not upgrade or publish an old interpretation.
 
 New source requests also declare `source-semantic-units-v1`. SOUL owns their
 unfiltered lexical units, exact source locations and message-role provenance;

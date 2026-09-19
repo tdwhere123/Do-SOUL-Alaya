@@ -5,7 +5,7 @@ import { parseOfficialApiSourcePacketRequest } from "./source-packet-request.js"
 import { officialApiSourcePacketResponseSchema } from "./source-packet-schema.js";
 import { parseSourceSemanticRequest, sourceSemanticResponseJsonSchema } from "./source-semantic-request.js";
 
-const SOURCE_SEMANTIC_RESPONSE_SCHEMA_PREIMAGE = JSON.stringify(sourceSemanticResponseJsonSchema());
+const semanticSchemaPreimages = new Map<string, string>();
 
 // This constrains generation, not admission: historical raw still uses its
 // recorded signals envelope and parser. Live ordinary extraction asks for
@@ -37,8 +37,15 @@ export function officialApiExtractionResponseSchemaPreimage(userPrompt: string):
   const packetSchema = sourcePacketSchema(userPrompt);
   if (packetSchema !== undefined) return JSON.stringify(packetSchema);
   const semanticRequest = sourceSemanticRequest(userPrompt);
-  if (semanticRequest !== undefined) return semanticRequest.source_request.proposal_contract === undefined
-    ? JSON.stringify(sourceSemanticResponseJsonSchema(semanticRequest)) : SOURCE_SEMANTIC_RESPONSE_SCHEMA_PREIMAGE;
+  if (semanticRequest !== undefined) {
+    const contract = semanticRequest.source_request.proposal_contract ?? "canonical-envelope";
+    let preimage = semanticSchemaPreimages.get(contract);
+    if (preimage === undefined) {
+      preimage = JSON.stringify(sourceSemanticResponseJsonSchema(semanticRequest));
+      semanticSchemaPreimages.set(contract, preimage);
+    }
+    return preimage;
+  }
   return isOfficialApiExtractionRequestPrompt(userPrompt)
     ? OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE
     : "null";

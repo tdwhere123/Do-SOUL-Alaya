@@ -4,12 +4,12 @@ import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "
 import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/official-api/source-packet-request.js";
 import {
   SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT,
-  SOURCE_SEMANTIC_SYSTEM_PROMPT, buildSourceSemanticRequest, semanticSha256,
-  sourceSemanticResponseJsonSchema, parseSourceSemanticRequest
+  buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, semanticSha256,
+  sourceSemanticResponseJsonSchema, parseSourceSemanticRequest, sourceSemanticSystemPrompt
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import {
   MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeAlignmentSemantics, proposeQuerySemantics,
-  proposeSourceSemantics, receiveSourceSemantics
+  proposeSourceSemantics as proposeCurrentSourceSemantics, receiveSourceSemantics
 } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 
 const PROFILE: SourceInterpretationProfile = {
@@ -19,6 +19,19 @@ const PROFILE: SourceInterpretationProfile = {
 };
 
 const TEXT = "The archivist accessioned folio F into bay B.";
+
+// Archived graph proposals remain replayable; current content compilation has its own suite.
+function buildSourceSemanticRequest(input: Parameters<typeof buildCurrentSourceSemanticRequest>[0]) {
+  const current = buildCurrentSourceSemanticRequest(input);
+  return parseSourceSemanticRequest({ ...current, source_request: {
+    ...current.source_request, proposal_contract: "source-semantic-proposal-v1"
+  } });
+}
+function proposeSourceSemantics(input: Parameters<typeof proposeCurrentSourceSemantics>[0], injected?: { rawJson: string }) {
+  return injected === undefined || input.assertionIds.length === 0 ? proposeCurrentSourceSemantics(input, injected)
+    : receiveSourceSemantics(injected.rawJson, buildSourceSemanticRequest(input), input);
+}
+const SOURCE_SEMANTIC_SYSTEM_PROMPT = sourceSemanticSystemPrompt(buildSourceSemanticRequest(sourceInput()));
 
 function sourceInput(text = TEXT) {
   const sourceCorpus = buildOfficialApiSourceCorpus(text, [{ role: "user", content: text }]);
@@ -110,7 +123,7 @@ function admittedQuery() {
   };
 }
 
-describe("open source semantic proposal producer", () => {
+describe("historical graph proposals and source-independent query producers", () => {
   it("normalizes the complete neutral prompt example through the real request catalog", () => {
     const rawJson = SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
     const input = { sourceCorpus: "Mira shelved something. The label is hard to interpret.", assertionIds: [1, 2],
@@ -488,5 +501,7 @@ it("replays explicitly historical requests without upgrading their normalizer or
     ...legacyBody, normalizer_version: "source-semantic-normalizer-v4"
   } })).toThrow(/proposal contract and normalizer version/u);
   expect(JSON.stringify(sourceSemanticResponseJsonSchema(legacy))).toContain("source-interpretation-response-v4");
+  expect(sourceSemanticSystemPrompt(legacy)).toContain('"contract":"source-interpretation-response-v4"');
+  expect(sourceSemanticSystemPrompt(legacy)).not.toContain('"contract":"source-semantic-proposal-v1"');
   expect(JSON.stringify(sourceSemanticResponseJsonSchema(current))).toContain("source-semantic-proposal-v1");
 });

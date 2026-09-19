@@ -304,7 +304,7 @@ export { buildOfficialApiSourcePacketRequest, parseOfficialApiSourcePacketReques
 export { receiveOfficialApiSourcePacket, completeEmptyOfficialApiSourcePacket, MAX_OFFICIAL_API_SOURCE_PACKET_RESPONSE_BYTES } from "./garden/ingestion/official-api/source-packet-receive.js";
 export { collectSourceSemanticUnitPacks, sourceSemanticTransportUnits } from "./garden/ingestion/official-api/source-semantic-units.js";
 export {
-  SOURCE_SEMANTIC_SYSTEM_PROMPT, buildSourceSemanticRequest, parseSourceSemanticRequest,
+  SOURCE_SEMANTIC_SYSTEM_PROMPT, sourceSemanticSystemPrompt, buildSourceSemanticRequest, parseSourceSemanticRequest,
   sourceSemanticResponseJsonSchema, type SourceSemanticRequest, type SourceSemanticProposalInput
 } from "./garden/ingestion/official-api/source-semantic-request.js";
 export {

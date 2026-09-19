@@ -4,7 +4,8 @@ import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticAlignmentSchema,
   SourceSemanticOutcomeSchema, SourceSemanticQuerySchema, SourceSemanticResponseEnvelopeSchema,
   SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
-  materializeSourceSemanticProposal, buildSourceReferenceCatalog,
+  materializeSourceSemanticProposal, materializeSourceSemanticContentProposal, buildSourceReferenceCatalog,
+  SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   normalizeSourceSemantics, sourceSemanticQueryIdentity, verifySourceSemanticDisposition, canonicalJson,
   type SourceSemanticAlignment, type SourceSemanticDraft, type SourceSemanticInterpretation,
   type SourceSemanticOutcome, type SourceSemanticQuery
@@ -103,11 +104,16 @@ export function receiveSourceSemantics(
   // Marker-absent v3 requests are retained only for historical raw/cache replay.
   // Remove this branch when those archives use an offline-only legacy reader.
   let envelope: ReturnType<typeof SourceSemanticResponseEnvelopeSchema.safeParse>;
+  const limits = request.source_request.resource_limits;
+  const meter = request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
+    ? new SourceSemanticResourceLedger({ work_units: limits.work_units ?? 200000, memory_bytes: limits.memory_bytes ?? 20000000 }) : undefined;
   try {
     envelope = request.source_request.proposal_contract === undefined
       ? SourceSemanticResponseEnvelopeSchema.safeParse(parsed.value)
+      : meter !== undefined ? { success: true, data: materializeSourceSemanticContentProposal(parsed.value, meter) }
       : { success: true, data: materializeSourceSemanticProposal(parsed.value) };
   } catch (error) {
+    if (error instanceof SourceSemanticResourceExhausted) return { ...attempt, outcome: { status: "resource_exhausted" } };
     return { ...attempt, outcome: invalidProposalOutcome(error) };
   }
   if (!envelope.success) {
@@ -122,7 +128,7 @@ export function receiveSourceSemantics(
     catch { return { ...attempt, outcome: { status: "invalid", reason: "unbound_disposition_support" } }; }
   }
   if (outcome.status !== "interpreted" || draft === undefined) return { ...attempt, outcome };
-  return admitInterpretedDraft(draft, request, input, attempt);
+  return admitInterpretedDraft(draft, request, input, attempt, meter);
 }
 
 export function proposeQuerySemantics(
@@ -225,7 +231,7 @@ function parseSourceSemanticQueryProposal(input: Readonly<{
 
 function admitInterpretedDraft(
   draft: SourceSemanticDraft, request: SourceSemanticRequest, input: SourceSemanticProposalInput,
-  attempt: Attempt<SourceSemanticRequest>
+  attempt: Attempt<SourceSemanticRequest>, meter?: SourceSemanticResourceLedger
 ): SourceSemanticProposalResult {
   const limits = request.source_request.resource_limits;
   const normalized = normalizeSourceSemantics({
@@ -239,6 +245,7 @@ function admitInterpretedDraft(
     producer_version: request.source_request.producer_capability.producer_version,
     contract_version: SOURCE_SEMANTIC_PACKET_CONTRACT,
     normalizer_version: request.source_request.normalizer_version,
+    ...(meter === undefined ? {} : { meter }),
     ...(limits.work_units !== undefined && limits.memory_bytes !== undefined
       ? { budget: { work_units: limits.work_units, memory_bytes: limits.memory_bytes } } : {})
   });

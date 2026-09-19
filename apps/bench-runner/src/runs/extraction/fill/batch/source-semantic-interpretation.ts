@@ -3,7 +3,7 @@ import { computeCacheKey } from "../../../compile-seed/cache/cache-key.js";
 import type { CompileSeedExtractionConfig } from "../../../compile-seed/compile-seed-types.js";
 import { createHash } from "node:crypto";
 import {
-  SOURCE_SEMANTIC_SYSTEM_PROMPT, parseSourceSemanticRequest, receiveSourceSemantics,
+  sourceSemanticSystemPrompt, parseSourceSemanticRequest, receiveSourceSemantics,
   type SourceSemanticProposalInput, type SourceSemanticRequest
 } from "@do-soul/alaya-soul";
 import type { GeminiBatchInvocation, GeminiBatchLine, GeminiBatchPlan } from "./contract.js";
@@ -13,9 +13,10 @@ export function prepareSourceSemanticBatchLine(requestValue: SourceSemanticReque
   unitKeys: readonly string[], config: Pick<CompileSeedExtractionConfig, "model" | "requestProfile">): GeminiBatchLine {
   const request = parseSourceSemanticRequest(requestValue);
   const userPrompt = JSON.stringify(request);
-  return { key: computeCacheKey(config.model, config.requestProfile, SOURCE_SEMANTIC_SYSTEM_PROMPT, userPrompt), unitKeys,
+  const systemPrompt = sourceSemanticSystemPrompt(request);
+  return { key: computeCacheKey(config.model, config.requestProfile, systemPrompt, userPrompt), unitKeys,
     requestSha256: createHash("sha256").update(userPrompt).digest("hex"),
-    systemPrompt: SOURCE_SEMANTIC_SYSTEM_PROMPT, userPrompt };
+    systemPrompt, userPrompt };
 }
 
 /** Returned drafts still require Core publication; a parser success is not publication. */

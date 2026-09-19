@@ -2,6 +2,7 @@ import { z } from "zod";
 import { sourceSemanticStanceLists } from "./source-semantic-structure.js";
 export { sourceSemanticStanceLists } from "./source-semantic-structure.js";
 import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted } from "./source-semantic-resources.js";
+import { chargeSourceSemanticValidation } from "./source-semantic-validation-cost.js";
 import { AlayaError } from "../shared/alaya-error.js";
 import { canonicalSourceSemanticDecimal } from "./source-semantic-quantified-validation.js";
 import { accountSourceSemanticDraft } from "./source-semantic-accounting.js";
@@ -62,7 +63,7 @@ export function normalizeSourceSemantics(
   const meter = input.meter ?? new SourceSemanticResourceLedger(input.budget ?? { work_units: 200000, memory_bytes: 20000000 });
   const gated = gateResources(input, meter);
   if (gated !== undefined) return gated;
-  const draft = parseDraft(input.draft);
+  const draft = parseDraft(input.draft, meter);
   if (draft.status !== "ok") return draft;
   let accounted;
   try {
@@ -71,7 +72,7 @@ export function normalizeSourceSemantics(
   } catch (error) { return fromCaught(error); }
   const mentions = resolveMentions(accounted.mentions, input.catalog, input.sha256);
   if (mentions.status !== "ok") return mentions;
-  return assemble(accounted, mentions.value, input);
+  return assemble(accounted, mentions.value, input, meter);
 }
 
 function gateResources(
@@ -92,7 +93,9 @@ function gateResources(
   }
 }
 
-function parseDraft(value: unknown): Ok<SourceSemanticDraft> | SourceSemanticNormalizationResult {
+function parseDraft(value: unknown, meter: SourceSemanticResourceLedger): Ok<SourceSemanticDraft> | SourceSemanticNormalizationResult {
+  try { chargeSourceSemanticValidation(value, meter); }
+  catch (error) { return fromCaught(error); }
   const parsed = SourceSemanticDraftSchema.safeParse(value);
   return parsed.success ? { status: "ok", value: parsed.data } : fromIssues(parsed.error.issues);
 }
@@ -127,10 +130,13 @@ function resolveMentions(
 function assemble(
   draft: SourceSemanticDraft,
   mentions: readonly SourceSemanticNormalizedMention[],
-  input: SourceSemanticNormalizationInput
+  input: SourceSemanticNormalizationInput,
+  meter: SourceSemanticResourceLedger
 ): SourceSemanticNormalizationResult {
   const source = SourceSemanticSourceBindingSchema.safeParse(input.source);
   if (!source.success) return fromIssues(source.error.issues);
+  try { chargeSourceSemanticValidation(draft, meter); }
+  catch (error) { return fromCaught(error); }
   const occurrences = [...draft.frames, ...draft.operators];
   const parsed = SourceSemanticInterpretationSchema.safeParse({
     contract: SOURCE_SEMANTIC_PACKET_CONTRACT,

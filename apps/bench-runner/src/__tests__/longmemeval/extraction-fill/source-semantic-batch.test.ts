@@ -25,40 +25,33 @@ let cacheRoot: string, dataDir: string, pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks((roots) => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots), VARIANT);
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_mention" | "duplicate_gap_channel" | "partial" = "semantic") {
+function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias" | "duplicate_gap_channel" | "partial" = "semantic") {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
   const assertion = request.source_request.source_assertions.find((row) => row.text.includes("completed"))!;
   const catalog = request.source_catalog.assertions.find((row) => row.assertion_id === assertion.assertion_id)!;
   const segment = (text: string) => catalog.segments.find((row) => row.text === text)!;
-  const mention = (id: string, text: string) => ({
-    id, assertion_id: assertion.assertion_id, source_ref: { first: segment(text).id, last: segment(text).id }
+  const anchor = (text: string) => ({
+    assertion_id: assertion.assertion_id, source_ref: { first: segment(text).id, last: segment(text).id }
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const envelope = {
-    contract: "source-semantic-proposal-v1",
+    contract: "source-semantic-proposal-v2",
     outcome: { status: "interpreted" },
-    draft: {
-      contract: "source-interpretation-v4",
-      mentions: [mention("m0", "completed"), mention("m1", theme)],
-      referents: [{ id: "r0", referent_kind: "grouped", mentions: ["m1"] }],
-      frames: [{
-        id: "f0", assertion_ids: [assertion.assertion_id],
-        context_owner: { kind: "source_act", source_act: "assertion" },
-        additional_support: [],
-        predicate_support: { kind: "explicit", reading: "complete", mentions: ["m0"] },
-        slots: [{ id: "theme", role_reading: "theme", support: [{ kind: "lexical", mentions: ["m1"] }] }],
-        bindings: [{ slot_id: "theme", target: { kind: "node", id: "r0" }, support: [] }]
+    content: {
+      entities: [{ id: "r0", referent_kind: "grouped", mentions: [anchor(theme)] }],
+      statements: [{
+        id: "f0", predicate: { kind: "explicit", reading: "complete", evidence: [anchor("completed")] },
+        arguments: [{ role: "theme", target: { kind: "entity", id: "r0" }, evidence: [anchor(theme)] }]
       }],
-      operators: [],
+      operators: [], acts: [{ occurrence: "f0", act: "assertion" }],
       gaps: []
     }
   };
   const editable = JSON.parse(JSON.stringify(envelope));
-  if (mode === "unknown_mention") editable.draft.frames[0].slots[0].support[0].mentions = [segment(theme).id];
+  if (mode === "unknown_alias") editable.content.statements[0].arguments[0].target.id = segment(theme).id;
   if (mode === "duplicate_gap_channel" || mode === "partial") {
-    const gaps = [{ kind: "unresolved_referent", affected_ids: ["r0"],
-      support: [{ kind: "lexical", mentions: ["m1"] }] }];
-    if (mode === "partial") editable.draft.gaps = gaps;
+    const gaps = [{ kind: "unresolved_referent", affected: ["r0"], evidence: [anchor(theme)] }];
+    if (mode === "partial") editable.content.gaps = gaps;
     else editable.outcome.gaps = gaps;
   }
   return JSON.stringify(editable);
@@ -84,7 +77,7 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
     deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 };
   const limitsPath = join(cacheRoot, "limits.json"); writeFileSync(limitsPath, JSON.stringify(limits));
   let creates = 0, displayName = "", failCreate = false;
-  let responseMode: "semantic" | "oversize" | "disposition" | "unknown_mention" | "duplicate_gap_channel" | "partial" = "semantic";
+  let responseMode: "semantic" | "oversize" | "disposition" | "unknown_alias" | "duplicate_gap_channel" | "partial" = "semantic";
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
     const path = new URL(String(url)).pathname;
     if (path === "/upload/v1beta/files") return new Response(null, { headers: { "x-goog-upload-url": "https://fixture-provider.invalid/upload-session" } });
@@ -167,7 +160,7 @@ it("records a lost create as unknown and refuses a second dispatch until exact r
   for (const key of fixture.keys) expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE)).toMatchObject({ status: "hit" });
 }, 60000);
 
-it.each(["unknown_mention", "duplicate_gap_channel"] as const)("retains %s admission diagnostics across native Batch import and reopen", async (mode) => {
+it.each(["unknown_alias", "duplicate_gap_channel"] as const)("retains %s admission diagnostics across native Batch import and reopen", async (mode) => {
   const fixture = await setup(); fixture.mode(mode);
   expect(await fixture.run("prepare")).toBe(0);
   expect(await fixture.run("submit")).toBe(0);
@@ -178,8 +171,8 @@ it.each(["unknown_mention", "duplicate_gap_channel"] as const)("retains %s admis
   for (const line of fixture.plan().lines) {
     const outcome = outcomes[line.key]!;
     expect(outcome.status).toBe("quarantined");
-    expect(outcome.reason).toContain(mode === "unknown_mention" ? "unknown_cross_reference" : "unrecognized_keys");
-    expect(outcome.reason).toContain(mode === "unknown_mention" ? '"path":["draft","frames",0,"slots",0,"support",0,"mentions",0]' : '"path":["outcome"]');
+    expect(outcome.reason).toContain(mode === "unknown_alias" ? "unknown or wrong-kind semantic alias" : "unrecognized_keys");
+    if (mode === "duplicate_gap_channel") expect(outcome.reason).toContain('"path":["outcome"]');
     expect(outcome.reason).toContain("raw_response_id=sha256:");
     expect(outcome.reason!.length).toBeLessThan(16384);
     expect(inspectCachedSourceSemantic(cacheRoot, line.key, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
@@ -269,7 +262,7 @@ it("enforces the 32 MiB shard bound and the 1 MiB envelope before reservation or
 
 function dispositionResponse(userPrompt: string): string {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt)), row = request.source_catalog.assertions[0]!;
-  return JSON.stringify({ contract: "source-semantic-proposal-v1", outcome: {
+  return JSON.stringify({ contract: "source-semantic-proposal-v2", outcome: {
     status: "no_executable_proposition", description: "Unreviewed producer disposition",
     context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
       source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }]

@@ -8,6 +8,7 @@ import {
 } from "./source-semantic-draft.js";
 import { sourceSemanticStructuralEdges } from "./source-semantic-structure.js";
 import { SourceSemanticResourceExhausted, type SourceSemanticResourceLedger } from "./source-semantic-resources.js";
+import { chargeSourceSemanticValidation } from "./source-semantic-validation-cost.js";
 
 /** Accounts for structural omissions only. Source fidelity remains unreviewed. */
 export function accountSourceSemanticDraft(
@@ -53,6 +54,7 @@ export function accountSourceSemanticDraft(
     ...(graph.domains === undefined ? {} : { domains: graph.domains }),
     ...(graph.measurements === undefined ? {} : { measurements: graph.measurements }) };
   meter?.retain(result, "source interpretation accounting");
+  if (meter !== undefined) chargeSourceSemanticValidation(result, meter);
   const parsed = SourceSemanticDraftSchema.safeParse(result);
   if (!parsed.success) {
     if (parsed.error.issues.some((issue) => issue.code === "too_big"

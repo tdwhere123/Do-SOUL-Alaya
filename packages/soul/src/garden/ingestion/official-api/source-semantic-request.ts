@@ -4,12 +4,16 @@ import {
   AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
   SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema, SourceSemanticResponseEnvelopeSchema,
   SourceSemanticProposalSchema, SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
+  SourceSemanticContentProposalSchema, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
   buildSourceReferenceCatalog, canonicalJson,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, selectSourceSemanticUnits } from "./source-semantic-units.js";
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
+import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canonical-prompt.js";
+export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT = "source-semantic-query-request-v2" as const;
 export const SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT = "source-semantic-query-response-v2" as const;
@@ -36,7 +40,7 @@ const ProducerCapability = z.object({
 const SourceSemanticOpenRequestBodySchema = z.object({
   k_version: z.literal(SOURCE_SEMANTIC_K_VERSION),
   normalizer_version: z.enum([SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION]),
-  proposal_contract: z.literal(SOURCE_SEMANTIC_PROPOSAL_CONTRACT).optional(),
+  proposal_contract: z.enum([SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT]).optional(),
   source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT).optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
@@ -45,7 +49,7 @@ const SourceSemanticOpenRequestBodySchema = z.object({
     assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1), source_role: z.enum(["user", "assistant"]).optional()
   }).strict().readonly()).max(8).readonly()
 }).strict().superRefine((request, context) => {
-  const current = request.proposal_contract === SOURCE_SEMANTIC_PROPOSAL_CONTRACT;
+  const current = request.proposal_contract !== undefined;
   if (current !== (request.normalizer_version === SOURCE_SEMANTIC_NORMALIZER_VERSION)) {
     context.addIssue({ code: "custom", message: "proposal contract and normalizer version must agree" });
   }
@@ -54,6 +58,9 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   }
   if (request.source_unit_contract !== undefined && (!current || request.source_assertions.some((row) => row.source_role === undefined))) {
     context.addIssue({ code: "custom", message: "source units require the current proposal contract and explicit source roles" });
+  }
+  if (request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT && request.source_unit_contract === undefined) {
+    context.addIssue({ code: "custom", message: "content proposals require complete source units" });
   }
 }).readonly();
 
@@ -176,7 +183,7 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
   const source_request = SourceSemanticOpenRequestBodySchema.parse({
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    proposal_contract: SOURCE_SEMANTIC_PROPOSAL_CONTRACT,
+    proposal_contract: SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
     source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
@@ -232,8 +239,9 @@ export function buildSourceSemanticAlignmentRequest(
 
 /** Producer JSON Schema selected by the recorded request contract, without profile enums. */
 export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest): object {
-  const schema = request !== undefined && request.source_request.proposal_contract === undefined
-    ? SourceSemanticResponseEnvelopeSchema : SourceSemanticProposalSchema;
+  const contract = request?.source_request.proposal_contract;
+  const schema = request !== undefined && contract === undefined ? SourceSemanticResponseEnvelopeSchema
+    : contract === SOURCE_SEMANTIC_PROPOSAL_CONTRACT ? SourceSemanticProposalSchema : SourceSemanticContentProposalSchema;
   return z.toJSONSchema(schema, {
     io: "input",
     override: ({ jsonSchema }) => {
@@ -277,7 +285,8 @@ const sourceSemanticResponseExample = {
   }
 };
 
-export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
+// Retained graph proposals select these exact prompt bytes for cache replay.
+const LEGACY_SOURCE_SEMANTIC_SYSTEM_PROMPT = [
   "Propose one source-local semantic draft using source-interpretation-v4.",
   'Return strict JSON {"contract":"source-semantic-proposal-v1","outcome":OUTCOME,"draft":DRAFT_IF_INTERPRETED}. Interpreted OUTCOME is exactly {"status":"interpreted"}; draft.gaps is the sole gap list.',
   "Ask only for draft semantics: mention handles with catalog first/last selections, referents, frames with predicate and role readings, slot definitions versus bindings, operators, context owners, lexical/additional/dominating support, and explicit gaps.",
@@ -303,6 +312,13 @@ export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
   "Neutral partial example, not the current input: assertion 1 is Mira shelved something. Its catalog segments are a1s0=Mira, a1s1=space, a1s2=shelved, a1s3=space, a1s4=something, a1s5=period. Assertion 2 is The label is hard to interpret. Its segments are a2s0=The, a2s1=space, a2s2=label, a2s3=space, a2s4=is, a2s5=space, a2s6=hard, a2s7=space, a2s8=to, a2s9=space, a2s10=interpret, a2s11=period. This example deliberately leaves assertion 2 as a mention-located gap without a frame. Use the current request's catalog for your response.",
   `Example response:\n${JSON.stringify(sourceSemanticResponseExample)}`
 ].join("\n");
+
+/** A retained request selects its producer syntax and prompt together. */
+export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): string {
+  if (request.source_request.proposal_contract === undefined) return CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT;
+  return request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
+    ? SOURCE_SEMANTIC_SYSTEM_PROMPT : LEGACY_SOURCE_SEMANTIC_SYSTEM_PROMPT;
+}
 
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   "Propose query interpretation for the original query only, using source-semantic-query-v2 body fields.",

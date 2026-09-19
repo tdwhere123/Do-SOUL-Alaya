@@ -75,7 +75,7 @@ describe("source semantic unit coverage", () => {
     const source_assertions = [{ assertion_id: row.assertion_id, text: row.text }];
     const legacy = parseSourceSemanticRequest({ ...current,
       source_catalog: buildSourceReferenceCatalog(semanticSha256(sourceCorpus), source_assertions, semanticSha256),
-      source_request: { ...body, source_assertions, assertion_locations: [{ assertion_id: 1,
+      source_request: { ...body, proposal_contract: "source-semantic-proposal-v1", source_assertions, assertion_locations: [{ assertion_id: 1,
         source_utf8_span: [Buffer.byteLength(sourceCorpus.slice(0, row.start)), Buffer.byteLength(sourceCorpus.slice(0, row.end))] }] }
     });
     expect(receiveSourceSemantics("{}", legacy, input).outcome.status).toBe("invalid");

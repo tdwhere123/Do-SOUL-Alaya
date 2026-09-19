@@ -8,14 +8,25 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 6.1.0
+## Unreleased — protocol 6.2.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 6.1.0 can move
+heading (currently `## v0.3.11` below). Protocol 6.2.0 can move
 independently of the app semver. `@do-soul/alaya-engine-gateway` is
 `0.3.12` for the additive `soul.interpretation` tool surface.
+
+Protocol 6.2.0 adds the source-semantic content proposal and deterministic
+compiler under invariant §25. Producers choose predicates, roles, co-reference,
+scope, speech acts and domain evidence. The host generates mention identities,
+slot/binding pairs, reciprocal ownership and quantifier binders before existing
+canonical H validation. References and embedded content remain distinct;
+orphaned or conflicting scope is rejected rather than asserted. Compilation
+and normalization share one resource ledger. Recorded graph proposals retain
+their exact request-selected schema and prompt for replay. Canonical H, MCP,
+EventLog and config schemas are unchanged; structural admission still does
+not certify language completeness.
 
 Protocol 6.0.0 versions source semantics as H v4, Q/A v2, envelope 5,
 and reasoning/cache v3. Explicit finite domains, universal templates,
