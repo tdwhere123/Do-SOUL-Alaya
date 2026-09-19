@@ -21,7 +21,7 @@ const FORBIDDEN_PROPOSAL_KEYS = [
   "verdicts", "verdict", "QueryProgram", "query_program", "answer_ids", "answerIds"
 ] as const;
 
-export const SourceSemanticResourceLimitsSchema = z.object({
+const SourceSemanticResourceLimitsSchema = z.object({
   output_byte_limit: z.number().int().min(1024).max(1024 * 1024),
   work_units: z.number().int().nonnegative().optional(),
   memory_bytes: z.number().int().nonnegative().optional()
@@ -33,7 +33,7 @@ const ProducerCapability = z.object({
   proposes: z.literal("draft_semantics")
 }).strict().readonly();
 
-export const SourceSemanticOpenRequestBodySchema = z.object({
+const SourceSemanticOpenRequestBodySchema = z.object({
   k_version: z.literal(SOURCE_SEMANTIC_K_VERSION),
   normalizer_version: z.literal(SOURCE_SEMANTIC_NORMALIZER_VERSION),
   producer_capability: ProducerCapability,
@@ -48,7 +48,7 @@ const ApprovedContextSchema = z.object({
   context_id: BoundedIdSchema, notes: z.string().min(1).max(1024).optional()
 }).strict().readonly();
 
-export const SourceSemanticHDescriptorSchema = z.object({
+const SourceSemanticHDescriptorSchema = z.object({
   h_id: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
   interpretation: SourceSemanticInterpretationSchema
 }).strict().superRefine((descriptor, context) => {
@@ -57,9 +57,9 @@ export const SourceSemanticHDescriptorSchema = z.object({
   }
 }).readonly();
 
-export type SourceSemanticResourceLimits = z.infer<typeof SourceSemanticResourceLimitsSchema>;
-export type SourceSemanticOpenRequestBody = z.infer<typeof SourceSemanticOpenRequestBodySchema>;
-export type SourceSemanticApprovedContext = z.infer<typeof ApprovedContextSchema>;
+type SourceSemanticResourceLimits = z.infer<typeof SourceSemanticResourceLimitsSchema>;
+type SourceSemanticOpenRequestBody = z.infer<typeof SourceSemanticOpenRequestBodySchema>;
+type SourceSemanticApprovedContext = z.infer<typeof ApprovedContextSchema>;
 export type SourceSemanticHDescriptor = z.infer<typeof SourceSemanticHDescriptorSchema>;
 
 export type SourceSemanticRequest = Readonly<{
@@ -177,10 +177,6 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
     source_catalog: buildSourceReferenceCatalog(semanticSha256(input.sourceCorpus), source_request.source_assertions, semanticSha256),
     ...(input.profile !== undefined ? { profile: input.profile } : {})
   });
-}
-
-export function sourceSemanticRequestIdentity(request: SourceSemanticRequest): string {
-  return `sha256:${semanticSha256(canonicalJson(parseSourceSemanticRequest(request)))}`;
 }
 
 export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryProposalInput): SourceSemanticQueryRequest {

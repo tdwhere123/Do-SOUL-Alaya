@@ -753,6 +753,11 @@ disagreement is invalid rather than repaired or silently discarded. A has no
 gap channel, so an interpreted A requires empty outcome gaps. Partial H and Q
 remain valid with matching, structurally valid gaps. Protocol owns this binding
 rule and bounded validation diagnostics; raw response identity remains intact.
+SOUL `proposeQuerySemantics` and `proposeAlignmentSemantics` expose the native
+`system_prompt` beside the strict request body. Without an injected response,
+they prepare these inputs with `unexercised` and zero provider attempts. With
+an injected response, the same preparation metadata accompanies success or
+failure. Preparation does not dispatch a provider or admit model fidelity.
 
 Work, logical memory, native I/O and process RSS remain separately labeled.
 Preparation, compilation, solving, projection and proof materialization share

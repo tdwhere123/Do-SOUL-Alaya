@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { sourceReferenceResolver, sourceSemanticInterpretationIdentity, type SourceInterpretationProfile } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/official-api/source-packet-request.js";
@@ -275,6 +275,45 @@ describe("open source semantic proposal producer", () => {
 });
 
 describe("query and alignment proposal entry points", () => {
+  it("prepares native Q/A prompts without provider calls and retains them on injected success or failure", () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("provider calls are forbidden"));
+    try {
+      const source = sourceInput(), sourceRequest = buildSourceSemanticRequest(source);
+      const h = proposeSourceSemantics(source, { rawJson: interpretedJson(sourceRequest) }).interpretation!;
+      const query = admittedQuery();
+      const queryInput = { original_query: "which folio was accessioned into bay B?", producer_id: "query-producer", producer_version: "1" };
+      const alignmentInput = { admitted_q: query,
+        h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
+        producer_id: "align-producer", producer_version: "1" };
+      const preparedQuery = proposeQuerySemantics(queryInput);
+      const preparedAlignment = proposeAlignmentSemantics(alignmentInput);
+      for (const prepared of [preparedQuery, preparedAlignment]) {
+        expect(prepared.outcome).toEqual({ status: "unexercised" });
+        expect(prepared.provider_attempts).toBe(0);
+        expect(prepared.raw_response_id).toBeUndefined();
+        expect(prepared.request).not.toHaveProperty("system_prompt");
+      }
+      expect(preparedQuery.system_prompt).toContain("outcome.gaps must exactly echo query.gaps");
+      expect(preparedAlignment.system_prompt).toContain("outcome.gaps must be empty");
+      for (const valid of [false, true]) {
+        const q = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
+          contract: "source-semantic-query-response-v1", outcome: { status: "interpreted", gaps: [] },
+          query: { variables: query.variables, alternatives: query.alternatives, return_variables: query.return_variables, gaps: [] }
+        }) : "{}" });
+        const a = proposeAlignmentSemantics(alignmentInput, { rawJson: valid ? JSON.stringify({
+          contract: "source-semantic-alignment-response-v1", outcome: { status: "interpreted", gaps: [] }, alignment: { correspondences: [] }
+        }) : "{}" });
+        expect(q.outcome.status).toBe(valid ? "interpreted" : "invalid");
+        expect(a.outcome.status).toBe(valid ? "interpreted" : "invalid");
+        expect(q.system_prompt).toBe(preparedQuery.system_prompt);
+        expect(a.system_prompt).toBe(preparedAlignment.system_prompt);
+        expect(q.request).toEqual(preparedQuery.request);
+        expect(a.request).toEqual(preparedAlignment.request);
+      }
+      expect(fetch).not.toHaveBeenCalled();
+    } finally { fetch.mockRestore(); }
+  });
+
   it.each([false, true])("validates query outcome gaps against the admitted body (matching=%s)", (matching) => {
     const query = admittedQuery();
     const gaps = [{ kind: "unresolved_referent", affected_ids: ["bay"], support: [] }];

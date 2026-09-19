@@ -1,10 +1,10 @@
-export const SOURCE_SEMANTIC_QUERY_PRODUCER_REGISTRY_POLICY_VERSION = "1";
+const SOURCE_SEMANTIC_QUERY_PRODUCER_REGISTRY_POLICY_VERSION = "1";
 export const SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID = "alaya.source.semantic.query.core.v1";
 export const SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID = "alaya.source.semantic.query.soul.v1";
 
-export const SOURCE_SEMANTIC_QUERY_PRODUCER_CAPABILITIES = ["semantic_query"] as const;
+const SOURCE_SEMANTIC_QUERY_PRODUCER_CAPABILITIES = ["semantic_query"] as const;
 
-export type SourceSemanticQueryProducerCapability =
+type SourceSemanticQueryProducerCapability =
   (typeof SOURCE_SEMANTIC_QUERY_PRODUCER_CAPABILITIES)[number];
 
 export type SourceSemanticQueryProducerRecord = Readonly<{

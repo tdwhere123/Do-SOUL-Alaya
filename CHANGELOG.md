@@ -26,6 +26,9 @@ and includes a schema-checked neutral example. Batch quarantine retains the
 diagnostic and raw response identity. Historical raw responses are not repaired
 or relabeled, and new producer prompts use the existing request/cache identity
 owner. This engineering repair does not establish actual-model quality.
+Q/A proposal preparation now returns its native system prompt as separate
+metadata; strict request bodies and MCP schemas are unchanged. Unconsumed
+module exports remain private, and unused request type aliases are removed.
 
 Protocol 5.1.0 is an additive minor under handbook invariant §25. The
 opt-in `soul.interpretation` channel adds qualified answer bindings,

@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT, SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   buildSourceSemanticAlignmentRequest, buildSourceSemanticQueryRequest, buildSourceSemanticRequest,
   parseSourceSemanticRequest, semanticSha256, rejectForbiddenProposalInput,
   type SourceSemanticAlignmentProposalInput, type SourceSemanticAlignmentRequest,
@@ -31,6 +32,7 @@ export type SourceSemanticProposalResult = Readonly<{
 }>;
 
 export type SourceSemanticQueryProposalResult = Readonly<{
+  system_prompt: string;
   outcome: SourceSemanticOutcome;
   provider_attempts: 0 | 1;
   request: SourceSemanticQueryRequest;
@@ -40,6 +42,7 @@ export type SourceSemanticQueryProposalResult = Readonly<{
 }>;
 
 export type SourceSemanticAlignmentProposalResult = Readonly<{
+  system_prompt: string;
   outcome: SourceSemanticOutcome;
   provider_attempts: 0 | 1;
   request: SourceSemanticAlignmentRequest;
@@ -119,14 +122,15 @@ export function proposeQuerySemantics(
 ): SourceSemanticQueryProposalResult {
   const request = buildSourceSemanticQueryRequest(input);
   if (injected === undefined) {
-    return { outcome: { status: "unexercised" }, provider_attempts: 0, request };
+    return { outcome: { status: "unexercised" }, provider_attempts: 0, request,
+      system_prompt: SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT };
   }
-  return receiveQuerySemantics(injected.rawJson, request, parseQuery);
+  return { ...receiveQuerySemantics(injected.rawJson, request, parseQuery), system_prompt: SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT };
 }
 
-export function receiveQuerySemantics(
+function receiveQuerySemantics(
   rawJson: string, request: SourceSemanticQueryRequest, parseQuery: ParseSourceSemanticQueryProposal = parseSourceSemanticQueryProposal
-): SourceSemanticQueryProposalResult {
+): Omit<SourceSemanticQueryProposalResult, "system_prompt"> {
   const attempt = bindAttempt(rawJson, request);
   const bounded = boundRawJson(rawJson, request.resource_limits.output_byte_limit, attempt);
   if (bounded !== undefined) return bounded;
@@ -161,14 +165,15 @@ export function proposeAlignmentSemantics(
 ): SourceSemanticAlignmentProposalResult {
   const request = buildSourceSemanticAlignmentRequest(input);
   if (injected === undefined) {
-    return { outcome: { status: "unexercised" }, provider_attempts: 0, request };
+    return { outcome: { status: "unexercised" }, provider_attempts: 0, request,
+      system_prompt: SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT };
   }
-  return receiveAlignmentSemantics(injected.rawJson, request);
+  return { ...receiveAlignmentSemantics(injected.rawJson, request), system_prompt: SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT };
 }
 
-export function receiveAlignmentSemantics(
+function receiveAlignmentSemantics(
   rawJson: string, request: SourceSemanticAlignmentRequest
-): SourceSemanticAlignmentProposalResult {
+): Omit<SourceSemanticAlignmentProposalResult, "system_prompt"> {
   const attempt = bindAttempt(rawJson, request);
   const bounded = boundRawJson(rawJson, request.resource_limits.output_byte_limit, attempt);
   if (bounded !== undefined) return bounded;
@@ -201,7 +206,7 @@ export function receiveAlignmentSemantics(
 }
 
 /** Parses a proposed Q. Core `admitSourceSemanticQuery` is the admission owner. */
-export function parseSourceSemanticQueryProposal(input: Readonly<{
+function parseSourceSemanticQueryProposal(input: Readonly<{
   original_query: string; request: SourceSemanticQueryRequest; query: SourceSemanticQuery;
 }>): SourceSemanticQuery {
   void input.original_query;

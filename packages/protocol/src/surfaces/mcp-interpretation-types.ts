@@ -132,7 +132,3 @@ export const SoulInterpretationResponseSchema = z.discriminatedUnion("operation"
 
 export type SoulInterpretationRequest = z.infer<typeof SoulInterpretationRequestSchema>;
 export type SoulInterpretationResponse = z.infer<typeof SoulInterpretationResponseSchema>;
-export type SoulInterpretationPrepareSourceRequest = z.infer<typeof SoulInterpretationPrepareSourceRequestSchema>;
-export type SoulInterpretationProposeRequest = z.infer<typeof SoulInterpretationProposeRequestSchema>;
-export type SoulInterpretationPrepareQueryRequest = z.infer<typeof SoulInterpretationPrepareQueryRequestSchema>;
-export type SoulInterpretationReasonRequest = z.infer<typeof SoulInterpretationReasonRequestSchema>;
