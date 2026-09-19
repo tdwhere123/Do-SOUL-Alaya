@@ -28,6 +28,12 @@ extrema preserve ties and unknown operands. Nested universal binders and
 additional comparison frame constraints are rejected explicitly. Legacy
 interpretations are not relabeled or promoted to the new contract.
 
+Bench extraction samples now support any natively inspected dataset window,
+including small diagnostic corpora. Canonical population windows retain their
+target-selection requirement. Exact request membership, one Batch job, one
+attempt per selected key, spend reservations and strict result admission remain
+enforced by the existing authority and attempt-ledger owners.
+
 Protocol 5.2.0 adds optional bounded path/code/reference diagnostics to invalid
 source-semantic outcomes. Interpreted producer envelopes must echo the body's
 gaps; H and Q no longer discard conflicting outcome-only gaps, and A rejects

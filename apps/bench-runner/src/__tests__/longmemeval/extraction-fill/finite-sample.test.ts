@@ -1,11 +1,11 @@
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiExtractionRequests } from "@do-soul/alaya-soul";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
   "../../../runs/extraction/authority/inspection.js";
-import { createExtractionSampleScope, assertSampleKeys } from
+import { createExtractionSampleScope, assertSampleKeys, assertSampleReceipt } from
   "../../../runs/extraction/authority/sample-scope.js";
 import { createExtractionAuthorityReceipt, readExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
@@ -36,13 +36,13 @@ afterEach(async () => {
   }
 });
 
-async function sampleScenario() {
+async function sampleScenario(questionCount = 100, sampleSize = 8) {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gemini-3.1-flash-lite");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "gemini-3.1-low-v1");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_SOURCE_PACKING", "");
   const source = Array.from({ length: 18 }, (_, i) => `I recorded durable detail number ${i + 1}.`).join(" ");
-  const questions = Array.from({ length: 100 }, (_, i) =>
+  const questions = Array.from({ length: questionCount }, (_, i) =>
     buildExtractionFillQuestion(`q${i}`, source, "I enjoy gardening."));
   questions[0] = { ...questions[0]!,
     haystack_session_ids: [...questions[0]!.haystack_session_ids, "assistant-only"],
@@ -50,7 +50,7 @@ async function sampleScenario() {
     haystack_sessions: [...questions[0]!.haystack_sessions, [{ role: "assistant", content: "Acknowledged." }]]
   };
   await writeDataset(questions);
-  const inspectInput = { ...roots, variant: "longmemeval_s" as const, limit: 100,
+  const inspectInput = { ...roots, variant: "longmemeval_s" as const, limit: questionCount,
     revision: readCurrentExtractionAuthorityRevision(), action: "sample" as const,
     sourcePacking: "singleton" as const };
   const inspection = await inspectExtractionAuthority(inspectInput);
@@ -59,20 +59,22 @@ async function sampleScenario() {
   const requests = buildOfficialApiExtractionRequests(turn.turnContent, turn.turnMessages, "singleton");
   const keys = computeExtractionTurnCacheKeys("gemini-3.1-flash-lite", "gemini-3.1-low-v1",
     OFFICIAL_API_SYSTEM_PROMPT, turn, "singleton");
-  const selected = keys.slice(0, 8);
+  const selected = keys.slice(0, sampleSize);
   const scope = createExtractionSampleScope(selected, inspection);
   rmSync(roots.cacheRoot, { recursive: true });
-  const selection = createFreshRetiredSourceRebuildTargetSelection({ cacheRoot: roots.cacheRoot,
-    operator: "fixture-operator", observation: inspection.observation });
+  const selection = questionCount === 100
+    ? createFreshRetiredSourceRebuildTargetSelection({ cacheRoot: roots.cacheRoot,
+      operator: "fixture-operator", observation: inspection.observation }) : undefined;
+  if (selection === undefined) mkdirSync(roots.cacheRoot);
   const receipt = createExtractionAuthorityReceipt({ action: "sample", sampleScope: scope,
     observation: inspection.observation, inspection,
-    targetSelectionDigest: selection.receipt_digest,
+    ...(selection === undefined ? {} : { targetSelectionDigest: selection.receipt_digest }),
     outputTokenCap: { field: "maxOutputTokens", value: 512 }, diskFloorBytes: 0,
     priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2, maximumInputTokensPerAttempt: 100_000 } });
   const receiptPath = join(roots.cacheRoot, "..", "sample-authority.json");
   const selectionPath = join(roots.cacheRoot, "..", "target-selection.json");
   writeExtractionAuthorityReceipt(receiptPath, receipt);
-  writeExtractionTargetSelectionReceipt(selectionPath, selection);
+  if (selection !== undefined) writeExtractionTargetSelectionReceipt(selectionPath, selection);
   const limits: GeminiBatchLimits = { maxJobs: 1, maxRequestsPerJob: selected.length,
     maxFileBytes: 1_000_000, maxInputTokensPerJob: 1_000_000, maxEnqueuedTokens: 1_000_000,
     maxOutputTokens: 512, maxUsd: receipt.price.estimated_upper_usd,
@@ -80,8 +82,9 @@ async function sampleScenario() {
     requestTimeoutMs: 1_000, maxPolls: 10 };
   const provider = await startProvider();
   const run = (operation: GeminiBatchOperation, changes: Partial<ExtractionFillOptions> = {}) =>
-    runExtractionFill({ ...roots, variant: "longmemeval_s", limit: 100,
-      authorityReceiptPath: receiptPath, targetSelectionReceiptPath: selectionPath,
+    runExtractionFill({ ...roots, variant: "longmemeval_s", limit: questionCount,
+      authorityReceiptPath: receiptPath,
+      ...(selection === undefined ? {} : { targetSelectionReceiptPath: selectionPath }),
       batch: { operation, limits, window: "sample" }, batchHttp: provider.http,
       log: () => undefined, ...changes });
   return { inspection, scope, receipt, receiptPath, selection, selectionPath, requests, keys, selected,
@@ -141,6 +144,8 @@ it("binds a finite native sample to the complete inventory and retains the 18-wa
   expect(fixture.receipt.limits).toMatchObject({ starting_missing: 20,
     maximum_attempts: 8, successful_shard_ceiling: 8 });
   expect(readExtractionAuthorityReceipt(fixture.receiptPath)).toEqual(fixture.receipt);
+  expect(() => assertSampleReceipt({ ...fixture.receipt, target_selection_digest: undefined }))
+    .toThrow(/selection/u);
   for (const keys of [[], [...fixture.selected, fixture.selected[0]!], ["f".repeat(64)]]) {
     expect(() => createExtractionSampleScope(keys, fixture.inspection)).toThrow();
   }
@@ -150,7 +155,7 @@ it("binds a finite native sample to the complete inventory and retains the 18-wa
   expect(() => createExtractionAuthorityReceipt({ action: "sample",
     sampleScope: { keys: [empty], key_set_sha256: computeExtractionKeySetSha256([empty]) },
     observation: fixture.inspection.observation, inspection: fixture.inspection,
-    targetSelectionDigest: fixture.selection.receipt_digest,
+    targetSelectionDigest: fixture.selection!.receipt_digest,
     outputTokenCap: { field: "maxOutputTokens", value: 512 }, diskFloorBytes: 0,
     priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2,
       maximumInputTokensPerAttempt: 100_000 }
@@ -166,6 +171,11 @@ it("binds a finite native sample to the complete inventory and retains the 18-wa
     "--extraction-output-token-field", "maxOutputTokens", "--extraction-input-price-usd-per-million", "1",
     "--extraction-output-price-usd-per-million", "2", "--extraction-max-input-tokens", "100000",
     "--extraction-disk-floor-bytes", "0"];
+  const selectionFlag = args.indexOf("--extraction-target-selection");
+  expect(await runAuthorizeExtractionCommand([
+    ...args.slice(0, selectionFlag), ...args.slice(selectionFlag + 2)
+  ])).toBe(2);
+  expect(existsSync(issuedPath)).toBe(false);
   expect(await runAuthorizeExtractionCommand(args)).toBe(0);
   const issued = readExtractionAuthorityReceipt(issuedPath);
   expect(issued.sample_scope).toEqual(fixture.scope);
@@ -217,6 +227,49 @@ it("reopens singleton manifests, submits once through HTTP, and keeps sample res
     requiredExtractionTurns: fixture.turns.distinctExtractionTurns,
     requiredQuestionWindow: { offset: 0, limit: 100 }, allowLiveExtraction: false,
     diagnosticDir: null })).toThrow(/incomplete|missing|coverage|in_progress/iu);
+});
+
+it("authorizes an exact diagnostic sample through CLI and preserves one dispatch across reopen", async () => {
+  const fixture = await sampleScenario(2, 2);
+  const proposedPath = join(roots.cacheRoot, "..", "diagnostic-keys.json");
+  const issuedPath = join(roots.cacheRoot, "..", "diagnostic-authority.json");
+  writeFileSync(proposedPath, JSON.stringify(fixture.selected));
+  expect(await runAuthorizeExtractionCommand([
+    "--variant", "s", "--limit", "2", "--data-dir", roots.dataDir,
+    "--pinned-meta-root", roots.pinnedMetaRoot, "--extraction-cache-root", roots.cacheRoot,
+    "--extraction-source-packing", "singleton", "--extraction-action", "sample",
+    "--extraction-sample-keys", proposedPath, "--extraction-receipt-out", issuedPath,
+    "--extraction-output-token-cap", "512", "--extraction-output-token-field", "maxOutputTokens",
+    "--extraction-input-price-usd-per-million", "1", "--extraction-output-price-usd-per-million", "2",
+    "--extraction-max-input-tokens", "100000", "--extraction-disk-floor-bytes", "0"
+  ])).toBe(0);
+  const issued = readExtractionAuthorityReceipt(issuedPath);
+  expect(issued.observation.dataset).toMatchObject({ windowOffset: 0, windowLimit: 2 });
+  expect(issued.target_selection_digest).toBeUndefined();
+  expect(issued.sample_scope?.keys).toEqual([...fixture.selected].sort());
+  expect(issued.limits).toMatchObject({ maximum_attempts: 2, successful_shard_ceiling: 2 });
+  expect(() => assertSampleReceipt({ ...issued, target_selection_digest: "a".repeat(64) }))
+    .toThrow(/selection/u);
+  const run = (operation: GeminiBatchOperation) => fixture.run(operation,
+    { authorityReceiptPath: issuedPath, sourcePacking: "singleton" });
+  await run("prepare");
+  await expect(fixture.run("submit", { authorityReceiptPath: issuedPath, limit: 1 }))
+    .rejects.toThrow();
+  expect(fixture.provider.state.creates).toBe(0);
+  await run("submit");
+  expect(fixture.provider.state.creates).toBe(1);
+  expect(fixture.provider.state.uploads[0]!.trim().split("\n")
+    .map((line) => JSON.parse(line).key).sort()).toEqual([...fixture.selected].sort());
+  fixture.provider.state.finished = true;
+  const imported = await run("resume");
+  expect(imported.authorityTelemetry).toMatchObject({ attempts: 2, successfulShards: 2 });
+  expect(imported.manifest).toMatchObject({ fill_status: "in_progress", cached_turns: 2 });
+  await run("import");
+  await run("submit");
+  expect(fixture.provider.state.creates).toBe(1);
+  await expect(fixture.run("prepare", { authorityReceiptPath: issuedPath,
+    batch: { operation: "prepare", limits: fixture.limits, window: "another" } }))
+    .rejects.toThrow(/sample|overlap|job/iu);
 });
 
 it("retains an ambiguous submission intent across reopen and refuses a second dispatch", async () => {

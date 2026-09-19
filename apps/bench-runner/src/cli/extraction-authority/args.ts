@@ -61,9 +61,6 @@ function assertAuthorizeExtractionArgs(parsed: AuthorizeExtractionArgs): void {
   if ((parsed.action === "sample") !== (parsed.sampleKeysPath !== undefined)) {
     throw new Error("--extraction-sample-keys is required only for --extraction-action=sample");
   }
-  if (parsed.action === "sample" && parsed.targetSelectionPath === undefined) {
-    throw new Error("sample authority requires an existing target selection receipt");
-  }
   if (parsed.action === "probe" && parsed.probeKey === undefined) {
     throw new Error("--extraction-probe-key is required when --extraction-action=probe");
   }

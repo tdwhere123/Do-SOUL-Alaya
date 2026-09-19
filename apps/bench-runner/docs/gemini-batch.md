@@ -61,6 +61,17 @@ and source-window rules still apply. Obtain exact options from:
 node apps/bench-runner/bin/alaya-bench-runner.mjs --help
 ```
 
+For a finite diagnostic sample, use `--extraction-action sample` and
+`--extraction-sample-keys <json-array-file>` with the actual dataset window.
+The authority validates selected keys against that complete native inventory
+and binds its dataset revision, source generation and request identities. It
+permits one Batch job and one attempt per selected key; `maxRequestsPerJob`
+must equal the sample size. Normal LongMemEval-S 0..100 and 0..500 windows
+still require `--extraction-target-selection`; other inspected windows do not.
+Use a fresh cache root for a new paid window. A sample remains partial dataset
+coverage even when every selected request is admitted. Preparation and receipt
+creation do not submit provider requests or replace the user's paid grant.
+
 The Batch limits JSON must contain all of these fields:
 
 | Field | Meaning |

@@ -4,6 +4,7 @@ import { computeExtractionKeySetSha256 } from "../content-closure.js";
 import type { ExtractionAuthorityInspection } from "./inspection.js";
 import type { ExtractionAuthorityReceipt } from "./receipt.js";
 import type { ExtractionFillOptions } from "../extraction-fill.js";
+import { requiresExtractionTargetSelection } from "./target-selection/receipt.js";
 
 const SampleKeysSchema = z.array(z.string().regex(/^[a-f0-9]{64}$/u)).min(1).readonly();
 const SampleScopeSchema = z.object({
@@ -53,17 +54,19 @@ export function assertSampleReceipt(receipt: ExtractionAuthorityReceipt): void {
   }
   assertExtractionSampleScope(receipt.sample_scope);
   const count = receipt.sample_scope.keys.length;
-  const dataset = receipt.observation.dataset;
-  if (receipt.schema_version !== 5 || receipt.target_selection_digest === undefined ||
+  // Canonical population windows retain their target-root selection contract;
+  // other inspected windows are bound by the receipt's dataset and key identities.
+  const requiresSelection = requiresExtractionTargetSelection(receipt.observation);
+  if (receipt.schema_version !== 5 ||
+      requiresSelection !== (receipt.target_selection_digest !== undefined) ||
       receipt.direct_spend !== undefined || receipt.repair_scope !== undefined ||
       receipt.catalog_refill !== undefined || receipt.continuation !== undefined ||
-      receipt.probe_key !== undefined || dataset.variant !== "longmemeval_s" ||
-      dataset.windowOffset !== 0 || dataset.windowLimit !== 100 ||
+      receipt.probe_key !== undefined ||
       receipt.observation.inventory.invalidTurns !== 0 ||
       count > receipt.observation.inventory.missingTurns ||
       receipt.limits.starting_missing !== receipt.observation.inventory.missingTurns || receipt.limits.maximum_attempts !== count ||
       receipt.limits.successful_shard_ceiling !== count) {
-    throw new Error("sample authority requires an isolated first-100 selection and scope-derived limits");
+    throw new Error("sample authority requires its window selection policy and scope-derived limits");
   }
 }
 
@@ -73,14 +76,12 @@ export function assertSampleInspection(
   successfulKeys: readonly string[] = []
 ): void {
   assertExtractionSampleScope(scope);
-  const dataset = inspection.observation.dataset;
   const eligible = new Set(inspection.nonemptyKeys ?? []);
   const missing = new Set(inspection.missingKeys);
   const successful = new Set(successfulKeys);
-  if (dataset.variant !== "longmemeval_s" || dataset.windowOffset !== 0 ||
-      dataset.windowLimit !== 100 || inspection.observation.inventory.invalidTurns !== 0 ||
+  if (inspection.observation.inventory.invalidTurns !== 0 ||
       scope.keys.some((key) => !eligible.has(key) || (!missing.has(key) && !successful.has(key)))) {
-    throw new Error("sample keys must be native nonempty missing requests in the full first-100 inventory");
+    throw new Error("sample keys must be native nonempty missing requests in the inspected window inventory");
   }
 }
 
