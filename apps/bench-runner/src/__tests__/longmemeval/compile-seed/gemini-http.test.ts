@@ -141,8 +141,9 @@ describe("native Gemini interactive extraction", () => {
       req.on("end", () => {
         const schema = JSON.parse(Buffer.concat(chunks).toString("utf8")).generationConfig.responseJsonSchema;
         expect(schema.properties.content.required).toContain("roots");
+        expect(schema.properties.content.properties.roots.items.required).toContain("expression");
+        expect(schema.properties.content.properties.roots.items.properties.expression).toEqual({ type: "object", additionalProperties: true });
         expect(schema.$defs.__schema0.oneOf[0].required).toContain("arguments");
-        expect(schema.$defs.__schema0.oneOf[1].required).not.toContain("content");
         observed = true;
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: raw }] } }] }));

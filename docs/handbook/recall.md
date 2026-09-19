@@ -732,13 +732,14 @@ Canonical-envelope archives retain native request/response replay with their
 original prompt. Their normalizer-v3 manifests remain ineligible for current
 cache reuse; replay does not upgrade or publish an old interpretation.
 
-Gemini decoding guidance has its own provider projection: recursive properties
-are optional in the transmitted JSON Schema because GenerateContent cannot
-constrain required cyclic references. Local Protocol admission still requires
-all operands and arguments. New recursive Gemini cache identities include both
-the source schema and the versioned projected schema; acyclic historical keys
-and transmitted bytes remain unchanged. Provider acceptance and syntactic
-guidance do not certify language fidelity.
+Gemini decoding guidance has its own provider projection: recursive expressions
+are objects in the transmitted decoder schema, while the complete source schema
+is attached as system guidance. Required outer fields remain mandatory. Local
+Protocol admission still requires all expression operands and arguments. New
+recursive Gemini cache identities include the source schema, versioned decoder
+schema and exact appended guidance; acyclic historical keys and transmitted
+bytes remain unchanged. Provider acceptance and syntactic guidance do not certify
+language fidelity.
 
 SOUL can prepare an explicit `source-semantic-revision-v1` input after a complete
 retained response. It binds the unchanged base request, immediate parent request

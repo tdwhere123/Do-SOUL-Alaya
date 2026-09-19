@@ -25,12 +25,14 @@ export function encodeGeminiGenerateContent(
 ): object {
   assertGeminiGenerateContentSettings(settings);
   const responseJsonSchema = officialApiExtractionResponseSchema(line.userPrompt);
+  const projected = responseJsonSchema === undefined ? undefined : projectGeminiGenerationSchema(responseJsonSchema);
   return {
-    systemInstruction: { parts: [{ text: line.systemPrompt }] },
+    systemInstruction: { parts: [{ text: line.systemPrompt },
+      ...(projected?.instruction === undefined ? [] : [{ text: projected.instruction }])] },
     contents: [{ role: "user", parts: [{ text: line.userPrompt }] }],
     generationConfig: {
       responseMimeType: "application/json", maxOutputTokens: settings.maxOutputTokens,
-      ...(responseJsonSchema === undefined ? {} : { responseJsonSchema: projectGeminiGenerationSchema(responseJsonSchema).schema }),
+      ...(projected === undefined ? {} : { responseJsonSchema: projected.schema }),
       ...(isNativeGeminiRequestProfile(settings.requestProfile) ? {
         thinkingConfig: THINKING_CONFIG[settings.requestProfile]
       } : {})
