@@ -31,6 +31,12 @@ Recursive request cache identities bind the source schema, absent decoder schema
 and exact appended guidance; historical acyclic identities remain unchanged.
 Batch and interactive transport share this projection owner.
 
+SOUL's additive completed-response revision contract distinguishes transport
+completion from JSON validity. Explicitly complete invalid JSON can enter a fresh,
+bounded revision with immutable raw and rederived syntax diagnostics; truncated,
+unknown and empty responses remain rejected. Historical revision bytes, source
+lineage, the three-revision cap and strict replacement admission are preserved.
+
 Protocol 6.3.0 exposes the shared bounded diagnostics schema and preserves exact
 producer alias/ownership paths. SOUL adds explicit source-bound revision
 preparation with immutable prior raw, verified parent requests and at most three

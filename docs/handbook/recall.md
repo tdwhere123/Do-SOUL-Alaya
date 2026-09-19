@@ -740,8 +740,13 @@ schema, explicit absence of a decoder schema and exact appended guidance; acycli
 historical keys and transmitted bytes remain unchanged. Provider acceptance and
 syntactic guidance do not certify language fidelity.
 
-SOUL can prepare an explicit `source-semantic-revision-v1` input after a complete
-retained response. It binds the unchanged base request, immediate parent request
+SOUL can prepare an explicit `source-semantic-revision-v1` input from retained
+JSON. The additive `source-semantic-revision-v2` records caller-observed complete
+generation and can retain invalid JSON with a stable syntax diagnostic. Truncated,
+unknown-completion and empty responses are not accepted by that preparation path.
+The transport adapter owns completion observation; SOUL does not independently
+attest a network response. Completion does not establish syntax or fidelity.
+Each revision binds the unchanged base request, immediate parent request
 and prior raw bytes; the chain is validated before use and capped at three
 revisions. The shared compiler rederives structural diagnostics, including exact
 alias and ownership paths. Separately labeled source-review comments are bounded

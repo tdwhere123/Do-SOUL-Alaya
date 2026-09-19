@@ -8,6 +8,38 @@ const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor mi
 const raw = SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
 
 describe("source-bound explicit proposal revisions", () => {
+  it("retains invalid JSON only with explicit observed completion and keeps replacement admission strict", () => {
+    const parent = buildSourceSemanticRequest(input), malformed = raw + "}";
+    const revision = prepareSourceSemanticRevision(parent, malformed, [], { responseCompletion: "complete" });
+    expect(revision.contract).toBe("source-semantic-revision-v2");
+    expect(revision.structural_diagnostics).toEqual([{ code: "invalid_json", path: [], message: expect.any(String) }]);
+    const request = buildSourceSemanticRequest({ ...input, revision });
+    expect(request.source_request.revision?.previous_response).toBe(malformed);
+    expect(receiveSourceSemantics(malformed, request, input).outcome).toMatchObject({ status: "invalid", reason: "malformed_json" });
+    expect(receiveSourceSemantics(raw, request, input).outcome.status).toBe("interpreted");
+    for (const responseCompletion of ["truncated", "unknown"] as const)
+      expect(() => prepareSourceSemanticRevision(parent, malformed, [], { responseCompletion })).toThrow(/observed completion/u);
+    expect(() => prepareSourceSemanticRevision(parent, malformed)).toThrow(/complete retained JSON/u);
+    expect(() => prepareSourceSemanticRevision(parent, "  ", [], { responseCompletion: "complete" })).toThrow(/nonempty/u);
+    expect(() => parseSourceSemanticRequest({ ...request, source_request: { ...request.source_request,
+      revision: { ...revision, previous_response_completion: "unknown" } } })).toThrow();
+    expect(() => parseSourceSemanticRequest({ ...request, source_request: { ...request.source_request,
+      revision: { ...revision, structural_diagnostics: [] } } })).toThrow(/diagnostics differ/u);
+  });
+
+  it("preserves historical revision bytes and validates mixed legacy and completed-response chains", () => {
+    const parent = buildSourceSemanticRequest(input);
+    const legacy = prepareSourceSemanticRevision(parent, raw);
+    expect(legacy.contract).toBe("source-semantic-revision-v1");
+    expect(legacy).not.toHaveProperty("previous_response_completion");
+    const first = buildSourceSemanticRequest({ ...input, revision: legacy });
+    const next = prepareSourceSemanticRevision(first, raw + "}", [], { responseCompletion: "complete" });
+    expect(next.revision_number).toBe(2);
+    const request = buildSourceSemanticRequest({ ...input, revision: next });
+    expect(parseSourceSemanticRequest(JSON.parse(JSON.stringify(request)))).toEqual(request);
+    expect(JSON.parse(next.parent_request_json).source_request.revision).toEqual(legacy);
+  });
+
   it("retains rejected raw and precise diagnostics while applying unchanged admission to the replacement", () => {
     const parent = buildSourceSemanticRequest(input);
     const broken = JSON.parse(raw);

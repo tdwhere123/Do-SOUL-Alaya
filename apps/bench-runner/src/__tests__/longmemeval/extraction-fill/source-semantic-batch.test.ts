@@ -12,6 +12,7 @@ import { inspectCachedSourcePacket } from "../../../runs/extraction/cache/source
 import { readExtractionCacheManifestIdentity } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { resolveCompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-config.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
+import { decodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
 import type { GeminiBatchLimits, GeminiBatchPlan, GeminiBatchState } from "../../../runs/extraction/fill/batch/contract.js";
 import { buildAuthorityQuestion, registerExtractionFillHooks, setExtractionCredentialFixture, buildExtractionFillQuestion } from "./fixture.js";
 
@@ -55,7 +56,7 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   return JSON.stringify(editable);
 }
 
-async function setup(providerUrl = "https://fixture-provider.invalid", questionOnly = false, revise = false) {
+async function setup(providerUrl = "https://fixture-provider.invalid", questionOnly = false, revise: boolean | "complete_invalid_json" = false) {
   setExtractionCredentialFixture(); vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", providerUrl);
@@ -75,8 +76,13 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
       "--extraction-cache-root", cacheRoot, "--extraction-open-semantics", "--batch-operation", "prepare",
       "--batch-limits", limitsPath, "--extraction-preflight-out", preview])).toBe(0);
     const lines = JSON.parse(readFileSync(preview, "utf8")).planned_requests as GeminiBatchPlan["lines"];
-    const revisions = lines.map((line) => prepareSourceSemanticRevision(parseSourceSemanticRequest(JSON.parse(line.userPrompt)),
-      authoredResponse(line.userPrompt, "unknown_alias")));
+    const revisions = lines.map((line) => {
+      const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+      if (revise !== "complete_invalid_json") return prepareSourceSemanticRevision(request, authoredResponse(line.userPrompt, "unknown_alias"));
+      const completed = decodeGeminiGenerateContent({ candidates: [{ finishReason: "STOP",
+        content: { parts: [{ text: authoredResponse(line.userPrompt) + "}" }] } }] });
+      return prepareSourceSemanticRevision(request, completed.rawJson, [], { responseCompletion: "complete" });
+    });
     generation = { ...generation, revisions };
     writeFileSync(revisionPath, JSON.stringify(revisions));
   }
@@ -120,14 +126,18 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
     mode: (mode: typeof responseMode) => { responseMode = mode; } };
 }
 
-it("binds explicit revisions through native authority, plan, import and reopened typed cache", async () => {
-  const fixture = await setup("https://fixture-provider.invalid", false, true);
+it.each([true, "complete_invalid_json"] as const)("binds explicit revisions (%s) through native authority, plan, import and reopened typed cache", async (revisionMode) => {
+  const fixture = await setup("https://fixture-provider.invalid", false, revisionMode);
   expect(await fixture.run("prepare")).toBe(0);
   expect(fixture.fetchMock).not.toHaveBeenCalled();
   for (const line of fixture.plan().lines) {
     const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
     expect(request.source_request.revision?.revision_number).toBe(1);
     expect(request.source_request.revision?.structural_diagnostics.length).toBeGreaterThan(0);
+    if (revisionMode === "complete_invalid_json") {
+      expect(request.source_request.revision?.contract).toBe("source-semantic-revision-v2");
+      expect(request.source_request.revision?.structural_diagnostics[0]?.code).toBe("invalid_json");
+    }
   }
   expect(await fixture.run("submit")).toBe(0);
   expect(await fixture.run("resume")).toBe(0);
