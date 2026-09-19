@@ -8,12 +8,12 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 6.0.0
+## Unreleased — protocol 6.1.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 6.0.0 can move
+heading (currently `## v0.3.11` below). Protocol 6.1.0 can move
 independently of the app semver. `@do-soul/alaya-engine-gateway` is
 `0.3.12` for the additive `soul.interpretation` tool surface.
 
@@ -33,6 +33,20 @@ including small diagnostic corpora. Canonical population windows retain their
 target-selection requirement. Exact request membership, one Batch job, one
 attempt per selected key, spend reservations and strict result admission remain
 enforced by the existing authority and attempt-ledger owners.
+
+Protocol 6.1.0 is additive under handbook invariant §25: it exports the producer
+proposal contract/schema/materializer, shared accounting validator and explicit
+legacy normalizer version. MCP, EventLog and config schemas remain unchanged.
+H extraction now uses `source-semantic-proposal-v1`: Protocol derives redundant
+embedding self-references and outcome gap copies. Normalizer-v4 records
+structurally unaccounted source assertions/evidence and incomplete bindings as
+located gaps; Core enforces the same rule during publication and SQLite reopen.
+Accounting expansion consumes the resource budget and preserves exhaustion as
+a distinct outcome. Historical normalizer-v3 requests and stored H remain
+explicit replay/read paths; Core's internal normalized-H publication entrance
+requires v4, while MCP propose continues to accept canonical drafts. Canonical H v4 and
+response-envelope shapes are unchanged. This provider-free repair does not
+certify language completeness or change historical paid extraction verdicts.
 
 Protocol 5.2.0 adds optional bounded path/code/reference diagnostics to invalid
 source-semantic outcomes. Interpreted producer envelopes must echo the body's

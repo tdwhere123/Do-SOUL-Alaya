@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
   buildSourceReferenceCatalog, hashLabeledIdentity, sourceReferenceResolver, canonicalJson,
+  SourceSemanticPublishedInterpretationSchema, sourceSemanticInterpretationIdentity,
   type SourceReferenceCatalog, type SourceSemanticAlignment, type SourceSemanticQuery,
   type SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
@@ -260,6 +261,48 @@ it("keeps durable legacy interpretation bytes and identity while failing closed 
       details: expect.objectContaining({ reason: "unsupported_structural_contract" }) });
     const reopened = await createRecallRealStorage(() => undefined, filename);
     expect((await new SqliteEvidenceCapsuleRepo(reopened.database).findById(evidenceId))?.gist).toBe(oldBytes);
+    reopened.database.close(); closeCachedDatabase(filename);
+  });
+});
+
+it("keeps discovery open and returns typed validation for persisted interpretations missing accounting gaps", async () => {
+  await withPublished(async ({ hId, execute, filename }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const repo = new SqliteEvidenceCapsuleRepo(database);
+    const capsule = await repo.findById(semanticInterpretationEvidenceId(hId, fieldContractSha256));
+    if (capsule === null) throw new Error("published capsule missing");
+    const published = SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(capsule.gist));
+    const interpretation = { ...published.interpretation, frames: published.interpretation.frames.map((frame) => ({
+      ...frame, bindings: frame.bindings.filter((binding) => binding.slot_id !== "theme")
+    })), gaps: [] };
+    const corruptedId = sourceSemanticInterpretationIdentity(interpretation, fieldContractSha256);
+    // Preserve schema/source/identity validity so the reader must reach accounting validation.
+    const corrupted = SourceSemanticPublishedInterpretationSchema.parse({ ...published,
+      interpretation_id: corruptedId, interpretation });
+    const evidenceId = semanticInterpretationEvidenceId(corruptedId, fieldContractSha256);
+    const retainedBytes = JSON.stringify(corrupted);
+    await repo.create({ ...capsule, object_id: evidenceId, gist: retainedBytes });
+    database.close(); closeCachedDatabase(filename);
+
+    const prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q: queryOf(), budget: BUDGET });
+    if (prepared.kind !== "prepare_query") throw new Error("query preparation expected");
+    expect(prepared.candidates.map((row) => row.interpretation_id)).toContain(hId);
+    expect(prepared.candidates.map((row) => row.interpretation_id)).not.toContain(corruptedId);
+    expect(prepared.coverage.discovery).toBe("truncated");
+    expect(prepared.coverage.h).toBe("open");
+
+    const reason = { kind: "reason" as const, accepts_unreviewed_conditional_results: true as const,
+      h_id: corruptedId, q: queryOf(), a: alignmentOf(corruptedId, queryOf()), original_query: ORIGINAL,
+      budget: BUDGET, output_byte_limit: 1000000 };
+    await expect(call(execute, reason)).rejects.toMatchObject({ name: "CoreError", code: "VALIDATION",
+      message: expect.stringContaining("accounting gaps"), details: {
+        work: { native_work: expect.any(Number), logical_work: expect.any(Number) }
+      } });
+    await expect(call(execute, { ...reason, budget: { ...BUDGET, work_units: 1 } })).rejects.toMatchObject({
+      name: "CoreError", code: "CONFLICT", subCode: "RETRYABLE_BACKPRESSURE"
+    });
+    const reopened = await createRecallRealStorage(() => undefined, filename);
+    expect((await new SqliteEvidenceCapsuleRepo(reopened.database).findById(evidenceId))?.gist).toBe(retainedBytes);
     reopened.database.close(); closeCachedDatabase(filename);
   });
 });

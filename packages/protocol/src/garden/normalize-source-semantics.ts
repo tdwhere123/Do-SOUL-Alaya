@@ -4,6 +4,7 @@ export { sourceSemanticStanceLists } from "./source-semantic-structure.js";
 import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted } from "./source-semantic-resources.js";
 import { AlayaError } from "../shared/alaya-error.js";
 import { canonicalSourceSemanticDecimal } from "./source-semantic-quantified-validation.js";
+import { accountSourceSemanticDraft } from "./source-semantic-accounting.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import {
   SourceReferenceCatalogSchema, sourceReferencePreparationCost, sourceReferenceResolver,
@@ -20,7 +21,9 @@ import {
 } from "./source-semantic-interpretation.js";
 
 export const SOURCE_SEMANTIC_K_VERSION = "source-semantic-k-v3" as const;
-export const SOURCE_SEMANTIC_NORMALIZER_VERSION = "source-semantic-normalizer-v3" as const;
+export const SOURCE_SEMANTIC_NORMALIZER_VERSION = "source-semantic-normalizer-v4" as const;
+/** Historical request/cache replay only; new publication requires the current normalizer. */
+export const SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION = "source-semantic-normalizer-v3" as const;
 
 export type SourceSemanticNormalizationBudget = Readonly<{
   readonly work_units: number;
@@ -37,6 +40,7 @@ export type SourceSemanticNormalizationInput = Readonly<{
   readonly contract_version: string;
   readonly budget?: SourceSemanticNormalizationBudget;
   readonly meter?: SourceSemanticResourceLedger;
+  readonly normalizer_version?: typeof SOURCE_SEMANTIC_NORMALIZER_VERSION | typeof SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION;
 }>;
 
 export type SourceSemanticHandleMap = Readonly<Record<string, string>>;
@@ -55,20 +59,25 @@ type Ok<T> = { readonly status: "ok"; readonly value: T };
 export function normalizeSourceSemantics(
   input: SourceSemanticNormalizationInput
 ): SourceSemanticNormalizationResult {
-  const gated = gateResources(input);
+  const meter = input.meter ?? new SourceSemanticResourceLedger(input.budget ?? { work_units: 200000, memory_bytes: 20000000 });
+  const gated = gateResources(input, meter);
   if (gated !== undefined) return gated;
   const draft = parseDraft(input.draft);
   if (draft.status !== "ok") return draft;
-  const mentions = resolveMentions(draft.value.mentions, input.catalog, input.sha256);
+  let accounted;
+  try {
+    accounted = input.normalizer_version === SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION
+      ? draft.value : accountSourceSemanticDraft(draft.value, input.catalog, meter);
+  } catch (error) { return fromCaught(error); }
+  const mentions = resolveMentions(accounted.mentions, input.catalog, input.sha256);
   if (mentions.status !== "ok") return mentions;
-  return assemble(draft.value, mentions.value, input);
+  return assemble(accounted, mentions.value, input);
 }
 
 function gateResources(
-  input: SourceSemanticNormalizationInput
+  input: SourceSemanticNormalizationInput, meter: SourceSemanticResourceLedger
 ): SourceSemanticNormalizationResult | undefined {
   try {
-    const meter = input.meter ?? new SourceSemanticResourceLedger(input.budget ?? { work_units: 200000, memory_bytes: 20000000 });
     meter.retain(input.draft, "normalization input");
     meter.retain(input.catalog, "normalization catalog");
     const catalog = SourceReferenceCatalogSchema.parse(input.catalog);
@@ -126,7 +135,7 @@ function assemble(
   const parsed = SourceSemanticInterpretationSchema.safeParse({
     contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
-    normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
+    normalizer_version: input.normalizer_version ?? SOURCE_SEMANTIC_NORMALIZER_VERSION,
     source: source.data,
     producer_id: input.producer_id,
     producer_version: input.producer_version,

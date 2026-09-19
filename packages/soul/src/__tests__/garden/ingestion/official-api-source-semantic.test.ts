@@ -5,11 +5,11 @@ import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/o
 import {
   SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT,
   SOURCE_SEMANTIC_SYSTEM_PROMPT, buildSourceSemanticRequest, semanticSha256,
-  sourceSemanticResponseJsonSchema
+  sourceSemanticResponseJsonSchema, parseSourceSemanticRequest
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import {
   MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeAlignmentSemantics, proposeQuerySemantics,
-  proposeSourceSemantics
+  proposeSourceSemantics, receiveSourceSemantics
 } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 
 const PROFILE: SourceInterpretationProfile = {
@@ -76,8 +76,8 @@ function accessionDraft(request: ReturnType<typeof buildSourceSemanticRequest>, 
 function interpretedJson(request: ReturnType<typeof buildSourceSemanticRequest>, gaps: readonly object[] = []) {
   const draft = accessionDraft(request, gaps);
   return JSON.stringify({
-    contract: "source-interpretation-response-v4",
-    outcome: { status: "interpreted", gaps },
+    contract: "source-semantic-proposal-v1",
+    outcome: { status: "interpreted" },
     draft
   });
 }
@@ -118,7 +118,7 @@ describe("open source semantic proposal producer", () => {
     const received = proposeSourceSemantics(input, { rawJson });
     expect(received.outcome.status).toBe("interpreted");
     expect(received.interpretation?.mentions.map((row) => row.text)).toEqual(["Mira", "shelved", "something", "The label is hard to interpret."]);
-    expect(received.interpretation?.gaps).toEqual(JSON.parse(rawJson).outcome.gaps);
+    expect(received.interpretation?.gaps).toEqual(JSON.parse(rawJson).draft.gaps);
     expect(received.interpretation?.gaps).toHaveLength(2);
     expect(received.interpretation?.frames.map((row) => row.id)).toEqual(["fShelve"]);
     expect(received.interpretation?.gaps[1]).toMatchObject({ kind: "uninterpreted_clause", affected_ids: ["mClause"] });
@@ -133,7 +133,6 @@ describe("open source semantic proposal producer", () => {
     if (failure === "mention_target") envelope.draft.frames[0].bindings[0].target.id = "mActor";
     else {
       envelope.draft.gaps[1].affected_ids = ["fOmitted"];
-      envelope.outcome.gaps = envelope.draft.gaps;
     }
     const rawJson = JSON.stringify(envelope);
     const received = proposeSourceSemantics(input, { rawJson });
@@ -153,6 +152,8 @@ describe("open source semantic proposal producer", () => {
     expect(request.interpretation_contract).toBe("source-interpretation-v4");
     expect(request.profile).toBeUndefined();
     expect(request.source_request.k_version).toBe("source-semantic-k-v3");
+    expect(request.source_request.proposal_contract).toBe("source-semantic-proposal-v1");
+    expect(request.source_request.normalizer_version).toBe("source-semantic-normalizer-v4");
     expect(request.source_request.producer_capability.proposes).toBe("draft_semantics");
     expect(request.source_request.resource_limits.output_byte_limit).toBe(1024 * 1024);
     expect(request.source_catalog.assertions.length).toBe(1);
@@ -190,7 +191,7 @@ describe("open source semantic proposal producer", () => {
 
   it("keeps abstention as abstained with a receipt and does not convert it to empty success", () => {
     const received = proposeSourceSemantics(sourceInput(), {
-      rawJson: JSON.stringify({ contract: "source-interpretation-response-v4", outcome: { status: "abstained" } })
+      rawJson: JSON.stringify({ contract: "source-semantic-proposal-v1", outcome: { status: "abstained" } })
     });
     expect(received.outcome.status).toBe("abstained");
     expect(received.provider_attempts).toBe(1);
@@ -216,6 +217,21 @@ describe("open source semantic proposal producer", () => {
     const received = proposeSourceSemantics(input, { rawJson: JSON.stringify(envelope) });
     expect(received.outcome.status).toBe("invalid");
     expect(received.interpretation).toBeUndefined();
+  });
+
+  it("returns host-accounted missing bindings while retaining the original producer draft", () => {
+    const input = sourceInput(), request = buildSourceSemanticRequest(input);
+    const envelope = JSON.parse(interpretedJson(request));
+    envelope.draft.frames[0].bindings.pop();
+    const rawJson = JSON.stringify(envelope);
+    const received = proposeSourceSemantics(input, { rawJson });
+    expect(received.outcome.status).toBe("interpreted");
+    expect(received.draft?.gaps).toEqual([]);
+    expect(received.interpretation?.gaps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "missing_binding", affected_ids: ["fAccession"] })
+    ]));
+    expect(received.outcome).toEqual({ status: "interpreted", gaps: received.interpretation?.gaps });
+    expect(received.rawJson).toBe(rawJson);
   });
 
   it("identifies catalog IDs used as graph mention handles without repairing them", () => {
@@ -252,8 +268,8 @@ describe("open source semantic proposal producer", () => {
       ? { ...row, source_ref: { first: "a1s999", last: "a1s999" } } : row);
     const received = proposeSourceSemantics(input, {
       rawJson: JSON.stringify({
-        contract: "source-interpretation-response-v4",
-        outcome: { status: "interpreted", gaps: [] },
+        contract: "source-semantic-proposal-v1",
+        outcome: { status: "interpreted" },
         draft
       })
     });
@@ -442,10 +458,34 @@ it("retains a located no-proposition disposition without confusing it with abste
   const disposition = { status: "no_executable_proposition", description: "Acknowledgement without an executable proposition",
     context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
       source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }] };
-  const received = proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-interpretation-response-v4", outcome: disposition }) });
+  const received = proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v1", outcome: disposition }) });
   expect(received.outcome).toEqual(disposition);
   expect(received.provider_attempts).toBe(1); expect(received.draft).toBeUndefined(); expect(received.raw_response_id).toBeDefined();
   const forged = { ...disposition, context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
     source_ref: { first: "a999s0", last: "a999s0" } }] };
-  expect(proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-interpretation-response-v4", outcome: forged }) }).outcome.status).toBe("invalid");
+  expect(proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v1", outcome: forged }) }).outcome.status).toBe("invalid");
+});
+
+it("replays explicitly historical requests without upgrading their normalizer or salvaging current envelopes", () => {
+  const input = sourceInput(), current = buildSourceSemanticRequest(input);
+  const { proposal_contract: _proposalContract, ...legacyBody } = current.source_request;
+  const legacy = parseSourceSemanticRequest({ ...current, source_request: {
+    ...legacyBody, normalizer_version: "source-semantic-normalizer-v3"
+  } });
+  const rawJson = JSON.stringify({ contract: "source-interpretation-response-v4",
+    outcome: { status: "interpreted", gaps: [] }, draft: accessionDraft(current) });
+  const historical = receiveSourceSemantics(rawJson, legacy, input);
+  expect(historical.outcome.status).toBe("interpreted");
+  expect(historical.interpretation?.normalizer_version).toBe("source-semantic-normalizer-v3");
+  expect(historical.rawJson).toBe(rawJson);
+  expect(receiveSourceSemantics(rawJson, current, input).outcome.status).toBe("invalid");
+  expect(receiveSourceSemantics(interpretedJson(current), legacy, input).outcome.status).toBe("invalid");
+  expect(() => parseSourceSemanticRequest({ ...current, source_request: {
+    ...current.source_request, normalizer_version: "source-semantic-normalizer-v3"
+  } })).toThrow(/proposal contract and normalizer version/u);
+  expect(() => parseSourceSemanticRequest({ ...current, source_request: {
+    ...legacyBody, normalizer_version: "source-semantic-normalizer-v4"
+  } })).toThrow(/proposal contract and normalizer version/u);
+  expect(JSON.stringify(sourceSemanticResponseJsonSchema(legacy))).toContain("source-interpretation-response-v4");
+  expect(JSON.stringify(sourceSemanticResponseJsonSchema(current))).toContain("source-semantic-proposal-v1");
 });

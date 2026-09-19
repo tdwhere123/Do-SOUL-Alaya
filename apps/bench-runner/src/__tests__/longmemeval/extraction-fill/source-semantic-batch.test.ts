@@ -25,7 +25,7 @@ let cacheRoot: string, dataDir: string, pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks((roots) => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots), VARIANT);
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_mention" | "gap_mismatch" | "partial" = "semantic") {
+function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_mention" | "duplicate_gap_channel" | "partial" = "semantic") {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
   const assertion = request.source_request.source_assertions.find((row) => row.text.includes("completed"))!;
   const catalog = request.source_catalog.assertions.find((row) => row.assertion_id === assertion.assertion_id)!;
@@ -35,8 +35,8 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_mentio
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const envelope = {
-    contract: "source-interpretation-response-v4",
-    outcome: { status: "interpreted", gaps: [] },
+    contract: "source-semantic-proposal-v1",
+    outcome: { status: "interpreted" },
     draft: {
       contract: "source-interpretation-v4",
       mentions: [mention("m0", "completed"), mention("m1", theme)],
@@ -55,10 +55,11 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_mentio
   };
   const editable = JSON.parse(JSON.stringify(envelope));
   if (mode === "unknown_mention") editable.draft.frames[0].slots[0].support[0].mentions = [segment(theme).id];
-  if (mode === "gap_mismatch" || mode === "partial") {
-    editable.outcome.gaps = [{ kind: "unresolved_referent", affected_ids: ["r0"],
+  if (mode === "duplicate_gap_channel" || mode === "partial") {
+    const gaps = [{ kind: "unresolved_referent", affected_ids: ["r0"],
       support: [{ kind: "lexical", mentions: ["m1"] }] }];
-    if (mode === "partial") editable.draft.gaps = editable.outcome.gaps;
+    if (mode === "partial") editable.draft.gaps = gaps;
+    else editable.outcome.gaps = gaps;
   }
   return JSON.stringify(editable);
 }
@@ -81,7 +82,7 @@ async function setup(providerUrl = "https://fixture-provider.invalid") {
     deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 };
   const limitsPath = join(cacheRoot, "limits.json"); writeFileSync(limitsPath, JSON.stringify(limits));
   let creates = 0, displayName = "", failCreate = false;
-  let responseMode: "semantic" | "oversize" | "disposition" | "unknown_mention" | "gap_mismatch" | "partial" = "semantic";
+  let responseMode: "semantic" | "oversize" | "disposition" | "unknown_mention" | "duplicate_gap_channel" | "partial" = "semantic";
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
     const path = new URL(String(url)).pathname;
     if (path === "/upload/v1beta/files") return new Response(null, { headers: { "x-goog-upload-url": "https://fixture-provider.invalid/upload-session" } });
@@ -164,7 +165,7 @@ it("records a lost create as unknown and refuses a second dispatch until exact r
   for (const key of fixture.keys) expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE)).toMatchObject({ status: "hit" });
 }, 60000);
 
-it.each(["unknown_mention", "gap_mismatch"] as const)("retains %s admission diagnostics across native Batch import and reopen", async (mode) => {
+it.each(["unknown_mention", "duplicate_gap_channel"] as const)("retains %s admission diagnostics across native Batch import and reopen", async (mode) => {
   const fixture = await setup(); fixture.mode(mode);
   expect(await fixture.run("prepare")).toBe(0);
   expect(await fixture.run("submit")).toBe(0);
@@ -175,8 +176,8 @@ it.each(["unknown_mention", "gap_mismatch"] as const)("retains %s admission diag
   for (const line of fixture.plan().lines) {
     const outcome = outcomes[line.key]!;
     expect(outcome.status).toBe("quarantined");
-    expect(outcome.reason).toContain(mode === "unknown_mention" ? "unknown_cross_reference" : "outcome_gap_mismatch");
-    expect(outcome.reason).toContain(mode === "unknown_mention" ? '"path":["draft","frames",0,"slots",0,"support",0,"mentions",0]' : '"path":["outcome","gaps"]');
+    expect(outcome.reason).toContain(mode === "unknown_mention" ? "unknown_cross_reference" : "unrecognized_keys");
+    expect(outcome.reason).toContain(mode === "unknown_mention" ? '"path":["draft","frames",0,"slots",0,"support",0,"mentions",0]' : '"path":["outcome"]');
     expect(outcome.reason).toContain("raw_response_id=sha256:");
     expect(outcome.reason!.length).toBeLessThan(16384);
     expect(inspectCachedSourceSemantic(cacheRoot, line.key, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
@@ -266,7 +267,7 @@ it("enforces the 32 MiB shard bound and the 1 MiB envelope before reservation or
 
 function dispositionResponse(userPrompt: string): string {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt)), row = request.source_catalog.assertions[0]!;
-  return JSON.stringify({ contract: "source-interpretation-response-v4", outcome: {
+  return JSON.stringify({ contract: "source-semantic-proposal-v1", outcome: {
     status: "no_executable_proposition", description: "Unreviewed producer disposition",
     context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
       source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }]

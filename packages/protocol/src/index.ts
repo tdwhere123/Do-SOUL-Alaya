@@ -260,11 +260,13 @@ export {
 
 export * from "./garden/source-interpretation-profile.js";
 export * from "./garden/source-semantic-draft.js";
+export * from "./garden/source-semantic-proposal.js";
 export { canonicalSourceSemanticDecimal, compareSourceSemanticDecimals } from "./garden/source-semantic-quantified-validation.js";
 export { sourceSemanticValidationDiagnostics } from "./garden/source-semantic-diagnostics.js";
 export * from "./garden/source-semantic-interpretation.js";
 export * from "./garden/source-semantic-worker.js";
 export * from "./garden/source-semantic-identity.js";
 export * from "./garden/normalize-source-semantics.js";
+export { assertSourceSemanticAccounting } from "./garden/source-semantic-accounting.js";
 
 export { SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS, sourceInterpretationDependsOnRecord } from "./garden/source-interpretation-dependency.js";

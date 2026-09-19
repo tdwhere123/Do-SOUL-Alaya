@@ -2,6 +2,7 @@ import {
   SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type RequestBudget, canonicalJson, buildSourceReferenceCatalog, sourceReferenceResolver, assertSourceInterpretationPacketProfile, SourceInterpretationPacketSchema,
   PublishedSourceInterpretationPacketSchema, sourceRecallTarget, sourceEvidenceRootTarget,
   normalizeSourceSemantics, sourceSemanticInterpretationIdentity, sourceSemanticStanceLists,
+  SOURCE_SEMANTIC_NORMALIZER_VERSION,
   SourceReferenceCatalogSchema, SourceSemanticInterpretationSchema, SourceSemanticPublishedInterpretationSchema,
   type PublishedSourceInterpretationPacket, type FieldContractSha256,
   type SourceReferenceCatalog, type SourceSemanticInterpretation,
@@ -212,10 +213,11 @@ function incomingInterpretation(owner: Pick<Owner, "sha256" | "meter">, stored: 
     content_digest: stored.record.content_digest
   };
   if (input.interpretation !== undefined) {
-    return hostStanceInterpretation(SourceSemanticInterpretationSchema.parse({
-      ...SourceSemanticInterpretationSchema.parse(input.interpretation),
-      source: { ...SourceSemanticInterpretationSchema.parse(input.interpretation).source, ...source }
-    }));
+    const interpretation = SourceSemanticInterpretationSchema.parse(input.interpretation);
+    if (interpretation.normalizer_version !== SOURCE_SEMANTIC_NORMALIZER_VERSION) {
+      throw new CoreError("VALIDATION", "new source semantic publication requires the current normalizer");
+    }
+    return hostStanceInterpretation({ ...interpretation, source: { ...interpretation.source, ...source } });
   }
   if (input.draft === undefined || input.producer_version === undefined || input.contract_version === undefined) {
     throw new CoreError("VALIDATION", "source semantic publication requires a draft or a normalized interpretation");

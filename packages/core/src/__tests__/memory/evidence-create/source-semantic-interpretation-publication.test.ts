@@ -9,6 +9,7 @@ import {
   sourceReferenceResolver,
   sourceSemanticInterpretationIdentity,
   SourceSemanticPublishedInterpretationSchema,
+  SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
   type SourceReferenceCatalog
 } from "@do-soul/alaya-protocol";
 import {
@@ -162,6 +163,38 @@ function countRows(database: StorageDatabase, sql: string): number {
 }
 
 describe("source semantic interpretation publication", () => {
+  it("persists structural gaps across SQLite reopen and rejects normalized inputs that erase them", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "alaya-source-accounting-"));
+    const filename = join(directory, "memory.sqlite");
+    const fixture = await openFixture(filename);
+    await admitSource(fixture);
+    const catalog = catalogFor(ASSERTION);
+    const draft = usesDraft(catalog, ASSERTION);
+    draft.frames[0]!.bindings = [];
+    const published = await fixture.publication.publish(publicationInput(catalog, { draft }));
+    expect(published.bound.interpretation.gaps).toContainEqual(expect.objectContaining({
+      kind: "missing_binding", affected_ids: ["fUse"]
+    }));
+    const { draft: _draft, ...normalizedInput } = publicationInput(catalog);
+    const stripped = { ...published.bound.interpretation, gaps: [] };
+    await expect(fixture.publication.publish({ ...normalizedInput, interpretation: stripped }))
+      .rejects.toThrow(/accounting gaps/u);
+    await expect(fixture.publication.publish({ ...normalizedInput,
+      interpretation: { ...stripped, normalizer_version: SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION } }))
+      .rejects.toThrow(/current normalizer/u);
+    fixture.database.close(); databases.delete(fixture.database);
+    const reopened = await openFixture(filename);
+    await admitSource(reopened);
+    const stored = await reopened.evidenceService.findById(published.evidence.object_id);
+    const rebound = SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(stored!.gist));
+    const checked = verifyPublishedSourceSemanticInterpretation(reopened.owner, rebound, REAL_SQLITE_TEST_WORKSPACE_ID);
+    expect(checked.bound.interpretation.gaps).toEqual(published.bound.interpretation.gaps);
+    const forged = { ...rebound, interpretation: stripped,
+      interpretation_id: sourceSemanticInterpretationIdentity(stripped, fieldContractSha256) };
+    expect(() => verifyPublishedSourceSemanticInterpretation(reopened.owner, forged, REAL_SQLITE_TEST_WORKSPACE_ID))
+      .toThrow(/accounting gaps/u);
+  });
+
   it("publishes a draft, reopens the same H/source, and does not mint memory or relations", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-source-semantic-"));
     const filename = join(directory, "memory.sqlite");

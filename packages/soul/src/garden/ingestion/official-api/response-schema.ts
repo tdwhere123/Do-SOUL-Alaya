@@ -36,7 +36,9 @@ function isOfficialApiExtractionRequestPrompt(userPrompt: string): boolean {
 export function officialApiExtractionResponseSchemaPreimage(userPrompt: string): string {
   const packetSchema = sourcePacketSchema(userPrompt);
   if (packetSchema !== undefined) return JSON.stringify(packetSchema);
-  if (isSourceSemanticRequestPrompt(userPrompt)) return SOURCE_SEMANTIC_RESPONSE_SCHEMA_PREIMAGE;
+  const semanticRequest = sourceSemanticRequest(userPrompt);
+  if (semanticRequest !== undefined) return semanticRequest.source_request.proposal_contract === undefined
+    ? JSON.stringify(sourceSemanticResponseJsonSchema(semanticRequest)) : SOURCE_SEMANTIC_RESPONSE_SCHEMA_PREIMAGE;
   return isOfficialApiExtractionRequestPrompt(userPrompt)
     ? OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE
     : "null";
@@ -46,7 +48,8 @@ export function officialApiExtractionResponseSchemaPreimage(userPrompt: string):
 export function officialApiExtractionResponseSchema(userPrompt: string): object | undefined {
   const packetSchema = sourcePacketSchema(userPrompt);
   if (packetSchema !== undefined) return packetSchema;
-  if (isSourceSemanticRequestPrompt(userPrompt)) return structuredClone(sourceSemanticResponseJsonSchema());
+  const semanticRequest = sourceSemanticRequest(userPrompt);
+  if (semanticRequest !== undefined) return structuredClone(sourceSemanticResponseJsonSchema(semanticRequest));
   if (!isOfficialApiExtractionRequestPrompt(userPrompt)) return undefined;
   return structuredClone(responseSchema);
 }
@@ -56,11 +59,10 @@ function sourcePacketSchema(userPrompt: string): object | undefined {
   catch { return undefined; }
 }
 
-function isSourceSemanticRequestPrompt(userPrompt: string): boolean {
+function sourceSemanticRequest(userPrompt: string): ReturnType<typeof parseSourceSemanticRequest> | undefined {
   try {
-    parseSourceSemanticRequest(JSON.parse(userPrompt));
-    return true;
+    return parseSourceSemanticRequest(JSON.parse(userPrompt));
   } catch {
-    return false;
+    return undefined;
   }
 }

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
   SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema, SourceSemanticResponseEnvelopeSchema,
+  SourceSemanticProposalSchema, SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
   buildSourceReferenceCatalog, canonicalJson,
@@ -35,14 +36,20 @@ const ProducerCapability = z.object({
 
 const SourceSemanticOpenRequestBodySchema = z.object({
   k_version: z.literal(SOURCE_SEMANTIC_K_VERSION),
-  normalizer_version: z.literal(SOURCE_SEMANTIC_NORMALIZER_VERSION),
+  normalizer_version: z.enum([SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION]),
+  proposal_contract: z.literal(SOURCE_SEMANTIC_PROPOSAL_CONTRACT).optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
   assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(8).readonly().optional(),
   source_assertions: z.array(z.object({
     assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1)
   }).strict().readonly()).max(8).readonly()
-}).strict().readonly();
+}).strict().superRefine((request, context) => {
+  const current = request.proposal_contract === SOURCE_SEMANTIC_PROPOSAL_CONTRACT;
+  if (current !== (request.normalizer_version === SOURCE_SEMANTIC_NORMALIZER_VERSION)) {
+    context.addIssue({ code: "custom", message: "proposal contract and normalizer version must agree" });
+  }
+}).readonly();
 
 const ApprovedContextSchema = z.object({
   context_id: BoundedIdSchema, notes: z.string().min(1).max(1024).optional()
@@ -163,6 +170,7 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
   const source_request = SourceSemanticOpenRequestBodySchema.parse({
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
+    proposal_contract: SOURCE_SEMANTIC_PROPOSAL_CONTRACT,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
     assertion_locations: indexOfficialApiSourceAssertions(input.sourceCorpus).filter((row) => input.assertionIds.includes(row.assertion_id)).map((row) => ({
@@ -215,9 +223,11 @@ export function buildSourceSemanticAlignmentRequest(
   };
 }
 
-/** Open-mode JSON Schema from the 02 envelope. No profile content enums. */
-export function sourceSemanticResponseJsonSchema(): object {
-  return z.toJSONSchema(SourceSemanticResponseEnvelopeSchema, {
+/** Producer JSON Schema selected by the recorded request contract, without profile enums. */
+export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest): object {
+  const schema = request !== undefined && request.source_request.proposal_contract === undefined
+    ? SourceSemanticResponseEnvelopeSchema : SourceSemanticProposalSchema;
+  return z.toJSONSchema(schema, {
     io: "input",
     override: ({ jsonSchema }) => {
       if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
@@ -230,8 +240,8 @@ const exampleGaps = [{ kind: "unresolved_referent", affected_ids: ["rItem"],
   { kind: "uninterpreted_clause", affected_ids: ["mClause"],
     support: [{ kind: "lexical", mentions: ["mClause"] }], description: "This clause is left uninterpreted without inventing a frame." }];
 const sourceSemanticResponseExample = {
-  contract: "source-interpretation-response-v4",
-  outcome: { status: "interpreted", gaps: exampleGaps },
+  contract: SOURCE_SEMANTIC_PROPOSAL_CONTRACT,
+  outcome: { status: "interpreted" },
   draft: {
     contract: "source-interpretation-v4",
     mentions: [
@@ -262,7 +272,7 @@ const sourceSemanticResponseExample = {
 
 export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
   "Propose one source-local semantic draft using source-interpretation-v4.",
-  'Return strict JSON {"contract":"source-interpretation-response-v4","outcome":OUTCOME,"draft":DRAFT_IF_INTERPRETED}.',
+  'Return strict JSON {"contract":"source-semantic-proposal-v1","outcome":OUTCOME,"draft":DRAFT_IF_INTERPRETED}. Interpreted OUTCOME is exactly {"status":"interpreted"}; draft.gaps is the sole gap list.',
   "Ask only for draft semantics: mention handles with catalog first/last selections, referents, frames with predicate and role readings, slot definitions versus bindings, operators, context owners, lexical/additional/dominating support, and explicit gaps.",
   "Do not emit host hashes, character or UTF-8 offsets, entry_roots, asserted_at_scope, persistent IDs, QueryProgram, seeds, scores, ranking, answers, or verdicts.",
   "A supplied profile is an optional adapter, not an admission prerequisite. Novel predicate and role readings are allowed.",
@@ -273,6 +283,7 @@ export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
   'For a source-supported entity or value, declare a referent (one mention is sufficient for referent_kind="grouped") and bind to that referent, not its mention. For an unresolved role target use {"kind":"unresolved"} without id, or omit its binding and retain a located gap; never fabricate a participant to complete a slot.',
   "A gap affected_ids entry may name a declared mention, referent, frame, or operator. For an uninterpreted clause with no frame, declare a mention for its source span and use that mention in affected_ids and lexical support. Never cite a hypothetical or omitted frame as if it were declared.",
   "Each binding slot_id must name a slot defined by that same frame. Dominating support via_id must name a declared referent, frame, or operator, not a mention. Check each reference against its required kind before returning the draft; prefixes alone do not declare a handle.",
+  'An embedded occurrence uses context_owner={"kind":"embedding","parent_frame":PARENT_FRAME_ID}. Do not emit content_argument: the host derives the current occurrence ID. The parent binding identifies its content target; do not assert the embedded action independently.',
   "Cover every selected source assertion with interpreted meaning or an explicit located draft.gaps entry. Locate gap support through declared mentions for that assertion. Do not silently omit clauses that are difficult to interpret.",
   "Explicit predicate support needs valid mention handles; implicit support needs supporting context and a reading. Empty or omitted support is a gap, not implicit.",
   "Unresolved referents are local. Do not mint a global unknown. Record unsupported meaning as gaps.",
@@ -280,7 +291,7 @@ export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
   'Optional domains contain {id,context:OWNER_ID_OR_NULL,support,members:[{referent,evidence,restrictions:[{restriction,evidence}]}],exclusions:[{referent,evidence}],closure:{kind:"open"}|{kind:"closed",evidence}}. Membership/restriction/closure evidence must be occurrences in the declared context; null requires source assertions. Lists are bounded to64 members. A universal claim does not establish a complete census. Preserve promise/report/negative ownership.',
   'Optional measurements contain {id,subject,owner,population,metric,unit,context,value,support}. value is an exact decimal string (128 digits,64 fractional digits maximum), with source support. Distinct values for the same subject/population/metric/unit/context require an explicit context distinction. Do not turn subjective easiest/best wording into objective values or rankings.',
   "Outcome interpreted requires a draft; abstained, invalid, quarantine, truncated, and transport failures must not carry a draft.",
-  "For interpreted output, outcome.gaps must exactly repeat draft.gaps, including all supports. The draft is the sole owner of gaps.",
+  "For interpreted output, emit gaps only in draft.gaps. Do not repeat gaps in outcome; the host derives the canonical envelope from the draft.",
   "Do not infer world truth or confidence. Admission of a draft does not certify language fidelity.",
   "Neutral partial example, not the current input: assertion 1 is Mira shelved something. Its catalog segments are a1s0=Mira, a1s1=space, a1s2=shelved, a1s3=space, a1s4=something, a1s5=period. Assertion 2 is The label is hard to interpret. Its segments are a2s0=The, a2s1=space, a2s2=label, a2s3=space, a2s4=is, a2s5=space, a2s6=hard, a2s7=space, a2s8=to, a2s9=space, a2s10=interpret, a2s11=period. This example deliberately leaves assertion 2 as a mention-located gap without a frame. Use the current request's catalog for your response.",
   `Example response:\n${JSON.stringify(sourceSemanticResponseExample)}`

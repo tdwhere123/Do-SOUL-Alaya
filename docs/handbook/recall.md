@@ -704,12 +704,29 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local H, source-independent
 Q, explicit A, and selected C. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 6.0.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
+Garden v1. Protocol 6.1.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
 reasoning/cache v3, `source-semantic-k-v3`,
-`source-semantic-normalizer-v3` and `source-semantic-lowering-v3`. An older open
+`source-semantic-normalizer-v4` and `source-semantic-lowering-v3`. An older open
 H is not relabeled or silently promoted; recreate its interpretation explicitly.
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
+
+New H extraction uses the producer-only `source-semantic-proposal-v1` contract.
+Protocol derives each embedded occurrence's self-reference and the canonical
+outcome gap list from its containing draft. The producer still owns parent
+selection, argument bindings and all language interpretation. The canonical H
+and response-envelope shapes remain unchanged. Marker-absent normalizer-v3
+requests retain an explicit historical replay path; new publication requires
+normalizer-v4. Request/schema identities distinguish the new producer wire.
+
+Normalizer-v4 accounts for selected assertions without connected evidence,
+orphan mentions/referents, unresolved slots and embedded occurrences without
+parent bindings as located gaps. It never invents missing relations or bindings.
+Core checks the same accounting on normalized admission and persisted reopen;
+stripping gaps cannot bypass it. Host expansion beyond graph or work/memory
+capacity is resource exhaustion. These structural checks cannot discover every
+omitted qualifier inside a supported clause: an admitted H remains unreviewed
+for language fidelity, even when no structural accounting gaps remain.
 
 Protocol owns operator/embedding incidence and the exact host-derived entry
 roots and assertion permissions. Entry activation is not assertion. Conflicting

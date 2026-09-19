@@ -4,6 +4,7 @@ import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticAlignmentSchema,
   SourceSemanticOutcomeSchema, SourceSemanticQuerySchema, SourceSemanticResponseEnvelopeSchema,
   SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
+  materializeSourceSemanticProposal,
   normalizeSourceSemantics, sourceSemanticQueryIdentity, verifySourceSemanticDisposition, canonicalJson,
   type SourceSemanticAlignment, type SourceSemanticDraft, type SourceSemanticInterpretation,
   type SourceSemanticOutcome, type SourceSemanticQuery
@@ -99,7 +100,16 @@ export function receiveSourceSemantics(
   bindSource(request, input);
   const parsed = parseResponseJson(rawJson, attempt);
   if (parsed.status !== "ok") return parsed.result;
-  const envelope = SourceSemanticResponseEnvelopeSchema.safeParse(parsed.value);
+  // Marker-absent v3 requests are retained only for historical raw/cache replay.
+  // Remove this branch when those archives use an offline-only legacy reader.
+  let envelope: ReturnType<typeof SourceSemanticResponseEnvelopeSchema.safeParse>;
+  try {
+    envelope = request.source_request.proposal_contract === undefined
+      ? SourceSemanticResponseEnvelopeSchema.safeParse(parsed.value)
+      : { success: true, data: materializeSourceSemanticProposal(parsed.value) };
+  } catch (error) {
+    return { ...attempt, outcome: invalidProposalOutcome(error) };
+  }
   if (!envelope.success) {
     return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
   }
@@ -228,6 +238,7 @@ function admitInterpretedDraft(
     producer_id: request.source_request.producer_capability.producer_id,
     producer_version: request.source_request.producer_capability.producer_version,
     contract_version: SOURCE_SEMANTIC_PACKET_CONTRACT,
+    normalizer_version: request.source_request.normalizer_version,
     ...(limits.work_units !== undefined && limits.memory_bytes !== undefined
       ? { budget: { work_units: limits.work_units, memory_bytes: limits.memory_bytes } } : {})
   });
@@ -236,7 +247,7 @@ function admitInterpretedDraft(
     return { ...attempt, outcome: { status: "invalid", reason: normalized.reason }, draft };
   }
   return {
-    ...attempt, outcome: { status: "interpreted", gaps: draft.gaps }, draft,
+    ...attempt, outcome: { status: "interpreted", gaps: normalized.interpretation.gaps }, draft,
     interpretation: normalized.interpretation
   };
 }
