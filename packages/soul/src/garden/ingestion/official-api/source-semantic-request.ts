@@ -226,7 +226,9 @@ export function sourceSemanticResponseJsonSchema(): object {
 }
 
 const exampleGaps = [{ kind: "unresolved_referent", affected_ids: ["rItem"],
-  support: [{ kind: "lexical", mentions: ["mItem"] }], description: "The thing shelved is not identified." }];
+  support: [{ kind: "lexical", mentions: ["mItem"] }], description: "The thing shelved is not identified." },
+  { kind: "uninterpreted_clause", affected_ids: ["mClause"],
+    support: [{ kind: "lexical", mentions: ["mClause"] }], description: "This clause is left uninterpreted without inventing a frame." }];
 const sourceSemanticResponseExample = {
   contract: "source-interpretation-response-v3",
   outcome: { status: "interpreted", gaps: exampleGaps },
@@ -235,7 +237,8 @@ const sourceSemanticResponseExample = {
     mentions: [
       { id: "mActor", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" } },
       { id: "mShelved", assertion_id: 1, source_ref: { first: "a1s2", last: "a1s2" } },
-      { id: "mItem", assertion_id: 1, source_ref: { first: "a1s4", last: "a1s4" } }
+      { id: "mItem", assertion_id: 1, source_ref: { first: "a1s4", last: "a1s4" } },
+      { id: "mClause", assertion_id: 2, source_ref: { first: "a2s0", last: "a2s11" } }
     ],
     referents: [
       { id: "rActor", referent_kind: "grouped", mentions: ["mActor"] },
@@ -264,15 +267,19 @@ export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
   "Do not emit host hashes, character or UTF-8 offsets, entry_roots, asserted_at_scope, persistent IDs, QueryProgram, seeds, scores, ranking, answers, or verdicts.",
   "A supplied profile is an optional adapter, not an admission prerequisite. Novel predicate and role readings are allowed.",
   "Select inclusive first/last segment IDs shown in source_catalog. Never copy quotation text, invent offsets, or cross assertion boundaries.",
-  "There are two distinct ID namespaces: source_catalog segment IDs (for example a1s2) occur ONLY inside source_ref.first/last. Graph mention IDs (for example mShelved) are declared in draft.mentions[].id. Every predicate mentions/supporting_context, referent mentions, lexical/additional support.mentions (including role, binding and gap support) MUST refer to those declared graph mention IDs, never catalog segment IDs.",
-  "Declare a mention for every source span used by predicates, roles, bindings and gaps. Graph node targets and gap affected_ids must name declared graph handles; slot_id must name a slot of its frame.",
+  "Keep catalog segment IDs separate from graph handles: source_catalog segment IDs (for example a1s2) occur ONLY inside source_ref.first/last. Graph mention IDs (for example mShelved) are declared in draft.mentions[].id. Every predicate mentions/supporting_context, referent mentions, lexical/additional support.mentions (including role, binding and gap support) MUST refer to those declared graph mention IDs, never catalog segment IDs.",
+  "Declare a mention for every source span used by predicates, roles, bindings and gaps. Mentions locate evidence; they are not argument nodes.",
+  'For a binding target {"kind":"node","id":ID}, ID must name a declared draft.referents[].id, draft.frames[].id, or draft.operators[].id. A mention ID, catalog segment ID, frame-local slot ID, or undeclared handle is not a node target.',
+  'For a source-supported entity or value, declare a referent (one mention is sufficient for referent_kind="grouped") and bind to that referent, not its mention. For an unresolved role target use {"kind":"unresolved"} without id, or omit its binding and retain a located gap; never fabricate a participant to complete a slot.',
+  "A gap affected_ids entry may name a declared mention, referent, frame, or operator. For an uninterpreted clause with no frame, declare a mention for its source span and use that mention in affected_ids and lexical support. Never cite a hypothetical or omitted frame as if it were declared.",
+  "Each binding slot_id must name a slot defined by that same frame. Dominating support via_id must name a declared referent, frame, or operator, not a mention. Check each reference against its required kind before returning the draft; prefixes alone do not declare a handle.",
   "Cover every selected source assertion with interpreted meaning or an explicit located draft.gaps entry. Locate gap support through declared mentions for that assertion. Do not silently omit clauses that are difficult to interpret.",
   "Explicit predicate support needs valid mention handles; implicit support needs supporting context and a reading. Empty or omitted support is a gap, not implicit.",
   "Unresolved referents are local. Do not mint a global unknown. Record unsupported meaning as gaps.",
   "Outcome interpreted requires a draft; abstained, invalid, quarantine, truncated, and transport failures must not carry a draft.",
   "For interpreted output, outcome.gaps must exactly repeat draft.gaps, including all supports. The draft is the sole owner of gaps.",
   "Do not infer world truth or confidence. Admission of a draft does not certify language fidelity.",
-  "Neutral worked example, not the current input: assertion 1 is Mira shelved something. Its catalog segments are a1s0=Mira, a1s1=space, a1s2=shelved, a1s3=space, a1s4=something, a1s5=period. Use the current request's catalog for your response.",
+  "Neutral partial example, not the current input: assertion 1 is Mira shelved something. Its catalog segments are a1s0=Mira, a1s1=space, a1s2=shelved, a1s3=space, a1s4=something, a1s5=period. Assertion 2 is The label is hard to interpret. Its segments are a2s0=The, a2s1=space, a2s2=label, a2s3=space, a2s4=is, a2s5=space, a2s6=hard, a2s7=space, a2s8=to, a2s9=space, a2s10=interpret, a2s11=period. This example deliberately leaves assertion 2 as a mention-located gap without a frame. Use the current request's catalog for your response.",
   `Example response:\n${JSON.stringify(sourceSemanticResponseExample)}`
 ].join("\n");
 

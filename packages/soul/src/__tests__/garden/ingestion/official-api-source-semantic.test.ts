@@ -113,13 +113,39 @@ function admittedQuery() {
 describe("open source semantic proposal producer", () => {
   it("normalizes the complete neutral prompt example through the real request catalog", () => {
     const rawJson = SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
-    const input = { sourceCorpus: "Mira shelved something.", assertionIds: [1],
+    const input = { sourceCorpus: "Mira shelved something. The label is hard to interpret.", assertionIds: [1, 2],
       source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
     const received = proposeSourceSemantics(input, { rawJson });
     expect(received.outcome.status).toBe("interpreted");
-    expect(received.interpretation?.mentions.map((row) => row.text)).toEqual(["Mira", "shelved", "something"]);
+    expect(received.interpretation?.mentions.map((row) => row.text)).toEqual(["Mira", "shelved", "something", "The label is hard to interpret."]);
     expect(received.interpretation?.gaps).toEqual(JSON.parse(rawJson).outcome.gaps);
-    expect(received.interpretation?.gaps).toHaveLength(1);
+    expect(received.interpretation?.gaps).toHaveLength(2);
+    expect(received.interpretation?.frames.map((row) => row.id)).toEqual(["fShelve"]);
+    expect(received.interpretation?.gaps[1]).toMatchObject({ kind: "uninterpreted_clause", affected_ids: ["mClause"] });
+    expect(received.interpretation?.frames[0]?.bindings.map((row) => row.target)).toEqual([
+      { kind: "node", id: "rActor" }, { kind: "node", id: "rItem" }
+    ]);
+  });
+  it.each(["mention_target", "undeclared_gap"] as const)("rejects %s in a partial proposal without repairing its handles", (failure) => {
+    const envelope = JSON.parse(SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!);
+    const input = { sourceCorpus: "Mira shelved something. The label is hard to interpret.", assertionIds: [1, 2],
+      source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
+    if (failure === "mention_target") envelope.draft.frames[0].bindings[0].target.id = "mActor";
+    else {
+      envelope.draft.gaps[1].affected_ids = ["fOmitted"];
+      envelope.outcome.gaps = envelope.draft.gaps;
+    }
+    const rawJson = JSON.stringify(envelope);
+    const received = proposeSourceSemantics(input, { rawJson });
+    expect(received.outcome).toMatchObject({ status: "invalid", reason: "malformed_response", diagnostics: [{
+      code: "unknown_cross_reference",
+      path: failure === "mention_target" ? ["draft", "frames", 0, "bindings", 0, "target", "id"] : ["draft", "gaps", 1, "affected_ids", 0],
+      reference: failure === "mention_target" ? "mActor" : "fOmitted"
+    }] });
+    expect(received.rawJson).toBe(rawJson);
+    expect(received.raw_response_id).toBe(`sha256:${semanticSha256(rawJson)}`);
+    expect(received.draft).toBeUndefined();
+    expect(received.interpretation).toBeUndefined();
   });
   it("builds an open request with catalog, versions, capability and limits and no mandatory profile", () => {
     const request = buildSourceSemanticRequest(sourceInput());

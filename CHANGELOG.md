@@ -29,6 +29,11 @@ owner. This engineering repair does not establish actual-model quality.
 Q/A proposal preparation now returns its native system prompt as separate
 metadata; strict request bodies and MCP schemas are unchanged. Unconsumed
 module exports remain private, and unused request type aliases are removed.
+H producer guidance now distinguishes argument node targets from mention
+evidence and gap locations, with a neutral partial example that anchors an
+uninterpreted clause without inventing a frame. Existing reference validation
+and historical raw rejection remain unchanged; this does not certify model
+source fidelity.
 
 Protocol 5.1.0 is an additive minor under handbook invariant §25. The
 opt-in `soul.interpretation` channel adds qualified answer bindings,

@@ -39,6 +39,24 @@ it("rejects duplicate node handles and unknown cross-references", () => {
   })).success).toBe(false);
 });
 
+it.each([
+  ["rBob", true, true], ["fSend", true, true], ["opNot", true, true],
+  ["mSent", false, true], ["agent", false, false], ["a1s0", false, false], ["missing", false, false]
+] as const)("distinguishes binding targets from gap locations for %s", (id, nodeAllowed, gapAllowed) => {
+  const graph = draft({
+    frames: [frame({ kind: "source_act", source_act: "assertion" }),
+      { ...frame({ kind: "operator", operator_handle: "opNot" }, []), id: "fNested" }],
+    operators: [{ id: "opNot", operator: "not", content: "fNested", assertion_ids: [1],
+      context_owner: { kind: "source_act", source_act: "assertion" }, additional_support: [] }]
+  });
+  const targeted = { ...graph, frames: [frame({ kind: "source_act", source_act: "assertion" },
+    [{ slot_id: "agent", target: { kind: "node", id }, support: [] }]), graph.frames[1]] };
+  expect(SourceSemanticDraftSchema.safeParse(targeted).success).toBe(nodeAllowed);
+  const located = { ...graph, gaps: [{ kind: "uninterpreted_clause", affected_ids: [id],
+    support: [{ kind: "lexical", mentions: ["mSent"] }] }] };
+  expect(SourceSemanticDraftSchema.safeParse(located).success).toBe(gapAllowed);
+});
+
 it("keeps slot definition without a binding from implying a target", () => {
   const parsed = SourceSemanticDraftSchema.parse(draft({
     frames: [frame({ kind: "source_act", source_act: "assertion" }, [])]

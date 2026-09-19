@@ -717,6 +717,12 @@ not governed content. Query operators, role targets, variable sorts, named
 referent correspondences and all incidence obligations lower onto the existing
 conditional-field engine. Iterative traversal visits reverse and non-tree
 incidences with shared variable binding; it is not a second answer matcher.
+Mentions locate source evidence. A slot binding's node target must be a
+declared referent, frame or operator; a mention is not an argument node.
+Gap locations may also name declared mentions, so an uninterpreted clause can
+remain a source-located gap without inventing a frame. Neither a target nor a
+gap location may cite an undeclared handle. Producer guidance explains these
+distinct reference domains; Protocol remains their admission authority.
 The Q context obligation `unresolved` requires no completed-event assertion and
 excludes source assertion occurrences. It accepts question, directive,
 unresolved source acts and embedded/operator content through the non-asserted
