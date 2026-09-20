@@ -25,7 +25,8 @@ import { assertExtractionFillComplete } from "./fill-completion.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import {
   attemptInputByteUpperBound,
-  assertAttemptInputWithinReceiptLimit
+  assertAttemptInputWithinReceiptLimit,
+  COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD
 } from "../authority/receipt-limits.js";
 
 interface InteractiveFillInput {
@@ -69,7 +70,7 @@ export async function executeOpenSemanticsInteractiveFill(
   const extractor = createGeminiHttpExtractor(input.prepared.config);
   let newlyExtracted = 0;
   await runBoundedWorkers(workset.lines, input.concurrency, async (line) => {
-    if (await dispatchInteractiveLine(input, workset, line, extractor, maxOutputTokens) === "admitted") {
+    if (await fillInteractiveLine(input, workset, line, extractor, maxOutputTokens) === "admitted") {
       newlyExtracted += 1;
     }
   });
@@ -100,19 +101,36 @@ function selectedInteractiveKeys(authority: ExecutionExtractionAuthority): Reado
   return new Set(authority.receipt.catalog_refill.keys);
 }
 
+async function fillInteractiveLine(
+  input: InteractiveFillInput,
+  workset: BatchExtractionWorkset,
+  line: GeminiBatchLine,
+  extractor: ReturnType<typeof createGeminiHttpExtractor>,
+  maxOutputTokens: number
+): Promise<"admitted" | "quarantined" | "transport_exhausted"> {
+  let last: "quarantined" | "transport_exhausted" = "transport_exhausted";
+  for (let attempt = 0; attempt < COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD; attempt += 1) {
+    const outcome = await dispatchInteractiveLine(input, workset, line, extractor, maxOutputTokens);
+    if (outcome === "admitted" || outcome === "quarantined") return outcome;
+    last = outcome;
+  }
+  return last;
+}
+
 async function dispatchInteractiveLine(
   input: InteractiveFillInput,
   workset: BatchExtractionWorkset,
   line: GeminiBatchLine,
   extractor: ReturnType<typeof createGeminiHttpExtractor>,
   maxOutputTokens: number
-): Promise<"admitted" | "quarantined"> {
+): Promise<"admitted" | "quarantined" | "transport_exhausted"> {
   const sourceCorpus = workset.requests.find((request) => request.line.key === line.key)?.units[0]?.sourceCorpus;
   if (sourceCorpus === undefined) throw new Error("open-semantics interactive fill lost its bound source corpus");
   const authority = input.authority!;
   if (authority.reserveAttemptOrdinal === undefined) {
     throw new Error("open-semantics interactive fill requires bound attempt authority");
   }
+  input.options.signal?.throwIfAborted();
   const attemptOrdinal = await authority.reserveAttemptOrdinal(line.key, input.options.signal);
   try {
     const extracted = await extractor.extract({
@@ -124,12 +142,13 @@ async function dispatchInteractiveLine(
     });
     return importInteractiveLine(input, line, sourceCorpus, extracted, attemptOrdinal);
   } catch (cause) {
+    if (input.options.signal?.aborted === true) throw cause;
     const outcome = readLiveTransportFailure(cause);
     if (outcome !== undefined && outcome.transportFailures.length > 0) {
       authority.recordTransportOutcome(line.key, outcome, attemptOrdinal);
     }
     authority.abandonPendingShard(line.key, attemptOrdinal);
-    throw cause;
+    return "transport_exhausted";
   }
 }
 

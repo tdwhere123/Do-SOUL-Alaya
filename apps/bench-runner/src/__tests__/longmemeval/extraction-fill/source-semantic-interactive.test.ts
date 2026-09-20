@@ -92,6 +92,10 @@ async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic")
 
 it("fills complete-source open semantics through interactive generateContent without Batch isolation or packing-size errors", async () => {
   const fixture = await setupInteractive();
+  const receipt = JSON.parse(readFileSync(fixture.receiptPath, "utf8")) as {
+    readonly limits: { readonly starting_missing: number; readonly maximum_attempts: number };
+  };
+  expect(receipt.limits.maximum_attempts).toBe(receipt.limits.starting_missing * 2);
   expect(await runCli([
     "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
     "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
@@ -139,15 +143,69 @@ it("records an interactive generateContent network failure on the attempt ledger
     "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
     "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
     "--extraction-source-packing", "complete-source", "--extraction-authority", fixture.receiptPath
-  ])).toBe(2);
+  ])).toBe(0);
   const ledgerName = readdirSync(cacheRoot).find((name) => name.startsWith("extraction-attempt-ledger"));
   expect(ledgerName).toBeDefined();
   const ledger = JSON.parse(readFileSync(join(cacheRoot, ledgerName!), "utf8")) as {
     readonly successful_shards: unknown[];
     readonly transport_failures: readonly unknown[];
+    readonly attempts: number;
   };
   expect(ledger.successful_shards).toEqual([]);
   expect(ledger.transport_failures.length).toBeGreaterThan(0);
+  expect(ledger.attempts).toBe(fixture.keys.length * 2);
+}, 60000);
+
+it("continues later complete-source keys after one interactive transport failure", async () => {
+  setExtractionCredentialFixture();
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid");
+  await writeDataset([
+    buildExtractionFillQuestion("q0",
+      "I completed alpha. The room was quiet. The desk was clear. The lamp was on. The window was open. " +
+      "The door was closed. The shelf was full. The clock was ticking. The floor was clean. It is ready.",
+      "I completed decoy."),
+    buildExtractionFillQuestion("q1",
+      "I completed beta. The room was quiet. The desk was clear. The lamp was on. The window was open. " +
+      "The door was closed. The shelf was full. The clock was ticking. The floor was clean. It is ready.",
+      "I completed other.")
+  ]);
+  const inspection = await inspectExtractionAuthority({
+    variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot, sourcePacking: "complete-source",
+    openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION, revision: readCurrentExtractionAuthorityRevision(),
+    action: "fill"
+  });
+  const receipt = createExtractionAuthorityReceipt({
+    action: "fill", observation: inspection.observation,
+    outputTokenCap: { field: "maxOutputTokens", value: 4096 }, diskFloorBytes: 0,
+    priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2, maximumInputTokensPerAttempt: 100000 },
+    inspection
+  });
+  const receiptPath = join(cacheRoot, "authority.json");
+  writeExtractionAuthorityReceipt(receiptPath, receipt);
+  vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    if (!path.endsWith(":streamGenerateContent")) throw new Error(`unexpected offline request ${path}`);
+    const userPrompt = JSON.parse(String(init?.body)).contents[0].parts[0].text as string;
+    if (userPrompt.includes("completed alpha")) {
+      throw Object.assign(new TypeError("fetch failed"), { cause: new Error("socket hang up") });
+    }
+    return Response.json({
+      candidates: [{ finishReason: "STOP", content: { parts: [{ text: authoredResponse(userPrompt) }] } }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 }
+    });
+  }));
+  expect(await runCli([
+    "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
+    "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
+    "--extraction-source-packing", "complete-source", "--extraction-authority", receiptPath,
+    "--concurrency", "1"
+  ])).toBe(0);
+  const statuses = inspection.missingKeys.map((key) =>
+    inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status);
+  expect(statuses).toContain("hit");
+  expect(statuses.some((status) => status !== "hit")).toBe(true);
 }, 60000);
 
 it("still refuses mixing lazy_field, expansion, or an injected extractor with open semantics", async () => {

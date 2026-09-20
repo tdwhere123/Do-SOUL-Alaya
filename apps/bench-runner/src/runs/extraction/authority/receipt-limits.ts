@@ -1,5 +1,6 @@
 import type { ExtractionSampleScope } from "./sample-scope.js";
 import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "@do-soul/alaya-soul";
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { BENCH_HTTP_MAX_RETRIES } from "../../compile-seed/http/garden-http-retry-policy.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 
@@ -8,6 +9,8 @@ const MAX_ASSERTION_PARTITION_TREE_NODES =
   OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH * 2 - 1;
 export const EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD =
   MAX_ASSERTION_PARTITION_TREE_NODES * (BENCH_HTTP_MAX_RETRIES + 1) + 1;
+/** Complete-source is one request per corpus, not an assertion partition tree. */
+export const COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD = 2;
 const DEFAULT_MAX_CONCURRENCY = 32;
 const MILLION = 1_000_000;
 
@@ -43,6 +46,7 @@ export interface ExtractionAuthorityReceiptLimitInput {
   readonly action: "probe" | "fill" | "sample";
   readonly sampleScope?: ExtractionSampleScope;
   readonly observation: { readonly inventory: { readonly missingTurns: number } };
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly outputTokenCap: {
     readonly field: ExtractionAuthorityReceiptLimits["output_token_field"];
     readonly value: number;
@@ -69,7 +73,9 @@ export function resolveExtractionAuthorityReceiptLimits(
   const missing = carried?.startingMissing ?? input.observation.inventory.missingTurns;
   if (input.action === "sample" && carried !== undefined) throw new Error("sample limits cannot be carried or renewed");
   const expected = expectedExtractionAuthorityLimits(
-    input.action, input.action === "sample" ? input.sampleScope!.keys.length : missing
+    input.action,
+    input.action === "sample" ? input.sampleScope!.keys.length : missing,
+    input.sourcePacking
   );
   if (carried !== undefined && (carried.maximumAttempts !== expected.maximumAttempts ||
       carried.successfulShardCeiling !== expected.successfulShardCeiling)) {
@@ -134,7 +140,8 @@ export function resolveExtractionAuthorityReceiptPrice(
 
 export function expectedExtractionAuthorityLimits(
   action: "probe" | "fill" | "sample",
-  missing: number
+  missing: number,
+  sourcePacking?: ExtractionSourcePacking
 ): { readonly maximumAttempts: number; readonly successfulShardCeiling: number } {
   if (action === "sample") {
     if (!Number.isSafeInteger(missing) || missing < 1) throw new Error("sample requires a nonempty scope");
@@ -145,9 +152,22 @@ export function expectedExtractionAuthorityLimits(
     return { maximumAttempts: 1, successfulShardCeiling: 1 };
   }
   return {
-    maximumAttempts: computeExtractionFillAttemptCeiling(missing),
+    maximumAttempts: sourcePacking === "complete-source"
+      ? completeSourceFillAttemptCeiling(missing)
+      : computeExtractionFillAttemptCeiling(missing),
     successfulShardCeiling: missing
   };
+}
+
+function completeSourceFillAttemptCeiling(missing: number): number {
+  if (!Number.isSafeInteger(missing) || missing < 0) {
+    throw new Error("extraction fill starting missing must be a non-negative safe integer");
+  }
+  const ceiling = missing * COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD;
+  if (!Number.isSafeInteger(ceiling)) {
+    throw new Error("complete-source fill attempt ceiling exceeds the safe integer range");
+  }
+  return ceiling;
 }
 
 export function computeExtractionFillAttemptCeiling(missing: number): number {

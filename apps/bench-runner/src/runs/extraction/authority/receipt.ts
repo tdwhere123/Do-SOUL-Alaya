@@ -222,7 +222,12 @@ function buildUnsignedReceipt(
   if ((input.action === "sample") !== (input.sampleScope !== undefined)) {
     throw new Error("sample action requires its finite scope");
   }
-  const limits = resolveExtractionAuthorityReceiptLimits(input);
+  const limits = resolveExtractionAuthorityReceiptLimits({
+    ...input,
+    ...(input.observation.extraction.sourcePacking === undefined ? {} : {
+      sourcePacking: input.observation.extraction.sourcePacking
+    })
+  });
   const price = resolveExtractionAuthorityReceiptPrice(input.priceEstimate, limits);
   const probeKey = input.action === "probe" ? requireProbeKey(input.probeKey) : undefined;
   return {
@@ -288,7 +293,10 @@ export function assertExtractionAuthorityReceipt(
     startingMissing: receipt.limits.starting_missing,
     maximumAttempts: receipt.limits.maximum_attempts,
     successfulShardCeiling: receipt.limits.successful_shard_ceiling,
-    sampleCount: receipt.sample_scope?.keys.length
+    sampleCount: receipt.sample_scope?.keys.length,
+    ...(receipt.observation.extraction.sourcePacking === undefined ? {} : {
+      sourcePacking: receipt.observation.extraction.sourcePacking
+    })
   })) {
     throw new Error("extraction authority receipt has reset or widened its cumulative limits");
   }

@@ -79,6 +79,34 @@ describe("extraction authority receipt", () => {
     expect(() => assertExtractionAuthorityReceipt(receipt, observation)).not.toThrow();
   });
 
+  it("caps complete-source fill attempts at two per missing shard", () => {
+    const completeObservation = {
+      ...observation,
+      extraction: { ...observation.extraction, sourcePacking: "complete-source" as const }
+    };
+    const receipt = createExtractionAuthorityReceipt({
+      action: "fill",
+      observation: completeObservation,
+      outputTokenCap: { field: "maxOutputTokens", value: 512 },
+      priceEstimate: {
+        inputUsdPerMillion: 1,
+        outputUsdPerMillion: 2,
+        maximumInputTokensPerAttempt: 300
+      },
+      diskFloorBytes: 1_024,
+      inspection: {
+        writerLock: "absent",
+        disk: { status: "available", freeBytes: 2_048 },
+        credentialStatus: "present",
+        modelReadiness: "not_probed"
+      }
+    });
+    expect(receipt.limits.maximum_attempts).toBe(18);
+    expect(receipt.limits.maximum_attempts).toBeLessThan(computeExtractionFillAttemptCeiling(9));
+    expect(receipt.limits.successful_shard_ceiling).toBe(9);
+    expect(() => assertExtractionAuthorityReceipt(receipt, completeObservation)).not.toThrow();
+  });
+
   it("accepts a MiMo request profile as sealed fill authority", () => {
     const mimoObservation = {
       ...observation,

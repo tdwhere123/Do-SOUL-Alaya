@@ -1,3 +1,4 @@
+import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS,
   expectedExtractionAuthorityLimits,
@@ -13,6 +14,7 @@ export function hasExpectedExtractionAuthorityReceiptLimits(input: {
   readonly schemaVersion: 2 | 3 | 4 | 5;
   readonly action: "probe" | "fill" | "sample";
   readonly sampleCount?: number;
+  readonly sourcePacking?: ExtractionSourcePacking;
   readonly startingMissing: number;
   readonly maximumAttempts: number;
   readonly successfulShardCeiling: number;
@@ -26,7 +28,7 @@ export function hasExpectedExtractionAuthorityReceiptLimits(input: {
   if (input.successfulShardCeiling !== expectedSuccesses) return false;
   if (input.schemaVersion === CURRENT_RECEIPT_VERSION) {
     return input.maximumAttempts === expectedExtractionAuthorityLimits(
-      input.action, input.startingMissing
+      input.action, input.startingMissing, input.sourcePacking
     ).maximumAttempts;
   }
   return legacyAttemptCeilings(input.schemaVersion, input.action, input.startingMissing)
