@@ -158,14 +158,9 @@ describe("native Gemini interactive extraction", () => {
     expect(observed).toBeDefined();
     const wire = JSON.parse(observed!);
     expect(wire.generationConfig.responseMimeType).toBe("application/json");
-    if (generation === "bounded") {
-      expect(wire.generationConfig.responseJsonSchema).toBeDefined();
-      expect(wire.systemInstruction.parts).toHaveLength(1);
-    } else {
-      expect(wire.generationConfig).not.toHaveProperty("responseJsonSchema");
-      expect(wire.systemInstruction.parts[1].text).toContain(
-        JSON.stringify(soul.officialApiExtractionResponseSchema(JSON.stringify(request))));
-    }
+    expect(wire.generationConfig).not.toHaveProperty("responseJsonSchema");
+    expect(wire.systemInstruction.parts[1].text).toContain(
+      JSON.stringify(soul.officialApiExtractionResponseSchema(JSON.stringify(request))));
   });
 
   it("adapts generation array bounds and empty additional-property schemas without changing other constraints or property names", () => {

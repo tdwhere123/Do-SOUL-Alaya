@@ -4,6 +4,12 @@ const listPositions = ["allOf", "anyOf", "oneOf", "prefixItems"];
 const singlePositions = ["items", "additionalProperties", "contains", "not", "if", "then", "else",
   "propertyNames", "unevaluatedProperties", "unevaluatedItems"];
 
+/** Compact v4 schemas are ~70KiB; Gemini streamGenerateContent then sends no SSE bytes. */
+const GEMINI_STRUCTURED_SCHEMA_MAX_BYTES = 24 * 1024;
+
+const SCHEMA_INSTRUCTION =
+  "Return JSON satisfying this complete local response schema. All required fields, kinds and operands remain mandatory; omitted or invalid expressions will be rejected. Return the complete source interpretation, not the schema itself.\n";
+
 /** Provider decoding guidance is weaker than local admission, which keeps every required field. */
 export function projectGeminiGenerationSchema(schema: object): { schema?: object; recursive: boolean; instruction?: string } {
   const root = schema as Schema, recursiveReferences = new Map<string, boolean>();
@@ -22,9 +28,7 @@ export function projectGeminiGenerationSchema(schema: object): { schema?: object
     }
     return schemaChildren(node).some(child => cycle(child, visiting));
   };
-  if (cycle(root)) return { recursive: true, instruction:
-    "Return JSON satisfying this complete local response schema. All required fields, kinds and operands remain mandatory; omitted or invalid expressions will be rejected. Return the complete source interpretation, not the schema itself.\n" + JSON.stringify(schema)
-  };
+  if (cycle(root)) return { recursive: true, instruction: SCHEMA_INSTRUCTION + JSON.stringify(schema) };
   const visit = (value: unknown): unknown => {
     const node = record(value); if (node === undefined) return value;
     return Object.fromEntries(Object.entries(node).filter(([key]) => key !== "maxItems").map(([key, child]) => {
@@ -37,7 +41,11 @@ export function projectGeminiGenerationSchema(schema: object): { schema?: object
       return [key, structuredClone(child)];
     }));
   };
-  return { schema: visit(root) as object, recursive: false };
+  const projected = visit(root) as object;
+  if (Buffer.byteLength(JSON.stringify(projected)) > GEMINI_STRUCTURED_SCHEMA_MAX_BYTES) {
+    return { recursive: false, instruction: SCHEMA_INSTRUCTION + JSON.stringify(schema) };
+  }
+  return { schema: projected, recursive: false };
 }
 
 /** Preserve all historical acyclic identities; new recursive requests bind actual decoding guidance. */
@@ -45,8 +53,19 @@ export function geminiGenerationSchemaCacheMaterial(preimage: string): string {
   const schema: unknown = JSON.parse(preimage);
   if (record(schema) === undefined) return preimage;
   const projected = projectGeminiGenerationSchema(schema as object);
-  return projected.recursive ? JSON.stringify({ contract: "gemini-recursive-generation-schema-v3",
-    source_schema: schema, response_schema: null, instruction: projected.instruction }) : preimage;
+  if (projected.recursive) {
+    return JSON.stringify({
+      contract: "gemini-recursive-generation-schema-v3",
+      source_schema: schema, response_schema: null, instruction: projected.instruction
+    });
+  }
+  if (projected.schema === undefined && projected.instruction !== undefined) {
+    return JSON.stringify({
+      contract: "gemini-instruction-generation-schema-v1",
+      source_schema: schema, response_schema: null, instruction: projected.instruction
+    });
+  }
+  return preimage;
 }
 
 function record(value: unknown): Schema | undefined {

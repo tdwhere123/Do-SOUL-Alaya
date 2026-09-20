@@ -60,20 +60,24 @@ describe("Gemini recursive decoding schema projection", () => {
     expect(geminiGenerationSchemaCacheMaterial("null")).toBe("null");
   });
 
-  it("transmits the current bounded expression schema through the native structured decoder", () => {
+  it("does not put the compact expression schema on the structured decoder wire", () => {
     const request = JSON.stringify(buildSourceSemanticRequest(input));
     const source = officialApiExtractionResponseSchemaPreimage(request);
     const projected = projectGeminiGenerationSchema(JSON.parse(source));
     expect(projected.recursive).toBe(false);
-    expect(projected.instruction).toBeUndefined();
+    expect(projected.schema).toBeUndefined();
+    expect(projected.instruction).toContain('"type"');
     const body = encodeGeminiGenerateContent({ userPrompt: request, systemPrompt: SOURCE_SEMANTIC_SYSTEM_PROMPT },
       { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1", maxOutputTokens: 32768 });
-    expect(body).toMatchObject({ generationConfig: { responseMimeType: "application/json", responseJsonSchema: projected.schema } });
-    expect(body).toMatchObject({ systemInstruction: { parts: [{ text: SOURCE_SEMANTIC_SYSTEM_PROMPT }] } });
-    expect(geminiGenerationSchemaCacheMaterial(source)).toBe(source);
-    const fields = ["gemini-3.1-flash-lite", "gemini-3.1-low-v1", SOURCE_SEMANTIC_SYSTEM_PROMPT, request, source];
+    expect(body).toMatchObject({ generationConfig: { responseMimeType: "application/json" } });
+    expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
+    expect(body).toMatchObject({ systemInstruction: { parts: [{ text: SOURCE_SEMANTIC_SYSTEM_PROMPT }, { text: projected.instruction }] } });
+    const material = geminiGenerationSchemaCacheMaterial(source);
+    expect(JSON.parse(material).response_schema).toBeNull();
+    expect(JSON.parse(material).contract).toBe("gemini-instruction-generation-schema-v1");
+    const fields = ["gemini-3.1-flash-lite", "gemini-3.1-low-v1", SOURCE_SEMANTIC_SYSTEM_PROMPT, request];
     expect(computeCacheKey(fields[0]!, "gemini-3.1-low-v1", fields[2]!, request))
-      .toBe(createHash("sha256").update(fields.join("\0")).digest("hex"));
+      .toBe(createHash("sha256").update([...fields, material].join("\0")).digest("hex"));
   });
 
   it("still rejects a missing nested operand through the unchanged strict local receiver", () => {
