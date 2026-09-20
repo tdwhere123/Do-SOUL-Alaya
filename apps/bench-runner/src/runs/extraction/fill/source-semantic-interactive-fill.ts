@@ -1,7 +1,7 @@
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 import { createGeminiHttpExtractor } from "../../compile-seed/http/gemini-http.js";
-import { EXTRACTION_REQUEST_TIMEOUT_MS } from "../../compile-seed/http/output-token-retry.js";
+import { resolveExtractionRequestTimeoutMs } from "../../compile-seed/http/output-token-retry.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
 import {
   SourceSemanticAdmissionError, writeDeterministicSourceSemanticArtifact, importSourceSemanticArtifact
@@ -116,7 +116,8 @@ async function dispatchInteractiveLine(
   try {
     const extracted = await extractor.extract({
       systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, retryMode: "disabled",
-      timeoutMs: EXTRACTION_REQUEST_TIMEOUT_MS, maxOutputTokens, outputTokenField: "maxOutputTokens",
+      timeoutMs: resolveExtractionRequestTimeoutMs(maxOutputTokens), maxOutputTokens,
+      outputTokenField: "maxOutputTokens",
       validateRawJson: () => undefined,
       ...(input.options.signal === undefined ? {} : { abortSignal: input.options.signal })
     });

@@ -3,7 +3,7 @@ import {
 } from "../../../compile-seed/http/garden-http-retry-policy.js";
 import {
   EXTRACTION_OUTPUT_TOKEN_QUANTUM,
-  EXTRACTION_REQUEST_TIMEOUT_MS
+  resolveExtractionRequestTimeoutMs
 } from "../../../compile-seed/http/output-token-retry.js";
 import {
   EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD
@@ -22,9 +22,7 @@ export function resolveExtractionFillProviderTimeBudget(
   if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1) {
     throw new Error("extraction output-token ceiling must be a positive integer");
   }
-  const requestTimeoutMs = EXTRACTION_REQUEST_TIMEOUT_MS * Math.ceil(
-    maxOutputTokens / EXTRACTION_OUTPUT_TOKEN_QUANTUM
-  );
+  const requestTimeoutMs = resolveExtractionRequestTimeoutMs(maxOutputTokens);
   const providerWallClockBudgetMs =
     requestTimeoutMs * EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD +
     EXTRACTION_HTTP_MAX_RETRY_JITTER_MS + PROVIDER_WALL_CLOCK_GRACE_MS;

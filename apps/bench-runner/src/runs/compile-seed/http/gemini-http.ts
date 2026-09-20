@@ -20,7 +20,7 @@ import { markGardenHttpFailure, toBenchTransportFailureAttempt } from
   "./garden-http-failure-attempt.js";
 import { wrapGardenHttpTransportError } from "./garden-http-terminal-error.js";
 import { extractValidGardenHttpContent } from "./garden-http-response-validation.js";
-import { EXTRACTION_REQUEST_TIMEOUT_MS } from "./output-token-retry.js";
+import { resolveExtractionRequestTimeoutMs } from "./output-token-retry.js";
 
 const MAX_GEMINI_RESPONSE_BYTES = 32 * 1024 * 1024;
 type ExtractInput = Parameters<BenchSignalExtractor["extract"]>[0];
@@ -80,8 +80,9 @@ function prepareGeminiRequest(config: CompileSeedExtractionConfig, input: Extrac
     throw new Error("Gemini output token field must be maxOutputTokens");
   }
   if (input.maxOutputTokens === undefined) throw new Error("Gemini output token cap must be explicit");
-  const timeoutMs = input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > EXTRACTION_REQUEST_TIMEOUT_MS) {
+  const timeoutCeilingMs = resolveExtractionRequestTimeoutMs(input.maxOutputTokens);
+  const timeoutMs = input.timeoutMs ?? timeoutCeilingMs;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > timeoutCeilingMs) {
     throw new Error("invalid Gemini interactive timeout");
   }
   const route = resolveExtractionTransportRoute(config);

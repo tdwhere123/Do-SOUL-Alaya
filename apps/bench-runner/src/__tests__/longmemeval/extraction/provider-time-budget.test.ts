@@ -21,7 +21,7 @@ describe("extraction provider time budget", () => {
     const base = resolveExtractionFillProviderTimeBudget(2_048);
     const overhead = base.providerWallClockBudgetMs -
       base.requestTimeoutMs * EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD;
-    for (const multiplier of [4, 8]) {
+    for (const multiplier of [4, 8, 16]) {
       const budget = resolveExtractionFillProviderTimeBudget(2_048 * multiplier);
       expect(budget.requestTimeoutMs).toBe(EXTRACTION_REQUEST_TIMEOUT_MS * multiplier);
       expect(budget.providerWallClockBudgetMs).toBe(

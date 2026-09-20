@@ -394,4 +394,14 @@ describe("native Gemini interactive extraction", () => {
     expect(body.generationConfig).toEqual({ responseMimeType: "application/json", maxOutputTokens: 256,
       thinkingConfig: { thinkingBudget: 0 } });
   });
+
+  it("scales the interactive timeout ceiling with the output-token quantum", async () => {
+    const fetchImpl = vi.fn(async () => response());
+    await expect(createGardenHttpExtractor(config, { fetch: fetchImpl }).extract({
+      ...input, maxOutputTokens: 32_768, timeoutMs: 60_001
+    })).resolves.toMatchObject({ rawJson: '{"signals":[]}' });
+    await expect(createGardenHttpExtractor(config, { fetch: fetchImpl }).extract({
+      ...input, maxOutputTokens: 32_768, timeoutMs: 960_001
+    })).rejects.toThrow("invalid Gemini interactive timeout");
+  });
 });
