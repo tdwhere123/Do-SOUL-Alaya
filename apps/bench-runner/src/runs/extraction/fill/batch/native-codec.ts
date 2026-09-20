@@ -7,6 +7,7 @@ export interface GeminiGenerateContentSettings {
   readonly model: string;
   readonly requestProfile: "provider-default-v1" | NativeGeminiRequestProfile;
   readonly maxOutputTokens: number;
+  readonly includeThoughts?: boolean;
 }
 
 export function isGeminiGenerateContentProfile(value: unknown): value is GeminiGenerateContentSettings["requestProfile"] {
@@ -34,7 +35,11 @@ export function encodeGeminiGenerateContent(
       responseMimeType: "application/json", maxOutputTokens: settings.maxOutputTokens,
       ...(projected?.schema === undefined ? {} : { responseJsonSchema: projected.schema }),
       ...(isNativeGeminiRequestProfile(settings.requestProfile) ? {
-        thinkingConfig: THINKING_CONFIG[settings.requestProfile]
+        thinkingConfig: {
+          ...THINKING_CONFIG[settings.requestProfile],
+          ...(settings.includeThoughts === true && settings.requestProfile !== "gemini-2.5-nonthinking-v1"
+            ? { includeThoughts: true } : {})
+        }
       } : {})
     }
   };

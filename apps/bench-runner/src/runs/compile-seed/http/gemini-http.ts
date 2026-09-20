@@ -95,7 +95,8 @@ function prepareGeminiRequest(config: CompileSeedExtractionConfig, input: Extrac
   const route = resolveExtractionTransportRoute(config);
   const endpoint = normalizeGeminiEndpoint(route.providerUrl);
   const body = JSON.stringify(encodeGeminiGenerateContent(input, {
-    model: route.model, requestProfile: config.requestProfile, maxOutputTokens: input.maxOutputTokens
+    model: route.model, requestProfile: config.requestProfile, maxOutputTokens: input.maxOutputTokens,
+    includeThoughts: true
   }));
   return {
     url: new URL(`/v1beta/models/${route.model}:streamGenerateContent?alt=sse`, endpoint),
