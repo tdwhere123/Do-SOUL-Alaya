@@ -63,7 +63,7 @@ describe("native Gemini interactive extraction", () => {
       const chunks: Buffer[] = [];
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("end", () => {
-        expect(req.url).toBe("/v1beta/models/gemini-3.1-flash-lite:generateContent");
+        expect(req.url).toBe("/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse");
         wires.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ candidates: [{ finishReason: "STOP",
@@ -226,7 +226,7 @@ describe("native Gemini interactive extraction", () => {
       requestProfile: "gemini-3.1-minimal-v1" as const,
       providerUrl: "https://synthetic.invalid/v1beta/openai" };
     await createGardenHttpExtractor(nativeConfig, { fetch: fetchImpl }).extract(input);
-    expect(String(fetchImpl.mock.calls[0]![0])).toBe("https://synthetic.invalid/v1beta/models/gemini-3.1-flash-lite:generateContent");
+    expect(String(fetchImpl.mock.calls[0]![0])).toBe("https://synthetic.invalid/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse");
     expect(fetchImpl.mock.calls[0]![1]?.headers).toMatchObject({ "x-goog-api-key": "synthetic-fixture-key" });
     expect(JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).generationConfig).toEqual({
       responseMimeType: "application/json", maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: "minimal" }
@@ -289,7 +289,7 @@ describe("native Gemini interactive extraction", () => {
       expect(result.extractorMeta).toMatchObject({ successfulRequestCount: 1, usageRequestCount: 1, retryCount: 0 });
     });
     expect(order).toEqual(["authorized", "fetch"]);
-    expect(observed.url).toBe("/v1beta/models/gemini-2.5-flash-lite:generateContent");
+    expect(observed.url).toBe("/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent?alt=sse");
     expect(observed.key).toBe("synthetic-fixture-key");
     expect(observed.body).toEqual({
       systemInstruction: { parts: [{ text: "Return JSON only." }] },
@@ -393,6 +393,22 @@ describe("native Gemini interactive extraction", () => {
     const body = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string);
     expect(body.generationConfig).toEqual({ responseMimeType: "application/json", maxOutputTokens: 256,
       thinkingConfig: { thinkingBudget: 0 } });
+  });
+
+  it("assembles a streamed generateContent body through the same STOP decoder", async () => {
+    await withServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"sig' }] } }] })}\n\n`);
+      res.write(`data: ${JSON.stringify({
+        candidates: [{ finishReason: "STOP", content: { parts: [{ text: 'nals":[]}' }] } }],
+        usageMetadata: usage
+      })}\n\n`);
+      res.end();
+    }, async (origin) => {
+      const result = await createGardenHttpExtractor({ ...config, providerUrl: origin }).extract(input);
+      expect(result.rawJson).toBe('{"signals":[]}');
+      expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 23, totalTokens: 33 });
+    });
   });
 
   it("does not send the default interactive attempt through undici fetch", async () => {

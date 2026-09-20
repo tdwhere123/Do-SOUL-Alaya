@@ -40,6 +40,52 @@ export function encodeGeminiGenerateContent(
   };
 }
 
+export function parseGeminiGenerateContentBody(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("data:") || trimmed.includes("\ndata:")) return assembleGeminiSse(trimmed);
+  return JSON.parse(raw);
+}
+
+function assembleGeminiSse(raw: string): unknown {
+  const events: unknown[] = [];
+  for (const block of raw.split(/\r?\n\r?\n/u)) {
+    const data = block.split(/\r?\n/u).filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart()).join("\n");
+    if (data.length === 0 || data === "[DONE]") continue;
+    events.push(JSON.parse(data));
+  }
+  if (events.length === 0) throw new Error("Gemini stream is empty");
+  return assembleGeminiStreamEvents(events);
+}
+
+function assembleGeminiStreamEvents(events: readonly unknown[]): unknown {
+  const texts: string[] = [];
+  let finishReason: unknown;
+  let usageMetadata: unknown;
+  for (const event of events) {
+    const response = record(event);
+    if (response.usageMetadata !== undefined) usageMetadata = response.usageMetadata;
+    const candidates = response.candidates;
+    if (!Array.isArray(candidates) || candidates.length === 0) continue;
+    if (candidates.length !== 1) throw new Error("Gemini response requires one candidate");
+    const candidate = record(candidates[0]);
+    if (candidate.finishReason !== undefined) finishReason = candidate.finishReason;
+    if (candidate.content === undefined) continue;
+    const parts = record(candidate.content).parts;
+    if (!Array.isArray(parts)) continue;
+    for (const partValue of parts) {
+      const part = record(partValue);
+      if (part.thought === true || part.text === undefined) continue;
+      if (typeof part.text !== "string") throw new Error("Gemini response has non-text output");
+      texts.push(part.text);
+    }
+  }
+  return {
+    candidates: [{ ...(finishReason === undefined ? {} : { finishReason }), content: { parts: [{ text: texts.join("") }] } }],
+    ...(usageMetadata === undefined ? {} : { usageMetadata })
+  };
+}
+
 export function decodeGeminiGenerateContent(value: unknown): {
   readonly rawJson: string;
   readonly usage?: { readonly inputTokens: number; readonly outputTokens: number; readonly totalTokens: number };

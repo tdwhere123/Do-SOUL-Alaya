@@ -14,6 +14,7 @@ import {
   decodeGeminiGenerateContent,
   encodeGeminiGenerateContent,
   geminiUsage,
+  parseGeminiGenerateContentBody,
   record
 } from "../../extraction/fill/batch/native-codec.js";
 import { readBoundedResponse } from "../../extraction/fill/batch/http.js";
@@ -96,7 +97,10 @@ function prepareGeminiRequest(config: CompileSeedExtractionConfig, input: Extrac
   const body = JSON.stringify(encodeGeminiGenerateContent(input, {
     model: route.model, requestProfile: config.requestProfile, maxOutputTokens: input.maxOutputTokens
   }));
-  return { url: new URL(`/v1beta/models/${route.model}:generateContent`, endpoint), body, timeoutMs };
+  return {
+    url: new URL(`/v1beta/models/${route.model}:streamGenerateContent?alt=sse`, endpoint),
+    body, timeoutMs
+  };
 }
 
 async function dispatchGeminiHttp(
@@ -121,6 +125,7 @@ function sendGeminiHttp(url: URL, init: {
         headers: incomingHttpHeaders(incoming.headers)
       }));
     });
+    request.setSocketKeepAlive(true, 10_000);
     request.on("error", reject);
     request.end(init.body);
   });
@@ -148,7 +153,7 @@ async function decodeGeminiResponse(response: Response, input: ExtractInput, att
   const raw = await readBoundedResponse(response, MAX_GEMINI_RESPONSE_BYTES);
   attempt.phase = "response_parse";
   attempt.kind = "response_parse_error";
-  const value: unknown = JSON.parse(raw);
+  const value: unknown = parseGeminiGenerateContentBody(raw);
   attempt.usage = geminiUsage(record(value));
   attempt.phase = "response_schema";
   attempt.kind = "response_schema_error";

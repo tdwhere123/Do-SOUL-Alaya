@@ -71,7 +71,7 @@ async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic")
     if (path.includes("batchGenerateContent") || path.startsWith("/v1beta/batches/") || path.includes("/upload")) {
       throw new Error(`interactive fill must not dispatch Batch ${path}`);
     }
-    if (!path.endsWith(":generateContent")) throw new Error(`unexpected offline request ${path}`);
+    if (!path.endsWith(":streamGenerateContent")) throw new Error(`unexpected offline request ${path}`);
     const userPrompt = JSON.parse(String(init?.body)).contents[0].parts[0].text as string;
     return Response.json({
       candidates: [{ finishReason: "STOP", content: { parts: [{ text: authoredResponse(userPrompt, mode) }] } }],
