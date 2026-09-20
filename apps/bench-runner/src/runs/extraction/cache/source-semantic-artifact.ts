@@ -13,7 +13,7 @@ import { computeExtractionRawJsonSha256 } from "../content-closure.js";
 import { receiveSourceSemanticBatchLine } from "../fill/batch/source-semantic-interpretation.js";
 import type { GeminiBatchInvocation, GeminiBatchPlan, GeminiBatchLine } from "../fill/batch/contract.js";
 import type { ExtractionCacheWriteLease } from "../fill/manifest/fill-root-guard.js";
-import { buildExtractionTransportProvenance } from "../transport-route.js";
+import { buildExtractionTransportProvenance, isExtractionTransportProvenance } from "../transport-route.js";
 import { assertExtractionCacheIdentity } from "./cache-identity.js";
 import { extractionAdmissionGenerationSha256, readExtractionCacheManifestIdentity } from "./extraction-cache-manifest.js";
 import { normalizeGeminiEndpoint } from "../../provider/gemini-endpoint.js";
@@ -26,6 +26,24 @@ import {
 
 export class SourceSemanticAdmissionError extends Error {}
 
+export type GeminiGenerateContentProvenance = Readonly<{
+  readonly transport: "gemini-generate-content";
+  readonly finishReason: "STOP";
+  readonly attemptOrdinal: number;
+  readonly responseSha256: string;
+  readonly usage?: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly totalTokens: number;
+  };
+}>;
+
+export type GeminiGenerateContentLineResult = Readonly<{
+  readonly line: GeminiBatchLine;
+  readonly rawJson: string;
+  readonly provenance: GeminiGenerateContentProvenance;
+}>;
+
 export type CachedSourceSemantic = Readonly<{
   contract: typeof SOURCE_SEMANTIC_CACHE_CONTRACT;
   source_binding: "unbound";
@@ -35,6 +53,7 @@ export type CachedSourceSemantic = Readonly<{
   producer_id: string;
 }> & (
   | Readonly<{ kind: "gemini_batch"; plan_identity: string; authority_receipt_digest: string; result: Parameters<GeminiBatchInvocation["importLine"]>[0] }>
+  | Readonly<{ kind: "gemini_generate_content"; result: GeminiGenerateContentLineResult }>
   | Readonly<{ kind: "deterministic_empty"; line: GeminiBatchLine }>
 );
 
@@ -75,12 +94,45 @@ function retainableOutcome(result: SourceSemanticProposalResult): "interpreted" 
   return undefined;
 }
 
+function assertInteractiveGenerateContentProvenance(provenance: GeminiGenerateContentProvenance): void {
+  if (provenance.transport !== "gemini-generate-content" || "job" in provenance || "inputFile" in provenance) {
+    throw new AlayaError("CONFLICT", "typed open-semantics interactive transport binding mismatch");
+  }
+}
+
+function inspectInteractiveGenerateContent(
+  typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" }>,
+  entry: CachedExtractionEntry,
+  request: ReturnType<typeof parseSourceSemanticRequest>
+): SourceSemanticProposalResult {
+  assertInteractiveGenerateContentProvenance(typed.result.provenance);
+  if (typed.result.rawJson !== entry.raw_json || !isExtractionTransportProvenance(entry.transport_provenance)) {
+    throw new AlayaError("CONFLICT", "typed open-semantics interactive transport binding mismatch");
+  }
+  const metadata = persistedResponseMetadata({ finishReason: "STOP", completionContractVersion: 1,
+    completionWitness: "finish_reason" }, typed.result.provenance.usage, true);
+  if (canonicalJson(entry.response_metadata) !== canonicalJson(metadata.response_metadata)) {
+    throw new AlayaError("CONFLICT", "typed open-semantics retained response metadata mismatch");
+  }
+  const admitted = receiveSourceSemanticBatchLine({
+    config: { model: entry.model, requestProfile: entry.request_profile },
+    line: typed.result.line, rawJson: entry.raw_json, sourceCorpus: typed.source_corpus,
+    proposal: proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id))
+  });
+  const completion = retainableOutcome(admitted);
+  if (completion === undefined || completion !== typed.completion) {
+    throw new AlayaError("CONFLICT", "typed open-semantics completion mismatch");
+  }
+  return admitted;
+}
+
 function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: string) {
   const typed = entry.source_semantic;
   if (typed?.contract !== SOURCE_SEMANTIC_CACHE_CONTRACT || typed.source_binding !== "unbound" ||
       typed.interpretation_contract !== SOURCE_SEMANTIC_PACKET_CONTRACT ||
       typeof typed.source_corpus !== "string" || typeof typed.producer_id !== "string" ||
-      (typed.kind !== "gemini_batch" && typed.kind !== "deterministic_empty")) {
+      (typed.kind !== "gemini_batch" && typed.kind !== "gemini_generate_content" &&
+       typed.kind !== "deterministic_empty")) {
     throw new AlayaError("CONFLICT", "invalid typed source semantic cache artifact");
   }
   const line = artifactLine(typed);
@@ -98,6 +150,8 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
     if (admitted.outcome.status !== "no_eligible_source" || typed.completion !== "no_eligible_source") {
       throw new AlayaError("CONFLICT", "deterministic open semantics is not a zero-attempt empty catalog");
     }
+  } else if (typed.kind === "gemini_generate_content") {
+    admitted = inspectInteractiveGenerateContent(typed, entry, request);
   } else {
     const retained = readRetainedBatchLine(cacheRoot, typed.plan_identity, entry.cache_key);
     const authority = readRetainedBatchAuthority(cacheRoot, typed.plan_identity, typed.authority_receipt_digest);
@@ -124,7 +178,7 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
       throw new AlayaError("CONFLICT", "typed open-semantics completion mismatch");
     }
   }
-  const response = inspectCachedResponseMetadata(entry.response_metadata, typed.kind === "gemini_batch");
+  const response = inspectCachedResponseMetadata(entry.response_metadata, typed.kind !== "deterministic_empty");
   const rawJsonSha256 = computeExtractionRawJsonSha256(entry.raw_json);
   if (entry.admission_identity?.request_key !== entry.cache_key ||
       entry.admission_identity.raw_json_sha256 !== rawJsonSha256) {
@@ -153,33 +207,32 @@ export function inspectCachedSourceSemantic(cacheRoot: string, cacheKey: string,
   }
 }
 
-export function importSourceSemanticArtifact(input: Readonly<{
+type SourceSemanticImportBase = Readonly<{
   config: CompileSeedExtractionConfig; cacheRoot: string; writeLease: ExtractionCacheWriteLease;
-  sourceCorpus: string; plan: GeminiBatchPlan; authority: ExtractionAuthorityReceipt; result: Parameters<GeminiBatchInvocation["importLine"]>[0];
-}>) {
-  const { result, config, cacheRoot, writeLease } = input;
-  writeLease.assertOwned(); writeLease.assertRoot(cacheRoot);
-  const identity = readExtractionCacheManifestIdentity(cacheRoot);
-  if (identity === undefined || config.openSemantics === undefined) throw new AlayaError("CONFLICT", "open-semantics import requires a pinned typed generation");
-  assertExtractionCacheIdentity({ config, manifest: identity.manifest, systemPrompt: result.line.systemPrompt, validateProvider: true });
-  if (computeCacheKey(config.model, config.requestProfile, result.line.systemPrompt, result.line.userPrompt) !== result.line.key) {
-    throw new AlayaError("CONFLICT", "open-semantics cache request key mismatch");
-  }
-  const request = parseSourceSemanticRequest(JSON.parse(result.line.userPrompt));
-  const transport = buildExtractionTransportProvenance(config);
-  const authority = readRetainedBatchAuthority(cacheRoot, input.plan.identity, input.authority.receipt_digest);
-  if (canonicalJson(transport) !== canonicalJson(buildExtractionTransportProvenance(authority.observation.transport!))) {
-    throw new AlayaError("CONFLICT", "open-semantics physical route differs from retained authority");
-  }
-  if (input.plan.model !== transport.model || input.plan.requestProfile !== config.requestProfile) {
-    throw new AlayaError("CONFLICT", "open-semantics native transport differs from generation");
-  }
+  sourceCorpus: string;
+}>;
+
+export function importSourceSemanticArtifact(input: SourceSemanticImportBase & (
+  | Readonly<{
+      plan: GeminiBatchPlan; authority: ExtractionAuthorityReceipt;
+      result: Parameters<GeminiBatchInvocation["importLine"]>[0];
+    }>
+  | Readonly<{ result: GeminiGenerateContentLineResult }>
+)) {
+  return "plan" in input ? importBatchSourceSemanticArtifact(input) : importInteractiveSourceSemanticArtifact(input);
+}
+
+function admitSourceSemanticLine(input: SourceSemanticImportBase & {
+  readonly line: GeminiBatchLine; readonly rawJson: string;
+  readonly retained?: Parameters<typeof receiveSourceSemanticBatchLine>[0]["retained"];
+}): { admitted: SourceSemanticProposalResult; completion: NonNullable<ReturnType<typeof retainableOutcome>> } {
+  const request = parseSourceSemanticRequest(JSON.parse(input.line.userPrompt));
   let admitted: SourceSemanticProposalResult;
   try {
     admitted = receiveSourceSemanticBatchLine({
-      config, line: result.line, rawJson: result.rawJson, sourceCorpus: input.sourceCorpus,
+      config: input.config, line: input.line, rawJson: input.rawJson, sourceCorpus: input.sourceCorpus,
       proposal: proposalForRequest(input.sourceCorpus, request.source_request.source_assertions.map((row) => row.assertion_id)),
-      retained: { plan: input.plan, provenance: result.provenance }
+      ...(input.retained === undefined ? {} : { retained: input.retained })
     });
   } catch (cause) {
     throw new SourceSemanticAdmissionError(`source semantics failed request-bound admission: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
@@ -188,18 +241,77 @@ export function importSourceSemanticArtifact(input: Readonly<{
   if (completion === undefined) {
     throw new SourceSemanticAdmissionError(`source semantics failed request-bound admission: ${JSON.stringify(admitted.outcome)}; raw_response_id=${admitted.raw_response_id}`);
   }
-  const rawJsonSha256 = computeExtractionRawJsonSha256(result.rawJson);
-  const entry: CachedExtractionEntry = { model: config.model, request_profile: config.requestProfile,
+  return { admitted, completion };
+}
+
+function bindOpenSemanticsImport(input: SourceSemanticImportBase, line: GeminiBatchLine) {
+  input.writeLease.assertOwned(); input.writeLease.assertRoot(input.cacheRoot);
+  const identity = readExtractionCacheManifestIdentity(input.cacheRoot);
+  if (identity === undefined || input.config.openSemantics === undefined) {
+    throw new AlayaError("CONFLICT", "open-semantics import requires a pinned typed generation");
+  }
+  assertExtractionCacheIdentity({
+    config: input.config, manifest: identity.manifest, systemPrompt: line.systemPrompt, validateProvider: true
+  });
+  if (computeCacheKey(input.config.model, input.config.requestProfile, line.systemPrompt, line.userPrompt) !== line.key) {
+    throw new AlayaError("CONFLICT", "open-semantics cache request key mismatch");
+  }
+  return identity;
+}
+
+function importBatchSourceSemanticArtifact(input: SourceSemanticImportBase & Readonly<{
+  plan: GeminiBatchPlan; authority: ExtractionAuthorityReceipt;
+  result: Parameters<GeminiBatchInvocation["importLine"]>[0];
+}>) {
+  const { result, config, cacheRoot } = input;
+  const identity = bindOpenSemanticsImport(input, result.line);
+  const transport = buildExtractionTransportProvenance(config);
+  const authority = readRetainedBatchAuthority(cacheRoot, input.plan.identity, input.authority.receipt_digest);
+  if (canonicalJson(transport) !== canonicalJson(buildExtractionTransportProvenance(authority.observation.transport!))) {
+    throw new AlayaError("CONFLICT", "open-semantics physical route differs from retained authority");
+  }
+  if (input.plan.model !== transport.model || input.plan.requestProfile !== config.requestProfile) {
+    throw new AlayaError("CONFLICT", "open-semantics native transport differs from generation");
+  }
+  const { admitted, completion } = admitSourceSemanticLine({
+    ...input, line: result.line, rawJson: result.rawJson,
+    retained: { plan: input.plan, provenance: result.provenance }
+  });
+  persistSemanticEntry(input, {
+    model: config.model, request_profile: config.requestProfile,
+    cache_key: result.line.key, raw_json: result.rawJson, extracted_at: new Date().toISOString(),
+    transport_provenance: transport,
+    ...persistedResponseMetadata({ finishReason: "STOP", completionContractVersion: 1, completionWitness: "finish_reason" }, result.provenance.usage, true),
+    admission_identity: { generation_sha256: extractionAdmissionGenerationSha256(identity.manifest),
+      request_key: result.line.key, raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson) },
+    source_semantic: { contract: SOURCE_SEMANTIC_CACHE_CONTRACT, source_binding: "unbound",
+      interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT, kind: "gemini_batch", completion,
+      source_corpus: input.sourceCorpus, producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
+      plan_identity: input.plan.identity, authority_receipt_digest: input.authority.receipt_digest, result }
+  }, identity.manifestSha256);
+  return admitted;
+}
+
+function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase & Readonly<{
+  result: GeminiGenerateContentLineResult;
+}>) {
+  const { result, config } = input;
+  assertInteractiveGenerateContentProvenance(result.provenance);
+  const identity = bindOpenSemanticsImport(input, result.line);
+  const { admitted, completion } = admitSourceSemanticLine({
+    ...input, line: result.line, rawJson: result.rawJson
+  });
+  persistSemanticEntry(input, {
+    model: config.model, request_profile: config.requestProfile,
     cache_key: result.line.key, raw_json: result.rawJson, extracted_at: new Date().toISOString(),
     transport_provenance: buildExtractionTransportProvenance(config),
     ...persistedResponseMetadata({ finishReason: "STOP", completionContractVersion: 1, completionWitness: "finish_reason" }, result.provenance.usage, true),
     admission_identity: { generation_sha256: extractionAdmissionGenerationSha256(identity.manifest),
-      request_key: result.line.key, raw_json_sha256: rawJsonSha256 },
+      request_key: result.line.key, raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson) },
     source_semantic: { contract: SOURCE_SEMANTIC_CACHE_CONTRACT, source_binding: "unbound",
-      interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT, kind: "gemini_batch", completion,
-      source_corpus: input.sourceCorpus, producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
-      plan_identity: input.plan.identity, authority_receipt_digest: input.authority.receipt_digest, result } };
-  persistSemanticEntry(input, entry, identity.manifestSha256);
+      interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT, kind: "gemini_generate_content", completion,
+      source_corpus: input.sourceCorpus, producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID, result }
+  }, identity.manifestSha256);
   return admitted;
 }
 

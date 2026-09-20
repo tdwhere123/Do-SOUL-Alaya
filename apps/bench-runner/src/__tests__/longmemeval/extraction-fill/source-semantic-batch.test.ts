@@ -346,7 +346,7 @@ it("does not let a packet-profile cache satisfy open generation", async () => {
   expect(() => resolveCompileSeedExtractionConfig(process.env, packetManifest, undefined, undefined, true))
     .toThrow(/explicit matching opt-in/u);
   await expect(runExtractionFill({ variant: VARIANT, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION, cacheRoot }))
-    .rejects.toThrow(/explicit isolated Batch/u);
+    .rejects.toThrow(/explicit matching opt-in/u);
 }, 60000);
 
 it("enforces the 32 MiB shard bound and the 1 MiB envelope before reservation or admission", async () => {

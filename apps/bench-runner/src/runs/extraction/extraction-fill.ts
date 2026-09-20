@@ -1,6 +1,7 @@
 import { AlayaError, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import process from "node:process";
 import { executeExtractionBatchFill } from "./fill/batch-fill.js";
+import { executeOpenSemanticsInteractiveFill } from "./fill/source-semantic-interactive-fill.js";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
@@ -172,9 +173,9 @@ async function runExtractionFillBody(
       options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.extractorFactory !== undefined)) {
     throw new AlayaError("VALIDATION", "source packet fill requires explicit isolated Batch execution");
   }
-  if (options.openSemantics !== undefined && (options.batch === undefined ||
+  if (options.openSemantics !== undefined && (
       options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.extractorFactory !== undefined)) {
-    throw new AlayaError("VALIDATION", "open semantics fill requires explicit isolated Batch execution");
+    throw new AlayaError("VALIDATION", "open semantics fill cannot mix lazy_field, expansion, or an injected extractor");
   }
   const fill = freezeExtractionFillOptions(options);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(fill.cacheRoot);
@@ -301,6 +302,13 @@ async function runLockedExtractionFill(
   if (options.batch !== undefined) {
     return executeExtractionBatchFill({ options, prepared, cacheRoot, writeLease,
       authority: executionAuthority });
+  }
+  if (options.openSemantics !== undefined) {
+    return executeOpenSemanticsInteractiveFill({
+      options, prepared, cacheRoot, writeLease,
+      authority: executionAuthority,
+      concurrency: authority?.receipt.action === "probe" ? 1 : concurrency
+    });
   }
   const stats = newFillStats();
   const tolerateProviderTaskFailures = resolveProviderTaskFailureTolerance({
