@@ -55,6 +55,10 @@ function successOutcome(result: Awaited<ReturnType<BenchSignalExtractor["extract
   };
 }
 
+export function readLiveTransportFailure(cause: unknown): ExtractionLiveTransportOutcome | undefined {
+  return failureOutcome(cause);
+}
+
 function failureOutcome(cause: unknown): ExtractionLiveTransportOutcome | undefined {
   const meta = readBenchRetryFailure(cause);
   if (meta === undefined) return undefined;

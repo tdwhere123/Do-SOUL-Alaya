@@ -395,6 +395,25 @@ describe("native Gemini interactive extraction", () => {
       thinkingConfig: { thinkingBudget: 0 } });
   });
 
+  it("does not send the default interactive attempt through undici fetch", async () => {
+    await withServer((req, res) => {
+      expect(req.method).toBe("POST");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ candidates: [{ finishReason: "STOP",
+        content: { parts: [{ text: '{"signals":[]}' }] } }], usageMetadata: usage }));
+    }, async (origin) => {
+      const extractor = createGardenHttpExtractor({ ...config, providerUrl: origin });
+      const spy = vi.spyOn(globalThis, "fetch");
+      try {
+        const result = await extractor.extract(input);
+        expect(result.rawJson).toBe('{"signals":[]}');
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
   it("scales the interactive timeout ceiling with the output-token quantum", async () => {
     const fetchImpl = vi.fn(async () => response());
     await expect(createGardenHttpExtractor(config, { fetch: fetchImpl }).extract({

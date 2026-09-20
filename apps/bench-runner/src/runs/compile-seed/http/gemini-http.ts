@@ -1,3 +1,6 @@
+import http from "node:http";
+import https from "node:https";
+import { Readable } from "node:stream";
 import { normalizeGeminiEndpoint } from "../../provider/gemini-endpoint.js";
 import { isNativeGeminiRequestProfile } from "../../extraction/request-profile.js";
 import type {
@@ -23,6 +26,7 @@ import { extractValidGardenHttpContent } from "./garden-http-response-validation
 import { resolveExtractionRequestTimeoutMs } from "./output-token-retry.js";
 
 const MAX_GEMINI_RESPONSE_BYTES = 32 * 1024 * 1024;
+const defaultFetch = globalThis.fetch;
 type ExtractInput = Parameters<BenchSignalExtractor["extract"]>[0];
 
 /** Interactive work is one explicitly bounded attempt; retries belong to its caller. */
@@ -49,8 +53,10 @@ async function extractGeminiOnce(
   signal.throwIfAborted();
   const attempt: GeminiAttempt = { phase: "request", kind: "network_error", status: null };
   try {
-    const response = await fetchImpl(url, { method: "POST", redirect: "error", signal,
-      headers: { "content-type": "application/json", "x-goog-api-key": config.apiKey }, body });
+    const response = await dispatchGeminiHttp(fetchImpl, url, {
+      method: "POST", redirect: "error", signal,
+      headers: { "content-type": "application/json", "x-goog-api-key": config.apiKey }, body
+    });
     attempt.status = response.status;
     if (!response.ok) {
       attempt.phase = "response_status";
@@ -91,6 +97,42 @@ function prepareGeminiRequest(config: CompileSeedExtractionConfig, input: Extrac
     model: route.model, requestProfile: config.requestProfile, maxOutputTokens: input.maxOutputTokens
   }));
   return { url: new URL(`/v1beta/models/${route.model}:generateContent`, endpoint), body, timeoutMs };
+}
+
+async function dispatchGeminiHttp(
+  fetchImpl: typeof fetch, url: URL, init: {
+    readonly method: string; readonly redirect: "error"; readonly signal: AbortSignal;
+    readonly headers: Record<string, string>; readonly body: string;
+  }
+): Promise<Response> {
+  if (fetchImpl !== defaultFetch) return fetchImpl(url, init);
+  return sendGeminiHttp(url, init);
+}
+
+function sendGeminiHttp(url: URL, init: {
+  readonly method: string; readonly headers: Record<string, string>; readonly body: string; readonly signal: AbortSignal;
+}): Promise<Response> {
+  const headers = init.headers;
+  const send = url.protocol === "http:" ? http.request : https.request;
+  return new Promise((resolve, reject) => {
+    const request = send(url, { method: init.method, headers, signal: init.signal }, (incoming) => {
+      resolve(new Response(Readable.toWeb(incoming), {
+        status: incoming.statusCode ?? 0,
+        headers: incomingHttpHeaders(incoming.headers)
+      }));
+    });
+    request.on("error", reject);
+    request.end(init.body);
+  });
+}
+
+function incomingHttpHeaders(headers: http.IncomingHttpHeaders): Headers {
+  const result = new Headers();
+  for (const [key, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    for (const item of Array.isArray(value) ? value : [value]) result.append(key, String(item));
+  }
+  return result;
 }
 
 interface GeminiAttempt {

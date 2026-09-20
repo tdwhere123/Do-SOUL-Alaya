@@ -190,14 +190,27 @@ function handleExtractionFillError(error: unknown): number {
   if (error instanceof ExtractionFillInterruptedError) return error.exitCode;
   if (error instanceof ExtractionFillTaskError) {
     process.stderr.write(
-      `alaya-bench-runner extraction-fill: ${error.message}${taskCauseSummary(error.cause)}\n`
+      `alaya-bench-runner extraction-fill: ${describeError(error)}${taskCauseSummary(error.cause)}\n`
     );
     return error.exitCode;
   }
   process.stderr.write(
-    `alaya-bench-runner extraction-fill: ${error instanceof Error ? error.message : String(error)}\n`
+    `alaya-bench-runner extraction-fill: ${describeError(error)}\n`
   );
   return 2;
+}
+
+function describeError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const parts = [error.message];
+  let cause: unknown = error.cause;
+  for (let depth = 0; depth < 4 && cause instanceof Error; depth += 1) {
+    if (cause.message.length > 0 && cause.message !== parts[parts.length - 1]) {
+      parts.push(cause.message);
+    }
+    cause = cause.cause;
+  }
+  return parts.join(": ");
 }
 
 function taskCauseSummary(cause: unknown): string {

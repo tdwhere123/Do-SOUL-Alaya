@@ -1,5 +1,6 @@
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
+import { readLiveTransportFailure } from "../cache/cache-live-delegate.js";
 import { createGeminiHttpExtractor } from "../../compile-seed/http/gemini-http.js";
 import { resolveExtractionRequestTimeoutMs } from "../../compile-seed/http/output-token-retry.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
@@ -123,6 +124,10 @@ async function dispatchInteractiveLine(
     });
     return importInteractiveLine(input, line, sourceCorpus, extracted, attemptOrdinal);
   } catch (cause) {
+    const outcome = readLiveTransportFailure(cause);
+    if (outcome !== undefined && outcome.transportFailures.length > 0) {
+      authority.recordTransportOutcome(line.key, outcome, attemptOrdinal);
+    }
     authority.abandonPendingShard(line.key, attemptOrdinal);
     throw cause;
   }

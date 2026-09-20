@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
@@ -120,6 +120,26 @@ it("quarantines an interactive generateContent line through the same source-sema
     expect(inspected.status).not.toBe("hit");
   }
   expect(existsSync(join(cacheRoot, "gemini-batch-plan.json"))).toBe(false);
+}, 60000);
+
+it("records an interactive generateContent network failure on the attempt ledger", async () => {
+  const fixture = await setupInteractive();
+  vi.stubGlobal("fetch", vi.fn(async () => {
+    throw Object.assign(new TypeError("fetch failed"), { cause: new Error("socket hang up") });
+  }));
+  expect(await runCli([
+    "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
+    "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
+    "--extraction-source-packing", "complete-source", "--extraction-authority", fixture.receiptPath
+  ])).toBe(2);
+  const ledgerName = readdirSync(cacheRoot).find((name) => name.startsWith("extraction-attempt-ledger"));
+  expect(ledgerName).toBeDefined();
+  const ledger = JSON.parse(readFileSync(join(cacheRoot, ledgerName!), "utf8")) as {
+    readonly successful_shards: unknown[];
+    readonly transport_failures: readonly unknown[];
+  };
+  expect(ledger.successful_shards).toEqual([]);
+  expect(ledger.transport_failures.length).toBeGreaterThan(0);
 }, 60000);
 
 it("still refuses mixing lazy_field, expansion, or an injected extractor with open semantics", async () => {
