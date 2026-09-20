@@ -3,6 +3,7 @@ import { SOURCE_SEMANTIC_SYSTEM_PROMPT, buildSourceSemanticRequest, parseSourceS
   sourceSemanticResponseJsonSchema, sourceSemanticSystemPrompt } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import { proposeSourceSemantics, receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as CONTENT_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-content-guidance.js";
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT as EXPRESSION_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-expression-guidance.js";
 import { prepareSourceSemanticRevision } from "../../../garden/ingestion/official-api/source-semantic-revision.js";
 import { officialApiExtractionResponseSchema, officialApiExtractionResponseSchemaPreimage } from "../../../garden/ingestion/official-api/response-schema.js";
 
@@ -36,7 +37,7 @@ describe("source-bound nested semantic expressions", () => {
     const historical = parseSourceSemanticRequest({ ...current, source_request: {
       ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v2"
     } });
-    expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v3");
+    expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v4");
     expect(sourceSemanticSystemPrompt(current)).toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
     expect(sourceSemanticSystemPrompt(historical)).toBe(CONTENT_PROMPT);
     expect(JSON.stringify(sourceSemanticResponseJsonSchema(current))).toContain('"roots"');
@@ -53,28 +54,38 @@ describe("source-bound nested semantic expressions", () => {
     expect(() => buildSourceSemanticRequest({ ...input, revision })).toThrow(/different original source/u);
   });
 
-  it("pins bounded generation separately while replaying historical recursive requests unchanged", () => {
+  it("pins host-owned generation separately while replaying historical nested requests unchanged", () => {
     const current = buildSourceSemanticRequest(input);
     const { generation_schema_contract: _generation, ...body } = current.source_request;
-    const historical = parseSourceSemanticRequest({ ...current, source_request: body });
-    expect(current.source_request.generation_schema_contract).toBe("bounded-expression-schema-v1");
+    expect(current.source_request.generation_schema_contract).toBe("host-owned-expression-schema-v1");
+    expect(() => parseSourceSemanticRequest({ ...current, source_request: body })).toThrow(/host-owned generation schema/u);
+    const historical = parseSourceSemanticRequest({ ...current, source_request: {
+      ...body, proposal_contract: "source-semantic-proposal-v3"
+    } });
+    const bounded = parseSourceSemanticRequest({ ...current, source_request: {
+      ...body, proposal_contract: "source-semantic-proposal-v3", generation_schema_contract: "bounded-expression-schema-v1"
+    } });
     expect(historical.source_request).not.toHaveProperty("generation_schema_contract");
     expect(sourceSemanticResponseJsonSchema(current)).not.toEqual(sourceSemanticResponseJsonSchema(historical));
-    for (const request of [historical, current, historical, current]) {
+    for (const request of [historical, bounded, current]) {
       const prompt = JSON.stringify(request);
       expect(officialApiExtractionResponseSchemaPreimage(prompt)).toBe(JSON.stringify(officialApiExtractionResponseSchema(prompt)));
     }
-    expect(receiveSourceSemantics(raw, historical, input).interpretation).toEqual(receiveSourceSemantics(raw, current, input).interpretation);
-    const revision = prepareSourceSemanticRevision(historical, raw);
+    const nestedRaw = EXPRESSION_PROMPT.split("Example response:\n")[1]!;
+    expect(receiveSourceSemantics(nestedRaw, historical, input).interpretation)
+      .toEqual(receiveSourceSemantics(nestedRaw, bounded, input).interpretation);
+    expect(receiveSourceSemantics(nestedRaw, current, input).outcome.status).toBe("invalid");
+    const revision = prepareSourceSemanticRevision(historical, nestedRaw);
     expect(() => buildSourceSemanticRequest({ ...input, revision })).toThrow(/different original source/u);
     expect(() => parseSourceSemanticRequest({ ...current, source_request: {
       ...current.source_request, proposal_contract: "source-semantic-proposal-v2"
-    } })).toThrow(/bounded generation schema/u);
+    } })).toThrow(/host-owned generation schema/u);
   });
 
   it("retains contradictory declarations as rejected raw without publishing an interpretation", () => {
     const value = JSON.parse(raw);
-    value.content.roots.push({ act: "assertion", expression: value.content.roots[0].expression.arguments[1].target.expression });
+    value.content.roots[0].expression.key = "dup";
+    value.content.roots.push({ act: "assertion", expression: { ...value.content.roots[0].expression } });
     const rawJson = JSON.stringify(value), received = proposeSourceSemantics(input, { rawJson });
     expect(received.outcome.status).toBe("invalid");
     expect(received.rawJson).toBe(rawJson);
@@ -85,5 +96,21 @@ describe("source-bound nested semantic expressions", () => {
     const received = proposeSourceSemantics({ ...input, resource_limits: { work_units: 1, memory_bytes: 1 } }, { rawJson: raw });
     expect(received.outcome).toEqual({ status: "resource_exhausted" });
     expect(received.interpretation).toBeUndefined();
+  });
+
+  it("binds compact producer contract, prompt and schema in request identity and shrinks ordinary prompt bytes", () => {
+    const current = buildSourceSemanticRequest(input);
+    const nested = parseSourceSemanticRequest({ ...current, source_request: {
+      ...current.source_request, proposal_contract: "source-semantic-proposal-v3",
+      generation_schema_contract: "bounded-expression-schema-v1"
+    } });
+    expect(JSON.stringify(current)).not.toBe(JSON.stringify(nested));
+    expect(sourceSemanticSystemPrompt(current)).toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
+    expect(sourceSemanticSystemPrompt(nested)).toBe(EXPRESSION_PROMPT);
+    expect(Buffer.byteLength(SOURCE_SEMANTIC_SYSTEM_PROMPT)).toBeLessThan(Buffer.byteLength(EXPRESSION_PROMPT));
+    expect(Buffer.byteLength(JSON.stringify(sourceSemanticResponseJsonSchema(current))))
+      .toBeLessThan(Buffer.byteLength(JSON.stringify(sourceSemanticResponseJsonSchema(nested))) + 32768);
+    expect(receiveSourceSemantics(raw, nested, input).outcome.status).toBe("invalid");
+    expect(receiveSourceSemantics(EXPRESSION_PROMPT.split("Example response:\n")[1]!, current, input).outcome.status).toBe("invalid");
   });
 });

@@ -1,4 +1,4 @@
-import { SourceSemanticResourceLedger, compareUtcInstants, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted, compareUtcInstants, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
 import { CoreError, fieldContractSha256, type FieldFormationStores } from "@do-soul/alaya-core";
 import { RETAINED_SOURCE_READ_RESERVATION, SqliteFieldSourceRecordRepo, sourceRecordFromRow, type StorageDatabase } from "@do-soul/alaya-storage";
 
@@ -7,6 +7,10 @@ export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
   public nativeBytes = 0;
   read(work: number, bytes: number): void {
     this.charge(work, bytes, "native source read"); this.nativeWork += work; this.nativeBytes += bytes;
+  }
+  absorb(child: SourceSemanticReadBudget): void {
+    this.charge(child.spentWork, child.spentBytes, "bounded read phase");
+    this.nativeWork += child.nativeWork; this.nativeBytes += child.nativeBytes;
   }
 }
 
@@ -55,6 +59,59 @@ export function sourceSemanticReadStores(database: StorageDatabase, workspace: s
       meter.charge(0, offset * 2, "source assembly");
       return { record, content_bytes: chunks.join("") };
     }
+  };
+}
+
+/** Current authorized source identities. Query text is not a membership predicate. */
+export function listEligibleSemanticSources(
+  database: StorageDatabase, workspace: string, meter: SourceSemanticReadBudget,
+  authorized: readonly string[] | null
+): { sources: SourceRecordIdentity[]; truncated: boolean; open: boolean; pages: number } {
+  const repo = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
+  const latest = new Map<string, { record: SourceRecordIdentity; allowed: boolean }>();
+  let afterRecordedAt = "", afterRecordId = "", pages = 0, truncated = false, open = false;
+  while (pages < 32) {
+    try { meter.reserve(16 * 5, 16 * RETAINED_SOURCE_READ_RESERVATION); }
+    catch (error) {
+      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+      open = true; truncated = true; break;
+    }
+    const page = repo.listPageBounded(workspace, { limit: 16, afterRecordedAt, afterRecordId }, 1);
+    meter.read(Math.max(1, page.rows.length) * 5, page.rows.reduce((sum, row) => sum + row.nativeBytes + row.metadataBytes, 0));
+    pages += 1;
+    if (page.unavailable === true) { open = true; break; }
+    for (const row of page.rows) {
+      if (row.record == null) { open = true; continue; }
+      const record = sourceRecordFromRow(row.record);
+      const deleted = row.record.source_body === null;
+      if (deleted && row.bodyBytes > 0) open = true;
+      let allowed = !deleted;
+      if (allowed) {
+        try { authorizeSemanticScope(record.scope_class, authorized); } catch { allowed = false; }
+      }
+      const prev = latest.get(record.source_id);
+      const order = prev === undefined ? 1 : compareUtcInstants(prev.record.recorded_at, record.recorded_at);
+      if (prev === undefined || order === -1 || order === 0 && prev.record.identity < record.identity) {
+        try { meter.retain(record, "current source catalog"); }
+        catch (error) {
+          if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+          return { sources: [], truncated: true, open: true, pages };
+        }
+        latest.set(record.source_id, { record, allowed });
+      }
+    }
+    const last = page.rows.at(-1)?.record;
+    if (last == null) { truncated = page.truncated; break; }
+    afterRecordedAt = last.recorded_at; afterRecordId = last.record_id;
+    truncated = page.truncated;
+    if (!page.truncated) break;
+  }
+  if (truncated) open = true;
+  return {
+    // A historical prefix cannot establish currentness: later exclusions and erasures supersede it too.
+    sources: (open || truncated ? [] : [...latest.values()]).filter((row) => row.allowed).map((row) => row.record)
+      .sort((left, right) => left.identity.localeCompare(right.identity)),
+    truncated, open, pages
   };
 }
 

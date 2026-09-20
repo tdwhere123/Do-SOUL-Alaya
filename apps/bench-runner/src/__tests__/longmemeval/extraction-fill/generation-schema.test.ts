@@ -38,7 +38,9 @@ describe("Gemini recursive decoding schema projection", () => {
   it("replays historical recursive decoding bytes and cache identity while preserving acyclic identities", () => {
     const current = buildSourceSemanticRequest(input);
     const { generation_schema_contract: _generation, ...source_request } = current.source_request;
-    const request = JSON.stringify({ ...current, source_request });
+    const request = JSON.stringify({ ...current, source_request: {
+      ...source_request, proposal_contract: "source-semantic-proposal-v3"
+    } });
     const source = officialApiExtractionResponseSchemaPreimage(request);
     const material = geminiGenerationSchemaCacheMaterial(source);
     const body = encodeGeminiGenerateContent({ userPrompt: request, systemPrompt: SOURCE_SEMANTIC_SYSTEM_PROMPT },

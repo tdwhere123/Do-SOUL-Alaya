@@ -12,6 +12,7 @@ import {
   type SourceReferenceCatalog, type SourceSemanticAlignment, type SourceSemanticQuery,
   type SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
+import { proposeAlignmentSemantics, proposeQuerySemantics } from "@do-soul/alaya-soul";
 import {
   admitSourceSemanticQuery, createAuditedSourceAdmission, createSourceSemanticInterpretationPublication,
   EvidenceService, fieldContractSha256, SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
@@ -544,6 +545,58 @@ it("reports a failed alignment as invalid instead of charging a default Core bud
     if (result.kind !== "reason") throw new Error("expected reason");
     expect(result.result.outcome).toEqual({ status: "invalid", reason: "malformed_alignment" });
     expect(result.coverage.computation).toBe("unexercised");
+  });
+});
+
+it("reasons through the worker on receiver-produced query and alignment bodies", async () => {
+  await withPublished(async ({ hId, execute }) => {
+    const qCanonical = queryOf();
+    const receivedQ = proposeQuerySemantics({
+      original_query: ORIGINAL,
+      producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
+      producer_version: "1"
+    }, {
+      rawJson: JSON.stringify({
+        contract: "source-semantic-query-response-v2",
+        outcome: { status: "interpreted" },
+        query: {
+          variables: qCanonical.variables,
+          alternatives: qCanonical.alternatives,
+          return_variables: qCanonical.return_variables,
+          gaps: qCanonical.gaps
+        }
+      })
+    });
+    expect(receivedQ.outcome.status).toBe("interpreted");
+    expect(receivedQ.query).toEqual(qCanonical);
+    const prepared = await call(execute, {
+      kind: "prepare_query", original_query: ORIGINAL, q: receivedQ.query, budget: BUDGET
+    });
+    if (prepared.kind !== "prepare_query") throw new Error("expected query page");
+    const candidate = prepared.candidates.find((row) => row.interpretation_id === hId);
+    if (candidate?.interpretation === undefined) throw new Error("published interpretation missing from descriptors");
+    const receivedA = proposeAlignmentSemantics({
+      admitted_q: receivedQ.query!,
+      h_descriptors: [{ h_id: candidate.interpretation_id, interpretation: candidate.interpretation }],
+      producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
+      producer_version: "1"
+    }, {
+      rawJson: JSON.stringify({
+        contract: "source-semantic-alignment-response-v2",
+        outcome: { status: "interpreted", gaps: [] },
+        alignment: { correspondences: alignmentOf(hId, receivedQ.query!).correspondences }
+      })
+    });
+    expect(receivedA.alignment?.h_id).toBe(hId);
+    const result = await call(execute, {
+      kind: "reason", accepts_unreviewed_conditional_results: true,
+      query_handle: prepared.query_handle, a: receivedA.alignment,
+      budget: BUDGET, output_byte_limit: 1000000
+    });
+    if (result.kind !== "reason") throw new Error("expected reason");
+    expect(result.result.outcome.status).toBe("interpreted");
+    expect(result.result.answers?.[0]?.returned.tools?.node_id).toBe("rTools");
+    expect(result.result.world_claim).toBe("unknown");
   });
 });
 

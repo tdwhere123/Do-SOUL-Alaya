@@ -75,8 +75,8 @@ soul:mcp-types.ts#SoulInterpretationProposeRequestSchema(authorized_scopes,budge
 soul:mcp-types.ts#SoulInterpretationProposeResponseSchema(coverage,evidence_object_id,operation,outcome,provider_attempts,published,semantic_status,source_binding,work)#f782333
 soul:mcp-types.ts#SoulInterpretationReasonRequestSchema(a,accepts_unreviewed_conditional_results,authorized_scopes,budget,h_id,operation,original_query,output_byte_limit,q,query_handle)#1d9dd84
 soul:mcp-types.ts#SoulInterpretationReasonResponseSchema(alignment,context,coverage,interpretation,operation,outcome,provider_attempts,query,result,work)#aeebf53
-soul:mcp-types.ts#SoulInterpretationRequestSchema()#5cdcd4e
-soul:mcp-types.ts#SoulInterpretationResponseSchema()#0259b83
+soul:mcp-types.ts#SoulInterpretationRequestSchema()#f2f3b28
+soul:mcp-types.ts#SoulInterpretationResponseSchema()#6e2d315
 soul:mcp-types.ts#SoulListPendingEdgeProposalsRequestSchema(edge_type,limit,min_confidence,since,trigger_source)#797b0c8
 soul:mcp-types.ts#SoulListPendingEdgeProposalsResponseSchema(proposals,total_count)#730ce68
 soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#766d3d9

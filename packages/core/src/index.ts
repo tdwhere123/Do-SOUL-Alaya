@@ -206,4 +206,10 @@ export {
   SourceSemanticAlignmentProducerRegistry, defaultSourceSemanticAlignmentProducerRegistry
 } from "./recall/conditional-field/query/source-semantic-alignment-producer-registry.js";
 export { reasonSourceInterpretation } from "./recall/runtime/source-interpretation-reasoning.js";
-export { reasonSourceSemanticInterpretation } from "./recall/runtime/source-semantic-reasoning.js";
+export { reasonSourceSemanticInterpretation, executeSourceSemanticInterpretation } from "./recall/runtime/source-semantic-reasoning.js";
+export { deliveredSourceSemanticLibraryProof } from "./recall/runtime/source-semantic-library-proof.js";
+export {
+  SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResults,
+  proofEntriesFromBranch, proofForLibraryEntry, slotQualifiersFor, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry,
+  encodeSourceSemanticLibraryResponse, sourceSemanticLibraryQueryIdentity, scopeSourceSemanticLibraryBranch
+} from "./recall/runtime/source-semantic-library-recall.js";

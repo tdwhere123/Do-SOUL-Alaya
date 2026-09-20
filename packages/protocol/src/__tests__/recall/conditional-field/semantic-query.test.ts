@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import {
-  SourceSemanticQuerySchema, queryAlternativeConnected,
+  SourceSemanticQueryProducerBodySchema, SourceSemanticQuerySchema, queryAlternativeConnected,
   type SourceSemanticQueryAlternative, type SourceSemanticQueryFrame,
   type SourceSemanticContextObligation, type SourceSemanticQueryVariable
 } from "../../../recall/conditional-field/semantic-query.js";
@@ -67,6 +67,22 @@ it("connects frames by incidence, not by sharing an obligation kind", () => {
   }]);
   expect(SourceSemanticQuerySchema.parse(incident).alternatives[0]?.context_obligations[0]?.incidence?.kind)
     .toBe("embedding");
+});
+
+it("derives the producer body by omitting host identities and rejecting unknown fields", () => {
+  const body = {
+    variables: [{ id: "actor", sort: "entity" as const }, { id: "use", sort: "proposition" as const }],
+    alternatives: [{ frames: [{ id: "qUse", variable: "use", predicate_reading: "use", role_requirements: [] }],
+      context_obligations: [{ frame: "qUse", kind: "asserted_at_source" as const }] }],
+    return_variables: [],
+    gaps: [],
+    domains: [{ id: "people", support: { kind: "query_text" as const, excerpt: "users" } }],
+    evaluation: { kind: "forall" as const, domain: "people", binder: "actor", local_variables: ["actor", "use"] }
+  };
+  expect(SourceSemanticQueryProducerBodySchema.parse(body).evaluation?.kind).toBe("forall");
+  expect(SourceSemanticQueryProducerBodySchema.safeParse({ ...body, producer_id: "qp" }).success).toBe(false);
+  expect(SourceSemanticQueryProducerBodySchema.safeParse({ ...body, original_query_digest: digest }).success).toBe(false);
+  expect(SourceSemanticQueryProducerBodySchema.safeParse({ ...body, invented: true }).success).toBe(false);
 });
 
 it("records unsupported phenomena as gaps and rejects extra query operators", () => {

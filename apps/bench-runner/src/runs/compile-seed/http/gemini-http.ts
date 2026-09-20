@@ -13,6 +13,7 @@ import type {
 import {
   decodeGeminiGenerateContent,
   encodeGeminiGenerateContent,
+  GeminiProviderEnvelopeError,
   geminiUsage,
   parseGeminiGenerateContentBody,
   record
@@ -72,6 +73,10 @@ async function extractGeminiOnce(
       usageRequestCount: decoded.usage === undefined ? 0 : 1, transportFailures: []
     } };
   } catch (cause) {
+    if (cause instanceof GeminiProviderEnvelopeError) {
+      attempt.phase = "response_parse";
+      attempt.kind = "provider_error";
+    }
     throw geminiAttemptFailure(cause, attempt, input.abortSignal?.aborted === true, timeout.aborted);
   }
 }
@@ -95,8 +100,7 @@ function prepareGeminiRequest(config: CompileSeedExtractionConfig, input: Extrac
   const route = resolveExtractionTransportRoute(config);
   const endpoint = normalizeGeminiEndpoint(route.providerUrl);
   const body = JSON.stringify(encodeGeminiGenerateContent(input, {
-    model: route.model, requestProfile: config.requestProfile, maxOutputTokens: input.maxOutputTokens,
-    includeThoughts: true
+    model: route.model, requestProfile: config.requestProfile, maxOutputTokens: input.maxOutputTokens
   }));
   return {
     url: new URL(`/v1beta/models/${route.model}:streamGenerateContent?alt=sse`, endpoint),

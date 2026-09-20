@@ -82,7 +82,7 @@ describe("native Gemini interactive extraction", () => {
       systemInstruction: { parts: [{ text: input.systemPrompt }] },
       contents: [{ role: "user", parts: [{ text: input.userPrompt }] }],
       generationConfig: { responseMimeType: "application/json", maxOutputTokens: input.maxOutputTokens,
-        thinkingConfig: { thinkingLevel, includeThoughts: true } }
+        thinkingConfig: { thinkingLevel } }
     })));
     expect(computeCacheKey("gemini-3.1-flash-lite", "gemini-3.1-low-v1", input.systemPrompt, input.userPrompt))
       .not.toBe(computeCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1", input.systemPrompt, input.userPrompt));
@@ -134,8 +134,11 @@ describe("native Gemini interactive extraction", () => {
       source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
     const current = soul.buildSourceSemanticRequest(source);
     const { generation_schema_contract: _generation, ...source_request } = current.source_request;
-    const request = generation === "bounded" ? current : { ...current, source_request };
-    const raw = soul.SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
+    const request = soul.parseSourceSemanticRequest(generation === "bounded" ? current : {
+      ...current, source_request: { ...source_request, proposal_contract: "source-semantic-proposal-v3" }
+    });
+    const systemPrompt = soul.sourceSemanticSystemPrompt(request);
+    const raw = systemPrompt.split("Example response:\n")[1]!;
     let observed: string | undefined;
     await withServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -147,7 +150,7 @@ describe("native Gemini interactive extraction", () => {
       });
     }, async (origin) => {
       const result = await createGardenHttpExtractor({ ...config, providerUrl: origin }).extract({ ...input,
-        systemPrompt: soul.SOURCE_SEMANTIC_SYSTEM_PROMPT, userPrompt: JSON.stringify(request),
+        systemPrompt, userPrompt: JSON.stringify(request),
         validateRawJson: value => { expect(soul.receiveSourceSemantics(value, request, source).outcome.status).toBe("interpreted"); }
       });
       expect(result.rawJson).toBe(raw);
@@ -230,7 +233,7 @@ describe("native Gemini interactive extraction", () => {
     expect(fetchImpl.mock.calls[0]![1]?.headers).toMatchObject({ "x-goog-api-key": "synthetic-fixture-key" });
     expect(JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).generationConfig).toEqual({
       responseMimeType: "application/json", maxOutputTokens: 1024,
-      thinkingConfig: { thinkingLevel: "minimal", includeThoughts: true }
+      thinkingConfig: { thinkingLevel: "minimal" }
     });
     const batch = createGeminiBatchHttp({ endpoint: nativeConfig.providerUrl, apiKey: nativeConfig.apiKey!,
       timeoutMs: 1000, fetch: fetchImpl });
@@ -439,5 +442,49 @@ describe("native Gemini interactive extraction", () => {
     await expect(createGardenHttpExtractor(config, { fetch: fetchImpl }).extract({
       ...input, maxOutputTokens: 32_768, timeoutMs: 960_001
     })).rejects.toThrow("invalid Gemini interactive timeout");
+  });
+
+  it("classifies a provider error body as provider_error rather than generateContent schema failure", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({
+      error: { code: 1, message: "The operation was cancelled." }
+    }));
+    await expect(createGardenHttpExtractor(config, { fetch: fetchImpl }).extract(input))
+      .rejects.toMatchObject({
+        message: expect.stringContaining("The operation was cancelled"),
+        benchRetry: {
+          transportFailures: [expect.objectContaining({ kind: "provider_error", phase: "response_parse" })]
+        }
+      });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("classifies an SSE provider error event on the real HTTP path", async () => {
+    await withServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ error: { code: 13, message: "internal" } })}\n\n`);
+    }, async (origin) => {
+      await expect(createGardenHttpExtractor({ ...config, providerUrl: origin }).extract(input))
+        .rejects.toMatchObject({
+          benchRetry: { transportFailures: [expect.objectContaining({ kind: "provider_error" })] }
+        });
+    });
+  });
+
+  it("records a socket interruption after headers as a body-read or network failure", async () => {
+    await withServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.write('{"candidates":');
+      res.socket?.destroy();
+    }, async (origin) => {
+      await expect(createGardenHttpExtractor({ ...config, providerUrl: origin }).extract({
+        ...input, timeoutMs: 1_000
+      })).rejects.toMatchObject({
+        benchRetry: {
+          transportFailures: [expect.objectContaining({
+            kind: expect.stringMatching(/^(?:body_read_error|network_error)$/u)
+          })]
+        }
+      });
+    });
   });
 });

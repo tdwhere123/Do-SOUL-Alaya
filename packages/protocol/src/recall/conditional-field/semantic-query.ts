@@ -65,7 +65,7 @@ const SourceSemanticEvaluationSchema = z.discriminatedUnion("kind", [
   }).strict().readonly()
 ]);
 
-export const SourceSemanticQuerySchema = z.object({
+const SourceSemanticQueryObjectSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_QUERY_CONTRACT),
   original_query_digest: Sha256DigestSchema,
   producer_id: BoundedIdSchema,
@@ -79,7 +79,18 @@ export const SourceSemanticQuerySchema = z.object({
     support: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly()
   }).strict().readonly()).max(64).readonly().optional(),
   evaluation: SourceSemanticEvaluationSchema.optional()
-}).strict().superRefine((query, context) => {
+}).strict();
+
+/** Producer body omits host envelope identities; the receiver materializes those from the request. */
+export const SourceSemanticQueryProducerBodySchema = SourceSemanticQueryObjectSchema.omit({
+  contract: true,
+  original_query_digest: true,
+  producer_id: true,
+  producer_version: true,
+  contract_version: true
+}).strict().readonly();
+
+export const SourceSemanticQuerySchema = SourceSemanticQueryObjectSchema.superRefine((query, context) => {
   const problem = (message: string) => context.addIssue({ code: "custom", message });
   if (new TextEncoder().encode(JSON.stringify(query)).length > SOURCE_SEMANTIC_MAX_BYTES) {
     problem("source semantic query exceeds its byte bound");
@@ -237,4 +248,5 @@ export type SourceSemanticQueryFrame = z.infer<typeof SourceSemanticQueryFrameSc
 export type SourceSemanticQueryIncidence = z.infer<typeof SourceSemanticQueryIncidenceSchema>;
 export type SourceSemanticContextObligation = z.infer<typeof SourceSemanticContextObligationSchema>;
 export type SourceSemanticQueryAlternative = z.infer<typeof SourceSemanticQueryAlternativeSchema>;
+export type SourceSemanticQueryProducerBody = z.infer<typeof SourceSemanticQueryProducerBodySchema>;
 export type SourceSemanticQuery = z.infer<typeof SourceSemanticQuerySchema>;

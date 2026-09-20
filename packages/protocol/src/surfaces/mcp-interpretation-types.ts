@@ -14,9 +14,17 @@ import {
   SourceSemanticPublishedInterpretationSchema,
   SourceSemanticReasoningResultSchema
 } from "../garden/source-semantic-interpretation.js";
+import { InformationIndexSchema } from "../recall/conditional-field/index-view.js";
+import { MemorySearchResultSchema } from "./mcp-memory-search-types.js";
 import {
+  SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
+  SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
   SourceSemanticCoverageSchema,
   SourceSemanticHandleDescriptorSchema,
+  SourceSemanticLibraryDiscoverySchema,
+  SourceSemanticLibraryOrderSchema,
+  SourceSemanticLibraryProofSchema,
+  SourceSemanticLibrarySlotQualifierSchema,
   SourceSemanticWorkerWorkSchema
 } from "../garden/source-semantic-worker.js";
 
@@ -73,11 +81,24 @@ export const SoulInterpretationReasonRequestSchema = z.object({
   authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
 }).strict().readonly();
 
+const SoulInterpretationRecallRequestSchema = z.object({
+  operation: z.literal("recall"),
+  accepts_unreviewed_conditional_results: z.literal(true),
+  query_handle: BoundedIdSchema.optional(),
+  q: SourceSemanticQuerySchema.optional(),
+  original_query: z.string().min(1).max(8192).optional(),
+  alignments: z.array(SourceSemanticAlignmentSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
+  budget: RequestBudgetSchema,
+  output_byte_limit: z.number().int().min(1024).max(1_000_000),
+  authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
+}).strict().readonly();
+
 export const SoulInterpretationRequestSchema = z.discriminatedUnion("operation", [
   SoulInterpretationPrepareSourceRequestSchema,
   SoulInterpretationProposeRequestSchema,
   SoulInterpretationPrepareQueryRequestSchema,
-  SoulInterpretationReasonRequestSchema
+  SoulInterpretationReasonRequestSchema,
+  SoulInterpretationRecallRequestSchema
 ]);
 
 export const SoulInterpretationPrepareSourceResponseSchema = z.object({
@@ -123,11 +144,29 @@ export const SoulInterpretationReasonResponseSchema = z.object({
   ...CoverageWork
 }).strict().readonly();
 
+const SoulInterpretationRecallResponseSchema = z.object({
+  operation: z.literal("recall"),
+  delivery_id: BoundedIdSchema.optional(),
+  protocol_version: z.literal(1).optional(),
+  results: z.array(MemorySearchResultSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly().optional(),
+  total_count: z.number().int().nonnegative().optional(),
+  index: InformationIndexSchema.optional(),
+  page_purpose: z.literal("membership").optional(),
+  discovery: SourceSemanticLibraryDiscoverySchema.optional(),
+  order: SourceSemanticLibraryOrderSchema.optional(),
+  slot_qualifiers: z.array(SourceSemanticLibrarySlotQualifierSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly().optional(),
+  proofs: z.array(SourceSemanticLibraryProofSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly().optional(),
+  request_budget: RequestBudgetSchema.optional(),
+  outcome: SourceSemanticOutcomeSchema.optional(),
+  ...CoverageWork
+}).strict().readonly();
+
 export const SoulInterpretationResponseSchema = z.discriminatedUnion("operation", [
   SoulInterpretationPrepareSourceResponseSchema,
   SoulInterpretationProposeResponseSchema,
   SoulInterpretationPrepareQueryResponseSchema,
-  SoulInterpretationReasonResponseSchema
+  SoulInterpretationReasonResponseSchema,
+  SoulInterpretationRecallResponseSchema
 ]);
 
 export type SoulInterpretationRequest = z.infer<typeof SoulInterpretationRequestSchema>;

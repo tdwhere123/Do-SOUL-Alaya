@@ -45,10 +45,22 @@ export function encodeGeminiGenerateContent(
   };
 }
 
+export class GeminiProviderEnvelopeError extends Error {
+  readonly providerCode: unknown;
+  constructor(message: string, providerCode?: unknown) {
+    super(`Gemini provider error: ${message}`);
+    this.name = "GeminiProviderEnvelopeError";
+    this.providerCode = providerCode;
+  }
+}
+
 export function parseGeminiGenerateContentBody(raw: string): unknown {
   const trimmed = raw.trim();
   if (trimmed.startsWith("data:") || trimmed.includes("\ndata:")) return assembleGeminiSse(trimmed);
-  return JSON.parse(raw);
+  const parsed: unknown = JSON.parse(raw);
+  if (Array.isArray(parsed)) return assembleGeminiStreamEvents(parsed);
+  throwIfGeminiProviderError(parsed);
+  return parsed;
 }
 
 function assembleGeminiSse(raw: string): unknown {
@@ -68,6 +80,7 @@ function assembleGeminiStreamEvents(events: readonly unknown[]): unknown {
   let finishReason: unknown;
   let usageMetadata: unknown;
   for (const event of events) {
+    throwIfGeminiProviderError(event);
     const response = record(event);
     if (response.usageMetadata !== undefined) usageMetadata = response.usageMetadata;
     const candidates = response.candidates;
@@ -97,6 +110,7 @@ export function decodeGeminiGenerateContent(value: unknown): {
   readonly responseMetadata: { readonly finishReason: "STOP"; readonly completionWitness: "finish_reason";
     readonly completionContractVersion: 1 };
 } {
+  throwIfGeminiProviderError(value);
   const response = record(value);
   const candidates = response.candidates;
   if (!Array.isArray(candidates) || candidates.length !== 1) throw new Error("Gemini response requires one candidate");
@@ -146,6 +160,23 @@ export function assertGeminiGenerateContentSettings(settings: GeminiGenerateCont
         settings.maxOutputTokens > 65_536)) {
     throw new Error("unsupported Gemini model/request profile/output settings");
   }
+}
+
+function throwIfGeminiProviderError(value: unknown): void {
+  if (value === undefined || value === null) {
+    throw new Error("Gemini response is missing");
+  }
+  if (typeof value !== "object" || Array.isArray(value)) return;
+  const error = (value as { readonly error?: unknown }).error;
+  if (error === undefined) return;
+  if (typeof error !== "object" || error === null || Array.isArray(error)) {
+    throw new GeminiProviderEnvelopeError("malformed error envelope");
+  }
+  const body = error as Record<string, unknown>;
+  const message = typeof body.message === "string" && body.message.trim().length > 0
+    ? body.message
+    : "provider error envelope";
+  throw new GeminiProviderEnvelopeError(message, body.code);
 }
 
 export function record(value: unknown): Record<string, unknown> {

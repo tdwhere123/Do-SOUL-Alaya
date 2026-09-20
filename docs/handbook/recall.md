@@ -721,32 +721,38 @@ H is not relabeled or silently promoted; recreate its interpretation explicitly.
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
 
-New H extraction uses the producer-only `source-semantic-proposal-v3` contract.
-The producer owns predicate/role readings, co-reference, semantic scope, speech
-acts, domain membership/closure and measurement context. It provides source
-anchors and entity declarations inline, one argument list and nested expressions
-for governing relationships. Repeated entity keys declare co-reference; ordinary
-occurrence references do not govern scope. Same-parent content references allow
-explicit reuse without a second governing owner. Protocol assigns canonical IDs
-and compiles mentions, slot/binding pairs, reciprocal context owners,
-assertion membership, quantifier binders and canonical outcome gaps. A plain
-occurrence reference does not embed its target. Unowned or conflicting scopes
-are rejected; the compiler never guesses assertion permission or domain facts.
-Compilation and normalization share one resource ledger. Structural admission
-and located gaps cannot certify language completeness. The canonical H and
-response-envelope shapes remain unchanged. Recorded v1/v2 proposals select their
-original prompt/schema explicitly for replay. Marker-absent normalizer-v3
-requests retain an explicit historical replay path; new publication requires
-normalizer-v4. Request/schema identities distinguish the new producer wire.
-Canonical-envelope archives retain native request/response replay with their
-original prompt. Their normalizer-v3 manifests remain ineligible for current
-cache reuse; replay does not upgrade or publish an old interpretation.
+New H extraction uses the producer-only `source-semantic-proposal-v4` contract
+with `host-owned-expression-schema-v1` at canonical domination depth 16. Optional
+quantified and measurement fields remain in that recorded projection; omit empty
+tables when the source does not support them. The producer owns predicate/role
+readings, co-reference, semantic scope, speech acts, domain membership/closure
+and measurement context. Compact catalog anchors and inline mentions are enough
+for an unreused local referent. A producer alias is required only for
+co-reference, an occurrence reference, same-parent reuse, or a quantifier
+binding. Source-label equality is not identity. Nested expressions remain the
+scope owner; the host does not reconstruct lost scope from English labels or map
+a missing act to assertion. Protocol assigns canonical IDs and compiles mentions,
+slot/binding pairs, reciprocal context owners, assertion membership, quantifier
+binders and canonical outcome gaps. A plain occurrence reference does not embed
+its target. Unowned or conflicting scopes are rejected; the compiler never
+guesses assertion permission, pronoun antecedents or domain facts. Compilation
+and normalization share one resource ledger. Structural admission and located
+gaps cannot certify language completeness. The canonical H and response-envelope
+shapes remain unchanged. Recorded v1/v2/v3 proposals select their original
+prompt/schema explicitly for replay. Marker-absent normalizer-v3 requests retain
+an explicit historical replay path; new publication requires normalizer-v4.
+Request/schema identities distinguish the producer wire. Canonical-envelope
+archives retain native request/response replay with their original prompt. Their
+normalizer-v3 manifests remain ineligible for current cache reuse; replay does
+not upgrade or publish an old interpretation.
 
-New expression requests bind `bounded-expression-schema-v1`. Protocol derives
-its generation schema from the same expression shapes, with shared acyclic
-definitions spanning the canonical domination-depth limit. SOUL selects it for
-structured generation; reference validation and semantic admission still run
-locally. Decoder acceptance does not prove semantic fidelity or source coverage.
+New compact expression requests bind `host-owned-expression-schema-v1`. Protocol
+derives its generation schema from the same compact shapes, with shared acyclic
+definitions spanning the canonical domination-depth limit. Recorded v3 requests
+keep `bounded-expression-schema-v1` or the recursive decoder. SOUL selects the
+schema for structured generation; reference validation and semantic admission
+still run locally after host expansion into the unchanged compiler. Decoder
+acceptance does not prove semantic fidelity or source coverage.
 Recorded requests without this marker keep their original recursive schema.
 Gemini decoding guidance has its own provider projection: those recursive schemas
 use JSON mode without a decoder schema, while the complete source schema is
@@ -872,6 +878,34 @@ not survive worker loss.
 Query/page handles conservatively invalidate on the worker database revision;
 reprepare after changes. One-shot reasoning is supported without claiming that
 library discovery ran. There is no cross-run semantic result/coverage cache.
+
+`soul.interpretation` `recall` is the opt-in library path shared by native callers
+and the benchmark. Original query and authorized scope enter once. Host operations
+remain provider-free; Q and A are supplied by explicit producers or a prepared
+cache. Discovery pages current source records and published H beyond a single
+16-row descriptor page, records the eligible population, visited pages, candidate
+prefix and open residuals, and does not treat query hints as semantic membership.
+Compatible H/Q/A compile independently through the existing field; there is no
+cross-H join. Delivery uses canonical `sortIndexEntries` with source-root occupancy
+(`source_gold_root_identity`) and a membership page of at most 10. Equal grades
+use canonical identity ties; this is not learned relevance. Proof-bearing slots
+keep H/Q/A/C closure. A source excerpt without a closed proof is source evidence,
+not assertion truth or H/A success. Over-budget proof-bearing conclusions are
+omitted rather than delivered after stripping assumptions. First exposure is the
+initial membership page recorded by the existing `FirstExposureSession` owner.
+This path does not replace ordinary `soul.recall`.
+
+Current-source discovery scans at most 32 pages of 16 historical records. An
+incomplete or unavailable scan cannot establish currentness and emits no source
+identities, with discovery left open/truncated. Indexed current-source enumeration
+is needed before scaling beyond this bound. H candidate diagnostics include only
+authorized current sources. Library continuation leases bind the first clock,
+request budget, caller/session, scope and database revision; changing any bound
+input requires a fresh request. Proof demotion preserves occupied positions.
+Public payload coverage and index payload completeness both report shortened
+previews. Measurement retains requested budget separately from the fixed ten-slot
+page policy and requires the delivered H/Q/A/C package and closed proof graph for
+proof-conditioned scoring; source retrieval remains independently scoreable.
 
 Results expose actual accepting bindings and returned variables, per-answer
 explanation roots, the existing derivation forest, and exact observation-to-leaf

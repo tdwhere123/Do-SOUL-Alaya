@@ -1,7 +1,8 @@
 import { z } from "zod";
 import {
   AlayaError, SourceAssertionIdSchema, SourceSemanticDiagnosticsSchema,
-  materializeSourceSemanticContentProposal, materializeSourceSemanticExpressionProposal, sourceSemanticValidationDiagnostics
+  materializeSourceSemanticContentProposal, materializeSourceSemanticExpressionProposal,
+  materializeSourceSemanticCompactProposal, sourceSemanticValidationDiagnostics
 } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, semanticSha256, type SourceSemanticRequest } from "./source-semantic-request.js";
 
@@ -45,7 +46,8 @@ export function prepareSourceSemanticRevision(requestValue: SourceSemanticReques
   options?: Readonly<{ responseCompletion: "complete" | "truncated" | "unknown" }>): SourceSemanticRevision {
   const request = parseSourceSemanticRequest(requestValue);
   if (request.source_request.proposal_contract !== "source-semantic-proposal-v2" &&
-      request.source_request.proposal_contract !== "source-semantic-proposal-v3") {
+      request.source_request.proposal_contract !== "source-semantic-proposal-v3" &&
+      request.source_request.proposal_contract !== "source-semantic-proposal-v4") {
     throw new AlayaError("VALIDATION", "revision requires the semantic content proposal contract");
   }
   if (Buffer.byteLength(previousResponse, "utf8") > 524288) throw new AlayaError("VALIDATION", "revision response exceeds its byte bound");
@@ -103,7 +105,8 @@ function structuralDiagnostics(raw: string, request: SourceSemanticRequest, comp
     return [{ code: "invalid_json", path: [], message: "The retained complete response is not valid JSON. Return one complete JSON proposal matching the response schema while preserving source content and scope." }];
   }
   try {
-    if (request.source_request.proposal_contract === "source-semantic-proposal-v3") materializeSourceSemanticExpressionProposal(previous);
+    if (request.source_request.proposal_contract === "source-semantic-proposal-v4") materializeSourceSemanticCompactProposal(previous);
+    else if (request.source_request.proposal_contract === "source-semantic-proposal-v3") materializeSourceSemanticExpressionProposal(previous);
     else materializeSourceSemanticContentProposal(previous);
   }
   catch (error) {

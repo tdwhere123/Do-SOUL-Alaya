@@ -1,32 +1,34 @@
 import { randomUUID } from "node:crypto";
-import { canonicalJson, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
+import { canonicalJson, type SourceSemanticQuery, type Continuation } from "@do-soul/alaya-protocol";
 import { CoreError } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 
 export type SourceSemanticLease = Readonly<{
-  kind: "source" | "query" | "page";
+  kind: "source" | "query" | "page" | "library";
   workspace_id: string; principal: string; as_of: string; authorized: readonly string[] | null;
   expires_at: string; revision: string;
   source_id?: string; source_version?: string; content_digest?: string;
   original_query?: string; q?: SourceSemanticQuery; q_id?: string;
   candidates?: readonly string[];
   after_cursor?: string | null; discovery_open?: boolean; truncated?: boolean;
+  continuation?: Continuation; request_identity?: string;
 }>;
 type Caller = Readonly<{ workspace_id: string; principal?: string; as_of: string }>;
 const LEASES = new WeakMap<RecallReadWorkerRuntime, Map<string, SourceSemanticLease>>();
 const MAX_BYTES = 8_000_000;
 
 export function sourceSemanticRevision(runtime: RecallReadWorkerRuntime): string {
-  return String(runtime.database.connection.pragma("data_version", { simple: true }));
+  return `${String(runtime.database.connection.pragma("data_version", { simple: true }))}:${String(
+    (runtime.database.connection.prepare("SELECT total_changes() AS n").get() as { n: number }).n)}`;
 }
 
-export function issueSemanticLease(runtime: RecallReadWorkerRuntime, lease: SourceSemanticLease, meter: SourceSemanticReadBudget): string {
+export function issueSemanticLease(runtime: RecallReadWorkerRuntime, lease: SourceSemanticLease, meter: SourceSemanticReadBudget, issuedId?: string): string {
   meter.retain(lease, "preparation lease");
   let rows = LEASES.get(runtime);
   if (rows === undefined) { rows = new Map(); LEASES.set(runtime, rows); }
   for (const [id, row] of rows) if (row.expires_at <= lease.as_of) rows.delete(id);
-  const id = randomUUID(); rows.set(id, lease);
+  const id = issuedId ?? randomUUID(); rows.set(id, lease);
   const size = () => [...rows.values()].reduce((sum, row) => sum + 4 * canonicalJson(row).length, 0);
   while (rows.size > 32 || size() > MAX_BYTES) rows.delete(rows.keys().next().value!);
   if (!rows.has(id)) throw new CoreError("CONFLICT", "source semantic preparation exceeds lease capacity", { subCode: "RETRYABLE_BACKPRESSURE" });

@@ -1,11 +1,13 @@
 import { z } from "zod";
 import {
   AlayaError, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_PACKET_CONTRACT,
-  SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticAlignmentSchema,
-  SourceSemanticOutcomeSchema, SourceSemanticQuerySchema, SourceSemanticResponseEnvelopeSchema,
-  SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticAlignmentProducerBodySchema, SourceSemanticAlignmentSchema,
+  SourceSemanticGapSchema, SourceSemanticOutcomeSchema, SourceSemanticQueryProducerBodySchema,
+  SourceSemanticQuerySchema,
+  SourceSemanticResponseEnvelopeSchema, SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
   materializeSourceSemanticProposal, materializeSourceSemanticContentProposal, buildSourceReferenceCatalog,
   materializeSourceSemanticExpressionProposal, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
+  materializeSourceSemanticCompactProposal, SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT,
   SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   normalizeSourceSemantics, sourceSemanticQueryIdentity, verifySourceSemanticDisposition, canonicalJson,
   type SourceSemanticAlignment, type SourceSemanticDraft, type SourceSemanticInterpretation,
@@ -106,12 +108,14 @@ export function receiveSourceSemantics(
   // Remove this branch when those archives use an offline-only legacy reader.
   let envelope: ReturnType<typeof SourceSemanticResponseEnvelopeSchema.safeParse>;
   const limits = request.source_request.resource_limits;
+  const compact = request.source_request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT;
   const expression = request.source_request.proposal_contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT;
-  const meter = expression || request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
+  const meter = compact || expression || request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
     ? new SourceSemanticResourceLedger({ work_units: limits.work_units ?? 200000, memory_bytes: limits.memory_bytes ?? 20000000 }) : undefined;
   try {
     envelope = request.source_request.proposal_contract === undefined
       ? SourceSemanticResponseEnvelopeSchema.safeParse(parsed.value)
+      : compact ? { success: true, data: materializeSourceSemanticCompactProposal(parsed.value, meter) }
       : expression ? { success: true, data: materializeSourceSemanticExpressionProposal(parsed.value, meter) }
       : meter !== undefined ? { success: true, data: materializeSourceSemanticContentProposal(parsed.value, meter) }
       : { success: true, data: materializeSourceSemanticProposal(parsed.value) };
@@ -168,7 +172,12 @@ function receiveQuerySemantics(
   }
   try {
     const query = parseQuery({ original_query: request.original_query, request, query: materializeQuery(envelope.data.query, request) });
-    SourceSemanticOutcomeGapBindingSchema.parse({ outcome: envelope.data.outcome, gaps: query.gaps });
+    const reportedGaps = envelope.data.outcome.gaps;
+    if (reportedGaps !== undefined) {
+      SourceSemanticOutcomeGapBindingSchema.parse({
+        outcome: { status: "interpreted", gaps: reportedGaps }, gaps: query.gaps
+      });
+    }
     if (query.original_query_digest !== request.original_query_digest) {
       return { ...attempt, outcome: { status: "invalid", reason: "query_digest_mismatch" } };
     }
@@ -211,7 +220,9 @@ function receiveAlignmentSemantics(
   }
   try {
     const alignment = SourceSemanticAlignmentSchema.parse(materializeAlignment(envelope.data.alignment, request));
-    SourceSemanticOutcomeGapBindingSchema.parse({ outcome: envelope.data.outcome, gaps: [] });
+    SourceSemanticOutcomeGapBindingSchema.parse({
+      outcome: { status: "interpreted", gaps: envelope.data.outcome.gaps ?? [] }, gaps: []
+    });
     if (alignment.q_id !== sourceSemanticQueryIdentity(request.admitted_q, semanticSha256)) {
       return { ...attempt, outcome: { status: "invalid", reason: "alignment_q_mismatch" } };
     }
@@ -314,35 +325,51 @@ function parseResponseJson<T>(rawJson: string, attempt: Attempt<T>):
 function materializeQuery(body: unknown, request: SourceSemanticQueryRequest): SourceSemanticQuery {
   const record = asRecord(body);
   rejectForbiddenProposalInput(record);
+  const parsed = SourceSemanticQueryProducerBodySchema.parse(record);
   return SourceSemanticQuerySchema.parse({
     contract: SOURCE_SEMANTIC_QUERY_CONTRACT,
     original_query_digest: request.original_query_digest,
     producer_id: request.producer_capability.producer_id,
     producer_version: request.producer_capability.producer_version,
     contract_version: SOURCE_SEMANTIC_QUERY_CONTRACT,
-    variables: record.variables, alternatives: record.alternatives,
-    return_variables: record.return_variables, gaps: record.gaps ?? []
+    variables: parsed.variables,
+    alternatives: parsed.alternatives,
+    return_variables: parsed.return_variables,
+    gaps: parsed.gaps,
+    ...(parsed.domains === undefined ? {} : { domains: parsed.domains }),
+    ...(parsed.evaluation === undefined ? {} : { evaluation: parsed.evaluation })
   });
 }
 
 function materializeAlignment(body: unknown, request: SourceSemanticAlignmentRequest): unknown {
   const record = asRecord(body);
   rejectForbiddenProposalInput(record);
-  const h_id = typeof record.h_id === "string" ? record.h_id : singleHId(request.h_descriptors);
+  const parsed = SourceSemanticAlignmentProducerBodySchema.parse(record);
   return {
     contract: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
-    h_id,
+    h_id: bindAlignmentHandle(parsed.h, request.h_descriptors),
     q_id: sourceSemanticQueryIdentity(request.admitted_q, semanticSha256),
     producer_id: request.producer_capability.producer_id,
     producer_version: request.producer_capability.producer_version,
     contract_version: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
-    correspondences: record.correspondences
+    correspondences: parsed.correspondences,
+    ...(parsed.domains === undefined ? {} : { domains: parsed.domains }),
+    ...(parsed.membership_assumptions === undefined ? {} : { membership_assumptions: parsed.membership_assumptions })
   };
 }
 
-function singleHId(descriptors: readonly SourceSemanticHDescriptor[]): string {
-  if (descriptors.length !== 1) throw new AlayaError("VALIDATION", "alignment requires an h_id among the descriptors");
-  return descriptors[0]!.h_id;
+function bindAlignmentHandle(handle: string | undefined, descriptors: readonly SourceSemanticHDescriptor[]): string {
+  if (handle === undefined) {
+    if (descriptors.length !== 1) {
+      throw new AlayaError("VALIDATION", "alignment to multiple descriptors requires a request-local handle");
+    }
+    return descriptors[0]!.h_id;
+  }
+  const descriptor = descriptors[Number(handle.slice(1)) - 1];
+  if (descriptor === undefined) {
+    throw new AlayaError("VALIDATION", "alignment handle does not name a supplied descriptor");
+  }
+  return descriptor.h_id;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -364,14 +391,23 @@ function invalidProposalOutcome(error: unknown): SourceSemanticOutcome {
   return error instanceof z.ZodError ? invalidSchemaOutcome(error) : { status: "invalid", reason: reasonOf(error) };
 }
 
+const InterpretedOutcome = z.object({
+  status: z.literal("interpreted"),
+  gaps: z.array(SourceSemanticGapSchema).max(256).readonly().optional()
+}).strict().readonly();
+const ProducerResponseOutcomeSchema = z.discriminatedUnion("status", [
+  InterpretedOutcome,
+  ...SourceSemanticOutcomeSchema.options.filter((option) => option.unwrap().shape.status.value !== "interpreted")
+]);
+
 const queryResponseSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT),
-  outcome: SourceSemanticOutcomeSchema,
+  outcome: ProducerResponseOutcomeSchema,
   query: z.unknown().optional()
 }).strict().readonly();
 
 const alignmentResponseSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT),
-  outcome: SourceSemanticOutcomeSchema,
+  outcome: ProducerResponseOutcomeSchema,
   alignment: z.unknown().optional()
 }).strict().readonly();

@@ -2,7 +2,8 @@ import {
   canonicalJson, interpretationNodeIdentity, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   SourceSemanticInterpretationSchema, SourceSemanticPublishedInterpretationSchema, SOURCE_SEMANTIC_K_VERSION,
   SourceSemanticReasoningRequestSchema, SourceSemanticReasoningResultSchema,
-  type SourceEvidenceTarget, type SourceSemanticReasoningRequest, type SourceSemanticReasoningResult
+  type InformationIndex, type SourceEvidenceTarget, type SourceSemanticReasoningRequest,
+  type SourceSemanticReasoningResult
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
@@ -24,48 +25,60 @@ export type ReasonSourceSemanticInterpretationInput = Readonly<{
   source_target?: SourceEvidenceTarget;
 }>;
 type ResultBody = Omit<SourceSemanticReasoningResult, "contract" | "semantic_status" | "conclusion_scope" | "world_claim">;
+type Prepared = Readonly<{ body: ResultBody; index: InformationIndex | null }>;
+export type SourceSemanticInterpretationExecution = Readonly<{
+  result: SourceSemanticReasoningResult; index: InformationIndex | null;
+}>;
 
 /** One budget and one fixed C; missing semantic preparation never calls a provider. */
 export function reasonSourceSemanticInterpretation(input: ReasonSourceSemanticInterpretationInput): SourceSemanticReasoningResult {
+  return executeSourceSemanticInterpretation(input).result;
+}
+
+/** Same one-H/one-A owner as reason, plus the accepting index that library delivery must reuse. */
+export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticInterpretationInput): SourceSemanticInterpretationExecution {
   const request = input.request === undefined ? undefined : SourceSemanticReasoningRequestSchema.parse(input.request);
   const budget = request?.budget ?? BUDGET, meter = new SourceSemanticResourceLedger(budget);
   const original = request?.original_query ?? input.original_query;
-  let result: ResultBody;
+  let body: ResultBody;
+  let index: InformationIndex | null = null;
   try {
     if (original === undefined || input.q === undefined || input.a === undefined) {
       const missing = input.q === undefined ? input.a === undefined ? "q_and_a" : "q" : "a";
-      result = { outcome: { status: "preparation_required", missing }, consumed_leaves: [] };
+      body = { outcome: { status: "preparation_required", missing }, consumed_leaves: [] };
     } else {
       meter.retain(input.h, "H admission"); meter.retain(input.q, "Q admission"); meter.retain(input.a, "A admission");
-      result = reasonPrepared(input, original, request, meter);
+      const prepared = reasonPrepared(input, original, request, meter);
+      body = prepared.body; index = prepared.index;
     }
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-    result = { outcome: { status: "resource_exhausted" }, consumed_leaves: [] };
+    body = { outcome: { status: "resource_exhausted" }, consumed_leaves: [] }; index = null;
   }
-  return finish({ ...result, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } }, request?.output_byte_limit);
+  const result = finish({ ...body, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } }, request?.output_byte_limit);
+  return { result, index: result.outcome.status === "truncated" ? null : index };
 }
 
 function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original: string,
-  request: SourceSemanticReasoningRequest | undefined, meter: SourceSemanticResourceLedger): ResultBody {
+  request: SourceSemanticReasoningRequest | undefined, meter: SourceSemanticResourceLedger): Prepared {
   const published = SourceSemanticPublishedInterpretationSchema.safeParse(input.h);
   const parsed = published.success ? { success: true as const, data: published.data.interpretation }
     : SourceSemanticInterpretationSchema.safeParse(input.h);
-  if (!parsed.success) return invalid("malformed_interpretation");
-  if (parsed.data.k_version !== SOURCE_SEMANTIC_K_VERSION) return invalid("unsupported_structural_contract");
+  if (!parsed.success) return { body: invalid("malformed_interpretation"), index: null };
+  if (parsed.data.k_version !== SOURCE_SEMANTIC_K_VERSION) return { body: invalid("unsupported_structural_contract"), index: null };
   const admission = admitSourceSemanticAlignment({ alignment: input.a, h: parsed.data, q: input.q, original_query: original });
-  if (admission.kind !== "admitted") return invalid(admission.kind === "unsupported" ? "unsupported_producer" : "malformed_alignment");
+  if (admission.kind !== "admitted") return { body: invalid(admission.kind === "unsupported" ? "unsupported_producer" : "malformed_alignment"), index: null };
   if (request !== undefined && (request.h_id !== admission.interpretation_id || request.q_id !== admission.query_id || request.a_id !== admission.alignment_id)) {
-    return invalid("identity_mismatch");
+    return { body: invalid("identity_mismatch"), index: null };
   }
-  if (input.authorizedScopes !== null && !input.authorizedScopes.includes(input.scope)) return invalid("unauthorized_scope");
+  if (input.authorizedScopes !== null && !input.authorizedScopes.includes(input.scope)) return { body: invalid("unauthorized_scope"), index: null };
   const sourceTarget = input.source_target ?? (published.success ? published.data.source_target : undefined) ?? {
     kind: "source_evidence" as const, workspace_id: input.workspaceId, root_kind: "source_record" as const,
     root_id: parsed.data.source.source_id, source_version: parsed.data.source.source_version,
     content_digest: parsed.data.source.content_digest, evidence_object_id: null
   };
   if (sourceTarget.workspace_id !== input.workspaceId || sourceTarget.source_version !== parsed.data.source.source_version
-    || sourceTarget.content_digest !== parsed.data.source.content_digest) return invalid("source_binding_mismatch");
+    || sourceTarget.content_digest !== parsed.data.source.content_digest) return { body: invalid("source_binding_mismatch"), index: null };
   const qualified = { c_id: admission.context_id, h_id: admission.interpretation_id, q_id: admission.query_id, a_id: admission.alignment_id,
     source_target: sourceTarget, query_gaps: admission.query.gaps };
   const population = compileSourceSemanticPremises({ interpretation: admission.interpretation, alignment: admission.alignment,
@@ -87,7 +100,7 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
     budget: remaining, readers: sourceSemanticReaders(population, seeds), authorized_scopes: input.authorizedScopes });
   const beforeProjection = Math.max(0, state.remaining_exploration + state.remaining_reserve);
   meter.charge(Math.max(0, remaining.work_units - beforeProjection), Math.max(0, remaining.memory_bytes - state.remaining_memory_bytes), "engine");
-  if (state.binding.kind !== "bound") return { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] };
+  if (state.binding.kind !== "bound") return { body: { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] }, index: null };
   let afterProjection = beforeProjection;
   const index = projectAcceptingIndex({ snapshot: state.binding.snapshot, view: query.view, query_id: query.query_id,
     snapshot_id: snapshot, result_version: "source-interpretation-reasoning-v3",
@@ -112,8 +125,11 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
     && !state.memory_exhausted && state.remaining_work.length === 0 && index.continuation === null
     && Object.entries(index.completeness).every(([key, value]) => ["schema_version", "certificate_id", "interpretation_coverage"].includes(key)
       || value === "complete" || key === "observed_coverage" && value === "exhausted_empty");
-  return { ...qualified, ...proof, completeness: index.completeness,
-    outcome: complete ? { status: "interpreted", gaps: admission.interpretation.gaps } : { status: "resource_exhausted" } };
+  return {
+    body: { ...qualified, ...proof, completeness: index.completeness,
+      outcome: complete ? { status: "interpreted", gaps: admission.interpretation.gaps } : { status: "resource_exhausted" } },
+    index
+  };
 }
 
 function invalid(reason: string): ResultBody { return { outcome: { status: "invalid", reason }, consumed_leaves: [] }; }

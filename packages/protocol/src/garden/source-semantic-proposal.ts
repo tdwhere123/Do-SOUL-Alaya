@@ -3,6 +3,10 @@ export { SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT, SourceSemanticContentProposa
   materializeSourceSemanticContentProposal } from "./source-semantic-content-proposal.js";
 export { SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT, SourceSemanticExpressionProposalSchema,
   SourceSemanticExpressionGenerationSchema, materializeSourceSemanticExpressionProposal } from "./source-semantic-expression-proposal.js";
+export { SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT,
+  SOURCE_SEMANTIC_COMPACT_GENERATION_DEPTH, SOURCE_SEMANTIC_COMPACT_FEATURES,
+  SourceSemanticCompactProposalSchema, SourceSemanticCompactGenerationSchema,
+  materializeSourceSemanticCompactProposal } from "./source-semantic-compact-proposal.js";
 import {
   SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticContextOwnerSchema,
   SourceSemanticFrameSchema, SourceSemanticGraphFields, SourceSemanticOperatorSchema

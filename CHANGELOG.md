@@ -8,6 +8,24 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
+## Unreleased — protocol 6.7.0, engine gateway 0.4.0
+
+`@do-soul/alaya-engine-gateway` is `0.4.0`; app packages remain `0.3.11`.
+
+Under invariant §25, this is an additive minor: opt-in `soul.interpretation`
+`recall` accepts prepared Q/A and returns source-root occupancy pages, complete
+conditional H/Q/A/C proof packages, explicit coverage and the actual request
+budget. Ordinary `soul.recall` and its defaults are unchanged. Continuations
+bind the initial clock, caller/session, scopes, budgets and current database
+revision; stale generations fail closed. Payload demotion preserves occupied
+positions and cannot retain a semantic proof without its conditions.
+
+Source discovery withholds identities when its bounded historical scan is
+incomplete or unavailable. Libraries beyond that bound need indexed current
+source enumeration before any broad usefulness claim. Source retrieval remains
+scoreable when proof-conditioned measurement is unavailable. No provider calls,
+benchmark execution or default cutover are authorized by this contract change.
+
 ## Unreleased — protocol 6.6.0
 
 This section is **not a release tag**. App packages remain `0.3.11`

@@ -376,6 +376,8 @@ describe("durable Gemini Batch HTTP extraction", () => {
     const imported = await run("resume", { recordLineOutcome });
     expect(recordLineOutcome.mock.calls.map((call) => call.slice(0, 3)))
       .toEqual([["line-a", "provider_error", undefined], ["line-b", "missing", undefined]]);
+    expect(() => decodeGeminiGenerateContent({ error: { code: 429, message: "quota" } }))
+      .toThrow(/Gemini provider error: quota/u);
     expect(imported.jobs[0]?.usageUnknown).toBe(true);
     expect(accountedCost(imported.jobs[0]!, { plan: plan() })).toBe(imported.jobs[0]?.costBoundUsd);
   });

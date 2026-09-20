@@ -33,7 +33,7 @@ import {
   sealIssuedContinuation
 } from "./continuation-capability.js";
 
-export { sealIssuedContinuation };
+export { continuationCapabilityMatches, issuedContinuationTampered, sealIssuedContinuation };
 
 export type ProjectionProgress = NonNullable<FieldEngineState["projection_progress"]>;
 export type EmittedRevisions = Readonly<Record<string, string>>;

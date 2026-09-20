@@ -118,8 +118,7 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
         usageRequestCount: usage === undefined ? 0 : 1,
         ...(outcome === "success" ? {} : { terminalRetryClassification: "failure_non_retryable_response" }),
         transportFailures: outcome === "success" ? [] : [{
-          attempt: 1, kind: outcome === "missing" ? "empty_response" : "response_schema_error",
-          phase: outcome === "missing" ? "response_body" : "response_schema", httpStatus: null,
+          attempt: 1, ...batchLineFailureIdentity(outcome), httpStatus: null,
           fingerprint: batchDigest(JSON.stringify({ job: binding.jobId, key, outcome }))
         }], ...(usage === undefined ? {} : { usage }) }, binding.attemptOrdinal);
     },
@@ -300,4 +299,13 @@ async function importEmptyRequests(input: BatchFillInput, workset: BatchExtracti
   for (const { line } of workset.deterministicEmptyRequests) {
     await extractor.extract({ systemPrompt: line.systemPrompt, userPrompt: line.userPrompt });
   }
+}
+
+function batchLineFailureIdentity(outcome: "provider_error" | "invalid" | "missing"): {
+  readonly kind: "provider_error" | "response_schema_error" | "empty_response";
+  readonly phase: "response_parse" | "response_schema" | "response_body";
+} {
+  if (outcome === "missing") return { kind: "empty_response", phase: "response_body" };
+  if (outcome === "provider_error") return { kind: "provider_error", phase: "response_parse" };
+  return { kind: "response_schema_error", phase: "response_schema" };
 }

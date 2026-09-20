@@ -23,6 +23,22 @@ it("admits prepare and one-shot reason without a continuation token", () => {
   expect(SourceSemanticWorkerRequestSchema.safeParse({
     kind: "reason", accepts_unreviewed_conditional_results: true, budget, output_byte_limit: 1024
   }).success).toBe(false);
+  expect(SourceSemanticWorkerRequestSchema.safeParse({
+    kind: "recall", accepts_unreviewed_conditional_results: true, budget, output_byte_limit: 1024
+  }).success).toBe(false);
+  expect(SourceSemanticWorkerRequestSchema.parse({
+    kind: "recall", accepts_unreviewed_conditional_results: true, query_handle: "query-handle",
+    budget, output_byte_limit: 1024
+  }).kind).toBe("recall");
+  expect(SourceSemanticWorkerRequestSchema.parse({
+    kind: "recall", accepts_unreviewed_conditional_results: true, query_handle: "query-handle",
+    budget, output_byte_limit: 1024,
+    continuation: {
+      schema_version: 1, continuation_id: "page-10", query_id: "q1", snapshot_id: digest,
+      result_version: "source-semantic-library-v1", expires_at: "2099-01-01T00:00:00.000Z",
+      cursor: "offset-10"
+    }
+  }).kind).toBe("recall");
   const result = SourceSemanticWorkerResultSchema.parse({
     kind: "reason",
     result: {

@@ -30,7 +30,7 @@ const DRAFT = {
   gaps: []
 };
 
-it("parses the four soul.interpretation operations and rejects unknown operations", () => {
+it("parses soul.interpretation host operations including library recall and rejects unknown operations", () => {
   expect(SoulInterpretationRequestSchema.parse({
     operation: "prepare_source",
     source_id: "artifact-1",
@@ -55,11 +55,17 @@ it("parses the four soul.interpretation operations and rejects unknown operation
     budget: BUDGET,
     output_byte_limit: 4096
   }).operation).toBe("reason");
+  expect(SoulInterpretationRequestSchema.parse({
+    operation: "recall",
+    accepts_unreviewed_conditional_results: true,
+    budget: BUDGET,
+    output_byte_limit: 4096
+  }).operation).toBe("recall");
   expect(SoulInterpretationRequestSchema.safeParse({
     operation: "report_context_usage",
     budget: BUDGET
   }).success).toBe(false);
   expect(soulToolJsonSchemas["soul.interpretation"]).toMatchObject({
-    oneOf: [{ type: "object" }, { type: "object" }, { type: "object" }, { type: "object" }]
+    oneOf: [{ type: "object" }, { type: "object" }, { type: "object" }, { type: "object" }, { type: "object" }]
   });
 });

@@ -87,7 +87,15 @@ export {
   recallConsumerViewIdentity,
   type RecallConsumerCapability
 } from "./runtime/recall-consumer-compatibility.js";
-export { bindIssuedDeliveryId, issuedDeliveryIdOf } from "./runtime/index-continuation.js";
+export {
+  OFFSET_CURSOR,
+  bindIssuedDeliveryId,
+  continuationCapabilityMatches,
+  issuedContinuationTampered,
+  issuedDeliveryIdOf,
+  preparedDeliveryId,
+  sealIssuedContinuation
+} from "./runtime/index-continuation.js";
 export type {
   ConditionalFieldExecutionReceipt,
   RequestActualCost

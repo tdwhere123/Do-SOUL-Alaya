@@ -80,7 +80,7 @@ const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.f
   "soul.resolve":
     "Apply a resolution against a staged warning surfaced by soul.recall; the audit event is the durable record of the decision.",
   "soul.interpretation":
-    "Host operations are provider-free. propose is an idempotent unreviewed-evidence write; it does not create memory or relations. reason requires accepts_unreviewed_conditional_results and never strips H/A. Missing source/Q/A does not invent them. soul.report_context_usage is not an interpretation delivery loop.",
+    "Host operations are provider-free. propose is an idempotent unreviewed-evidence write; it does not create memory or relations. reason requires accepts_unreviewed_conditional_results and never strips H/A. recall is opt-in library discovery plus canonical first-exposure delivery; it does not replace soul.recall or call a provider. Missing source/Q/A does not invent them. soul.report_context_usage is not an interpretation delivery loop.",
   "garden.list_pending_tasks": "",
   "garden.claim_task": "",
   "garden.complete_task": ""

@@ -224,7 +224,7 @@ function assertOutcome(input: ExtractionTransportOutcome): void {
 
 const FAILURE_KINDS = new Set<BenchTransportFailureKind>([
   "network_error", "http_error", "body_read_error", "response_parse_error",
-  "response_schema_error", "empty_response", "timeout", "aborted"
+  "response_schema_error", "provider_error", "empty_response", "timeout", "aborted"
 ]);
 const FAILURE_PHASES = new Set<BenchTransportFailurePhase>([
   "request", "response_status", "response_body", "response_parse", "response_schema"

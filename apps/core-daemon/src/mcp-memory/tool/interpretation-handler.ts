@@ -2,7 +2,7 @@ import { SoulInterpretationResponseSchema, verifySourceSemanticDisposition, Sour
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult, type SoulInterpretationRequest,
   type SoulInterpretationResponse, type RequestBudget, type SourceSemanticWorkerWork,
   type AuthorizedScopesAdmission } from "@do-soul/alaya-protocol";
-import { CoreError, fieldContractSha256 } from "@do-soul/alaya-core";
+import { CoreError, encodeSourceSemanticLibraryResponse, fieldContractSha256 } from "@do-soul/alaya-core";
 import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import { ToolUnavailableError, ToolValidationError } from "./tool-handler-support.js";
 import type { McpMemoryToolCallContext } from "./tool-handler-types.js";
@@ -36,6 +36,12 @@ export function createSourceSemanticInterpretationHandler(input: Dependencies):
         (request.h_id === undefined || request.q === undefined || request.original_query === undefined))) {
       return SoulInterpretationResponseSchema.parse({ operation: "reason",
         outcome: { status: "preparation_required", missing: request.a === undefined ? request.q === undefined && request.query_handle === undefined ? "q_and_a" : "a" : "q" },
+        coverage: IDLE, work: ZERO_WORK, provider_attempts: 0 });
+    }
+    if (request.operation === "recall" && request.query_handle === undefined &&
+        (request.q === undefined || request.original_query === undefined)) {
+      return SoulInterpretationResponseSchema.parse({ operation: "recall",
+        outcome: { status: "preparation_required", missing: "q" },
         coverage: IDLE, work: ZERO_WORK, provider_attempts: 0 });
     }
     const { operation, authorized_scopes, ...rest } = request;
@@ -133,11 +139,14 @@ async function executeWorker(input: Dependencies, context: McpMemoryToolCallCont
   if (input.sourceSemanticsPort === undefined) throw new ToolUnavailableError("soul.interpretation worker is not wired into this daemon");
   const asOf = input.now();
   return input.sourceSemanticsPort.execute({ workspace_id: context.workspaceId, as_of: asOf,
-    authorized_scopes, principal: context.agentTarget,
+    authorized_scopes, principal: JSON.stringify([context.agentTarget, context.sessionId, context.runId]),
     expires_at: new Date(Date.parse(asOf) + 600_000).toISOString(), request });
 }
 function mcpFromWorker(result: SourceSemanticWorkerResult): SoulInterpretationResponse {
   if (result.kind === "validate_source") throw new CoreError("OBLIGATION_VIOLATION", "internal preparation cannot escape as an MCP response");
+  if (result.kind === "recall") {
+    return encodeSourceSemanticLibraryResponse(result);
+  }
   const { kind, ...rest } = result;
   return SoulInterpretationResponseSchema.parse({ operation: kind, ...rest, provider_attempts: 0 });
 }

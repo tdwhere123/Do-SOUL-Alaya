@@ -13,6 +13,7 @@ export const MIXED_KIND_FIRST_EXPOSURE_CONTRACT = "mixed-kind-first-exposure-any
 export const SOURCE_GOLD_JOIN_DENOMINATOR = "source_gold_root_identity" as const;
 export const HISTORICAL_MEMORY_ANY_AT_K_CONTRACT = "gold-memory-ids-any-at-k" as const;
 export const HISTORICAL_MEMORY_ANY_AT_K_DENOMINATOR = "gold_memory_ids" as const;
+export const PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT = "proof-conditioned-first-exposure-any-at-k-v1" as const;
 
 const UnavailableMetric = z.object({
   status: z.literal("unavailable"), value: z.null(), reason: z.string()
@@ -51,10 +52,29 @@ export const HistoricalMemoryAnyAtKMetricSchema = z.object({
   hit_at_10: FirstExposureBinaryMetricSchema
 }).strict().readonly();
 
+export const ProofConditionedFirstExposureMetricSchema = z.object({
+  contract: z.literal(PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT),
+  denominator: z.literal(SOURCE_GOLD_JOIN_DENOMINATOR),
+  gold_unit_count: z.number().int().nonnegative(),
+  joined_unit_count: z.number().int().nonnegative(),
+  any_at_1: FirstExposureBinaryMetricSchema,
+  any_at_5: FirstExposureBinaryMetricSchema,
+  any_at_10: FirstExposureBinaryMetricSchema
+}).strict().readonly();
+
 export type SourceGoldUnit = z.infer<typeof SourceGoldUnitSchema>;
 export type MixedKindFirstExposureMetric = z.infer<typeof MixedKindFirstExposureMetricSchema>;
 export type HistoricalMemoryAnyAtKMetric = z.infer<typeof HistoricalMemoryAnyAtKMetricSchema>;
+export type ProofConditionedFirstExposureMetric = z.infer<typeof ProofConditionedFirstExposureMetricSchema>;
 export type FirstExposureBinaryMetric = z.infer<typeof FirstExposureBinaryMetricSchema>;
+
+/** Gold root identity. Omits evidence_object_id, span, hypothesis, and interpretation node. */
+export function sourceGoldUnitFromPublishedRoot(target: SourceEvidenceTarget): SourceGoldUnit {
+  return SourceGoldUnitSchema.parse({
+    workspace_id: target.workspace_id, root_kind: target.root_kind, root_id: target.root_id,
+    source_version: target.source_version, content_digest: target.content_digest
+  });
+}
 
 export interface FirstExposureSlot {
   readonly rank: number;
@@ -81,6 +101,29 @@ export function scoreMixedKindFirstExposure(
     any_at_1: hitOrMiss(sourceGoldHitAt(slots, goldUnits, 1)),
     any_at_5: hitOrMiss(sourceGoldHitAt(slots, goldUnits, 5)),
     any_at_10: hitOrMiss(sourceGoldHitAt(slots, goldUnits, 10))
+  };
+}
+
+export function scoreProofConditionedFirstExposure(
+  slots: readonly FirstExposureSlot[],
+  goldUnits: readonly SourceGoldUnit[],
+  proofRanks: ReadonlySet<number>
+): ProofConditionedFirstExposureMetric {
+  if (goldUnits.length === 0) {
+    const any = unavailable("source gold join not supplied");
+    return {
+      contract: PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT, denominator: SOURCE_GOLD_JOIN_DENOMINATOR,
+      gold_unit_count: 0, joined_unit_count: 0, any_at_1: any, any_at_5: any, any_at_10: any
+    };
+  }
+  const joined = goldUnits.filter((unit) => slots.some((slot) =>
+    proofRanks.has(slot.rank) && sourceSlotJoinsGold(slot, unit))).length;
+  return {
+    contract: PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT, denominator: SOURCE_GOLD_JOIN_DENOMINATOR,
+    gold_unit_count: goldUnits.length, joined_unit_count: joined,
+    any_at_1: hitOrMiss(proofGoldHitAt(slots, goldUnits, proofRanks, 1)),
+    any_at_5: hitOrMiss(proofGoldHitAt(slots, goldUnits, proofRanks, 5)),
+    any_at_10: hitOrMiss(proofGoldHitAt(slots, goldUnits, proofRanks, 10))
   };
 }
 
@@ -124,6 +167,14 @@ function sourceGoldHitAt(
   slots: readonly FirstExposureSlot[], goldUnits: readonly SourceGoldUnit[], k: number
 ): boolean {
   return slots.slice(0, k).some((slot) => goldUnits.some((unit) => sourceSlotJoinsGold(slot, unit)));
+}
+
+function proofGoldHitAt(
+  slots: readonly FirstExposureSlot[], goldUnits: readonly SourceGoldUnit[],
+  proofRanks: ReadonlySet<number>, k: number
+): boolean {
+  return slots.slice(0, k).some((slot) => proofRanks.has(slot.rank)
+    && goldUnits.some((unit) => sourceSlotJoinsGold(slot, unit)));
 }
 
 function sourceSlotJoinsGold(slot: FirstExposureSlot, unit: SourceGoldUnit): boolean {

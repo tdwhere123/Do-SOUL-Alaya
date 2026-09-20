@@ -38,7 +38,15 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
     assertion_id: assertion.assertion_id, source_ref: { first: segment(text).id, last: segment(text).id }
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
-  const envelope = {
+  const contract = request.source_request.proposal_contract ?? "source-semantic-proposal-v3";
+  const envelope = contract === "source-semantic-proposal-v4" ? {
+    contract, outcome: { status: "interpreted" }, content: {
+      roots: [{ act: "assertion", expression: {
+        kind: "statement", predicate: { kind: "explicit", reading: "complete", at: segment("completed").id },
+        arguments: [{ role: "theme", target: { key: "r0", at: segment(theme).id } }]
+      } }]
+    }
+  } : {
     contract: "source-semantic-proposal-v3",
     outcome: { status: "interpreted" },
     content: {
@@ -369,7 +377,7 @@ it("enforces the 32 MiB shard bound and the 1 MiB envelope before reservation or
 
 function dispositionResponse(userPrompt: string): string {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt)), row = request.source_catalog.assertions[0]!;
-  return JSON.stringify({ contract: "source-semantic-proposal-v3", outcome: {
+  return JSON.stringify({ contract: request.source_request.proposal_contract ?? "source-semantic-proposal-v3", outcome: {
     status: "no_executable_proposition", description: "Unreviewed producer disposition",
     context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
       source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }]

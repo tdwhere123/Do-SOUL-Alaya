@@ -74,6 +74,7 @@ export type BenchTransportFailureKind =
   | "body_read_error"
   | "response_parse_error"
   | "response_schema_error"
+  | "provider_error"
   | "empty_response"
   | "timeout"
   | "aborted";

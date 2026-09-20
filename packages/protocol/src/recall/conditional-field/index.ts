@@ -277,6 +277,7 @@ export {
   SourceSemanticQueryIncidenceSchema,
   SourceSemanticContextObligationSchema,
   SourceSemanticQueryAlternativeSchema,
+  SourceSemanticQueryProducerBodySchema,
   SourceSemanticQuerySchema,
   queryAlternativeConnected,
   type SourceSemanticQueryVariable,
@@ -285,18 +286,22 @@ export {
   type SourceSemanticQueryIncidence,
   type SourceSemanticContextObligation,
   type SourceSemanticQueryAlternative,
+  type SourceSemanticQueryProducerBody,
   type SourceSemanticQuery
 } from "./semantic-query.js";
 export {
   SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
   SOURCE_SEMANTIC_ALIGNMENT_RELATION,
+  SOURCE_SEMANTIC_ALIGNMENT_DESCRIPTOR_HANDLE,
   SourceSemanticQueryEndpointSchema,
   SourceSemanticSourceEndpointSchema,
   SourceSemanticCorrespondenceSchema,
+  SourceSemanticAlignmentProducerBodySchema,
   SourceSemanticAlignmentSchema,
   type SourceSemanticQueryEndpoint,
   type SourceSemanticSourceEndpoint,
   type SourceSemanticCorrespondence,
+  type SourceSemanticAlignmentProducerBody,
   type SourceSemanticAlignment
 } from "./semantic-alignment.js";
 export {

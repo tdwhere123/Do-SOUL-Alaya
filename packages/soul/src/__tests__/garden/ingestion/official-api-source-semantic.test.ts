@@ -348,8 +348,8 @@ describe("query and alignment proposal entry points", () => {
         expect(prepared.raw_response_id).toBeUndefined();
         expect(prepared.request).not.toHaveProperty("system_prompt");
       }
-      expect(preparedQuery.system_prompt).toContain("outcome.gaps must exactly echo query.gaps");
-      expect(preparedAlignment.system_prompt).toContain("outcome.gaps must be empty");
+      expect(preparedQuery.system_prompt).toContain("Query.gaps is the authoritative gap list");
+      expect(preparedAlignment.system_prompt).toContain("request-local handle h1, h2");
       for (const valid of [false, true]) {
         const q = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
           contract: "source-semantic-query-response-v2", outcome: { status: "interpreted", gaps: [] },

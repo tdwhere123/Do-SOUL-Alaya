@@ -28,7 +28,15 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
     assertion_id: assertion.assertion_id, source_ref: { first: segment(text).id, last: segment(text).id }
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
-  const envelope = {
+  const contract = request.source_request.proposal_contract ?? "source-semantic-proposal-v3";
+  const envelope = contract === "source-semantic-proposal-v4" ? {
+    contract, outcome: { status: "interpreted" }, content: {
+      roots: [{ act: "assertion", expression: {
+        kind: "statement", predicate: { kind: "explicit", reading: "complete", at: segment("completed").id },
+        arguments: [{ role: "theme", target: { key: "r0", at: segment(theme).id } }]
+      } }]
+    }
+  } : {
     contract: "source-semantic-proposal-v3",
     outcome: { status: "interpreted" },
     content: {
