@@ -28,6 +28,8 @@ import { extractValidGardenHttpContent } from "./garden-http-response-validation
 import { resolveExtractionRequestTimeoutMs } from "./output-token-retry.js";
 
 const MAX_GEMINI_RESPONSE_BYTES = 32 * 1024 * 1024;
+/** Complete-source TTFB can exceed the output-token quantum; thinking SSE keeps the socket alive. */
+export const GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS = 15 * 60_000;
 const defaultFetch = globalThis.fetch;
 type ExtractInput = Parameters<BenchSignalExtractor["extract"]>[0];
 
@@ -92,7 +94,10 @@ function prepareGeminiRequest(config: CompileSeedExtractionConfig, input: Extrac
     throw new Error("Gemini output token field must be maxOutputTokens");
   }
   if (input.maxOutputTokens === undefined) throw new Error("Gemini output token cap must be explicit");
-  const timeoutCeilingMs = resolveExtractionRequestTimeoutMs(input.maxOutputTokens);
+  const timeoutCeilingMs = Math.max(
+    resolveExtractionRequestTimeoutMs(input.maxOutputTokens),
+    GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS
+  );
   const timeoutMs = input.timeoutMs ?? timeoutCeilingMs;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > timeoutCeilingMs) {
     throw new Error("invalid Gemini interactive timeout");
@@ -100,7 +105,8 @@ function prepareGeminiRequest(config: CompileSeedExtractionConfig, input: Extrac
   const route = resolveExtractionTransportRoute(config);
   const endpoint = normalizeGeminiEndpoint(route.providerUrl);
   const body = JSON.stringify(encodeGeminiGenerateContent(input, {
-    model: route.model, requestProfile: config.requestProfile, maxOutputTokens: input.maxOutputTokens
+    model: route.model, requestProfile: config.requestProfile, maxOutputTokens: input.maxOutputTokens,
+    includeThoughts: true
   }));
   return {
     url: new URL(`/v1beta/models/${route.model}:streamGenerateContent?alt=sse`, endpoint),

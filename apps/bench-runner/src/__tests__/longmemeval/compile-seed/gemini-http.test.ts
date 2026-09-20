@@ -82,7 +82,7 @@ describe("native Gemini interactive extraction", () => {
       systemInstruction: { parts: [{ text: input.systemPrompt }] },
       contents: [{ role: "user", parts: [{ text: input.userPrompt }] }],
       generationConfig: { responseMimeType: "application/json", maxOutputTokens: input.maxOutputTokens,
-        thinkingConfig: { thinkingLevel } }
+        thinkingConfig: { thinkingLevel, includeThoughts: true } }
     })));
     expect(computeCacheKey("gemini-3.1-flash-lite", "gemini-3.1-low-v1", input.systemPrompt, input.userPrompt))
       .not.toBe(computeCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1", input.systemPrompt, input.userPrompt));
@@ -233,7 +233,7 @@ describe("native Gemini interactive extraction", () => {
     expect(fetchImpl.mock.calls[0]![1]?.headers).toMatchObject({ "x-goog-api-key": "synthetic-fixture-key" });
     expect(JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).generationConfig).toEqual({
       responseMimeType: "application/json", maxOutputTokens: 1024,
-      thinkingConfig: { thinkingLevel: "minimal" }
+      thinkingConfig: { thinkingLevel: "minimal", includeThoughts: true }
     });
     const batch = createGeminiBatchHttp({ endpoint: nativeConfig.providerUrl, apiKey: nativeConfig.apiKey!,
       timeoutMs: 1000, fetch: fetchImpl });
