@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   QueryOsfSemanticCompletenessReceiptSchema,
+  RecallCandidateObjectKindSchema,
   RecallOriginPlaneSchema,
   RecallTokenEconomySampleSchema
 } from "@do-soul/alaya-protocol";
@@ -64,12 +65,7 @@ export {
 export { EvidenceCandidateScoringSelectionReceiptSchema } from
   "./evidence/evidence-scoring-schema.js";
 
-const RecallDiagnosticObjectKindSchema = z.enum([
-  "memory_entry",
-  "evidence_capsule",
-  "synthesis_capsule",
-  "source_evidence"
-]);
+const RecallDiagnosticObjectKindSchema = RecallCandidateObjectKindSchema;
 export const DiagnosticSelectGammaDecisionSchema = z.object({
   kind: z.enum([
     "ineligible",

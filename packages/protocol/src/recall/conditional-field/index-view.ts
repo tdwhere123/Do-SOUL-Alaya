@@ -331,10 +331,19 @@ export function indexEntrySubjectId(entry: {
   return entry.target.kind === "memory_entry" ? entry.target.object_id : entry.target.root_id;
 }
 
+/** Closed proof occupancy is not source-fallback retrieval. */
+export const SOURCE_SEMANTIC_PROOF_OBJECT_KIND = "semantic_proof" as const;
+
 export function indexEntryObjectKind(entry: {
   readonly target: RecallTargetRef;
-}): "memory_entry" | "source_evidence" {
-  return entry.target.kind === "source_evidence" ? "source_evidence" : "memory_entry";
+  readonly interpretation_node?: unknown;
+  readonly explanation_ids?: readonly string[];
+}): "memory_entry" | "source_evidence" | typeof SOURCE_SEMANTIC_PROOF_OBJECT_KIND {
+  if (entry.target.kind === "memory_entry") return "memory_entry";
+  if (entry.interpretation_node !== undefined && (entry.explanation_ids?.length ?? 0) > 0) {
+    return SOURCE_SEMANTIC_PROOF_OBJECT_KIND;
+  }
+  return "source_evidence";
 }
 
 export function memoryIndexEntry(input: Readonly<{

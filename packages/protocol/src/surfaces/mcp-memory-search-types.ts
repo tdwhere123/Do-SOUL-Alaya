@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SOURCE_SEMANTIC_PROOF_OBJECT_KIND } from "../recall/conditional-field/index-view.js";
 import { CaptureExecutionSchema } from "../recall/selection/capture/capture-execution.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
@@ -108,11 +109,11 @@ export const MemorySearchResultSchema = z
         message: "source_evidence must not fill object_id"
       });
     }
-    if (value.object_kind !== "source_evidence") {
+    if (value.object_kind !== "source_evidence" && value.object_kind !== SOURCE_SEMANTIC_PROOF_OBJECT_KIND) {
       context.addIssue({
         code: "custom",
         path: ["object_kind"],
-        message: "source_evidence target requires object_kind source_evidence"
+        message: "source_evidence target requires object_kind source_evidence or semantic_proof"
       });
     }
   })

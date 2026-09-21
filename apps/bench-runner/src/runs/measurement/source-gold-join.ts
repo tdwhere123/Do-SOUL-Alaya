@@ -117,7 +117,7 @@ export function scoreProofConditionedFirstExposure(
     };
   }
   const joined = goldUnits.filter((unit) => slots.some((slot) =>
-    proofRanks.has(slot.rank) && sourceSlotJoinsGold(slot, unit))).length;
+    proofRanks.has(slot.rank) && proofSlotJoinsGold(slot, unit))).length;
   return {
     contract: PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT, denominator: SOURCE_GOLD_JOIN_DENOMINATOR,
     gold_unit_count: goldUnits.length, joined_unit_count: joined,
@@ -174,11 +174,19 @@ function proofGoldHitAt(
   proofRanks: ReadonlySet<number>, k: number
 ): boolean {
   return slots.slice(0, k).some((slot) => proofRanks.has(slot.rank)
-    && goldUnits.some((unit) => sourceSlotJoinsGold(slot, unit)));
+    && goldUnits.some((unit) => proofSlotJoinsGold(slot, unit)));
+}
+
+function sourceIdentityMatchesGold(slot: FirstExposureSlot, unit: SourceGoldUnit): boolean {
+  return slot.target.kind === "source_evidence" && sourceGoldUnitMatches(unit, slot.target);
 }
 
 function sourceSlotJoinsGold(slot: FirstExposureSlot, unit: SourceGoldUnit): boolean {
-  return slot.target.kind === "source_evidence" && sourceGoldUnitMatches(unit, slot.target);
+  return slot.object_kind === "source_evidence" && sourceIdentityMatchesGold(slot, unit);
+}
+
+function proofSlotJoinsGold(slot: FirstExposureSlot, unit: SourceGoldUnit): boolean {
+  return slot.object_kind === "semantic_proof" && sourceIdentityMatchesGold(slot, unit);
 }
 
 function sourceGoldUnitMatches(unit: SourceGoldUnit, target: SourceEvidenceTarget): boolean {

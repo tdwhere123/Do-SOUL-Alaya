@@ -50,7 +50,8 @@ function literalWitnessSchema() {
         "memory_entry",
         "synthesis_capsule",
         "evidence_capsule",
-        "source_evidence"
+        "source_evidence",
+        "semantic_proof"
       ]),
       rank: z.number().int().positive(),
       field: z.enum(["content", "evidence_gist"])

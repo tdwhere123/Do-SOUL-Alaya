@@ -12,7 +12,8 @@ import {
   measureSourceSemanticLibraryResponse
 } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import {
-  PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT, sourceGoldUnitFromPublishedRoot
+  PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT, sourceGoldUnitFromPublishedRoot,
+  scoreMixedKindFirstExposure, scoreProofConditionedFirstExposure
 } from "../../../runs/measurement/source-gold-join.js";
 
 const DIGEST = `sha256:${"ab".repeat(32)}`;
@@ -94,6 +95,19 @@ function measureOf(result: ReturnType<typeof workerRecall>) {
 }
 
 describe("source semantic library measurement", () => {
+  it("does not join a semantic_proof slot as mixed source retrieval", () => {
+    const proofSlot = { rank: 1, object_kind: "semantic_proof" as const, target: GOLD_TARGET };
+    const sourceSlot = { rank: 1, object_kind: "source_evidence" as const, target: GOLD_TARGET };
+    expect(scoreMixedKindFirstExposure([proofSlot], [GOLD]).any_at_5)
+      .toEqual({ status: "miss", value: false });
+    expect(scoreProofConditionedFirstExposure([proofSlot], [GOLD], new Set([1])).any_at_5)
+      .toEqual({ status: "hit", value: true });
+    expect(scoreMixedKindFirstExposure([sourceSlot], [GOLD]).any_at_5)
+      .toEqual({ status: "hit", value: true });
+    expect(scoreProofConditionedFirstExposure([sourceSlot], [GOLD], new Set()).any_at_5)
+      .toEqual({ status: "miss", value: false });
+  });
+
   it("scores mixed source retrieval but rejects label-only proof claims", () => {
     const withProof = measureOf(workerRecall(assemble([sourceOnly("gold")], [proofEntry("gold")])));
     const withoutProof = measureOf(workerRecall(assemble([sourceOnly("gold")], [])));
@@ -101,7 +115,7 @@ describe("source semantic library measurement", () => {
       status: "validated", provider_calls: 0,
       request: { budget: { page_budget: REQUEST.page_budget } },
       metrics: {
-        mixed_kind_first_exposure: { any_at_10: { status: "hit", value: true } },
+        mixed_kind_first_exposure: { any_at_10: { status: "miss", value: false } },
         proof_conditioned_first_exposure: {
           contract: PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT,
           any_at_10: { status: "unavailable", value: null }

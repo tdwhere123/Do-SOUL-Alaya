@@ -91,7 +91,7 @@ function candidatePlaneAttributes(
   kind: ReturnType<typeof indexEntryObjectKind>,
   metadata: RecallSourceMetadata | undefined
 ): Pick<RecallSourceMetadata, "dimension" | "scope_class"> {
-  if (kind === "source_evidence") {
+  if (kind === "source_evidence" || kind === "semantic_proof") {
     return {
       ...(metadata?.dimension === undefined ? {} : { dimension: metadata.dimension }),
       ...(metadata?.scope_class === undefined ? {} : { scope_class: metadata.scope_class })

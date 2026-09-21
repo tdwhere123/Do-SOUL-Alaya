@@ -148,6 +148,26 @@ describe("conditional-field product identity", () => {
     expect(indexEntryObjectKind(measuredSource)).toBe("source_evidence");
     expect(indexEntrySubjectId({ target: source.target })).toBe("rec-1");
     expect(indexEntryObjectKind({ target: source.target })).toBe("source_evidence");
+    const proved = {
+      ...source,
+      explanation_ids: ["ex-1"],
+      interpretation_node: { packet_id: "packet-1", hypothesis_id: source.hypothesis_id, node_id: "n1" }
+    };
+    expect(indexEntryObjectKind(proved)).toBe("semantic_proof");
+    expect(MemorySearchResultSchema.parse({
+      object_kind: "semantic_proof",
+      target: source.target,
+      relevance_score: 0.6,
+      content_preview: "quoted excerpt",
+      evidence_pointers: [],
+      selection_reason: "proved source",
+      source_channels: ["conditional_field"],
+      score_factors: { activation: 0.6, relevance: 0.6 },
+      budget_state: {
+        token_estimate: 1, max_entries: 1, max_total_tokens: 10,
+        remaining_entries: 0, remaining_tokens: 0, within_budget: true
+      }
+    }).object_kind).toBe("semantic_proof");
     const spanned = sourceIndexEntry({
       workspace_id: "ws",
       root_kind: "source_record",

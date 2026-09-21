@@ -13,7 +13,6 @@ import {
 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
 import { proposeAlignmentSemantics, proposeQuerySemantics, proposeSourceSemantics } from "@do-soul/alaya-soul";
-import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
@@ -23,7 +22,7 @@ import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
-import { capableRecallRequest, createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
+import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 
 const CLOCK = "2026-09-21T10:00:00.000Z";
 const SOURCE = "Ada can operate the lathe.";
@@ -140,7 +139,7 @@ function receiveFrozenMeaningQ() {
   if (received.outcome.status !== "interpreted" || received.query === undefined) {
     throw new Error(`meaning Q receive failed: ${JSON.stringify(received.outcome)}`);
   }
-  return received;
+  return { request: received.request, query: received.query };
 }
 
 function receiveLatheA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: string) {
@@ -193,11 +192,14 @@ function receiveLatheA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, 
   return received.alignment;
 }
 
-it("recalls a model-admitted meaning Q through SQLite reopen, worker, and public MCP", async () => {
+/**
+ * Handbook (`docs/handbook/recall.md`): `soul.interpretation` `recall` is the
+ * opt-in typed H/Q/A library path. Ordinary `soul.recall` is not that surface.
+ */
+it("recalls a model-admitted meaning Q through SQLite reopen, worker, and public interpretation", async () => {
   const receivedQ = receiveFrozenMeaningQ();
   expect(receivedQ.request.contract).toBe("source-semantic-query-request-v3");
   expect(receivedQ.query.alternatives[0]?.frames.some((row) => row.operator === "possible")).toBe(true);
-  const q = receivedQ.query;
 
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-meaning-public-"));
   const filename = join(directory, "alaya.db");
@@ -252,33 +254,21 @@ it("recalls a model-admitted meaning Q through SQLite reopen, worker, and public
 
     const reopened = await openSession(filename);
     try {
-      const alignment = receiveLatheA(q, h, hId);
-      const mcp = await callAlayaMcpMemoryTool(
-        { memoryToolHandler: reopened.handler, contextProvider: () => reopened.context },
-        "soul.interpretation",
-        SoulInterpretationRequestSchema.parse({
-          operation: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
-          q, alignments: [alignment], budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
-        })
-      );
-      const payload = mcp.structuredContent as { ok?: boolean; output?: { operation?: string; provider_attempts?: number; slot_qualifiers?: readonly { evidence_kind?: string; h_id?: string }[] } };
-      expect(payload.ok).toBe(true);
-      expect(payload.output?.operation).toBe("recall");
-      expect(payload.output?.provider_attempts).toBe(0);
-      expect(payload.output?.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof" && row.h_id === hId)).toBe(true);
-
-      const ordinary = await callAlayaMcpMemoryTool(
-        { memoryToolHandler: reopened.handler, contextProvider: () => reopened.context },
-        "soul.recall",
-        capableRecallRequest({
-          query: ORIGINAL, max_results: 5, scope_class: null, dimension: null, domain_tags: null
-        })
-      );
-      const ordinaryPayload = ordinary.structuredContent as { ok?: boolean; tool_name?: string; error?: unknown };
-      if (ordinaryPayload.ok !== true) {
-        throw new Error(`ordinary soul.recall failed: ${JSON.stringify(ordinary.structuredContent)}`);
-      }
-      expect(ordinaryPayload.tool_name).toBe("soul.recall");
+      const admitted = receiveFrozenMeaningQ();
+      expect(admitted.request.contract).toBe("source-semantic-query-request-v3");
+      const qAfter = admitted.query;
+      const alignment = receiveLatheA(qAfter, h, hId);
+      const recalled = await interpret(reopened.handler, {
+        operation: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
+        q: qAfter, alignments: [alignment], budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
+      }, reopened.context);
+      if (recalled.operation !== "recall") throw new Error(`recall expected: ${JSON.stringify(recalled)}`);
+      expect(recalled.provider_attempts).toBe(0);
+      const proofSlot = recalled.slot_qualifiers?.find((row) => row.evidence_kind === "semantic_proof" && row.h_id === hId);
+      expect(proofSlot).toBeDefined();
+      expect(recalled.proofs?.some((row) => row.h_id === hId && (row.answers?.length ?? 0) > 0)).toBe(true);
+      expect(recalled.results?.[proofSlot!.index]?.object_kind).toBe("semantic_proof");
+      expect(recalled.delivery_id).toEqual(expect.any(String));
     } finally {
       await closeSession(reopened, filename);
     }

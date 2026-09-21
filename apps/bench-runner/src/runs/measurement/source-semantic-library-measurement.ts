@@ -205,7 +205,8 @@ function proofRanksFromLibrary(
       || !sameRecallTarget(slot.target, entry.target)) return null;
     const fromEntry = entry.interpretation_node !== undefined && entry.explanation_ids.length > 0;
     const fromQualifier = qualifier.evidence_kind === "semantic_proof";
-    if (fromEntry !== fromQualifier) return null;
+    const fromKind = slot.object_kind === "semantic_proof";
+    if (fromEntry !== fromQualifier || fromQualifier !== fromKind) return null;
     if (fromQualifier) {
       if (deliveredSourceSemanticLibraryProof(index, entry, qualifier, proofs) === undefined) return null;
       ranks.add(slot.rank);

@@ -232,7 +232,10 @@ it("discovers a relevant interpretation after the first descriptor page and keep
       && row.object_kind === "source_evidence")).toBe(true);
     expect(search.results.some((row) => row.object_kind === "memory_entry")).toBe(false);
     expect(recalled.slot_qualifiers.some((row) => row.evidence_kind === "semantic_proof" && row.h_id === gold)).toBe(true);
+    const proofIndex = recalled.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof" && row.h_id === gold)!.index;
+    expect(search.results[proofIndex]?.object_kind).toBe("semantic_proof");
     const page = recordSourceSemanticLibraryFirstExposure(recalled);
+    expect(page.initial?.slots[proofIndex]?.object_kind).toBe("semantic_proof");
     expect(firstExposureMismatch(page, {
       query_id: search.index!.query_id, snapshot_id: search.index!.snapshot_id,
       interpretation_id: search.index!.interpretation_id!, as_of: search.index!.as_of!
@@ -383,7 +386,7 @@ it("scores mixed-kind retrieval and proof-conditioned Any@K from one published H
       status: "validated", provider_calls: 0,
       request: { budget: { page_budget: BUDGET.page_budget } },
       metrics: {
-        mixed_kind_first_exposure: { any_at_10: { status: "hit", value: true } },
+        mixed_kind_first_exposure: { any_at_10: { status: "miss", value: false } },
         proof_conditioned_first_exposure: { any_at_10: { status: "hit", value: true } }
       }
     });

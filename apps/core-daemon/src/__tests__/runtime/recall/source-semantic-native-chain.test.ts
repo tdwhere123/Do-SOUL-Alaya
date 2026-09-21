@@ -318,7 +318,7 @@ function queryHandleRecall(handler: Handler, context: Context, original: string,
   }, context);
 }
 
-it("preserves positive finite-domain and measured-comparison proofs through public recall after reopen", async () => {
+it("preserves positive finite-domain and measured-comparison proofs through public interpretation after reopen", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-finite-native-"));
   const filename = join(directory, "alaya.db");
   const source = "Alice and Bob are registered users, every registered user uses X, both have speed 2.1 ms in lab, Y is unused.";

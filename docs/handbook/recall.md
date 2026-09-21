@@ -893,8 +893,12 @@ Compatible H/Q/A compile independently through the existing field; there is no
 cross-H join. Delivery uses canonical `sortIndexEntries` with source-root occupancy
 (`source_gold_root_identity`) and a membership page of at most 10. Equal grades
 use canonical identity ties; this is not learned relevance. Proof-bearing slots
-keep H/Q/A/C closure. A source excerpt without a closed proof is source evidence,
-not assertion truth or H/A success. Over-budget proof-bearing conclusions are
+keep H/Q/A/C closure. Delivery and first-exposure `object_kind` is
+`semantic_proof` on those slots and `source_evidence` on a source excerpt
+without a closed proof. Mixed Any@K joins only `object_kind: source_evidence`;
+proof-conditioned Any@K joins closed proof ranks; the two metrics must not
+collapse. A source excerpt without a closed proof is source evidence, not
+assertion truth or H/A success. Over-budget proof-bearing conclusions are
 omitted rather than delivered after stripping assumptions. First exposure is the
 initial membership page recorded by the existing `FirstExposureSession` owner.
 This path does not replace ordinary `soul.recall`.

@@ -93,7 +93,8 @@ export const RecallCandidateObjectKindSchema = z.enum([
   "memory_entry",
   "synthesis_capsule",
   "evidence_capsule",
-  "source_evidence"
+  "source_evidence",
+  "semantic_proof"
 ]);
 
 export const RecallCandidateSchema = z
@@ -130,19 +131,19 @@ export const RecallCandidateSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.object_kind === "source_evidence") {
+    if (value.object_kind === "source_evidence" || value.object_kind === "semantic_proof") {
       if (value.target === undefined || value.target.kind !== "source_evidence") {
         context.addIssue({
           code: "custom",
           path: ["target"],
-          message: "source_evidence candidate requires a source_evidence target"
+          message: `${value.object_kind} candidate requires a source_evidence target`
         });
       }
       if (value.object_id !== undefined) {
         context.addIssue({
           code: "custom",
           path: ["object_id"],
-          message: "source_evidence must not fill object_id"
+          message: `${value.object_kind} must not fill object_id`
         });
       }
       return;

@@ -1,13 +1,9 @@
 import { z } from "zod";
+import { RecallCandidateObjectKindSchema } from "@do-soul/alaya-protocol";
 import { validateQuestionMeasurementStatus } from
   "../../runs/measurement/question-measurement-status.js";
 
-export const DiagnosticRecallObjectKindSchema = z.enum([
-  "memory_entry",
-  "synthesis_capsule",
-  "evidence_capsule",
-  "source_evidence"
-]);
+export const DiagnosticRecallObjectKindSchema = RecallCandidateObjectKindSchema;
 
 export const LongMemEvalGoldObjectKindSchema = z.enum([
   "memory_entry",

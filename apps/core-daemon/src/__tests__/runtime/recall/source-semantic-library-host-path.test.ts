@@ -297,7 +297,7 @@ async function withHost(
 function mcpRecall(payload: unknown): RecallOut {
   const body = payload as { ok?: boolean; output?: SoulInterpretationResponse };
   if (body.ok !== true || body.output?.operation !== "recall") {
-    throw new Error(`public MCP recall expected: ${JSON.stringify(payload)}`);
+    throw new Error(`public soul.interpretation recall expected: ${JSON.stringify(payload)}`);
   }
   return body.output;
 }
