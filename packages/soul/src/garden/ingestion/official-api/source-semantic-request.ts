@@ -36,7 +36,7 @@ export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-q
 export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v3" as const;
 export const SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT = "source-semantic-alignment-request-v2" as const;
 export const SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT = "source-semantic-alignment-response-v2" as const;
-export const SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT = "source-semantic-alignment-request-v3" as const;
+export const SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT = "source-semantic-alignment-request-v4" as const;
 export const SOURCE_SEMANTIC_ALIGNMENT_SELECTION_RESPONSE_CONTRACT = "source-semantic-alignment-response-v3" as const;
 
 const FORBIDDEN_PROPOSAL_KEYS = [
@@ -171,6 +171,7 @@ export type SourceSemanticQueryProposalInput = Readonly<{
 }>;
 
 export type SourceSemanticAlignmentProposalInput = Readonly<{
+  original_query: string;
   admitted_q: SourceSemanticQuery;
   h_descriptors: readonly SourceSemanticHDescriptor[];
   producer_id: string;
@@ -190,6 +191,7 @@ export type SourceSemanticQueryRequest = Readonly<{
 }>;
 
 export type SourceSemanticAlignmentRequest = Readonly<{
+  original_query: string;
   contract: typeof SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT | typeof SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT;
   k_version: typeof SOURCE_SEMANTIC_K_VERSION;
   admitted_q: SourceSemanticQuery;
@@ -277,19 +279,24 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
     source_request: { ...request.source_request, revision: input.revision } });
 }
 
-export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryProposalInput): SourceSemanticQueryRequest {
-  rejectForbiddenProposalInput(input);
-  if (input.original_query.trim().length === 0) {
+function originalQueryDigest(original_query: string): string {
+  if (typeof original_query !== "string" || original_query.trim().length === 0) {
     throw new AlayaError("VALIDATION", "query proposal requires the original query");
   }
-  const original_query = input.original_query;
   if (original_query.length > 8192) throw new AlayaError("VALIDATION", "original query exceeds its bound");
+  return `sha256:${semanticSha256(original_query)}`;
+}
+
+export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryProposalInput): SourceSemanticQueryRequest {
+  rejectForbiddenProposalInput(input);
+  const original_query = input.original_query;
+  const original_query_digest = originalQueryDigest(original_query);
   const meaning = input.query_syntax !== SOURCE_SEMANTIC_QUERY_CONTRACT;
   return {
     contract: meaning ? SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT : SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     original_query,
-    original_query_digest: `sha256:${semanticSha256(original_query)}`,
+    original_query_digest,
     ...(input.approved_fixed_context !== undefined
       ? { approved_fixed_context: ApprovedContextSchema.parse(input.approved_fixed_context) } : {}),
     producer_capability: producerCapability(input.producer_id, input.producer_version),
@@ -302,6 +309,9 @@ export function buildSourceSemanticAlignmentRequest(
 ): SourceSemanticAlignmentRequest {
   rejectForbiddenProposalInput(input);
   const admitted_q = SourceSemanticQuerySchema.parse(input.admitted_q);
+  if (admitted_q.original_query_digest !== originalQueryDigest(input.original_query)) {
+    throw new AlayaError("VALIDATION", "alignment request Q does not bind the original query");
+  }
   const h_descriptors = z.array(SourceSemanticHDescriptorSchema).min(1).max(64).parse(input.h_descriptors);
   if (Buffer.byteLength(JSON.stringify(h_descriptors)) > 1_000_000) throw new AlayaError("VALIDATION", "alignment descriptors exceed input budget");
   const selection = input.alignment_syntax !== SOURCE_SEMANTIC_ALIGNMENT_CONTRACT;
@@ -309,6 +319,7 @@ export function buildSourceSemanticAlignmentRequest(
     contract: selection ? SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT : SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     admitted_q,
+    original_query: input.original_query,
     h_descriptors,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
@@ -355,6 +366,11 @@ const QueryAlignmentGenerationOutcomeSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("abstained") }).strict().readonly()
 ]);
 
+const AlignmentGenerationOutcomeSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("interpreted") }).strict().readonly(),
+  z.object({ status: z.literal("abstained") }).strict().readonly()
+]);
+
 function producerResponseJsonSchema(schema: z.ZodType, reused?: "ref"): object {
   return z.toJSONSchema(schema, {
     io: "output",
@@ -390,13 +406,13 @@ export function sourceSemanticAlignmentResponseJsonSchema(
   if (request?.contract === SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT) {
     return producerResponseJsonSchema(z.object({
       contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT),
-      outcome: QueryAlignmentGenerationOutcomeSchema,
+      outcome: AlignmentGenerationOutcomeSchema,
       alignment: SourceSemanticAlignmentProducerBodySchema.optional()
     }).strict().readonly());
   }
   return producerResponseJsonSchema(z.object({
     contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_SELECTION_RESPONSE_CONTRACT),
-    outcome: QueryAlignmentGenerationOutcomeSchema,
+    outcome: AlignmentGenerationOutcomeSchema,
     alignment: SourceSemanticAlignmentSelectionSchema.optional()
   }).strict().readonly());
 }
@@ -507,6 +523,7 @@ export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
 ].join(" ");
 
 export const SOURCE_SEMANTIC_ALIGNMENT_GRAPH_SYSTEM_PROMPT = [
+  "The original_query is the evidence text. Every query_support.excerpt must copy an exact substring from it, preserving its inflection and language; normalized Q predicates are not evidence excerpts.",
   "Propose alignment correspondences from admitted Q endpoints to the supplied H descriptors.",
   "Use contextual equivalence only. Do not emit answers, ranking, seeds, programs, verdicts, or chosen results.",
   "Do not invent H structure or rewrite Q.",
@@ -515,6 +532,7 @@ export const SOURCE_SEMANTIC_ALIGNMENT_GRAPH_SYSTEM_PROMPT = [
 ].join(" ");
 
 export const SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT = [
+  "The original_query is the evidence text. Every query_excerpt and query_support.excerpt must copy an exact substring from it, preserving its inflection and language; normalized Q predicates are not evidence excerpts.",
   "Propose alignment as source-semantic-alignment-selection-v1 over the advertised catalog.",
   "Use contextual equivalence only. A cannot rank or answer. Do not emit answers, ranking, seeds, programs, verdicts, or chosen results.",
   "Do not invent H structure or rewrite Q. Do not copy host hashes or assemble internal Q/H endpoint objects.",

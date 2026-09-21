@@ -172,7 +172,7 @@ function useCorrespondences(h: SourceSemanticInterpretation) {
 }
 
 function receiveA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: string, extra: object = {}) {
-  const received = proposeAlignmentSemantics({
+  const received = proposeAlignmentSemantics({ original_query: ORIGINAL,
     admitted_q: q, h_descriptors: [{ h_id: hId, interpretation: h }],
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1",
     alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,

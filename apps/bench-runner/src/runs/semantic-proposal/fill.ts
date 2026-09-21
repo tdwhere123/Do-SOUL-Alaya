@@ -427,6 +427,7 @@ function receiveLine(line: SemanticProposalLine, rawJson: string) {
   }
   const request = line.request as SourceSemanticAlignmentRequest;
   const received = proposeAlignmentSemantics({
+    original_query: request.original_query,
     admitted_q: request.admitted_q, h_descriptors: request.h_descriptors,
     producer_id: request.producer_capability.producer_id,
     producer_version: request.producer_capability.producer_version,

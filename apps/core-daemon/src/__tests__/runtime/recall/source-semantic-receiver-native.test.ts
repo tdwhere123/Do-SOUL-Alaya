@@ -71,7 +71,7 @@ it("admits receiver-produced Q/A and drops dependent answers when membership is 
     query_support: { kind: "query_text" as const, excerpt: "New" },
     description: "Assume New belongs to users."
   }];
-  const receivedA = proposeAlignmentSemantics({
+  const receivedA = proposeAlignmentSemantics({ original_query: FINITE_QUERY,
     admitted_q: receivedQ.query!,
     h_descriptors: [{ h_id: hId, interpretation: h }],
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
@@ -97,7 +97,7 @@ it("admits receiver-produced Q/A and drops dependent answers when membership is 
   expect(assumed.answers).toHaveLength(1);
   expect(assumed.consumed_leaves.some((row) => row.leaf_kind === "a_membership")).toBe(true);
 
-  const withoutMembership = proposeAlignmentSemantics({
+  const withoutMembership = proposeAlignmentSemantics({ original_query: FINITE_QUERY,
     admitted_q: receivedQ.query!,
     h_descriptors: [{ h_id: hId, interpretation: h }],
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,

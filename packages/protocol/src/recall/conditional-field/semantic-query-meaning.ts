@@ -106,7 +106,7 @@ export type QueryForallMeaning = Readonly<{
 }>;
 export type QueryOccurrenceMeaning = Readonly<{ kind: "occurrence"; readonly key: string }>;
 
-function meaningShape(inner?: z.ZodType<QueryMeaning>): z.ZodType<QueryMeaning> {
+function meaningShape(inner?: z.ZodType<QueryMeaning>, includeForall = true): z.ZodType<QueryMeaning> {
   const operand = inner ?? Occurrence;
   return z.discriminatedUnion("kind", [
     z.object({
@@ -134,11 +134,11 @@ function meaningShape(inner?: z.ZodType<QueryMeaning>): z.ZodType<QueryMeaning> 
       kind: z.literal("opaque"), key: Key.optional(), operands: z.array(operand).min(1).max(8).readonly(),
       obligation: Obligation.optional(), source_act: SourceAct.optional()
     }).strict().readonly(),
-    z.object({
+    ...(includeForall ? [z.object({
       kind: z.literal("forall"), key: Key.optional(), domain: Key, binder: Key,
       restriction: operand.nullable().optional(), content: operand,
       obligation: Obligation.optional(), source_act: SourceAct.optional()
-    }).strict().readonly(),
+    }).strict().readonly()] : []),
     Occurrence
   ]);
 }
@@ -186,7 +186,7 @@ export const SourceSemanticQueryMeaningBodySchema = bodyShape(Meaning).superRefi
 export const SourceSemanticQueryMeaningGenerationSchema = (() => {
   let meaning: z.ZodType<QueryMeaning> | undefined;
   for (let depth = SOURCE_SEMANTIC_QUERY_MEANING_GENERATION_DEPTH; depth >= 0; depth -= 1) {
-    meaning = meaningShape(meaning);
+    meaning = meaningShape(meaning, false);
   }
   return bodyShape(meaning!);
 })();

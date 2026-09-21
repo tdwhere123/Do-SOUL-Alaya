@@ -134,6 +134,7 @@ describe("Gemini recursive decoding schema projection", () => {
     } };
     expect(projectGeminiGenerationSchema(schema).schema).toBeUndefined();
     expect(projectGeminiGenerationSchema(schema).instruction).toContain(JSON.stringify(schema));
+    expect(projectGeminiGenerationSchema(schema).instruction).toContain("Return the complete source interpretation, not the schema itself.");
   });
 
   it("keeps query generation off the source-extraction schema", () => {
@@ -150,6 +151,7 @@ describe("Gemini recursive decoding schema projection", () => {
       }
     );
     const encoded = JSON.stringify(body);
+    expect(encoded).toContain("complete response envelope including its contract, outcome and body");
     expect(encoded).not.toContain("source-semantic-proposal-v4");
     expect(encoded).not.toContain("source-semantic-proposal-v5");
     expect(encoded).toContain("application/json");

@@ -86,6 +86,7 @@ export function prepareSourceSemanticLibrary(
     let received: ReturnType<typeof proposeAlignmentSemantics>;
     const rawJson = Buffer.from(produced.rawJson).subarray(0, MAX_SOURCE_SEMANTIC_RESPONSE_BYTES).toString("utf8");
     try { received = proposeAlignmentSemantics({
+      original_query: input.original_query,
       admitted_q: input.admitted_q,
       h_descriptors: [descriptor],
       producer_id: input.producer_id,

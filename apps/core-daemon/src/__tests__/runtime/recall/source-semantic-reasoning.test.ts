@@ -577,7 +577,7 @@ it("reasons through the worker on receiver-produced query and alignment bodies",
     if (prepared.kind !== "prepare_query") throw new Error("expected query page");
     const candidate = prepared.candidates.find((row) => row.interpretation_id === hId);
     if (candidate?.interpretation === undefined) throw new Error("published interpretation missing from descriptors");
-    const receivedA = proposeAlignmentSemantics({
+    const receivedA = proposeAlignmentSemantics({ original_query: ORIGINAL,
       admitted_q: receivedQ.query!,
       h_descriptors: [{ h_id: candidate.interpretation_id, interpretation: candidate.interpretation }],
       producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,

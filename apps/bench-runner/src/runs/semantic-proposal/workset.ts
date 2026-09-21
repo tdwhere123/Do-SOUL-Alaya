@@ -83,14 +83,11 @@ export function materializeSemanticProposalLines(
   return workset.items.map((item) => {
     const parsed = AlignmentItemSchema.parse(item);
     const request = buildSourceSemanticAlignmentRequest({
+      original_query: parsed.original_query,
       admitted_q: parsed.admitted_q as SourceSemanticAlignmentRequest["admitted_q"],
       h_descriptors: parsed.h_descriptors as SourceSemanticAlignmentRequest["h_descriptors"],
       producer_id, producer_version
     });
-    const expected = `sha256:${createHash("sha256").update(parsed.original_query, "utf8").digest("hex")}`;
-    if (request.admitted_q.original_query_digest !== expected) {
-      throw new Error("alignment workset Q does not bind the original query");
-    }
     return bindLine(workset, "alignment", SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT, request, schema,
       parsed.original_query, maxOutputTokens);
   });

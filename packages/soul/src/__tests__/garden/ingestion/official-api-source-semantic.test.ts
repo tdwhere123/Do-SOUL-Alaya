@@ -340,7 +340,7 @@ describe("query and alignment proposal entry points", () => {
       const h = proposeSourceSemantics(source, { rawJson: interpretedJson(sourceRequest) }).interpretation!;
       const query = admittedQuery();
       const queryInput = { original_query: "which folio was accessioned into bay B?", producer_id: "query-producer", producer_version: "1" };
-      const alignmentInput = { admitted_q: query,
+      const alignmentInput = { original_query: "which folio was accessioned into bay B?", admitted_q: query,
         h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
         producer_id: "align-producer", producer_version: "1" };
       const preparedQuery = proposeQuerySemantics(queryInput);
@@ -406,7 +406,7 @@ describe("query and alignment proposal entry points", () => {
   it("rejects alignment outcome gaps rather than returning successful empty gaps", () => {
     const input = sourceInput(), request = buildSourceSemanticRequest(input);
     const h = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
-    const received = proposeAlignmentSemantics({ admitted_q: admittedQuery(),
+    const received = proposeAlignmentSemantics({ original_query: "which folio was accessioned into bay B?", admitted_q: admittedQuery(),
       h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
       producer_id: "align-producer", producer_version: "1",
       alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT }, { rawJson: JSON.stringify({
@@ -454,7 +454,7 @@ describe("query and alignment proposal entry points", () => {
   it("accepts admitted Q plus H descriptors and rejects ranking or seeds", () => {
     const input = sourceInput(), request = buildSourceSemanticRequest(input);
     const h = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
-    const alignmentInput = {
+    const alignmentInput = { original_query: "which folio was accessioned into bay B?",
       admitted_q: admittedQuery(),
       h_descriptors: [{
         h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h
@@ -462,6 +462,11 @@ describe("query and alignment proposal entry points", () => {
       producer_id: "align-producer", producer_version: "1"
     };
     const prepared = proposeAlignmentSemantics(alignmentInput);
+    expect(prepared.request.original_query).toBe(alignmentInput.original_query);
+    expect(() => proposeAlignmentSemantics({ ...alignmentInput,
+      original_query: "a different query" })).toThrow(/does not bind the original query/u);
+    expect(() => proposeAlignmentSemantics({ ...alignmentInput,
+      original_query: "" })).toThrow(/requires the original query/u);
     const predicate = prepared.request.catalog?.query_endpoints.find((row) => row.kind === "predicate");
     const frame = prepared.request.catalog?.source_endpoints.find((row) => row.kind === "frame");
     const received = proposeAlignmentSemantics(alignmentInput, {
@@ -481,7 +486,7 @@ describe("query and alignment proposal entry points", () => {
     expect(received.alignment?.correspondences).toHaveLength(1);
     expect(received.request.h_descriptors[0]!.interpretation.mentions.length).toBe(6);
     expect(received.request.h_descriptors[0]!.interpretation.frames[0]!.bindings.length).toBe(3);
-    expect(() => proposeAlignmentSemantics({
+    expect(() => proposeAlignmentSemantics({ original_query: "which folio was accessioned into bay B?",
       admitted_q: admittedQuery(),
       h_descriptors: [{ h_id: digest, source_id: "src", source_version: "1", frames: [] }],
       producer_id: "align-producer", producer_version: "1",

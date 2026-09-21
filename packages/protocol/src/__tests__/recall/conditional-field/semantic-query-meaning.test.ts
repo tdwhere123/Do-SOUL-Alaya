@@ -175,6 +175,18 @@ it("preserves universal and comparison evaluation on the canonical query", () =>
   ]);
 });
 
+it("generates universal evaluation without advertising unsupported nested forall", () => {
+  const body = meaning(statement("use", [
+    { role: "agent", target: { kind: "reference", key: "actor" } }
+  ]), { domains: [{ key: "people", excerpt: "people" }],
+    evaluation: { kind: "forall", domain: "people", binder: "actor", local_variables: ["actor"] } });
+  expect(SourceSemanticQueryMeaningGenerationSchema.safeParse(body).success).toBe(true);
+  expect(SourceSemanticQueryMeaningGenerationSchema.safeParse(meaning({
+    kind: "forall", domain: "people", binder: "actor",
+    content: statement("use", [])
+  })).success).toBe(false);
+});
+
 it("rejects nested forall rather than erase its domain and binder", () => {
   expect(() => compiled({ kind: "possible", content: {
     kind: "forall", domain: "people", binder: "actor",

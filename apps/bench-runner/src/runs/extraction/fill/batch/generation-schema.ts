@@ -9,12 +9,21 @@ const singlePositions = ["items", "additionalProperties", "contains", "not", "if
  * always retains the full schema, including when decoding uses JSON mode. */
 const GEMINI_STRUCTURED_SCHEMA_MAX_BYTES = 16 * 1024;
 
-const SCHEMA_INSTRUCTION =
+const ENVELOPE_SCHEMA_INSTRUCTION =
+  "Return JSON satisfying this complete local response schema. All required fields, kinds and operands remain mandatory; omitted or invalid expressions will be rejected. Return the complete response envelope including its contract, outcome and body, not the schema itself.\n";
+// Retained H request identities bind these exact bytes. Only Q/A envelopes use
+// the corrected instruction; historical source artifacts remain replayable.
+const SOURCE_SCHEMA_INSTRUCTION =
   "Return JSON satisfying this complete local response schema. All required fields, kinds and operands remain mandatory; omitted or invalid expressions will be rejected. Return the complete source interpretation, not the schema itself.\n";
 
 /** Provider decoding guidance is weaker than local admission, which keeps every required field. */
 export function projectGeminiGenerationSchema(schema: object): { schema?: object; recursive: boolean; instruction?: string } {
   const root = schema as Schema, recursiveReferences = new Map<string, boolean>();
+  const contract = record(record(root.properties)?.contract);
+  const values = Array.isArray(contract?.enum) ? contract.enum : [contract?.const];
+  const envelope = values.some(value => typeof value === "string"
+    && /^source-semantic-(query|alignment)-response-v[23]$/u.test(value));
+  const instruction = envelope ? ENVELOPE_SCHEMA_INSTRUCTION : SOURCE_SCHEMA_INSTRUCTION;
   const cycle = (value: unknown, visiting = new Set<string>()): boolean => {
     const node = record(value); if (node === undefined) return false;
     if (typeof node.$ref === "string") {
@@ -30,7 +39,7 @@ export function projectGeminiGenerationSchema(schema: object): { schema?: object
     }
     return schemaChildren(node).some(child => cycle(child, visiting));
   };
-  if (cycle(root)) return { recursive: true, instruction: SCHEMA_INSTRUCTION + JSON.stringify(schema) };
+  if (cycle(root)) return { recursive: true, instruction: instruction + JSON.stringify(schema) };
   const visit = (value: unknown): unknown => {
     const node = record(value); if (node === undefined) return value;
     return Object.fromEntries(Object.entries(node).filter(([key]) => key !== "maxItems").map(([key, child]) => {
@@ -45,7 +54,7 @@ export function projectGeminiGenerationSchema(schema: object): { schema?: object
   };
   const projected = visit(root) as object;
   if (Buffer.byteLength(JSON.stringify(projected)) > GEMINI_STRUCTURED_SCHEMA_MAX_BYTES) {
-    return { recursive: false, instruction: SCHEMA_INSTRUCTION + JSON.stringify(schema) };
+    return { recursive: false, instruction: instruction + JSON.stringify(schema) };
   }
   return { schema: projected, recursive: false };
 }

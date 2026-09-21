@@ -216,8 +216,8 @@ function withoutNecessaryAgentBinding(
   };
 }
 
-function receiveA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: string, extra: { correspondences?: unknown; domains?: unknown } = {}) {
-  const received = proposeAlignmentSemantics({
+function receiveA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: string, extra: { correspondences?: unknown; domains?: unknown } = {}, original_query = ORIGINAL) {
+  const received = proposeAlignmentSemantics({ original_query,
     admitted_q: q, h_descriptors: [{ h_id: hId, interpretation: h }],
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1",
     alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
@@ -344,7 +344,7 @@ it("preserves positive finite-domain and measured-comparison proofs through publ
       const q = receiveQ(FINITE_QUERY, { variables, alternatives, return_variables, gaps, domains, evaluation }).query;
       const a = finiteAlignment(published!.interpretation, q);
       const aligned = receiveA(q, published!.interpretation, published!.interpretation_id,
-        { correspondences: a.correspondences, domains: a.domains });
+        { correspondences: a.correspondences, domains: a.domains }, FINITE_QUERY);
       const forall = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, q, [aligned.alignment], budget);
       if (forall.operation !== "recall") throw new Error("native forall recall required");
       expect(forall.provider_attempts).toBe(0);
@@ -365,7 +365,7 @@ it("preserves positive finite-domain and measured-comparison proofs through publ
           source_endpoint: { kind: "referent", referent: `r${name}` },
           query_support: { kind: "query_text", excerpt: name }, source_semantic_support: []
         }))
-      });
+      }, FINITE_QUERY);
       const compared = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, comparison, [comparisonA.alignment], budget);
       if (compared.operation !== "recall") throw new Error("native comparison recall required");
       expect(compared.proofs).toHaveLength(1);
@@ -612,7 +612,7 @@ it("retrieves promised source evidence without minting a completed-event proof",
           gaps: []
         });
         const sendFrame = frameOf(published.interpretation, "send");
-        const receivedA = proposeAlignmentSemantics({
+        const receivedA = proposeAlignmentSemantics({ original_query: SENT,
           admitted_q: sendQ.query, h_descriptors: [{ h_id: published.interpretation_id, interpretation: published.interpretation }],
           producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1",
           alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT

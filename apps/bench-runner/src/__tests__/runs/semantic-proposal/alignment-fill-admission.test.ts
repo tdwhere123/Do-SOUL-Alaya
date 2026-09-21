@@ -177,7 +177,7 @@ async function fillAlignment(excerpt: string) {
   const line = materializeSemanticProposalLines(prepared, 128)[0]!;
   const request = line.request as SourceSemanticAlignmentRequest;
   const body = selectionBody(request, excerpt);
-  const received = proposeAlignmentSemantics({
+  const received = proposeAlignmentSemantics({ original_query: request.original_query,
     admitted_q: request.admitted_q,
     h_descriptors: request.h_descriptors,
     producer_id: request.producer_capability.producer_id,

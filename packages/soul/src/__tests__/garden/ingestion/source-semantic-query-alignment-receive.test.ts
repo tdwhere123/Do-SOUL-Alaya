@@ -137,7 +137,7 @@ function alignmentEnvelope(
   body: object,
   outcome: object = { status: "interpreted", gaps: [] }
 ) {
-  return proposeAlignmentSemantics({
+  return proposeAlignmentSemantics({ original_query: EXISTENTIAL,
     admitted_q: query, h_descriptors: descriptors, producer_id: "align-producer", producer_version: "1",
     alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
   }, {
@@ -432,6 +432,7 @@ describe("query and alignment generation schemas", () => {
     expect(alignment).toContain("source-semantic-alignment-selection-v1");
     expect(alignment).toContain("membership_assumptions");
     expect(alignment).not.toContain("q_id");
+    expect(alignment).not.toContain('"gaps"');
     expect(Buffer.byteLength(query)).toBeLessThan(24 * 1024);
     expect(Buffer.byteLength(alignment)).toBeLessThan(24 * 1024);
     const legacyQuery = JSON.stringify(sourceSemanticQueryResponseJsonSchema({
@@ -490,7 +491,7 @@ describe("query meaning receive and alignment selection", () => {
     const h = interpretation();
     const hId = sourceSemanticInterpretationIdentity(h, semanticSha256);
     const admitted = canonicalQuery(EXISTENTIAL, existentialBody());
-    const selected = proposeAlignmentSemantics({
+    const selected = proposeAlignmentSemantics({ original_query: EXISTENTIAL,
       admitted_q: admitted, h_descriptors: [{ h_id: hId, interpretation: h }],
       producer_id: "align-producer", producer_version: "1"
     });
@@ -498,7 +499,7 @@ describe("query meaning receive and alignment selection", () => {
     const frame = selected.request.catalog?.source_endpoints.find((row) => row.kind === "frame");
     expect(predicate).toBeDefined();
     expect(frame).toBeDefined();
-    const received = proposeAlignmentSemantics({
+    const received = proposeAlignmentSemantics({ original_query: EXISTENTIAL,
       admitted_q: admitted, h_descriptors: [{ h_id: hId, interpretation: h }],
       producer_id: "align-producer", producer_version: "1"
     }, {
@@ -519,7 +520,7 @@ describe("query meaning receive and alignment selection", () => {
       kind: "predicate", alternative: 0, frame: "qAccession"
     });
 
-    const legacy = proposeAlignmentSemantics({
+    const legacy = proposeAlignmentSemantics({ original_query: EXISTENTIAL,
       admitted_q: admitted, h_descriptors: [{ h_id: hId, interpretation: h }],
       producer_id: "align-producer", producer_version: "1",
       alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
@@ -548,7 +549,7 @@ describe("query meaning receive and alignment selection", () => {
     expect(query.query).toBeUndefined();
 
     const h = interpretation();
-    const alignment = proposeAlignmentSemantics({
+    const alignment = proposeAlignmentSemantics({ original_query: EXISTENTIAL,
       admitted_q: canonicalQuery(EXISTENTIAL, existentialBody()),
       h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
       producer_id: "align-producer", producer_version: "1"
@@ -558,7 +559,7 @@ describe("query meaning receive and alignment selection", () => {
         alignment: { correspondences: [] }
       })
     });
-    expect(alignment.request.contract).toBe("source-semantic-alignment-request-v3");
+    expect(alignment.request.contract).toBe("source-semantic-alignment-request-v4");
     expect(alignment.outcome.status).toBe("invalid");
     expect(alignment.alignment).toBeUndefined();
   });
