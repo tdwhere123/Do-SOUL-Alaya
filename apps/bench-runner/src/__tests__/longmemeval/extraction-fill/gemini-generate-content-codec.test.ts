@@ -35,6 +35,18 @@ describe("native Gemini generateContent codec", () => {
     ]))).rawJson).toBe('{"signals":[]}');
   });
 
+  it("keeps nonempty JSON when the stream reports MAX_TOKENS or omits STOP", () => {
+    const raw = '{"signals":[]}';
+    expect(decodeGeminiGenerateContent({
+      candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [{ text: raw }] } }],
+      usageMetadata: usage
+    }).rawJson).toBe(raw);
+    expect(decodeGeminiGenerateContent({
+      candidates: [{ content: { parts: [{ text: raw }] } }],
+      usageMetadata: usage
+    }).responseMetadata.finishReason).toBe("MAX_TOKENS");
+  });
+
   it("rejects thought-only STOP as empty model content", () => {
     expect(() => decodeGeminiGenerateContent({
       candidates: [{ finishReason: "STOP", content: { parts: [{ thought: true, text: "private" }] } }]

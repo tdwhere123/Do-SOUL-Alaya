@@ -107,19 +107,21 @@ function assembleGeminiStreamEvents(events: readonly unknown[]): unknown {
 export function decodeGeminiGenerateContent(value: unknown): {
   readonly rawJson: string;
   readonly usage?: { readonly inputTokens: number; readonly outputTokens: number; readonly totalTokens: number };
-  readonly responseMetadata: { readonly finishReason: "STOP"; readonly completionWitness: "finish_reason";
-    readonly completionContractVersion: 1 };
+  readonly responseMetadata: {
+    readonly finishReason: "STOP" | "MAX_TOKENS";
+    readonly completionWitness: "finish_reason";
+    readonly completionContractVersion: 1
+  };
 } {
   throwIfGeminiProviderError(value);
   const response = record(value);
   const candidates = response.candidates;
   if (!Array.isArray(candidates) || candidates.length !== 1) throw new Error("Gemini response requires one candidate");
   const candidate = record(candidates[0]);
-  if (candidate.finishReason !== "STOP") throw new Error("Gemini response is truncated or not complete");
-  const parts = record(candidate.content).parts;
-  if (!Array.isArray(parts) || parts.length === 0) throw new Error("Gemini response content missing");
+  const parts = candidate.content === undefined ? [] : record(candidate.content).parts;
+  if (candidate.content !== undefined && !Array.isArray(parts)) throw new Error("Gemini response content missing");
   const text: string[] = [];
-  for (const partValue of parts) {
+  for (const partValue of Array.isArray(parts) ? parts : []) {
     const part = record(partValue);
     if (part.thought === true) continue;
     if (typeof part.text !== "string") throw new Error("Gemini response has non-text output");
@@ -127,10 +129,15 @@ export function decodeGeminiGenerateContent(value: unknown): {
   }
   const rawJson = text.join("");
   if (!rawJson.trim()) throw new Error("Gemini response is empty");
+  const finishReason = candidate.finishReason === "STOP" ? "STOP" : "MAX_TOKENS";
+  if (candidate.finishReason !== "STOP" && candidate.finishReason !== "MAX_TOKENS" &&
+      candidate.finishReason !== undefined) {
+    throw new Error("Gemini response is truncated or not complete");
+  }
   const usage = geminiUsage(response);
   return {
     rawJson, ...(usage === undefined ? {} : { usage }),
-    responseMetadata: { finishReason: "STOP", completionWitness: "finish_reason", completionContractVersion: 1 }
+    responseMetadata: { finishReason, completionWitness: "finish_reason", completionContractVersion: 1 }
   };
 }
 

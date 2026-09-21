@@ -169,9 +169,13 @@ async function decodeGeminiResponse(response: Response, input: ExtractInput, att
   attempt.phase = "response_schema";
   attempt.kind = "response_schema_error";
   const decoded = decodeGeminiGenerateContent(value);
-  extractValidGardenHttpContent({ content: decoded.rawJson, finishReason: "STOP",
-    ...(decoded.usage === undefined ? {} : { usage: decoded.usage }) },
-  input.validateRawJson === undefined ? "default_envelope" : "caller_owned");
+  const validation = input.validateRawJson === undefined ? "default_envelope" : "caller_owned";
+  extractValidGardenHttpContent({
+    content: decoded.rawJson,
+    finishReason: validation === "caller_owned" ? "stop" :
+      decoded.responseMetadata.finishReason === "MAX_TOKENS" ? "length" : "stop",
+    ...(decoded.usage === undefined ? {} : { usage: decoded.usage })
+  }, validation);
   input.validateRawJson?.(decoded.rawJson);
   return { ...decoded, responseMetadata: {
     ...decoded.responseMetadata, maxOutputTokens: input.maxOutputTokens
