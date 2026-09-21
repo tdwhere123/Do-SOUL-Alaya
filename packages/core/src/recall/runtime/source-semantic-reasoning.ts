@@ -12,9 +12,9 @@ import { defaultView } from "../conditional-field/query/query-admission.js";
 import { admitSourceSemanticAlignment } from "../conditional-field/query/source-semantic-alignment-admission.js";
 import { compileSourceSemanticExecution } from "../conditional-field/query/compile-source-semantic-finite.js";
 import { observeField } from "./conditional-field-observe.js";
-import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
 import { compileSourceSemanticPremises, sourceSemanticReaders } from "./source-semantic-premises.js";
-import { deliverSourceSemanticProof } from "./source-semantic-delivery.js";
+import { traceSourceSemanticWithdrawals, type SourceSemanticWithdrawalTrace } from "./source-semantic-withdrawal.js";
+import { projectSourceSemanticState, type SourceSemanticResultBody as ResultBody } from "./source-semantic-projection.js";
 
 const BUDGET = { schema_version: 1 as const, work_units: 200000, memory_bytes: 20000000,
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 };
@@ -23,11 +23,13 @@ export type ReasonSourceSemanticInterpretationInput = Readonly<{
   workspaceId: string; scope: string; authorizedScopes: readonly string[] | null; asOf: string;
   sourceValidity?: Readonly<{ valid_from: string | null; valid_to: string | null }>;
   source_target?: SourceEvidenceTarget;
+  /** Offline causal diagnostics only; never enabled by normal recall. */
+  withdrawal_trial_limit?: number;
 }>;
-type ResultBody = Omit<SourceSemanticReasoningResult, "contract" | "semantic_status" | "conclusion_scope" | "world_claim">;
-type Prepared = Readonly<{ body: ResultBody; index: InformationIndex | null }>;
+type Prepared = Readonly<{ body: ResultBody; index: InformationIndex | null; withdrawal_trace?: SourceSemanticWithdrawalTrace }>;
 export type SourceSemanticInterpretationExecution = Readonly<{
   result: SourceSemanticReasoningResult; index: InformationIndex | null;
+  withdrawal_trace?: SourceSemanticWithdrawalTrace;
 }>;
 
 /** One budget and one fixed C; missing semantic preparation never calls a provider. */
@@ -42,6 +44,9 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
   const original = request?.original_query ?? input.original_query;
   let body: ResultBody;
   let index: InformationIndex | null = null;
+  let withdrawalTrace: SourceSemanticWithdrawalTrace | undefined;
+  if (input.withdrawal_trial_limit !== undefined && (!Number.isInteger(input.withdrawal_trial_limit)
+    || input.withdrawal_trial_limit < 1 || input.withdrawal_trial_limit > 64)) throw new CoreError("VALIDATION", "withdrawal trial limit must be 1..64");
   try {
     if (original === undefined || input.q === undefined || input.a === undefined) {
       const missing = input.q === undefined ? input.a === undefined ? "q_and_a" : "q" : "a";
@@ -50,13 +55,15 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
       meter.retain(input.h, "H admission"); meter.retain(input.q, "Q admission"); meter.retain(input.a, "A admission");
       const prepared = reasonPrepared(input, original, request, meter);
       body = prepared.body; index = prepared.index;
+      withdrawalTrace = prepared.withdrawal_trace;
     }
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     body = { outcome: { status: "resource_exhausted" }, consumed_leaves: [] }; index = null;
   }
   const result = finish({ ...body, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } }, request?.output_byte_limit);
-  return { result, index: result.outcome.status === "truncated" ? null : index };
+  return { result, index: result.outcome.status === "truncated" ? null : index,
+    ...(withdrawalTrace === undefined ? {} : { withdrawal_trace: withdrawalTrace }) };
 }
 
 function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original: string,
@@ -101,35 +108,25 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   const beforeProjection = Math.max(0, state.remaining_exploration + state.remaining_reserve);
   meter.charge(Math.max(0, remaining.work_units - beforeProjection), Math.max(0, remaining.memory_bytes - state.remaining_memory_bytes), "engine");
   if (state.binding.kind !== "bound") return { body: { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] }, index: null };
-  let afterProjection = beforeProjection;
-  const index = projectAcceptingIndex({ snapshot: state.binding.snapshot, view: query.view, query_id: query.query_id,
-    snapshot_id: snapshot, result_version: "source-interpretation-reasoning-v3",
-    budget: { ...remaining, work_units: state.remaining_exploration, memory_bytes: state.remaining_memory_bytes },
-    binding_contexts: state.binding_contexts,
-    selected_semantics: { h: admission.interpretation, context: admission.context, source_target: sourceTarget,
-      compiled_nodes: population.coordinates },
-    observer: { outcome: { schema_version: 1, status: state.closure.observation }, open_regions: state.residuals },
-    interpretation_status: query.status, resume_cursors: state.resume_cursors,
-    remaining_reserve: beforeProjection, on_remaining_reserve: (value) => { afterProjection = value; },
-    resource_work: state.memory_exhausted || state.remaining_work.length > 0 ? "open" : "complete",
-    transition_derivations: state.transition_derivations, grounding_progress: state.grounding_progress,
-    grounding_transitions: [...state.transitions], grounding_seeds: [...state.seeds], grounding_derivations: [...state.derivations],
-    derivations: [...state.derivations], projection_facets: [...state.facets], remaining_memory_bytes: state.remaining_memory_bytes });
-  meter.charge(Math.max(0, beforeProjection - afterProjection), 0, "index projection");
-  if (index.entries.some((entry) => entry.interpretation_node?.packet_id !== admission.interpretation_id || entry.hypothesis_id !== admission.context_id)) {
-    throw new CoreError("OBLIGATION_VIOLATION", "conditional result escaped its evaluation context");
-  }
-  const { proofComplete, ...proof } = deliverSourceSemanticProof({ index, query: admission.query, population,
-    bindings: state.binding_contexts, meter, execution });
-  const complete = proofComplete && state.binding.solver_complete && state.closure.observation === "exhausted"
-    && !state.memory_exhausted && state.remaining_work.length === 0 && index.continuation === null
-    && Object.entries(index.completeness).every(([key, value]) => ["schema_version", "certificate_id", "interpretation_coverage"].includes(key)
-      || value === "complete" || key === "observed_coverage" && value === "exhausted_empty");
-  return {
-    body: { ...qualified, ...proof, completeness: index.completeness,
-      outcome: complete ? { status: "interpreted", gaps: admission.interpretation.gaps } : { status: "resource_exhausted" } },
-    index
-  };
+  const prefixWork = meter.spentWork, prefixBytes = meter.spentBytes;
+  const projection = { remaining, query, snapshot, admission, population, execution, sourceTarget, qualified };
+  const baseline = projectSourceSemanticState({ ...projection, state, meter });
+  if (input.withdrawal_trial_limit === undefined) return baseline;
+  const withdrawal_trace = traceSourceSemanticWithdrawals({ state, origins: population.origins,
+    prefix_resource_usage: { work_units: prefixWork, memory_bytes: prefixBytes },
+    baseline: finish(baseline.body), limit: input.withdrawal_trial_limit, project: (withdrawn) => {
+      const trialMeter = new SourceSemanticResourceLedger(request?.budget ?? BUDGET);
+      let trial: ResultBody;
+      try {
+        trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
+        trial = projectSourceSemanticState({ ...projection, state: withdrawn, meter: trialMeter }).body;
+      } catch (error) {
+        if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+        trial = { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] };
+      }
+      return finish({ ...trial, resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, request?.output_byte_limit);
+    } });
+  return { ...baseline, withdrawal_trace };
 }
 
 function invalid(reason: string): ResultBody { return { outcome: { status: "invalid", reason }, consumed_leaves: [] }; }

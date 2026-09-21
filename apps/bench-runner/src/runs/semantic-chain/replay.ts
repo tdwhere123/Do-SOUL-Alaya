@@ -3,7 +3,6 @@ import { z } from "zod";
 import { canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SourceSemanticAlignment } from "@do-soul/alaya-protocol";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
-import { readSemanticProposalResults } from "../semantic-proposal/fill.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../measurement/source-semantic-library-recall.js";
 import { measureSourceSemanticLibraryResponse } from "../measurement/source-semantic-library-measurement.js";
@@ -12,27 +11,14 @@ import { FirstExposurePageSchema } from "../measurement/first-exposure-session.j
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainArtifact,
   assertChainSnapshot, withSemanticChainDaemon } from "./contract.js";
 import type { SourceSemanticAlignmentRequest } from "@do-soul/alaya-soul";
+import { readSemanticChainAlignments, verifySemanticChainQueries } from "./inputs.js";
 
 export async function replaySemanticChain(root: string, arm: "retained" | "without_alignments" = "retained") {
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(root, "prepare.json")));
   const config = plan.config;
   assertChainSnapshot(config);
-  const queries = readSemanticProposalResults(config.query_workset, config.query_cache_root, config.max_output_tokens);
-  const currentIdentity = chainIdentity({ config, queries: queries.map((row) => ({
-    key: row.line.key, raw: row.shard?.raw_digest ?? null, status: row.status
-  })) });
-  if (currentIdentity !== plan.input_identity) throw new Error("prepared Q state changed before native replay");
-  for (const row of plan.queries) {
-    const current = queries.find((query) => query.line.key === row.query_key);
-    if ((current?.shard?.raw_digest ?? null) !== row.raw_digest ||
-        row.status === "ready" && (current?.received === undefined || !("query" in current.received) ||
-        canonicalJson(current.received.query) !== canonicalJson(row.q))) throw new Error("prepared Q changed before native replay");
-  }
-  const alignments = plan.alignment_workset === null ? [] : readSemanticProposalResults(
-    plan.alignment_workset, config.alignment_cache_root, config.max_output_tokens);
-  const identity = chainIdentity({ plan, arm, alignments: alignments.map((row) => ({
-    key: row.line.key, raw: row.shard?.raw_digest ?? null, status: row.status
-  })) });
+  verifySemanticChainQueries(plan);
+  const { alignments, identity } = readSemanticChainAlignments(plan, arm);
   const output = join(root, `replay-${identity}.json`);
   return withSnapshotPublishLock(output, async () => {
     const retained = readChainArtifact(output);

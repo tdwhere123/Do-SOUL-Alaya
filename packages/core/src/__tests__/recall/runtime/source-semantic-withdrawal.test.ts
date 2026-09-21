@@ -9,6 +9,33 @@ import { compileSourceSemanticPremises, sourceSemanticReaders } from "../../../r
 import { observeField } from "../../../recall/runtime/conditional-field-observe.js";
 import { withdrawDerivationLeaves, type FieldEngineState } from "../../../recall/conditional-field/engine/field-engine.js";
 import { parseBindingContext } from "../../../recall/conditional-field/engine/binding-environment.js";
+import { executeSourceSemanticInterpretation } from "../../../recall/runtime/source-semantic-reasoning.js";
+
+it("records bounded same-compilation H/A withdrawals through the maintained execution owner", () => {
+  const original_query = "who uses which tools?", h = source(), q = query(original_query, false), a = align(h, q, false);
+  const input = { h, q, a, original_query, workspaceId: "ws", scope: "project", authorizedScopes: ["project"], asOf: CLOCK };
+  const normal = executeSourceSemanticInterpretation(input);
+  expect(normal.withdrawal_trace).toBeUndefined();
+  const diagnostic = executeSourceSemanticInterpretation({ ...input, withdrawal_trial_limit: 64 });
+  expect(diagnostic.result).toEqual(normal.result);
+  const trace = diagnostic.withdrawal_trace!;
+  expect(trace.derivations.length).toBeGreaterThan(0);
+  expect(trace.unattempted).toBe(0);
+  expect(trace.prefix_resource_usage.work_units).toBeGreaterThan(0);
+  for (const kind of ["h_binding", "a_predicate"]) {
+    const arm = trace.arms.find((row) => row.leaf.leaf_kind === kind && row.leaf.occurrence === "fAlice");
+    expect(arm).toBeDefined();
+    expect(arm!.result.outcome.status).toBe("interpreted");
+    expect(arm!.result.c_id).toBe(diagnostic.result.c_id);
+    expect(arm!.result.answers?.map((answer) => answer.returned.tools?.node_id)).toEqual(["rY"]);
+    expect(arm!.independent_answer_bindings).toHaveLength(1);
+    expect(arm!.independent_proofs_preserved).toBe(true);
+    expect(arm!.result.resource_usage!.work_units).toBeGreaterThanOrEqual(trace.prefix_resource_usage.work_units);
+  }
+  const bounded = executeSourceSemanticInterpretation({ ...input, withdrawal_trial_limit: 1 }).withdrawal_trace!;
+  expect(bounded.arms).toHaveLength(1);
+  expect(bounded.unattempted).toBeGreaterThan(0);
+});
 
 it("withdraws actual H and A leaves in a fixed C while preserving an independent proof", () => {
   const text = "who uses which tools?", h = source(), q = query(text, false), a = align(h, q, false);

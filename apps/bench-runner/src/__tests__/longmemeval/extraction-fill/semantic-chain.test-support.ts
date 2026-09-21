@@ -11,7 +11,8 @@ import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../r
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
 import { replaySemanticChain, measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
-import { readChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { interveneSemanticChain } from "../../../runs/semantic-chain/intervene.js";
+import { readChainArtifact, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
 
 export async function assertNativeSemanticChain(cacheRoot: string): Promise<void> {
   const queryWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v1",
@@ -33,6 +34,9 @@ export async function assertNativeSemanticChain(cacheRoot: string): Promise<void
   expect(blocked.alignment_workset).toBeNull();
   expect(existsSync(join(blockedRoot, "alignment-workset.json"))).toBe(false);
   const blockedReplay = await replaySemanticChain(blockedRoot);
+  const blockedWithdrawal = interveneSemanticChain(blockedRoot, blockedReplay.path);
+  expect((readChainArtifact(blockedWithdrawal.path) as { rows: { status: string }[] }).rows
+    .every((row) => row.status === "not_exercised")).toBe(true);
   expect(blockedReplay.result).toMatchObject({ provider_calls: 0, rows: [{ status: "blocked" }, { status: "blocked" }] });
   expect(() => measureSemanticChain(blockedRoot, blockedReplay.path, [])).toThrow(/per-query gold/u);
   const measured = measureSemanticChain(blockedRoot, blockedReplay.path,
@@ -104,6 +108,20 @@ export async function assertNativeSemanticChain(cacheRoot: string): Promise<void
   if (proof.operation !== "recall") throw new Error("wrong native response");
   expect(proof.proofs?.length).toBeGreaterThan(0);
   expect(proof.index?.as_of).toBe(config.interpretation_clock);
+  const intervention = interveneSemanticChain(root, proofReplay.path, 32);
+  const diagnostic = readChainArtifact(intervention.path) as {
+    provider_calls: number; rows: { status: string; effects: { leaf_kind: string; removed_answers: string[] | null }[] }[]
+  };
+  expect(diagnostic.provider_calls).toBe(0);
+  expect(diagnostic.rows[0]!.status).toBe("diagnosed");
+  for (const family of ["h_", "a_"]) expect(diagnostic.rows[0]!.effects.some((arm) =>
+    arm.leaf_kind.startsWith(family) && (arm.removed_answers?.length ?? 0) > 0)).toBe(true);
+  expect(interveneSemanticChain(root, proofReplay.path, 32)).toEqual(intervention);
+  for (const [name, rows] of [["missing", []], ["duplicate", [...proofPayload.rows, proofPayload.rows[0]]]] as const) {
+    const invalidPath = join(root, `invalid-${name}-replay.json`);
+    writeChainArtifact(invalidPath, { ...proofPayload, rows });
+    expect(() => interveneSemanticChain(root, invalidPath)).toThrow(/exact query denominator/u);
+  }
   const control = await replaySemanticChain(root, "without_alignments");
   const controlPayload = readChainArtifact(control.path) as { rows: { response?: unknown }[] };
   const without = SoulInterpretationResponseSchema.parse(controlPayload.rows[0]!.response);

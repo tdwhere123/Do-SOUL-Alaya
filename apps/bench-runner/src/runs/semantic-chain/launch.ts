@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prepareSemanticChain } from "./prepare.js";
 import { replaySemanticChain, measureSemanticChain } from "./replay.js";
+import { interveneSemanticChain } from "./intervene.js";
 import { prepareSourcePublicationAssociations } from "../snapshot/source-records/prepare-associations.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
@@ -10,7 +11,7 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
   try {
     const [operation, ...rest] = args;
     const flags = new Map<string, string>();
-    const allowed = new Set(["--root", "--config", "--replay", "--gold", "--arm", "--preflight", "--out"]);
+    const allowed = new Set(["--root", "--config", "--replay", "--gold", "--arm", "--preflight", "--out", "--leaf-trials"]);
     for (let index = 0; index < rest.length; index += 2) {
       const key = rest[index]!, value = rest[index + 1];
       if (!allowed.has(key) || flags.has(key) || value === undefined) throw new Error("invalid semantic chain arguments");
@@ -24,6 +25,8 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
     else if (operation === "replay") result = await replaySemanticChain(required("--root"),
       z.enum(["retained", "without_alignments"]).parse(flags.get("--arm") ?? "retained"));
     else if (operation === "measure") result = measureSemanticChain(required("--root"), required("--replay"), json(required("--gold")));
+    else if (operation === "intervene") result = interveneSemanticChain(required("--root"), required("--replay"),
+      Number(flags.get("--leaf-trials") ?? "32"));
     else if (operation === "associate") {
       const population = z.object({ name: z.string(), dataDir: z.string(), pinnedMetaRoot: z.string(),
         cacheRoot: z.string(), model: z.string(), requestProfile: z.string().refine(isExtractionRequestProfile)
@@ -31,7 +34,7 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
       if (!isExtractionRequestProfile(population.requestProfile)) throw new Error("unsupported extraction request profile");
       result = await prepareSourcePublicationAssociations({ ...population, requestProfile: population.requestProfile },
         required("--preflight"), required("--out"));
-    } else throw new Error("expected prepare, replay, measure, or associate");
+    } else throw new Error("expected prepare, replay, measure, intervene, or associate");
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return 0;
   } catch (error) {

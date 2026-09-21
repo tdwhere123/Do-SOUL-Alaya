@@ -107,6 +107,8 @@ node apps/bench-runner/dist/runs/semantic-chain/launch.js replay \
   --root .do-it/bench-runs/semantic-chain --arm retained
 node apps/bench-runner/dist/runs/semantic-chain/launch.js measure \
   --root .do-it/bench-runs/semantic-chain --replay REPLAY_PATH --gold query-gold.json
+node apps/bench-runner/dist/runs/semantic-chain/launch.js intervene \
+  --root .do-it/bench-runs/semantic-chain --replay REPLAY_PATH --leaf-trials 32
 ```
 
 Population configuration contains `name`, `dataDir`, `pinnedMetaRoot`,
@@ -117,6 +119,15 @@ the intended request set, including an earlier complete preflight when the
 last fill contains only remaining requests. Associations are new host
 publication decisions, not historical source-origin or completion witnesses.
 Historical templates incompatible with the current request owner fail closed.
+
+`intervene` verifies the frozen snapshot and retained native proof identities, then
+runs a new offline Core compilation. Its bounded H/A withdrawal arms all start
+from that execution's same observed state and reuse the normal projection/delivery
+owners. It retains the original derivation graph, leaf origins, before/after proof
+results and answer differences. This is not the original MCP process's in-memory
+state or another first exposure. Missing native proofs remain `not_exercised`;
+baseline mismatch and resource failure do not establish a causal effect. The
+existing `without_alignments` replay remains a separate recompilation control.
 
 The [chain configuration schema](src/runs/semantic-chain/contract.ts) requires
 the frozen snapshot path/digest, current extraction-authority implementation
