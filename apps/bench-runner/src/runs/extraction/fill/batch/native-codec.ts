@@ -123,7 +123,7 @@ export function decodeGeminiGenerateContent(value: unknown): {
   const text: string[] = [];
   for (const partValue of Array.isArray(parts) ? parts : []) {
     const part = record(partValue);
-    if (part.thought === true) continue;
+    if (part.thought === true || part.text === undefined) continue;
     if (typeof part.text !== "string") throw new Error("Gemini response has non-text output");
     text.push(part.text);
   }

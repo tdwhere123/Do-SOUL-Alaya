@@ -35,6 +35,15 @@ describe("native Gemini generateContent codec", () => {
     ]))).rawJson).toBe('{"signals":[]}');
   });
 
+  it("skips thought-signature parts that have no text", () => {
+    expect(decodeGeminiGenerateContent({
+      candidates: [{ finishReason: "STOP", content: { parts: [
+        { thoughtSignature: "sig" },
+        { text: '{"signals":[]}' }
+      ] } }]
+    }).rawJson).toBe('{"signals":[]}');
+  });
+
   it("keeps nonempty JSON when the stream reports MAX_TOKENS or omits STOP", () => {
     const raw = '{"signals":[]}';
     expect(decodeGeminiGenerateContent({
