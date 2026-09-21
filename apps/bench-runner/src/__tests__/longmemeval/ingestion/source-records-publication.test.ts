@@ -12,9 +12,9 @@ import { restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js"
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { runSourceSemanticPublicationLauncher } from "../../../runs/snapshot/source-records/launch-publication.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
-import { freezeLongMemEvalSemanticDevelopment } from "../../../runs/longmemeval-semantic/freeze.js";
-import { prepareLongMemEvalSemanticDevelopment, replayLongMemEvalSemanticDevelopment } from "../../../runs/longmemeval-semantic/execute.js";
-import { measureLongMemEvalSemanticDevelopment } from "../../../runs/longmemeval-semantic/measure.js";
+import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
+import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/execute.js";
+import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { chainIdentity } from "../../../runs/semantic-chain/contract.js";
@@ -61,7 +61,7 @@ describe("complete-source census and publication", () => {
     const f = await fixture(false, true);
     const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
     const root = join(f.root, "development"), queryCache = join(f.root, "query-cache");
-    const frozen = await freezeLongMemEvalSemanticDevelopment({ data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot,
+    const frozen = await freezeLongMemEvalSemanticRun({ data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot,
       dataset_sha256: census.dataset_sha256, dataset_question_count: 3, question_ids: ["mixed-roles", "absent-h_abs"],
       model: "gemini-2.5-flash-lite", request_profile: "gemini-2.5-nonthinking-v1", query_cache_root: queryCache,
       recorded_at: CLOCK, producer_commit: "a".repeat(40), max_output_tokens: 4096, output_byte_limit: 1000000,
@@ -70,14 +70,14 @@ describe("complete-source census and publication", () => {
     expect(frozen.selected.map((row) => row.source_manifest.length)).toEqual([1, 1]);
     expect(frozen.selected.every((row) => row.interpretation_clock === AS_OF)).toBe(true);
     expect(JSON.stringify(frozen)).not.toContain("excluded gold");
-    const blocked = await prepareLongMemEvalSemanticDevelopment(root);
-    const blockedReplay = await replayLongMemEvalSemanticDevelopment(root, blocked.path);
-    const blockedMeasurement = await measureLongMemEvalSemanticDevelopment(root, blockedReplay.path);
+    const blocked = await prepareLongMemEvalSemanticRun(root);
+    const blockedReplay = await replayLongMemEvalSemanticRun(root, blocked.path);
+    const blockedMeasurement = await measureLongMemEvalSemanticRun(root, blockedReplay.path);
     expect(blockedMeasurement.result.primary).toMatchObject({ eligible: 1, unknown: 1, lower_bound: 0, upper_bound: 1 });
     const published = blocked.result.rows[0]!;
     if (published.status !== "prepared") throw new Error("question publication required");
     unlinkSync(published.publication_path);
-    expect((await prepareLongMemEvalSemanticDevelopment(root)).result).toEqual(blocked.result);
+    expect((await prepareLongMemEvalSemanticRun(root)).result).toEqual(blocked.result);
     const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(frozen.query_workset, queryCache, 4096),
       inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
     const filled = await executeSemanticProposalFill({ workset: frozen.query_workset, cacheRoot: queryCache, authority,
@@ -88,11 +88,11 @@ describe("complete-source census and publication", () => {
         } }], return: ["theme"], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
     expect(filled.newly_admitted).toBe(2);
-    const prepared = await prepareLongMemEvalSemanticDevelopment(root);
+    const prepared = await prepareLongMemEvalSemanticRun(root);
     expect(prepared.result.rows.every((row) => row.status === "prepared")).toBe(true);
-    const replayed = await replayLongMemEvalSemanticDevelopment(root, prepared.path);
-    expect(await replayLongMemEvalSemanticDevelopment(root, prepared.path)).toEqual(replayed);
-    const measured = await measureLongMemEvalSemanticDevelopment(root, replayed.path);
+    const replayed = await replayLongMemEvalSemanticRun(root, prepared.path);
+    expect(await replayLongMemEvalSemanticRun(root, prepared.path)).toEqual(replayed);
+    const measured = await measureLongMemEvalSemanticRun(root, replayed.path);
     expect(measured.result.inventory).toEqual({ questions: 3, answerable: 2, abstention: 1 });
     expect(measured.result.primary).toMatchObject({ eligible: 1, hits: 1, misses: 0, unknown: 0, target_decision: "development_only" });
     expect(measured.result.rows).toHaveLength(3);
@@ -102,10 +102,26 @@ describe("complete-source census and publication", () => {
     const changed = JSON.parse(receipt).payload;
     changed.sources[0].record_id = "foreign-root";
     writeFileSync(published.publication_path, JSON.stringify({ identity: chainIdentity(changed), payload: changed }));
-    const unavailable = await measureLongMemEvalSemanticDevelopment(root, replayed.path);
+    const unavailable = await measureLongMemEvalSemanticRun(root, replayed.path);
     expect(unavailable.result.primary).toMatchObject({ eligible: 1, hits: 0, unknown: 1 });
     expect(unavailable.result.rows.find((row) => row.question_id === "mixed-roles")?.reason).toMatch(/publication changed/u);
     writeFileSync(published.publication_path, receipt);
+    const formalRoot = join(f.root, "formal");
+    await expect(freezeLongMemEvalSemanticRun({ ...frozen.config, stage: "formal",
+      previously_exposed_question_ids: [] }, formalRoot)).rejects.toThrow(/entire original dataset/u);
+    const formal = await freezeLongMemEvalSemanticRun({ ...frozen.config, stage: "formal",
+      previously_exposed_question_ids: ["mixed-roles"],
+      question_ids: frozen.inventory.map(row => row.question_id), query_cache_root: join(f.root, "formal-empty-cache") }, formalRoot);
+    expect(formal.exposure).toBe("formal_with_recorded_development_exposure");
+    const formalPrepared = await prepareLongMemEvalSemanticRun(formalRoot);
+    const formalReplay = await replayLongMemEvalSemanticRun(formalRoot, formalPrepared.path);
+    const formalMeasurement = await measureLongMemEvalSemanticRun(formalRoot, formalReplay.path);
+    expect(formalMeasurement.result.primary).toMatchObject({ eligible: 2, hits: 0, unknown: 2, target_decision: "unresolved" });
+    expect(formalMeasurement.result.formal_target).toMatchObject({ eligible: 2, strict_over_90_required_hits: 2,
+      status: "unresolved", additional_confirmed_hits_needed: 2 });
+    expect(formalMeasurement.result.rows.filter(row => row.prior_development_exposure).map(row => row.question_id)).toEqual(["mixed-roles"]);
+    expect(formalMeasurement.result.rows.filter(row => row.cohort === "answerable")
+      .every(row => row.attribution.layer === "query_unavailable")).toBe(true);
   }, 60000);
 
   it("rejects invalid or repeated publication associations before creating the snapshot", async () => {

@@ -51,6 +51,7 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
           throw new Error("native first exposure is unresolved after interruption; retained reservation forbids re-exposure");
         }
         writeChainArtifact(reservation, { replay_identity: identity, query_key: query.query_key });
+        const started = performance.now();
         const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
           SoulInterpretationRequestSchema.parse({ operation: "recall", original_query: query.original_query, q: query.q,
             alignments: arm === "retained" ? ready : [], accepts_unreviewed_conditional_results: true,
@@ -59,7 +60,7 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
         const exposure = response.index === undefined || response.delivery_id === undefined ? null
           : recordSourceSemanticLibraryFirstExposure(response);
         const row = { query_key: query.query_key, status: exposure === null ? "native_unavailable" : "replayed",
-          alignment_outcomes: outcomes, response, first_exposure: exposure };
+          alignment_outcomes: outcomes, response, first_exposure: exposure, native_elapsed_ms: performance.now() - started };
         writeChainArtifact(rowPath, row); rows.push(row);
       }
     });
@@ -75,6 +76,7 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
   const replay = z.object({ contract: z.literal("source-semantic-chain-replay-v1"),
     plan_identity: z.string(), identity: z.string(), rows: z.array(z.object({
       query_key: z.string(), status: z.enum(["blocked", "replayed", "native_unavailable"]),
+      reason: z.string().optional(), native_elapsed_ms: z.number().nonnegative().optional(),
       response: SoulInterpretationResponseSchema.optional(), first_exposure: FirstExposurePageSchema.nullable().optional()
     }).passthrough()) }).passthrough().parse(readChainArtifact(replayPath));
   if (replay.contract !== "source-semantic-chain-replay-v1" || replay.plan_identity !== chainIdentity(plan)) {
@@ -87,6 +89,12 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
     throw new Error("measurement requires exact per-query gold and replay denominator coverage");
   }
   const rows = replay.rows.map((row) => ({ query_key: row.query_key, status: row.status,
+    reason: row.reason ?? null,
+    diagnostics: row.response?.operation === "recall" ? {
+      discovery: row.response.discovery, coverage: row.response.coverage, work: row.response.work,
+      delivered_results: row.response.results?.length ?? 0, delivered_proofs: row.response.proofs?.length ?? 0,
+      native_elapsed_ms: row.native_elapsed_ms ?? null
+    } : null,
     measurement: row.first_exposure == null ? null : measureSourceSemanticLibraryResponse({
       recallResult: row.response, firstExposurePage: row.first_exposure,
       requestBudget: plan.config.budget, goldSourceUnits: gold.find((entry) => entry.query_key === row.query_key)!.source_units

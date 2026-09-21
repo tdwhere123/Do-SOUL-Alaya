@@ -9,31 +9,31 @@ import { publishSourceSemanticSnapshot } from "../snapshot/source-records/publis
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
-import { assertDevelopmentRows, loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze,
+import { assertLongMemEvalSemanticRows, loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze,
   type LongMemEvalSemanticFreeze } from "./contract.js";
 
-export const DevelopmentPublicationSchema = z.object({ workspace_id: z.string(), run_id: z.string(), recorded_at: z.string(),
+export const LongMemEvalPublicationSchema = z.object({ workspace_id: z.string(), run_id: z.string(), recorded_at: z.string(),
   snapshot_path: z.string(), db_sha256: z.string(), census_count: z.number(), admitted_count: z.number(), published_count: z.literal(0),
   sources: z.array(z.object({ question_id: z.string(), session_id: z.string(), source_id: z.string(), source_version: z.string(),
     content_digest: z.string(), corpus_digest: z.string(), admission: z.enum(["admitted", "rejected"]), record_id: z.string().optional()
   }).passthrough())
 }).passthrough();
 const Unavailable = z.object({ question_id: z.string(), status: z.literal("unavailable"), reason: z.string() }).strict();
-export const DevelopmentPreparedSchema = z.object({ contract: z.literal("longmemeval-semantic-prepared-v1"),
+export const LongMemEvalPreparedSchema = z.object({ contract: z.literal("longmemeval-semantic-prepared-v1"),
   freeze_identity: z.string(), rows: z.array(z.discriminatedUnion("status", [Unavailable,
     z.object({ question_id: z.string(), status: z.literal("prepared"), chain_root: z.string(), publication_path: z.string(), publication_identity: z.string() }).strict()
   ])) }).strict();
-export const DevelopmentReplaySchema = z.object({ contract: z.literal("longmemeval-semantic-replay-v1"),
+export const LongMemEvalReplaySchema = z.object({ contract: z.literal("longmemeval-semantic-replay-v1"),
   freeze_identity: z.string(), prepared_identity: z.string(), provider_calls: z.literal(0),
   rows: z.array(z.discriminatedUnion("status", [Unavailable,
     z.object({ question_id: z.string(), status: z.literal("replayed"), chain_root: z.string(), publication_path: z.string(), publication_identity: z.string(), replay_path: z.string() }).strict()
   ])) }).strict();
 
-export async function prepareLongMemEvalSemanticDevelopment(root: string) {
+export async function prepareLongMemEvalSemanticRun(root: string) {
   const frozen = readLongMemEvalSemanticFreeze(root);
   await loadFrozenLongMemEvalDataset(frozen.config);
   const results = readSemanticProposalResults(frozen.query_workset, frozen.config.query_cache_root, frozen.config.max_output_tokens);
-  const rows: z.infer<typeof DevelopmentPreparedSchema>["rows"] = [];
+  const rows: z.infer<typeof LongMemEvalPreparedSchema>["rows"] = [];
   for (const [index, selected] of frozen.selected.entries()) {
     try {
       const directory = resolve(root, "questions", String(selected.index).padStart(5, "0"));
@@ -54,7 +54,7 @@ export async function prepareLongMemEvalSemanticDevelopment(root: string) {
         publication_path: publicationPath, publication_identity: chainIdentity(publication) });
     } catch (error) { rows.push({ question_id: selected.question_id, status: "unavailable", reason: error instanceof Error ? error.message : String(error) }); }
   }
-  const result = DevelopmentPreparedSchema.parse({ contract: "longmemeval-semantic-prepared-v1", freeze_identity: chainIdentity(frozen), rows });
+  const result = LongMemEvalPreparedSchema.parse({ contract: "longmemeval-semantic-prepared-v1", freeze_identity: chainIdentity(frozen), rows });
   const path = join(root, `prepared-${chainIdentity(result)}.json`);
   writeChainArtifact(path, result); return { path, result };
 }
@@ -78,17 +78,17 @@ async function publishQuestion(frozen: LongMemEvalSemanticFreeze, selected: Long
         questionWindow: { offset: selected.index, limit: 1 }, model: config.model, requestProfile: config.request_profile }] });
     }
   }
-  const report = verifyDevelopmentQuestionPublication(frozen, selected, directory, retained);
+  const report = verifyLongMemEvalQuestionPublication(frozen, selected, directory, retained);
   writeChainArtifact(publicationPath, retained);
   return report;
 }
 
 /** Both preparation and evaluator joins must bind the exact original question inventory. */
-export function verifyDevelopmentQuestionPublication(frozen: LongMemEvalSemanticFreeze,
+export function verifyLongMemEvalQuestionPublication(frozen: LongMemEvalSemanticFreeze,
   selected: LongMemEvalSemanticFreeze["selected"][number], directory: string, value: unknown) {
   const { config } = frozen;
   const snapshotPath = join(directory, "library.sqlite");
-  const report = DevelopmentPublicationSchema.parse(value);
+  const report = LongMemEvalPublicationSchema.parse(value);
   if (report.snapshot_path !== snapshotPath || report.recorded_at !== config.recorded_at
     || report.workspace_id !== `longmemeval-semantic-${selected.index}`
     || report.run_id !== `longmemeval-semantic-${selected.index}`) throw new Error("question publication identity changed");
@@ -100,12 +100,12 @@ export function verifyDevelopmentQuestionPublication(frozen: LongMemEvalSemantic
   return report;
 }
 
-export async function replayLongMemEvalSemanticDevelopment(root: string, preparedPath: string) {
+export async function replayLongMemEvalSemanticRun(root: string, preparedPath: string) {
   const frozen = readLongMemEvalSemanticFreeze(root);
-  const prepared = DevelopmentPreparedSchema.parse(readChainArtifact(preparedPath));
+  const prepared = LongMemEvalPreparedSchema.parse(readChainArtifact(preparedPath));
   if (prepared.freeze_identity !== chainIdentity(frozen)) throw new Error("prepared development run binds another freeze");
-  assertDevelopmentRows(frozen, prepared.rows);
-  const rows: z.infer<typeof DevelopmentReplaySchema>["rows"] = [];
+  assertLongMemEvalSemanticRows(frozen, prepared.rows);
+  const rows: z.infer<typeof LongMemEvalReplaySchema>["rows"] = [];
   for (const row of prepared.rows) {
     if (row.status === "unavailable") { rows.push(row); continue; }
     try {
@@ -113,7 +113,7 @@ export async function replayLongMemEvalSemanticDevelopment(root: string, prepare
       rows.push({ ...row, status: "replayed", replay_path: replay.path });
     } catch (error) { rows.push({ question_id: row.question_id, status: "unavailable", reason: error instanceof Error ? error.message : String(error) }); }
   }
-  const result = DevelopmentReplaySchema.parse({ contract: "longmemeval-semantic-replay-v1", freeze_identity: chainIdentity(frozen),
+  const result = LongMemEvalReplaySchema.parse({ contract: "longmemeval-semantic-replay-v1", freeze_identity: chainIdentity(frozen),
     prepared_identity: chainIdentity(prepared), provider_calls: 0, rows });
   const path = join(root, `replay-${chainIdentity(result)}.json`);
   writeChainArtifact(path, result); return { path, result };

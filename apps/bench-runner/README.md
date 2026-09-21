@@ -132,7 +132,7 @@ existing `without_alignments` replay remains a separate recompilation control.
 For a bounded LongMemEval-S source-only development baseline, use the maintained
 entry below. Its [configuration](src/runs/longmemeval-semantic/contract.ts) requires
 the original dataset directory, pinned metadata directory, SHA-256 and question
-count, 1–20 original question IDs, model/profile, Q cache root, recorded timestamp,
+count, 1–50 development question IDs, model/profile, Q cache root, recorded timestamp,
 producer commit, native budget and output limits. It never rewrites a dataset or
 dispatches a provider. `freeze` emits `query-workset.json` for the separately
 authorized existing semantic-proposal fill lane. Original question text is retained;
@@ -157,6 +157,15 @@ including unselected questions, and distinguish development bounds from the unru
 formal target. This source-only baseline does not establish semantic mechanism
 benefit or formal 500-question success. Completed publication reports recover a
 missing orchestration receipt; incomplete publication or exposure fails closed.
+
+Use `stage: "formal"` only with every original dataset question ID and an explicit
+`previously_exposed_question_ids` list. A partial formal selection is rejected,
+including omission of abstention rows. Formal reports record prior exposure per
+question and decide the strict target from confirmed-hit/unknown bounds; they do
+not label reused development questions as a holdout. Development remains the
+default and cannot issue a formal target decision. Per-row diagnostics retain
+query failures, source/H/A discovery, native work/memory, payload coverage and
+measured native call latency when available.
 
 The [chain configuration schema](src/runs/semantic-chain/contract.ts) requires
 the frozen snapshot path/digest, current extraction-authority implementation

@@ -1,9 +1,9 @@
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
-import { freezeLongMemEvalSemanticDevelopment } from "./freeze.js";
-import { prepareLongMemEvalSemanticDevelopment, replayLongMemEvalSemanticDevelopment } from "./execute.js";
-import { measureLongMemEvalSemanticDevelopment } from "./measure.js";
+import { freezeLongMemEvalSemanticRun } from "./freeze.js";
+import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun } from "./execute.js";
+import { measureLongMemEvalSemanticRun } from "./measure.js";
 
-/** Bounded development orchestration only. The existing paid fill lane owns any provider execution. */
+/** Frozen dataset orchestration. The existing paid fill lane owns any provider execution. */
 export async function runLongMemEvalSemanticLauncher(args: readonly string[]): Promise<number> {
   try {
     const [operation, ...rest] = args;
@@ -18,11 +18,11 @@ export async function runLongMemEvalSemanticLauncher(args: readonly string[]): P
     const required = (key: string) => { const value = flags.get(key); if (!value) throw new Error(`${key} is required`); return value; };
     const root = required("--root");
     let result: unknown;
-    if (operation === "freeze") result = await freezeLongMemEvalSemanticDevelopment(JSON.parse(readBoundedCanonicalUtf8Artifact({
+    if (operation === "freeze") result = await freezeLongMemEvalSemanticRun(JSON.parse(readBoundedCanonicalUtf8Artifact({
       path: required("--config"), maxBytes: 1024 * 1024, label: "LongMemEval semantic config" })), root);
-    else if (operation === "prepare") result = await prepareLongMemEvalSemanticDevelopment(root);
-    else if (operation === "replay") result = await replayLongMemEvalSemanticDevelopment(root, required("--prepared"));
-    else if (operation === "measure") result = await measureLongMemEvalSemanticDevelopment(root, required("--replay"));
+    else if (operation === "prepare") result = await prepareLongMemEvalSemanticRun(root);
+    else if (operation === "replay") result = await replayLongMemEvalSemanticRun(root, required("--prepared"));
+    else if (operation === "measure") result = await measureLongMemEvalSemanticRun(root, required("--replay"));
     else throw new Error("expected freeze, prepare, replay, or measure");
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`); return 0;
   } catch (error) {

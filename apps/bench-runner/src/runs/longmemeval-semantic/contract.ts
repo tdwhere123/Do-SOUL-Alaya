@@ -9,7 +9,9 @@ import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const LongMemEvalSemanticConfigSchema = z.object({
   data_dir: z.string().min(1), pinned_meta_root: z.string().min(1), dataset_sha256: Digest,
-  dataset_question_count: z.number().int().positive(), question_ids: z.array(z.string().min(1)).min(1).max(20),
+  dataset_question_count: z.number().int().positive(), question_ids: z.array(z.string().min(1)).min(1).max(500),
+  stage: z.enum(["development", "formal"]).optional(),
+  previously_exposed_question_ids: z.array(z.string().min(1)).max(500).optional(),
   model: z.string().min(1), request_profile: z.string().refine(isExtractionRequestProfile),
   query_cache_root: z.string().min(1), recorded_at: z.string().datetime(), producer_commit: z.string().regex(/^[a-f0-9]{40}$/u),
   ...SemanticChainConfigSchema.pick({ budget: true, output_byte_limit: true, max_output_tokens: true }).shape
@@ -24,7 +26,7 @@ export const LongMemEvalSemanticFreezeSchema = z.object({
   contract: z.literal("longmemeval-semantic-development-v1"), config: LongMemEvalSemanticConfigSchema,
   implementation_revision: z.string(), metric: z.literal("session-bearing-source-round-mixed-any-at-5"),
   order_policy: z.literal("native_canonical_source_root_order"), mechanism: z.literal("source_only_h_a_not_exercised"),
-  exposure: z.literal("development_exposed"), inventory: z.array(InventoryRow),
+  exposure: z.enum(["development_exposed", "formal_with_recorded_development_exposure"]), inventory: z.array(InventoryRow),
   selected: z.array(InventoryRow.extend({ question: z.string(), question_date: z.string(), interpretation_clock: z.string().datetime(),
     query_key: Digest, source_manifest: z.array(SourceManifest) }).strict()),
   query_workset: SemanticProposalWorksetSchema
@@ -47,7 +49,7 @@ export async function loadFrozenLongMemEvalDataset(config: LongMemEvalSemanticCo
   return loaded;
 }
 
-export function assertDevelopmentRows(frozen: LongMemEvalSemanticFreeze, rows: readonly { question_id: string }[]): void {
+export function assertLongMemEvalSemanticRows(frozen: LongMemEvalSemanticFreeze, rows: readonly { question_id: string }[]): void {
   const expected = frozen.selected.map((row) => row.question_id).sort();
   const actual = rows.map((row) => row.question_id).sort();
   if (new Set(expected).size !== expected.length || chainIdentity(expected) !== chainIdentity(actual)) {
