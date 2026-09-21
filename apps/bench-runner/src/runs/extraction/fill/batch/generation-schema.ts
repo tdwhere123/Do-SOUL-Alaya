@@ -4,8 +4,10 @@ const listPositions = ["allOf", "anyOf", "oneOf", "prefixItems"];
 const singlePositions = ["items", "additionalProperties", "contains", "not", "if", "then", "else",
   "propertyNames", "unevaluatedProperties", "unevaluatedItems"];
 
-/** Compact v4 schemas are ~70KiB; Gemini streamGenerateContent then sends no SSE bytes. */
-const GEMINI_STRUCTURED_SCHEMA_MAX_BYTES = 24 * 1024;
+/** A 19KiB query schema exceeded provider flattening limits. This conservative
+ * wire budget is not a guarantee about provider complexity; local admission
+ * always retains the full schema, including when decoding uses JSON mode. */
+const GEMINI_STRUCTURED_SCHEMA_MAX_BYTES = 16 * 1024;
 
 const SCHEMA_INSTRUCTION =
   "Return JSON satisfying this complete local response schema. All required fields, kinds and operands remain mandatory; omitted or invalid expressions will be rejected. Return the complete source interpretation, not the schema itself.\n";

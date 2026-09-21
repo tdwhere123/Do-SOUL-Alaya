@@ -6,6 +6,7 @@ import { SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, bui
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
 import { projectGeminiGenerationSchema, geminiGenerationSchemaCacheMaterial } from "../../../runs/extraction/fill/batch/generation-schema.js";
 import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
+import { proposalCacheKey } from "../../../runs/semantic-proposal/workset.js";
 
 const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor might read it.", assertionIds: [1, 2],
   source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
@@ -152,6 +153,13 @@ describe("Gemini recursive decoding schema projection", () => {
     expect(encoded).not.toContain("source-semantic-proposal-v4");
     expect(encoded).not.toContain("source-semantic-proposal-v5");
     expect(encoded).toContain("application/json");
-    expect(projectGeminiGenerationSchema(schema).schema).toBeDefined();
+    expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
+    expect(projectGeminiGenerationSchema(schema).instruction).toContain(JSON.stringify(schema));
+    const oldStructuredKey = createHash("sha256").update([
+      "gemini-3.1-flash-lite", "gemini-3.1-minimal-v1", SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
+      request, JSON.stringify(schema), "4096"
+    ].join("\0")).digest("hex");
+    expect(proposalCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1",
+      SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema, 4096)).not.toBe(oldStructuredKey);
   });
 });

@@ -311,11 +311,13 @@ it.each([
   const cacheRoot = join(root, "cache");
   const prepared = workset();
   let hits = 0;
+  const wires: { url: string | undefined; body: unknown }[] = [];
   const server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => { chunks.push(chunk); });
     req.on("end", () => {
       hits += 1;
+      wires.push({ url: req.url, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
       res.statusCode = response.status ?? 200;
       res.setHeader("content-type", "application/json");
       res.end(response.body);
@@ -338,6 +340,12 @@ it.each([
     expect(result.attempts).toBe("attempts" in response ? response.attempts : 1);
     expect(result.newly_admitted).toBe(0);
     expect(result.terminal_failures).toBe(1);
+    for (const wire of wires) {
+      expect(wire.url).toBe("/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse");
+      expect(wire.body).not.toHaveProperty("generationConfig.responseJsonSchema");
+      expect(wire.body).toMatchObject({ generationConfig: { responseMimeType: "application/json" },
+        systemInstruction: { parts: [expect.anything(), { text: expect.stringContaining("source-semantic-query-meaning-v1") }] } });
+    }
     expect(readSemanticProposalResults(prepared, cacheRoot, 128)).toMatchObject([
       { status: "transport_failure", shard: { outcome: { status: "transport_failure" } } }
     ]);
