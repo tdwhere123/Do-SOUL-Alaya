@@ -70,23 +70,16 @@ export interface BenchProviderResponseMetadata {
 
 export type BenchProviderUsage = ProviderUsage;
 
-export type BenchTransportFailureKind =
-  | "network_error"
-  | "http_error"
-  | "body_read_error"
-  | "response_parse_error"
-  | "response_schema_error"
-  | "provider_error"
-  | "empty_response"
-  | "timeout"
-  | "aborted";
+export const BENCH_TRANSPORT_FAILURE_KINDS = [
+  "network_error", "http_error", "body_read_error", "response_parse_error",
+  "response_schema_error", "provider_error", "empty_response", "timeout", "aborted"
+] as const;
+export type BenchTransportFailureKind = typeof BENCH_TRANSPORT_FAILURE_KINDS[number];
 
-export type BenchTransportFailurePhase =
-  | "request"
-  | "response_status"
-  | "response_body"
-  | "response_parse"
-  | "response_schema";
+export const BENCH_TRANSPORT_FAILURE_PHASES = [
+  "request", "response_status", "response_body", "response_parse", "response_schema"
+] as const;
+export type BenchTransportFailurePhase = typeof BENCH_TRANSPORT_FAILURE_PHASES[number];
 
 /** Redacted, per-extract HTTP attempt evidence safe for durable telemetry. */
 export interface BenchTransportFailureAttempt {

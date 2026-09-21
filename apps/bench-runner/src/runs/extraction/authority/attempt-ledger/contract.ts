@@ -5,6 +5,7 @@ import {
   BENCH_ADDITIVE_TERMINAL_RETRY_CLASSIFICATIONS,
   BENCH_BASE_TERMINAL_RETRY_CLASSIFICATIONS,
   BENCH_TERMINAL_RETRY_CLASSIFICATIONS,
+  BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES,
   completeBenchTerminalRetryClassifications,
   emptyBenchTerminalRetryClassifications,
   type BenchTerminalRetryClassification,
@@ -346,13 +347,8 @@ function withNormalizedTelemetry(
   };
 }
 
-const FAILURE_KINDS = new Set<string>([
-  "network_error", "http_error", "body_read_error", "response_parse_error",
-  "response_schema_error", "provider_error", "empty_response", "timeout", "aborted"
-]);
-const FAILURE_PHASES = new Set<string>([
-  "request", "response_status", "response_body", "response_parse", "response_schema"
-]);
+const FAILURE_KINDS = new Set<string>(BENCH_TRANSPORT_FAILURE_KINDS);
+const FAILURE_PHASES = new Set<string>(BENCH_TRANSPORT_FAILURE_PHASES);
 
 function isFailureKind(value: unknown): value is BenchTransportFailureKind {
   return typeof value === "string" && FAILURE_KINDS.has(value);

@@ -7,6 +7,8 @@ import {
   readBoundedCanonicalUtf8Artifact
 } from "../cache-audit/bounded-artifact-reader.js";
 import { writeBytesExclusiveDurable } from "./manifest/durable-exclusive-publication.js";
+import { BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES,
+  type BenchTransportFailureAttempt } from "../../compile-seed/compile-seed-types.js";
 
 export const PROVIDER_RAW_ATTEMPT_CONTRACT = "provider-raw-attempt-v1" as const;
 const MAX_RETAINED_RAW_BYTES = 1024 * 1024;
@@ -36,6 +38,15 @@ const ProviderRawAttemptSchema = z.object({
   usage: UsageSchema.nullable(),
   usage_known: z.boolean(),
   transport_phase: z.string().nullable(),
+  transport_failure: z.object({
+    kind: z.enum(BENCH_TRANSPORT_FAILURE_KINDS),
+    phase: z.enum(BENCH_TRANSPORT_FAILURE_PHASES),
+    httpStatus: z.number().nullable(), fingerprint: z.string(), attempt: z.number().int().positive(),
+    usage: UsageSchema.optional()
+  }).strict().optional(),
+  response_body: z.object({
+    text: z.string(), truncated: z.boolean(), original_byte_length: z.number().int().nonnegative(), digest: z.string()
+  }).strict().optional(),
   extracted_at: z.string().min(1)
 }).strict();
 
@@ -112,6 +123,8 @@ export function writeProviderRawAttempt(input: Readonly<{
   finishReason: string | null;
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
   transportPhase?: string;
+  transportFailure?: BenchTransportFailureAttempt;
+  responseBody?: string;
 }>): ProviderRawAttempt {
   const original = Buffer.from(input.decodedText, "utf8");
   const truncated = original.byteLength > MAX_RETAINED_RAW_BYTES;
@@ -134,12 +147,32 @@ export function writeProviderRawAttempt(input: Readonly<{
     usage: input.usage ?? null,
     usage_known: input.usage !== undefined,
     transport_phase: input.transportPhase ?? "response_schema",
+    ...(input.transportFailure === undefined ? {} : { transport_failure: input.transportFailure }),
+    ...(input.responseBody === undefined ? {} : { response_body: retainResponseBody(input.responseBody) }),
     extracted_at: new Date().toISOString()
   });
   const path = providerRawAttemptPath(input.root, input.cacheKey, input.attemptOrdinal);
   mkdirSync(dirname(path), { recursive: true });
   writeBytesExclusiveDurable(path, Buffer.from(`${JSON.stringify(record, null, 2)}\n`, "utf8"));
   return record;
+}
+
+function retainResponseBody(text: string) {
+  const bytes = Buffer.from(text, "utf8");
+  // Leave space for escaped JSON and decoded text in the bounded record.
+  const cap = 64 * 1024;
+  return { text: bytes.subarray(0, cap).toString("utf8"), truncated: bytes.length > cap,
+    original_byte_length: bytes.length, digest: createHash("sha256").update(bytes).digest("hex") };
+}
+
+export function retainedFailureOutcome(raw: ProviderRawAttempt) {
+  if (raw.transport_failure === undefined) return undefined;
+  return {
+    retryCount: 0, rateLimitRetries: 0, successfulRequestCount: 0,
+    terminalRetryClassification: "failure_non_retryable_response" as const,
+    transportFailures: [raw.transport_failure], usageRequestCount: raw.usage_known ? 1 : 0,
+    ...(raw.usage === null ? {} : { usage: raw.usage })
+  };
 }
 
 export function requestEnvelopeDigest(requestJson: string): string {

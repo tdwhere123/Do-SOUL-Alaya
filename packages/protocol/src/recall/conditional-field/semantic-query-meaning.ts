@@ -164,6 +164,7 @@ function bodyShape(meaning: z.ZodType<QueryMeaning>) {
     gaps: z.array(SourceSemanticGapSchema).max(256).readonly(),
     return: z.array(Key).max(64).readonly().optional(),
     domains: z.array(Domain).max(64).readonly().optional(),
+    entities: z.array(z.discriminatedUnion("kind", [FreeTarget, NamedTarget])).max(64).readonly().optional(),
     evaluation: SourceSemanticQueryEvaluationSchema.optional()
   }).strict().readonly();
 }
@@ -281,6 +282,9 @@ class QueryMeaningCompiler {
   }
 
   private collect(body: SourceSemanticQueryMeaningBody): void {
+    for (const [index, entity] of (body.entities ?? []).entries()) {
+      this.collectTarget(entity, ["entities", index]);
+    }
     for (const [index, alternative] of body.alternatives.entries()) {
       if (alternative.meaning !== undefined) this.collectMeaning(alternative.meaning, ["alternatives", index, "meaning"]);
     }
@@ -320,13 +324,7 @@ class QueryMeaningCompiler {
       return;
     }
     if (meaning.kind === "forall") {
-      this.declareEntityKey(meaning.binder, [...path, "binder"]);
-      this.reserve(meaning.domain, [...path, "domain"]);
-      if (meaning.restriction !== undefined && meaning.restriction !== null) {
-        this.collectMeaning(meaning.restriction, [...path, "restriction"]);
-      }
-      this.collectMeaning(meaning.content, [...path, "content"]);
-      return;
+      fail(path, "nested forall is unsupported; use the explicit forall evaluation with domain and binder");
     }
     this.collectMeaning(meaning.content, [...path, "content"]);
   }

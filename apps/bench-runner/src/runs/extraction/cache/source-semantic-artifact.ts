@@ -194,6 +194,7 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
     throw new AlayaError("CONFLICT", "typed open-semantics admission identity mismatch");
   }
   return { status: "hit" as const, artifactKind: "source_semantic" as const, sourceBinding: "unbound" as const, admitted,
+    requestDigest: computeExtractionRawJsonSha256(line.userPrompt),
     cacheAdmission: entry.admission_identity, deterministicEmpty: typed.kind === "deterministic_empty",
     rawJson: entry.raw_json, rawJsonSha256, rawSignalCount: 0, parsedDraftCount: admitted.draft === undefined ? 0 : 1,
     transportProvenance: entry.transport_provenance, ...response };

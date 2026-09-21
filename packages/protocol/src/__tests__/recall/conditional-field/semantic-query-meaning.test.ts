@@ -161,6 +161,7 @@ it("preserves universal and comparison evaluation on the canonical query", () =>
     alternatives: [{}],
     gaps: [],
     domains: [{ key: "people", excerpt: "Alice" }],
+    entities: [{ kind: "named", key: "alice", excerpt: "Alice" }, { kind: "named", key: "bob", excerpt: "Bob" }],
     evaluation: {
       kind: "comparison", domain: "people", operation: "gt", left: "alice", right: "bob",
       strict: true, metric: "speed", unit: "ms", context: "lab", scope: "asserted"
@@ -168,6 +169,17 @@ it("preserves universal and comparison evaluation on the canonical query", () =>
   }, envelope);
   expect(comparison.alternatives[0]?.frames).toEqual([]);
   expect(comparison.evaluation).toMatchObject({ kind: "comparison", left: "alice", right: "bob", strict: true });
+  expect(comparison.variables).toEqual([
+    { id: "alice", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } },
+    { id: "bob", sort: "entity", reference: { kind: "query_text", excerpt: "Bob" } }
+  ]);
+});
+
+it("rejects nested forall rather than erase its domain and binder", () => {
+  expect(() => compiled({ kind: "possible", content: {
+    kind: "forall", domain: "people", binder: "actor",
+    content: statement("travel", [{ role: "agent", target: { kind: "reference", key: "actor" } }])
+  } }, { domains: [{ key: "people", excerpt: "people" }] })).toThrow(/nested forall is unsupported/u);
 });
 
 it("refuses cyclic, undeclared, and kind-conflicting references instead of repairing them", () => {

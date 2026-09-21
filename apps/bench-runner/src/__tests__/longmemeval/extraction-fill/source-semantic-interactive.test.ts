@@ -13,6 +13,8 @@ import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import type { LongMemEvalExpansionCapability } from "../../../datasets/longmemeval/promotion/expansion/expansion-capability.js";
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
+import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
+import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
 
 const MODEL = "gemini-2.5-flash-lite";
 const REQUEST_PROFILE = "gemini-2.5-nonthinking-v1" as const;
@@ -127,6 +129,25 @@ it("fills complete-source open semantics through interactive generateContent wit
   expect(shard.source_semantic.result.provenance.transport).toBe("gemini-generate-content");
   expect(shard.source_semantic.result.provenance.job).toBeUndefined();
   expect(JSON.stringify(shard)).not.toMatch(/batches\//u);
+  const census = await censusCompleteSourceRecords({ population: "fixture", dataDir, pinnedMetaRoot });
+  const publicationAssociations = census.records.map((source) => {
+    const key = fixture.keys.find((candidate) => {
+      const h = inspectCachedSourceSemantic(cacheRoot, candidate, MODEL, REQUEST_PROFILE);
+      return h.status === "hit" && h.admitted.request.source_catalog.source_digest === source.corpus_digest;
+    })!;
+    const h = inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE);
+    if (h.status !== "hit") throw new Error("fixture H missing");
+    return { source_id: source.source_id, source_version: source.source_version,
+      generation_key: key, request_digest: h.requestDigest };
+  });
+  const report = await publishSourceSemanticSnapshot({
+    snapshotPath: join(cacheRoot, "published.sqlite"), dataDirRoot: join(cacheRoot, "publication"),
+    recordedAt: "2026-09-21T00:00:00.000Z", producerCommit: "a".repeat(40),
+    populations: [{ name: "fixture", dataDir, pinnedMetaRoot, cacheRoot, model: MODEL, requestProfile: REQUEST_PROFILE, publicationAssociations }]
+  });
+  expect(report.published_count).toBe(census.records.length);
+  expect(report.h_binding_complete).toBe(true);
+  expect(report.sources.every((source) => source.h_binding?.kind === "host_publication_association")).toBe(true);
 }, 60000);
 
 it("quarantines an interactive generateContent line through the same source-semantic receiver as Batch", async () => {
@@ -195,6 +216,8 @@ it("does not retry thought-only STOP generateContent as transport", async () => 
     expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
     expect(listProviderRawAttempts(cacheRoot, key)[0]).toMatchObject({
       decoded_text: "",
+      finish_reason: "STOP", completion_witness: "finish_reason",
+      transport_failure: { kind: "response_schema_error", phase: "response_schema" },
       usage: { inputTokens: 10, outputTokens: 3, totalTokens: 13 }
     });
   }

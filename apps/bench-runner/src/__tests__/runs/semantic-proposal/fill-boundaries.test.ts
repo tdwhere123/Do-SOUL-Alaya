@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12,7 +12,7 @@ import {
 } from "../../../runs/semantic-proposal/authority.js";
 import {
   inspectSemanticProposalShard, SemanticProposalIdentityError, SEMANTIC_PROPOSAL_CACHE_CONTRACT,
-  writeSemanticProposalShard
+  writeSemanticProposalShard, isExecutableProposalShard
 } from "../../../runs/semantic-proposal/artifact.js";
 import {
   executeSemanticProposalFill, prepareSemanticProposal
@@ -30,6 +30,43 @@ const PROFILE = "gemini-3.1-minimal-v1" as const;
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "proposal-process-fixture.mjs");
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../../../..");
 const roots: string[] = [];
+
+it("keeps admitted legacy shards without completion witnesses non-executable", () => {
+  const shard = {
+    contract: SEMANTIC_PROPOSAL_CACHE_CONTRACT, kind: "query" as const, cache_key: "a".repeat(64),
+    model: MODEL, request_profile: PROFILE, original_query: "Who?", system_prompt: "system", user_prompt: "user",
+    raw_json: "{}", outcome: { status: "interpreted" }, admitted: true, attempt_ordinal: 1, extracted_at: "now"
+  };
+  expect(isExecutableProposalShard(shard)).toBe(false);
+  expect(isExecutableProposalShard({ ...shard, finish_reason: "STOP" })).toBe(false);
+  expect(isExecutableProposalShard({ ...shard, finish_reason: "STOP", completion_witness: "finish_reason" })).toBe(true);
+});
+
+it.each(["{\"outcome\":{\"status\":\"abstained\"}}", "{}"])(
+  "recovers a published terminal shard before ledger settlement without credentials: %s", async (rawJson) => {
+    const cacheRoot = tempRoot();
+    const prepared = workset();
+    const authority = pinSemanticProposalAuthority({
+      preflight: prepareSemanticProposal(prepared, cacheRoot, 128), inputUsdPerMillion: 1, outputUsdPerMillion: 2
+    });
+    const ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${authority.identity_digest}.json`);
+    let reserved = "";
+    await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: config(), extractor: {
+      extract: async () => {
+        reserved = readFileSync(ledgerPath, "utf8");
+        return { rawJson, responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } };
+      }
+    } });
+    writeFileSync(ledgerPath, reserved);
+    for (let replay = 0; replay < 2; replay++) {
+      await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: { ...config(), apiKey: null } });
+      const settled = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot();
+      expect(settled.unresolvedAttempts).toEqual([]);
+      expect(settled.pendingKeys).toEqual([]);
+      expect(settled.telemetry.totalTokens).toBe(5);
+    }
+  }
+);
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -255,7 +292,17 @@ it("gives one process the writer lease and rejects a second real process", async
   expect(contended.stderr).toMatch(/already has an active writer lock/u);
 }, 30_000);
 
-it("does not buy a second extract for thought-only STOP generateContent", async () => {
+it.each([
+  { label: "thought-only STOP", body: JSON.stringify({ candidates: [{ finishReason: "STOP", content: {
+    parts: [{ thought: true, text: "private synthetic thought" }] } }],
+    usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 0, thoughtsTokenCount: 3, totalTokenCount: 13 } }),
+    kind: "response_schema_error", phase: "response_schema", finish: "STOP", known: true },
+  { label: "provider rejection", body: JSON.stringify({ error: { code: 429, message: "fixture rejected" },
+    usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 0, thoughtsTokenCount: 3, totalTokenCount: 13 } }),
+    kind: "provider_error", phase: "response_parse", finish: null, known: true },
+  { label: "malformed body", body: "{", kind: "response_parse_error", phase: "response_parse", finish: null, known: false },
+  { label: "malformed envelope", body: "{}", kind: "response_schema_error", phase: "response_schema", finish: null, known: false }
+])("retains classified $label failure without buying a second extract", async (response) => {
   const root = tempRoot();
   const cacheRoot = join(root, "cache");
   const prepared = workset();
@@ -266,15 +313,7 @@ it("does not buy a second extract for thought-only STOP generateContent", async 
     req.on("end", () => {
       hits += 1;
       res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({
-        candidates: [{
-          finishReason: "STOP",
-          content: { parts: [{ thought: true, text: "private synthetic thought" }] }
-        }],
-        usageMetadata: {
-          promptTokenCount: 10, candidatesTokenCount: 0, thoughtsTokenCount: 3, totalTokenCount: 13
-        }
-      }));
+      res.end(response.body);
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -297,14 +336,20 @@ it("does not buy a second extract for thought-only STOP generateContent", async 
     const key = authority.keys[0]!;
     expect(readProviderRawAttempt(cacheRoot, key, 1)).toMatchObject({
       decoded_text: "",
-      usage: { inputTokens: 10, outputTokens: 3, totalTokens: 13 }
+      finish_reason: response.finish, completion_witness: response.finish === null ? null : "finish_reason",
+      transport_failure: { kind: response.kind, phase: response.phase, fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+      response_body: { text: response.body, truncated: false }, usage_known: response.known,
+      usage: response.known ? { inputTokens: 10, outputTokens: 3, totalTokens: 13 } : null
     });
     expect(inspectSemanticProposalShard(cacheRoot, key, {
       kind: "query", model: MODEL, request_profile: PROFILE
     })?.admitted).toBe(false);
     const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
     expect(ledger.snapshot().unresolvedAttempts).toEqual([]);
-    expect(ledger.snapshot().transportFailures).toEqual([]);
+    expect(ledger.snapshot().transportFailures).toMatchObject([{ kind: response.kind, phase: response.phase }]);
+    expect(ledger.snapshot().successfulShards).toBe(0);
+    await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: { ...config(), apiKey: null } });
+    expect(hits).toBe(1);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => {

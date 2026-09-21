@@ -9,7 +9,7 @@ import {
   proposeAlignmentSemantics, proposeQuerySemantics,
   type SourceSemanticAlignmentRequest, type SourceSemanticQueryRequest
 } from "@do-soul/alaya-soul";
-import { createGeminiHttpExtractor } from "../compile-seed/http/gemini-http.js";
+import { createGeminiHttpExtractor, readGeminiFailureResponse } from "../compile-seed/http/gemini-http.js";
 import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../compile-seed/http/gemini-http.js";
 import { resolveExtractionRequestTimeoutMs } from "../compile-seed/http/output-token-retry.js";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
@@ -18,7 +18,7 @@ import { acquireExtractionCacheWriteLease } from "../extraction/fill/manifest/fi
 import { isCompleteGeminiFinish } from "../extraction/fill/batch/native-codec.js";
 import {
   bindProviderRawAttempt, listProviderRawAttempts, readProviderRawAttempt, requestEnvelopeDigest,
-  writeProviderRawAttempt, type ProviderRawAttempt
+  writeProviderRawAttempt, retainedFailureOutcome, type ProviderRawAttempt
 } from "../extraction/fill/provider-raw-attempt.js";
 import { readLiveTransportFailure } from "../extraction/cache/cache-live-delegate.js";
 import { buildExtractionTransportProvenance } from "../extraction/transport-route.js";
@@ -89,6 +89,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
   const lines = materializeSemanticProposalLines(input.workset, maxOutputTokens);
   const authorized = new Set(authority.keys);
   const dispatch: SemanticProposalLine[] = [];
+  const retainedLines: SemanticProposalLine[] = [];
   let cacheHits = 0, interpreted = 0, abstained = 0, cachedInvalid = 0, unattempted = 0;
   for (const line of lines) {
     const existing = inspectSemanticProposalShard(
@@ -100,6 +101,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
       if (isExecutableProposalShard(existing)) interpreted += 1;
       else if (classified === "abstained") abstained += 1;
       else cachedInvalid += 1;
+      if (authorized.has(line.key)) retainedLines.push(line);
       continue;
     }
     if (!authorized.has(line.key)) {
@@ -111,11 +113,8 @@ export async function executeSemanticProposalFill(input: Readonly<{
   if (dispatch.length > 0 && authority.limits.maximum_attempts === 0) {
     throw new Error("semantic proposal authority has no remaining provider attempt capacity");
   }
-  if (dispatch.length === 0) {
+  if (dispatch.length === 0 && retainedLines.length === 0) {
     return summarize(lines.length, cacheHits, 0, 0, 0, interpreted, abstained, cachedInvalid, unattempted);
-  }
-  if (input.config.apiKey === null || input.config.apiKey.trim().length === 0) {
-    if (input.extractor === undefined) throw new Error("garden API key is unavailable");
   }
   const lease = acquireExtractionCacheWriteLease(input.cacheRoot);
   try {
@@ -123,11 +122,20 @@ export async function executeSemanticProposalFill(input: Readonly<{
     const ledger = openSemanticProposalAttemptLedger({
       cacheRoot: input.cacheRoot, authority, kind: input.workset.kind
     });
-    const extractor = input.extractor ?? createGeminiHttpExtractor(input.config);
+    for (const line of retainedLines) {
+      if (!ledger.snapshot().pendingKeys.includes(line.key) &&
+          !ledger.snapshot().unresolvedAttempts.some((item) => item.cacheKey === line.key)) continue;
+      replayExistingProposalRaws(input, line, ledger);
+      if (ledger.snapshot().pendingKeys.includes(line.key) ||
+          ledger.snapshot().unresolvedAttempts.some((item) => item.cacheKey === line.key)) {
+        throw new SemanticProposalIdentityError(`retained proposal has unresolved attempt evidence: ${line.key}`);
+      }
+    }
+    const extractor = dispatch.length === 0 ? undefined : input.extractor ?? createGeminiHttpExtractor(input.config);
     let newlyAdmitted = 0, terminalFailures = 0, attempts = 0;
     for (const line of dispatch) {
       assertAttemptInputWithinReceiptLimit(line.inputByteUpper, authority.price.maximum_input_tokens_per_attempt);
-      const filled = await fillLine(input, line, extractor, ledger, maxOutputTokens);
+      const filled = await fillLine(input, line, extractor!, ledger, maxOutputTokens);
       attempts += filled.attempts;
       if (filled.admitted) {
         newlyAdmitted += 1;
@@ -181,6 +189,9 @@ async function fillLine(
     if (remainingGlobal <= 0) {
       return { classified: "retryable", admitted: false, attempts: used };
     }
+    if (input.extractor === undefined && (input.config.apiKey === null || input.config.apiKey.trim().length === 0)) {
+      throw new Error("garden API key is unavailable");
+    }
     const ordinal = ledger.reserveAttemptOrdinal(line.key);
     used += 1;
     const lastAttempt = used >= SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY || remainingGlobal <= 1;
@@ -199,7 +210,7 @@ async function fillLine(
       appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
         `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
       if (isCompletedNonRetryableResponse(transport)) {
-        return persistCompletedEmptyExtract(input, line, ledger, transport, ordinal, used);
+        return persistCompletedEmptyExtract(input, line, ledger, transport, ordinal, used, readGeminiFailureResponse(cause));
       }
       if (lastAttempt) {
         writeAttempt(input, line, "", undefined, { status: "transport_failure" }, false, ordinal, null);
@@ -301,6 +312,14 @@ function replayPersistedProposalRaw(
     requestProfile: input.workset.request_profile,
     requestDigest: requestEnvelopeDigest(line.userPrompt)
   });
+  const failure = retainedFailureOutcome(raw);
+  if (failure !== undefined) {
+    writeAttempt(input, line, raw.decoded_text, raw.usage ?? undefined,
+      { status: "transport_failure", failure: raw.transport_failure }, false, raw.attempt_ordinal, raw.finish_reason);
+    ledger.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);
+    ledger.abandonPendingShard(line.key, raw.attempt_ordinal);
+    return { classified: "terminal", admitted: false };
+  }
   if (!raw.full_replay_possible) {
     const usage = raw.usage_known && raw.usage !== null ? raw.usage : undefined;
     writeAttempt(input, line, raw.decoded_text, usage,
@@ -467,22 +486,23 @@ function persistCompletedEmptyExtract(
   ledger: ProposalLedger,
   transport: NonNullable<ReturnType<typeof readLiveTransportFailure>>,
   ordinal: number,
-  used: number
+  used: number,
+  response: ReturnType<typeof readGeminiFailureResponse>
 ): { classified: ProposalAttemptClass; admitted: boolean; attempts: number } {
   const usage = transport.usage;
   const phase = transport.transportFailures[0]?.phase;
-  writeProviderRawAttempt({
+  const raw = writeProviderRawAttempt({
     root: input.cacheRoot, cacheKey: line.key, attemptOrdinal: ordinal, kind: line.kind,
     model: input.workset.model, requestProfile: input.workset.request_profile,
     requestDigest: requestEnvelopeDigest(line.userPrompt), decodedText: "",
-    finishReason: null,
+    finishReason: response?.finishReason ?? null,
+    ...(response === undefined ? {} : { responseBody: response.rawBody }),
+    ...(transport.transportFailures[0] === undefined ? {} : { transportFailure: transport.transportFailures[0] }),
     ...(usage === undefined ? {} : { usage }),
     ...(phase === undefined ? {} : { transportPhase: phase })
   });
   return {
-    ...settleDecoded(input, line, ledger, {
-      rawJson: "", finishReason: null, usage, replay: false
-    }, ordinal, true),
+    ...replayPersistedProposalRaw(input, line, ledger, raw, true),
     attempts: used
   };
 }

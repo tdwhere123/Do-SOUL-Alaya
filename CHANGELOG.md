@@ -12,6 +12,16 @@ below as the live ranking recipe.
 
 `@do-soul/alaya-engine-gateway` is `0.4.0`; app packages remain `0.3.11`.
 
+Opt-in producer APIs add source selection, query meaning, and alignment selection
+schemas/materializers in Protocol and their request/response builders in SOUL.
+These additive exports serve SOUL and the bench runner; the MCP, EventLog, and
+runtime-config schema surfaces remain unchanged by this producer repair (§25).
+Query meaning preserves named comparison operands and rejects unsupported nested
+universal binders. Retained provider failures keep their original classification,
+completion evidence, and raw response; terminal proposal publication resumes
+idempotently. Source publication requires an explicit association to a frozen
+source/version and retained request, without claiming historical generation origin.
+
 Under invariant §25, this is an additive minor: opt-in `soul.interpretation`
 `recall` accepts prepared Q/A and returns source-root occupancy pages, complete
 conditional H/Q/A/C proof packages, explicit coverage and the actual request

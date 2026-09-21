@@ -1,9 +1,10 @@
-import type {
-  BenchProviderUsage,
-  BenchTerminalRetryClassification,
-  BenchTransportFailureAttempt,
-  BenchTransportFailureKind,
-  BenchTransportFailurePhase
+import {
+  BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES,
+  type BenchProviderUsage,
+  type BenchTerminalRetryClassification,
+  type BenchTransportFailureAttempt,
+  type BenchTransportFailureKind,
+  type BenchTransportFailurePhase
 } from "../../../compile-seed/compile-seed-types.js";
 import type {
   ExtractionAttemptLedgerRecord,
@@ -222,13 +223,8 @@ function assertOutcome(input: ExtractionTransportOutcome): void {
   }
 }
 
-const FAILURE_KINDS = new Set<BenchTransportFailureKind>([
-  "network_error", "http_error", "body_read_error", "response_parse_error",
-  "response_schema_error", "provider_error", "empty_response", "timeout", "aborted"
-]);
-const FAILURE_PHASES = new Set<BenchTransportFailurePhase>([
-  "request", "response_status", "response_body", "response_parse", "response_schema"
-]);
+const FAILURE_KINDS = new Set<BenchTransportFailureKind>(BENCH_TRANSPORT_FAILURE_KINDS);
+const FAILURE_PHASES = new Set<BenchTransportFailurePhase>(BENCH_TRANSPORT_FAILURE_PHASES);
 
 function assertFailureAttempt(
   failure: BenchTransportFailureAttempt,

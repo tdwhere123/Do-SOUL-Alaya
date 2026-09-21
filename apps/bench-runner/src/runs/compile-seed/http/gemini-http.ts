@@ -31,6 +31,10 @@ const MAX_GEMINI_RESPONSE_BYTES = 32 * 1024 * 1024;
 /** Complete-source TTFB can exceed the output-token quantum; thinking SSE keeps the socket alive. */
 export const GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS = 15 * 60_000;
 const defaultFetch = globalThis.fetch;
+const responseEvidence = new WeakMap<object, Readonly<{ rawBody: string; finishReason: string | null }>>();
+export function readGeminiFailureResponse(error: unknown) {
+  return typeof error === "object" && error !== null ? responseEvidence.get(error) : undefined;
+}
 type ExtractInput = Parameters<BenchSignalExtractor["extract"]>[0];
 
 /** Interactive work is one explicitly bounded attempt; retries belong to its caller. */
@@ -78,8 +82,14 @@ async function extractGeminiOnce(
     if (cause instanceof GeminiProviderEnvelopeError) {
       attempt.phase = "response_parse";
       attempt.kind = "provider_error";
+      // A rejection envelope can still contain provider-reported token usage.
+      try { attempt.usage = geminiUsage(record(cause.response)); } catch { /* Preserve the original provider error. */ }
     }
-    throw geminiAttemptFailure(cause, attempt, input.abortSignal?.aborted === true, timeout.aborted);
+    const failure = geminiAttemptFailure(cause, attempt, input.abortSignal?.aborted === true, timeout.aborted);
+    if (attempt.rawBody !== undefined) responseEvidence.set(failure, {
+      rawBody: attempt.rawBody, finishReason: attempt.finishReason ?? null
+    });
+    throw failure;
   }
 }
 
@@ -157,16 +167,24 @@ interface GeminiAttempt {
   kind: BenchTransportFailureKind;
   status: number | null;
   usage?: BenchProviderUsage;
+  rawBody?: string;
+  finishReason?: string | null;
 }
 
 async function decodeGeminiResponse(response: Response, input: ExtractInput, attempt: GeminiAttempt) {
   attempt.phase = "response_body";
   attempt.kind = "body_read_error";
   const raw = await readBoundedResponse(response, MAX_GEMINI_RESPONSE_BYTES);
+  attempt.rawBody = raw;
   attempt.phase = "response_parse";
   attempt.kind = "response_parse_error";
   const value: unknown = parseGeminiGenerateContentBody(raw);
   attempt.usage = geminiUsage(record(value));
+  const candidates = record(value).candidates;
+  if (Array.isArray(candidates) && candidates.length === 1) {
+    const finish = record(candidates[0]).finishReason;
+    attempt.finishReason = typeof finish === "string" && finish.trim().length > 0 ? finish : null;
+  }
   attempt.phase = "response_schema";
   attempt.kind = "response_schema_error";
   const decoded = decodeGeminiGenerateContent(value);
@@ -193,7 +211,9 @@ function gardenFinishReason(finish: string | null): string {
 function geminiAttemptFailure(cause: unknown, attempt: GeminiAttempt, aborted: boolean, timedOut: boolean) {
   const kind = aborted ? "aborted" : timedOut ? "timeout" : attempt.kind;
   const marked = markGardenHttpFailure(cause, { kind, phase: attempt.phase,
-    httpStatus: attempt.status, ...(attempt.usage === undefined ? {} : { usage: attempt.usage }) });
+    httpStatus: attempt.status,
+    ...(attempt.rawBody === undefined ? {} : { rawBody: attempt.rawBody }),
+    ...(attempt.usage === undefined ? {} : { usage: attempt.usage }) });
   const failure = toBenchTransportFailureAttempt(marked, 0);
   return wrapGardenHttpTransportError(marked,
     aborted ? "failure_aborted" : timedOut ? "failure_timeout" : "failure_non_retryable_response",

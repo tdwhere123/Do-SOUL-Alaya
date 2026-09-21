@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { canonicalJson } from "@do-soul/alaya-protocol";
+import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durable-exclusive-publication.js";
 import { proposalCacheKey, type SemanticProposalKind } from "./workset.js";
 
 export const SEMANTIC_PROPOSAL_CACHE_CONTRACT = "source-semantic-proposal-cache-v1" as const;
@@ -134,7 +136,27 @@ export function writeSemanticProposalShard(cacheRoot: string, shard: SemanticPro
   const parsed = ShardSchema.parse(shard);
   const path = semanticProposalShardPath(cacheRoot, parsed.cache_key);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`, { flag: "wx" });
+  const existing = readSemanticProposalShard(cacheRoot, parsed.cache_key);
+  if (existing !== undefined) {
+    // Recovery may revisit publication after a crash before reservation settlement.
+    // The timestamp is publication bookkeeping; every semantic/attempt field must match.
+    if (canonicalJson({ ...existing, extracted_at: "" }) !== canonicalJson({ ...parsed, extracted_at: "" })) {
+      throw new SemanticProposalIdentityError(`immutable semantic proposal conflict: ${parsed.cache_key}`);
+    }
+    return;
+  }
+  try {
+    publishBytesExclusiveDurable({ destination: path,
+      bytes: Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, "utf8"),
+      ownerIdentity: `${parsed.cache_key}:${parsed.attempt_ordinal}`, temporaryDirectory: dirname(path) });
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
+    const winner = readSemanticProposalShard(cacheRoot, parsed.cache_key);
+    if (winner === undefined || canonicalJson({ ...winner, extracted_at: "" }) !==
+        canonicalJson({ ...parsed, extracted_at: "" })) {
+      throw new SemanticProposalIdentityError(`immutable semantic proposal conflict: ${parsed.cache_key}`);
+    }
+  }
 }
 
 export function proposalOutcomeStatus(shard: SemanticProposalShard): string {
@@ -147,7 +169,7 @@ export function proposalOutcomeStatus(shard: SemanticProposalShard): string {
 
 export function isExecutableProposalShard(shard: SemanticProposalShard): boolean {
   return shard.admitted === true && proposalOutcomeStatus(shard) === "interpreted" &&
-    (shard.finish_reason === undefined || shard.finish_reason === "STOP");
+    shard.finish_reason === "STOP" && shard.completion_witness === "finish_reason";
 }
 
 export function listSemanticProposalKeys(cacheRoot: string, kind: SemanticProposalKind): ReadonlySet<string> {

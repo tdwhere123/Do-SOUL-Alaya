@@ -75,9 +75,9 @@ function collectCompleteSourceRecords(
         );
         const contentBytes = buildOfficialApiSourceCorpus(round.content.trim(), turnMessages);
         const packs = collectSourceSemanticUnitPacks(contentBytes, "complete-source");
-        const coverage = JSON.stringify(packs);
-        if (seen.has(coverage)) continue;
-        seen.add(coverage);
+        const occurrence = JSON.stringify([population, question.question_id, sessionId, roundIndex]);
+        if (seen.has(occurrence)) throw new Error("duplicate logical source occurrence");
+        seen.add(occurrence);
         const pack = packs[0];
         if (pack === undefined) throw new Error("complete-source packing produced no source unit");
         const roles = Object.freeze(turnMessages.map((message) => message.role));

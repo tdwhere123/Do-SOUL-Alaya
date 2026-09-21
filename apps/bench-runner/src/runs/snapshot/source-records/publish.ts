@@ -26,6 +26,9 @@ export type SourcePublicationPopulation = Readonly<{
   cacheRoot?: string;
   model: string;
   requestProfile: ExtractionRequestProfile;
+  publicationAssociations?: readonly Readonly<{
+    source_id: string; source_version: string; generation_key: string; request_digest: string;
+  }>[];
 }>;
 
 export type SourcePublicationDisposition = Readonly<{
@@ -43,6 +46,7 @@ export type SourcePublicationDisposition = Readonly<{
   record_id?: string;
   h: "interpreted" | "abstained" | "no_executable_proposition" | "no_eligible_source" | "absent" | "invalid" | "conflict";
   h_generation_key?: string;
+  h_binding?: Readonly<{ kind: "host_publication_association"; request_digest: string }>;
   publication: "published" | "not_attempted" | "failed";
   publication_error?: string;
   interpretation_id?: string;
@@ -63,7 +67,11 @@ export type SourcePublicationReport = Readonly<{
   published_count: number;
   h_counts: Readonly<Record<SourcePublicationDisposition["h"], number>>;
   sources: readonly SourcePublicationDisposition[];
+  unbound_h_artifacts: readonly UnboundHArtifact[];
+  h_binding_complete: boolean;
 }>;
+
+type UnboundHArtifact = Readonly<{ population: string; generation_key: string; status: "invalid" | "unbound" }>;
 
 export async function publishSourceSemanticSnapshot(input: Readonly<{
   snapshotPath: string;
@@ -82,15 +90,17 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
   const workspaceId = input.workspaceId ?? "source-semantic-library";
   const runId = input.runId ?? "source-semantic-library-run";
   const census = await loadCensus(input.populations);
+  // Validate and inspect associations before creating any database or source record.
+  const retained = indexRetainedSemantics(census, input.populations);
   return withSnapshotPublishLock(snapshotPath, () => withSnapshotPublishLock(join(dataDirRoot, "source-semantic-publication"), async () => {
     bindIsolatedSnapshot(dataDirRoot, snapshotPath);
     const dispositions = await admitCensusSources(dataDirRoot, snapshotPath, census, {
       recordedAt: input.recordedAt, workspaceId, runId
     });
-    await publishRetainedSemantics(snapshotPath, census, input.populations, dispositions, workspaceId, runId);
+    await publishRetainedSemantics(snapshotPath, census, retained.joined, dispositions, workspaceId, runId);
     checkpointSnapshot(snapshotPath);
     const report = sealReport({
-      recordedAt: input.recordedAt, workspaceId, runId, snapshotPath, census, dispositions
+      recordedAt: input.recordedAt, workspaceId, runId, snapshotPath, census, dispositions, unbound: retained.unbound
     });
     atomicWriteJson(`${snapshotPath}.publication.json`, report);
     return report;
@@ -165,11 +175,10 @@ async function admitOneSource(
 
 async function publishRetainedSemantics(
   snapshotPath: string, census: readonly SourceCensus[],
-  populations: readonly SourcePublicationPopulation[],
+  joined: ReadonlyMap<string, RetainedSemantics>,
   dispositions: SourcePublicationDisposition[],
   workspaceId: string, runId: string
 ): Promise<void> {
-  const joined = indexRetainedSemantics(census, populations);
   const database = initDatabase({ filename: snapshotPath });
   try {
     const publication = createSourceSemanticInterpretationPublication({
@@ -185,7 +194,7 @@ async function publishRetainedSemantics(
       const current = dispositions[index]!;
       if (current.admission !== "admitted") continue;
       dispositions[index] = await publishOneSource(
-        publication, joined.get(source.corpus_digest), source, current, workspaceId, runId
+        publication, joined.get(source.source_id), source, current, workspaceId, runId
       );
     }
   } finally {
@@ -206,7 +215,8 @@ async function publishOneSource(
   }
   const native = retained.native;
   const h = classifyRetainedH(native.admitted.outcome.status);
-  const generation = { h, ...(retained.key === undefined ? {} : { h_generation_key: retained.key }) };
+  const generation = { h, h_generation_key: retained.key,
+    h_binding: { kind: "host_publication_association" as const, request_digest: native.requestDigest } };
   if (h !== "interpreted") return { ...current, ...generation };
   const request = native.admitted.request;
   const locations = request.source_request.assertion_locations;
@@ -243,25 +253,48 @@ type RetainedSemantics =
 
 function indexRetainedSemantics(
   census: readonly SourceCensus[], populations: readonly SourcePublicationPopulation[]
-): Map<string, RetainedSemantics> {
-  const allowed = new Set(census.flatMap((row) => row.records.map((source) => source.corpus_digest)));
+): { joined: Map<string, RetainedSemantics>; unbound: UnboundHArtifact[] } {
   const joined = new Map<string, RetainedSemantics>();
+  const unbound: UnboundHArtifact[] = [];
   for (const population of populations) {
+    const sources = new Map(census.find((row) => row.population === population.name)!.records.map((source) => [source.source_id, source]));
+    const bindings = population.publicationAssociations ?? [];
+    if (bindings.length > 0 && population.cacheRoot === undefined) throw new Error("retained H association requires a cache root");
+    const boundSources = new Set<string>();
+    for (const binding of bindings) {
+      const source = sources.get(binding.source_id);
+      if (source === undefined || source.source_version !== binding.source_version ||
+          !/^[a-f0-9]{64}$/u.test(binding.generation_key) || !/^[a-f0-9]{64}$/u.test(binding.request_digest)) {
+        throw new Error("retained H binding does not match the frozen source census");
+      }
+      if (boundSources.has(binding.source_id)) throw new Error("retained H association repeats a source");
+      boundSources.add(binding.source_id);
+    }
     if (population.cacheRoot === undefined) continue;
     for (const key of listShardKeys(population.cacheRoot)) {
       const native = inspectCachedSourceSemantic(population.cacheRoot, key, population.model, population.requestProfile);
-      if (native.status !== "hit") continue;
-      const digest = native.admitted.request.source_catalog.source_digest;
-      if (!allowed.has(digest)) continue;
-      const existing = joined.get(digest);
-      if (existing !== undefined && (existing.status !== "hit" || existing.key !== key)) {
-        joined.set(digest, { status: "conflict", key });
-        continue;
+      const matched = bindings.filter((binding) => binding.generation_key === key);
+      if (matched.length === 0) {
+        unbound.push({ population: population.name, generation_key: key, status: native.status === "hit" ? "unbound" : "invalid" });
       }
-      joined.set(digest, { status: "hit", key, native });
+      for (const binding of matched) {
+        const source = sources.get(binding.source_id)!;
+        const valid = native.status === "hit" &&
+          native.admitted.request.source_catalog.source_digest === source.corpus_digest &&
+          native.requestDigest === binding.request_digest;
+        const existing = joined.get(source.source_id);
+        if (existing !== undefined && (existing.status !== "hit" || existing.key !== key)) {
+          joined.set(source.source_id, { status: "conflict", key });
+        } else {
+          joined.set(source.source_id, valid && native.status === "hit" ? { status: "hit", key, native } : { status: "invalid", key });
+        }
+      }
+    }
+    for (const binding of bindings) {
+      if (!joined.has(binding.source_id)) joined.set(binding.source_id, { status: "invalid", key: binding.generation_key });
     }
   }
-  return joined;
+  return { joined, unbound };
 }
 
 function listShardKeys(cacheRoot: string): readonly string[] {
@@ -304,6 +337,7 @@ function checkpointSnapshot(snapshotPath: string): void {
 function sealReport(input: Readonly<{
   recordedAt: string; workspaceId: string; runId: string; snapshotPath: string;
   census: readonly SourceCensus[]; dispositions: readonly SourcePublicationDisposition[];
+  unbound: readonly UnboundHArtifact[];
 }>): SourcePublicationReport {
   const hCounts = {
     interpreted: 0, abstained: 0, no_executable_proposition: 0, no_eligible_source: 0,
@@ -318,7 +352,9 @@ function sealReport(input: Readonly<{
     admitted_count: input.dispositions.filter((row) => row.admission === "admitted").length,
     rejected_count: input.dispositions.filter((row) => row.admission === "rejected").length,
     published_count: input.dispositions.filter((row) => row.publication === "published").length,
-    h_counts: hCounts, sources: input.dispositions
+    h_counts: hCounts, sources: input.dispositions,
+    unbound_h_artifacts: input.unbound, h_binding_complete: input.unbound.length === 0 &&
+      input.dispositions.every((row) => row.h !== "invalid" && row.h !== "conflict")
   };
 }
 
@@ -336,4 +372,3 @@ function dispositionBase(source: SourceCensusRecord): Omit<SourcePublicationDisp
     speaker: source.speaker ?? null, roles: source.roles, repeated_assertion_text: source.repeated_assertion_text
   };
 }
-

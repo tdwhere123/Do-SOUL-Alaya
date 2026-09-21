@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,7 +18,7 @@ const CLOCK = "2026-09-13T00:00:00.000Z";
 const AS_OF = "2023-09-13T00:00:00.000Z";
 afterEach(async () => { for (const root of roots) await rm(root, { recursive: true, force: true }); roots.clear(); });
 
-async function fixture() {
+async function fixture(duplicate = false) {
   const root = await mkdtemp(join(tmpdir(), "source-records-publication-"));
   roots.add(root);
   const dataDir = join(root, "data");
@@ -28,14 +29,15 @@ async function fixture() {
     question("mixed-roles", [[{ role: "user", content: "A café source record." },
       { role: "assistant", content: "Noted the café source." }]]),
     question("repeated-text", [[{ role: "user", content: "Please note this. The cat sat. The cat sat. Done." }]]),
-    question("absent-h", [[{ role: "user", content: "Unrelated distractor lives in Suzhou." }]])
+    question("absent-h", [[{ role: "user", content: "Unrelated distractor lives in Suzhou." }]]),
+    ...(duplicate ? [question("same-text-other-session", [[{ role: "user", content: "Unrelated distractor lives in Suzhou." }]])] : [])
   ]);
   await writeFile(join(dataDir, "longmemeval_s.json"), source);
   await writeFile(join(pinnedMetaRoot, "longmemeval_s.meta.json"), JSON.stringify({
     sha256: createHash("sha256").update(source).digest("hex"),
-    size_bytes: Buffer.byteLength(source), question_count: 3
+    size_bytes: Buffer.byteLength(source), question_count: duplicate ? 4 : 3
   }));
-  await writeFile(join(cacheRoot, "ab", `${"f".repeat(64)}.json`), "{}");
+  await writeFile(join(cacheRoot, "ab", `${"ab".repeat(32)}.json`), "{}");
   return { root, dataDir, pinnedMetaRoot, cacheRoot };
 }
 
@@ -49,6 +51,32 @@ function question(id: string, sessions: { role: string; content: string }[][]) {
 }
 
 describe("complete-source census and publication", () => {
+  it("rejects invalid or repeated publication associations before creating the snapshot", async () => {
+    const f = await fixture();
+    const census = await censusCompleteSourceRecords({ population: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
+    const source = census.records[0]!;
+    const binding = { source_id: source.source_id, source_version: source.source_version,
+      generation_key: "ab".repeat(32), request_digest: "c".repeat(64) };
+    const base = { snapshotPath: join(f.root, "invalid.sqlite"), dataDirRoot: join(f.root, "invalid-seed"),
+      recordedAt: CLOCK, producerCommit: "a".repeat(40) };
+    for (const [cacheRoot, bindings] of [[undefined, [binding]], [f.cacheRoot, [binding, binding]]] as const) {
+      await expect(publishSourceSemanticSnapshot({ ...base, populations: [{
+        name: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot, cacheRoot,
+        model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1", publicationAssociations: bindings
+      }] })).rejects.toThrow(/association requires a cache root|association repeats a source/u);
+      expect(existsSync(base.snapshotPath)).toBe(false);
+      expect(existsSync(base.dataDirRoot)).toBe(false);
+    }
+  });
+  it("preserves identical text belonging to distinct source sessions", async () => {
+    const f = await fixture(true);
+    const census = await censusCompleteSourceRecords({ population: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
+    expect(census.records).toHaveLength(4);
+    const duplicate = census.records.filter((row) => row.content_bytes.includes("Suzhou"));
+    expect(duplicate).toHaveLength(2);
+    expect(new Set(duplicate.map((row) => row.source_id)).size).toBe(2);
+    expect(new Set(duplicate.map((row) => row.session_id)).size).toBe(2);
+  });
   it("keeps census and publication ownership out of the launcher", async () => {
     expect(await runSourceSemanticPublicationLauncher([])).toBe(2);
   });
@@ -88,6 +116,8 @@ describe("complete-source census and publication", () => {
     expect(report.rejected_count).toBe(0);
     expect(report.published_count).toBe(0);
     expect(report.h_counts.absent).toBe(3);
+    expect(report.unbound_h_artifacts).toEqual([{ population: "fixture", generation_key: "ab".repeat(32), status: "invalid" }]);
+    expect(report.h_binding_complete).toBe(false);
     expect(report.sources.every((row) => row.admission === "admitted")).toBe(true);
     expect(report.sources.every((row) => row.h === "absent" && row.publication === "not_attempted")).toBe(true);
     const db = new Database(report.snapshot_path, { readonly: true });

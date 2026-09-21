@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 import { readLiveTransportFailure } from "../cache/cache-live-delegate.js";
-import { createGeminiHttpExtractor } from "../../compile-seed/http/gemini-http.js";
+import { createGeminiHttpExtractor, readGeminiFailureResponse } from "../../compile-seed/http/gemini-http.js";
 import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../../compile-seed/http/gemini-http.js";
 import { resolveExtractionRequestTimeoutMs } from "../../compile-seed/http/output-token-retry.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
@@ -26,7 +26,7 @@ import { batchDigest } from "./batch/plan.js";
 import { encodeGeminiGenerateContent, isCompleteGeminiFinish, isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import {
   bindProviderRawAttempt, listProviderRawAttempts, readProviderRawAttempt, requestEnvelopeDigest,
-  writeProviderRawAttempt, type ProviderRawAttempt
+  writeProviderRawAttempt, retainedFailureOutcome, type ProviderRawAttempt
 } from "./provider-raw-attempt.js";
 import { assertExtractionFillComplete } from "./fill-completion.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
@@ -73,7 +73,6 @@ export async function executeOpenSemanticsInteractiveFill(
       authority.receipt.price.maximum_input_tokens_per_attempt
     );
   }
-  if (input.prepared.config.apiKey === null) throw new Error("garden API key is unavailable");
   const extractor = createGeminiHttpExtractor(input.prepared.config);
   let newlyExtracted = 0;
   await runBoundedWorkers(workset.lines, input.concurrency, async (line) => {
@@ -159,6 +158,12 @@ function importInteractiveFromRaw(
     requestProfile: input.prepared.config.requestProfile,
     requestDigest: requestEnvelopeDigest(line.userPrompt)
   });
+  const failure = retainedFailureOutcome(raw);
+  if (failure !== undefined) {
+    input.authority!.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);
+    input.authority!.abandonPendingShard(line.key, raw.attempt_ordinal);
+    return "quarantined";
+  }
   if (!raw.full_replay_possible) {
     input.authority!.abandonPendingShard(line.key, raw.attempt_ordinal);
     return "quarantined";
@@ -189,6 +194,9 @@ async function dispatchInteractiveLine(
     throw new Error("open-semantics interactive fill requires bound attempt authority");
   }
   input.options.signal?.throwIfAborted();
+  if (input.prepared.config.apiKey === null || input.prepared.config.apiKey.trim().length === 0) {
+    throw new Error("garden API key is unavailable");
+  }
   const attemptOrdinal = await authority.reserveAttemptOrdinal(line.key, input.options.signal);
   let extracted: Awaited<ReturnType<typeof extractor.extract>>;
   try {
@@ -208,20 +216,19 @@ async function dispatchInteractiveLine(
     appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
       `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
     if (isCompletedNonRetryableResponse(outcome)) {
-      writeProviderRawAttempt({
+      const response = readGeminiFailureResponse(cause);
+      const raw = writeProviderRawAttempt({
         root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",
         model: input.prepared.config.model, requestProfile: input.prepared.config.requestProfile,
         requestDigest: requestEnvelopeDigest(line.userPrompt), decodedText: "",
-        finishReason: null,
+        finishReason: response?.finishReason ?? null,
+        ...(response === undefined ? {} : { responseBody: response.rawBody }),
+        ...(outcome.transportFailures[0] === undefined ? {} : { transportFailure: outcome.transportFailures[0] }),
         ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
         ...(outcome.transportFailures[0]?.phase === undefined
           ? {} : { transportPhase: outcome.transportFailures[0].phase })
       });
-      return importInteractiveLine(input, line, sourceCorpus, {
-        rawJson: "",
-        responseMetadata: { finishReason: null },
-        ...(outcome.usage === undefined ? {} : { usage: outcome.usage })
-      }, attemptOrdinal);
+      return importInteractiveFromRaw(input, line, sourceCorpus, raw);
     }
     authority.recordTransportOutcome(line.key, outcome, attemptOrdinal);
     authority.abandonPendingShard(line.key, attemptOrdinal);
@@ -352,10 +359,11 @@ function publishInteractiveFill(
     windowLimit: input.prepared.windowLimit, completion, status
   });
   writeExtractionCacheManifest(input.cacheRoot, manifest);
+  const authorityTelemetry = input.authority!.snapshot();
   return {
     requestedTurns: input.prepared.requestedTurns, cacheHits: workset.cachedRequests.length,
     newlyExtracted, coverage: completion.coverage, manifest,
-    ...readFillRetryTelemetry(newFillStats()), authorityTelemetry: input.authority!.snapshot()
+    ...readFillRetryTelemetry({ ...newFillStats(), ...authorityTelemetry?.telemetry }), authorityTelemetry
   };
 }
 

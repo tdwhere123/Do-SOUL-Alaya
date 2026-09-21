@@ -48,7 +48,7 @@ export function encodeGeminiGenerateContent(
 
 export class GeminiProviderEnvelopeError extends Error {
   readonly providerCode: unknown;
-  constructor(message: string, providerCode?: unknown) {
+  constructor(message: string, providerCode?: unknown, readonly response?: unknown) {
     super(`Gemini provider error: ${message}`);
     this.name = "GeminiProviderEnvelopeError";
     this.providerCode = providerCode;
@@ -190,13 +190,13 @@ function throwIfGeminiProviderError(value: unknown): void {
   const error = (value as { readonly error?: unknown }).error;
   if (error === undefined) return;
   if (typeof error !== "object" || error === null || Array.isArray(error)) {
-    throw new GeminiProviderEnvelopeError("malformed error envelope");
+    throw new GeminiProviderEnvelopeError("malformed error envelope", undefined, value);
   }
   const body = error as Record<string, unknown>;
   const message = typeof body.message === "string" && body.message.trim().length > 0
     ? body.message
     : "provider error envelope";
-  throw new GeminiProviderEnvelopeError(message, body.code);
+  throw new GeminiProviderEnvelopeError(message, body.code, value);
 }
 
 export function record(value: unknown): Record<string, unknown> {

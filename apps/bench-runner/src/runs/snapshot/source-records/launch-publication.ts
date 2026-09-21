@@ -1,4 +1,6 @@
-import { publishSourceSemanticSnapshot } from "./publish.js";
+import { publishSourceSemanticSnapshot, type SourcePublicationPopulation } from "./publish.js";
+import { readFileSync } from "node:fs";
+import { z } from "zod";
 import type { ExtractionRequestProfile } from "../../extraction/request-profile.js";
 import { isExtractionRequestProfile } from "../../extraction/request-profile.js";
 
@@ -29,22 +31,20 @@ export async function runSourceSemanticPublicationLauncher(args: readonly string
   }
 }
 
-function population(flags: ReadonlyMap<string, string>, name: "original" | "challenge"): {
-  name: "original" | "challenge";
-  dataDir: string;
-  pinnedMetaRoot: string;
-  cacheRoot?: string;
-  model: string;
-  requestProfile: ExtractionRequestProfile;
-} {
+function population(flags: ReadonlyMap<string, string>, name: "original" | "challenge"): SourcePublicationPopulation {
   const prefix = `--${name}`;
   const cacheRoot = flags.get(`${prefix}-cache-root`);
+  const bindingsPath = flags.get(`${prefix}-publication-associations`);
   return {
     name,
     dataDir: required(flags, `${prefix}-data-dir`),
     pinnedMetaRoot: required(flags, `${prefix}-pinned-meta-root`),
     model: required(flags, "--model"),
     requestProfile: requestProfile(required(flags, "--request-profile")),
+    ...(bindingsPath === undefined ? {} : { publicationAssociations: z.array(z.object({
+      source_id: z.string().min(1), source_version: z.string().min(1),
+      generation_key: z.string().regex(/^[a-f0-9]{64}$/u), request_digest: z.string().regex(/^[a-f0-9]{64}$/u)
+    }).strict()).max(10000).parse(JSON.parse(readFileSync(bindingsPath, "utf8"))) }),
     ...(cacheRoot === undefined ? {} : { cacheRoot })
   };
 }
@@ -54,7 +54,8 @@ function parseFlags(args: readonly string[]): Map<string, string> {
     "--snapshot", "--data-dir-root", "--recorded-at", "--producer-commit", "--workspace-id", "--run-id",
     "--model", "--request-profile",
     "--original-data-dir", "--original-pinned-meta-root", "--original-cache-root",
-    "--challenge-data-dir", "--challenge-pinned-meta-root", "--challenge-cache-root"
+    "--challenge-data-dir", "--challenge-pinned-meta-root", "--challenge-cache-root",
+    "--original-publication-associations", "--challenge-publication-associations"
   ];
   const flags = new Map<string, string>();
   for (let index = 0; index < args.length; index += 2) {
