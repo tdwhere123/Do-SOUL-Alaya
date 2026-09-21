@@ -15,7 +15,7 @@ import {
   writeSemanticProposalShard, isExecutableProposalShard
 } from "../../../runs/semantic-proposal/artifact.js";
 import {
-  executeSemanticProposalFill, prepareSemanticProposal
+  executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults
 } from "../../../runs/semantic-proposal/fill.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
 import {
@@ -42,7 +42,7 @@ it("keeps admitted legacy shards without completion witnesses non-executable", (
   expect(isExecutableProposalShard({ ...shard, finish_reason: "STOP", completion_witness: "finish_reason" })).toBe(true);
 });
 
-it.each(["{\"outcome\":{\"status\":\"abstained\"}}", "{}"])(
+it.each([JSON.stringify({ contract: "source-semantic-query-response-v3", outcome: { status: "abstained" } }), "{}"])(
   "recovers a published terminal shard before ledger settlement without credentials: %s", async (rawJson) => {
     const cacheRoot = tempRoot();
     const prepared = workset();
@@ -57,6 +57,8 @@ it.each(["{\"outcome\":{\"status\":\"abstained\"}}", "{}"])(
         return { rawJson, responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } };
       }
     } });
+    expect(readSemanticProposalResults(prepared, cacheRoot, 128)[0]?.status)
+      .toBe(rawJson === "{}" ? "invalid" : "abstained");
     writeFileSync(ledgerPath, reserved);
     for (let replay = 0; replay < 2; replay++) {
       await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: { ...config(), apiKey: null } });
@@ -336,6 +338,9 @@ it.each([
     expect(result.attempts).toBe("attempts" in response ? response.attempts : 1);
     expect(result.newly_admitted).toBe(0);
     expect(result.terminal_failures).toBe(1);
+    expect(readSemanticProposalResults(prepared, cacheRoot, 128)).toMatchObject([
+      { status: "transport_failure", shard: { outcome: { status: "transport_failure" } } }
+    ]);
     const key = authority.keys[0]!;
     expect(readProviderRawAttempt(cacheRoot, key, 1)).toMatchObject({
       decoded_text: "",

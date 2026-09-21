@@ -175,8 +175,13 @@ export function readSemanticProposalResults(workset: SemanticProposalWorkset, ca
   return materializeSemanticProposalLines(workset, maxOutputTokens).map((line) => {
     const shard = inspectSemanticProposalShard(cacheRoot, line.key, lookupOf(workset, line, maxOutputTokens));
     if (shard === undefined) return { line, status: "unattempted" as const };
-    const classified = replayCachedProposalShard(line, shard);
-    if (!isExecutableProposalShard(shard)) return { line, shard, status: classified };
+    replayCachedProposalShard(line, shard);
+    if (!isExecutableProposalShard(shard)) {
+      const outcome = proposalOutcomeStatus(shard);
+      // Retry/cache classification is not a semantic outcome. In particular,
+      // absent decoded text on a failed HTTP attempt is not valid-empty output.
+      return { line, shard, status: outcome === "interpreted" ? "incomplete" : outcome };
+    }
     const received = receiveLine(line, shard.raw_json);
     if (!isCoreAdmittedProposal(line, received)) throw new SemanticProposalIdentityError("cached proposal no longer admits");
     return { line, shard, received, status: "interpreted" as const };
