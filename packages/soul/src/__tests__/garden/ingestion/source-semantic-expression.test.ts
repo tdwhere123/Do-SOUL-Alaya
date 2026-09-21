@@ -13,6 +13,31 @@ const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor mi
 const raw = SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
 
 describe("source-bound nested semantic expressions", () => {
+  it.each(["can", "may", "might"])("preserves %s scope without promoting its nested event to an asserted fact", (modal) => {
+    const source = { ...input, sourceCorpus: `Rin ${modal} inspect crates.`, assertionIds: [1] };
+    const request = buildSourceSemanticRequest(source);
+    const select = (text: string) => request.source_catalog.assertions[0]!.segments.find((row) => row.text === text)!.id;
+    const event = { kind: "statement", predicate: { kind: "explicit", reading: "inspect", support: select("inspect") },
+      arguments: [{ role: "inspector", target: select("Rin") }, { role: "item", target: select("crates") }] };
+    const proposal = { contract: "source-semantic-proposal-v5", outcome: { status: "interpreted" }, content: {
+      roots: [{ act: "assertion", expression: { kind: "possible", support: select(modal), content: event } }]
+    } };
+    const rawJson = JSON.stringify(proposal);
+    const received = receiveSourceSemantics(rawJson, request, source);
+    expect(received.outcome.status).toBe("interpreted");
+    expect(received.rawJson).toBe(rawJson);
+    const h = received.interpretation!;
+    const possibility = h.operators.find((row) => row.operator === "possible")!;
+    const nested = h.frames.find((row) => row.predicate_support.reading === "inspect")!;
+    expect(h.asserted_at_scope).toEqual([possibility.id]);
+    expect(nested.context_owner).toEqual({ kind: "operator", operator_handle: possibility.id });
+    // Admission validates a supplied scope; it must not invent a modal missing from model output.
+    const omitted = { ...proposal, content: { roots: [{ act: "assertion", expression: event }] } };
+    const flattened = receiveSourceSemantics(JSON.stringify(omitted), request, source).interpretation!;
+    expect(flattened.operators).toHaveLength(0);
+    expect(flattened.asserted_at_scope).toEqual([flattened.frames[0]!.id]);
+  });
+
   it("compiles source scope and co-reference with host-owned identities", () => {
     const received = proposeSourceSemantics(input, { rawJson: raw });
     expect(received.outcome).toEqual({ status: "interpreted", gaps: [] });
