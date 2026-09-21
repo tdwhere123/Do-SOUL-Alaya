@@ -31,7 +31,7 @@ import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import {
-  exposureSlots, firstExposureMismatch
+  exposureSlots, firstExposureMismatch, FirstExposureSession
 } from "../../../../../../apps/bench-runner/src/runs/measurement/first-exposure-session.js";
 import {
   recordSourceSemanticLibraryFirstExposure, soulSearchFromLibraryRecall
@@ -517,6 +517,23 @@ it("binds delivery_id to the delivered first-exposure membership", async () => {
   }, 1);
 });
 
+it("expires preparation by elapsed lifetime while retaining a fixed interpretation clock", async () => {
+  await withLibrary(async ({ execute }) => {
+    let now = "2026-09-21T00:00:00.000Z";
+    const handler = createSourceSemanticInterpretationHandler({ now: () => now,
+      interpretationClock: CLOCK, sourceSemanticsPort: { execute } });
+    const context = { workspaceId: WS, runId: RUN, agentTarget: "codex", sessionId: "fixed-clock" };
+    const prepared = await handler({ operation: "prepare_source", source_id: "artifact-1", budget: BUDGET }, context);
+    if (prepared.operation !== "prepare_source" || prepared.source_handle === undefined) throw new Error("preparation missing");
+    const request = { operation: "prepare_query" as const, original_query: ORIGINAL, q: queryOf(),
+      source_handle: prepared.source_handle, budget: BUDGET };
+    now = "2026-09-21T00:01:00.000Z";
+    expect((await handler(request, context)).operation).toBe("prepare_query");
+    now = "2026-09-21T00:11:00.000Z";
+    await expect(handler(request, context)).rejects.toThrow(/expired/u);
+  }, 1);
+});
+
 it("pages library occupancy without duplicating first-page product identities", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-library-pages-"));
   const filename = join(directory, "alaya.db");
@@ -550,6 +567,11 @@ it("pages library occupancy without duplicating first-page product identities", 
     if (second.kind !== "recall") throw new Error("library recall expected");
     expect(second.index.entries.length).toBeGreaterThan(0);
     expect(second.index.as_of).toBe(first.index.as_of);
+    const exposureSession = new FirstExposureSession();
+    const firstExposure = recordSourceSemanticLibraryFirstExposure(first, exposureSession);
+    const nextExposure = recordSourceSemanticLibraryFirstExposure(second, exposureSession, first.index.continuation);
+    expect(nextExposure.initial).toEqual(firstExposure.initial);
+    expect(recordSourceSemanticLibraryFirstExposure(second, new FirstExposureSession(), first.index.continuation).initial).toBeNull();
     const continued = { ...recallRequest([]), continuation: first.index.continuation! };
     await expect(execute({ workspace_id: WS, as_of: "2026-09-18T00:06:00.000Z",
       authorized_scopes: { mode: "named", scopes: ["project"] }, request: continued })).rejects.toThrow(/expired/u);
@@ -573,6 +595,20 @@ it("pages library occupancy without duplicating first-page product identities", 
     changed.database.connection.prepare("UPDATE source_records SET scope_class = 'global_core' WHERE source_id = 'artifact-0'").run();
     changed.database.close(); closeCachedDatabase(filename);
     await expect(handler(nextRequest, context)).rejects.toThrow(/snapshot/u);
+    let lifetime = "2026-09-21T00:00:00.000Z";
+    const fixed = createSourceSemanticInterpretationHandler({ now: () => lifetime, interpretationClock: CLOCK,
+      sourceSemanticsPort: { execute } });
+    const fixedFirst = await fixed(publicRequest, context);
+    if (fixedFirst.operation !== "recall" || fixedFirst.index?.continuation == null) throw new Error("fixed-clock page missing");
+    expect(fixedFirst.index.as_of).toBe(CLOCK);
+    expect(fixedFirst.index.continuation.expires_at).toBe("2026-09-21T00:05:00.000Z");
+    const fixedRequest = { ...publicRequest, continuation: fixedFirst.index.continuation };
+    lifetime = "2026-09-21T00:01:00.000Z";
+    const fixedNext = await fixed(fixedRequest, context);
+    if (fixedNext.operation !== "recall") throw new Error("fixed-clock continuation missing");
+    expect(fixedNext.index?.as_of).toBe(CLOCK);
+    lifetime = "2026-09-21T00:06:00.000Z";
+    await expect(fixed(fixedRequest, context)).rejects.toThrow(/expired/u);
     const firstIds = new Set(first.index.entries.map(canonicalProductIdentityOfEntry));
     expect(second.index.entries.some((entry) => firstIds.has(canonicalProductIdentityOfEntry(entry)))).toBe(false);
     await expect(call(execute, {

@@ -874,7 +874,11 @@ Host operations accept the same `authorized_scopes` admission as ordinary Recall
 (`unrestricted`, `named`, or `denied`); omitting it stays unrestricted for the
 attached-agent default. Source/query/page handles have distinct operations,
 principal/workspace/scope bindings and finite process-local lifetimes. They do
-not survive worker loss.
+not survive worker loss. The host passes `lifetime_now` separately from semantic
+`as_of` to the worker. Preparation and library continuation expiry use elapsed
+lifetime even when a benchmark pins the interpretation clock; freezing semantic
+time cannot extend a capability. Internal callers without an explicit lifetime
+clock retain the existing advancing `as_of` convention.
 Query/page handles conservatively invalidate on the worker database revision;
 reprepare after changes. One-shot reasoning is supported without claiming that
 library discovery ran. There is no cross-run semantic result/coverage cache.

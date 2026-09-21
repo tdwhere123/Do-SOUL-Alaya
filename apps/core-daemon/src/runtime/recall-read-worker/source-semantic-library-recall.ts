@@ -18,7 +18,7 @@ import { admissionOf, discover, loadVerified, workOf } from "./source-semantic-d
 import {
   listEligibleSemanticSources, sourceSemanticReadStores, SourceSemanticReadBudget
 } from "../field/source-semantic-read-stores.js";
-import { issueSemanticLease, readSemanticLease, sourceSemanticRevision } from "./source-semantic-leases.js";
+import { issueSemanticLease, readSemanticLease, sourceSemanticLifetimeNow, sourceSemanticRevision } from "./source-semantic-leases.js";
 
 const LIBRARY_PREVIEW_CHARS = 4_096;
 
@@ -205,7 +205,7 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
     cursor: request.continuation?.cursor ?? null
   }));
   const paging = {
-    offset, expires_at: issued?.expires_at ?? new Date(Date.parse(payload.as_of) + 5 * 60_000).toISOString(),
+    offset, expires_at: issued?.expires_at ?? new Date(Date.parse(sourceSemanticLifetimeNow(payload)) + 5 * 60_000).toISOString(),
     authorized_scopes: authorized
   };
   const assembled = assembleSourceSemanticLibraryIndex({
@@ -303,6 +303,7 @@ function issueLibraryIndex(runtime: RecallReadWorkerRuntime, payload: SourceSema
   if (index.continuation === null) return index;
   const sealed = sealIssuedContinuation(index.continuation);
   issueSemanticLease(runtime, { kind: "library", workspace_id: payload.workspace_id,
+    lifetime_now: sourceSemanticLifetimeNow(payload),
     principal: payload.principal ?? "", as_of: payload.as_of, authorized, expires_at: sealed.expires_at,
     revision: sourceSemanticRevision(runtime), continuation: sealed, request_identity: requestIdentity }, meter, sealed.continuation_id);
   return { ...index, continuation: sealed };

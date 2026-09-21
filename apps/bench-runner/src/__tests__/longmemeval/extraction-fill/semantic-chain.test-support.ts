@@ -1,9 +1,10 @@
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
 import type { SourceSemanticAlignmentRequest } from "@do-soul/alaya-soul";
 import { SoulInterpretationResponseSchema } from "@do-soul/alaya-protocol";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
+import { BENCH_DAEMON_DB_FILENAME } from "../../../runs/snapshot/materialize.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { parseSemanticProposalWorkset, materializeSemanticProposalLines } from "../../../runs/semantic-proposal/workset.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
@@ -109,4 +110,18 @@ export async function assertNativeSemanticChain(cacheRoot: string): Promise<void
   if (without.operation !== "recall") throw new Error("wrong control response");
   expect(without.proofs ?? []).toHaveLength(0);
   expect(without.index?.as_of).toBe(config.interpretation_clock);
+  await assertInterruptedExposure(root, proofReplay.path, ready.query_key);
+}
+
+async function assertInterruptedExposure(root: string, output: string, queryKey: string): Promise<void> {
+  // Model a crash after exposure reservation but before its result publication.
+  // Leave the actual owner's reservation intact, rather than authoring another one.
+  const rowPath = join(output.slice(0, -".json".length), `${queryKey}.json`);
+  expect(existsSync(`${rowPath}.reserved`)).toBe(true);
+  unlinkSync(output); unlinkSync(rowPath);
+  await expect(replaySemanticChain(root)).rejects.toThrow(/unresolved after interruption/u);
+  expect(existsSync(output)).toBe(false);
+  const retained = readdirSync(root).filter((name) => name.startsWith("native-session-"));
+  expect(retained).toHaveLength(1);
+  expect(existsSync(join(root, retained[0]!, BENCH_DAEMON_DB_FILENAME))).toBe(true);
 }

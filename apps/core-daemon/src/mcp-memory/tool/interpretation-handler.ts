@@ -14,7 +14,7 @@ const DEFAULT_BUDGET: RequestBudget = { schema_version: 1, work_units: 200000, m
 
 export type SourceSemanticHostPort = Readonly<{
   execute(input: Readonly<{ workspace_id: string; as_of: string; authorized_scopes: AuthorizedScopesAdmission;
-    principal?: string; expires_at?: string; request: SourceSemanticWorkerRequest }>): Promise<SourceSemanticWorkerResult>;
+    principal?: string; expires_at?: string; lifetime_now?: string; request: SourceSemanticWorkerRequest }>): Promise<SourceSemanticWorkerResult>;
 }>;
 export type SourceSemanticPublicationPort = Readonly<{
   publish(input: Readonly<{
@@ -140,6 +140,7 @@ async function executeWorker(input: Dependencies, context: McpMemoryToolCallCont
   const now = input.now();
   const asOf = input.interpretationClock ?? now;
   return input.sourceSemanticsPort.execute({ workspace_id: context.workspaceId, as_of: asOf,
+    lifetime_now: now,
     authorized_scopes, principal: JSON.stringify([context.agentTarget, context.sessionId, context.runId]),
     expires_at: new Date(Date.parse(now) + 600_000).toISOString(), request });
 }

@@ -149,7 +149,9 @@ it("fills complete-source open semantics through interactive generateContent wit
   expect(report.published_count).toBe(census.records.length);
   expect(report.h_binding_complete).toBe(true);
   expect(report.sources.every((source) => source.h_binding?.kind === "host_publication_association")).toBe(true);
+  const providerCalls = fixture.fetchMock.mock.calls.length;
   await assertNativeSemanticChain(cacheRoot);
+  expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
 }, 60000);
 
 it("quarantines an interactive generateContent line through the same source-semantic receiver as Batch", async () => {

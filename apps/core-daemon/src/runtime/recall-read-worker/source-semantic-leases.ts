@@ -7,6 +7,7 @@ import type { SourceSemanticReadBudget } from "../field/source-semantic-read-sto
 export type SourceSemanticLease = Readonly<{
   kind: "source" | "query" | "page" | "library";
   workspace_id: string; principal: string; as_of: string; authorized: readonly string[] | null;
+  lifetime_now?: string;
   expires_at: string; revision: string;
   source_id?: string; source_version?: string; content_digest?: string;
   original_query?: string; q?: SourceSemanticQuery; q_id?: string;
@@ -14,9 +15,15 @@ export type SourceSemanticLease = Readonly<{
   after_cursor?: string | null; discovery_open?: boolean; truncated?: boolean;
   continuation?: Continuation; request_identity?: string;
 }>;
-type Caller = Readonly<{ workspace_id: string; principal?: string; as_of: string }>;
+type Clock = Readonly<{ as_of: string; lifetime_now?: string }>;
+type Caller = Clock & Readonly<{ workspace_id: string; principal?: string }>;
 const LEASES = new WeakMap<RecallReadWorkerRuntime, Map<string, SourceSemanticLease>>();
 const MAX_BYTES = 8_000_000;
+
+/** Interpretation time may be frozen; capability lifetime must keep advancing. */
+export function sourceSemanticLifetimeNow(clock: Clock): string {
+  return clock.lifetime_now ?? clock.as_of;
+}
 
 export function sourceSemanticRevision(runtime: RecallReadWorkerRuntime): string {
   return `${String(runtime.database.connection.pragma("data_version", { simple: true }))}:${String(
@@ -27,7 +34,7 @@ export function issueSemanticLease(runtime: RecallReadWorkerRuntime, lease: Sour
   meter.retain(lease, "preparation lease");
   let rows = LEASES.get(runtime);
   if (rows === undefined) { rows = new Map(); LEASES.set(runtime, rows); }
-  for (const [id, row] of rows) if (row.expires_at <= lease.as_of) rows.delete(id);
+  for (const [id, row] of rows) if (row.expires_at <= sourceSemanticLifetimeNow(lease)) rows.delete(id);
   const id = issuedId ?? randomUUID(); rows.set(id, lease);
   const size = () => [...rows.values()].reduce((sum, row) => sum + 4 * canonicalJson(row).length, 0);
   while (rows.size > 32 || size() > MAX_BYTES) rows.delete(rows.keys().next().value!);
@@ -38,7 +45,7 @@ export function issueSemanticLease(runtime: RecallReadWorkerRuntime, lease: Sour
 export function readSemanticLease(runtime: RecallReadWorkerRuntime, caller: Caller, id: string,
   authorized: readonly string[] | null, kind: SourceSemanticLease["kind"]): SourceSemanticLease {
   const rows = LEASES.get(runtime), lease = rows?.get(id);
-  if (lease === undefined || lease.expires_at <= caller.as_of) {
+  if (lease === undefined || lease.expires_at <= sourceSemanticLifetimeNow(caller)) {
     rows?.delete(id); throw new CoreError("VALIDATION", "source semantic preparation handle expired", { details: { admission: "expired" } });
   }
   if (lease.kind !== kind || lease.workspace_id !== caller.workspace_id || lease.principal !== (caller.principal ?? "")) {
@@ -53,7 +60,7 @@ export function readSemanticLease(runtime: RecallReadWorkerRuntime, caller: Call
   return lease;
 }
 
-export function semanticLeaseExpiry(asOf: string, requested?: string): string {
-  const maximum = new Date(Date.parse(asOf) + 600_000).toISOString();
+export function semanticLeaseExpiry(lifetimeNow: string, requested?: string): string {
+  const maximum = new Date(Date.parse(lifetimeNow) + 600_000).toISOString();
   return requested !== undefined && requested < maximum ? requested : maximum;
 }

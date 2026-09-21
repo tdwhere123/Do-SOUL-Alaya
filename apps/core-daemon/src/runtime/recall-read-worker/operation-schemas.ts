@@ -96,6 +96,7 @@ const PAYLOAD_SCHEMAS = {
     request: SourceInterpretationReasoningRequestSchema }).strict(),
   "conditionalField.sourceSemantics": z.object({
     workspace_id: z.string().min(1), as_of: z.string().datetime(),
+    lifetime_now: z.string().datetime().optional(),
     authorized_scopes: AuthorizedScopesAdmissionSchema,
     principal: z.string().min(1).max(256).optional(),
     expires_at: z.string().datetime().optional(),

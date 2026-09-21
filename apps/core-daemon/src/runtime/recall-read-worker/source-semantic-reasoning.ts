@@ -8,7 +8,7 @@ import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
 import { sourceSemanticReadStores, currentSemanticSource, authorizeSemanticScope, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
-import { issueSemanticLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticRevision, type SourceSemanticLease } from "./source-semantic-leases.js";
+import { issueSemanticLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow, sourceSemanticRevision, type SourceSemanticLease } from "./source-semantic-leases.js";
 import { runSourceSemanticLibraryRecall } from "./source-semantic-library-recall.js";
 import { IDLE, discover, loadVerified, workOf } from "./source-semantic-discovery.js";
 
@@ -36,7 +36,8 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
 
 function leaseBase(runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null) {
   return { workspace_id: payload.workspace_id, principal: payload.principal ?? "", as_of: payload.as_of,
-    authorized, expires_at: semanticLeaseExpiry(payload.as_of, payload.expires_at), revision: sourceSemanticRevision(runtime) };
+    lifetime_now: sourceSemanticLifetimeNow(payload),
+    authorized, expires_at: semanticLeaseExpiry(sourceSemanticLifetimeNow(payload), payload.expires_at), revision: sourceSemanticRevision(runtime) };
 }
 
 function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null,
