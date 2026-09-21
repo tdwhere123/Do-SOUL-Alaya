@@ -1,3 +1,5 @@
+import { appendFileSync } from "node:fs";
+import { join } from "node:path";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 import { readLiveTransportFailure } from "../cache/cache-live-delegate.js";
@@ -145,6 +147,8 @@ async function dispatchInteractiveLine(
     return importInteractiveLine(input, line, sourceCorpus, extracted, attemptOrdinal);
   } catch (cause) {
     if (input.options.signal?.aborted === true) throw cause;
+    appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
+      `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
     const outcome = readLiveTransportFailure(cause);
     if (outcome !== undefined && outcome.transportFailures.length > 0) {
       authority.recordTransportOutcome(line.key, outcome, attemptOrdinal);
