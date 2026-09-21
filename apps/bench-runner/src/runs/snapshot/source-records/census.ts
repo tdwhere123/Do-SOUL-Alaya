@@ -44,9 +44,11 @@ export async function censusCompleteSourceRecords(input: Readonly<{
   population: string;
   dataDir: string;
   pinnedMetaRoot: string;
+  questionWindow?: Readonly<{ offset: number; limit: number }>;
 }>): Promise<SourceCensus> {
   const loaded = await loadDatasetWindowWithIdentity("longmemeval_s", {
-    dataDir: input.dataDir, pinnedMetaRoot: input.pinnedMetaRoot, offset: 0
+    dataDir: input.dataDir, pinnedMetaRoot: input.pinnedMetaRoot, offset: input.questionWindow?.offset ?? 0,
+    ...(input.questionWindow === undefined ? {} : { limit: input.questionWindow.limit })
   });
   return Object.freeze({
     population: input.population,

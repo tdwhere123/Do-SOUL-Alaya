@@ -129,6 +129,35 @@ state or another first exposure. Missing native proofs remain `not_exercised`;
 baseline mismatch and resource failure do not establish a causal effect. The
 existing `without_alignments` replay remains a separate recompilation control.
 
+For a bounded LongMemEval-S source-only development baseline, use the maintained
+entry below. Its [configuration](src/runs/longmemeval-semantic/contract.ts) requires
+the original dataset directory, pinned metadata directory, SHA-256 and question
+count, 1–20 original question IDs, model/profile, Q cache root, recorded timestamp,
+producer commit, native budget and output limits. It never rewrites a dataset or
+dispatches a provider. `freeze` emits `query-workset.json` for the separately
+authorized existing semantic-proposal fill lane. Original question text is retained;
+only its question date supplies approved fixed context and the interpretation clock.
+
+```bash
+node apps/bench-runner/dist/runs/longmemeval-semantic/launch.js freeze --root ROOT --config CONFIG
+node apps/bench-runner/dist/runs/longmemeval-semantic/launch.js prepare --root ROOT
+node apps/bench-runner/dist/runs/longmemeval-semantic/launch.js replay --root ROOT --prepared PREPARED_PATH
+node apps/bench-runner/dist/runs/longmemeval-semantic/launch.js measure --root ROOT --replay REPLAY_PATH
+```
+
+Each selected question gets its complete original haystack in an isolated source
+snapshot, with original session/round identities and dataset revision. H is absent
+and A is not attempted; results use native canonical source-root order. Q failures
+remain unknown in the selected answerable denominator. Gold is read only by
+`measure`, which maps that question's answer session IDs to published source rounds
+and invokes the existing immutable first-exposure measurement. Abstention uses the
+dataset cohort owner even when gold sessions exist, stays uncalibrated, and is
+excluded from the primary denominator. Reports retain every original inventory row,
+including unselected questions, and distinguish development bounds from the unrun
+formal target. This source-only baseline does not establish semantic mechanism
+benefit or formal 500-question success. Completed publication reports recover a
+missing orchestration receipt; incomplete publication or exposure fails closed.
+
 The [chain configuration schema](src/runs/semantic-chain/contract.ts) requires
 the frozen snapshot path/digest, current extraction-authority implementation
 revision, fixed ISO interpretation clock, workspace/run, exact query workset,

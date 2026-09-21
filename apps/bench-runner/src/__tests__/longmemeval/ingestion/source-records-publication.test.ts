@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,13 +12,19 @@ import { restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js"
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { runSourceSemanticPublicationLauncher } from "../../../runs/snapshot/source-records/launch-publication.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
+import { freezeLongMemEvalSemanticDevelopment } from "../../../runs/longmemeval-semantic/freeze.js";
+import { prepareLongMemEvalSemanticDevelopment, replayLongMemEvalSemanticDevelopment } from "../../../runs/longmemeval-semantic/execute.js";
+import { measureLongMemEvalSemanticDevelopment } from "../../../runs/longmemeval-semantic/measure.js";
+import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
+import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
+import { chainIdentity } from "../../../runs/semantic-chain/contract.js";
 
 const roots = new Set<string>();
 const CLOCK = "2026-09-13T00:00:00.000Z";
 const AS_OF = "2023-09-13T00:00:00.000Z";
 afterEach(async () => { for (const root of roots) await rm(root, { recursive: true, force: true }); roots.clear(); });
 
-async function fixture(duplicate = false) {
+async function fixture(duplicate = false, abstention = false) {
   const root = await mkdtemp(join(tmpdir(), "source-records-publication-"));
   roots.add(root);
   const dataDir = join(root, "data");
@@ -29,7 +35,7 @@ async function fixture(duplicate = false) {
     question("mixed-roles", [[{ role: "user", content: "A café source record." },
       { role: "assistant", content: "Noted the café source." }]]),
     question("repeated-text", [[{ role: "user", content: "Please note this. The cat sat. The cat sat. Done." }]]),
-    question("absent-h", [[{ role: "user", content: "Unrelated distractor lives in Suzhou." }]]),
+    question(abstention ? "absent-h_abs" : "absent-h", [[{ role: "user", content: "Unrelated distractor lives in Suzhou." }]]),
     ...(duplicate ? [question("same-text-other-session", [[{ role: "user", content: "Unrelated distractor lives in Suzhou." }]])] : [])
   ]);
   await writeFile(join(dataDir, "longmemeval_s.json"), source);
@@ -51,6 +57,57 @@ function question(id: string, sessions: { role: string; content: string }[][]) {
 }
 
 describe("complete-source census and publication", () => {
+  it("keeps original question haystacks isolated through source-only development and evaluator-only scoring", async () => {
+    const f = await fixture(false, true);
+    const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
+    const root = join(f.root, "development"), queryCache = join(f.root, "query-cache");
+    const frozen = await freezeLongMemEvalSemanticDevelopment({ data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot,
+      dataset_sha256: census.dataset_sha256, dataset_question_count: 3, question_ids: ["mixed-roles", "absent-h_abs"],
+      model: "gemini-2.5-flash-lite", request_profile: "gemini-2.5-nonthinking-v1", query_cache_root: queryCache,
+      recorded_at: CLOCK, producer_commit: "a".repeat(40), max_output_tokens: 4096, output_byte_limit: 1000000,
+      budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000,
+        finalization_reserve: 10000, min_envelope: 10 } }, root);
+    expect(frozen.selected.map((row) => row.source_manifest.length)).toEqual([1, 1]);
+    expect(frozen.selected.every((row) => row.interpretation_clock === AS_OF)).toBe(true);
+    expect(JSON.stringify(frozen)).not.toContain("excluded gold");
+    const blocked = await prepareLongMemEvalSemanticDevelopment(root);
+    const blockedReplay = await replayLongMemEvalSemanticDevelopment(root, blocked.path);
+    const blockedMeasurement = await measureLongMemEvalSemanticDevelopment(root, blockedReplay.path);
+    expect(blockedMeasurement.result.primary).toMatchObject({ eligible: 1, unknown: 1, lower_bound: 0, upper_bound: 1 });
+    const published = blocked.result.rows[0]!;
+    if (published.status !== "prepared") throw new Error("question publication required");
+    unlinkSync(published.publication_path);
+    expect((await prepareLongMemEvalSemanticDevelopment(root)).result).toEqual(blocked.result);
+    const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(frozen.query_workset, queryCache, 4096),
+      inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+    const filled = await executeSemanticProposalFill({ workset: frozen.query_workset, cacheRoot: queryCache, authority,
+      config: { providerUrl: "http://127.0.0.1:9", model: frozen.config.model, requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" },
+      extractor: { extract: async () => ({ rawJson: JSON.stringify({ contract: "source-semantic-query-response-v3",
+        outcome: { status: "interpreted" }, query: { contract: "source-semantic-query-meaning-v1", alternatives: [{ meaning: {
+          kind: "statement", key: "record", predicate: "record", arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
+        } }], return: ["theme"], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
+    expect(filled.newly_admitted).toBe(2);
+    const prepared = await prepareLongMemEvalSemanticDevelopment(root);
+    expect(prepared.result.rows.every((row) => row.status === "prepared")).toBe(true);
+    const replayed = await replayLongMemEvalSemanticDevelopment(root, prepared.path);
+    expect(await replayLongMemEvalSemanticDevelopment(root, prepared.path)).toEqual(replayed);
+    const measured = await measureLongMemEvalSemanticDevelopment(root, replayed.path);
+    expect(measured.result.inventory).toEqual({ questions: 3, answerable: 2, abstention: 1 });
+    expect(measured.result.primary).toMatchObject({ eligible: 1, hits: 1, misses: 0, unknown: 0, target_decision: "development_only" });
+    expect(measured.result.rows).toHaveLength(3);
+    expect(measured.result.rows.find((row) => row.question_id === "absent-h_abs")?.outcome).toBe("uncalibrated");
+    expect(measured.result.rows.find((row) => row.question_id === "repeated-text")?.outcome).toBe("not_selected_development");
+    const receipt = readFileSync(published.publication_path, "utf8");
+    const changed = JSON.parse(receipt).payload;
+    changed.sources[0].record_id = "foreign-root";
+    writeFileSync(published.publication_path, JSON.stringify({ identity: chainIdentity(changed), payload: changed }));
+    const unavailable = await measureLongMemEvalSemanticDevelopment(root, replayed.path);
+    expect(unavailable.result.primary).toMatchObject({ eligible: 1, hits: 0, unknown: 1 });
+    expect(unavailable.result.rows.find((row) => row.question_id === "mixed-roles")?.reason).toMatch(/publication changed/u);
+    writeFileSync(published.publication_path, receipt);
+  }, 60000);
+
   it("rejects invalid or repeated publication associations before creating the snapshot", async () => {
     const f = await fixture();
     const census = await censusCompleteSourceRecords({ population: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });

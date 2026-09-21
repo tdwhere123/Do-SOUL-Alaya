@@ -23,6 +23,7 @@ export type SourcePublicationPopulation = Readonly<{
   name: string;
   dataDir: string;
   pinnedMetaRoot: string;
+  questionWindow?: Readonly<{ offset: number; limit: number }>;
   cacheRoots?: readonly string[];
   model: string;
   requestProfile: ExtractionRequestProfile;
@@ -38,6 +39,9 @@ export type SourcePublicationDisposition = Readonly<{
   corpus_digest: string;
   population: string;
   question_id: string;
+  session_id: string;
+  session_index: number;
+  round_index: number;
   speaker: "user" | "assistant" | "system" | null;
   roles: readonly ("user" | "assistant")[];
   repeated_assertion_text: boolean;
@@ -115,7 +119,8 @@ async function loadCensus(populations: readonly SourcePublicationPopulation[]): 
     if (names.has(population.name)) throw new Error(`duplicate source population '${population.name}'`);
     names.add(population.name);
     loaded.push(await censusCompleteSourceRecords({
-      population: population.name, dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot
+      population: population.name, dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
+      ...(population.questionWindow === undefined ? {} : { questionWindow: population.questionWindow })
     }));
   }
   return loaded;
@@ -377,6 +382,7 @@ function dispositionBase(source: SourceCensusRecord): Omit<SourcePublicationDisp
   return {
     source_id: source.source_id, source_version: source.source_version, content_digest: source.content_digest,
     corpus_digest: source.corpus_digest, population: source.population, question_id: source.question_id,
+    session_id: source.session_id, session_index: source.session_index, round_index: source.round_index,
     speaker: source.speaker ?? null, roles: source.roles, repeated_assertion_text: source.repeated_assertion_text
   };
 }
