@@ -27,6 +27,8 @@ import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
+import { finiteSource, finiteQuery, finiteAlignment, FINITE_QUERY }
+  from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-finite-fixture.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import {
   exposureSlots, firstExposureMismatch
@@ -214,7 +216,7 @@ function withoutNecessaryAgentBinding(
   };
 }
 
-function receiveA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: string, extra: object = {}) {
+function receiveA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: string, extra: { correspondences?: unknown; domains?: unknown } = {}) {
   const received = proposeAlignmentSemantics({
     admitted_q: q, h_descriptors: [{ h_id: hId, interpretation: h }],
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1",
@@ -223,7 +225,7 @@ function receiveA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: 
     rawJson: JSON.stringify({
       contract: "source-semantic-alignment-response-v2",
       outcome: { status: "interpreted", gaps: [] },
-      alignment: { correspondences: useCorrespondences(h), ...extra }
+      alignment: { correspondences: extra.correspondences ?? useCorrespondences(h), ...extra }
     })
   });
   if (received.outcome.status !== "interpreted" || received.alignment === undefined) {
@@ -309,12 +311,75 @@ async function proposeDraft(handler: Handler, context: Context, sourceHandle: st
   return output.published;
 }
 
-function queryHandleRecall(handler: Handler, context: Context, original: string, q: SourceSemanticQuery, alignments: object[]) {
+function queryHandleRecall(handler: Handler, context: Context, original: string, q: SourceSemanticQuery, alignments: object[], budget = BUDGET) {
   return callInterpretation(handler, {
     operation: "recall", accepts_unreviewed_conditional_results: true, original_query: original, q, alignments,
-    budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
+    budget, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
   }, context);
 }
+
+it("preserves positive finite-domain and measured-comparison proofs through public recall after reopen", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "source-semantic-finite-native-"));
+  const filename = join(directory, "alaya.db");
+  const source = "Alice and Bob are registered users, every registered user uses X, both have speed 2.1 ms in lab, Y is unused.";
+  const budget = { ...BUDGET, work_units: 10000000, memory_bytes: 60000000, finalization_reserve: 50000 };
+  try {
+    await admitSources(filename, [{ id: "finite-users", content: source }]);
+    const session = await openSession(filename);
+    let published: Awaited<ReturnType<typeof proposeDraft>>;
+    try {
+      const prepared = await prepareSource(session.handler, session.context, "finite-users");
+      const h = finiteSource();
+      // Authored finite semantics exercise public admission; this is not a compact-producer fidelity claim.
+      const draft = { contract: h.contract, referents: h.referents, frames: h.frames, operators: h.operators,
+        domains: h.domains, measurements: h.measurements, gaps: [],
+        mentions: h.mentions.map((row) => ({ id: row.id, assertion_id: 1,
+          source_ref: { first: segment(prepared.catalog, row.text), last: segment(prepared.catalog, row.text) } })) };
+      published = await proposeDraft(session.handler, session.context, prepared.source_handle, draft, "finite-v1");
+    } finally { await closeSession(session, filename); }
+    const reopened = await openSession(filename);
+    try {
+      const base = finiteQuery(true);
+      const { variables, alternatives, return_variables, gaps, domains, evaluation } = base;
+      const q = receiveQ(FINITE_QUERY, { variables, alternatives, return_variables, gaps, domains, evaluation }).query;
+      const a = finiteAlignment(published!.interpretation, q);
+      const aligned = receiveA(q, published!.interpretation, published!.interpretation_id,
+        { correspondences: a.correspondences, domains: a.domains });
+      const forall = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, q, [aligned.alignment], budget);
+      if (forall.operation !== "recall") throw new Error("native forall recall required");
+      expect(forall.provider_attempts).toBe(0);
+      expect(forall.proofs).toHaveLength(1);
+      expect(forall.proofs![0]!.evaluation).toMatchObject({ status: "supported", vacuous: false });
+      expect(forall.proofs![0]!.consumed_leaves.map((row) => row.leaf_kind)).toEqual(expect.arrayContaining([
+        "h_membership", "h_instantiation", "a_domain"
+      ]));
+      const comparison = receiveQ(FINITE_QUERY, { variables: [
+        { id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } },
+        { id: "tools", sort: "entity", reference: { kind: "query_text", excerpt: "Bob" } }
+      ], alternatives: [{ frames: [], context_obligations: [] }], return_variables: ["actor", "tools"], gaps: [], domains,
+      evaluation: { kind: "comparison", domain: "people", operation: "eq", left: "actor", right: "tools",
+        strict: false, metric: "speed", unit: "ms", context: "lab", scope: "asserted" } }).query;
+      const comparisonA = receiveA(comparison, published!.interpretation, published!.interpretation_id, {
+        domains: a.domains, correspondences: [["actor", "Alice"], ["tools", "Bob"]].map(([variable, name]) => ({
+          relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable },
+          source_endpoint: { kind: "referent", referent: `r${name}` },
+          query_support: { kind: "query_text", excerpt: name }, source_semantic_support: []
+        }))
+      });
+      const compared = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, comparison, [comparisonA.alignment], budget);
+      if (compared.operation !== "recall") throw new Error("native comparison recall required");
+      expect(compared.proofs).toHaveLength(1);
+      expect(compared.proofs![0]!.evaluation).toMatchObject({ status: "supported" });
+      expect(compared.proofs![0]!.consumed_leaves.filter((row) => row.leaf_kind === "h_measurement")
+        .map((row) => row.measurement).sort()).toEqual(["valueAlice", "valueBob"]);
+      const withdrawn = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, comparison, [], budget);
+      if (withdrawn.operation !== "recall") throw new Error("native source fallback required");
+      expect(withdrawn.proofs ?? []).toHaveLength(0);
+      expect(soulSearchFromLibraryRecall(withdrawn).results.some((row) => row.target.kind === "source_evidence"
+        && row.target.root_id === published!.source_target.root_id)).toBe(true);
+    } finally { await closeSession(reopened, filename); }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}, 60000);
 
 it("preserves compact H and receiver Q/A through publish, reopen, MCP recall and first exposure", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-native-chain-"));
