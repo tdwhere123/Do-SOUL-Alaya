@@ -13,7 +13,8 @@ const LineSchema = z.object({ key: z.string(), unitKeys: z.array(z.string()), re
 
 /** New host associations only; neither bytes nor a model-cache key proves historical source origin. */
 export async function prepareSourcePublicationAssociations(
-  population: SourcePublicationPopulation, retainedPreflightPath: string, outputPath: string
+  population: Omit<SourcePublicationPopulation, "cacheRoots"> & Readonly<{ cacheRoot: string }>,
+  retainedPreflightPath: string, outputPath: string
 ) {
   if (population.cacheRoot === undefined) throw new Error("association preparation requires a retained cache");
   const census = await censusCompleteSourceRecords({ population: population.name,

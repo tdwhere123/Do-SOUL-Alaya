@@ -23,7 +23,7 @@ export type SourcePublicationPopulation = Readonly<{
   name: string;
   dataDir: string;
   pinnedMetaRoot: string;
-  cacheRoot?: string;
+  cacheRoots?: readonly string[];
   model: string;
   requestProfile: ExtractionRequestProfile;
   publicationAssociations?: readonly Readonly<{
@@ -259,7 +259,11 @@ function indexRetainedSemantics(
   for (const population of populations) {
     const sources = new Map(census.find((row) => row.population === population.name)!.records.map((source) => [source.source_id, source]));
     const bindings = population.publicationAssociations ?? [];
-    if (bindings.length > 0 && population.cacheRoot === undefined) throw new Error("retained H association requires a cache root");
+    const cacheRoots = population.cacheRoots ?? [];
+    if (new Set(cacheRoots.map((root) => resolve(root))).size !== cacheRoots.length) {
+      throw new Error("retained H cache roots repeat a generation directory");
+    }
+    if (bindings.length > 0 && cacheRoots.length === 0) throw new Error("retained H association requires a cache root");
     const boundSources = new Set<string>();
     for (const binding of bindings) {
       const source = sources.get(binding.source_id);
@@ -270,23 +274,27 @@ function indexRetainedSemantics(
       if (boundSources.has(binding.source_id)) throw new Error("retained H association repeats a source");
       boundSources.add(binding.source_id);
     }
-    if (population.cacheRoot === undefined) continue;
-    for (const key of listRetainedSourceSemanticKeys(population.cacheRoot)) {
-      const native = inspectCachedSourceSemantic(population.cacheRoot, key, population.model, population.requestProfile);
-      const matched = bindings.filter((binding) => binding.generation_key === key);
-      if (matched.length === 0) {
-        unbound.push({ population: population.name, generation_key: key, status: native.status === "hit" ? "unbound" : "invalid" });
-      }
-      for (const binding of matched) {
-        const source = sources.get(binding.source_id)!;
-        const valid = native.status === "hit" &&
-          native.admitted.request.source_catalog.source_digest === source.corpus_digest &&
-          native.requestDigest === binding.request_digest;
-        const existing = joined.get(source.source_id);
-        if (existing !== undefined && (existing.status !== "hit" || existing.key !== key)) {
-          joined.set(source.source_id, { status: "conflict", key });
-        } else {
-          joined.set(source.source_id, valid && native.status === "hit" ? { status: "hit", key, native } : { status: "invalid", key });
+    const seenKeys = new Set<string>();
+    for (const cacheRoot of cacheRoots) {
+      for (const key of listRetainedSourceSemanticKeys(cacheRoot)) {
+        if (seenKeys.has(key)) throw new Error("retained H generation key occurs in multiple cache roots");
+        seenKeys.add(key);
+        const native = inspectCachedSourceSemantic(cacheRoot, key, population.model, population.requestProfile);
+        const matched = bindings.filter((binding) => binding.generation_key === key);
+        if (matched.length === 0) {
+          unbound.push({ population: population.name, generation_key: key, status: native.status === "hit" ? "unbound" : "invalid" });
+        }
+        for (const binding of matched) {
+          const source = sources.get(binding.source_id)!;
+          const valid = native.status === "hit" &&
+            native.admitted.request.source_catalog.source_digest === source.corpus_digest &&
+            native.requestDigest === binding.request_digest;
+          const existing = joined.get(source.source_id);
+          if (existing !== undefined && (existing.status !== "hit" || existing.key !== key)) {
+            joined.set(source.source_id, { status: "conflict", key });
+          } else {
+            joined.set(source.source_id, valid && native.status === "hit" ? { status: "hit", key, native } : { status: "invalid", key });
+          }
         }
       }
     }
@@ -309,7 +317,7 @@ export function listRetainedSourceSemanticKeys(cacheRoot: string): readonly stri
   return keys.sort();
 }
 
-function sourceLookupStores(database: ReturnType<typeof initDatabase>): Pick<FieldFormationStores, "listRecords" | "getStoredRecord"> {
+export function sourceLookupStores(database: ReturnType<typeof initDatabase>): Pick<FieldFormationStores, "listRecords" | "getStoredRecord"> {
   const records = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
   return {
     listRecords: (workspaceId) => records.listByWorkspace(workspaceId).map(sourceRecordFromRow),

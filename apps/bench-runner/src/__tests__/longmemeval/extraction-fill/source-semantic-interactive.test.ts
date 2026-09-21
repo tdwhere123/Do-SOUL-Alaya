@@ -1,5 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
@@ -141,10 +141,20 @@ it("fills complete-source open semantics through interactive generateContent wit
     return { source_id: source.source_id, source_version: source.source_version,
       generation_key: key, request_digest: h.requestDigest };
   });
+  const secondCache = join(dirname(cacheRoot), "second-generation");
+  mkdirSync(secondCache);
+  for (const moved of fixture.keys.slice(1)) {
+    mkdirSync(dirname(cacheFilePath(secondCache, moved)), { recursive: true });
+    renameSync(cacheFilePath(cacheRoot, moved), cacheFilePath(secondCache, moved));
+  }
+  expect(inspectCachedSourceSemantic(secondCache, fixture.keys[1]!, MODEL, REQUEST_PROFILE)).toMatchObject({
+    status: "invalid", reason: "typed open-semantics generation binding mismatch"
+  });
+  copyFileSync(join(cacheRoot, "manifest.json"), join(secondCache, "manifest.json"));
   const report = await publishSourceSemanticSnapshot({
     snapshotPath: join(cacheRoot, "published.sqlite"), dataDirRoot: join(cacheRoot, "publication"),
     recordedAt: "2026-09-21T00:00:00.000Z", producerCommit: "a".repeat(40),
-    populations: [{ name: "fixture", dataDir, pinnedMetaRoot, cacheRoot, model: MODEL, requestProfile: REQUEST_PROFILE, publicationAssociations }]
+    populations: [{ name: "fixture", dataDir, pinnedMetaRoot, cacheRoots: [cacheRoot, secondCache], model: MODEL, requestProfile: REQUEST_PROFILE, publicationAssociations }]
   });
   expect(report.published_count).toBe(census.records.length);
   expect(report.h_binding_complete).toBe(true);

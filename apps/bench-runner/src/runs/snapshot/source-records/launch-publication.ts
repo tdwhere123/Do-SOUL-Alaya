@@ -34,6 +34,10 @@ export async function runSourceSemanticPublicationLauncher(args: readonly string
 function population(flags: ReadonlyMap<string, string>, name: "original" | "challenge"): SourcePublicationPopulation {
   const prefix = `--${name}`;
   const cacheRoot = flags.get(`${prefix}-cache-root`);
+  const cacheRootsJson = flags.get(`${prefix}-cache-roots`);
+  if (cacheRoot !== undefined && cacheRootsJson !== undefined) throw new Error("choose one cache roots flag per population");
+  const cacheRoots = cacheRootsJson === undefined ? (cacheRoot === undefined ? undefined : [cacheRoot])
+    : z.array(z.string().min(1)).min(1).max(32).parse(JSON.parse(cacheRootsJson));
   const bindingsPath = flags.get(`${prefix}-publication-associations`);
   return {
     name,
@@ -45,7 +49,7 @@ function population(flags: ReadonlyMap<string, string>, name: "original" | "chal
       source_id: z.string().min(1), source_version: z.string().min(1),
       generation_key: z.string().regex(/^[a-f0-9]{64}$/u), request_digest: z.string().regex(/^[a-f0-9]{64}$/u)
     }).strict()).max(10000).parse(JSON.parse(readFileSync(bindingsPath, "utf8"))) }),
-    ...(cacheRoot === undefined ? {} : { cacheRoot })
+    ...(cacheRoots === undefined ? {} : { cacheRoots })
   };
 }
 
@@ -55,7 +59,8 @@ function parseFlags(args: readonly string[]): Map<string, string> {
     "--model", "--request-profile",
     "--original-data-dir", "--original-pinned-meta-root", "--original-cache-root",
     "--challenge-data-dir", "--challenge-pinned-meta-root", "--challenge-cache-root",
-    "--original-publication-associations", "--challenge-publication-associations"
+    "--original-publication-associations", "--challenge-publication-associations",
+    "--original-cache-roots", "--challenge-cache-roots"
   ];
   const flags = new Map<string, string>();
   for (let index = 0; index < args.length; index += 2) {

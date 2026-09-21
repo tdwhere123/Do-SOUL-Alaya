@@ -61,7 +61,7 @@ describe("complete-source census and publication", () => {
       recordedAt: CLOCK, producerCommit: "a".repeat(40) };
     for (const [cacheRoot, bindings] of [[undefined, [binding]], [f.cacheRoot, [binding, binding]]] as const) {
       await expect(publishSourceSemanticSnapshot({ ...base, populations: [{
-        name: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot, cacheRoot,
+        name: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot, cacheRoots: cacheRoot === undefined ? [] : [cacheRoot],
         model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1", publicationAssociations: bindings
       }] })).rejects.toThrow(/association requires a cache root|association repeats a source/u);
       expect(existsSync(base.snapshotPath)).toBe(false);
@@ -76,6 +76,21 @@ describe("complete-source census and publication", () => {
     expect(duplicate).toHaveLength(2);
     expect(new Set(duplicate.map((row) => row.source_id)).size).toBe(2);
     expect(new Set(duplicate.map((row) => row.session_id)).size).toBe(2);
+  });
+  it("rejects repeated cache roots and ambiguous generation keys before creating any snapshot", async () => {
+    const f = await fixture();
+    const second = join(f.root, "second-cache");
+    await mkdir(join(second, "ab"), { recursive: true });
+    await writeFile(join(second, "ab", `${"ab".repeat(32)}.json`), "{}");
+    for (const cacheRoots of [[f.cacheRoot, f.cacheRoot], [f.cacheRoot, second]]) {
+      const snapshotPath = join(f.root, "ambiguous.sqlite"), dataDirRoot = join(f.root, "ambiguous-runtime");
+      await expect(publishSourceSemanticSnapshot({ snapshotPath, dataDirRoot, recordedAt: CLOCK,
+        producerCommit: "a".repeat(40), populations: [{ name: "fixture", dataDir: f.dataDir,
+          pinnedMetaRoot: f.pinnedMetaRoot, cacheRoots, model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1" }]
+      })).rejects.toThrow(/repeat a generation directory|occurs in multiple cache roots/u);
+      expect(existsSync(snapshotPath)).toBe(false);
+      expect(existsSync(dataDirRoot)).toBe(false);
+    }
   });
   it("keeps census and publication ownership out of the launcher", async () => {
     expect(await runSourceSemanticPublicationLauncher([])).toBe(2);
@@ -108,7 +123,7 @@ describe("complete-source census and publication", () => {
       recordedAt: CLOCK, producerCommit: "a".repeat(40),
       populations: [{
         name: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot,
-        cacheRoot: f.cacheRoot, model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1"
+        cacheRoots: [f.cacheRoot], model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1"
       }]
     });
     expect(report.census_count).toBe(3);
