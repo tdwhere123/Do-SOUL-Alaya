@@ -54,11 +54,27 @@ describe("source semantic proof obligations", () => {
     const absent = { ...a, correspondences: a.correspondences.filter((row) => row.query_endpoint.kind !== "referent") };
     expect(run(h, q, absent).answers).toEqual([]);
   });
+  it("does not invent a second answer when the producer omitted the other matching frame", () => {
+    const text = "who uses which tools?", h = source(), q = query(text, false), complete = align(h, q, false);
+    const incomplete = { ...complete, correspondences: complete.correspondences.filter((row) =>
+      row.source_endpoint.kind === "referent" || row.source_endpoint.frame === "fAlice"
+    ) };
+    expect(incomplete.correspondences).toHaveLength(3);
+    expect(incomplete.correspondences.some((row) => row.source_endpoint.kind !== "referent"
+      && row.source_endpoint.frame === "fBob")).toBe(false);
+    const result = run(h, q, incomplete, text);
+    expect(result.outcome.status).toBe("interpreted");
+    expect(returned(result)).toEqual(['{"tools":"rX"}']);
+    expect(result.answers).toHaveLength(1);
+  });
   it("returns separate real bindings and closed proof forests for two answers", () => {
     const text = "who uses which tools?", h = source(), q = query(text, false), a = align(h, q, false);
     const result = run(h, q, a, text);
     expect(result.outcome.status).toBe("interpreted");
     expect(returned(result)).toEqual(['{"tools":"rX"}', '{"tools":"rY"}']);
+    expect(a.correspondences.filter((row) => row.source_endpoint.kind === "frame").map((row) =>
+      row.source_endpoint.kind === "frame" ? row.source_endpoint.frame : undefined
+    )).toEqual(["fAlice", "fBob"]);
     for (const answer of result.answers!) {
       const frame = answer.bindings.use!.node_id;
       const leaves = proofLeaves(result, answer.explanation_ids);
