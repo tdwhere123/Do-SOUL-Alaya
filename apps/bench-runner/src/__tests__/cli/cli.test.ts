@@ -57,6 +57,7 @@ describe("bench-runner CLI", () => {
     expect(exitCode).toBe(0);
     expect(stdoutBuf).toContain("diagnostic-loop --work-root <dir>");
     expect(stdoutBuf).toContain("extraction-fill");
+    expect(stdoutBuf).toContain("semantic-proposal-fill --kind query|alignment");
     expect(stdoutBuf).not.toContain("recover-extraction-attempt-ledger");
     expect(stdoutBuf).toContain("recall-eval --snapshot <db>");
     expect(stdoutBuf).toContain("--experiment");

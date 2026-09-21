@@ -8,6 +8,7 @@ export interface GeminiGenerateContentSettings {
   readonly requestProfile: "provider-default-v1" | NativeGeminiRequestProfile;
   readonly maxOutputTokens: number;
   readonly includeThoughts?: boolean;
+  readonly responseJsonSchema?: object;
 }
 
 export function isGeminiGenerateContentProfile(value: unknown): value is GeminiGenerateContentSettings["requestProfile"] {
@@ -25,7 +26,7 @@ export function encodeGeminiGenerateContent(
   settings: GeminiGenerateContentSettings
 ): object {
   assertGeminiGenerateContentSettings(settings);
-  const responseJsonSchema = officialApiExtractionResponseSchema(line.userPrompt);
+  const responseJsonSchema = settings.responseJsonSchema ?? officialApiExtractionResponseSchema(line.userPrompt);
   const projected = responseJsonSchema === undefined ? undefined : projectGeminiGenerationSchema(responseJsonSchema);
   return {
     systemInstruction: { parts: [{ text: line.systemPrompt },

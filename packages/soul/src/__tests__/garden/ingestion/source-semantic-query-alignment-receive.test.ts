@@ -5,7 +5,8 @@ import {
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import {
   buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, semanticSha256,
-  parseSourceSemanticRequest
+  parseSourceSemanticRequest, sourceSemanticAlignmentResponseJsonSchema,
+  sourceSemanticQueryResponseJsonSchema
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import {
   proposeAlignmentSemantics, proposeQuerySemantics, receiveSourceSemantics
@@ -410,5 +411,21 @@ describe("alignment receive preserves producer meaning", () => {
     expect(trusted.alignment?.h_id).toBe(descriptors[0]!.h_id);
     expect(trusted.alignment?.q_id).not.toBe(FOREIGN);
     expect(trusted.alignment?.producer_id).toBe("align-producer");
+  });
+});
+
+describe("query and alignment generation schemas", () => {
+  it("asks for producer bodies without host envelope identities", () => {
+    const query = JSON.stringify(sourceSemanticQueryResponseJsonSchema());
+    const alignment = JSON.stringify(sourceSemanticAlignmentResponseJsonSchema());
+    expect(query).toContain("source-semantic-query-response-v2");
+    expect(query).toContain("evaluation");
+    expect(query).toContain("domains");
+    expect(query).not.toContain("original_query_digest");
+    expect(alignment).toContain("source-semantic-alignment-response-v2");
+    expect(alignment).toContain("membership_assumptions");
+    expect(alignment).not.toContain("q_id");
+    expect(Buffer.byteLength(query)).toBeLessThan(24 * 1024);
+    expect(Buffer.byteLength(alignment)).toBeLessThan(24 * 1024);
   });
 });

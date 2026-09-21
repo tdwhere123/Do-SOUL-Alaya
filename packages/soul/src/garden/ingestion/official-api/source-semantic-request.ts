@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
-  SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema, SourceSemanticResponseEnvelopeSchema,
+  SourceSemanticQuerySchema, SourceSemanticQueryProducerBodySchema, SourceSemanticRequestEnvelopeSchema, SourceSemanticResponseEnvelopeSchema,
   SourceSemanticProposalSchema, SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
   SourceSemanticContentProposalSchema, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
   SourceSemanticExpressionProposalSchema, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
@@ -11,6 +11,7 @@ import {
   SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT, SourceSemanticCompactGenerationSchema,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
+  SourceSemanticAlignmentProducerBodySchema, SourceSemanticGapSchema,
   buildSourceReferenceCatalog, canonicalJson,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
@@ -308,6 +309,41 @@ export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest
       if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
     }
   });
+}
+
+const QueryAlignmentGenerationOutcomeSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("interpreted"),
+    gaps: z.array(SourceSemanticGapSchema).max(256).readonly().optional()
+  }).strict().readonly(),
+  z.object({ status: z.literal("abstained") }).strict().readonly()
+]);
+
+function producerResponseJsonSchema(schema: z.ZodType): object {
+  return z.toJSONSchema(schema, {
+    io: "output",
+    override: ({ jsonSchema }) => {
+      if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
+    }
+  });
+}
+
+/** Generation envelope for Q. Local admission still uses the producer body owner. */
+export function sourceSemanticQueryResponseJsonSchema(): object {
+  return producerResponseJsonSchema(z.object({
+    contract: z.literal(SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT),
+    outcome: QueryAlignmentGenerationOutcomeSchema,
+    query: SourceSemanticQueryProducerBodySchema.optional()
+  }).strict().readonly());
+}
+
+/** Generation envelope for A. Local admission still uses the producer body owner. */
+export function sourceSemanticAlignmentResponseJsonSchema(): object {
+  return producerResponseJsonSchema(z.object({
+    contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT),
+    outcome: QueryAlignmentGenerationOutcomeSchema,
+    alignment: SourceSemanticAlignmentProducerBodySchema.optional()
+  }).strict().readonly());
 }
 
 const exampleGaps = [{ kind: "unresolved_referent", affected_ids: ["rItem"],

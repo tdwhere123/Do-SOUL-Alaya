@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { SOURCE_SEMANTIC_SYSTEM_PROMPT, buildSourceSemanticRequest, officialApiExtractionResponseSchemaPreimage,
-  receiveSourceSemantics } from "@do-soul/alaya-soul";
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, buildSourceSemanticRequest,
+  buildSourceSemanticQueryRequest, officialApiExtractionResponseSchemaPreimage, receiveSourceSemantics,
+  sourceSemanticQueryResponseJsonSchema } from "@do-soul/alaya-soul";
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
 import { projectGeminiGenerationSchema, geminiGenerationSchemaCacheMaterial } from "../../../runs/extraction/fill/batch/generation-schema.js";
 import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
@@ -96,5 +97,24 @@ describe("Gemini recursive decoding schema projection", () => {
     } };
     expect(projectGeminiGenerationSchema(schema).schema).toBeUndefined();
     expect(projectGeminiGenerationSchema(schema).instruction).toContain(JSON.stringify(schema));
+  });
+
+  it("keeps query generation off the source-extraction schema", () => {
+    const request = JSON.stringify(buildSourceSemanticQueryRequest({
+      original_query: "Who chairs SHADOW?", producer_id: "alaya.source.semantic.query.soul.v1",
+      producer_version: "1"
+    }));
+    const schema = sourceSemanticQueryResponseJsonSchema();
+    const body = encodeGeminiGenerateContent(
+      { userPrompt: request, systemPrompt: SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT },
+      {
+        model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1", maxOutputTokens: 4096,
+        responseJsonSchema: schema
+      }
+    );
+    const encoded = JSON.stringify(body);
+    expect(encoded).not.toContain("source-semantic-proposal-v4");
+    expect(encoded).toContain("application/json");
+    expect(projectGeminiGenerationSchema(schema).schema).toBeDefined();
   });
 });

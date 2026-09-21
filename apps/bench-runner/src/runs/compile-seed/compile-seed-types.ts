@@ -45,6 +45,8 @@ export interface BenchSignalExtractor extends SignalExtractor {
     readonly maxOutputTokens?: number;
     /** Exact provider request field pre-registered in the authority receipt. */
     readonly outputTokenField?: ExtractionOutputTokenField;
+    /** Caller-owned response schema; omit to keep source-extraction schema selection. */
+    readonly responseJsonSchema?: object;
   }): Promise<Awaited<ReturnType<SignalExtractor["extract"]>> & {
     readonly rawJson: string;
     readonly extractionSkip?: "plan_skipped";
