@@ -54,6 +54,17 @@ describe("source semantic proof obligations", () => {
     const absent = { ...a, correspondences: a.correspondences.filter((row) => row.query_endpoint.kind !== "referent") };
     expect(run(h, q, absent).answers).toEqual([]);
   });
+  it("does not treat predicate-only set-valued correspondences as a completed group of answers", () => {
+    const text = "who uses which tools?", h = source();
+    const q = { ...query(text, false), return_variables: ["actor", "tools"] };
+    const predicatesOnly = {
+      ...align(h, q, false),
+      correspondences: align(h, q, false).correspondences.filter((row) => row.query_endpoint.kind === "predicate")
+    };
+    const result = run(h, q, predicatesOnly, text);
+    expect(result.outcome.status).toBe("interpreted");
+    expect(result.answers ?? []).toEqual([]);
+  });
   it("does not invent a second answer when the producer omitted the other matching frame", () => {
     const text = "who uses which tools?", h = source(), q = query(text, false), complete = align(h, q, false);
     const incomplete = { ...complete, correspondences: complete.correspondences.filter((row) =>

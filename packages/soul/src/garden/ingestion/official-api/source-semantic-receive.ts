@@ -4,7 +4,8 @@ import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticAlignmentProducerBodySchema, SourceSemanticAlignmentSchema,
   SourceSemanticGapSchema, SourceSemanticOutcomeSchema, SourceSemanticQueryProducerBodySchema,
   SourceSemanticQueryGapSchema, SourceSemanticQueryOutcomeGapBindingSchema,
-  SourceSemanticQuerySchema, materializeSourceSemanticQueryMeaning, materializeSourceSemanticAlignmentSelection,
+  SourceSemanticQuerySchema, SourceSemanticAlignmentSelectionSchema, materializeSourceSemanticQueryMeaning,
+  materializeSourceSemanticAlignmentSelection,
   SourceSemanticResponseEnvelopeSchema, SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
   materializeSourceSemanticProposal, materializeSourceSemanticContentProposal, buildSourceReferenceCatalog,
   materializeSourceSemanticExpressionProposal, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
@@ -12,8 +13,9 @@ import {
   materializeSourceSemanticSelectionProposal, SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
   SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   normalizeSourceSemantics, sourceSemanticQueryIdentity, verifySourceSemanticDisposition, canonicalJson,
-  type SourceSemanticAlignment, type SourceSemanticDraft, type SourceSemanticInterpretation,
-  type SourceSemanticOutcome, type SourceSemanticQuery, type SourceSemanticQueryOutcome
+  type SourceSemanticAlignment, type SourceSemanticAlignmentEndpointCatalog, type SourceSemanticDraft,
+  type SourceSemanticInterpretation, type SourceSemanticOutcome, type SourceSemanticQuery,
+  type SourceSemanticQueryOutcome
 } from "@do-soul/alaya-protocol";
 import {
   SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT,
@@ -224,6 +226,14 @@ function receiveAlignmentSemantics(
   if (envelope.data.alignment === undefined) {
     return { ...attempt, outcome: { status: "invalid", reason: "interpreted_alignment_required" } };
   }
+  // Predicate-only set-valued groups compile to zero answers while looking interpreted.
+  if (request.contract !== SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT && request.catalog !== undefined) {
+    const selected = SourceSemanticAlignmentSelectionSchema.safeParse(envelope.data.alignment);
+    if (selected.success &&
+      selectionGroupCompleteness(request.admitted_q, request.catalog, selected.data.selections) === "incomplete") {
+      return { ...attempt, outcome: { status: "invalid", reason: "incomplete_selection_group" } };
+    }
+  }
   try {
     const alignment = SourceSemanticAlignmentSchema.parse(materializeAlignment(envelope.data.alignment, request));
     SourceSemanticOutcomeGapBindingSchema.parse({
@@ -351,6 +361,50 @@ function materializeQuery(body: unknown, request: SourceSemanticQueryRequest): S
     ...(parsed.domains === undefined ? {} : { domains: parsed.domains }),
     ...(parsed.evaluation === undefined ? {} : { evaluation: parsed.evaluation })
   });
+}
+
+function selectionGroupCompleteness(
+  query: SourceSemanticQuery,
+  catalog: SourceSemanticAlignmentEndpointCatalog,
+  selections: readonly Readonly<{ query: string; source: string }>[]
+): "empty" | "complete" | "incomplete" {
+  const requiredSlots = returnedRoleIds(query);
+  if (requiredSlots.length === 0) return selections.length === 0 ? "empty" : "complete";
+  const queryByHandle = new Map(catalog.query_endpoints.map((row) => [row.handle, row]));
+  const sourceByHandle = new Map(catalog.source_endpoints.map((row) => [row.handle, row]));
+  const groups = new Map<string, { predicate: boolean; slots: Set<string> }>();
+  for (const selection of selections) {
+    const queryEndpoint = queryByHandle.get(selection.query);
+    const sourceEndpoint = sourceByHandle.get(selection.source);
+    if (queryEndpoint === undefined || sourceEndpoint === undefined || sourceEndpoint.kind === "referent") {
+      continue;
+    }
+    const frame = sourceEndpoint.frame;
+    if (frame === undefined) continue;
+    const group = groups.get(frame) ?? { predicate: false, slots: new Set<string>() };
+    if (queryEndpoint.kind === "predicate") group.predicate = true;
+    if (queryEndpoint.kind === "slot" && queryEndpoint.slot !== undefined) group.slots.add(queryEndpoint.slot);
+    groups.set(frame, group);
+  }
+  if (groups.size === 0) return "empty";
+  for (const group of groups.values()) {
+    if (!group.predicate || requiredSlots.some((slot) => !group.slots.has(slot))) return "incomplete";
+  }
+  return "complete";
+}
+
+function returnedRoleIds(query: SourceSemanticQuery): readonly string[] {
+  if (query.return_variables.length <= 1) return [];
+  const returned = new Set(query.return_variables);
+  const roles: string[] = [];
+  for (const alternative of query.alternatives) {
+    for (const frame of alternative.frames) {
+      for (const role of frame.role_requirements) {
+        if (returned.has(role.target_variable)) roles.push(role.id);
+      }
+    }
+  }
+  return roles;
 }
 
 function materializeAlignment(body: unknown, request: SourceSemanticAlignmentRequest): unknown {

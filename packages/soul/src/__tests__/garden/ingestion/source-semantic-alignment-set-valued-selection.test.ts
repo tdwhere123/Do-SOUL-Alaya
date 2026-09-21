@@ -83,6 +83,20 @@ function twoOfferInterpretation() {
   });
 }
 
+function predicateOnlySelections(
+  catalog: NonNullable<ReturnType<typeof proposeAlignmentSemantics>["request"]["catalog"]>,
+  frames: readonly string[]
+) {
+  const predicate = catalog.query_endpoints.find((row) => row.kind === "predicate")!;
+  return frames.map((frame) => {
+    const sourceFrame = catalog.source_endpoints.find((row) => row.kind === "frame" && row.frame === frame)!;
+    return {
+      query: predicate.handle, source: sourceFrame.handle, query_excerpt: "offer",
+      source_semantic_support: [{ kind: "lexical" as const, mentions: ["mOffer1"] }]
+    };
+  });
+}
+
 function offerSelections(
   catalog: NonNullable<ReturnType<typeof proposeAlignmentSemantics>["request"]["catalog"]>,
   frames: readonly string[]
@@ -109,45 +123,81 @@ function offerSelections(
   return selections;
 }
 
+function receiveSelections(
+  h: ReturnType<typeof twoOfferInterpretation>,
+  selections: ReturnType<typeof offerSelections>
+) {
+  const hId = sourceSemanticInterpretationIdentity(h, semanticSha256);
+  const admitted = setValuedQuery();
+  return proposeAlignmentSemantics({
+    original_query: SET_VALUED, admitted_q: admitted,
+    h_descriptors: [{ h_id: hId, interpretation: h }],
+    producer_id: "align-producer", producer_version: "1"
+  }, {
+    rawJson: JSON.stringify({
+      contract: "source-semantic-alignment-response-v3",
+      outcome: { status: "interpreted" },
+      alignment: { contract: "source-semantic-alignment-selection-v1", h: "h1", selections }
+    })
+  });
+}
+
 describe("set-valued alignment selections stay producer-owned", () => {
-  it("asks the producer for one selection group per matching asserted frame", () => {
+  it("requires each set-valued group to bind returned-variable slots, not a predicate row alone", () => {
     expect(SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT).toContain(
-      "must emit a selection group for each matching asserted frame"
+      "slot binding for every returned variable"
     );
-    expect(SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT).toContain("Do not collapse those frames onto the first hit");
-    expect(SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT).toContain("The host does not complete omitted selections");
+    expect(SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT).toContain(
+      "A predicate-only group is incomplete and must not be handed in as a group"
+    );
+    expect(SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT).not.toMatch(
+      /predicate-only group is (?:complete|enough|finished)/iu
+    );
+    for (const match of SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT.matchAll(/"selections"\s*:\s*(\[[\s\S]*?\])/gu)) {
+      const rows = JSON.parse(match[1]!) as readonly { query?: string; source?: string }[];
+      const bySource = new Map<string, { query: string }[]>();
+      for (const row of rows) {
+        if (row.source === undefined || row.query === undefined) continue;
+        const group = bySource.get(row.source) ?? [];
+        group.push({ query: row.query });
+        bySource.set(row.source, group);
+      }
+      for (const group of bySource.values()) {
+        expect(group.length).toBeGreaterThan(1);
+      }
+    }
   });
 
   it("still admits a first-pass single-frame selection as interpreted", () => {
     const h = twoOfferInterpretation();
-    const hId = sourceSemanticInterpretationIdentity(h, semanticSha256);
-    const admitted = setValuedQuery();
     const prepared = proposeAlignmentSemantics({
-      original_query: SET_VALUED, admitted_q: admitted,
-      h_descriptors: [{ h_id: hId, interpretation: h }],
+      original_query: SET_VALUED, admitted_q: setValuedQuery(),
+      h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
       producer_id: "align-producer", producer_version: "1"
     });
     const catalog = prepared.request.catalog!;
     expect(catalog.source_endpoints.filter((row) => row.kind === "frame" && row.reading === "offer")).toHaveLength(2);
-    const received = proposeAlignmentSemantics({
-      original_query: SET_VALUED, admitted_q: admitted,
-      h_descriptors: [{ h_id: hId, interpretation: h }],
-      producer_id: "align-producer", producer_version: "1"
-    }, {
-      rawJson: JSON.stringify({
-        contract: "source-semantic-alignment-response-v3",
-        outcome: { status: "interpreted" },
-        alignment: {
-          contract: "source-semantic-alignment-selection-v1", h: "h1",
-          selections: offerSelections(catalog, ["fPhilips"])
-        }
-      })
-    });
+    const received = receiveSelections(h, offerSelections(catalog, ["fPhilips"]));
     expect(received.outcome.status).toBe("interpreted");
     expect(received.alignment?.correspondences).toHaveLength(3);
     expect(received.alignment?.correspondences.map((row) =>
       row.source_endpoint.kind === "referent" ? undefined : row.source_endpoint.frame
     )).toEqual(["fPhilips", "fPhilips", "fPhilips"]);
+  });
+
+  it("rejects A2-shaped predicate-only groups as incomplete instead of compiling them as finished", () => {
+    const h = twoOfferInterpretation();
+    const prepared = proposeAlignmentSemantics({
+      original_query: SET_VALUED, admitted_q: setValuedQuery(),
+      h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
+      producer_id: "align-producer", producer_version: "1"
+    });
+    const frames = prepared.request.catalog!.source_endpoints
+      .filter((row) => row.kind === "frame" && row.reading === "offer")
+      .map((row) => row.frame!);
+    const received = receiveSelections(h, predicateOnlySelections(prepared.request.catalog!, frames));
+    expect(received.outcome).toEqual({ status: "invalid", reason: "incomplete_selection_group" });
+    expect(received.alignment).toBeUndefined();
   });
 
   it("materializes one selection group per matching frame without adding omitted pairs", () => {
