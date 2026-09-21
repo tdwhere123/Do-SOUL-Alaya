@@ -178,6 +178,8 @@ function importInteractiveLine(
     });
   } catch (cause) {
     if (!(cause instanceof SourceSemanticAdmissionError)) throw cause;
+    appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
+      `${line.key}\tadmission\t${cause.message}\n`);
     authority.abandonPendingShard(line.key, attemptOrdinal);
     recordInteractiveOutcome(authority, line.key, attemptOrdinal, extracted, "quarantined", provenance.responseSha256);
     return "quarantined";
