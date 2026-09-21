@@ -3,19 +3,22 @@ import {
   AlayaError, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_PACKET_CONTRACT,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticAlignmentProducerBodySchema, SourceSemanticAlignmentSchema,
   SourceSemanticGapSchema, SourceSemanticOutcomeSchema, SourceSemanticQueryProducerBodySchema,
-  SourceSemanticQuerySchema,
+  SourceSemanticQuerySchema, materializeSourceSemanticQueryMeaning, materializeSourceSemanticAlignmentSelection,
   SourceSemanticResponseEnvelopeSchema, SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
   materializeSourceSemanticProposal, materializeSourceSemanticContentProposal, buildSourceReferenceCatalog,
   materializeSourceSemanticExpressionProposal, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
   materializeSourceSemanticCompactProposal, SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT,
+  materializeSourceSemanticSelectionProposal, SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
   SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   normalizeSourceSemantics, sourceSemanticQueryIdentity, verifySourceSemanticDisposition, canonicalJson,
   type SourceSemanticAlignment, type SourceSemanticDraft, type SourceSemanticInterpretation,
   type SourceSemanticOutcome, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import {
-  SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT, SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT,
-  SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
+  SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_SELECTION_RESPONSE_CONTRACT,
+  sourceSemanticAlignmentSystemPrompt, sourceSemanticQuerySystemPrompt,
   buildSourceSemanticAlignmentRequest, buildSourceSemanticQueryRequest, buildSourceSemanticRequest,
   parseSourceSemanticRequest, semanticSha256, rejectForbiddenProposalInput,
   type SourceSemanticAlignmentProposalInput, type SourceSemanticAlignmentRequest,
@@ -109,12 +112,14 @@ export function receiveSourceSemantics(
   let envelope: ReturnType<typeof SourceSemanticResponseEnvelopeSchema.safeParse>;
   const limits = request.source_request.resource_limits;
   const compact = request.source_request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT;
+  const selection = request.source_request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT;
   const expression = request.source_request.proposal_contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT;
-  const meter = compact || expression || request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
+  const meter = compact || selection || expression || request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
     ? new SourceSemanticResourceLedger({ work_units: limits.work_units ?? 200000, memory_bytes: limits.memory_bytes ?? 20000000 }) : undefined;
   try {
     envelope = request.source_request.proposal_contract === undefined
       ? SourceSemanticResponseEnvelopeSchema.safeParse(parsed.value)
+      : selection ? { success: true, data: materializeSourceSemanticSelectionProposal(parsed.value, meter) }
       : compact ? { success: true, data: materializeSourceSemanticCompactProposal(parsed.value, meter) }
       : expression ? { success: true, data: materializeSourceSemanticExpressionProposal(parsed.value, meter) }
       : meter !== undefined ? { success: true, data: materializeSourceSemanticContentProposal(parsed.value, meter) }
@@ -146,9 +151,9 @@ export function proposeQuerySemantics(
   const request = buildSourceSemanticQueryRequest(input);
   if (injected === undefined) {
     return { outcome: { status: "unexercised" }, provider_attempts: 0, request,
-      system_prompt: SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT };
+      system_prompt: sourceSemanticQuerySystemPrompt(request) };
   }
-  return { ...receiveQuerySemantics(injected.rawJson, request, parseQuery), system_prompt: SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT };
+  return { ...receiveQuerySemantics(injected.rawJson, request, parseQuery), system_prompt: sourceSemanticQuerySystemPrompt(request) };
 }
 
 function receiveQuerySemantics(
@@ -159,7 +164,7 @@ function receiveQuerySemantics(
   if (bounded !== undefined) return bounded;
   const parsed = parseResponseJson(rawJson, attempt);
   if (parsed.status !== "ok") return parsed.result;
-  const envelope = queryResponseSchema.safeParse(parsed.value);
+  const envelope = queryResponseSchema(request).safeParse(parsed.value);
   if (!envelope.success) {
     return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
   }
@@ -194,9 +199,9 @@ export function proposeAlignmentSemantics(
   const request = buildSourceSemanticAlignmentRequest(input);
   if (injected === undefined) {
     return { outcome: { status: "unexercised" }, provider_attempts: 0, request,
-      system_prompt: SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT };
+      system_prompt: sourceSemanticAlignmentSystemPrompt(request) };
   }
-  return { ...receiveAlignmentSemantics(injected.rawJson, request), system_prompt: SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT };
+  return { ...receiveAlignmentSemantics(injected.rawJson, request), system_prompt: sourceSemanticAlignmentSystemPrompt(request) };
 }
 
 function receiveAlignmentSemantics(
@@ -207,7 +212,7 @@ function receiveAlignmentSemantics(
   if (bounded !== undefined) return bounded;
   const parsed = parseResponseJson(rawJson, attempt);
   if (parsed.status !== "ok") return parsed.result;
-  const envelope = alignmentResponseSchema.safeParse(parsed.value);
+  const envelope = alignmentResponseSchema(request).safeParse(parsed.value);
   if (!envelope.success) {
     return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
   }
@@ -325,12 +330,18 @@ function parseResponseJson<T>(rawJson: string, attempt: Attempt<T>):
 function materializeQuery(body: unknown, request: SourceSemanticQueryRequest): SourceSemanticQuery {
   const record = asRecord(body);
   rejectForbiddenProposalInput(record);
+  const envelope = {
+    original_query_digest: request.original_query_digest,
+    producer_id: request.producer_capability.producer_id,
+    producer_version: request.producer_capability.producer_version
+  };
+  if (request.contract !== SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT) {
+    return materializeSourceSemanticQueryMeaning(record, envelope);
+  }
   const parsed = SourceSemanticQueryProducerBodySchema.parse(record);
   return SourceSemanticQuerySchema.parse({
     contract: SOURCE_SEMANTIC_QUERY_CONTRACT,
-    original_query_digest: request.original_query_digest,
-    producer_id: request.producer_capability.producer_id,
-    producer_version: request.producer_capability.producer_version,
+    ...envelope,
     contract_version: SOURCE_SEMANTIC_QUERY_CONTRACT,
     variables: parsed.variables,
     alternatives: parsed.alternatives,
@@ -344,6 +355,18 @@ function materializeQuery(body: unknown, request: SourceSemanticQueryRequest): S
 function materializeAlignment(body: unknown, request: SourceSemanticAlignmentRequest): unknown {
   const record = asRecord(body);
   rejectForbiddenProposalInput(record);
+  if (request.contract !== SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT) {
+    if (request.catalog === undefined) {
+      throw new AlayaError("VALIDATION", "alignment selection requires the advertised endpoint catalog");
+    }
+    const parsed = z.object({ h: z.string().optional() }).passthrough().parse(record);
+    return materializeSourceSemanticAlignmentSelection(record, request.catalog, {
+      h_id: bindAlignmentHandle(parsed.h, request.h_descriptors),
+      q_id: sourceSemanticQueryIdentity(request.admitted_q, semanticSha256),
+      producer_id: request.producer_capability.producer_id,
+      producer_version: request.producer_capability.producer_version
+    });
+  }
   const parsed = SourceSemanticAlignmentProducerBodySchema.parse(record);
   return {
     contract: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
@@ -400,14 +423,33 @@ const ProducerResponseOutcomeSchema = z.discriminatedUnion("status", [
   ...SourceSemanticOutcomeSchema.options.filter((option) => option.unwrap().shape.status.value !== "interpreted")
 ]);
 
-const queryResponseSchema = z.object({
+const QueryGraphResponseSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT),
   outcome: ProducerResponseOutcomeSchema,
   query: z.unknown().optional()
 }).strict().readonly();
-
-const alignmentResponseSchema = z.object({
+const QueryMeaningResponseSchema = z.object({
+  contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT),
+  outcome: ProducerResponseOutcomeSchema,
+  query: z.unknown().optional()
+}).strict().readonly();
+const AlignmentGraphResponseSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT),
   outcome: ProducerResponseOutcomeSchema,
   alignment: z.unknown().optional()
 }).strict().readonly();
+const AlignmentSelectionResponseSchema = z.object({
+  contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_SELECTION_RESPONSE_CONTRACT),
+  outcome: ProducerResponseOutcomeSchema,
+  alignment: z.unknown().optional()
+}).strict().readonly();
+
+function queryResponseSchema(request: SourceSemanticQueryRequest) {
+  return request.contract === SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT
+    ? QueryGraphResponseSchema : QueryMeaningResponseSchema;
+}
+
+function alignmentResponseSchema(request: SourceSemanticAlignmentRequest) {
+  return request.contract === SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT
+    ? AlignmentGraphResponseSchema : AlignmentSelectionResponseSchema;
+}

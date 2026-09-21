@@ -119,8 +119,35 @@ export function estimatedUpperUsd(
   return perAttempt * preflight.maximum_attempts;
 }
 
+export function verifySemanticProposalAuthority(authority: SemanticProposalAuthority): SemanticProposalAuthority {
+  const { identity_digest, ...body } = authority;
+  const digest = createHash("sha256").update(canonicalJson(body)).digest("hex");
+  if (digest !== identity_digest) {
+    throw new Error("semantic proposal authority identity digest is invalid");
+  }
+  if (new Set(authority.keys).size !== authority.keys.length) {
+    throw new Error("semantic proposal authority keys are not unique");
+  }
+  if (authority.limits.starting_missing !== authority.keys.length ||
+      authority.limits.successful_shard_ceiling !== authority.keys.length) {
+    throw new Error("semantic proposal authority key/cap relationship is invalid");
+  }
+  if (authority.limits.maximum_attempts !== authority.keys.length * SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY) {
+    throw new Error("semantic proposal authority maximum_attempts does not bind its keys");
+  }
+  const estimated = estimatedUpperUsd({
+    maximum_attempts: authority.limits.maximum_attempts,
+    max_output_tokens: authority.limits.max_output_tokens,
+    maximum_input_tokens_per_attempt: authority.price.maximum_input_tokens_per_attempt
+  }, authority.price.input_usd_per_million, authority.price.output_usd_per_million);
+  if (authority.price.estimated_upper_usd !== estimated) {
+    throw new Error("semantic proposal authority price does not bind its limits");
+  }
+  return authority;
+}
+
 export function readSemanticProposalAuthority(path: string): SemanticProposalAuthority {
-  return AuthoritySchema.parse(JSON.parse(readFileSync(path, "utf8")));
+  return verifySemanticProposalAuthority(AuthoritySchema.parse(JSON.parse(readFileSync(path, "utf8"))));
 }
 
 export function writeJsonExclusive(path: string, value: unknown): void {

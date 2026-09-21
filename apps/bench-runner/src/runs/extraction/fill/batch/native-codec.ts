@@ -105,15 +105,21 @@ function assembleGeminiStreamEvents(events: readonly unknown[]): unknown {
   };
 }
 
-export function decodeGeminiGenerateContent(value: unknown): {
+export type GeminiDecodedCompletion = {
   readonly rawJson: string;
   readonly usage?: { readonly inputTokens: number; readonly outputTokens: number; readonly totalTokens: number };
   readonly responseMetadata: {
-    readonly finishReason: "STOP" | "MAX_TOKENS";
-    readonly completionWitness: "finish_reason";
-    readonly completionContractVersion: 1
+    readonly finishReason: string | null;
+    readonly completionWitness?: "finish_reason";
+    readonly completionContractVersion?: 1;
   };
-} {
+};
+
+export function isCompleteGeminiFinish(finishReason: string | null | undefined): boolean {
+  return finishReason === "STOP";
+}
+
+export function decodeGeminiGenerateContent(value: unknown): GeminiDecodedCompletion {
   throwIfGeminiProviderError(value);
   const response = record(value);
   const candidates = response.candidates;
@@ -130,16 +136,22 @@ export function decodeGeminiGenerateContent(value: unknown): {
   }
   const rawJson = text.join("");
   if (!rawJson.trim()) throw new Error("Gemini response is empty");
-  const finishReason = candidate.finishReason === "STOP" ? "STOP" : "MAX_TOKENS";
-  if (candidate.finishReason !== "STOP" && candidate.finishReason !== "MAX_TOKENS" &&
-      candidate.finishReason !== undefined) {
-    throw new Error("Gemini response is truncated or not complete");
-  }
+  const finishReason = observedGeminiFinishReason(candidate.finishReason);
   const usage = geminiUsage(response);
   return {
     rawJson, ...(usage === undefined ? {} : { usage }),
-    responseMetadata: { finishReason, completionWitness: "finish_reason", completionContractVersion: 1 }
+    responseMetadata: finishReason === null
+      ? { finishReason: null }
+      : { finishReason, completionWitness: "finish_reason", completionContractVersion: 1 }
   };
+}
+
+function observedGeminiFinishReason(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error("Gemini finish reason is malformed");
+  }
+  return value;
 }
 
 export function geminiUsage(response: Record<string, unknown>): {

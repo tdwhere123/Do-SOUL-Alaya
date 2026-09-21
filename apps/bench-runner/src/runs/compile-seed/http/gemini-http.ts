@@ -171,16 +171,23 @@ async function decodeGeminiResponse(response: Response, input: ExtractInput, att
   attempt.kind = "response_schema_error";
   const decoded = decodeGeminiGenerateContent(value);
   const validation = input.validateRawJson === undefined ? "default_envelope" : "caller_owned";
-  extractValidGardenHttpContent({
-    content: decoded.rawJson,
-    finishReason: validation === "caller_owned" ? "stop" :
-      decoded.responseMetadata.finishReason === "MAX_TOKENS" ? "length" : "stop",
-    ...(decoded.usage === undefined ? {} : { usage: decoded.usage })
-  }, validation);
+  if (validation === "default_envelope") {
+    extractValidGardenHttpContent({
+      content: decoded.rawJson,
+      finishReason: gardenFinishReason(decoded.responseMetadata.finishReason),
+      ...(decoded.usage === undefined ? {} : { usage: decoded.usage })
+    }, validation);
+  }
   input.validateRawJson?.(decoded.rawJson);
   return { ...decoded, responseMetadata: {
     ...decoded.responseMetadata, maxOutputTokens: input.maxOutputTokens
   } };
+}
+
+function gardenFinishReason(finish: string | null): string {
+  if (finish === "STOP") return "stop";
+  if (finish === "MAX_TOKENS") return "length";
+  throw new Error("Gemini response finish reason is unknown or incomplete");
 }
 
 function geminiAttemptFailure(cause: unknown, attempt: GeminiAttempt, aborted: boolean, timedOut: boolean) {

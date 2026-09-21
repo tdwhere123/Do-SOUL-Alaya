@@ -23,7 +23,11 @@ import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
 import { prepareBatchExtractionWorkset, type BatchExtractionWorkset } from "./batch-workset.js";
 import type { GeminiBatchLine } from "./batch/contract.js";
 import { batchDigest } from "./batch/plan.js";
-import { encodeGeminiGenerateContent, isGeminiGenerateContentProfile } from "./batch/native-codec.js";
+import { encodeGeminiGenerateContent, isCompleteGeminiFinish, isGeminiGenerateContentProfile } from "./batch/native-codec.js";
+import {
+  bindProviderRawAttempt, listProviderRawAttempts, readProviderRawAttempt, requestEnvelopeDigest,
+  writeProviderRawAttempt, type ProviderRawAttempt
+} from "./provider-raw-attempt.js";
 import { assertExtractionFillComplete } from "./fill-completion.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import {
@@ -111,6 +115,8 @@ async function fillInteractiveLine(
   extractor: ReturnType<typeof createGeminiHttpExtractor>,
   maxOutputTokens: number
 ): Promise<"admitted" | "quarantined" | "transport_exhausted"> {
+  const replayed = replayInteractiveRaws(input, workset, line);
+  if (replayed !== undefined) return replayed;
   let last: "quarantined" | "transport_exhausted" = "transport_exhausted";
   for (let attempt = 0; attempt < COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD; attempt += 1) {
     const outcome = await dispatchInteractiveLine(input, workset, line, extractor, maxOutputTokens);
@@ -120,6 +126,56 @@ async function fillInteractiveLine(
   return last;
 }
 
+function replayInteractiveRaws(
+  input: InteractiveFillInput,
+  workset: BatchExtractionWorkset,
+  line: GeminiBatchLine
+): "admitted" | "quarantined" | "transport_exhausted" | undefined {
+  const unresolved = input.authority!.snapshot()?.unresolvedAttempts
+    .filter((item) => item.cacheKey === line.key) ?? [];
+  for (const pending of unresolved) {
+    if (readProviderRawAttempt(input.cacheRoot, line.key, pending.attemptOrdinal) === undefined) {
+      return "transport_exhausted";
+    }
+  }
+  const raws = listProviderRawAttempts(input.cacheRoot, line.key);
+  if (raws.length === 0) return undefined;
+  const sourceCorpus = boundSourceCorpus(workset, line);
+  for (const raw of raws) {
+    const outcome = importInteractiveFromRaw(input, line, sourceCorpus, raw);
+    if (outcome === "admitted" || outcome === "quarantined") return outcome;
+  }
+  return "transport_exhausted";
+}
+
+function importInteractiveFromRaw(
+  input: InteractiveFillInput,
+  line: GeminiBatchLine,
+  sourceCorpus: string,
+  raw: ProviderRawAttempt
+): "admitted" | "quarantined" {
+  bindProviderRawAttempt(raw, {
+    cacheKey: line.key, kind: "source_semantic", model: input.prepared.config.model,
+    requestProfile: input.prepared.config.requestProfile,
+    requestDigest: requestEnvelopeDigest(line.userPrompt)
+  });
+  if (!raw.full_replay_possible) {
+    input.authority!.abandonPendingShard(line.key, raw.attempt_ordinal);
+    return "quarantined";
+  }
+  return importInteractiveLine(input, line, sourceCorpus, {
+    rawJson: raw.decoded_text,
+    responseMetadata: { finishReason: raw.finish_reason },
+    ...(raw.usage === null ? {} : { usage: raw.usage })
+  }, raw.attempt_ordinal);
+}
+
+function boundSourceCorpus(workset: BatchExtractionWorkset, line: GeminiBatchLine): string {
+  const sourceCorpus = workset.requests.find((request) => request.line.key === line.key)?.units[0]?.sourceCorpus;
+  if (sourceCorpus === undefined) throw new Error("open-semantics interactive fill lost its bound source corpus");
+  return sourceCorpus;
+}
+
 async function dispatchInteractiveLine(
   input: InteractiveFillInput,
   workset: BatchExtractionWorkset,
@@ -127,16 +183,16 @@ async function dispatchInteractiveLine(
   extractor: ReturnType<typeof createGeminiHttpExtractor>,
   maxOutputTokens: number
 ): Promise<"admitted" | "quarantined" | "transport_exhausted"> {
-  const sourceCorpus = workset.requests.find((request) => request.line.key === line.key)?.units[0]?.sourceCorpus;
-  if (sourceCorpus === undefined) throw new Error("open-semantics interactive fill lost its bound source corpus");
+  const sourceCorpus = boundSourceCorpus(workset, line);
   const authority = input.authority!;
   if (authority.reserveAttemptOrdinal === undefined) {
     throw new Error("open-semantics interactive fill requires bound attempt authority");
   }
   input.options.signal?.throwIfAborted();
   const attemptOrdinal = await authority.reserveAttemptOrdinal(line.key, input.options.signal);
+  let extracted: Awaited<ReturnType<typeof extractor.extract>>;
   try {
-    const extracted = await extractor.extract({
+    extracted = await extractor.extract({
       systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, retryMode: "disabled",
       timeoutMs: Math.max(resolveExtractionRequestTimeoutMs(maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS),
       maxOutputTokens,
@@ -144,33 +200,83 @@ async function dispatchInteractiveLine(
       validateRawJson: () => undefined,
       ...(input.options.signal === undefined ? {} : { abortSignal: input.options.signal })
     });
-    return importInteractiveLine(input, line, sourceCorpus, extracted, attemptOrdinal);
   } catch (cause) {
     if (input.options.signal?.aborted === true) throw cause;
+    if (isLocalPersistenceFailure(cause)) throw cause;
+    const outcome = readLiveTransportFailure(cause);
+    if (outcome === undefined || outcome.transportFailures.length === 0) throw cause;
     appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
       `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
-    const outcome = readLiveTransportFailure(cause);
-    if (outcome !== undefined && outcome.transportFailures.length > 0) {
-      authority.recordTransportOutcome(line.key, outcome, attemptOrdinal);
+    if (isCompletedNonRetryableResponse(outcome)) {
+      writeProviderRawAttempt({
+        root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",
+        model: input.prepared.config.model, requestProfile: input.prepared.config.requestProfile,
+        requestDigest: requestEnvelopeDigest(line.userPrompt), decodedText: "",
+        finishReason: null,
+        ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
+        ...(outcome.transportFailures[0]?.phase === undefined
+          ? {} : { transportPhase: outcome.transportFailures[0].phase })
+      });
+      return importInteractiveLine(input, line, sourceCorpus, {
+        rawJson: "",
+        responseMetadata: { finishReason: null },
+        ...(outcome.usage === undefined ? {} : { usage: outcome.usage })
+      }, attemptOrdinal);
     }
+    authority.recordTransportOutcome(line.key, outcome, attemptOrdinal);
     authority.abandonPendingShard(line.key, attemptOrdinal);
     return "transport_exhausted";
   }
+  writeProviderRawAttempt({
+    root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",
+    model: input.prepared.config.model, requestProfile: input.prepared.config.requestProfile,
+    requestDigest: requestEnvelopeDigest(line.userPrompt), decodedText: extracted.rawJson,
+    finishReason: extracted.responseMetadata?.finishReason ?? null,
+    ...(extracted.usage === undefined ? {} : { usage: extracted.usage })
+  });
+  return importInteractiveLine(input, line, sourceCorpus, extracted, attemptOrdinal);
 }
+
+function isCompletedNonRetryableResponse(
+  transport: NonNullable<ReturnType<typeof readLiveTransportFailure>>
+): boolean {
+  return transport.terminalRetryClassification === "failure_non_retryable_response" &&
+    transport.transportFailures.some((item) =>
+      item.phase === "response_schema" || item.phase === "response_parse");
+}
+
+function isLocalPersistenceFailure(cause: unknown): boolean {
+  const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+  return code === "ENOSPC" || code === "EACCES" || code === "EPERM" || code === "EROFS" || code === "EEXIST";
+}
+
+type InteractiveExtracted = Readonly<{
+  rawJson: string;
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  responseMetadata?: { finishReason: string | null };
+}>;
 
 function importInteractiveLine(
   input: InteractiveFillInput,
   line: GeminiBatchLine,
   sourceCorpus: string,
-  extracted: Awaited<ReturnType<ReturnType<typeof createGeminiHttpExtractor>["extract"]>>,
+  extracted: InteractiveExtracted,
   attemptOrdinal: number
 ): "admitted" | "quarantined" {
   const authority = input.authority!;
+  const finishReason = extracted.responseMetadata?.finishReason ?? null;
   const provenance = {
-    transport: "gemini-generate-content" as const, finishReason: "STOP" as const, attemptOrdinal,
+    transport: "gemini-generate-content" as const, finishReason, attemptOrdinal,
     responseSha256: batchDigest(extracted.rawJson),
     ...(extracted.usage === undefined ? {} : { usage: extracted.usage })
   };
+  if (!isCompleteGeminiFinish(finishReason)) {
+    appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
+      `${line.key}\tincomplete\tfinish_reason=${String(finishReason)}\n`);
+    authority.abandonPendingShard(line.key, attemptOrdinal);
+    recordInteractiveOutcome(authority, line.key, attemptOrdinal, extracted, "quarantined", provenance.responseSha256);
+    return "quarantined";
+  }
   try {
     importSourceSemanticArtifact({
       config: input.prepared.config, cacheRoot: input.cacheRoot, writeLease: input.writeLease,
@@ -201,7 +307,7 @@ function recordInteractiveOutcome(
   authority: ExecutionExtractionAuthority,
   key: string,
   attemptOrdinal: number,
-  extracted: Awaited<ReturnType<ReturnType<typeof createGeminiHttpExtractor>["extract"]>>,
+  extracted: InteractiveExtracted,
   outcome: "admitted" | "quarantined",
   fingerprint?: string
 ): void {

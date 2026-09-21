@@ -28,7 +28,7 @@ export class SourceSemanticAdmissionError extends Error {}
 
 export type GeminiGenerateContentProvenance = Readonly<{
   readonly transport: "gemini-generate-content";
-  readonly finishReason: "STOP";
+  readonly finishReason: string | null;
   readonly attemptOrdinal: number;
   readonly responseSha256: string;
   readonly usage?: {
@@ -100,16 +100,25 @@ function assertInteractiveGenerateContentProvenance(provenance: GeminiGenerateCo
   }
 }
 
+function assertCompleteProviderFinish(finishReason: string | null): void {
+  if (finishReason !== "STOP") {
+    throw new SourceSemanticAdmissionError("source semantics completion is not a complete provider finish");
+  }
+}
+
 function inspectInteractiveGenerateContent(
   typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" }>,
   entry: CachedExtractionEntry,
   request: ReturnType<typeof parseSourceSemanticRequest>
 ): SourceSemanticProposalResult {
   assertInteractiveGenerateContentProvenance(typed.result.provenance);
+  if (typed.result.provenance.finishReason !== "STOP") {
+    throw new AlayaError("CONFLICT", "typed open-semantics interactive completion is not a complete provider finish");
+  }
   if (typed.result.rawJson !== entry.raw_json || !isExtractionTransportProvenance(entry.transport_provenance)) {
     throw new AlayaError("CONFLICT", "typed open-semantics interactive transport binding mismatch");
   }
-  const metadata = persistedResponseMetadata({ finishReason: "STOP", completionContractVersion: 1,
+  const metadata = persistedResponseMetadata({ finishReason: typed.result.provenance.finishReason, completionContractVersion: 1,
     completionWitness: "finish_reason" }, typed.result.provenance.usage, true);
   if (canonicalJson(entry.response_metadata) !== canonicalJson(metadata.response_metadata)) {
     throw new AlayaError("CONFLICT", "typed open-semantics retained response metadata mismatch");
@@ -264,6 +273,7 @@ function importBatchSourceSemanticArtifact(input: SourceSemanticImportBase & Rea
   result: Parameters<GeminiBatchInvocation["importLine"]>[0];
 }>) {
   const { result, config, cacheRoot } = input;
+  assertCompleteProviderFinish(result.provenance.finishReason);
   const identity = bindOpenSemanticsImport(input, result.line);
   const transport = buildExtractionTransportProvenance(config);
   const authority = readRetainedBatchAuthority(cacheRoot, input.plan.identity, input.authority.receipt_digest);
@@ -281,7 +291,7 @@ function importBatchSourceSemanticArtifact(input: SourceSemanticImportBase & Rea
     model: config.model, request_profile: config.requestProfile,
     cache_key: result.line.key, raw_json: result.rawJson, extracted_at: new Date().toISOString(),
     transport_provenance: transport,
-    ...persistedResponseMetadata({ finishReason: "STOP", completionContractVersion: 1, completionWitness: "finish_reason" }, result.provenance.usage, true),
+    ...persistedResponseMetadata({ finishReason: result.provenance.finishReason, completionContractVersion: 1, completionWitness: "finish_reason" }, result.provenance.usage, true),
     admission_identity: { generation_sha256: extractionAdmissionGenerationSha256(identity.manifest),
       request_key: result.line.key, raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson) },
     source_semantic: { contract: SOURCE_SEMANTIC_CACHE_CONTRACT, source_binding: "unbound",
@@ -297,6 +307,7 @@ function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase
 }>) {
   const { result, config } = input;
   assertInteractiveGenerateContentProvenance(result.provenance);
+  assertCompleteProviderFinish(result.provenance.finishReason);
   const identity = bindOpenSemanticsImport(input, result.line);
   const { admitted, completion } = admitSourceSemanticLine({
     ...input, line: result.line, rawJson: result.rawJson
@@ -305,7 +316,7 @@ function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase
     model: config.model, request_profile: config.requestProfile,
     cache_key: result.line.key, raw_json: result.rawJson, extracted_at: new Date().toISOString(),
     transport_provenance: buildExtractionTransportProvenance(config),
-    ...persistedResponseMetadata({ finishReason: "STOP", completionContractVersion: 1, completionWitness: "finish_reason" }, result.provenance.usage, true),
+    ...persistedResponseMetadata({ finishReason: result.provenance.finishReason, completionContractVersion: 1, completionWitness: "finish_reason" }, result.provenance.usage, true),
     admission_identity: { generation_sha256: extractionAdmissionGenerationSha256(identity.manifest),
       request_key: result.line.key, raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson) },
     source_semantic: { contract: SOURCE_SEMANTIC_CACHE_CONTRACT, source_binding: "unbound",

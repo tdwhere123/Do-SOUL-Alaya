@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
-  type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery
+  type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
 } from "@do-soul/alaya-protocol";
 import {
   createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
@@ -53,14 +54,14 @@ function compactStatement(
   roles: readonly { role: string; text: string }[]
 ) {
   return {
-    contract: "source-semantic-proposal-v4" as const,
+    contract: "source-semantic-proposal-v5" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{
         act: "assertion" as const,
         expression: {
           kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: predicate, at: segment(catalog, at) },
+          predicate: { kind: "explicit" as const, reading: predicate, support: segment(catalog, at) },
           arguments: roles.map((row) => ({ role: row.role, target: segment(catalog, row.text) }))
         }
       }]
@@ -81,7 +82,8 @@ function receiveH(source: string, sourceId: string, raw: object) {
 
 function receiveQ(original: string): SourceSemanticQuery {
   const received = proposeQuerySemantics({
-    original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1"
+    original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1",
+    query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT,
   }, {
     rawJson: JSON.stringify({
       contract: "source-semantic-query-response-v2", outcome: { status: "interpreted" },
@@ -280,7 +282,7 @@ it("prepares bounded A from discovered H and recalls only harness alignments", a
         };
         const prepared = prepareSourceSemanticLibrary({
           original_query: ORIGINAL, admitted_q: q, h_descriptors: descriptors, produce,
-          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1"
+          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1", alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
         });
         expect(fetch).not.toHaveBeenCalled();
         expect(produceCalls).toBe(descriptors.length);
@@ -294,7 +296,7 @@ it("prepares bounded A from discovered H and recalls only harness alignments", a
             outcome: status === "invalid" ? { status, reason: "rejected" } : { status } });
           const result = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_q: q,
             h_descriptors: descriptors, produce: () => ({ rawJson }),
-            producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1" });
+            producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1", alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT });
           expect(result.outcomes).toHaveLength(descriptors.length);
           expect(result.outcomes[0]).toMatchObject({ status: status === "abstained" ? "no_alignment" : status === "invalid" ? "invalid" : "failed",
             outcome: { status }, rawJson });
@@ -302,14 +304,14 @@ it("prepares bounded A from discovered H and recalls only harness alignments", a
         let attempts = 0;
         const thrown = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_q: q,
           h_descriptors: descriptors, produce: () => { attempts += 1; throw new Error("transport down"); }, cap: 1,
-          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1" });
+          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1", alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT });
         expect(attempts).toBe(1);
         expect(thrown.outcomes[0]).toMatchObject({ status: "failed", outcome: { status: "transport_failure" } });
         expect(thrown.outcomes.slice(1).every((row) => row.status === "unattempted")).toBe(true);
         const forbidden = vi.fn(() => ({ status: "no_alignment" as const }));
         for (const cap of [NaN, Infinity, -1, 1.5]) expect(() => prepareSourceSemanticLibrary({
           original_query: ORIGINAL, admitted_q: q, h_descriptors: descriptors, produce: forbidden, cap,
-          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1"
+          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1", alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
         })).toThrow(/cap/u);
         expect(() => prepareSourceSemanticLibrary({ original_query: "different", admitted_q: q,
           h_descriptors: descriptors, produce: forbidden, producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
@@ -327,7 +329,7 @@ it("prepares bounded A from discovered H and recalls only harness alignments", a
         }
         const capped = prepareSourceSemanticLibrary({
           original_query: ORIGINAL, admitted_q: q, h_descriptors: descriptors, produce, cap: 1,
-          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1"
+          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1", alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
         });
         expect(capped.outcomes[0]?.status).not.toBe("unattempted");
         expect(capped.outcomes.slice(1).every((row) => row.status === "unattempted")).toBe(true);

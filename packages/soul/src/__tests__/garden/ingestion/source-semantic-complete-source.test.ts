@@ -9,7 +9,7 @@ const producer = { source_id: "source", source_version: "1", producer_id: "autho
 const source = (count: number) => Array.from({ length: count }, (_, i) => `Item ${i} is recorded.`).join(" ");
 const inputFor = (count: number) => ({ ...producer, sourceCorpus: source(count),
   assertionIds: Array.from({ length: count }, (_, i) => i + 1), sourceScope: "complete-source" as const });
-const emptyDraft = JSON.stringify({ contract: "source-semantic-proposal-v4", outcome: { status: "interpreted" },
+const emptyDraft = JSON.stringify({ contract: "source-semantic-proposal-v5", outcome: { status: "interpreted" },
   content: { roots: [] } });
 
 describe("bounded complete-source semantic requests", () => {
@@ -68,15 +68,13 @@ describe("bounded complete-source semantic requests", () => {
     ]) };
     const request = buildSourceSemanticRequest(input);
     expect(request.source_request.source_assertions.map(row => row.source_role)).toEqual([...Array<string>(8).fill("user"), "assistant"]);
-    const anchor = (assertion_id: number, text: string) => {
-      const id = request.source_catalog.assertions.find(row => row.assertion_id === assertion_id)!.segments.find(row => row.text === text)!.id;
-      return { assertion_id, source_ref: { first: id, last: id } };
-    };
-    const raw = JSON.stringify({ contract: "source-semantic-proposal-v4", outcome: { status: "interpreted" }, content: {
+    const anchor = (assertion_id: number, text: string) =>
+      request.source_catalog.assertions.find(row => row.assertion_id === assertion_id)!.segments.find(row => row.text === text)!.id;
+    const raw = JSON.stringify({ contract: "source-semantic-proposal-v5", outcome: { status: "interpreted" }, content: {
       roots: [{ act: "assertion", expression: { kind: "statement", predicate: {
-        kind: "explicit", reading: "opened", at: anchor(9, "opened")
+        kind: "explicit", reading: "opened", support: anchor(9, "opened")
       }, arguments: [{ role: "theme", target: {
-        key: "atlas", mentions: [anchor(1, "atlas"), anchor(9, "it")]
+        kind: "entity", key: "atlas", mentions: [anchor(1, "atlas"), anchor(9, "it")]
       } }] } }]
     } });
     const result = receiveSourceSemantics(raw, request, input);

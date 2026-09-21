@@ -10,7 +10,8 @@ import {
   buildSourceReferenceCatalog, hashLabeledIdentity, sourceReferenceResolver, canonicalJson,
   SourceSemanticPublishedInterpretationSchema, sourceSemanticInterpretationIdentity,
   type SourceReferenceCatalog, type SourceSemanticAlignment, type SourceSemanticQuery,
-  type SourceSemanticWorkerRequest
+  type SourceSemanticWorkerRequest,
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
 } from "@do-soul/alaya-protocol";
 import { proposeAlignmentSemantics, proposeQuerySemantics } from "@do-soul/alaya-soul";
 import {
@@ -554,7 +555,8 @@ it("reasons through the worker on receiver-produced query and alignment bodies",
     const receivedQ = proposeQuerySemantics({
       original_query: ORIGINAL,
       producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
-      producer_version: "1"
+      producer_version: "1",
+      query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT,
     }, {
       rawJson: JSON.stringify({
         contract: "source-semantic-query-response-v2",
@@ -579,7 +581,8 @@ it("reasons through the worker on receiver-produced query and alignment bodies",
       admitted_q: receivedQ.query!,
       h_descriptors: [{ h_id: candidate.interpretation_id, interpretation: candidate.interpretation }],
       producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-      producer_version: "1"
+      producer_version: "1",
+      alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
     }, {
       rawJson: JSON.stringify({
         contract: "source-semantic-alignment-response-v2",

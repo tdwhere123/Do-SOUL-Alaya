@@ -1,5 +1,7 @@
 import { expect, it } from "vitest";
-import { sourceSemanticInterpretationIdentity } from "@do-soul/alaya-protocol";
+import {
+  sourceSemanticInterpretationIdentity, SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
+} from "@do-soul/alaya-protocol";
 import {
   admitSourceSemanticAlignment, admitSourceSemanticQuery, fieldContractSha256,
   SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
@@ -35,7 +37,8 @@ it("admits receiver-produced Q/A and drops dependent answers when membership is 
   const receivedQ = proposeQuerySemantics({
     original_query: FINITE_QUERY,
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
-    producer_version: "1"
+    producer_version: "1",
+    query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT
   }, {
     rawJson: JSON.stringify({
       contract: "source-semantic-query-response-v2",
@@ -50,7 +53,8 @@ it("admits receiver-produced Q/A and drops dependent answers when membership is 
   const forged = proposeQuerySemantics({
     original_query: FINITE_QUERY,
     producer_id: "forged.unknown.v1",
-    producer_version: "1"
+    producer_version: "1",
+    query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT
   }, {
     rawJson: JSON.stringify({
       contract: "source-semantic-query-response-v2",
@@ -71,7 +75,8 @@ it("admits receiver-produced Q/A and drops dependent answers when membership is 
     admitted_q: receivedQ.query!,
     h_descriptors: [{ h_id: hId, interpretation: h }],
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-    producer_version: "1"
+    producer_version: "1",
+    alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
   }, {
     rawJson: JSON.stringify({
       contract: "source-semantic-alignment-response-v2",
@@ -96,7 +101,8 @@ it("admits receiver-produced Q/A and drops dependent answers when membership is 
     admitted_q: receivedQ.query!,
     h_descriptors: [{ h_id: hId, interpretation: h }],
     producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-    producer_version: "1"
+    producer_version: "1",
+    alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
   }, {
     rawJson: JSON.stringify({
       contract: "source-semantic-alignment-response-v2",

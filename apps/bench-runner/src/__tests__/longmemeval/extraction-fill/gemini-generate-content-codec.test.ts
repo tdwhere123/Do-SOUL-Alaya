@@ -44,22 +44,42 @@ describe("native Gemini generateContent codec", () => {
     }).rawJson).toBe('{"signals":[]}');
   });
 
-  it("keeps nonempty JSON when the stream reports MAX_TOKENS or omits STOP", () => {
+  it("keeps nonempty JSON when the stream reports MAX_TOKENS and leaves missing finish unknown", () => {
     const raw = '{"signals":[]}';
-    expect(decodeGeminiGenerateContent({
+    const truncated = decodeGeminiGenerateContent({
       candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [{ text: raw }] } }],
       usageMetadata: usage
-    }).rawJson).toBe(raw);
-    expect(decodeGeminiGenerateContent({
+    });
+    expect(truncated.rawJson).toBe(raw);
+    expect(truncated.responseMetadata.finishReason).toBe("MAX_TOKENS");
+    expect(truncated.responseMetadata.completionWitness).toBe("finish_reason");
+    const missing = decodeGeminiGenerateContent({
       candidates: [{ content: { parts: [{ text: raw }] } }],
       usageMetadata: usage
-    }).responseMetadata.finishReason).toBe("MAX_TOKENS");
+    });
+    expect(missing.rawJson).toBe(raw);
+    expect(missing.responseMetadata.finishReason).toBeNull();
+    expect(missing.responseMetadata.completionWitness).toBeUndefined();
+  });
+
+  it("preserves an explicit non-STOP finish reason without mapping it to MAX_TOKENS", () => {
+    const decoded = decodeGeminiGenerateContent({
+      candidates: [{ finishReason: "SAFETY", content: { parts: [{ text: '{"signals":[]}' }] } }]
+    });
+    expect(decoded.responseMetadata.finishReason).toBe("SAFETY");
+    expect(decoded.responseMetadata.completionWitness).toBe("finish_reason");
   });
 
   it("rejects thought-only STOP as empty model content", () => {
     expect(() => decodeGeminiGenerateContent({
       candidates: [{ finishReason: "STOP", content: { parts: [{ thought: true, text: "private" }] } }]
     })).toThrow(/empty/u);
+  });
+
+  it("does not invent model JSON from a truncated SSE event", () => {
+    expect(() => parseGeminiGenerateContentBody(
+      "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"{\"}]}}\n\n"
+    )).toThrow();
   });
 
   it("classifies an SSE provider error without assembling proposal text", () => {

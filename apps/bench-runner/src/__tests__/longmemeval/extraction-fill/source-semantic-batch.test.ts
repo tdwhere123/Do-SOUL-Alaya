@@ -39,7 +39,14 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const contract = request.source_request.proposal_contract ?? "source-semantic-proposal-v3";
-  const envelope = contract === "source-semantic-proposal-v4" ? {
+  const envelope = contract === "source-semantic-proposal-v5" ? {
+    contract, outcome: { status: "interpreted" }, content: {
+      roots: [{ act: "assertion", expression: {
+        kind: "statement", predicate: { kind: "explicit", reading: "complete", support: segment("completed").id },
+        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [segment(theme).id] } }]
+      } }]
+    }
+  } : contract === "source-semantic-proposal-v4" ? {
     contract, outcome: { status: "interpreted" }, content: {
       roots: [{ act: "assertion", expression: {
         kind: "statement", predicate: { kind: "explicit", reading: "complete", at: segment("completed").id },
@@ -58,9 +65,15 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
     }
   };
   const editable = JSON.parse(JSON.stringify(envelope));
-  if (mode === "unknown_alias") editable.content.roots[0].expression.arguments[0].target = { kind: "reference", key: segment(theme).id };
+  if (mode === "unknown_alias") {
+    editable.content.roots[0].expression.arguments[0].target = contract === "source-semantic-proposal-v5"
+      ? { kind: "occurrence", key: segment(theme).id }
+      : { kind: "reference", key: segment(theme).id };
+  }
   if (mode === "duplicate_gap_channel" || mode === "partial") {
-    const gaps = [{ kind: "unresolved_referent", affected: ["r0"], evidence: [anchor(theme)] }];
+    const gaps = contract === "source-semantic-proposal-v5"
+      ? [{ kind: "unresolved_referent", affected: ["r0"], support: segment(theme).id }]
+      : [{ kind: "unresolved_referent", affected: ["r0"], evidence: [anchor(theme)] }];
     if (mode === "partial") editable.content.gaps = gaps;
     else editable.outcome.gaps = gaps;
   }

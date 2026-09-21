@@ -54,7 +54,7 @@ export const SourceSemanticQueryAlternativeSchema = z.object({
   purpose: z.enum(["support", "counterexample"]).optional()
 }).strict().readonly();
 
-const SourceSemanticEvaluationSchema = z.discriminatedUnion("kind", [
+export const SourceSemanticQueryEvaluationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("forall"), domain: Handle, binder: Handle,
     local_variables: z.array(Handle).max(256).readonly() }).strict().readonly(),
   z.object({ kind: z.literal("comparison"), domain: Handle,
@@ -78,7 +78,7 @@ const SourceSemanticQueryObjectSchema = z.object({
   domains: z.array(z.object({ id: Handle,
     support: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly()
   }).strict().readonly()).max(64).readonly().optional(),
-  evaluation: SourceSemanticEvaluationSchema.optional()
+  evaluation: SourceSemanticQueryEvaluationSchema.optional()
 }).strict();
 
 /** Producer body omits host envelope identities; the receiver materializes those from the request. */

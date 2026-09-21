@@ -33,12 +33,15 @@ export function receiveSourceInterpretationPacketBatchLine(input: Readonly<{
       !retained.plan.lines.some((line) => JSON.stringify(line) === JSON.stringify(input.line)))) {
     throw new AlayaError("CONFLICT", "Batch packet is missing its retained plan/attempt binding");
   }
+  if (retained !== undefined && retained.provenance.finishReason !== "STOP") {
+    throw new AlayaError("CONFLICT", "Batch packet completion is not a complete provider finish");
+  }
   const transport = retained === undefined ? { kind: "unavailable" as const } : {
     kind: "gemini_batch" as const, plan_identity: retained.plan.identity, model: retained.plan.model,
     request_profile: retained.plan.requestProfile, max_output_tokens: retained.plan.limits.maxOutputTokens,
     request_sha256: input.line.requestSha256, job: retained.provenance.job, input_file: retained.provenance.inputFile,
     input_sha256: retained.provenance.inputSha256, output_sha256: retained.provenance.outputSha256,
-    response_sha256: retained.provenance.responseSha256, finish_reason: retained.provenance.finishReason,
+    response_sha256: retained.provenance.responseSha256, finish_reason: "STOP" as const,
     attempt_ordinal: retained.provenance.attemptOrdinal!
   };
   return receiveOfficialApiSourcePacket(input.rawJson, request, { ...input, transport });

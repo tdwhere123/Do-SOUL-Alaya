@@ -196,6 +196,7 @@ export {
 export { admitSourceSemanticQuery } from "./recall/conditional-field/query/source-semantic-query-admission.js";
 export {
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
+  SOURCE_SEMANTIC_QUERY_GRAPH_SYNTAX, SOURCE_SEMANTIC_QUERY_MEANING_SYNTAX,
   SourceSemanticQueryProducerRegistry, defaultSourceSemanticQueryProducerRegistry
 } from "./recall/conditional-field/query/source-semantic-query-producer-registry.js";
 export {
@@ -203,6 +204,7 @@ export {
 } from "./recall/conditional-field/query/source-semantic-alignment-admission.js";
 export {
   SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, SOURCE_SEMANTIC_ALIGNMENT_SOUL_PRODUCER_ID,
+  SOURCE_SEMANTIC_ALIGNMENT_GRAPH_SYNTAX, SOURCE_SEMANTIC_ALIGNMENT_SELECTION_SYNTAX,
   SourceSemanticAlignmentProducerRegistry, defaultSourceSemanticAlignmentProducerRegistry
 } from "./recall/conditional-field/query/source-semantic-alignment-producer-registry.js";
 export { reasonSourceInterpretation } from "./recall/runtime/source-interpretation-reasoning.js";

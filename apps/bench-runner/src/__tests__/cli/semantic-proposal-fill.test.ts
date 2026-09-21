@@ -6,8 +6,10 @@ import { runCli } from "../../cli/index.js";
 import { classifyProposalOutcome } from "../../runs/semantic-proposal/fill.js";
 
 it("retries only transport and malformed JSON proposal failures", () => {
-  expect(classifyProposalOutcome({ status: "interpreted" })).toBe("admitted");
-  expect(classifyProposalOutcome({ status: "abstained" })).toBe("admitted");
+  expect(classifyProposalOutcome({ status: "interpreted" })).toBe("interpreted");
+  expect(classifyProposalOutcome({ status: "abstained" })).toBe("abstained");
+  expect(classifyProposalOutcome({ status: "interpreted" }, null)).toBe("incomplete");
+  expect(classifyProposalOutcome({ status: "interpreted" }, "MAX_TOKENS")).toBe("incomplete");
   expect(classifyProposalOutcome({ status: "transport_failure" })).toBe("retryable");
   expect(classifyProposalOutcome({ status: "invalid", reason: "malformed_json" })).toBe("retryable");
   expect(classifyProposalOutcome({ status: "invalid", reason: "malformed_response" })).toBe("terminal");

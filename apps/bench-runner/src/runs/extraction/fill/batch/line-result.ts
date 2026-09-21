@@ -1,12 +1,15 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import type { GeminiBatchInvocation, GeminiBatchJob, GeminiBatchPlan } from "./contract.js";
-import { decodeGeminiGenerateContent } from "./native-codec.js";
+import { decodeGeminiGenerateContent, isCompleteGeminiFinish } from "./native-codec.js";
 import { batchDigest } from "./plan.js";
 
 /** Shared import and durable replay authority for one provider result. */
 export function batchLineResult(plan: GeminiBatchPlan, job: GeminiBatchJob, key: string, response: unknown):
   Parameters<GeminiBatchInvocation["importLine"]>[0] {
   const decoded = decodeGeminiGenerateContent(response);
+  if (!isCompleteGeminiFinish(decoded.responseMetadata.finishReason)) {
+    throw new Error("Gemini response is truncated or not complete");
+  }
   if (decoded.usage !== undefined && decoded.usage.outputTokens > plan.limits.maxOutputTokens) {
     throw new AlayaError("CONFLICT", "provider output exceeds authorized token cap");
   }
@@ -18,7 +21,7 @@ export function batchLineResult(plan: GeminiBatchPlan, job: GeminiBatchJob, key:
   return { line, rawJson: decoded.rawJson, provenance: {
     transport: "gemini-batch", job: job.remoteJob, inputFile: job.inputFile,
     inputSha256: job.inputSha256, outputSha256: job.rawOutputSha256,
-    responseSha256: batchDigest(JSON.stringify(response)), finishReason: "STOP",
+    responseSha256: batchDigest(JSON.stringify(response)), finishReason: decoded.responseMetadata.finishReason,
     ...(job.attemptOrdinals?.[key] === undefined ? {} : { attemptOrdinal: job.attemptOrdinals[key] }),
     ...(decoded.usage === undefined ? {} : { usage: decoded.usage })
   } };

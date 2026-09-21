@@ -1,12 +1,14 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
+import * as geminiHttp from "../../../runs/compile-seed/http/gemini-http.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
+import { listProviderRawAttempts } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import type { LongMemEvalExpansionCapability } from "../../../datasets/longmemeval/promotion/expansion/expansion-capability.js";
@@ -29,7 +31,14 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const contract = request.source_request.proposal_contract ?? "source-semantic-proposal-v3";
-  const envelope = contract === "source-semantic-proposal-v4" ? {
+  const envelope = contract === "source-semantic-proposal-v5" ? {
+    contract, outcome: { status: "interpreted" }, content: {
+      roots: [{ act: "assertion", expression: {
+        kind: "statement", predicate: { kind: "explicit", reading: "complete", support: segment("completed").id },
+        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [segment(theme).id] } }]
+      } }]
+    }
+  } : contract === "source-semantic-proposal-v4" ? {
     contract, outcome: { status: "interpreted" }, content: {
       roots: [{ act: "assertion", expression: {
         kind: "statement", predicate: { kind: "explicit", reading: "complete", at: segment("completed").id },
@@ -130,8 +139,71 @@ it("quarantines an interactive generateContent line through the same source-sema
   for (const key of fixture.keys) {
     const inspected = inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE);
     expect(inspected.status).not.toBe("hit");
+    expect(listProviderRawAttempts(cacheRoot, key)[0]).toMatchObject({
+      kind: "source_semantic", full_replay_possible: true
+    });
   }
   expect(existsSync(join(cacheRoot, "gemini-batch-plan.json"))).toBe(false);
+}, 60000);
+
+it("retains raw and refuses an executable cache entry when generateContent omits finishReason", async () => {
+  const fixture = await setupInteractive();
+  vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    if (!path.endsWith(":streamGenerateContent")) throw new Error(`unexpected offline request ${path}`);
+    const userPrompt = JSON.parse(String(init?.body)).contents[0].parts[0].text as string;
+    return Response.json({
+      candidates: [{ content: { parts: [{ text: authoredResponse(userPrompt) }] } }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 }
+    });
+  }));
+  expect(await runCli([
+    "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
+    "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
+    "--extraction-source-packing", "complete-source", "--extraction-authority", fixture.receiptPath
+  ])).toBe(0);
+  for (const key of fixture.keys) {
+    expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
+    const raw = listProviderRawAttempts(cacheRoot, key)[0];
+    expect(raw?.finish_reason).toBeNull();
+    expect(raw?.completion_witness).toBeNull();
+    expect(raw?.decoded_text.length).toBeGreaterThan(0);
+  }
+}, 60000);
+
+it("does not retry thought-only STOP generateContent as transport", async () => {
+  const fixture = await setupInteractive();
+  const fetchMock = vi.fn<typeof fetch>(async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (!path.endsWith(":streamGenerateContent")) throw new Error(`unexpected offline request ${path}`);
+    return Response.json({
+      candidates: [{
+        finishReason: "STOP",
+        content: { parts: [{ thought: true, text: "private synthetic thought" }] }
+      }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 0, thoughtsTokenCount: 3, totalTokenCount: 13 }
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  expect(await runCli([
+    "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
+    "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
+    "--extraction-source-packing", "complete-source", "--extraction-authority", fixture.receiptPath
+  ])).toBe(0);
+  expect(fetchMock).toHaveBeenCalledTimes(fixture.keys.length);
+  for (const key of fixture.keys) {
+    expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
+    expect(listProviderRawAttempts(cacheRoot, key)[0]).toMatchObject({
+      decoded_text: "",
+      usage: { inputTokens: 10, outputTokens: 3, totalTokens: 13 }
+    });
+  }
+  const ledgerName = readdirSync(cacheRoot).find((name) => name.startsWith("extraction-attempt-ledger"));
+  expect(ledgerName).toBeDefined();
+  const ledger = JSON.parse(readFileSync(join(cacheRoot, ledgerName!), "utf8")) as {
+    readonly attempts: number;
+  };
+  expect(ledger.attempts).toBe(fixture.keys.length);
 }, 60000);
 
 it("records an interactive generateContent network failure on the attempt ledger", async () => {
@@ -206,6 +278,61 @@ it("continues later complete-source keys after one interactive transport failure
     inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status);
   expect(statuses).toContain("hit");
   expect(statuses.some((status) => status !== "hit")).toBe(true);
+}, 60000);
+
+it("does not classify a programmer extract error as transport failure", async () => {
+  const fixture = await setupInteractive();
+  vi.spyOn(geminiHttp, "createGeminiHttpExtractor").mockReturnValue({
+    extract: async () => {
+      throw new TypeError("extractor contract broken");
+    }
+  } as never);
+  expect(await runCli([
+    "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
+    "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
+    "--extraction-source-packing", "complete-source", "--extraction-authority", fixture.receiptPath
+  ])).toBe(2);
+  const ledgerName = readdirSync(cacheRoot).find((name) => name.startsWith("extraction-attempt-ledger"));
+  expect(ledgerName).toBeDefined();
+  const ledger = JSON.parse(readFileSync(join(cacheRoot, ledgerName!), "utf8")) as {
+    readonly attempts: number;
+    readonly unresolved_attempts: readonly unknown[];
+    readonly transport_failures: readonly unknown[];
+  };
+  expect(ledger.transport_failures).toEqual([]);
+  expect(ledger.unresolved_attempts.length).toBeGreaterThan(0);
+  expect(ledger.attempts).toBeGreaterThan(0);
+  expect(ledger.attempts).toBeLessThanOrEqual(fixture.keys.length);
+}, 60000);
+
+it("replays persisted raw without a second provider call after a shard write failure", async () => {
+  const fixture = await setupInteractive();
+  const buckets = [...new Set(fixture.keys.map((key) => join(cacheRoot, key.slice(0, 2))))];
+  for (const bucket of buckets) {
+    mkdirSync(bucket, { recursive: true });
+    chmodSync(bucket, 0o500);
+  }
+  expect(await runCli([
+    "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
+    "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
+    "--extraction-source-packing", "complete-source", "--extraction-authority", fixture.receiptPath,
+    "--concurrency", String(Math.max(fixture.keys.length, 1))
+  ])).toBe(2);
+  expect(fixture.fetchMock).toHaveBeenCalled();
+  expect(fixture.keys.some((key) => listProviderRawAttempts(cacheRoot, key).length > 0)).toBe(true);
+  for (const bucket of buckets) chmodSync(bucket, 0o700);
+  fixture.fetchMock.mockClear();
+  expect(await runCli([
+    "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
+    "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
+    "--extraction-source-packing", "complete-source", "--extraction-authority", fixture.receiptPath,
+    "--concurrency", "1"
+  ])).toBe(0);
+  expect(fixture.fetchMock).not.toHaveBeenCalled();
+  for (const key of fixture.keys) {
+    if (listProviderRawAttempts(cacheRoot, key).length === 0) continue;
+    expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status).toBe("hit");
+  }
 }, 60000);
 
 it("still refuses mixing lazy_field, expansion, or an injected extractor with open semantics", async () => {

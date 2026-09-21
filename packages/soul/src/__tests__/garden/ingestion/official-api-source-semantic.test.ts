@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { sourceReferenceResolver, sourceSemanticInterpretationIdentity, type SourceInterpretationProfile } from "@do-soul/alaya-protocol";
+import {
+  SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_QUERY_CONTRACT,
+  sourceReferenceResolver, sourceSemanticInterpretationIdentity, type SourceInterpretationProfile
+} from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/official-api/source-packet-request.js";
 import {
-  SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT,
+  SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
   buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, semanticSha256,
   sourceSemanticResponseJsonSchema, parseSourceSemanticRequest, sourceSemanticSystemPrompt
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
@@ -352,11 +355,23 @@ describe("query and alignment proposal entry points", () => {
       expect(preparedAlignment.system_prompt).toContain("request-local handle h1, h2");
       for (const valid of [false, true]) {
         const q = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
-          contract: "source-semantic-query-response-v2", outcome: { status: "interpreted", gaps: [] },
-          query: { variables: query.variables, alternatives: query.alternatives, return_variables: query.return_variables, gaps: [] }
+          contract: "source-semantic-query-response-v3", outcome: { status: "interpreted", gaps: [] },
+          query: {
+            contract: "source-semantic-query-meaning-v1",
+            alternatives: [{ meaning: {
+              kind: "statement", key: "accession", predicate: "accession",
+              arguments: [
+                { role: "object", target: { kind: "free", key: "folio" }, excerpt: "folio" },
+                { role: "bay", target: { kind: "named", key: "bay", excerpt: "bay B" }, excerpt: "bay B" }
+              ]
+            } }],
+            return: ["folio"],
+            gaps: []
+          }
         }) : "{}" });
         const a = proposeAlignmentSemantics(alignmentInput, { rawJson: valid ? JSON.stringify({
-          contract: "source-semantic-alignment-response-v2", outcome: { status: "interpreted", gaps: [] }, alignment: { correspondences: [] }
+          contract: "source-semantic-alignment-response-v3", outcome: { status: "interpreted", gaps: [] },
+          alignment: { contract: "source-semantic-alignment-selection-v1", h: "h1", selections: [] }
         }) : "{}" });
         expect(q.outcome.status).toBe(valid ? "interpreted" : "invalid");
         expect(a.outcome.status).toBe(valid ? "interpreted" : "invalid");
@@ -373,7 +388,8 @@ describe("query and alignment proposal entry points", () => {
     const query = admittedQuery();
     const gaps = [{ kind: "unresolved_referent", affected_ids: ["bay"], support: [] }];
     const received = proposeQuerySemantics({ original_query: "which folio was accessioned into bay B?",
-      producer_id: "query-producer", producer_version: "1" }, { rawJson: JSON.stringify({
+      producer_id: "query-producer", producer_version: "1",
+      query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT }, { rawJson: JSON.stringify({
       contract: "source-semantic-query-response-v2", outcome: { status: "interpreted", gaps },
       query: { variables: query.variables, alternatives: query.alternatives,
         return_variables: query.return_variables, gaps: matching ? gaps : [] }
@@ -392,7 +408,8 @@ describe("query and alignment proposal entry points", () => {
     const h = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
     const received = proposeAlignmentSemantics({ admitted_q: admittedQuery(),
       h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
-      producer_id: "align-producer", producer_version: "1" }, { rawJson: JSON.stringify({
+      producer_id: "align-producer", producer_version: "1",
+      alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT }, { rawJson: JSON.stringify({
       contract: "source-semantic-alignment-response-v2",
       outcome: { status: "interpreted", gaps: [{ kind: "unsupported_meaning", affected_ids: [], support: [] }] },
       alignment: { correspondences: [] }
@@ -402,23 +419,29 @@ describe("query and alignment proposal entry points", () => {
   });
 
   it("accepts the original query and approved context and rejects answers or programs", () => {
-    const query = admittedQuery();
-    const body = {
-      variables: query.variables, alternatives: query.alternatives,
-      return_variables: query.return_variables, gaps: query.gaps
-    };
     const received = proposeQuerySemantics({
       original_query: "which folio was accessioned into bay B?",
       approved_fixed_context: { context_id: "fixed-ctx" },
       producer_id: "query-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-query-response-v2",
+        contract: "source-semantic-query-response-v3",
         outcome: { status: "interpreted", gaps: [] },
-        query: body
+        query: {
+          contract: "source-semantic-query-meaning-v1",
+          alternatives: [{ meaning: {
+            kind: "statement", key: "accession", predicate: "accession",
+            arguments: [
+              { role: "object", target: { kind: "free", key: "folio" }, excerpt: "folio" },
+              { role: "bay", target: { kind: "named", key: "bay", excerpt: "bay B" }, excerpt: "bay B" }
+            ]
+          } }],
+          return: ["folio"],
+          gaps: []
+        }
       })
     });
-    expect(received.request.contract).toBe(SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT);
+    expect(received.request.contract).toBe(SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT);
     expect(received.request.original_query).toBe("which folio was accessioned into bay B?");
     expect(received.query?.variables.map((row) => row.id)).toContain("folio");
     expect(() => proposeQuerySemantics({
@@ -431,28 +454,30 @@ describe("query and alignment proposal entry points", () => {
   it("accepts admitted Q plus H descriptors and rejects ranking or seeds", () => {
     const input = sourceInput(), request = buildSourceSemanticRequest(input);
     const h = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
-    const received = proposeAlignmentSemantics({
+    const alignmentInput = {
       admitted_q: admittedQuery(),
       h_descriptors: [{
         h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h
       }],
       producer_id: "align-producer", producer_version: "1"
-    }, {
+    };
+    const prepared = proposeAlignmentSemantics(alignmentInput);
+    const predicate = prepared.request.catalog?.query_endpoints.find((row) => row.kind === "predicate");
+    const frame = prepared.request.catalog?.source_endpoints.find((row) => row.kind === "frame");
+    const received = proposeAlignmentSemantics(alignmentInput, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-alignment-response-v2",
+        contract: "source-semantic-alignment-response-v3",
         outcome: { status: "interpreted", gaps: [] },
         alignment: {
-          correspondences: [{
-            relation: "contextual_equivalence",
-            query_endpoint: { kind: "predicate", alternative: 0, frame: "qAccession" },
-            source_endpoint: { kind: "frame", frame: "fAccession" },
-            query_support: { kind: "query_text", excerpt: "accessioned" },
+          contract: "source-semantic-alignment-selection-v1", h: "h1",
+          selections: [{
+            query: predicate!.handle, source: frame!.handle, query_excerpt: "accessioned",
             source_semantic_support: [{ kind: "lexical", mentions: ["mAccessioned"] }]
           }]
         }
       })
     });
-    expect(received.request.contract).toBe(SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT);
+    expect(received.request.contract).toBe(SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT);
     expect(received.alignment?.correspondences).toHaveLength(1);
     expect(received.request.h_descriptors[0]!.interpretation.mentions.length).toBe(6);
     expect(received.request.h_descriptors[0]!.interpretation.frames[0]!.bindings.length).toBe(3);

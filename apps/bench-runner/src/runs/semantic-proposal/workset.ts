@@ -87,6 +87,10 @@ export function materializeSemanticProposalLines(
       h_descriptors: parsed.h_descriptors as SourceSemanticAlignmentRequest["h_descriptors"],
       producer_id, producer_version
     });
+    const expected = `sha256:${createHash("sha256").update(parsed.original_query, "utf8").digest("hex")}`;
+    if (request.admitted_q.original_query_digest !== expected) {
+      throw new Error("alignment workset Q does not bind the original query");
+    }
     return bindLine(workset, "alignment", SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT, request, schema,
       parsed.original_query, maxOutputTokens);
   });
@@ -112,14 +116,17 @@ function bindLine(
     }
   ));
   return {
-    key: proposalCacheKey(workset.model, workset.request_profile, systemPrompt, userPrompt, responseJsonSchema),
+    key: proposalCacheKey(
+      workset.model, workset.request_profile, systemPrompt, userPrompt, responseJsonSchema, maxOutputTokens
+    ),
     kind, systemPrompt, userPrompt, responseJsonSchema, original_query, request,
     inputByteUpper: attemptInputByteUpperBound(encoded)
   };
 }
 
 export function proposalCacheKey(
-  model: string, requestProfile: string, systemPrompt: string, userPrompt: string, schema: object
+  model: string, requestProfile: string, systemPrompt: string, userPrompt: string, schema: object,
+  maxOutputTokens: number
 ): string {
   const material = model.startsWith("gemini-")
     ? geminiGenerationSchemaCacheMaterial(JSON.stringify(schema))
@@ -129,6 +136,7 @@ export function proposalCacheKey(
     .update(requestProfile, "utf8").update("\u0000", "utf8")
     .update(systemPrompt, "utf8").update("\u0000", "utf8")
     .update(userPrompt, "utf8").update("\u0000", "utf8")
-    .update(material, "utf8")
+    .update(material, "utf8").update("\u0000", "utf8")
+    .update(String(maxOutputTokens), "utf8")
     .digest("hex");
 }

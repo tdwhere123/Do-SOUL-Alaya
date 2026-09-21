@@ -305,6 +305,9 @@ export { receiveOfficialApiSourcePacket, completeEmptyOfficialApiSourcePacket, M
 export { collectSourceSemanticUnitPacks, indexSourceSemanticUnits, sourceSemanticTransportUnits } from "./garden/ingestion/official-api/source-semantic-units.js";
 export {
   SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT,
+  SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_SELECTION_RESPONSE_CONTRACT,
+  sourceSemanticQuerySystemPrompt, sourceSemanticAlignmentSystemPrompt,
   sourceSemanticSystemPrompt, buildSourceSemanticRequest, buildSourceSemanticQueryRequest,
   buildSourceSemanticAlignmentRequest, parseSourceSemanticRequest, sourceSemanticResponseJsonSchema,
   sourceSemanticQueryResponseJsonSchema, sourceSemanticAlignmentResponseJsonSchema,

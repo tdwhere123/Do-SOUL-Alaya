@@ -114,7 +114,7 @@ export interface GeminiBatchInvocation {
       readonly inputSha256: string;
       readonly outputSha256: string;
       readonly responseSha256: string;
-      readonly finishReason: "STOP";
+      readonly finishReason: string | null;
       readonly attemptOrdinal?: number;
       readonly usage?: { readonly inputTokens: number; readonly outputTokens: number; readonly totalTokens: number };
     };

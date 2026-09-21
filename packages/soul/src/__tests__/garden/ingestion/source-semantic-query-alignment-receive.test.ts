@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_QUERY_CONTRACT,
   SourceSemanticAlignmentSchema, SourceSemanticQuerySchema, sourceSemanticInterpretationIdentity
 } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import {
   buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, semanticSha256,
   parseSourceSemanticRequest, sourceSemanticAlignmentResponseJsonSchema,
-  sourceSemanticQueryResponseJsonSchema
+  sourceSemanticQueryResponseJsonSchema, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import {
   proposeAlignmentSemantics, proposeQuerySemantics, receiveSourceSemantics
@@ -120,7 +121,10 @@ function existentialBody() {
 }
 
 function queryEnvelope(original: string, body: object, outcome: object = { status: "interpreted", gaps: [] }) {
-  return proposeQuerySemantics({ original_query: original, producer_id: "query-producer", producer_version: "1" }, {
+  return proposeQuerySemantics({
+    original_query: original, producer_id: "query-producer", producer_version: "1",
+    query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT
+  }, {
     rawJson: JSON.stringify({
       contract: "source-semantic-query-response-v2", outcome, query: body
     })
@@ -134,7 +138,8 @@ function alignmentEnvelope(
   outcome: object = { status: "interpreted", gaps: [] }
 ) {
   return proposeAlignmentSemantics({
-    admitted_q: query, h_descriptors: descriptors, producer_id: "align-producer", producer_version: "1"
+    admitted_q: query, h_descriptors: descriptors, producer_id: "align-producer", producer_version: "1",
+    alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
   }, {
     rawJson: JSON.stringify({
       contract: "source-semantic-alignment-response-v2", outcome, alignment: body
@@ -418,14 +423,143 @@ describe("query and alignment generation schemas", () => {
   it("asks for producer bodies without host envelope identities", () => {
     const query = JSON.stringify(sourceSemanticQueryResponseJsonSchema());
     const alignment = JSON.stringify(sourceSemanticAlignmentResponseJsonSchema());
-    expect(query).toContain("source-semantic-query-response-v2");
+    expect(query).toContain("source-semantic-query-response-v3");
+    expect(query).toContain("source-semantic-query-meaning-v1");
+    expect(query).toContain("statement");
     expect(query).toContain("evaluation");
-    expect(query).toContain("domains");
     expect(query).not.toContain("original_query_digest");
-    expect(alignment).toContain("source-semantic-alignment-response-v2");
+    expect(alignment).toContain("source-semantic-alignment-response-v3");
+    expect(alignment).toContain("source-semantic-alignment-selection-v1");
     expect(alignment).toContain("membership_assumptions");
     expect(alignment).not.toContain("q_id");
     expect(Buffer.byteLength(query)).toBeLessThan(24 * 1024);
     expect(Buffer.byteLength(alignment)).toBeLessThan(24 * 1024);
+    const legacyQuery = JSON.stringify(sourceSemanticQueryResponseJsonSchema({
+      contract: "source-semantic-query-request-v2"
+    }));
+    expect(legacyQuery).toContain("source-semantic-query-response-v2");
+    expect(legacyQuery).not.toContain("source-semantic-query-meaning-v1");
+  });
+});
+
+describe("query meaning receive and alignment selection", () => {
+  it("materializes nested meaning and keeps the legacy graph envelope on its own version", () => {
+    const meaning = proposeQuerySemantics({
+      original_query: "Who sent the sample to Mira?", producer_id: "query-producer", producer_version: "1"
+    }, {
+      rawJson: JSON.stringify({
+        contract: "source-semantic-query-response-v3",
+        outcome: { status: "interpreted" },
+        query: {
+          contract: "source-semantic-query-meaning-v1",
+          alternatives: [{ meaning: {
+            kind: "statement", key: "send", predicate: "send",
+            arguments: [
+              { role: "sender", target: { kind: "free", key: "sender" }, excerpt: "Who" },
+              { role: "theme", target: { kind: "named", key: "sample", excerpt: "sample" }, excerpt: "sample" },
+              { role: "recipient", target: { kind: "named", key: "mira", excerpt: "Mira" }, excerpt: "Mira" }
+            ]
+          } }],
+          return: ["sender"],
+          gaps: []
+        }
+      })
+    });
+    expect(meaning.outcome.status).toBe("interpreted");
+    expect(meaning.query?.variables.find((row) => row.id === "sender")?.reference).toBeUndefined();
+    expect(meaning.query?.variables.find((row) => row.id === "mira")?.reference?.excerpt).toBe("Mira");
+    expect(meaning.query?.alternatives[0]?.frames[0]?.source_act).toBeUndefined();
+    expect(meaning.system_prompt).toContain("source-semantic-query-meaning-v1");
+    expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("source_act is retrieval intent");
+
+    const legacy = proposeQuerySemantics({
+      original_query: EXISTENTIAL, producer_id: "query-producer", producer_version: "1",
+      query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT
+    }, {
+      rawJson: JSON.stringify({
+        contract: "source-semantic-query-response-v2", outcome: { status: "interpreted", gaps: [] },
+        query: existentialBody()
+      })
+    });
+    expect(legacy.outcome.status).toBe("interpreted");
+    expect(legacy.request.contract).toBe("source-semantic-query-request-v2");
+    expect(legacy.query).toEqual(canonicalQuery(EXISTENTIAL, existentialBody()));
+  });
+
+  it("materializes catalog selections and still accepts a legacy correspondence envelope", () => {
+    const h = interpretation();
+    const hId = sourceSemanticInterpretationIdentity(h, semanticSha256);
+    const admitted = canonicalQuery(EXISTENTIAL, existentialBody());
+    const selected = proposeAlignmentSemantics({
+      admitted_q: admitted, h_descriptors: [{ h_id: hId, interpretation: h }],
+      producer_id: "align-producer", producer_version: "1"
+    });
+    const predicate = selected.request.catalog?.query_endpoints.find((row) => row.kind === "predicate");
+    const frame = selected.request.catalog?.source_endpoints.find((row) => row.kind === "frame");
+    expect(predicate).toBeDefined();
+    expect(frame).toBeDefined();
+    const received = proposeAlignmentSemantics({
+      admitted_q: admitted, h_descriptors: [{ h_id: hId, interpretation: h }],
+      producer_id: "align-producer", producer_version: "1"
+    }, {
+      rawJson: JSON.stringify({
+        contract: "source-semantic-alignment-response-v3",
+        outcome: { status: "interpreted", gaps: [] },
+        alignment: {
+          contract: "source-semantic-alignment-selection-v1", h: "h1",
+          selections: [{
+            query: predicate!.handle, source: frame!.handle, query_excerpt: "accessioned",
+            source_semantic_support: [{ kind: "lexical", mentions: ["mAccessioned"] }]
+          }]
+        }
+      })
+    });
+    expect(received.outcome.status).toBe("interpreted");
+    expect(received.alignment?.correspondences[0]?.query_endpoint).toEqual({
+      kind: "predicate", alternative: 0, frame: "qAccession"
+    });
+
+    const legacy = proposeAlignmentSemantics({
+      admitted_q: admitted, h_descriptors: [{ h_id: hId, interpretation: h }],
+      producer_id: "align-producer", producer_version: "1",
+      alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
+    }, {
+      rawJson: JSON.stringify({
+        contract: "source-semantic-alignment-response-v2", outcome: { status: "interpreted", gaps: [] },
+        alignment: { correspondences: [] }
+      })
+    });
+    expect(legacy.outcome.status).toBe("interpreted");
+    expect(legacy.request.catalog).toBeUndefined();
+    expect(legacy.alignment?.correspondences).toEqual([]);
+  });
+
+  it("rejects a graph producer envelope on the default meaning request", () => {
+    const query = proposeQuerySemantics({
+      original_query: EXISTENTIAL, producer_id: "query-producer", producer_version: "1"
+    }, {
+      rawJson: JSON.stringify({
+        contract: "source-semantic-query-response-v2", outcome: { status: "interpreted", gaps: [] },
+        query: existentialBody()
+      })
+    });
+    expect(query.request.contract).toBe("source-semantic-query-request-v3");
+    expect(query.outcome.status).toBe("invalid");
+    expect(query.query).toBeUndefined();
+
+    const h = interpretation();
+    const alignment = proposeAlignmentSemantics({
+      admitted_q: canonicalQuery(EXISTENTIAL, existentialBody()),
+      h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
+      producer_id: "align-producer", producer_version: "1"
+    }, {
+      rawJson: JSON.stringify({
+        contract: "source-semantic-alignment-response-v2", outcome: { status: "interpreted", gaps: [] },
+        alignment: { correspondences: [] }
+      })
+    });
+    expect(alignment.request.contract).toBe("source-semantic-alignment-request-v3");
+    expect(alignment.outcome.status).toBe("invalid");
+    expect(alignment.alignment).toBeUndefined();
   });
 });

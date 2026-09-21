@@ -1,4 +1,5 @@
 import {
+  SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT,
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, sourceSemanticQueryIdentity,
   type SourceSemanticAlignment, type SourceSemanticQuery, type SourceSemanticOutcome
 } from "@do-soul/alaya-protocol";
@@ -34,6 +35,7 @@ export type SourceSemanticLibraryPrepareInput = Readonly<{
   cap?: number;
   producer_id: string;
   producer_version: string;
+  alignment_syntax?: typeof SOURCE_SEMANTIC_ALIGNMENT_CONTRACT | typeof SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT;
 }>;
 
 export type SourceSemanticLibraryPrepareResult = Readonly<{
@@ -87,7 +89,8 @@ export function prepareSourceSemanticLibrary(
       admitted_q: input.admitted_q,
       h_descriptors: [descriptor],
       producer_id: input.producer_id,
-      producer_version: input.producer_version
+      producer_version: input.producer_version,
+      ...(input.alignment_syntax === undefined ? {} : { alignment_syntax: input.alignment_syntax })
     }, { rawJson: produced.rawJson }); }
     catch (error) {
       outcomes.push({ h_id: descriptor.h_id, status: "failed", rawJson, raw_truncated: rawJson !== produced.rawJson,

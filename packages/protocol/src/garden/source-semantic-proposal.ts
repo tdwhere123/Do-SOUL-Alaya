@@ -7,6 +7,11 @@ export { SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_COMPACT_GENE
   SOURCE_SEMANTIC_COMPACT_GENERATION_DEPTH, SOURCE_SEMANTIC_COMPACT_FEATURES,
   SourceSemanticCompactProposalSchema, SourceSemanticCompactGenerationSchema,
   materializeSourceSemanticCompactProposal } from "./source-semantic-compact-proposal.js";
+export { SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT,
+  SOURCE_SEMANTIC_SELECTION_GENERATION_DEPTH, SOURCE_SEMANTIC_SELECTION_FEATURES,
+  SOURCE_SEMANTIC_SELECTION_SUPPORT_BOUND, SOURCE_SEMANTIC_SELECTION_SUPPORT_LIST_BOUND,
+  SourceSemanticSelectionProposalSchema, SourceSemanticSelectionGenerationSchema,
+  materializeSourceSemanticSelectionProposal } from "./source-semantic-selection-proposal.js";
 import {
   SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticContextOwnerSchema,
   SourceSemanticFrameSchema, SourceSemanticGraphFields, SourceSemanticOperatorSchema

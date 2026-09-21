@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, hashLabeledIdentity,
-  type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery
+  type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
 } from "@do-soul/alaya-protocol";
 import {
   admitSourceSemanticQuery, createAuditedSourceAdmission,
@@ -63,21 +64,21 @@ function segment(catalog: SourceReferenceCatalog, text: string, assertionId = 1)
 
 function compactUse(catalog: SourceReferenceCatalog, extra: { gap?: boolean } = {}) {
   return {
-    contract: "source-semantic-proposal-v4" as const,
+    contract: "source-semantic-proposal-v5" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{
         act: "assertion" as const,
         expression: {
           kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: "use", at: segment(catalog, "uses") },
+          predicate: { kind: "explicit" as const, reading: "use", support: segment(catalog, "uses") },
           arguments: [
             { role: "agent", target: segment(catalog, "Alice") },
             { role: "theme", target: segment(catalog, "tools") }
           ]
         }
       }],
-      ...(extra.gap === true ? { gaps: [{ kind: "universal_quantification" as const, evidence: segment(catalog, "Alice"),
+      ...(extra.gap === true ? { gaps: [{ kind: "universal_quantification" as const, support: segment(catalog, "Alice"),
         description: "Nested universal binders remain unsupported." }] } : {})
     }
   };
@@ -85,19 +86,19 @@ function compactUse(catalog: SourceReferenceCatalog, extra: { gap?: boolean } = 
 
 function compactPromise(catalog: SourceReferenceCatalog) {
   return {
-    contract: "source-semantic-proposal-v4" as const,
+    contract: "source-semantic-proposal-v5" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{
         act: "assertion" as const,
         expression: {
           kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: "promise", at: segment(catalog, "promised") },
+          predicate: { kind: "explicit" as const, reading: "promise", support: segment(catalog, "promised") },
           arguments: [
             { role: "promisor", target: segment(catalog, "Alice") },
-            { role: "content", at: segment(catalog, "send"), target: {
+            { role: "content", support: segment(catalog, "send"), target: {
               kind: "statement" as const,
-              predicate: { kind: "explicit" as const, reading: "send", at: segment(catalog, "send") },
+              predicate: { kind: "explicit" as const, reading: "send", support: segment(catalog, "send") },
               arguments: [
                 { role: "agent", target: segment(catalog, "Alice") },
                 { role: "theme", target: segment(catalog, "tools") }
@@ -144,7 +145,8 @@ function existentialBody() {
 
 function receiveQ(original: string, body: object) {
   const received = proposeQuerySemantics({
-    original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1"
+    original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1",
+    query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT,
   }, {
     rawJson: JSON.stringify({ contract: "source-semantic-query-response-v2", outcome: { status: "interpreted" }, query: body })
   });
@@ -215,7 +217,8 @@ function withoutNecessaryAgentBinding(
 function receiveA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: string, extra: object = {}) {
   const received = proposeAlignmentSemantics({
     admitted_q: q, h_descriptors: [{ h_id: hId, interpretation: h }],
-    producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1"
+    producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1",
+    alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
   }, {
     rawJson: JSON.stringify({
       contract: "source-semantic-alignment-response-v2",
@@ -546,7 +549,8 @@ it("retrieves promised source evidence without minting a completed-event proof",
         const sendFrame = frameOf(published.interpretation, "send");
         const receivedA = proposeAlignmentSemantics({
           admitted_q: sendQ.query, h_descriptors: [{ h_id: published.interpretation_id, interpretation: published.interpretation }],
-          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1"
+          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1",
+          alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
         }, {
           rawJson: JSON.stringify({
             contract: "source-semantic-alignment-response-v2",
@@ -594,14 +598,14 @@ it("drops only dependent proof when a necessary H binding is withdrawn and isola
       const other = await prepareSource(session.handler, session.context, "artifact-other");
       const full = receiveH(ALICE, "artifact-alice", compactUse(alice.catalog));
       const otherH = receiveH(OTHER, "artifact-other", {
-        contract: "source-semantic-proposal-v4",
+        contract: "source-semantic-proposal-v5",
         outcome: { status: "interpreted" },
         content: {
           roots: [{
             act: "assertion",
             expression: {
               kind: "statement",
-              predicate: { kind: "explicit", reading: "stay", at: segment(other.catalog, "stays") },
+              predicate: { kind: "explicit", reading: "stay", support: segment(other.catalog, "stays") },
               arguments: [{ role: "agent", target: segment(other.catalog, "Alice") }]
             }
           }]

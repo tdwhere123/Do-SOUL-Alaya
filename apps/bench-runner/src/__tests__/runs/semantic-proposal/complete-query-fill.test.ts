@@ -1,0 +1,257 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, expect, it } from "vitest";
+import { admitSourceSemanticQuery, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "@do-soul/alaya-core";
+import { proposeQuerySemantics } from "@do-soul/alaya-soul";
+import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
+import {
+  inspectSemanticProposalShard, isExecutableProposalShard
+} from "../../../runs/semantic-proposal/artifact.js";
+import {
+  executeSemanticProposalFill, prepareSemanticProposal
+} from "../../../runs/semantic-proposal/fill.js";
+import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
+import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
+import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
+
+const MODEL = "gemini-3.1-flash-lite";
+const PROFILE = "gemini-3.1-minimal-v1" as const;
+const MIRA_QUERY = "Who sent the sample to Mira?";
+const roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function tempRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "proposal-complete-fill-"));
+  roots.push(root);
+  return root;
+}
+
+function queryWorkset(originalQuery: string) {
+  return parseSemanticProposalWorkset({
+    contract: "source-semantic-proposal-workset-v1",
+    kind: "query", model: MODEL, request_profile: PROFILE,
+    items: [{ original_query: originalQuery }]
+  });
+}
+
+function config(): CompileSeedExtractionConfig {
+  return { providerUrl: "http://127.0.0.1:9", model: MODEL, requestProfile: PROFILE, apiKey: "synthetic-fixture-key" };
+}
+
+function extractor(raws: string[], extra: { finish?: string | null; usage?: boolean } = {}) {
+  const queue = [...raws];
+  const calls: string[] = [];
+  const finish = extra.finish === undefined ? "STOP" : extra.finish;
+  const withUsage = extra.usage !== false;
+  return {
+    calls,
+    extract: async (input: { readonly userPrompt: string }) => {
+      calls.push(input.userPrompt);
+      const rawJson = queue.shift() ?? "{";
+      return {
+        rawJson,
+        ...(withUsage ? { usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8 } } : {}),
+        responseMetadata: finish === null
+          ? { finishReason: null as string | null }
+          : { finishReason: finish, completionWitness: "finish_reason" as const, completionContractVersion: 1 as const }
+      };
+    }
+  };
+}
+
+function meaningBody(themeExcerpt: string): string {
+  return JSON.stringify({
+    contract: "source-semantic-query-response-v3",
+    outcome: { status: "interpreted" },
+    query: {
+      contract: "source-semantic-query-meaning-v1",
+      alternatives: [{ meaning: {
+        kind: "statement", key: "send", predicate: "send",
+        arguments: [
+          { role: "sender", target: { kind: "free", key: "sender" }, excerpt: "Who" },
+          { role: "theme", target: { kind: "named", key: "sample", excerpt: themeExcerpt }, excerpt: themeExcerpt },
+          { role: "recipient", target: { kind: "named", key: "mira", excerpt: "Mira" }, excerpt: "Mira" }
+        ]
+      } }],
+      return: ["sender"],
+      gaps: []
+    }
+  });
+}
+
+it("commits a complete STOP query after settling the reserved attempt", async () => {
+  const cacheRoot = join(tempRoot(), "cache");
+  const prepared = queryWorkset(MIRA_QUERY);
+  const authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(prepared, cacheRoot, 128),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2
+  });
+  const first = extractor([meaningBody("sample")]);
+  const result = await executeSemanticProposalFill({
+    workset: prepared, cacheRoot, authority, config: config(), extractor: first
+  });
+  const key = authority.keys[0]!;
+  const shard = inspectSemanticProposalShard(cacheRoot, key, {
+    kind: "query", model: MODEL, request_profile: PROFILE
+  });
+  const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
+  expect(first.calls).toHaveLength(1);
+  expect(result.newly_admitted).toBe(1);
+  expect(result.interpreted).toBe(1);
+  expect(result.attempts).toBe(1);
+  expect(shard?.admitted).toBe(true);
+  expect(shard?.finish_reason).toBe("STOP");
+  expect(isExecutableProposalShard(shard!)).toBe(true);
+  expect(ledger.snapshot().unresolvedAttempts).toEqual([]);
+  expect(ledger.snapshot().pendingKeys).toEqual([]);
+  expect(ledger.snapshot().successfulKeys).toEqual([key]);
+  expect(ledger.snapshot().telemetry.inputTokens).toBe(3);
+  const second = extractor(["should-not-run"]);
+  const replayed = await executeSemanticProposalFill({
+    workset: prepared, cacheRoot, authority, config: config(), extractor: second
+  });
+  expect(second.calls).toHaveLength(0);
+  expect(replayed.cache_hits).toBe(1);
+  expect(replayed.newly_admitted).toBe(0);
+  expect(replayed.interpreted).toBe(1);
+});
+
+it("does not treat a Core-invalid receive as an executable cache hit", async () => {
+  const invalidBody = meaningBody("parcel");
+  const received = proposeQuerySemantics({
+    original_query: MIRA_QUERY,
+    producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
+    producer_version: "1"
+  }, { rawJson: invalidBody });
+  expect(received.outcome.status).toBe("interpreted");
+  expect(admitSourceSemanticQuery(received.query, MIRA_QUERY).kind).toBe("invalid");
+
+  const cacheRoot = join(tempRoot(), "cache");
+  const prepared = queryWorkset(MIRA_QUERY);
+  const authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(prepared, cacheRoot, 128),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2
+  });
+  const first = extractor([invalidBody]);
+  const result = await executeSemanticProposalFill({
+    workset: prepared, cacheRoot, authority, config: config(), extractor: first
+  });
+  const key = authority.keys[0]!;
+  const shard = inspectSemanticProposalShard(cacheRoot, key, {
+    kind: "query", model: MODEL, request_profile: PROFILE
+  });
+  const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
+  expect(first.calls).toHaveLength(1);
+  expect(result.newly_admitted).toBe(0);
+  expect(result.interpreted).toBe(0);
+  expect(readProviderRawAttempt(cacheRoot, key, 1)?.decoded_text).toBe(invalidBody);
+  expect(shard?.admitted).toBe(false);
+  expect(isExecutableProposalShard(shard!)).toBe(false);
+  expect(ledger.snapshot().unresolvedAttempts).toEqual([]);
+  expect(ledger.snapshot().successfulKeys).toEqual([]);
+  const second = extractor(["should-not-run"]);
+  const replayed = await executeSemanticProposalFill({
+    workset: prepared, cacheRoot, authority, config: config(), extractor: second
+  });
+  expect(second.calls).toHaveLength(0);
+  expect(replayed.cache_hits).toBe(1);
+  expect(replayed.cached_invalid).toBe(1);
+  expect(replayed.newly_admitted).toBe(0);
+  expect(replayed.interpreted).toBe(0);
+});
+
+async function fillInterpretedQuery(finish: string | null) {
+  const cacheRoot = join(tempRoot(), "cache");
+  const prepared = queryWorkset(MIRA_QUERY);
+  const authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(prepared, cacheRoot, 128),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2
+  });
+  const first = extractor([meaningBody("sample")], { finish });
+  const result = await executeSemanticProposalFill({
+    workset: prepared, cacheRoot, authority, config: config(), extractor: first
+  });
+  return { cacheRoot, prepared, authority, first, result, key: authority.keys[0]! };
+}
+
+it("replays interpreted JSON with a missing finish as cached incomplete", async () => {
+  const { cacheRoot, prepared, authority, first, result, key } =
+    await fillInterpretedQuery(null);
+  const shard = inspectSemanticProposalShard(cacheRoot, key, {
+    kind: "query", model: MODEL, request_profile: PROFILE
+  });
+  const raw = readProviderRawAttempt(cacheRoot, key, 1);
+  const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
+  expect(first.calls).toHaveLength(1);
+  expect(result.newly_admitted).toBe(0);
+  expect(result.terminal_failures).toBe(1);
+  expect(shard?.admitted).toBe(false);
+  expect(shard?.finish_reason).toBeNull();
+  expect(shard?.outcome).toMatchObject({ status: "interpreted" });
+  expect(isExecutableProposalShard(shard!)).toBe(false);
+  expect(raw?.finish_reason).toBeNull();
+  expect(raw?.completion_witness).toBeNull();
+  expect(ledger.snapshot().unresolvedAttempts).toEqual([]);
+  expect(ledger.snapshot().successfulKeys).toEqual([]);
+  expect(() => prepareSemanticProposal(prepared, cacheRoot, 128)).not.toThrow();
+  const second = extractor(["should-not-run"]);
+  const replayed = await executeSemanticProposalFill({
+    workset: prepared, cacheRoot, authority, config: config(), extractor: second
+  });
+  expect(second.calls).toHaveLength(0);
+  expect(replayed.cache_hits).toBe(1);
+  expect(replayed.cached_invalid).toBe(1);
+  expect(replayed.newly_admitted).toBe(0);
+});
+
+it("replays interpreted JSON with MAX_TOKENS as cached incomplete", async () => {
+  const { cacheRoot, prepared, authority, first, result, key } =
+    await fillInterpretedQuery("MAX_TOKENS");
+  const shard = inspectSemanticProposalShard(cacheRoot, key, {
+    kind: "query", model: MODEL, request_profile: PROFILE
+  });
+  const raw = readProviderRawAttempt(cacheRoot, key, 1);
+  expect(first.calls).toHaveLength(1);
+  expect(result.newly_admitted).toBe(0);
+  expect(shard?.admitted).toBe(false);
+  expect(shard?.finish_reason).toBe("MAX_TOKENS");
+  expect(shard?.outcome).toMatchObject({ status: "interpreted" });
+  expect(isExecutableProposalShard(shard!)).toBe(false);
+  expect(raw?.finish_reason).toBe("MAX_TOKENS");
+  expect(raw?.completion_witness).toBe("finish_reason");
+  expect(() => prepareSemanticProposal(prepared, cacheRoot, 128)).not.toThrow();
+  const second = extractor(["should-not-run"]);
+  const replayed = await executeSemanticProposalFill({
+    workset: prepared, cacheRoot, authority, config: config(), extractor: second
+  });
+  expect(second.calls).toHaveLength(0);
+  expect(replayed.cache_hits).toBe(1);
+  expect(replayed.cached_invalid).toBe(1);
+  expect(replayed.newly_admitted).toBe(0);
+});
+
+it("records unknown usage against one reserved attempt", async () => {
+  const cacheRoot = join(tempRoot(), "cache");
+  mkdirSync(cacheRoot, { recursive: true });
+  const prepared = queryWorkset("Who chairs SHADOW?");
+  const authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(prepared, cacheRoot, 128),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2
+  });
+  const spy = extractor(['{"outcome":{"status":"abstained"}}'], { usage: false });
+  const result = await executeSemanticProposalFill({
+    workset: prepared, cacheRoot, authority, config: config(), extractor: spy
+  });
+  const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
+  expect(spy.calls).toHaveLength(1);
+  expect(result.attempts).toBe(1);
+  expect(result.newly_admitted).toBe(0);
+  expect(ledger.snapshot().unresolvedAttempts).toEqual([]);
+  expect(ledger.snapshot().attempts).toBe(1);
+  expect(ledger.snapshot().telemetry.usageUnavailableRequests).toBe(1);
+});

@@ -9,6 +9,7 @@ import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/com
 import { buildOfficialApiExtractionRequest, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import * as soul from "@do-soul/alaya-soul";
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
+import { createGeminiHttpExtractor } from "../../../runs/compile-seed/http/gemini-http.js";
 import { OpenSemanticFactorGraphProposalSchema } from "@do-soul/alaya-protocol";
 import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
 
@@ -392,6 +393,36 @@ describe("native Gemini interactive extraction", () => {
     const body = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string);
     expect(body.generationConfig).toEqual({ responseMimeType: "application/json", maxOutputTokens: 256,
       thinkingConfig: { thinkingBudget: 0 } });
+  });
+
+  it("rejects Garden extraction when the provider omits finishReason instead of fabricating STOP", async () => {
+    await withServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"signals":[]}' }] } }],
+        usageMetadata: usage
+      }));
+    }, async (origin) => {
+      await expect(createGardenHttpExtractor({ ...config, providerUrl: origin }).extract(input))
+        .rejects.toThrow(/finish reason is unknown or incomplete/u);
+    });
+  });
+
+  it("returns caller-owned generateContent with unknown finish and no STOP stamp", async () => {
+    await withServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"signals":[]}' }] } }],
+        usageMetadata: usage
+      }));
+    }, async (origin) => {
+      const result = await createGeminiHttpExtractor({ ...config, providerUrl: origin }).extract({
+        ...input, validateRawJson: () => undefined
+      });
+      expect(result.rawJson).toBe('{"signals":[]}');
+      expect(result.responseMetadata?.finishReason).toBeNull();
+      expect(result.responseMetadata?.completionWitness).toBeUndefined();
+    });
   });
 
   it("assembles a streamed generateContent body through the same STOP decoder", async () => {

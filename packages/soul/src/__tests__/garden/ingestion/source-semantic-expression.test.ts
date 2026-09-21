@@ -4,6 +4,7 @@ import { SOURCE_SEMANTIC_SYSTEM_PROMPT, buildSourceSemanticRequest, parseSourceS
 import { proposeSourceSemantics, receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as CONTENT_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-content-guidance.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as EXPRESSION_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-expression-guidance.js";
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT as COMPACT_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-compact-guidance.js";
 import { prepareSourceSemanticRevision } from "../../../garden/ingestion/official-api/source-semantic-revision.js";
 import { officialApiExtractionResponseSchema, officialApiExtractionResponseSchemaPreimage } from "../../../garden/ingestion/official-api/response-schema.js";
 
@@ -37,7 +38,7 @@ describe("source-bound nested semantic expressions", () => {
     const historical = parseSourceSemanticRequest({ ...current, source_request: {
       ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v2"
     } });
-    expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v4");
+    expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v5");
     expect(sourceSemanticSystemPrompt(current)).toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
     expect(sourceSemanticSystemPrompt(historical)).toBe(CONTENT_PROMPT);
     expect(JSON.stringify(sourceSemanticResponseJsonSchema(current))).toContain('"roots"');
@@ -57,8 +58,8 @@ describe("source-bound nested semantic expressions", () => {
   it("pins host-owned generation separately while replaying historical nested requests unchanged", () => {
     const current = buildSourceSemanticRequest(input);
     const { generation_schema_contract: _generation, ...body } = current.source_request;
-    expect(current.source_request.generation_schema_contract).toBe("host-owned-expression-schema-v1");
-    expect(() => parseSourceSemanticRequest({ ...current, source_request: body })).toThrow(/host-owned generation schema/u);
+    expect(current.source_request.generation_schema_contract).toBe("host-owned-selection-schema-v1");
+    expect(() => parseSourceSemanticRequest({ ...current, source_request: body })).toThrow(/host-owned selection schema/u);
     const historical = parseSourceSemanticRequest({ ...current, source_request: {
       ...body, proposal_contract: "source-semantic-proposal-v3"
     } });
@@ -79,7 +80,7 @@ describe("source-bound nested semantic expressions", () => {
     expect(() => buildSourceSemanticRequest({ ...input, revision })).toThrow(/different original source/u);
     expect(() => parseSourceSemanticRequest({ ...current, source_request: {
       ...current.source_request, proposal_contract: "source-semantic-proposal-v2"
-    } })).toThrow(/host-owned generation schema/u);
+    } })).toThrow(/host-owned selection schema/u);
   });
 
   it("retains contradictory declarations as rejected raw without publishing an interpretation", () => {
@@ -98,19 +99,28 @@ describe("source-bound nested semantic expressions", () => {
     expect(received.interpretation).toBeUndefined();
   });
 
-  it("binds compact producer contract, prompt and schema in request identity and shrinks ordinary prompt bytes", () => {
+  it("binds selection producer contract, prompt and schema in request identity and shrinks ordinary prompt bytes", () => {
     const current = buildSourceSemanticRequest(input);
     const nested = parseSourceSemanticRequest({ ...current, source_request: {
       ...current.source_request, proposal_contract: "source-semantic-proposal-v3",
       generation_schema_contract: "bounded-expression-schema-v1"
     } });
+    const compact = parseSourceSemanticRequest({ ...current, source_request: {
+      ...current.source_request, proposal_contract: "source-semantic-proposal-v4",
+      generation_schema_contract: "host-owned-expression-schema-v1"
+    } });
     expect(JSON.stringify(current)).not.toBe(JSON.stringify(nested));
+    expect(JSON.stringify(current)).not.toBe(JSON.stringify(compact));
     expect(sourceSemanticSystemPrompt(current)).toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
     expect(sourceSemanticSystemPrompt(nested)).toBe(EXPRESSION_PROMPT);
+    expect(sourceSemanticSystemPrompt(compact)).toBe(COMPACT_PROMPT);
     expect(Buffer.byteLength(SOURCE_SEMANTIC_SYSTEM_PROMPT)).toBeLessThan(Buffer.byteLength(EXPRESSION_PROMPT));
     expect(Buffer.byteLength(JSON.stringify(sourceSemanticResponseJsonSchema(current))))
-      .toBeLessThan(Buffer.byteLength(JSON.stringify(sourceSemanticResponseJsonSchema(nested))) + 32768);
+      .toBeLessThan(Buffer.byteLength(JSON.stringify(sourceSemanticResponseJsonSchema(compact))));
     expect(receiveSourceSemantics(raw, nested, input).outcome.status).toBe("invalid");
     expect(receiveSourceSemantics(EXPRESSION_PROMPT.split("Example response:\n")[1]!, current, input).outcome.status).toBe("invalid");
+    expect(receiveSourceSemantics(COMPACT_PROMPT.split("Example response:\n")[1]!, compact, input).outcome.status).toBe("interpreted");
+    expect(receiveSourceSemantics(raw, compact, input).outcome.status).toBe("invalid");
+    expect(receiveSourceSemantics(COMPACT_PROMPT.split("Example response:\n")[1]!, current, input).outcome.status).toBe("invalid");
   });
 });

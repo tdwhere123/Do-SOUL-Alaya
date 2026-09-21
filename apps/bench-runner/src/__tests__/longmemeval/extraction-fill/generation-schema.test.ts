@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, buildSourceSemanticRequest,
-  buildSourceSemanticQueryRequest, officialApiExtractionResponseSchemaPreimage, receiveSourceSemantics,
-  sourceSemanticQueryResponseJsonSchema } from "@do-soul/alaya-soul";
+  buildSourceSemanticQueryRequest, officialApiExtractionResponseSchemaPreimage, parseSourceSemanticRequest,
+  receiveSourceSemantics, sourceSemanticQueryResponseJsonSchema, sourceSemanticSystemPrompt } from "@do-soul/alaya-soul";
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
 import { projectGeminiGenerationSchema, geminiGenerationSchemaCacheMaterial } from "../../../runs/extraction/fill/batch/generation-schema.js";
 import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
@@ -62,23 +62,59 @@ describe("Gemini recursive decoding schema projection", () => {
   });
 
   it("does not put the compact expression schema on the structured decoder wire", () => {
-    const request = JSON.stringify(buildSourceSemanticRequest(input));
+    const current = buildSourceSemanticRequest(input);
+    const compactRequest = parseSourceSemanticRequest({
+      ...current, source_request: {
+        ...current.source_request, proposal_contract: "source-semantic-proposal-v4",
+        generation_schema_contract: "host-owned-expression-schema-v1"
+      }
+    });
+    const request = JSON.stringify(compactRequest);
+    const compactPrompt = sourceSemanticSystemPrompt(compactRequest);
     const source = officialApiExtractionResponseSchemaPreimage(request);
     const projected = projectGeminiGenerationSchema(JSON.parse(source));
     expect(projected.recursive).toBe(false);
     expect(projected.schema).toBeUndefined();
     expect(projected.instruction).toContain('"type"');
-    const body = encodeGeminiGenerateContent({ userPrompt: request, systemPrompt: SOURCE_SEMANTIC_SYSTEM_PROMPT },
+    const body = encodeGeminiGenerateContent({ userPrompt: request, systemPrompt: compactPrompt },
       { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1", maxOutputTokens: 32768 });
     expect(body).toMatchObject({ generationConfig: { responseMimeType: "application/json" } });
     expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
-    expect(body).toMatchObject({ systemInstruction: { parts: [{ text: SOURCE_SEMANTIC_SYSTEM_PROMPT }, { text: projected.instruction }] } });
+    expect(body).toMatchObject({ systemInstruction: { parts: [{ text: compactPrompt }, { text: projected.instruction }] } });
     const material = geminiGenerationSchemaCacheMaterial(source);
     expect(JSON.parse(material).response_schema).toBeNull();
     expect(JSON.parse(material).contract).toBe("gemini-instruction-generation-schema-v1");
-    const fields = ["gemini-3.1-flash-lite", "gemini-3.1-low-v1", SOURCE_SEMANTIC_SYSTEM_PROMPT, request];
+    const fields = ["gemini-3.1-flash-lite", "gemini-3.1-low-v1", compactPrompt, request];
     expect(computeCacheKey(fields[0]!, "gemini-3.1-low-v1", fields[2]!, request))
       .toBe(createHash("sha256").update([...fields, material].join("\0")).digest("hex"));
+  });
+
+  it("binds a new selection request identity and reports truthful generation projection", () => {
+    const live = buildSourceSemanticRequest(input);
+    expect(live.source_request.proposal_contract).toBe("source-semantic-proposal-v5");
+    const request = JSON.stringify(live);
+    const source = officialApiExtractionResponseSchemaPreimage(request);
+    expect(source).toContain("source-semantic-proposal-v5");
+    expect(source).not.toContain("source-semantic-proposal-v4");
+    const projected = projectGeminiGenerationSchema(JSON.parse(source));
+    expect(projected.recursive).toBe(true);
+    expect(projected.schema).toBeUndefined();
+    expect(projected.instruction).toBeDefined();
+    const body = encodeGeminiGenerateContent({ userPrompt: request, systemPrompt: SOURCE_SEMANTIC_SYSTEM_PROMPT },
+      { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1", maxOutputTokens: 32768 });
+    const material = geminiGenerationSchemaCacheMaterial(source);
+    const compactCurrent = parseSourceSemanticRequest({
+      ...live, source_request: {
+        ...live.source_request, proposal_contract: "source-semantic-proposal-v4",
+        generation_schema_contract: "host-owned-expression-schema-v1"
+      }
+    });
+    const compactSource = officialApiExtractionResponseSchemaPreimage(JSON.stringify(compactCurrent));
+    expect(Buffer.byteLength(source)).toBeLessThan(Buffer.byteLength(compactSource));
+    expect(body).toMatchObject({ generationConfig: { responseMimeType: "application/json" } });
+    expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
+    expect(JSON.parse(material).response_schema).toBeNull();
+    expect(body).toMatchObject({ systemInstruction: { parts: [{ text: SOURCE_SEMANTIC_SYSTEM_PROMPT }, { text: projected.instruction }] } });
   });
 
   it("still rejects a missing nested operand through the unchanged strict local receiver", () => {
@@ -114,6 +150,7 @@ describe("Gemini recursive decoding schema projection", () => {
     );
     const encoded = JSON.stringify(body);
     expect(encoded).not.toContain("source-semantic-proposal-v4");
+    expect(encoded).not.toContain("source-semantic-proposal-v5");
     expect(encoded).toContain("application/json");
     expect(projectGeminiGenerationSchema(schema).schema).toBeDefined();
   });

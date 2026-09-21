@@ -1,5 +1,5 @@
 import type { GeminiBatchInvocation, GeminiBatchJob, GeminiBatchState } from "./contract.js";
-import { record, decodeGeminiGenerateContent, geminiUsage } from "./native-codec.js";
+import { record, decodeGeminiGenerateContent, geminiUsage, isCompleteGeminiFinish } from "./native-codec.js";
 import { batchLineResult } from "./line-result.js";
 import { publishRetainedBatchOutput, readRetainedBatchOutput, saveBatchState } from "./store.js";
 import { deriveBatchUsage, parseOutputInventory } from "./output-inventory.js";
@@ -77,8 +77,11 @@ async function reportTransportOutcomes(input: GeminiBatchInvocation, job: Gemini
     try { usage = geminiUsage(record(entry.response)); } catch { usage = undefined; }
     let outcome: "success" | "invalid" = "success";
     try {
-      decodeGeminiGenerateContent(entry.response);
-      if (usage !== undefined && usage.outputTokens > input.plan.limits.maxOutputTokens) outcome = "invalid";
+      const decoded = decodeGeminiGenerateContent(entry.response);
+      if (!isCompleteGeminiFinish(decoded.responseMetadata.finishReason) ||
+          (usage !== undefined && usage.outputTokens > input.plan.limits.maxOutputTokens)) {
+        outcome = "invalid";
+      }
     } catch { outcome = "invalid"; }
     await input.recordLineOutcome(key, outcome, usage, binding);
   }

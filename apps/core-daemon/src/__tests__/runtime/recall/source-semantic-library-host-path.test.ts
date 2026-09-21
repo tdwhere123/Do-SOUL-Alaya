@@ -6,7 +6,8 @@ import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, hashLabeledIdentity,
   indexEntryCacheKey, materializeSourceSemanticCompactProposal,
   type SourceSemanticAlignment, type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
-  type SoulInterpretationResponse
+  type SoulInterpretationResponse,
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
 } from "@do-soul/alaya-protocol";
 import {
   admitSourceSemanticAlignment, admitSourceSemanticQuery, createAuditedSourceAdmission,
@@ -58,14 +59,14 @@ function segment(catalog: SourceReferenceCatalog, text: string, assertionId = 1)
 
 function compactUse(catalog: SourceReferenceCatalog) {
   return {
-    contract: "source-semantic-proposal-v4" as const,
+    contract: "source-semantic-proposal-v5" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{
         act: "assertion" as const,
         expression: {
           kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: "use", at: segment(catalog, "uses") },
+          predicate: { kind: "explicit" as const, reading: "use", support: segment(catalog, "uses") },
           arguments: [
             { role: "agent", target: segment(catalog, "Alice") },
             { role: "theme", target: segment(catalog, "tools") }
@@ -111,7 +112,8 @@ function existentialBody() {
 
 function receiveQ(original: string, body: object) {
   const received = proposeQuerySemantics({
-    original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1"
+    original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1",
+    query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT,
   }, {
     rawJson: JSON.stringify({ contract: "source-semantic-query-response-v2", outcome: { status: "interpreted" }, query: body })
   });
@@ -172,7 +174,8 @@ function useCorrespondences(h: SourceSemanticInterpretation) {
 function receiveA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: string, extra: object = {}) {
   const received = proposeAlignmentSemantics({
     admitted_q: q, h_descriptors: [{ h_id: hId, interpretation: h }],
-    producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1"
+    producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1",
+    alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
   }, {
     rawJson: JSON.stringify({
       contract: "source-semantic-alignment-response-v2",

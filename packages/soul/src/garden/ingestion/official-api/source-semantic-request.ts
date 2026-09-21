@@ -9,24 +9,35 @@ import {
   SourceSemanticExpressionGenerationSchema,
   SourceSemanticCompactProposalSchema, SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT,
   SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT, SourceSemanticCompactGenerationSchema,
+  SourceSemanticSelectionProposalSchema, SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
+  SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT, SourceSemanticSelectionGenerationSchema,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
   SourceSemanticAlignmentProducerBodySchema, SourceSemanticGapSchema,
-  buildSourceReferenceCatalog, canonicalJson,
-  type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+  SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT,
+  SourceSemanticQueryMeaningGenerationSchema, SourceSemanticAlignmentSelectionSchema,
+  buildSourceReferenceCatalog, buildSourceSemanticAlignmentEndpointCatalog, canonicalJson,
+  type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery,
+  type SourceSemanticAlignmentEndpointCatalog
 } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, indexSourceSemanticUnits, selectSourceSemanticUnits } from "./source-semantic-units.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as CONTENT_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as EXPRESSION_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-expression-guidance.js";
-import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-compact-guidance.js";
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT as COMPACT_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-compact-guidance.js";
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-selection-guidance.js";
 import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canonical-prompt.js";
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
-export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-compact-guidance.js";
+export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-selection-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT = "source-semantic-query-request-v2" as const;
 export const SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT = "source-semantic-query-response-v2" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v3" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v3" as const;
 export const SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT = "source-semantic-alignment-request-v2" as const;
 export const SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT = "source-semantic-alignment-response-v2" as const;
+export const SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT = "source-semantic-alignment-request-v3" as const;
+export const SOURCE_SEMANTIC_ALIGNMENT_SELECTION_RESPONSE_CONTRACT = "source-semantic-alignment-response-v3" as const;
 
 const FORBIDDEN_PROPOSAL_KEYS = [
   "answers", "answer", "ranking", "seeds", "seed", "programs", "program",
@@ -49,10 +60,12 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   k_version: z.literal(SOURCE_SEMANTIC_K_VERSION),
   normalizer_version: z.enum([SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION]),
   proposal_contract: z.enum([SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
-    SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT]).optional(),
+    SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT,
+    SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT]).optional(),
   source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT).optional(),
   source_scope: z.literal("complete-source").optional(),
-  generation_schema_contract: z.enum(["bounded-expression-schema-v1", SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT]).optional(),
+  generation_schema_contract: z.enum(["bounded-expression-schema-v1", SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT,
+    SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT]).optional(),
   revision: SourceSemanticRevisionSchema.optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
@@ -79,7 +92,8 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   }
   const semanticContent = request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT ||
     request.proposal_contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT ||
-    request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT;
+    request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT ||
+    request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT;
   if (semanticContent && request.source_unit_contract === undefined) {
     context.addIssue({ code: "custom", message: "content proposals require complete source units" });
   }
@@ -97,6 +111,14 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   if (request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT &&
     request.generation_schema_contract !== SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT) {
     context.addIssue({ code: "custom", message: "compact expression proposals require the host-owned generation schema" });
+  }
+  if (request.generation_schema_contract === SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT &&
+    request.proposal_contract !== SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT) {
+    context.addIssue({ code: "custom", message: "host-owned selection schema requires the selection proposal contract" });
+  }
+  if (request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT &&
+    request.generation_schema_contract !== SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT) {
+    context.addIssue({ code: "custom", message: "selection proposals require the host-owned selection schema" });
   }
 }).readonly();
 
@@ -145,6 +167,7 @@ export type SourceSemanticQueryProposalInput = Readonly<{
   producer_id: string;
   producer_version: string;
   resource_limits?: Partial<SourceSemanticResourceLimits>;
+  query_syntax?: typeof SOURCE_SEMANTIC_QUERY_CONTRACT | typeof SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT;
 }>;
 
 export type SourceSemanticAlignmentProposalInput = Readonly<{
@@ -153,10 +176,11 @@ export type SourceSemanticAlignmentProposalInput = Readonly<{
   producer_id: string;
   producer_version: string;
   resource_limits?: Partial<SourceSemanticResourceLimits>;
+  alignment_syntax?: typeof SOURCE_SEMANTIC_ALIGNMENT_CONTRACT | typeof SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT;
 }>;
 
 export type SourceSemanticQueryRequest = Readonly<{
-  contract: typeof SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT;
+  contract: typeof SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT | typeof SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT;
   k_version: typeof SOURCE_SEMANTIC_K_VERSION;
   original_query: string;
   original_query_digest: string;
@@ -166,12 +190,13 @@ export type SourceSemanticQueryRequest = Readonly<{
 }>;
 
 export type SourceSemanticAlignmentRequest = Readonly<{
-  contract: typeof SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT;
+  contract: typeof SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT | typeof SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT;
   k_version: typeof SOURCE_SEMANTIC_K_VERSION;
   admitted_q: SourceSemanticQuery;
   h_descriptors: readonly SourceSemanticHDescriptor[];
   producer_capability: z.infer<typeof ProducerCapability>;
   resource_limits: SourceSemanticResourceLimits;
+  catalog?: SourceSemanticAlignmentEndpointCatalog;
 }>;
 
 export function semanticSha256(text: string): string {
@@ -230,10 +255,10 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
   const source_request = SourceSemanticOpenRequestBodySchema.parse({
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    proposal_contract: SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT,
+    proposal_contract: SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
     source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
     ...(input.sourceScope !== undefined ? { source_scope: input.sourceScope } : {}),
-    generation_schema_contract: SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT,
+    generation_schema_contract: SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
     assertion_locations: units.map((row) => ({
@@ -259,8 +284,9 @@ export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryPropos
   }
   const original_query = input.original_query;
   if (original_query.length > 8192) throw new AlayaError("VALIDATION", "original query exceeds its bound");
+  const meaning = input.query_syntax !== SOURCE_SEMANTIC_QUERY_CONTRACT;
   return {
-    contract: SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT,
+    contract: meaning ? SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT : SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     original_query,
     original_query_digest: `sha256:${semanticSha256(original_query)}`,
@@ -278,13 +304,19 @@ export function buildSourceSemanticAlignmentRequest(
   const admitted_q = SourceSemanticQuerySchema.parse(input.admitted_q);
   const h_descriptors = z.array(SourceSemanticHDescriptorSchema).min(1).max(64).parse(input.h_descriptors);
   if (Buffer.byteLength(JSON.stringify(h_descriptors)) > 1_000_000) throw new AlayaError("VALIDATION", "alignment descriptors exceed input budget");
+  const selection = input.alignment_syntax !== SOURCE_SEMANTIC_ALIGNMENT_CONTRACT;
   return {
-    contract: SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT,
+    contract: selection ? SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT : SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     admitted_q,
     h_descriptors,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
-    resource_limits: resourceLimits(input.resource_limits)
+    resource_limits: resourceLimits(input.resource_limits),
+    ...(selection ? {
+      catalog: buildSourceSemanticAlignmentEndpointCatalog(admitted_q, h_descriptors.map((row, index) => ({
+        h: `h${index + 1}`, interpretation: row.interpretation
+      })))
+    } : {})
   };
 }
 
@@ -297,11 +329,15 @@ export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest
     : contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT ? SourceSemanticContentProposalSchema
     : contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT
       ? generation !== undefined ? SourceSemanticExpressionGenerationSchema : SourceSemanticExpressionProposalSchema
+    : contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT
+      ? generation !== undefined ? SourceSemanticCompactGenerationSchema : SourceSemanticCompactProposalSchema
     : generation !== undefined || request === undefined
-      ? SourceSemanticCompactGenerationSchema : SourceSemanticCompactProposalSchema;
+      ? SourceSemanticSelectionGenerationSchema : SourceSemanticSelectionProposalSchema;
   const output = schema === SourceSemanticExpressionProposalSchema || schema === SourceSemanticExpressionGenerationSchema
-    || schema === SourceSemanticCompactProposalSchema || schema === SourceSemanticCompactGenerationSchema;
-  const reused = schema === SourceSemanticExpressionGenerationSchema || schema === SourceSemanticCompactGenerationSchema;
+    || schema === SourceSemanticCompactProposalSchema || schema === SourceSemanticCompactGenerationSchema
+    || schema === SourceSemanticSelectionProposalSchema || schema === SourceSemanticSelectionGenerationSchema;
+  const reused = schema === SourceSemanticExpressionGenerationSchema || schema === SourceSemanticCompactGenerationSchema
+    || schema === SourceSemanticSelectionGenerationSchema;
   return z.toJSONSchema(schema, {
     io: output ? "output" : "input",
     ...(reused ? { reused: "ref" as const } : {}),
@@ -319,30 +355,49 @@ const QueryAlignmentGenerationOutcomeSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("abstained") }).strict().readonly()
 ]);
 
-function producerResponseJsonSchema(schema: z.ZodType): object {
+function producerResponseJsonSchema(schema: z.ZodType, reused?: "ref"): object {
   return z.toJSONSchema(schema, {
     io: "output",
+    ...(reused === undefined ? {} : { reused }),
     override: ({ jsonSchema }) => {
       if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
     }
   });
 }
 
-/** Generation envelope for Q. Local admission still uses the producer body owner. */
-export function sourceSemanticQueryResponseJsonSchema(): object {
+/** Generation envelope for Q. Syntax follows the request contract; never inferred from body fields. */
+export function sourceSemanticQueryResponseJsonSchema(
+  request?: Pick<SourceSemanticQueryRequest, "contract">
+): object {
+  if (request?.contract === SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT) {
+    return producerResponseJsonSchema(z.object({
+      contract: z.literal(SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT),
+      outcome: QueryAlignmentGenerationOutcomeSchema,
+      query: SourceSemanticQueryProducerBodySchema.optional()
+    }).strict().readonly());
+  }
   return producerResponseJsonSchema(z.object({
-    contract: z.literal(SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT),
+    contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT),
     outcome: QueryAlignmentGenerationOutcomeSchema,
-    query: SourceSemanticQueryProducerBodySchema.optional()
-  }).strict().readonly());
+    query: SourceSemanticQueryMeaningGenerationSchema.optional()
+  }).strict().readonly(), "ref");
 }
 
-/** Generation envelope for A. Local admission still uses the producer body owner. */
-export function sourceSemanticAlignmentResponseJsonSchema(): object {
+/** Generation envelope for A. Syntax follows the request contract; never inferred from body fields. */
+export function sourceSemanticAlignmentResponseJsonSchema(
+  request?: Pick<SourceSemanticAlignmentRequest, "contract">
+): object {
+  if (request?.contract === SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT) {
+    return producerResponseJsonSchema(z.object({
+      contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT),
+      outcome: QueryAlignmentGenerationOutcomeSchema,
+      alignment: SourceSemanticAlignmentProducerBodySchema.optional()
+    }).strict().readonly());
+  }
   return producerResponseJsonSchema(z.object({
-    contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT),
+    contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_SELECTION_RESPONSE_CONTRACT),
     outcome: QueryAlignmentGenerationOutcomeSchema,
-    alignment: SourceSemanticAlignmentProducerBodySchema.optional()
+    alignment: SourceSemanticAlignmentSelectionSchema.optional()
   }).strict().readonly());
 }
 
@@ -412,7 +467,8 @@ const LEGACY_SOURCE_SEMANTIC_SYSTEM_PROMPT = [
 /** A retained request selects its producer syntax and prompt together. */
 export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): string {
   if (request.source_request.proposal_contract === undefined) return CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT;
-  if (request.source_request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT) return SOURCE_SEMANTIC_SYSTEM_PROMPT;
+  if (request.source_request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT) return SOURCE_SEMANTIC_SYSTEM_PROMPT;
+  if (request.source_request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT) return COMPACT_SOURCE_SEMANTIC_SYSTEM_PROMPT;
   if (request.source_request.proposal_contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT) {
     return EXPRESSION_SOURCE_SEMANTIC_SYSTEM_PROMPT;
   }
@@ -420,7 +476,7 @@ export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): stri
     ? CONTENT_SOURCE_SEMANTIC_SYSTEM_PROMPT : LEGACY_SOURCE_SEMANTIC_SYSTEM_PROMPT;
 }
 
-export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
+export const SOURCE_SEMANTIC_QUERY_GRAPH_SYSTEM_PROMPT = [
   "Propose query interpretation for the original query only, using source-semantic-query-v2 body fields.",
   "Return variables, frames, role requirements, context obligations, finite alternatives, and located gaps.",
   "Do not emit answers, ranking, seeds, QueryProgram, programs, verdicts, or source answer IDs.",
@@ -430,10 +486,45 @@ export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   "Query.gaps is the authoritative gap list. If outcome.gaps is omitted, the host echoes it; disagreement remains invalid. Retain partial meaning and located gaps in the query body."
 ].join(" ");
 
-export const SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT = [
+export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
+  "Propose query meaning for the original query only, using source-semantic-query-meaning-v1.",
+  "Return nested meaning nodes. Do not write a flat variable/frame/sort graph, hashes, reciprocal incidence, answers, ranking, seeds, QueryProgram, programs, verdicts, or source answer IDs.",
+  "Host derives occurrence IDs, sorts, and incidence from declared node kind and nesting. A person and an event cannot share one variable. Free answers may be unknown in value without unresolved meaning.",
+  "Ordinary form: statement with predicate and role arguments; operator with explicit operands; named for a name constraint; free for an answer target; reference only for reuse, coreference, a returned occurrence, or a binder.",
+  "source_act is retrieval intent, not query punctuation. Ordinary factual questions omit it. Use source_act=question only when the sought source itself asked or directed. Did X happen seeks asserted or entailed X, not a source question.",
+  "possible(X) is a context node whose statement operand carries participants. Promise, report, and hypothetical stay distinct from observed fact. not X is not X; conditional operands keep their declared roles.",
+  "Question words locate a free target; they are not an entity named who. A name that happens to be Who is a named constraint. Keep true ambiguous-reference gaps; do not invent a unique entity.",
+  "Bind meaning to the original query text. Approved fixed context is given; do not invent H or A.",
+  'Optional domains are {key,excerpt}. Universal evaluation is {kind:"forall",domain,binder,local_variables}; binders occur in the body and cannot be returned. entailed_at_source requests inference; asserted_at_source requests a literal assertion. Counterexample alternatives use purpose:"counterexample".',
+  'Comparison evaluation is {kind:"comparison",domain,operation:"lt"|"le"|"eq"|"ge"|"gt"|"minimum"|"maximum",left,right?,strict,metric,unit,context,scope:"asserted"|"preserve"} with no nested meaning. Pairwise strict is true only for lt/gt; extrema omit right and explicitly choose strictness. Return only operand keys.',
+  "Unsupported meaning is a located gap, not a second evaluator or generic DSL.",
+  "Query.gaps is the authoritative gap list. If outcome.gaps is omitted, the host echoes it; disagreement remains invalid. Retain partial meaning and located gaps in the query body.",
+  'Neutral syntax examples, not the current input: statement with free and named entities {"kind":"statement","predicate":"hand","arguments":[{"role":"agent","target":{"kind":"free","key":"agent"},"excerpt":"Who"},{"role":"theme","target":{"kind":"named","key":"token","excerpt":"token"},"excerpt":"token"},{"role":"recipient","target":{"kind":"named","key":"nia","excerpt":"Nia"},"excerpt":"Nia"}]}; possible nesting {"kind":"possible","content":{"kind":"statement","predicate":"travel","arguments":[]}}; not nesting {"kind":"not","content":{"kind":"statement","predicate":"open","arguments":[]}}; reported wraps a statement while a bare statement is sought as fact; forall evaluation remains {"kind":"forall","domain":"people","binder":"actor","local_variables":["actor"]} with a statement body.'
+].join(" ");
+
+export const SOURCE_SEMANTIC_ALIGNMENT_GRAPH_SYSTEM_PROMPT = [
   "Propose alignment correspondences from admitted Q endpoints to the supplied H descriptors.",
   "Use contextual equivalence only. Do not emit answers, ranking, seeds, programs, verdicts, or chosen results.",
   "Do not invent H structure or rewrite Q.",
   'Optional domains map {query_domain,source_domain,query_support,source_semantic_support}. Explicit conditional membership assumptions are {query_variable,source_domain,restrictions:[],status:"member"|"excluded",query_support,description}; use only assumptions stated in the query/context, never infer identity from a matching surface name. Closed source domains cannot acquire novel assumed members.',
   "Name the target interpretation with request-local handle h1, h2, ... in descriptor order. Do not copy host hashes or producer identities. An interpreted alignment has no gap channel: omit outcome.gaps or send []. Use abstained if no supported alignment can be proposed."
 ].join(" ");
+
+export const SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT = [
+  "Propose alignment as source-semantic-alignment-selection-v1 over the advertised catalog.",
+  "Use contextual equivalence only. A cannot rank or answer. Do not emit answers, ranking, seeds, programs, verdicts, or chosen results.",
+  "Do not invent H structure or rewrite Q. Do not copy host hashes or assemble internal Q/H endpoint objects.",
+  "Select catalog handles qeN and seN. Bind one actual Q and the named H. Name the target interpretation with request-local handle h1, h2, ... in descriptor order.",
+  'Optional domains map {query_domain,source_domain,query_support,source_semantic_support}. Explicit conditional membership assumptions are {query_variable,source_domain,restrictions:[],status:"member"|"excluded",query_support,description}; use only assumptions stated in the query/context, never infer identity from a matching surface name. Closed source domains cannot acquire novel assumed members.',
+  "An interpreted alignment has no gap channel: omit outcome.gaps or send []. Use abstained if no supported alignment can be proposed."
+].join(" ");
+
+export function sourceSemanticQuerySystemPrompt(request: SourceSemanticQueryRequest): string {
+  return request.contract === SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT
+    ? SOURCE_SEMANTIC_QUERY_GRAPH_SYSTEM_PROMPT : SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT;
+}
+
+export function sourceSemanticAlignmentSystemPrompt(request: SourceSemanticAlignmentRequest): string {
+  return request.contract === SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT
+    ? SOURCE_SEMANTIC_ALIGNMENT_GRAPH_SYSTEM_PROMPT : SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT;
+}

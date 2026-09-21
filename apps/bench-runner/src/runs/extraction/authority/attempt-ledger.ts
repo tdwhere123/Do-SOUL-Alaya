@@ -213,6 +213,12 @@ export function discardPristineForkedExtractionAttemptLedger(input: {
   unlinkSync(path);
 }
 
+export type ExtractionAttemptShardInspector = (
+  cacheRoot: string,
+  cacheKey: string,
+  identity: ExtractionAttemptLedgerCacheIdentity
+) => ExtractionSuccessfulShard | undefined;
+
 export function openExtractionAttemptLedger(input: {
   readonly cacheRoot: string;
   readonly publicationTemporaryDirectory?: string;
@@ -220,6 +226,7 @@ export function openExtractionAttemptLedger(input: {
   readonly cacheIdentity: ExtractionAttemptLedgerCacheIdentity;
   readonly startingMissing: number;
   readonly maximumAttempts?: number; readonly successfulShardCeiling?: number;
+  readonly inspectProviderShard?: ExtractionAttemptShardInspector;
 }): {
   readonly reserveAttempt: (cacheKey: string) => void;
   readonly reserveAttemptOrdinal: (cacheKey: string) => number;
@@ -234,10 +241,11 @@ export function openExtractionAttemptLedger(input: {
   const existed = boundedArtifactEntryExists(path);
   let current = existed ? readAttemptLedgerRecord(path) : expected;
   assertBoundRecord(current, expected);
+  const inspectShard = input.inspectProviderShard ?? readValidLedgerShard;
   current = reconcilePending(
-    input.cacheRoot, current, path, true, input.publicationTemporaryDirectory
+    input.cacheRoot, current, path, true, input.publicationTemporaryDirectory, inspectShard
   );
-  assertSuccessfulShards(input.cacheRoot, current);
+  assertSuccessfulShards(input.cacheRoot, current, inspectShard, input.inspectProviderShard !== undefined);
   if (!existed) {
     persistAttemptLedgerRecord(path, current, input.publicationTemporaryDirectory);
   }
@@ -256,7 +264,7 @@ export function openExtractionAttemptLedger(input: {
     reserveAttemptOrdinal,
     abandonPendingShard: (cacheKey, attemptOrdinal) => update(abandonPendingShard(current, cacheKey, attemptOrdinal)),
     commitSuccessfulShard: (cacheKey) => {
-      const shard = requireValidShard(input.cacheRoot, cacheKey, current.cache_identity);
+      const shard = requireValidShard(input.cacheRoot, cacheKey, current.cache_identity, inspectShard);
       update(commitProviderBackedShard(current, shard));
     },
     commitDeterministicShard: (cacheKey) => {
@@ -318,10 +326,11 @@ function reconcilePending(
   current: ExtractionAttemptLedgerRecord,
   path: string,
   persist = true,
-  publicationTemporaryDirectory?: string
+  publicationTemporaryDirectory?: string,
+  inspectShard: ExtractionAttemptShardInspector = readValidLedgerShard
 ): ExtractionAttemptLedgerRecord {
   const recovered = current.pending_keys.flatMap((cacheKey) => {
-    const shard = readValidLedgerShard(cacheRoot, cacheKey, current.cache_identity);
+    const shard = inspectShard(cacheRoot, cacheKey, current.cache_identity);
     return shard === undefined ? [] : [shard];
   });
   if (recovered.length === 0) return current;
@@ -338,18 +347,31 @@ function reconcilePending(
 function requireValidShard(
   cacheRoot: string,
   cacheKey: string,
-  identity: ExtractionAttemptLedgerCacheIdentity
+  identity: ExtractionAttemptLedgerCacheIdentity,
+  inspectShard: ExtractionAttemptShardInspector
 ): ExtractionSuccessfulShard {
-  const shard = readValidLedgerShard(cacheRoot, cacheKey, identity);
+  const shard = inspectShard(cacheRoot, cacheKey, identity);
   if (shard === undefined) {
     throw new ExtractionAttemptLimitError("extraction success shard failed cache identity validation");
   }
   return shard;
 }
 
-function assertSuccessfulShards(cacheRoot: string, record: ExtractionAttemptLedgerRecord): void {
+function assertSuccessfulShards(
+  cacheRoot: string,
+  record: ExtractionAttemptLedgerRecord,
+  inspectShard: ExtractionAttemptShardInspector = readValidLedgerShard,
+  customInspector = false
+): void {
   for (const shard of record.successful_shards) {
-    assertLedgerSuccessfulShard(cacheRoot, shard, record.cache_identity);
+    if (!customInspector) {
+      assertLedgerSuccessfulShard(cacheRoot, shard, record.cache_identity);
+      continue;
+    }
+    const current = inspectShard(cacheRoot, shard.cacheKey, record.cache_identity);
+    if (current === undefined || current.rawJsonSha256 !== shard.rawJsonSha256) {
+      throw new Error(`extraction authority successful shard closure drifted: ${shard.cacheKey}`);
+    }
   }
 }
 

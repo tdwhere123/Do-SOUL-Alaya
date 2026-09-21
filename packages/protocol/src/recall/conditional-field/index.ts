@@ -278,6 +278,7 @@ export {
   SourceSemanticContextObligationSchema,
   SourceSemanticQueryAlternativeSchema,
   SourceSemanticQueryProducerBodySchema,
+  SourceSemanticQueryEvaluationSchema,
   SourceSemanticQuerySchema,
   queryAlternativeConnected,
   type SourceSemanticQueryVariable,
@@ -289,6 +290,17 @@ export {
   type SourceSemanticQueryProducerBody,
   type SourceSemanticQuery
 } from "./semantic-query.js";
+export {
+  SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+  SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH,
+  SOURCE_SEMANTIC_QUERY_MEANING_GENERATION_DEPTH,
+  SourceSemanticQueryMeaningBodySchema,
+  SourceSemanticQueryMeaningGenerationSchema,
+  materializeSourceSemanticQueryMeaning,
+  type QueryMeaning,
+  type SourceSemanticQueryMeaningBody,
+  type SourceSemanticQueryMeaningEnvelope
+} from "./semantic-query-meaning.js";
 export {
   SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
   SOURCE_SEMANTIC_ALIGNMENT_RELATION,
@@ -304,6 +316,23 @@ export {
   type SourceSemanticAlignmentProducerBody,
   type SourceSemanticAlignment
 } from "./semantic-alignment.js";
+export {
+  SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT,
+  SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE,
+  SOURCE_SEMANTIC_SOURCE_ENDPOINT_HANDLE,
+  SourceSemanticQueryCatalogEntrySchema,
+  SourceSemanticSourceCatalogEntrySchema,
+  SourceSemanticAlignmentEndpointCatalogSchema,
+  SourceSemanticAlignmentSelectionSchema,
+  buildSourceSemanticAlignmentEndpointCatalog,
+  materializeSourceSemanticAlignmentSelection,
+  type SourceSemanticQueryCatalogEntry,
+  type SourceSemanticSourceCatalogEntry,
+  type SourceSemanticAlignmentEndpointCatalog,
+  type SourceSemanticAlignmentSelection,
+  type SourceSemanticAlignmentDescriptor,
+  type SourceSemanticAlignmentSelectionEnvelope
+} from "./semantic-alignment-selection.js";
 export {
   SOURCE_SEMANTIC_CONTEXT_CONTRACT,
   SourceSemanticEvaluationContextSchema,
