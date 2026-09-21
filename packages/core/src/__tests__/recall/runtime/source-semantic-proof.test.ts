@@ -1,8 +1,13 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SourceSemanticDraftSchema, SourceSemanticQuerySchema, type SourceSemanticInterpretation,
-  type SourceSemanticQuery, type SourceSemanticReasoningResult } from "@do-soul/alaya-protocol";
+import { SourceSemanticDraftSchema, SourceSemanticQuerySchema, sourceSemanticAlignmentIdentity,
+  type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticReasoningResult } from "@do-soul/alaya-protocol";
 import { admitSourceSemanticAlignment } from "../../../recall/conditional-field/query/source-semantic-alignment-admission.js";
-import { source, query, align, run, ORIGINAL, BUDGET } from "./source-semantic-proof-fixture.js";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
+import { executeSourceSemanticInterpretation } from "../../../recall/runtime/source-semantic-reasoning.js";
+import { proofEntriesFromBranch } from "../../../recall/runtime/source-semantic-library-recall.js";
+import { source, catalog, query, align, run, ORIGINAL, BUDGET } from "./source-semantic-proof-fixture.js";
 
 function returned(result: SourceSemanticReasoningResult) {
   return [...new Set((result.answers ?? []).map((row) => JSON.stringify(Object.fromEntries(Object.entries(row.returned).map(([key, value]) => [key, value.node_id])))))].sort();
@@ -64,6 +69,42 @@ describe("source semantic proof obligations", () => {
     const result = run(h, q, predicatesOnly, text);
     expect(result.outcome.status).toBe("interpreted");
     expect(result.answers ?? []).toEqual([]);
+  });
+  it("compiles five complete groups to five answers without exhausting the existing budget", () => {
+    const packet = JSON.parse(readFileSync(fileURLToPath(new URL("./source-semantic-set-valued-catalog-fixture.json", import.meta.url)), "utf8"));
+    expect(packet.a.correspondences.filter((row: { query_endpoint: { kind: string } }) => row.query_endpoint.kind === "predicate")).toHaveLength(5);
+    expect(packet.a.correspondences.filter((row: { query_endpoint: { kind: string } }) => row.query_endpoint.kind === "slot")).toHaveLength(10);
+    const executed = executeSourceSemanticInterpretation({
+      h: packet.h, q: packet.q, a: packet.a, original_query: packet.original_query,
+      workspaceId: "source-semantic-library", scope: "project", authorizedScopes: ["project"],
+      asOf: "2026-09-21T10:00:00.000Z",
+      request: {
+        contract: "source-interpretation-reasoning-v3", accepts_unreviewed_conditional_results: true,
+        h_id: packet.a.h_id, q_id: packet.a.q_id, a_id: sourceSemanticAlignmentIdentity(packet.a, fieldContractSha256),
+        original_query: packet.original_query, budget: BUDGET, output_byte_limit: 1_000_000
+      }
+    });
+    const result = executed.result;
+    expect(result.outcome.status).toBe("interpreted");
+    expect(result.outcome.status).not.toBe("resource_exhausted");
+    expect(result.answers).toHaveLength(5);
+    expect(result.resource_usage?.work_units ?? 0).toBeLessThan(BUDGET.work_units);
+    expect(executed.index).not.toBeNull();
+    const occupancy = proofEntriesFromBranch(executed.index!, result);
+    expect(occupancy.entries).toHaveLength(5);
+    expect(occupancy.entries.map((row) => row.output_binding).sort())
+      .toEqual((result.answers ?? []).map((row) => row.binding_id).sort());
+  });
+  it("still compiles four complete groups to four answers", () => {
+    const text = "who uses which tools?", h = catalog(4);
+    const q = { ...query(text, false), return_variables: ["actor", "tools"] };
+    const result = run(h, q, align(h, q, false), text);
+    expect(result.outcome.status).toBe("interpreted");
+    expect(result.answers).toHaveLength(4);
+    expect(returned(result)).toEqual([
+      '{"actor":"rAnn","tools":"rX"}', '{"actor":"rBea","tools":"rY"}',
+      '{"actor":"rCam","tools":"rZ"}', '{"actor":"rDot","tools":"rU"}'
+    ]);
   });
   it("does not invent a second answer when the producer omitted the other matching frame", () => {
     const text = "who uses which tools?", h = source(), q = query(text, false), complete = align(h, q, false);
@@ -145,7 +186,7 @@ describe("source semantic proof obligations", () => {
     const text = "who uses which tools?", h = source(), q = query(text, false), a = align(h, q, false);
     const full = run(h, q, a, text);
     expect(full.outcome.status).toBe("interpreted");
-    const page = run(h, q, a, text, { ...BUDGET, page_budget: 1 });
+    const page = run(h, q, a, text, { ...BUDGET, page_budget: 0 });
     expect(page.outcome.status).toBe("resource_exhausted");
     const small = run(h, q, a, text, { ...BUDGET, work_units: 2000, finalization_reserve: 200 });
     expect(small.outcome.status).toBe("resource_exhausted");

@@ -13,6 +13,44 @@ import type { ObserverReaders, RelationObserverRow, SourceObserverRow } from "..
 export function sourceSemanticRelationKey(...parts: readonly (string | number)[]): string {
   return JSON.stringify(["source-interpretation-v4", ...parts]);
 }
+/** Predicate-aligned source frames for one query alternative, in stable order. */
+export function alignmentPredicateGroups(
+  alignment: SourceSemanticAlignment | undefined, alternative: number, queryFrame?: string
+): readonly string[] {
+  if (alignment === undefined) return [];
+  const frames = new Set<string>();
+  for (const row of alignment.correspondences) {
+    const query = row.query_endpoint, source = row.source_endpoint;
+    if (query.kind === "predicate" && source.kind === "frame" && query.alternative === alternative
+      && (queryFrame === undefined || query.frame === queryFrame)) {
+      frames.add(source.frame);
+    }
+  }
+  return [...frames].sort();
+}
+/** Split only when one query predicate is instantiated on several source frames. */
+export function alignmentGroupPhases(
+  query: SourceSemanticQuery | undefined, alignment: SourceSemanticAlignment | undefined, alternative: number
+): readonly (string | undefined)[] {
+  const branch = query?.alternatives[alternative];
+  const predicateFrames = branch?.frames.filter((frame) => frame.operator === undefined) ?? [];
+  if (predicateFrames.length !== 1) return [undefined];
+  const frames = alignmentPredicateGroups(alignment, alternative, predicateFrames[0]!.id);
+  return frames.length === 0 ? [undefined] : frames;
+}
+/** Slots stay on the chosen predicate frame; a shared query key searches every aligned frame. */
+export function alignmentPredicateKey(alternative: number, queryFrame: string, groupFrame?: string): string {
+  return groupFrame === undefined
+    ? sourceSemanticRelationKey("a_predicate", alternative, queryFrame)
+    : sourceSemanticRelationKey("a_predicate", alternative, queryFrame, groupFrame);
+}
+export function alignmentSlotKey(
+  direction: "a_slot" | "a_slot_inv", alternative: number, queryFrame: string, slot: string, groupFrame?: string
+): string {
+  return groupFrame === undefined
+    ? sourceSemanticRelationKey(direction, alternative, queryFrame, slot)
+    : sourceSemanticRelationKey(direction, alternative, queryFrame, slot, groupFrame);
+}
 /** Coordinates remain bounded independently of source-handle lengths; C binds their meaning. */
 export function sourceSemanticDerivedNodeId(kind: string, ...parts: readonly string[]): string {
   return `@${kind}:${fieldContractSha256(JSON.stringify(parts)).slice(0, 48)}`;
@@ -161,24 +199,36 @@ export function populateBindings(builder: PremiseBuilder, h: SourceSemanticInter
 }
 
 function populateAlignment(builder: PremiseBuilder, alignment: SourceSemanticAlignment): void {
+  const grouped = new Map<number, readonly (string | undefined)[]>();
+  const groupFrame = (alternative: number, frame: string): string | undefined => {
+    const frames = grouped.get(alternative) ?? alignmentGroupPhases(builder.input.query, alignment, alternative);
+    if (!grouped.has(alternative)) grouped.set(alternative, frames);
+    return frames.includes(frame) ? frame : undefined;
+  };
   for (const [index, correspondence] of alignment.correspondences.entries()) {
     const query = correspondence.query_endpoint, source = correspondence.source_endpoint;
     if (query.kind === "referent" && source.kind === "referent") {
       builder.self(source.referent, ["a_referent", query.variable], { leaf_kind: "a_referent", occurrence: source.referent, correspondence_index: index });
     } else if (query.kind === "predicate" && source.kind === "frame") {
-      builder.self(source.frame, ["a_predicate", query.alternative, query.frame], { leaf_kind: "a_predicate", occurrence: source.frame, correspondence_index: index });
+      const group = groupFrame(query.alternative, source.frame);
+      builder.self(source.frame, group === undefined
+        ? ["a_predicate", query.alternative, query.frame]
+        : ["a_predicate", query.alternative, query.frame, group],
+        { leaf_kind: "a_predicate", occurrence: source.frame, correspondence_index: index });
       for (const [id, template] of builder.aliases) if (template === source.frame) builder.self(id,
-        ["a_predicate", query.alternative, query.frame], { leaf_kind: "a_predicate", occurrence: id, correspondence_index: index });
+        group === undefined ? ["a_predicate", query.alternative, query.frame] : ["a_predicate", query.alternative, query.frame, group],
+        { leaf_kind: "a_predicate", occurrence: id, correspondence_index: index });
     } else if (query.kind === "slot" && source.kind === "slot") {
       const slot = builder.slotNodes.get(JSON.stringify([source.frame, source.slot]))!;
+      const group = groupFrame(query.alternative, source.frame);
       const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "a_slot", occurrence: source.frame, slot_id: source.slot, correspondence_index: index };
-      builder.edge(source.frame, slot, sourceSemanticRelationKey("a_slot", query.alternative, query.frame, query.slot), leaf);
-      builder.edge(slot, source.frame, sourceSemanticRelationKey("a_slot_inv", query.alternative, query.frame, query.slot), leaf);
+      builder.edge(source.frame, slot, alignmentSlotKey("a_slot", query.alternative, query.frame, query.slot, group), leaf);
+      builder.edge(slot, source.frame, alignmentSlotKey("a_slot_inv", query.alternative, query.frame, query.slot, group), leaf);
       for (const [id, template] of builder.aliases) if (template === source.frame) {
         const derivedSlot = builder.slotNodes.get(JSON.stringify([id, source.slot]))!;
         const derivedLeaf = { ...leaf, occurrence: id, derived_target: derivedSlot };
-        builder.edge(id, derivedSlot, sourceSemanticRelationKey("a_slot", query.alternative, query.frame, query.slot), derivedLeaf);
-        builder.edge(derivedSlot, id, sourceSemanticRelationKey("a_slot_inv", query.alternative, query.frame, query.slot), derivedLeaf);
+        builder.edge(id, derivedSlot, alignmentSlotKey("a_slot", query.alternative, query.frame, query.slot, group), derivedLeaf);
+        builder.edge(derivedSlot, id, alignmentSlotKey("a_slot_inv", query.alternative, query.frame, query.slot, group), derivedLeaf);
       }
     }
   }

@@ -29,7 +29,7 @@ import {
  * engine) owns the actual lowering; this admission only records the version.
  * Distinct lowering versions must not splice into one C.
  */
-export const SOURCE_SEMANTIC_LOWERING_VERSION = "source-semantic-lowering-v3" as const;
+export const SOURCE_SEMANTIC_LOWERING_VERSION = "source-semantic-lowering-v4" as const;
 
 export type SourceSemanticAlignmentAdmissionInput = Readonly<{
   readonly alignment: unknown;

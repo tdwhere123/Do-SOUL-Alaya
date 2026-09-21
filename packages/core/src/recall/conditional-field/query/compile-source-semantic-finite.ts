@@ -2,16 +2,20 @@ import {
   type QueryProgram, type SourceSemanticQuery, type SourceSemanticAlignment, type SourceSemanticInterpretation,
   type SourceSemanticResourceLedger, type SourceSemanticDomain
 } from "@do-soul/alaya-protocol";
-import { sourceSemanticRelationKey as key, type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
-import { compileSourceSemanticQueryProgram, compileSourceSemanticAlternative } from "./compile-source-semantic-query.js";
+import { sourceSemanticRelationKey as key, alignmentGroupPhases, type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
+import { compileSourceSemanticAlternative, compileSourceSemanticGroupProgram } from "./compile-source-semantic-query.js";
 import { semanticRelation as rel, semanticSequence as sequence, semanticAlternatives as alternatives,
   semanticOwnerProof, emptySemanticProgram } from "./source-semantic-proof-program.js";
 
 export type SourceSemanticProofBranch = Readonly<{ purpose: "support" | "counterexample" | "incomparable" | "empty_domain";
   alternative: number; candidate?: string; candidate_variable?: string }>;
+export type SourceSemanticGroupPhase = Readonly<{
+  program: QueryProgram; alternative: number; acceptIndex: number; groupFrame?: string;
+}>;
 export type SourceSemanticExecutionPlan = Readonly<{
   program: QueryProgram; branches: readonly SourceSemanticProofBranch[]; domain?: SourceSemanticDomain;
   missingOperands: boolean; missingMembership?: boolean;
+  groupPhases?: readonly SourceSemanticGroupPhase[];
 }>;
 type Input = Readonly<{ h: SourceSemanticInterpretation; q: SourceSemanticQuery; a: SourceSemanticAlignment;
   population: SourceSemanticPremisePopulation; meter: SourceSemanticResourceLedger }>;
@@ -20,10 +24,26 @@ const DOMAIN = "@finite:domain";
 /** Expand finite obligations only. Every outcome is still decided by the conditional-field engine. */
 export function compileSourceSemanticExecution(input: Input): SourceSemanticExecutionPlan {
   const { q, h, a, meter, population } = input;
-  if (q.evaluation === undefined) return {
-    program: compileSourceSemanticQueryProgram(q, meter, { h, population }),
-    branches: q.alternatives.map((_, alternative) => ({ purpose: "support", alternative })), missingOperands: false
-  };
+  if (q.evaluation === undefined) {
+    const finite = { h, population, alignment: a };
+    let acceptIndex = 0;
+    const groupPhases = q.alternatives.flatMap((alternative, index) => {
+      const frames = alignmentGroupPhases(q, a, index);
+      return frames.map((group) => {
+        const phase = {
+          program: compileSourceSemanticGroupProgram(q, alternative, index, meter, finite, group, acceptIndex),
+          alternative: index, acceptIndex, groupFrame: group
+        };
+        acceptIndex += 1;
+        return phase;
+      });
+    });
+    const branches = groupPhases.map((phase) => ({ purpose: "support" as const, alternative: phase.alternative }));
+    return {
+      program: groupPhases[0]?.program ?? emptySemanticProgram,
+      branches, missingOperands: false, groupPhases
+    };
+  }
   const mapping = a.domains?.find((row) => row.query_domain === q.evaluation!.domain);
   const domain = h.domains?.find((row) => row.id === mapping?.source_domain);
   if (domain === undefined) return { program: emptySemanticProgram, branches: [], missingOperands: false };
@@ -60,15 +80,19 @@ function compileUniversal(input: Input, domain: SourceSemanticDomain): SourceSem
   if (domain.context !== null) return { program: emptySemanticProgram, branches: [], domain, missingOperands: false };
   const branches: SourceSemanticProofBranch[] = [], options: QueryProgram[] = [];
   const body = (member: SourceSemanticDomain["members"][number], memberIndex: number, counterexample: boolean) => {
+    const finite = { h: input.h, population: input.population, alignment: input.a };
     const choices = q.alternatives.flatMap((alternative, index) => {
       if ((alternative.purpose === "counterexample") !== counterexample) return [];
-      meter.charge(1, 1024, "finite universal branch");
-      const suffix = `:member${memberIndex}:alt${index}`;
-      const rename = (name: string) => evaluation.local_variables.includes(name) || name.startsWith("@") ? `${name}${suffix}` : name;
-      const program = compileSourceSemanticAlternative(q, alternative, index, meter, input, true);
-      return [sequence([memberProof(input, domain, member, rename(evaluation.binder), `${memberIndex}:${index}`),
-        renameProgram(program, rename, meter),
-        rel(key("domain_return", domain.id), rename(alternative.frames[0]!.variable), DOMAIN, meter)])];
+      const frames = alignmentGroupPhases(q, input.a, index);
+      return frames.map((group, groupIndex) => {
+        meter.charge(1, 1024, "finite universal branch");
+        const suffix = `:member${memberIndex}:alt${index}:g${groupIndex}`;
+        const rename = (name: string) => evaluation.local_variables.includes(name) || name.startsWith("@") ? `${name}${suffix}` : name;
+        const program = compileSourceSemanticAlternative(q, alternative, index, meter, finite, true, group);
+        return sequence([memberProof(input, domain, member, rename(evaluation.binder), `${memberIndex}:${index}:${groupIndex}`),
+          renameProgram(program, rename, meter),
+          rel(key("domain_return", domain.id), rename(alternative.frames[0]!.variable), DOMAIN, meter)]);
+      });
     });
     return alternatives(choices);
   };

@@ -17,7 +17,7 @@ export function traceSourceSemanticWithdrawals(input: Readonly<{
   state: FieldEngineState; origins: ReadonlyMap<string, SourceSemanticConsumedLeaf>;
   baseline: SourceSemanticReasoningResult; limit: number;
   prefix_resource_usage: Readonly<{ work_units: number; memory_bytes: number }>;
-  project: (state: FieldEngineState) => SourceSemanticReasoningResult;
+  project: (state: FieldEngineState, leaf_id?: string) => SourceSemanticReasoningResult;
 }>): SourceSemanticWithdrawalTrace {
   const consumed = new Set(input.baseline.evidence_leaves?.map((row) => row.observation_id) ?? []);
   const candidates = [...input.origins].filter(([id, leaf]) => consumed.has(id)
@@ -34,7 +34,7 @@ export function traceSourceSemanticWithdrawals(input: Readonly<{
       leaves: localLeafIds(traced.traversal) };
   });
   const arms = selected.map(([leaf_id, leaf]) => {
-    const result = input.project(withdrawDerivationLeaves(input.state, leaf_id));
+    const result = input.project(withdrawDerivationLeaves(input.state, leaf_id), leaf_id);
     const independent = dependencies.filter((row) => row.complete && row.answer.explanation_ids.length > 0
       && !row.leaves.has(leaf_id)).map((row) => row.answer);
     return { leaf_id, leaf, result, independent_answer_bindings: independent.map((row) => row.binding_id),

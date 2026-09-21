@@ -1,0 +1,2133 @@
+{
+  "original_query": "Which brands offer which items?",
+  "h_id": "sha256:b313a448a950c8ddd45382e6cd16171d412c50646204c50740cec66e2f219c78",
+  "q": {
+    "contract": "source-semantic-query-v2",
+    "original_query_digest": "sha256:330a5309583f83aec96644da01d867e9e2d528e0a3467eaa1ab2a60a51527e64",
+    "producer_id": "alaya.source.semantic.query.soul.v1",
+    "producer_version": "1",
+    "contract_version": "source-semantic-query-v2",
+    "variables": [
+      {
+        "id": "offer_action",
+        "sort": "proposition"
+      },
+      {
+        "id": "brand",
+        "sort": "entity"
+      },
+      {
+        "id": "item",
+        "sort": "entity"
+      }
+    ],
+    "alternatives": [
+      {
+        "frames": [
+          {
+            "id": "offer_action",
+            "variable": "offer_action",
+            "predicate_reading": "offer",
+            "role_requirements": [
+              {
+                "id": "agent",
+                "role_reading": "agent",
+                "target_variable": "brand",
+                "support": {
+                  "kind": "query_text",
+                  "excerpt": "Which brands"
+                }
+              },
+              {
+                "id": "theme",
+                "role_reading": "theme",
+                "target_variable": "item",
+                "support": {
+                  "kind": "query_text",
+                  "excerpt": "which items"
+                }
+              }
+            ]
+          }
+        ],
+        "context_obligations": [
+          {
+            "frame": "offer_action",
+            "kind": "asserted_at_source"
+          }
+        ]
+      }
+    ],
+    "return_variables": [
+      "brand",
+      "item"
+    ],
+    "gaps": []
+  },
+  "a": {
+    "contract": "source-semantic-alignment-v2",
+    "h_id": "sha256:b313a448a950c8ddd45382e6cd16171d412c50646204c50740cec66e2f219c78",
+    "q_id": "sha256:5f61fded7b9d45ed64c0549fb977ffe2f5dcef018a729af7943e40d66fbfb788",
+    "producer_id": "alaya.source.semantic.alignment.soul.v1",
+    "producer_version": "1",
+    "contract_version": "source-semantic-alignment-v2",
+    "correspondences": [
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "predicate",
+          "alternative": 0,
+          "frame": "offer_action"
+        },
+        "source_endpoint": {
+          "kind": "frame",
+          "frame": "hoststatement4"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "offer"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention21"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "slot",
+          "alternative": 0,
+          "frame": "offer_action",
+          "slot": "agent"
+        },
+        "source_endpoint": {
+          "kind": "slot",
+          "frame": "hoststatement4",
+          "slot": "argument0"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "brands"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention7"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "slot",
+          "alternative": 0,
+          "frame": "offer_action",
+          "slot": "theme"
+        },
+        "source_endpoint": {
+          "kind": "slot",
+          "frame": "hoststatement4",
+          "slot": "argument1"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "items"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention8"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "predicate",
+          "alternative": 0,
+          "frame": "offer_action"
+        },
+        "source_endpoint": {
+          "kind": "frame",
+          "frame": "hoststatement5"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "offer"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention22"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "slot",
+          "alternative": 0,
+          "frame": "offer_action",
+          "slot": "agent"
+        },
+        "source_endpoint": {
+          "kind": "slot",
+          "frame": "hoststatement5",
+          "slot": "argument0"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "brands"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention9"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "slot",
+          "alternative": 0,
+          "frame": "offer_action",
+          "slot": "theme"
+        },
+        "source_endpoint": {
+          "kind": "slot",
+          "frame": "hoststatement5",
+          "slot": "argument1"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "items"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention10"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "predicate",
+          "alternative": 0,
+          "frame": "offer_action"
+        },
+        "source_endpoint": {
+          "kind": "frame",
+          "frame": "hoststatement6"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "offer"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention23"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "slot",
+          "alternative": 0,
+          "frame": "offer_action",
+          "slot": "agent"
+        },
+        "source_endpoint": {
+          "kind": "slot",
+          "frame": "hoststatement6",
+          "slot": "argument0"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "brands"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention11"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "slot",
+          "alternative": 0,
+          "frame": "offer_action",
+          "slot": "theme"
+        },
+        "source_endpoint": {
+          "kind": "slot",
+          "frame": "hoststatement6",
+          "slot": "argument1"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "items"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention12"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "predicate",
+          "alternative": 0,
+          "frame": "offer_action"
+        },
+        "source_endpoint": {
+          "kind": "frame",
+          "frame": "hoststatement7"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "offer"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention24"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "slot",
+          "alternative": 0,
+          "frame": "offer_action",
+          "slot": "agent"
+        },
+        "source_endpoint": {
+          "kind": "slot",
+          "frame": "hoststatement7",
+          "slot": "argument0"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "brands"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention13"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "slot",
+          "alternative": 0,
+          "frame": "offer_action",
+          "slot": "theme"
+        },
+        "source_endpoint": {
+          "kind": "slot",
+          "frame": "hoststatement7",
+          "slot": "argument1"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "items"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention14"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "predicate",
+          "alternative": 0,
+          "frame": "offer_action"
+        },
+        "source_endpoint": {
+          "kind": "frame",
+          "frame": "hoststatement8"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "offer"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention25"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "slot",
+          "alternative": 0,
+          "frame": "offer_action",
+          "slot": "agent"
+        },
+        "source_endpoint": {
+          "kind": "slot",
+          "frame": "hoststatement8",
+          "slot": "argument0"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "brands"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention15"
+            ]
+          }
+        ]
+      },
+      {
+        "relation": "contextual_equivalence",
+        "query_endpoint": {
+          "kind": "slot",
+          "alternative": 0,
+          "frame": "offer_action",
+          "slot": "theme"
+        },
+        "source_endpoint": {
+          "kind": "slot",
+          "frame": "hoststatement8",
+          "slot": "argument1"
+        },
+        "query_support": {
+          "kind": "query_text",
+          "excerpt": "items"
+        },
+        "source_semantic_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention16"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "h": {
+    "contract": "source-interpretation-v4",
+    "k_version": "source-semantic-k-v3",
+    "normalizer_version": "source-semantic-normalizer-v4",
+    "source": {
+      "source_id": "original:original-03-s0-r0",
+      "source_version": "aabb728e025aee9d489ae910c8d0b97142dbd607417721b166018b66011dcf78",
+      "content_digest": "sha256:1bfb736a1175b09a8d62d5836dcd738d546cb7af1fbf9c96cd3337074adac428",
+      "assertion_locations": [
+        {
+          "assertion_id": 1,
+          "source_utf8_span": [
+            0,
+            78
+          ]
+        },
+        {
+          "assertion_id": 2,
+          "source_utf8_span": [
+            79,
+            160
+          ]
+        },
+        {
+          "assertion_id": 3,
+          "source_utf8_span": [
+            161,
+            231
+          ]
+        },
+        {
+          "assertion_id": 4,
+          "source_utf8_span": [
+            232,
+            254
+          ]
+        },
+        {
+          "assertion_id": 5,
+          "source_utf8_span": [
+            255,
+            338
+          ]
+        },
+        {
+          "assertion_id": 6,
+          "source_utf8_span": [
+            339,
+            435
+          ]
+        },
+        {
+          "assertion_id": 7,
+          "source_utf8_span": [
+            436,
+            536
+          ]
+        },
+        {
+          "assertion_id": 8,
+          "source_utf8_span": [
+            537,
+            539
+          ]
+        },
+        {
+          "assertion_id": 9,
+          "source_utf8_span": [
+            540,
+            699
+          ]
+        },
+        {
+          "assertion_id": 10,
+          "source_utf8_span": [
+            700,
+            702
+          ]
+        },
+        {
+          "assertion_id": 11,
+          "source_utf8_span": [
+            703,
+            813
+          ]
+        },
+        {
+          "assertion_id": 12,
+          "source_utf8_span": [
+            814,
+            922
+          ]
+        },
+        {
+          "assertion_id": 13,
+          "source_utf8_span": [
+            923,
+            925
+          ]
+        },
+        {
+          "assertion_id": 14,
+          "source_utf8_span": [
+            926,
+            1098
+          ]
+        },
+        {
+          "assertion_id": 15,
+          "source_utf8_span": [
+            1099,
+            1101
+          ]
+        },
+        {
+          "assertion_id": 16,
+          "source_utf8_span": [
+            1102,
+            1282
+          ]
+        },
+        {
+          "assertion_id": 17,
+          "source_utf8_span": [
+            1283,
+            1394
+          ]
+        },
+        {
+          "assertion_id": 18,
+          "source_utf8_span": [
+            1395,
+            1468
+          ]
+        },
+        {
+          "assertion_id": 19,
+          "source_utf8_span": [
+            1469,
+            1506
+          ]
+        }
+      ]
+    },
+    "producer_id": "official-api-source-semantic",
+    "producer_version": "1",
+    "contract_version": "source-interpretation-v4",
+    "mentions": [
+      {
+        "id": "hostMention0",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s3",
+          "last": "a1s3"
+        },
+        "text": "I",
+        "utf8_span": [
+          6,
+          7
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention1",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s19",
+          "last": "a1s19"
+        },
+        "text": "LED",
+        "utf8_span": [
+          43,
+          46
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention2",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s25",
+          "last": "a1s25"
+        },
+        "text": "low",
+        "utf8_span": [
+          60,
+          63
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention3",
+        "assertion_id": 2,
+        "source_ref": {
+          "first": "a2s2",
+          "last": "a2s2"
+        },
+        "text": "you",
+        "utf8_span": [
+          82,
+          85
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention4",
+        "assertion_id": 2,
+        "source_ref": {
+          "first": "a2s16",
+          "last": "a2s16"
+        },
+        "text": "brands",
+        "utf8_span": [
+          128,
+          134
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention5",
+        "assertion_id": 3,
+        "source_ref": {
+          "first": "a3s0",
+          "last": "a3s0"
+        },
+        "text": "I",
+        "utf8_span": [
+          161,
+          162
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention6",
+        "assertion_id": 3,
+        "source_ref": {
+          "first": "a3s14",
+          "last": "a3s14"
+        },
+        "text": "options",
+        "utf8_span": [
+          200,
+          207
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention7",
+        "assertion_id": 6,
+        "source_ref": {
+          "first": "a6s0",
+          "last": "a6s0"
+        },
+        "text": "Philips",
+        "utf8_span": [
+          339,
+          346
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention8",
+        "assertion_id": 6,
+        "source_ref": {
+          "first": "a6s11",
+          "last": "a6s11"
+        },
+        "text": "stylish",
+        "utf8_span": [
+          371,
+          378
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention9",
+        "assertion_id": 9,
+        "source_ref": {
+          "first": "a9s0",
+          "last": "a9s0"
+        },
+        "text": "Lutron",
+        "utf8_span": [
+          540,
+          546
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention10",
+        "assertion_id": 9,
+        "source_ref": {
+          "first": "a9s13",
+          "last": "a9s13"
+        },
+        "text": "stylish",
+        "utf8_span": [
+          575,
+          582
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention11",
+        "assertion_id": 11,
+        "source_ref": {
+          "first": "a11s0",
+          "last": "a11s0"
+        },
+        "text": "Kohler",
+        "utf8_span": [
+          703,
+          709
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention12",
+        "assertion_id": 11,
+        "source_ref": {
+          "first": "a11s13",
+          "last": "a11s13"
+        },
+        "text": "low",
+        "utf8_span": [
+          736,
+          739
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention13",
+        "assertion_id": 14,
+        "source_ref": {
+          "first": "a14s0",
+          "last": "a14s0"
+        },
+        "text": "Delta",
+        "utf8_span": [
+          926,
+          931
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention14",
+        "assertion_id": 14,
+        "source_ref": {
+          "first": "a14s13",
+          "last": "a14s13"
+        },
+        "text": "low",
+        "utf8_span": [
+          957,
+          960
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention15",
+        "assertion_id": 16,
+        "source_ref": {
+          "first": "a16s0",
+          "last": "a16s0"
+        },
+        "text": "TOTO",
+        "utf8_span": [
+          1102,
+          1106
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention16",
+        "assertion_id": 16,
+        "source_ref": {
+          "first": "a16s13",
+          "last": "a16s13"
+        },
+        "text": "eco",
+        "utf8_span": [
+          1131,
+          1134
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention17",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s11",
+          "last": "a1s11"
+        },
+        "text": "start",
+        "utf8_span": [
+          19,
+          24
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention18",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s15",
+          "last": "a1s15"
+        },
+        "text": "switching",
+        "utf8_span": [
+          30,
+          39
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention19",
+        "assertion_id": 2,
+        "source_ref": {
+          "first": "a2s8",
+          "last": "a2s8"
+        },
+        "text": "recommendations",
+        "utf8_span": [
+          95,
+          110
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention20",
+        "assertion_id": 3,
+        "source_ref": {
+          "first": "a3s6",
+          "last": "a3s6"
+        },
+        "text": "interested",
+        "utf8_span": [
+          170,
+          180
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention21",
+        "assertion_id": 6,
+        "source_ref": {
+          "first": "a6s9",
+          "last": "a6s9"
+        },
+        "text": "offers",
+        "utf8_span": [
+          364,
+          370
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention22",
+        "assertion_id": 9,
+        "source_ref": {
+          "first": "a9s5",
+          "last": "a9s5"
+        },
+        "text": "offers",
+        "utf8_span": [
+          555,
+          561
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention23",
+        "assertion_id": 11,
+        "source_ref": {
+          "first": "a11s5",
+          "last": "a11s5"
+        },
+        "text": "offers",
+        "utf8_span": [
+          718,
+          724
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention24",
+        "assertion_id": 14,
+        "source_ref": {
+          "first": "a14s5",
+          "last": "a14s5"
+        },
+        "text": "offers",
+        "utf8_span": [
+          939,
+          945
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostMention25",
+        "assertion_id": 16,
+        "source_ref": {
+          "first": "a16s5",
+          "last": "a16s5"
+        },
+        "text": "offers",
+        "utf8_span": [
+          1113,
+          1119
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostAssertion4",
+        "assertion_id": 4,
+        "source_ref": {
+          "first": "a4s0",
+          "last": "a4s6"
+        },
+        "text": "Assistant: Great idea!",
+        "utf8_span": [
+          232,
+          254
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostAssertion5",
+        "assertion_id": 5,
+        "source_ref": {
+          "first": "a5s0",
+          "last": "a5s30"
+        },
+        "text": "Here are some eco-friendly brands that offer LED lighting and low-flow fixtures: 1.",
+        "utf8_span": [
+          255,
+          338
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostAssertion7",
+        "assertion_id": 7,
+        "source_ref": {
+          "first": "a7s0",
+          "last": "a7s35"
+        },
+        "text": "They offer a wide range of LED light bulbs and fixtures that are compatible with smart home systems.",
+        "utf8_span": [
+          436,
+          536
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostAssertion8",
+        "assertion_id": 8,
+        "source_ref": {
+          "first": "a8s0",
+          "last": "a8s1"
+        },
+        "text": "2.",
+        "utf8_span": [
+          537,
+          539
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostAssertion10",
+        "assertion_id": 10,
+        "source_ref": {
+          "first": "a10s0",
+          "last": "a10s1"
+        },
+        "text": "3.",
+        "utf8_span": [
+          700,
+          702
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostAssertion12",
+        "assertion_id": 12,
+        "source_ref": {
+          "first": "a12s0",
+          "last": "a12s32"
+        },
+        "text": "They are also WaterSense certified, which means they meet EPA criteria for water efficiency and performance.",
+        "utf8_span": [
+          814,
+          922
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostAssertion13",
+        "assertion_id": 13,
+        "source_ref": {
+          "first": "a13s0",
+          "last": "a13s1"
+        },
+        "text": "4.",
+        "utf8_span": [
+          923,
+          925
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostAssertion15",
+        "assertion_id": 15,
+        "source_ref": {
+          "first": "a15s0",
+          "last": "a15s1"
+        },
+        "text": "5.",
+        "utf8_span": [
+          1099,
+          1101
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostAssertion17",
+        "assertion_id": 17,
+        "source_ref": {
+          "first": "a17s0",
+          "last": "a17s37"
+        },
+        "text": "All of these brands offer stylish and sustainable options for LED lighting and low-flow fixtures for your home.",
+        "utf8_span": [
+          1283,
+          1394
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostAssertion18",
+        "assertion_id": 18,
+        "source_ref": {
+          "first": "a18s0",
+          "last": "a18s21"
+        },
+        "text": "Remember that eco-friendliness doesn't mean sacrificing style or quality.",
+        "utf8_span": [
+          1395,
+          1468
+        ],
+        "span_space": "source_utf8"
+      },
+      {
+        "id": "hostAssertion19",
+        "assertion_id": 19,
+        "source_ref": {
+          "first": "a19s0",
+          "last": "a19s14"
+        },
+        "text": "With these brands, you can have both.",
+        "utf8_span": [
+          1469,
+          1506
+        ],
+        "span_space": "source_utf8"
+      }
+    ],
+    "referents": [
+      {
+        "id": "hostentity0",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention0"
+        ]
+      },
+      {
+        "id": "hostentity1",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention1"
+        ]
+      },
+      {
+        "id": "hostentity2",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention2"
+        ]
+      },
+      {
+        "id": "hostentity3",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention3"
+        ]
+      },
+      {
+        "id": "hostentity4",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention4"
+        ]
+      },
+      {
+        "id": "hostentity5",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention5"
+        ]
+      },
+      {
+        "id": "hostentity6",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention6"
+        ]
+      },
+      {
+        "id": "hostentity7",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention7"
+        ]
+      },
+      {
+        "id": "hostentity8",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention8"
+        ]
+      },
+      {
+        "id": "hostentity9",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention9"
+        ]
+      },
+      {
+        "id": "hostentity10",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention10"
+        ]
+      },
+      {
+        "id": "hostentity11",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention11"
+        ]
+      },
+      {
+        "id": "hostentity12",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention12"
+        ]
+      },
+      {
+        "id": "hostentity13",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention13"
+        ]
+      },
+      {
+        "id": "hostentity14",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention14"
+        ]
+      },
+      {
+        "id": "hostentity15",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention15"
+        ]
+      },
+      {
+        "id": "hostentity16",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention16"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "hoststatement0",
+        "assertion_ids": [
+          1
+        ],
+        "context_owner": {
+          "kind": "source_act",
+          "source_act": "assertion"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "plan",
+          "mentions": [
+            "hostMention17"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "planner",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention0"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "intended activity",
+            "support": []
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity0"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention0"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hoststatement1"
+            },
+            "support": []
+          }
+        ]
+      },
+      {
+        "id": "hoststatement1",
+        "assertion_ids": [
+          1
+        ],
+        "context_owner": {
+          "kind": "embedding",
+          "parent_frame": "hoststatement0",
+          "content_argument": "hoststatement1"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "switch",
+          "mentions": [
+            "hostMention18"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "actor",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention0"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "target",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention1"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument2",
+            "role_reading": "target",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention2"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity0"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention0"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hostentity1"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention1"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument2",
+            "target": {
+              "kind": "node",
+              "id": "hostentity2"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention2"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hoststatement2",
+        "assertion_ids": [
+          2
+        ],
+        "context_owner": {
+          "kind": "source_act",
+          "source_act": "question"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "recommend",
+          "mentions": [
+            "hostMention19"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "requester",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention3"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "requested item",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention4"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity3"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention3"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hostentity4"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention4"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hoststatement3",
+        "assertion_ids": [
+          3
+        ],
+        "context_owner": {
+          "kind": "source_act",
+          "source_act": "assertion"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "interested in finding",
+          "mentions": [
+            "hostMention20"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "experiencer",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention5"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "object",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention6"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity5"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention5"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hostentity6"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention6"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hoststatement4",
+        "assertion_ids": [
+          6
+        ],
+        "context_owner": {
+          "kind": "source_act",
+          "source_act": "assertion"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "offer",
+          "mentions": [
+            "hostMention21"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "offerer",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention7"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "offered items",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention8"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity7"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention7"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hostentity8"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention8"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hoststatement5",
+        "assertion_ids": [
+          9
+        ],
+        "context_owner": {
+          "kind": "source_act",
+          "source_act": "assertion"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "offer",
+          "mentions": [
+            "hostMention22"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "offerer",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention9"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "offered items",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention10"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity9"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention9"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hostentity10"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention10"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hoststatement6",
+        "assertion_ids": [
+          11
+        ],
+        "context_owner": {
+          "kind": "source_act",
+          "source_act": "assertion"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "offer",
+          "mentions": [
+            "hostMention23"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "offerer",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention11"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "offered items",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention12"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity11"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention11"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hostentity12"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention12"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hoststatement7",
+        "assertion_ids": [
+          14
+        ],
+        "context_owner": {
+          "kind": "source_act",
+          "source_act": "assertion"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "offer",
+          "mentions": [
+            "hostMention24"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "offerer",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention13"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "offered items",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention14"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity13"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention13"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hostentity14"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention14"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hoststatement8",
+        "assertion_ids": [
+          16
+        ],
+        "context_owner": {
+          "kind": "source_act",
+          "source_act": "assertion"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "offer",
+          "mentions": [
+            "hostMention25"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "offerer",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention15"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "offered items",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention16"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity15"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention15"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hostentity16"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention16"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "operators": [],
+    "gaps": [
+      {
+        "kind": "uninterpreted_clause",
+        "affected_ids": [
+          "hostAssertion4"
+        ],
+        "support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostAssertion4"
+            ]
+          }
+        ],
+        "description": "No interpretation or located gap accounts for this selected source assertion."
+      },
+      {
+        "kind": "uninterpreted_clause",
+        "affected_ids": [
+          "hostAssertion5"
+        ],
+        "support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostAssertion5"
+            ]
+          }
+        ],
+        "description": "No interpretation or located gap accounts for this selected source assertion."
+      },
+      {
+        "kind": "uninterpreted_clause",
+        "affected_ids": [
+          "hostAssertion7"
+        ],
+        "support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostAssertion7"
+            ]
+          }
+        ],
+        "description": "No interpretation or located gap accounts for this selected source assertion."
+      },
+      {
+        "kind": "uninterpreted_clause",
+        "affected_ids": [
+          "hostAssertion8"
+        ],
+        "support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostAssertion8"
+            ]
+          }
+        ],
+        "description": "No interpretation or located gap accounts for this selected source assertion."
+      },
+      {
+        "kind": "uninterpreted_clause",
+        "affected_ids": [
+          "hostAssertion10"
+        ],
+        "support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostAssertion10"
+            ]
+          }
+        ],
+        "description": "No interpretation or located gap accounts for this selected source assertion."
+      },
+      {
+        "kind": "uninterpreted_clause",
+        "affected_ids": [
+          "hostAssertion12"
+        ],
+        "support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostAssertion12"
+            ]
+          }
+        ],
+        "description": "No interpretation or located gap accounts for this selected source assertion."
+      },
+      {
+        "kind": "uninterpreted_clause",
+        "affected_ids": [
+          "hostAssertion13"
+        ],
+        "support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostAssertion13"
+            ]
+          }
+        ],
+        "description": "No interpretation or located gap accounts for this selected source assertion."
+      },
+      {
+        "kind": "uninterpreted_clause",
+        "affected_ids": [
+          "hostAssertion15"
+        ],
+        "support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostAssertion15"
+            ]
+          }
+        ],
+        "description": "No interpretation or located gap accounts for this selected source assertion."
+      },
+      {
+        "kind": "uninterpreted_clause",
+        "affected_ids": [
+          "hostAssertion17"
+        ],
+        "support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostAssertion17"
+            ]
+          }
+        ],
+        "description": "No interpretation or located gap accounts for this selected source assertion."
+      },
+      {
+        "kind": "uninterpreted_clause",
+        "affected_ids": [
+          "hostAssertion18"
+        ],
+        "support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostAssertion18"
+            ]
+          }
+        ],
+        "description": "No interpretation or located gap accounts for this selected source assertion."
+      },
+      {
+        "kind": "uninterpreted_clause",
+        "affected_ids": [
+          "hostAssertion19"
+        ],
+        "support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostAssertion19"
+            ]
+          }
+        ],
+        "description": "No interpretation or located gap accounts for this selected source assertion."
+      }
+    ],
+    "entry_roots": [
+      "hoststatement0",
+      "hoststatement2",
+      "hoststatement3",
+      "hoststatement4",
+      "hoststatement5",
+      "hoststatement6",
+      "hoststatement7",
+      "hoststatement8"
+    ],
+    "asserted_at_scope": [
+      "hoststatement0",
+      "hoststatement3",
+      "hoststatement4",
+      "hoststatement5",
+      "hoststatement6",
+      "hoststatement7",
+      "hoststatement8"
+    ]
+  }
+}

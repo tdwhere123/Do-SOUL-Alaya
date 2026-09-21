@@ -21,6 +21,18 @@ export function source(): SourceSemanticInterpretation {
     frames: [event("fAlice", "rAlice", "rX"), event("fBob", "rBob", "rY")],
     operators: [], gaps: [], entry_roots: ["fAlice", "fBob"], asserted_at_scope: ["fAlice", "fBob"] };
 }
+export function catalog(count: number): SourceSemanticInterpretation {
+  const brands = ["Ann", "Bea", "Cam", "Dot", "Eve"];
+  const items = ["X", "Y", "Z", "U", "V"];
+  const names = [...brands.slice(0, count), ...items.slice(0, count), "uses"];
+  const frames = Array.from({ length: count }, (_, index) => event(`f${index}`, `r${brands[index]}`, `r${items[index]}`));
+  return { contract: "source-interpretation-v4", k_version: SOURCE_SEMANTIC_K_VERSION, normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
+    source: { source_id: "offer-catalog", source_version: "1", content_digest: `sha256:${sha(names.join(" "))}` },
+    producer_id: "fixture", producer_version: "1", contract_version: "source-interpretation-v4",
+    mentions: names.map((name, index) => ({ id: `m${name}`, assertion_id: 1, text: name, utf8_span: [0, name.length], source_ref: { first: `a1s${index}`, last: `a1s${index}` } })),
+    referents: names.slice(0, count * 2).map((name) => ({ id: `r${name}`, referent_kind: "grouped", mentions: [`m${name}`] })),
+    frames, operators: [], gaps: [], entry_roots: frames.map((row) => row.id), asserted_at_scope: frames.map((row) => row.id) };
+}
 export function event(id: string, actor: string, object: string): SourceSemanticInterpretation["frames"][number] {
   return { id, assertion_ids: [1], context_owner: { kind: "source_act", source_act: "assertion" }, additional_support: [],
     predicate_support: { kind: "explicit", reading: "use", mentions: ["muses"] },

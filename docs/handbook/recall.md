@@ -716,7 +716,9 @@ The `soul.interpretation` channel retains its source-local H, source-independent
 Q, explicit A, and selected C. It does not replace ordinary `soul.recall` or
 Garden v1. Protocol 6.6.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
 reasoning/cache v3, `source-semantic-k-v3`,
-`source-semantic-normalizer-v4` and `source-semantic-lowering-v3`. An older open
+`source-semantic-normalizer-v4` and `source-semantic-lowering-v4`. Each complete
+source-frame group is a jointly constrained compile alternative; slots must not
+float off that group's predicate frame. An older open
 H is not relabeled or silently promoted; recreate its interpretation explicitly.
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
