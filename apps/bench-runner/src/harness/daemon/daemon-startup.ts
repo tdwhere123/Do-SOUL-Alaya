@@ -23,6 +23,7 @@ import type { BenchDaemonConfigDirectoryLease } from "./daemon-config-directory.
 type ActiveBenchContext = { workspaceId: string; runId: string };
 
 export interface BenchDaemonStartupInput {
+  readonly sourceSemanticInterpretationClock?: string;
   readonly dataDir: string;
   readonly defaultWorkspaceId: string;
   readonly defaultRunId: string;
@@ -54,7 +55,8 @@ export async function initializeBenchDaemon(
     input.activeContext,
     input.expectedReconciliationBasis,
     input.relationProjectionAdmissionMode,
-    input.fieldProjectionAdmissionMode
+    input.fieldProjectionAdmissionMode,
+    input.sourceSemanticInterpretationClock
   );
   try {
     await installBenchProfile(
@@ -77,9 +79,11 @@ async function createBenchRuntimeResources(
   activeContext: ActiveBenchContext,
   expectedReconciliationBasis: EffectiveReconciliationBasis | undefined,
   relationProjectionAdmissionMode: RelationProjectionAdmissionMode | undefined,
-  fieldProjectionAdmissionMode: FieldProjectionAdmissionMode | undefined
+  fieldProjectionAdmissionMode: FieldProjectionAdmissionMode | undefined,
+  sourceSemanticInterpretationClock: string | undefined
 ): Promise<BenchDaemonStartupResources> {
   const runtime = await createAlayaDaemonRuntime({
+    ...(sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock }),
     relationProjectionAdmissionMode,
     fieldProjectionAdmissionMode
   });
@@ -89,9 +93,10 @@ async function createBenchRuntimeResources(
     await runtime.shutdown();
     throw error;
   }
+  const sessionId = `bench-session-${Date.now()}`;
   const server = createAlayaMcpServer({
     memoryToolHandler: runtime.services.mcpMemoryToolHandler,
-    contextProvider: () => createBenchToolContext(activeContext)
+    contextProvider: () => createBenchToolContext(activeContext, sessionId)
   });
   const mcpClient = new Client(
     { name: "alaya-bench-runner", version: resolveBenchRunnerVersion() },
@@ -126,12 +131,12 @@ function assertExpectedReconciliationBasis(
   }
 }
 
-function createBenchToolContext(activeContext: ActiveBenchContext) {
+function createBenchToolContext(activeContext: ActiveBenchContext, sessionId: string) {
   return {
     workspaceId: activeContext.workspaceId,
     runId: activeContext.runId,
     agentTarget: "bench-runner",
-    sessionId: `bench-session-${Date.now()}`,
+    sessionId,
     surfaceId: "bench"
   };
 }

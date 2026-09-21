@@ -75,6 +75,7 @@ export interface DaemonMcpMemoryToolHandlerInput {
   //   assertDeliveryInScope
   readonly claimSourceReader?: SoulResolveHandlerDependencies["claimSourceReader"];
   readonly causalUsagePort: CausalUsagePort;
+  readonly sourceSemanticInterpretationClock?: string;
   readonly sourceSemanticsPort?: McpMemoryToolHandlerDependencies["sourceSemanticsPort"];
   readonly sourceSemanticPublication?: McpMemoryToolHandlerDependencies["sourceSemanticPublication"];
 }
@@ -209,6 +210,7 @@ export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandl
       : { attachSurfaceRegistrar: input.attachSurfaceRegistrar }),
     soulResolveHandler,
     proposalWorkflow: buildDaemonMcpMemoryProposalWorkflow(input, reviewerIdentityBinding),
+    ...(input.sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock: input.sourceSemanticInterpretationClock }),
     ...(input.sourceSemanticsPort === undefined ? {} : { sourceSemanticsPort: input.sourceSemanticsPort }),
     ...(input.sourceSemanticPublication === undefined
       ? {}

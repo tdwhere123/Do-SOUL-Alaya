@@ -24,7 +24,7 @@ export type SourceSemanticPublicationPort = Readonly<{
   }>): Promise<Readonly<{ bound: SourceSemanticPublishedInterpretation; evidence: Readonly<{ object_id: string }>;
     resource_usage?: Readonly<{ work_units: number; memory_bytes: number; native_work?: number; native_bytes?: number }> }>>;
 }>;
-type Dependencies = Readonly<{ now: () => string; sourceSemanticsPort?: SourceSemanticHostPort; publication?: SourceSemanticPublicationPort }>;
+type Dependencies = Readonly<{ now: () => string; interpretationClock?: string; sourceSemanticsPort?: SourceSemanticHostPort; publication?: SourceSemanticPublicationPort }>;
 
 /** Preparation state lives in the bounded worker owner, never in a second main-thread catalog map. */
 export function createSourceSemanticInterpretationHandler(input: Dependencies):
@@ -137,10 +137,11 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
 async function executeWorker(input: Dependencies, context: McpMemoryToolCallContext, request: SourceSemanticWorkerRequest,
   authorized_scopes: AuthorizedScopesAdmission): Promise<SourceSemanticWorkerResult> {
   if (input.sourceSemanticsPort === undefined) throw new ToolUnavailableError("soul.interpretation worker is not wired into this daemon");
-  const asOf = input.now();
+  const now = input.now();
+  const asOf = input.interpretationClock ?? now;
   return input.sourceSemanticsPort.execute({ workspace_id: context.workspaceId, as_of: asOf,
     authorized_scopes, principal: JSON.stringify([context.agentTarget, context.sessionId, context.runId]),
-    expires_at: new Date(Date.parse(asOf) + 600_000).toISOString(), request });
+    expires_at: new Date(Date.parse(now) + 600_000).toISOString(), request });
 }
 function mcpFromWorker(result: SourceSemanticWorkerResult): SoulInterpretationResponse {
   if (result.kind === "validate_source") throw new CoreError("OBLIGATION_VIOLATION", "internal preparation cannot escape as an MCP response");

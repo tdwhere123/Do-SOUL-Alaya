@@ -7,8 +7,8 @@ import {
   readBoundedCanonicalUtf8Artifact
 } from "../cache-audit/bounded-artifact-reader.js";
 import { writeBytesExclusiveDurable } from "./manifest/durable-exclusive-publication.js";
-import { BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES,
-  type BenchTransportFailureAttempt } from "../../compile-seed/compile-seed-types.js";
+import { BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES, BENCH_TERMINAL_RETRY_CLASSIFICATIONS,
+  type BenchTransportFailureAttempt, type BenchTerminalRetryClassification } from "../../compile-seed/compile-seed-types.js";
 
 export const PROVIDER_RAW_ATTEMPT_CONTRACT = "provider-raw-attempt-v1" as const;
 const MAX_RETAINED_RAW_BYTES = 1024 * 1024;
@@ -38,6 +38,8 @@ const ProviderRawAttemptSchema = z.object({
   usage: UsageSchema.nullable(),
   usage_known: z.boolean(),
   transport_phase: z.string().nullable(),
+  failure_retryable: z.boolean().optional(),
+  failure_classification: z.enum(BENCH_TERMINAL_RETRY_CLASSIFICATIONS).optional(),
   transport_failure: z.object({
     kind: z.enum(BENCH_TRANSPORT_FAILURE_KINDS),
     phase: z.enum(BENCH_TRANSPORT_FAILURE_PHASES),
@@ -124,6 +126,8 @@ export function writeProviderRawAttempt(input: Readonly<{
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
   transportPhase?: string;
   transportFailure?: BenchTransportFailureAttempt;
+  failureRetryable?: boolean;
+  failureClassification?: BenchTerminalRetryClassification;
   responseBody?: string;
 }>): ProviderRawAttempt {
   const original = Buffer.from(input.decodedText, "utf8");
@@ -148,6 +152,8 @@ export function writeProviderRawAttempt(input: Readonly<{
     usage_known: input.usage !== undefined,
     transport_phase: input.transportPhase ?? "response_schema",
     ...(input.transportFailure === undefined ? {} : { transport_failure: input.transportFailure }),
+    ...(input.failureRetryable === undefined ? {} : { failure_retryable: input.failureRetryable }),
+    ...(input.failureClassification === undefined ? {} : { failure_classification: input.failureClassification }),
     ...(input.responseBody === undefined ? {} : { response_body: retainResponseBody(input.responseBody) }),
     extracted_at: new Date().toISOString()
   });
@@ -169,7 +175,7 @@ export function retainedFailureOutcome(raw: ProviderRawAttempt) {
   if (raw.transport_failure === undefined) return undefined;
   return {
     retryCount: 0, rateLimitRetries: 0, successfulRequestCount: 0,
-    terminalRetryClassification: "failure_non_retryable_response" as const,
+    terminalRetryClassification: raw.failure_classification ?? "failure_non_retryable_response" as const,
     transportFailures: [raw.transport_failure], usageRequestCount: raw.usage_known ? 1 : 0,
     ...(raw.usage === null ? {} : { usage: raw.usage })
   };

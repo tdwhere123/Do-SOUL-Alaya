@@ -293,6 +293,8 @@ it("gives one process the writer lease and rejects a second real process", async
 }, 30_000);
 
 it.each([
+  { label: "HTTP 500", status: 500, attempts: 2, body: '{"error":{"code":500,"message":"fixture failed"}}',
+    kind: "http_error", phase: "response_status", finish: null, known: false },
   { label: "thought-only STOP", body: JSON.stringify({ candidates: [{ finishReason: "STOP", content: {
     parts: [{ thought: true, text: "private synthetic thought" }] } }],
     usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 0, thoughtsTokenCount: 3, totalTokenCount: 13 } }),
@@ -302,7 +304,7 @@ it.each([
     kind: "provider_error", phase: "response_parse", finish: null, known: true },
   { label: "malformed body", body: "{", kind: "response_parse_error", phase: "response_parse", finish: null, known: false },
   { label: "malformed envelope", body: "{}", kind: "response_schema_error", phase: "response_schema", finish: null, known: false }
-])("retains classified $label failure without buying a second extract", async (response) => {
+]) ("retains classified $label evidence within its exact attempt ceiling", async (response) => {
   const root = tempRoot();
   const cacheRoot = join(root, "cache");
   const prepared = workset();
@@ -312,6 +314,7 @@ it.each([
     req.on("data", (chunk: Buffer) => { chunks.push(chunk); });
     req.on("end", () => {
       hits += 1;
+      res.statusCode = response.status ?? 200;
       res.setHeader("content-type", "application/json");
       res.end(response.body);
     });
@@ -329,8 +332,8 @@ it.each([
     const result = await executeSemanticProposalFill({
       workset: prepared, cacheRoot, authority, config: { ...config(), providerUrl: origin }
     });
-    expect(hits).toBe(1);
-    expect(result.attempts).toBe(1);
+    expect(hits).toBe("attempts" in response ? response.attempts : 1);
+    expect(result.attempts).toBe("attempts" in response ? response.attempts : 1);
     expect(result.newly_admitted).toBe(0);
     expect(result.terminal_failures).toBe(1);
     const key = authority.keys[0]!;
@@ -346,10 +349,13 @@ it.each([
     })?.admitted).toBe(false);
     const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
     expect(ledger.snapshot().unresolvedAttempts).toEqual([]);
-    expect(ledger.snapshot().transportFailures).toMatchObject([{ kind: response.kind, phase: response.phase }]);
+    expect(ledger.snapshot().transportFailures.every((failure) => failure.kind === response.kind && failure.phase === response.phase)).toBe(true);
+    if ("attempts" in response) expect(readProviderRawAttempt(cacheRoot, key, 2)).toMatchObject({
+      failure_retryable: true, response_body: { text: response.body }, transport_failure: { kind: "http_error", httpStatus: 500 }
+    });
     expect(ledger.snapshot().successfulShards).toBe(0);
     await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: { ...config(), apiKey: null } });
-    expect(hits).toBe(1);
+    expect(hits).toBe("attempts" in response ? response.attempts : 1);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => {

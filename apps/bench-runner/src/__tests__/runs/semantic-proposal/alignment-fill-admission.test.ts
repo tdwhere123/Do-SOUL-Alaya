@@ -164,6 +164,13 @@ function selectionBody(request: SourceSemanticAlignmentRequest, excerpt: string)
   });
 }
 
+it("rejects an alignment workset whose original question differs from the admitted query digest", () => {
+  const workset = alignmentWorkset();
+  expect(() => materializeSemanticProposalLines({ ...workset, items: [{
+    ...(workset.items[0] as Record<string, unknown>), original_query: "Another original question?"
+  }] }, 128)).toThrow(/Q does not bind the original query/u);
+});
+
 async function fillAlignment(excerpt: string) {
   const cacheRoot = join(tempRoot(), "cache");
   const prepared = alignmentWorkset();

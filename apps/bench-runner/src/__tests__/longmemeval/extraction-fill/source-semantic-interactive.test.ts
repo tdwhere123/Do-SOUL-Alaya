@@ -15,6 +15,7 @@ import type { LongMemEvalExpansionCapability } from "../../../datasets/longmemev
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
+import { assertNativeSemanticChain } from "./semantic-chain.test-support.js";
 
 const MODEL = "gemini-2.5-flash-lite";
 const REQUEST_PROFILE = "gemini-2.5-nonthinking-v1" as const;
@@ -63,15 +64,15 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   return JSON.stringify(editable);
 }
 
-async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic") {
+async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic", questions = 1) {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid");
-  await writeDataset([buildExtractionFillQuestion("q0",
+  await writeDataset(Array.from({ length: questions }, (_, index) => buildExtractionFillQuestion(`q${index}`,
     "I completed alpha. The room was quiet. The desk was clear. The lamp was on. The window was open. " +
-    "The door was closed. The shelf was full. The clock was ticking. The floor was clean. It is ready.",
-    "I completed decoy.")]);
+    `The door was closed. The shelf was full. The clock was ticking. The floor was clean. It is ready. Record ${index}.`,
+    `I completed decoy. Record ${index}.`)));
   const inspection = await inspectExtractionAuthority({
     variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot, sourcePacking: "complete-source",
     openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION, revision: readCurrentExtractionAuthorityRevision(),
@@ -102,7 +103,7 @@ async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic")
 }
 
 it("fills complete-source open semantics through interactive generateContent without Batch isolation or packing-size errors", async () => {
-  const fixture = await setupInteractive();
+  const fixture = await setupInteractive("semantic", 9);
   const receipt = JSON.parse(readFileSync(fixture.receiptPath, "utf8")) as {
     readonly limits: { readonly starting_missing: number; readonly maximum_attempts: number };
   };
@@ -148,6 +149,7 @@ it("fills complete-source open semantics through interactive generateContent wit
   expect(report.published_count).toBe(census.records.length);
   expect(report.h_binding_complete).toBe(true);
   expect(report.sources.every((source) => source.h_binding?.kind === "host_publication_association")).toBe(true);
+  await assertNativeSemanticChain(cacheRoot);
 }, 60000);
 
 it("quarantines an interactive generateContent line through the same source-semantic receiver as Batch", async () => {
@@ -229,16 +231,19 @@ it("does not retry thought-only STOP generateContent as transport", async () => 
   expect(ledger.attempts).toBe(fixture.keys.length);
 }, 60000);
 
-it("records an interactive generateContent network failure on the attempt ledger", async () => {
+it.each(["network", "http"])("retains each interactive %s failure and never repeats exhausted attempts", async (kind) => {
   const fixture = await setupInteractive();
-  vi.stubGlobal("fetch", vi.fn(async () => {
+  const fetchMock = vi.fn(async () => {
+    if (kind === "http") return Response.json({ error: { code: 500, message: "fixture server failure" } }, { status: 500 });
     throw Object.assign(new TypeError("fetch failed"), { cause: new Error("socket hang up") });
-  }));
-  expect(await runCli([
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const args = [
     "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
     "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
     "--extraction-source-packing", "complete-source", "--extraction-authority", fixture.receiptPath
-  ])).toBe(0);
+  ];
+  expect(await runCli(args)).toBe(0);
   const ledgerName = readdirSync(cacheRoot).find((name) => name.startsWith("extraction-attempt-ledger"));
   expect(ledgerName).toBeDefined();
   const ledger = JSON.parse(readFileSync(join(cacheRoot, ledgerName!), "utf8")) as {
@@ -249,6 +254,16 @@ it("records an interactive generateContent network failure on the attempt ledger
   expect(ledger.successful_shards).toEqual([]);
   expect(ledger.transport_failures.length).toBeGreaterThan(0);
   expect(ledger.attempts).toBe(fixture.keys.length * 2);
+  for (const key of fixture.keys) {
+    const raws = listProviderRawAttempts(cacheRoot, key);
+    expect(raws).toHaveLength(2);
+    expect(raws.every((raw) => raw.failure_retryable === true && raw.usage_known === false)).toBe(true);
+    if (kind === "http") expect(raws[0]).toMatchObject({
+      transport_failure: { kind: "http_error", httpStatus: 500 }, response_body: { text: expect.stringContaining("fixture server failure") }
+    });
+  }
+  expect(await runCli(args)).toBe(0);
+  expect(fetchMock).toHaveBeenCalledTimes(fixture.keys.length * 2);
 }, 60000);
 
 it("continues later complete-source keys after one interactive transport failure", async () => {

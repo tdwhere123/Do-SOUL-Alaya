@@ -170,6 +170,19 @@ function lookupOf(
   };
 }
 
+/** Offline consumers use the same exact-request lookup, receiver and Core admission as fill. */
+export function readSemanticProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number) {
+  return materializeSemanticProposalLines(workset, maxOutputTokens).map((line) => {
+    const shard = inspectSemanticProposalShard(cacheRoot, line.key, lookupOf(workset, line, maxOutputTokens));
+    if (shard === undefined) return { line, status: "unattempted" as const };
+    const classified = replayCachedProposalShard(line, shard);
+    if (!isExecutableProposalShard(shard)) return { line, shard, status: classified };
+    const received = receiveLine(line, shard.raw_json);
+    if (!isCoreAdmittedProposal(line, received)) throw new SemanticProposalIdentityError("cached proposal no longer admits");
+    return { line, shard, received, status: "interpreted" as const };
+  });
+}
+
 type ProposalLedger = ReturnType<typeof openSemanticProposalAttemptLedger>;
 
 async function fillLine(
@@ -209,15 +222,9 @@ async function fillLine(
       if (transport === undefined || transport.transportFailures.length === 0) throw cause;
       appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
         `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
-      if (isCompletedNonRetryableResponse(transport)) {
-        return persistCompletedEmptyExtract(input, line, ledger, transport, ordinal, used, readGeminiFailureResponse(cause));
-      }
-      if (lastAttempt) {
-        writeAttempt(input, line, "", undefined, { status: "transport_failure" }, false, ordinal, null);
-        ledger.recordTransportOutcome(line.key, transport, ordinal);
-        return { classified: "retryable", admitted: false, attempts: used };
-      }
-      ledger.recordTransportOutcome(line.key, transport, ordinal);
+      const settled = persistFailedExtract(input, line, ledger, transport, ordinal, used,
+        readGeminiFailureResponse(cause), lastAttempt);
+      if (settled.classified !== "retryable" || lastAttempt) return settled;
       continue;
     }
     writeProviderRawAttempt({
@@ -314,11 +321,11 @@ function replayPersistedProposalRaw(
   });
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
-    writeAttempt(input, line, raw.decoded_text, raw.usage ?? undefined,
+    if (raw.failure_retryable !== true || lastAttempt) writeAttempt(input, line, raw.decoded_text, raw.usage ?? undefined,
       { status: "transport_failure", failure: raw.transport_failure }, false, raw.attempt_ordinal, raw.finish_reason);
     ledger.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);
     ledger.abandonPendingShard(line.key, raw.attempt_ordinal);
-    return { classified: "terminal", admitted: false };
+    return { classified: raw.failure_retryable === true ? "retryable" : "terminal", admitted: false };
   }
   if (!raw.full_replay_possible) {
     const usage = raw.usage_known && raw.usage !== null ? raw.usage : undefined;
@@ -480,14 +487,15 @@ function settledProposalRequestOutcome(
   };
 }
 
-function persistCompletedEmptyExtract(
+function persistFailedExtract(
   input: Parameters<typeof executeSemanticProposalFill>[0],
   line: SemanticProposalLine,
   ledger: ProposalLedger,
   transport: NonNullable<ReturnType<typeof readLiveTransportFailure>>,
   ordinal: number,
   used: number,
-  response: ReturnType<typeof readGeminiFailureResponse>
+  response: ReturnType<typeof readGeminiFailureResponse>,
+  lastAttempt: boolean
 ): { classified: ProposalAttemptClass; admitted: boolean; attempts: number } {
   const usage = transport.usage;
   const phase = transport.transportFailures[0]?.phase;
@@ -498,11 +506,13 @@ function persistCompletedEmptyExtract(
     finishReason: response?.finishReason ?? null,
     ...(response === undefined ? {} : { responseBody: response.rawBody }),
     ...(transport.transportFailures[0] === undefined ? {} : { transportFailure: transport.transportFailures[0] }),
+    failureRetryable: !isCompletedNonRetryableResponse(transport),
+    ...(transport.terminalRetryClassification === undefined ? {} : { failureClassification: transport.terminalRetryClassification }),
     ...(usage === undefined ? {} : { usage }),
     ...(phase === undefined ? {} : { transportPhase: phase })
   });
   return {
-    ...replayPersistedProposalRaw(input, line, ledger, raw, true),
+    ...replayPersistedProposalRaw(input, line, ledger, raw, lastAttempt),
     attempts: used
   };
 }

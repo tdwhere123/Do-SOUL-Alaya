@@ -54,6 +54,7 @@ function createAttachSurfaceRegistrarInput(input: FinalizeDaemonRuntimeWiringInp
 
 function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput) {
   return {
+    ...(input.sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock: input.sourceSemanticInterpretationClock }),
     zeroDayToolAccess: input.zeroDaySecurityLayer,
     recallService: input.recallService,
     memoryService: input.memoryService,

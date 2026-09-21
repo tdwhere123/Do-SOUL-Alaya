@@ -71,6 +71,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
 
 export interface AlayaDaemonRuntimeOptions {
+  readonly sourceSemanticInterpretationClock?: string;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
 }
@@ -96,7 +97,8 @@ export async function createAlayaDaemonRuntime(
       bootstrap,
       repositories,
       foundation,
-      recallAndCore
+      recallAndCore,
+      options.sourceSemanticInterpretationClock
     );
     installUnhandledRejectionHandler(bootstrap.warnLogger, process, {
       shutdown: runtime.shutdown
@@ -277,7 +279,8 @@ async function finalizeRuntime(
   repositories: ReturnType<typeof createDaemonRepositoryWiring>,
   foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
   runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>,
-  gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>
+  gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>,
+  sourceSemanticInterpretationClock?: string
 ) {
   return await finalizeDaemonRuntimeFromWiring(
     buildFinalizeDaemonRuntimeWiringInput(
@@ -285,7 +288,8 @@ async function finalizeRuntime(
       repositories,
       foundation,
       runtimeWiring,
-      gardenWiring
+      gardenWiring,
+      sourceSemanticInterpretationClock
     )
   );
 }
@@ -301,9 +305,11 @@ function buildFinalizeDaemonRuntimeWiringInput(
   repositories: ReturnType<typeof createDaemonRepositoryWiring>,
   foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
   runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>,
-  gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>
+  gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>,
+  sourceSemanticInterpretationClock?: string
 ) {
   return {
+    sourceSemanticInterpretationClock,
     ...buildFinalizeSurfaceRuntimeInput(bootstrap, repositories, foundation, runtimeWiring),
     ...buildFinalizeGovernanceRuntimeInput(
       bootstrap,
@@ -445,10 +451,11 @@ async function createGardenAndFinalRuntime(
   bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>,
   repositories: ReturnType<typeof createDaemonRepositoryWiring>,
   foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
-  runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>
+  runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>,
+  sourceSemanticInterpretationClock?: string
 ) {
   const gardenWiring = await buildGardenWiring(bootstrap, repositories, foundation, runtimeWiring);
-  return await finalizeRuntime(bootstrap, repositories, foundation, runtimeWiring, gardenWiring);
+  return await finalizeRuntime(bootstrap, repositories, foundation, runtimeWiring, gardenWiring, sourceSemanticInterpretationClock);
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {

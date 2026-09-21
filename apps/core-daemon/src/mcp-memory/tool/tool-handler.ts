@@ -47,8 +47,11 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   });
   const operations = createMcpMemoryToolOperations({ deps, now, generateId, warn });
   const surfaceRegistrar = createAgentSurfaceRegistrar({ deps, warn });
+  const interpretationClock = deps.sourceSemanticInterpretationClock === undefined ? undefined
+    : new Date(deps.sourceSemanticInterpretationClock).toISOString();
   const interpretation = createSourceSemanticInterpretationHandler({
     now,
+    ...(interpretationClock === undefined ? {} : { interpretationClock }),
     ...(deps.sourceSemanticsPort === undefined ? {} : { sourceSemanticsPort: deps.sourceSemanticsPort }),
     ...(deps.sourceSemanticPublication === undefined
       ? {}

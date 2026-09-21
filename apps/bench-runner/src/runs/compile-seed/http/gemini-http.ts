@@ -69,7 +69,8 @@ async function extractGeminiOnce(
     if (!response.ok) {
       attempt.phase = "response_status";
       attempt.kind = "http_error";
-      await response.body?.cancel();
+      attempt.rawBody = await readBoundedResponse(response, MAX_GEMINI_RESPONSE_BYTES);
+      try { attempt.usage = geminiUsage(record(JSON.parse(attempt.rawBody))); } catch { /* HTTP status remains authoritative. */ }
       throw new Error(`Gemini HTTP ${response.status}`);
     }
     const decoded = await decodeGeminiResponse(response, input, attempt);

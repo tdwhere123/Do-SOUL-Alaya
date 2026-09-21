@@ -303,6 +303,7 @@ export interface McpMemoryToolHandlerDependencies {
   // see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts
   //   createSoulResolveHandler
   readonly soulResolveHandler?: SoulResolveHandler;
+  readonly sourceSemanticInterpretationClock?: string;
   readonly sourceSemanticsPort?: SourceSemanticHostPort;
   readonly sourceSemanticPublication?: SourceSemanticPublicationPort;
   readonly now?: () => string;

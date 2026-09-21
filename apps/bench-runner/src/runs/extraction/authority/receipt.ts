@@ -497,7 +497,7 @@ function isContinuation(value: unknown): value is SameRootExtractionContinuation
 function isDigest40(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
 }
-function isAuthorityRevision(value: unknown): value is string {
+export function isAuthorityRevision(value: unknown): value is string {
   return isDigest40(value) || (typeof value === "string" &&
     /^git-worktree-v1:[a-f0-9]{40}:[a-f0-9]{64}$/u.test(value));
 }

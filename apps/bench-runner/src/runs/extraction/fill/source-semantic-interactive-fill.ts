@@ -116,8 +116,10 @@ async function fillInteractiveLine(
 ): Promise<"admitted" | "quarantined" | "transport_exhausted"> {
   const replayed = replayInteractiveRaws(input, workset, line);
   if (replayed !== undefined) return replayed;
+  const retained = new Set(input.authority!.snapshot()?.transportFailures
+    .filter((item) => item.cacheKey === line.key).map((item) => item.attemptOrdinal));
   let last: "quarantined" | "transport_exhausted" = "transport_exhausted";
-  for (let attempt = 0; attempt < COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD; attempt += 1) {
+  for (let attempt = retained.size; attempt < COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD; attempt += 1) {
     const outcome = await dispatchInteractiveLine(input, workset, line, extractor, maxOutputTokens);
     if (outcome === "admitted" || outcome === "quarantined") return outcome;
     last = outcome;
@@ -144,7 +146,7 @@ function replayInteractiveRaws(
     const outcome = importInteractiveFromRaw(input, line, sourceCorpus, raw);
     if (outcome === "admitted" || outcome === "quarantined") return outcome;
   }
-  return "transport_exhausted";
+  return raws.length >= COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD ? "transport_exhausted" : undefined;
 }
 
 function importInteractiveFromRaw(
@@ -152,7 +154,7 @@ function importInteractiveFromRaw(
   line: GeminiBatchLine,
   sourceCorpus: string,
   raw: ProviderRawAttempt
-): "admitted" | "quarantined" {
+): "admitted" | "quarantined" | "transport_exhausted" {
   bindProviderRawAttempt(raw, {
     cacheKey: line.key, kind: "source_semantic", model: input.prepared.config.model,
     requestProfile: input.prepared.config.requestProfile,
@@ -162,7 +164,7 @@ function importInteractiveFromRaw(
   if (failure !== undefined) {
     input.authority!.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);
     input.authority!.abandonPendingShard(line.key, raw.attempt_ordinal);
-    return "quarantined";
+    return raw.failure_retryable === true ? "transport_exhausted" : "quarantined";
   }
   if (!raw.full_replay_possible) {
     input.authority!.abandonPendingShard(line.key, raw.attempt_ordinal);
@@ -215,24 +217,21 @@ async function dispatchInteractiveLine(
     if (outcome === undefined || outcome.transportFailures.length === 0) throw cause;
     appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
       `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
-    if (isCompletedNonRetryableResponse(outcome)) {
-      const response = readGeminiFailureResponse(cause);
-      const raw = writeProviderRawAttempt({
-        root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",
-        model: input.prepared.config.model, requestProfile: input.prepared.config.requestProfile,
-        requestDigest: requestEnvelopeDigest(line.userPrompt), decodedText: "",
-        finishReason: response?.finishReason ?? null,
-        ...(response === undefined ? {} : { responseBody: response.rawBody }),
-        ...(outcome.transportFailures[0] === undefined ? {} : { transportFailure: outcome.transportFailures[0] }),
-        ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
-        ...(outcome.transportFailures[0]?.phase === undefined
-          ? {} : { transportPhase: outcome.transportFailures[0].phase })
-      });
-      return importInteractiveFromRaw(input, line, sourceCorpus, raw);
-    }
-    authority.recordTransportOutcome(line.key, outcome, attemptOrdinal);
-    authority.abandonPendingShard(line.key, attemptOrdinal);
-    return "transport_exhausted";
+    const response = readGeminiFailureResponse(cause);
+    const raw = writeProviderRawAttempt({
+      root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",
+      model: input.prepared.config.model, requestProfile: input.prepared.config.requestProfile,
+      requestDigest: requestEnvelopeDigest(line.userPrompt), decodedText: "",
+      finishReason: response?.finishReason ?? null,
+      failureRetryable: !isCompletedNonRetryableResponse(outcome),
+      failureClassification: outcome.terminalRetryClassification,
+      ...(response === undefined ? {} : { responseBody: response.rawBody }),
+      ...(outcome.transportFailures[0] === undefined ? {} : { transportFailure: outcome.transportFailures[0] }),
+      ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
+      ...(outcome.transportFailures[0]?.phase === undefined
+        ? {} : { transportPhase: outcome.transportFailures[0].phase })
+    });
+    return importInteractiveFromRaw(input, line, sourceCorpus, raw);
   }
   writeProviderRawAttempt({
     root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",

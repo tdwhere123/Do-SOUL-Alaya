@@ -271,7 +271,7 @@ function indexRetainedSemantics(
       boundSources.add(binding.source_id);
     }
     if (population.cacheRoot === undefined) continue;
-    for (const key of listShardKeys(population.cacheRoot)) {
+    for (const key of listRetainedSourceSemanticKeys(population.cacheRoot)) {
       const native = inspectCachedSourceSemantic(population.cacheRoot, key, population.model, population.requestProfile);
       const matched = bindings.filter((binding) => binding.generation_key === key);
       if (matched.length === 0) {
@@ -297,7 +297,7 @@ function indexRetainedSemantics(
   return { joined, unbound };
 }
 
-function listShardKeys(cacheRoot: string): readonly string[] {
+export function listRetainedSourceSemanticKeys(cacheRoot: string): readonly string[] {
   const keys: string[] = [];
   if (!existsSync(cacheRoot)) return keys;
   for (const bucket of readdirSync(cacheRoot, { withFileTypes: true })) {

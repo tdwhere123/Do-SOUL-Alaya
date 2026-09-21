@@ -89,3 +89,56 @@ explicit `--producer-commit FULL_SHA` provenance declaration.
 Source artifacts cannot enter the existing post-extraction snapshot reader.
 That domain still requires complete current cache authority and `answers_with`
 formation; source preparation does not satisfy those enhancement prerequisites.
+
+## Offline semantic chain
+
+After `pnpm build`, `node apps/bench-runner/dist/runs/semantic-chain/launch.js`
+provides `associate`, `prepare`, `replay`, and `measure`. These operations make
+no provider calls. Query and alignment extraction still uses the existing
+`semantic-proposal-fill` preparation, authority, attempt ledger, and interactive
+SSE execution; the chain does not dispatch Batch or authorize extraction.
+
+```bash
+node apps/bench-runner/dist/runs/semantic-chain/launch.js associate \
+  --config population.json --preflight retained-preflight.json --out associations.json
+node apps/bench-runner/dist/runs/semantic-chain/launch.js prepare \
+  --config chain-config.json --root .do-it/bench-runs/semantic-chain
+node apps/bench-runner/dist/runs/semantic-chain/launch.js replay \
+  --root .do-it/bench-runs/semantic-chain --arm retained
+node apps/bench-runner/dist/runs/semantic-chain/launch.js measure \
+  --root .do-it/bench-runs/semantic-chain --replay REPLAY_PATH --gold query-gold.json
+```
+
+Population configuration contains `name`, `dataDir`, `pinnedMetaRoot`,
+`cacheRoot`, `model`, and `requestProfile`. The association report retains
+ambiguous, invalid, and unbound artifacts; its `.associations.json` companion
+is directly usable by source publication. Use the retained preflight covering
+the intended request set, including an earlier complete preflight when the
+last fill contains only remaining requests. Associations are new host
+publication decisions, not historical source-origin or completion witnesses.
+Historical templates incompatible with the current request owner fail closed.
+
+The [chain configuration schema](src/runs/semantic-chain/contract.ts) requires
+the frozen snapshot path/digest, current extraction-authority implementation
+revision, fixed ISO interpretation clock, workspace/run, exact query workset,
+Q/A cache roots, output cap, discovery page cap, alignment pair cap, native
+request budget, authorized scopes, and output byte limit. Preparation preserves
+every question, blocks non-executable Q, and writes an alignment workset only
+from actual paged native discovery. Unvisited H count remains unknown; visited
+but unselected H remains unattempted. Gold is unavailable to preparation.
+
+Stages are immutable and bind snapshot, implementation, Q/H/A, and fixed
+context. Resume rebuilds a missing identical alignment workset; run the existing
+proposal preparation command to inspect current cache state before any paid
+fill. A changed input requires a new preparation root or replay identity.
+Replay records native first exposure through the existing measurement owner.
+An interrupted exposure reservation without a result fails closed and retains
+its working database for diagnosis; it is not automatically replayable.
+
+Gold input is an array of `{ "query_key": "...", "source_units": [...] }`,
+with exactly one row for every prepared question, including blocked questions.
+Missing gold is not an empty gold set. `--arm without_alignments` executes a
+separate native control with the same snapshot, Q, clock, budget, and scopes;
+it is not a fixed compiled-context leaf intervention. Successful authored
+fixtures do not establish actual-model extraction quality or full campaign
+closure, stale-lease, erasure, or all control-arm coverage.

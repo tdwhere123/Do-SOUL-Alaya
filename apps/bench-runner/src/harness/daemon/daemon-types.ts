@@ -57,6 +57,7 @@ export {
 export type { BenchTokenMetrics } from "../token/token-metrics.js";
 
 export interface BenchDaemonOptions {
+  readonly sourceSemanticInterpretationClock?: string;
   readonly dataDirRoot?: string;
   readonly workspaceId?: string;
   readonly runId?: string;
