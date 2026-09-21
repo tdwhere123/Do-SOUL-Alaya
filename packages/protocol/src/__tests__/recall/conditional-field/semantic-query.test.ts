@@ -91,7 +91,7 @@ it("records unsupported phenomena as gaps and rejects extra query operators", ()
     role_requirements: [role("object", "parcel")]
   }], [], [{ id: "parcel", sort: "entity" }, { id: "fPack", sort: "proposition" }]);
   expect(SourceSemanticQuerySchema.parse({
-    ...withGap, gaps: [{ kind: "universal_quantification", affected_ids: [], support: [] }]
+    ...withGap, gaps: [{ kind: "universal_quantification", affected_ids: [], support: [{ kind: "query_text", excerpt: "every parcel" }] }]
   }).gaps[0]?.kind).toBe("universal_quantification");
   expect(SourceSemanticQuerySchema.safeParse({ ...withGap, program: { kind: "epsilon" } }).success).toBe(false);
   expect(SourceSemanticQuerySchema.safeParse({ ...withGap, seed_nodes: ["qPack"] }).success).toBe(false);

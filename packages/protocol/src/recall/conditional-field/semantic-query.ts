@@ -3,7 +3,7 @@ import { BoundedIdSchema, BoundedLabelSchema } from "../../shared/schema-primiti
 import { Sha256DigestSchema } from "./common.js";
 import { canonicalJson } from "../selection/capture/canonical-json.js";
 import {
-  SOURCE_SEMANTIC_MAX_BYTES, SourceSemanticGapSchema, SourceSemanticHandleSchema,
+  SOURCE_SEMANTIC_MAX_BYTES, SOURCE_SEMANTIC_GAP_KINDS, SourceSemanticHandleSchema,
   SourceSemanticReadingSchema
 } from "../../garden/source-semantic-draft.js";
 
@@ -13,18 +13,28 @@ export const SOURCE_SEMANTIC_CONTEXT_OBLIGATION_KINDS = [
 ] as const;
 
 const Handle = SourceSemanticHandleSchema;
+const QueryTextSupportSchema = z.object({ kind: z.literal("query_text"),
+  excerpt: z.string().min(1).max(1024) }).strict().readonly();
+
+/** Query evidence belongs to the original question, never to an H mention catalog. */
+export const SourceSemanticQueryGapSchema = z.object({
+  kind: z.enum(SOURCE_SEMANTIC_GAP_KINDS),
+  affected_ids: z.array(Handle).max(64).readonly(),
+  support: z.array(QueryTextSupportSchema).min(1).max(8).readonly(),
+  description: z.string().min(1).max(1024).optional()
+}).strict().readonly();
 
 export const SourceSemanticQueryVariableSchema = z.object({
   id: Handle,
   sort: z.enum(["entity", "proposition", "context"]),
-  reference: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly().optional()
+  reference: QueryTextSupportSchema.optional()
 }).strict().readonly();
 
 export const SourceSemanticQueryRoleRequirementSchema = z.object({
   id: Handle,
   role_reading: SourceSemanticReadingSchema,
   target_variable: Handle,
-  support: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly()
+  support: QueryTextSupportSchema
 }).strict().readonly();
 
 export const SourceSemanticQueryFrameSchema = z.object({
@@ -74,9 +84,9 @@ const SourceSemanticQueryObjectSchema = z.object({
   variables: z.array(SourceSemanticQueryVariableSchema).min(1).max(256).readonly(),
   alternatives: z.array(SourceSemanticQueryAlternativeSchema).min(1).max(16).readonly(),
   return_variables: z.array(Handle).max(64).readonly(),
-  gaps: z.array(SourceSemanticGapSchema).max(256).readonly(),
+  gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly(),
   domains: z.array(z.object({ id: Handle,
-    support: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly()
+    support: QueryTextSupportSchema
   }).strict().readonly()).max(64).readonly().optional(),
   evaluation: SourceSemanticQueryEvaluationSchema.optional()
 }).strict();
@@ -101,6 +111,8 @@ export const SourceSemanticQuerySchema = SourceSemanticQueryObjectSchema.superRe
   if (new Set(query.return_variables).size !== query.return_variables.length) problem("duplicate handles rejected");
   const sorts = new Map(query.variables.map((row) => [row.id, row.sort]));
   const domains = new Set(query.domains?.map((row) => row.id) ?? []);
+  const gapTargets = new Set([...variables, ...domains, ...query.alternatives.flatMap((row) => row.frames.map((frame) => frame.id))]);
+  if (query.gaps.some((gap) => gap.affected_ids.some((id) => !gapTargets.has(id)))) problem("unknown query gap target");
   if (domains.size !== (query.domains?.length ?? 0)) problem("duplicate query domains");
   if (query.evaluation !== undefined && !domains.has(query.evaluation.domain)) problem("evaluation requires a declared query domain");
   const evaluation = query.evaluation;

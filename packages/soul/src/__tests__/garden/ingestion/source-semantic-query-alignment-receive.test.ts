@@ -12,6 +12,7 @@ import {
 import {
   proposeAlignmentSemantics, proposeQuerySemantics, receiveSourceSemantics
 } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
+import { sourceSemanticQueryExamples } from "../../../garden/ingestion/official-api/source-semantic-query-examples.js";
 
 const TEXT = "The archivist accessioned folio F into bay B.";
 const EXISTENTIAL = "which folio was accessioned into bay B?";
@@ -328,7 +329,7 @@ describe("query receive preserves producer meaning", () => {
   });
 
   it("echoes omitted outcome gaps from the query body and still rejects disagreement", () => {
-    const gaps = [{ kind: "unresolved_referent", affected_ids: ["folio"], support: [] }];
+    const gaps = [{ kind: "unresolved_referent", affected_ids: ["folio"], support: [{ kind: "query_text", excerpt: "folio" }] }];
     const echoed = queryEnvelope(EXISTENTIAL, { ...existentialBody(), gaps }, { status: "interpreted" });
     expect(echoed.outcome).toEqual({ status: "interpreted", gaps });
     expect(echoed.query?.gaps).toEqual(gaps);
@@ -444,6 +445,37 @@ describe("query and alignment generation schemas", () => {
 });
 
 describe("query meaning receive and alignment selection", () => {
+  it("materializes complete producer examples without asserting embedded actions or returning universal witnesses", () => {
+    const results = sourceSemanticQueryExamples.map((example) => proposeQuerySemantics({
+      original_query: example.original_query, producer_id: "query-producer", producer_version: "1"
+    }, { rawJson: JSON.stringify(example.response) }));
+    expect(results.map((result) => result.outcome.status)).toEqual(["interpreted", "interpreted", "interpreted"]);
+    const nested = results[0]!.query!;
+    expect(nested.return_variables).toEqual(["person"]);
+    expect(nested.alternatives[0]!.context_obligations).toEqual([
+      { frame: "request", kind: "asserted_at_source" },
+      { frame: "action", kind: "explicit_embedded_structure",
+        incidence: { kind: "embedding", other_frame: "request", role: "content" } }
+    ]);
+    const universal = results[1]!.query!;
+    expect(universal.domains).toEqual([{ id: "sensors", support: { kind: "query_text", excerpt: "every registered sensor" } }]);
+    expect(universal.evaluation).toEqual({ kind: "forall", domain: "sensors", binder: "sensor", local_variables: ["sensor", "calibration"] });
+    expect(universal.return_variables).toEqual([]);
+    expect(universal.alternatives[0]!.frames[0]!.role_requirements[0]!.target_variable).toBe("sensor");
+    expect(results[2]!.query!.gaps).toEqual(sourceSemanticQueryExamples[2].response.query.gaps);
+    expect(results[2]!.outcome).toEqual({ status: "interpreted", gaps: sourceSemanticQueryExamples[2].response.query.gaps });
+  });
+
+  it("rejects legacy H mention support instead of claiming that it locates a query gap", () => {
+    const example = sourceSemanticQueryExamples[2];
+    const query = { ...example.response.query, gaps: [{ kind: "unsupported_meaning", affected_ids: ["arrival"],
+      support: [{ kind: "lexical", mentions: ["arrival"] }] }] };
+    const result = proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
+      { rawJson: JSON.stringify({ ...example.response, query }) });
+    expect(result.outcome.status).toBe("invalid");
+    expect(result.query).toBeUndefined();
+  });
+
   it("materializes nested meaning and keeps the legacy graph envelope on its own version", () => {
     const meaning = proposeQuerySemantics({
       original_query: "Who sent the sample to Mira?", producer_id: "query-producer", producer_version: "1"

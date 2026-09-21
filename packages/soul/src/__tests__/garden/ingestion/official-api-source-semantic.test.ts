@@ -386,7 +386,8 @@ describe("query and alignment proposal entry points", () => {
 
   it.each([false, true])("validates query outcome gaps against the admitted body (matching=%s)", (matching) => {
     const query = admittedQuery();
-    const gaps = [{ kind: "unresolved_referent", affected_ids: ["bay"], support: [] }];
+    const gaps = [{ kind: "unresolved_referent", affected_ids: ["bay"],
+      support: [{ kind: "query_text", excerpt: "bay B" }] }];
     const received = proposeQuerySemantics({ original_query: "which folio was accessioned into bay B?",
       producer_id: "query-producer", producer_version: "1",
       query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT }, { rawJson: JSON.stringify({

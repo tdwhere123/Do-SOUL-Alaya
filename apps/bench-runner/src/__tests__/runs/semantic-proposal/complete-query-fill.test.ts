@@ -9,7 +9,7 @@ import {
   inspectSemanticProposalShard, isExecutableProposalShard
 } from "../../../runs/semantic-proposal/artifact.js";
 import {
-  executeSemanticProposalFill, prepareSemanticProposal
+  executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults
 } from "../../../runs/semantic-proposal/fill.js";
 import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
@@ -119,6 +119,30 @@ it("commits a complete STOP query after settling the reserved attempt", async ()
   expect(replayed.cache_hits).toBe(1);
   expect(replayed.newly_admitted).toBe(0);
   expect(replayed.interpreted).toBe(1);
+});
+
+it.each([
+  { support: [{ kind: "query_text", excerpt: "sample" }], status: "interpreted", admitted: true },
+  { support: [{ kind: "query_text", excerpt: "foreign wording" }], status: "core_rejected", admitted: false },
+  { support: [{ kind: "lexical", mentions: ["sample"] }], status: "invalid", admitted: false }
+])("persists and replays located query gaps as $status without inventing H mentions", async ({ support, status, admitted }) => {
+  const body = JSON.parse(meaningBody("sample"));
+  body.query.gaps = [{ kind: "unsupported_meaning", affected_ids: ["send"], support }];
+  const rawJson = JSON.stringify(body);
+  const cacheRoot = join(tempRoot(), "cache"), workset = queryWorkset(MIRA_QUERY);
+  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, 128),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  await executeSemanticProposalFill({ workset, cacheRoot, authority, config: config(), extractor: extractor([rawJson]) });
+  const result = readSemanticProposalResults(workset, cacheRoot, 128)[0]!;
+  expect(result.status).toBe(status);
+  expect(result.shard?.admitted).toBe(admitted);
+  expect(result.shard?.raw_json).toBe(rawJson);
+  if (admitted) expect(result.received?.outcome).toEqual({ status: "interpreted", gaps: body.query.gaps });
+  const second = extractor(["must not run"]);
+  await executeSemanticProposalFill({ workset, cacheRoot, authority, config: config(), extractor: second });
+  expect(second.calls).toEqual([]);
+  expect(readSemanticProposalResults(workset, cacheRoot, 128)[0]!.status).toBe(status);
+  expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot().unresolvedAttempts).toEqual([]);
 });
 
 it("does not treat a Core-invalid receive as an executable cache hit", async () => {

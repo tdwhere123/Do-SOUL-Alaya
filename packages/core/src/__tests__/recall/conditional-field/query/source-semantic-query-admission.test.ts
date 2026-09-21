@@ -290,13 +290,14 @@ describe("source semantic query admission", () => {
   it("keeps unsupported phenomena as located gaps on an admitted connected query", () => {
     const proposed = {
       ...sameParcelQuery(),
-      gaps: [{ kind: "universal_quantification" as const, affected_ids: [], support: [] }]
+      gaps: [{ kind: "universal_quantification" as const, affected_ids: [],
+        support: [{ kind: "query_text" as const, excerpt: SAME_PARCEL }] }]
     };
     const admission = admitSourceSemanticQuery(proposed, SAME_PARCEL);
     expect(admission.kind).toBe("admitted");
     if (admission.kind !== "admitted") return;
     expect(admission.query.gaps).toEqual([
-      { kind: "universal_quantification", affected_ids: [], support: [] }
+      { kind: "universal_quantification", affected_ids: [], support: [{ kind: "query_text", excerpt: SAME_PARCEL }] }
     ]);
     expect(admission).not.toHaveProperty("program");
   });
@@ -306,5 +307,14 @@ describe("source semantic query admission", () => {
     expect(admitSourceSemanticQuery(proposed, "a different original query").kind).toBe("invalid");
     expect(admitSourceSemanticQuery(SAME_PARCEL, SAME_PARCEL).kind).toBe("invalid");
     expect(admitSourceSemanticQuery(undefined, SAME_PARCEL).kind).toBe("absent");
+  });
+
+  it("rejects foreign gap excerpts and undeclared affected handles at query admission", () => {
+    const gap = { kind: "unsupported_meaning", affected_ids: [],
+      support: [{ kind: "query_text", excerpt: "an unrelated qualification" }] };
+    expect(admitSourceSemanticQuery({ ...sameParcelQuery(), gaps: [gap] }, SAME_PARCEL).kind).toBe("invalid");
+    expect(admitSourceSemanticQuery({ ...sameParcelQuery(), gaps: [{ ...gap, affected_ids: ["invented"],
+      support: [{ kind: "query_text", excerpt: SAME_PARCEL }] }] }, SAME_PARCEL).kind).toBe("invalid");
+    expect(admitSourceSemanticQuery({ ...sameParcelQuery(), gaps: [{ ...gap, support: [] }] }, SAME_PARCEL).kind).toBe("invalid");
   });
 });

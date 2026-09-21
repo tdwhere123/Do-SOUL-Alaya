@@ -918,6 +918,13 @@ forest. A source or query gap is not filled by a structural match. In particular
 query gaps retain `query_complete=false`; fixed-C computation completion does
 not certify H, Q, A fidelity or exhaust possible interpretations.
 
+Q gaps use query-owned support: each gap carries at least one
+`{kind:"query_text",excerpt}` copied from the original question. Core checks those
+excerpts and the query schema checks affected variable, frame or domain handles.
+H mention handles cannot locate a Q gap because Q has no H mention catalog.
+Legacy nonempty Q gaps using H support or empty support are invalid; they are not
+silently upgraded. Queries with no gaps retain their canonical bytes and identity.
+
 For interpreted producer responses, H draft gaps and Q body gaps own the
 executable qualifiers. `outcome.gaps` must echo that body's gaps exactly;
 disagreement is invalid rather than repaired or silently discarded. A has no

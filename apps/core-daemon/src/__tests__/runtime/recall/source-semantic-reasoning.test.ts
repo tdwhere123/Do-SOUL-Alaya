@@ -507,7 +507,8 @@ it("binds query handles to Q, candidates and permissions and keeps one-shot disc
     if (prepared.kind !== "prepare_query" || prepared.query_handle === undefined) throw new Error("expected query lease");
     const request = { kind: "reason" as const, accepts_unreviewed_conditional_results: true as const,
       query_handle: prepared.query_handle, a, budget: BUDGET, output_byte_limit: 1000000 };
-    await expect(call(execute, { ...request, q: { ...q, gaps: [{ kind: "comparison", affected_ids: [], support: [] }] } }, { principal: "owner" })).rejects.toThrow(/retargeted/);
+    await expect(call(execute, { ...request, q: { ...q, gaps: [{ kind: "comparison", affected_ids: [],
+      support: [{ kind: "query_text", excerpt: "tools" }] }] } }, { principal: "owner" })).rejects.toThrow(/retargeted/);
     await expect(call(execute, { ...request, h_id: `sha256:${"f".repeat(64)}` }, { principal: "owner" })).rejects.toThrow(/candidates/);
     await expect(call(execute, request, { principal: "owner", authorized_scopes: { mode: "unrestricted" } })).rejects.toThrow(/scope admission/);
     await expect(call(execute, request, { principal: "other" })).rejects.toThrow(/principal/);

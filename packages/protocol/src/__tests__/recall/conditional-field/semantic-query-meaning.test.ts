@@ -124,7 +124,7 @@ it("separates a named entity called Who from a free target and retains an ambigu
   const query = compiled(statement("greet", [
     { role: "agent", target: { kind: "named", key: "whoPerson", excerpt: "Who" }, excerpt: "Who" },
     { role: "theme", target: { kind: "free", key: "guest" }, excerpt: "them" }
-  ]), { gaps: [{ kind: "unresolved_referent", affected_ids: ["guest"], support: [] }] });
+  ]), { gaps: [{ kind: "unresolved_referent", affected_ids: ["guest"], support: [{ kind: "query_text", excerpt: "them" }] }] });
   expect(query.variables.find((row) => row.id === "whoPerson")?.reference?.excerpt).toBe("Who");
   expect(query.variables.find((row) => row.id === "guest")?.reference).toBeUndefined();
   expect(query.gaps[0]?.kind).toBe("unresolved_referent");

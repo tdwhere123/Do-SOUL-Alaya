@@ -3,6 +3,7 @@ import {
   AlayaError, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_PACKET_CONTRACT,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticAlignmentProducerBodySchema, SourceSemanticAlignmentSchema,
   SourceSemanticGapSchema, SourceSemanticOutcomeSchema, SourceSemanticQueryProducerBodySchema,
+  SourceSemanticQueryGapSchema, SourceSemanticQueryOutcomeGapBindingSchema,
   SourceSemanticQuerySchema, materializeSourceSemanticQueryMeaning, materializeSourceSemanticAlignmentSelection,
   SourceSemanticResponseEnvelopeSchema, SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
   materializeSourceSemanticProposal, materializeSourceSemanticContentProposal, buildSourceReferenceCatalog,
@@ -12,7 +13,7 @@ import {
   SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   normalizeSourceSemantics, sourceSemanticQueryIdentity, verifySourceSemanticDisposition, canonicalJson,
   type SourceSemanticAlignment, type SourceSemanticDraft, type SourceSemanticInterpretation,
-  type SourceSemanticOutcome, type SourceSemanticQuery
+  type SourceSemanticOutcome, type SourceSemanticQuery, type SourceSemanticQueryOutcome
 } from "@do-soul/alaya-protocol";
 import {
   SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT,
@@ -44,7 +45,7 @@ export type SourceSemanticProposalResult = Readonly<{
 
 export type SourceSemanticQueryProposalResult = Readonly<{
   system_prompt: string;
-  outcome: SourceSemanticOutcome;
+  outcome: SourceSemanticQueryOutcome;
   provider_attempts: 0 | 1;
   request: SourceSemanticQueryRequest;
   query?: SourceSemanticQuery;
@@ -179,7 +180,7 @@ function receiveQuerySemantics(
     const query = parseQuery({ original_query: request.original_query, request, query: materializeQuery(envelope.data.query, request) });
     const reportedGaps = envelope.data.outcome.gaps;
     if (reportedGaps !== undefined) {
-      SourceSemanticOutcomeGapBindingSchema.parse({
+      SourceSemanticQueryOutcomeGapBindingSchema.parse({
         outcome: { status: "interpreted", gaps: reportedGaps }, gaps: query.gaps
       });
     }
@@ -311,7 +312,7 @@ function bindAttempt<T>(rawJson: string, request: T): Attempt<T> {
 }
 
 function boundRawJson<T>(rawJson: string, requestLimit: number, attempt: Attempt<T>):
-  (Attempt<T> & { outcome: SourceSemanticOutcome }) | undefined {
+  (Attempt<T> & { outcome: Exclude<SourceSemanticOutcome, { status: "interpreted" }> }) | undefined {
   const limit = Math.min(MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, requestLimit);
   if (Buffer.byteLength(rawJson, "utf8") > limit) return { ...attempt, outcome: { status: "truncated" } };
   if (rawJson.length === 0) return { ...attempt, outcome: { status: "transport_failure" } };
@@ -319,7 +320,7 @@ function boundRawJson<T>(rawJson: string, requestLimit: number, attempt: Attempt
 }
 
 function parseResponseJson<T>(rawJson: string, attempt: Attempt<T>):
-  { status: "ok"; value: unknown } | { status: "fail"; result: Attempt<T> & { outcome: SourceSemanticOutcome } } {
+  { status: "ok"; value: unknown } | { status: "fail"; result: Attempt<T> & { outcome: Exclude<SourceSemanticOutcome, { status: "interpreted" }> } } {
   try {
     return { status: "ok", value: JSON.parse(rawJson) };
   } catch {
@@ -406,11 +407,11 @@ function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 256) : "invalid_proposal";
 }
 
-function invalidSchemaOutcome(error: z.ZodError): SourceSemanticOutcome {
+function invalidSchemaOutcome(error: z.ZodError): Extract<SourceSemanticOutcome, { status: "invalid" }> {
   return { status: "invalid", reason: "malformed_response", diagnostics: sourceSemanticValidationDiagnostics(error) };
 }
 
-function invalidProposalOutcome(error: unknown): SourceSemanticOutcome {
+function invalidProposalOutcome(error: unknown): Extract<SourceSemanticOutcome, { status: "invalid" }> {
   return error instanceof z.ZodError ? invalidSchemaOutcome(error) : { status: "invalid", reason: reasonOf(error) };
 }
 
@@ -422,15 +423,20 @@ const ProducerResponseOutcomeSchema = z.discriminatedUnion("status", [
   InterpretedOutcome,
   ...SourceSemanticOutcomeSchema.options.filter((option) => option.unwrap().shape.status.value !== "interpreted")
 ]);
+const QueryResponseOutcomeSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("interpreted"),
+    gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly().optional() }).strict().readonly(),
+  ...SourceSemanticOutcomeSchema.options.filter((option) => option.unwrap().shape.status.value !== "interpreted")
+]);
 
 const QueryGraphResponseSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT),
-  outcome: ProducerResponseOutcomeSchema,
+  outcome: QueryResponseOutcomeSchema,
   query: z.unknown().optional()
 }).strict().readonly();
 const QueryMeaningResponseSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT),
-  outcome: ProducerResponseOutcomeSchema,
+  outcome: QueryResponseOutcomeSchema,
   query: z.unknown().optional()
 }).strict().readonly();
 const AlignmentGraphResponseSchema = z.object({

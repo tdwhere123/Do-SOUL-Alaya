@@ -84,7 +84,8 @@ describe("source semantic proof obligations", () => {
   });
   it("preserves query gaps, rejects variable sort substitution, and validates source support excerpts", () => {
     const h = source(), original = query();
-    const q = { ...original, gaps: [{ kind: "aggregate" as const, affected_ids: ["tools"], support: [], description: "count requirement is not executable" }] };
+    const q = { ...original, gaps: [{ kind: "aggregate" as const, affected_ids: ["tools"],
+      support: [{ kind: "query_text" as const, excerpt: "tools" }], description: "count requirement is not executable" }] };
     const result = run(h, q, align(h, q));
     expect(result.query_gaps).toEqual(q.gaps);
     expect(result.answers!.every((answer) => answer.query_complete === false)).toBe(true);

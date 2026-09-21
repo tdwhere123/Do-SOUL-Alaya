@@ -8,6 +8,7 @@ const singlePositions = ["items", "additionalProperties", "contains", "not", "if
  * wire budget is not a guarantee about provider complexity; local admission
  * always retains the full schema, including when decoding uses JSON mode. */
 const GEMINI_STRUCTURED_SCHEMA_MAX_BYTES = 16 * 1024;
+const GEMINI_ENVELOPE_EXPANSION_MAX_NODES = 1024;
 
 const ENVELOPE_SCHEMA_INSTRUCTION =
   "Return JSON satisfying this complete local response schema. All required fields, kinds and operands remain mandatory; omitted or invalid expressions will be rejected. Return the complete response envelope including its contract, outcome and body, not the schema itself.\n";
@@ -53,10 +54,39 @@ export function projectGeminiGenerationSchema(schema: object): { schema?: object
     }));
   };
   const projected = visit(root) as object;
-  if (Buffer.byteLength(JSON.stringify(projected)) > GEMINI_STRUCTURED_SCHEMA_MAX_BYTES) {
+  if (Buffer.byteLength(JSON.stringify(projected)) > GEMINI_STRUCTURED_SCHEMA_MAX_BYTES
+    || envelope && expandedEnvelopeNodes(root) > GEMINI_ENVELOPE_EXPANSION_MAX_NODES) {
     return { recursive: false, instruction: instruction + JSON.stringify(schema) };
   }
   return { schema: projected, recursive: false };
+}
+
+export function countGeminiEnvelopeExpandedNodes(schema: object): number {
+  return expandedEnvelopeNodes(schema as Schema);
+}
+
+/** Compact shared definitions can still expand exponentially at the provider.
+ * This guard applies to Q/A envelopes; retained H decoding identities stay fixed. */
+function expandedEnvelopeNodes(root: Schema): number {
+  const memo = new Map<string, number>();
+  const count = (value: unknown): number => {
+    const node = record(value);
+    if (node === undefined) return 0;
+    if (typeof node.$ref === "string") {
+      const cached = memo.get(node.$ref);
+      if (cached !== undefined) return cached;
+      const size = count(resolveReference(root, node.$ref));
+      memo.set(node.$ref, size);
+      return size;
+    }
+    let size = 1;
+    for (const child of schemaChildren(node)) {
+      size += count(child);
+      if (size > GEMINI_ENVELOPE_EXPANSION_MAX_NODES) return GEMINI_ENVELOPE_EXPANSION_MAX_NODES + 1;
+    }
+    return size;
+  };
+  return count(root);
 }
 
 /** Preserve all historical acyclic identities; new recursive requests bind actual decoding guidance. */

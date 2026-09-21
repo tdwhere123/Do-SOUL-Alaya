@@ -13,7 +13,7 @@ import {
   SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT, SourceSemanticSelectionGenerationSchema,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
-  SourceSemanticAlignmentProducerBodySchema, SourceSemanticGapSchema,
+  SourceSemanticAlignmentProducerBodySchema, SourceSemanticQueryGapSchema,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT,
   SourceSemanticQueryMeaningGenerationSchema, SourceSemanticAlignmentSelectionSchema,
@@ -22,6 +22,7 @@ import {
   type SourceSemanticAlignmentEndpointCatalog
 } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, indexSourceSemanticUnits, selectSourceSemanticUnits } from "./source-semantic-units.js";
+import { sourceSemanticQueryExamples } from "./source-semantic-query-examples.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as CONTENT_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as EXPRESSION_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-expression-guidance.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as COMPACT_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-compact-guidance.js";
@@ -361,7 +362,7 @@ export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest
 const QueryAlignmentGenerationOutcomeSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("interpreted"),
-    gaps: z.array(SourceSemanticGapSchema).max(256).readonly().optional()
+    gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly().optional()
   }).strict().readonly(),
   z.object({ status: z.literal("abstained") }).strict().readonly()
 ]);
@@ -518,8 +519,10 @@ export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   'Comparison evaluation is {kind:"comparison",domain,operation:"lt"|"le"|"eq"|"ge"|"gt"|"minimum"|"maximum",left,right?,strict,metric,unit,context,scope:"asserted"|"preserve"} with no nested meaning. Pairwise strict is true only for lt/gt; extrema omit right and explicitly choose strictness. Return only operand keys.',
   'For comparison operand names, declare entities:[{kind:"named",key:"left",excerpt:"Nia"},{kind:"named",key:"right",excerpt:"Omar"}]; operand keys refer to these declarations. Universal quantification is supported through evaluation only; nested forall nodes are rejected because their binder/domain cannot be represented losslessly.',
   "Unsupported meaning is a located gap, not a second evaluator or generic DSL.",
+  'A query gap has {kind,affected_ids,support:[{kind:"query_text",excerpt}],description?}; each excerpt is an exact substring of the original query. affected_ids names declared query variables, frames or domains, or [] for an unrepresented clause. Query gaps have no H mentions or source-catalog handles. Not knowing the members of a clearly requested population is not an unresolved query referent: declare its domain; H must later establish membership and closure.',
+  "Return only the requested answers. A person question returns its person variable, not the event occurrence as well. Universal binders and other local variables are not answers.",
   "Query.gaps is the authoritative gap list. If outcome.gaps is omitted, the host echoes it; disagreement remains invalid. Retain partial meaning and located gaps in the query body.",
-  'Neutral syntax examples, not the current input: statement with free and named entities {"kind":"statement","predicate":"hand","arguments":[{"role":"agent","target":{"kind":"free","key":"agent"},"excerpt":"Who"},{"role":"theme","target":{"kind":"named","key":"token","excerpt":"token"},"excerpt":"token"},{"role":"recipient","target":{"kind":"named","key":"nia","excerpt":"Nia"},"excerpt":"Nia"}]}; possible nesting {"kind":"possible","content":{"kind":"statement","predicate":"travel","arguments":[{"role":"agent","target":{"kind":"free","key":"traveler","return":true}}]}}; not nesting {"kind":"not","content":{"kind":"statement","predicate":"open","arguments":[{"role":"theme","target":{"kind":"named","key":"door","excerpt":"door"}}]}}; reported wraps a statement while a bare statement is sought as fact; forall evaluation remains {"kind":"forall","domain":"people","binder":"actor","local_variables":["actor"]} with a statement body.'
+  `Complete neutral examples, not the current input: ${JSON.stringify(sourceSemanticQueryExamples)}. Embedded content is not independently asserted. The universal example declares a population, not a closed member census. The partial example records the qualification it cannot preserve; it does not silently claim complete meaning.`
 ].join(" ");
 
 export const SOURCE_SEMANTIC_ALIGNMENT_GRAPH_SYSTEM_PROMPT = [

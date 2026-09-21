@@ -1,10 +1,10 @@
 import { z } from "zod";
 import {
-  SOURCE_SEMANTIC_MAX_BYTES, SOURCE_SEMANTIC_MAX_DEPTH, SourceSemanticGapSchema,
+  SOURCE_SEMANTIC_MAX_BYTES, SOURCE_SEMANTIC_MAX_DEPTH,
   SourceSemanticHandleSchema, SourceSemanticReadingSchema
 } from "../../garden/source-semantic-draft.js";
 import {
-  SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticQueryEvaluationSchema, SourceSemanticQuerySchema,
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticQueryEvaluationSchema, SourceSemanticQuerySchema, SourceSemanticQueryGapSchema,
   type SourceSemanticContextObligation, type SourceSemanticQuery, type SourceSemanticQueryAlternative,
   type SourceSemanticQueryFrame, type SourceSemanticQueryRoleRequirement, type SourceSemanticQueryVariable
 } from "./semantic-query.js";
@@ -161,7 +161,7 @@ function bodyShape(meaning: z.ZodType<QueryMeaning>) {
       meaning: meaning.optional(),
       purpose: z.enum(["support", "counterexample"]).optional()
     }).strict().readonly()).min(1).max(16).readonly(),
-    gaps: z.array(SourceSemanticGapSchema).max(256).readonly(),
+    gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly(),
     return: z.array(Key).max(64).readonly().optional(),
     domains: z.array(Domain).max(64).readonly().optional(),
     entities: z.array(z.discriminatedUnion("kind", [FreeTarget, NamedTarget])).max(64).readonly().optional(),

@@ -12,6 +12,7 @@ import { SourceReferenceCatalogSchema, SourceReferenceSchema, sourceReferenceRes
 import { SourceEvidenceTargetSchema } from "../recall/conditional-field/product-identity.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
 import { Sha256DigestSchema, Sha256HexSchema } from "../recall/conditional-field/common.js";
+import { SourceSemanticQueryGapSchema } from "../recall/conditional-field/semantic-query.js";
 import { SourceInterpretationProfileSchema } from "./source-interpretation-profile.js";
 import {
   SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticDraftSchema,
@@ -127,11 +128,14 @@ export function verifySourceSemanticDisposition(value: unknown, catalog: SourceR
   return disposition;
 }
 
+const SourceSemanticInterpretedOutcomeSchema = z.object({ status: z.literal("interpreted"),
+  gaps: z.array(SourceSemanticGapSchema).max(256).readonly() }).strict().readonly();
+
 export const SourceSemanticOutcomeSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("no_eligible_source"), provider_attempts: z.literal(0) }).strict().readonly(),
   z.object({ status: z.literal("unavailable"), reason: BoundedLabelSchema }).strict().readonly(),
   z.object({ status: z.literal("abstained"), raw_response_id: BoundedIdSchema.optional() }).strict().readonly(),
-  z.object({ status: z.literal("interpreted"), gaps: z.array(SourceSemanticGapSchema).max(256).readonly() }).strict().readonly(),
+  SourceSemanticInterpretedOutcomeSchema,
   SourceSemanticNoPropositionOutcomeSchema,
   z.object({ status: z.literal("invalid"), reason: BoundedLabelSchema,
     diagnostics: SourceSemanticDiagnosticsSchema.optional() }).strict().readonly(),
@@ -142,6 +146,13 @@ export const SourceSemanticOutcomeSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("unexercised") }).strict().readonly(),
   z.object({ status: z.literal("preparation_required"), missing: z.enum(["q", "a", "q_and_a"]) }).strict().readonly()
 ]);
+
+const SourceSemanticQueryOutcomeSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("interpreted"), gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly() }).strict().readonly(),
+  ...SourceSemanticOutcomeSchema.options.filter((option): option is Exclude<typeof option,
+    typeof SourceSemanticInterpretedOutcomeSchema> => option.unwrap().shape.status.value !== "interpreted")
+]);
+export type SourceSemanticQueryOutcome = z.infer<typeof SourceSemanticQueryOutcomeSchema>;
 
 export const SourceSemanticRequestEnvelopeSchema = z.object({
   schema_version: z.literal(SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION),
@@ -165,7 +176,7 @@ export const SourceSemanticResponseEnvelopeSchema = z.object({
 
 /** The body owns executable gaps. The envelope is an exact echo, never a second channel. */
 function refineSourceSemanticOutcomeGaps(
-  outcome: z.infer<typeof SourceSemanticOutcomeSchema>, gaps: readonly z.infer<typeof SourceSemanticGapSchema>[],
+  outcome: Readonly<{ status: string; gaps?: readonly unknown[] }>, gaps: readonly unknown[],
   context: { addIssue: (issue: { code: "custom"; path: string[]; message: string; params: { diagnostic_code: string } }) => void }
 ): void {
   if (outcome.status === "interpreted" && canonicalJson(outcome.gaps) !== canonicalJson(gaps)) {
@@ -178,6 +189,11 @@ function refineSourceSemanticOutcomeGaps(
 export const SourceSemanticOutcomeGapBindingSchema = z.object({
   outcome: SourceSemanticOutcomeSchema,
   gaps: z.array(SourceSemanticGapSchema).max(256).readonly()
+}).strict().superRefine((value, context) => refineSourceSemanticOutcomeGaps(value.outcome, value.gaps, context));
+
+export const SourceSemanticQueryOutcomeGapBindingSchema = z.object({
+  outcome: SourceSemanticQueryOutcomeSchema,
+  gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly()
 }).strict().superRefine((value, context) => refineSourceSemanticOutcomeGaps(value.outcome, value.gaps, context));
 
 export const SourceSemanticReasoningRequestSchema = z.object({
@@ -264,7 +280,7 @@ export const SourceSemanticReasoningResultSchema = z.object({
   derivations: z.array(DerivationSchema).max(1000).readonly().optional(),
   evidence_leaves: z.array(z.object({ observation_id: BoundedIdSchema, leaf: SourceSemanticConsumedLeafSchema }).strict().readonly()).max(4096).readonly().optional(),
   completeness: CompletenessReportSchema.optional(),
-  query_gaps: z.array(SourceSemanticGapSchema).max(256).readonly().optional(),
+  query_gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly().optional(),
   source_target: SourceEvidenceTargetSchema.optional(),
   resource_usage: z.object({ work_units: z.number().int().nonnegative(), memory_bytes: z.number().int().nonnegative() }).strict().readonly().optional(),
   derived_nodes: z.array(SourceSemanticDerivedNodeSchema).max(4096).readonly().optional(),

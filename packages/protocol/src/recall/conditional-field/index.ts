@@ -280,6 +280,7 @@ export {
   SourceSemanticQueryProducerBodySchema,
   SourceSemanticQueryEvaluationSchema,
   SourceSemanticQuerySchema,
+  SourceSemanticQueryGapSchema,
   queryAlternativeConnected,
   type SourceSemanticQueryVariable,
   type SourceSemanticQueryRoleRequirement,
