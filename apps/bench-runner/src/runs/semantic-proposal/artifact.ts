@@ -167,9 +167,13 @@ export function proposalOutcomeStatus(shard: SemanticProposalShard): string {
   return typeof status === "string" ? status : "invalid";
 }
 
+export function hasVerifiedProposalCompletion(shard: SemanticProposalShard): boolean {
+  return shard.finish_reason === "STOP" && shard.completion_witness === "finish_reason";
+}
+
 export function isExecutableProposalShard(shard: SemanticProposalShard): boolean {
   return shard.admitted === true && proposalOutcomeStatus(shard) === "interpreted" &&
-    shard.finish_reason === "STOP" && shard.completion_witness === "finish_reason";
+    hasVerifiedProposalCompletion(shard);
 }
 
 export function listSemanticProposalKeys(cacheRoot: string, kind: SemanticProposalKind): ReadonlySet<string> {

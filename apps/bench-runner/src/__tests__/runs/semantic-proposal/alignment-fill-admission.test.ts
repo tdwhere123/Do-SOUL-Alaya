@@ -19,7 +19,7 @@ import {
   inspectSemanticProposalShard, isExecutableProposalShard
 } from "../../../runs/semantic-proposal/artifact.js";
 import {
-  executeSemanticProposalFill, prepareSemanticProposal
+  executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults
 } from "../../../runs/semantic-proposal/fill.js";
 import {
   materializeSemanticProposalLines, parseSemanticProposalWorkset
@@ -238,6 +238,8 @@ it("retains a Core-invalid interpreted alignment as non-executable cache", async
   expect(readProviderRawAttempt(cacheRoot, key, 1)?.decoded_text).toContain("invented support");
   expect(shard?.admitted).toBe(false);
   expect(shard?.outcome).toMatchObject({ status: "interpreted" });
+  expect(shard?.finish_reason).toBe("STOP");
+  expect(readSemanticProposalResults(prepared, cacheRoot, 128)[0]?.status).toBe("core_rejected");
   expect(isExecutableProposalShard(shard!)).toBe(false);
   expect(() => prepareSemanticProposal(prepared, cacheRoot, 128)).not.toThrow();
   const second = extractor(["should-not-run"]);

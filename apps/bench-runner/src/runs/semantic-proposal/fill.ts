@@ -31,7 +31,7 @@ import {
 } from "./authority.js";
 import { openSemanticProposalAttemptLedger } from "./attempt.js";
 import {
-  inspectSemanticProposalShard, isExecutableProposalShard, proposalOutcomeStatus,
+  inspectSemanticProposalShard, isExecutableProposalShard, hasVerifiedProposalCompletion, proposalOutcomeStatus,
   writeSemanticProposalShard, SEMANTIC_PROPOSAL_CACHE_CONTRACT, SemanticProposalIdentityError,
   type SemanticProposalLookup, type SemanticProposalShard
 } from "./artifact.js";
@@ -180,7 +180,9 @@ export function readSemanticProposalResults(workset: SemanticProposalWorkset, ca
       const outcome = proposalOutcomeStatus(shard);
       // Retry/cache classification is not a semantic outcome. In particular,
       // absent decoded text on a failed HTTP attempt is not valid-empty output.
-      return { line, shard, status: outcome === "interpreted" ? "incomplete" : outcome };
+      const status = outcome !== "interpreted" ? outcome
+        : hasVerifiedProposalCompletion(shard) ? "core_rejected" : "incomplete";
+      return { line, shard, status };
     }
     const received = receiveLine(line, shard.raw_json);
     if (!isCoreAdmittedProposal(line, received)) throw new SemanticProposalIdentityError("cached proposal no longer admits");
