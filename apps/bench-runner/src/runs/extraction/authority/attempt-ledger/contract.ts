@@ -62,6 +62,8 @@ export interface ExtractionAttemptLedgerRecord {
   readonly successful_shards: readonly ExtractionSuccessfulShard[];
   readonly pending_keys: readonly string[];
   readonly unresolved_attempts: readonly ExtractionAttemptReservationRecord[];
+  /** Additive v5 history; absence in old records does not prove settled ownership. */
+  readonly settled_attempts?: readonly ExtractionAttemptReservationRecord[];
   readonly transport_failures: readonly ExtractionTransportFailureRecord[];
   readonly telemetry: ExtractionAttemptTelemetryRecord;
 }
@@ -155,6 +157,7 @@ export function projectAttemptLedgerV5Terminal(
 
 export function assertStoredAttemptLedgerRecord(record: ExtractionAttemptLedgerRecord): void {
   const reservations = record.unresolved_attempts;
+  const settled = record.settled_attempts ?? [];
   const failures = record.transport_failures;
   if (record.attempts > record.maximum_attempts ||
       record.successful_shards.length + record.pending_keys.length >
@@ -165,7 +168,11 @@ export function assertStoredAttemptLedgerRecord(record: ExtractionAttemptLedgerR
       !hasUniqueOrderedOrdinals(reservations) || !hasUniqueOrderedOrdinals(failures) ||
       hasOrdinalBeyondAttempts(reservations, record.attempts) ||
       hasOrdinalBeyondAttempts(failures, record.attempts) ||
-      hasOrdinalOverlap(reservations, failures)) {
+      hasOrdinalOverlap(reservations, failures) ||
+      !hasUniqueOrderedOrdinals(settled) || hasOrdinalBeyondAttempts(settled, record.attempts) ||
+      hasOrdinalOverlap(reservations, settled) || settled.length + reservations.length > record.attempts ||
+      failures.some(failure => settled.some(attempt => attempt.attempt_ordinal === failure.attempt_ordinal &&
+        attempt.cache_key !== failure.cache_key))) {
     throw new Error("extraction attempt ledger exceeds its recorded authority");
   }
 }
@@ -183,10 +190,11 @@ export function emptyAttemptTelemetry(): ExtractionAttemptTelemetryRecord {
 }
 
 function isAttemptLedgerRecord(value: unknown): value is ExtractionAttemptLedgerRecord {
+  const optional = typeof value === "object" && value !== null && "settled_attempts" in value ? ["settled_attempts"] : [];
   if (!hasExactKeys(value, [
     "schema_version", "lineage_digest", "cache_identity", "starting_missing",
     "maximum_attempts", "successful_shard_ceiling", "attempts", "successful_shards",
-    "pending_keys", "unresolved_attempts", "transport_failures", "telemetry"
+    "pending_keys", "unresolved_attempts", "transport_failures", "telemetry", ...optional
   ])) return false;
   const record = value as unknown as ExtractionAttemptLedgerRecord;
   if (record.schema_version !== EXTRACTION_ATTEMPT_LEDGER_VERSION ||
@@ -196,7 +204,8 @@ function isAttemptLedgerRecord(value: unknown): value is ExtractionAttemptLedger
       !isNonNegativeSafeInteger(record.successful_shard_ceiling) ||
       !isNonNegativeSafeInteger(record.attempts) || !isShards(record.successful_shards) ||
       !isKeys(record.pending_keys) || !isReservations(record.unresolved_attempts) ||
-      !isFailures(record.transport_failures) || !isTelemetry(record.telemetry)) return false;
+      !isFailures(record.transport_failures) || !isTelemetry(record.telemetry) ||
+      record.settled_attempts !== undefined && !isReservations(record.settled_attempts)) return false;
   try {
     assertStoredAttemptLedgerRecord(record);
     return true;
@@ -424,7 +433,7 @@ function hasOrdinalBeyondAttempts(
 
 function hasOrdinalOverlap(
   reservations: readonly ExtractionAttemptReservationRecord[],
-  failures: readonly ExtractionTransportFailureRecord[]
+  failures: readonly ExtractionAttemptReservationRecord[]
 ): boolean {
   const unresolved = new Set(reservations.map((entry) => entry.attempt_ordinal));
   return failures.some((entry) => unresolved.has(entry.attempt_ordinal));

@@ -6,7 +6,7 @@ import { admitSourceSemanticQuery, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from
 import { proposeQuerySemantics } from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import {
-  inspectSemanticProposalShard, isExecutableProposalShard
+  inspectSemanticProposalShard, hasAdmittedProposalOutcome
 } from "../../../runs/semantic-proposal/artifact.js";
 import {
   executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults
@@ -15,11 +15,14 @@ import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/wo
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
+import { proposalRecoveryCases } from "./proposal-recovery.test-support.js";
 
 const MODEL = "gemini-3.1-flash-lite";
 const PROFILE = "gemini-3.1-minimal-v1" as const;
 const MIRA_QUERY = "Who sent the sample to Mira?";
 const roots: string[] = [];
+
+proposalRecoveryCases({ workset: () => queryWorkset(MIRA_QUERY), body: () => meaningBody("sample"), config });
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -104,9 +107,10 @@ it("commits a complete STOP query after settling the reserved attempt", async ()
   expect(result.newly_admitted).toBe(1);
   expect(result.interpreted).toBe(1);
   expect(result.attempts).toBe(1);
+  expect(result.unknown).toBe(0);
   expect(shard?.admitted).toBe(true);
   expect(shard?.finish_reason).toBe("STOP");
-  expect(isExecutableProposalShard(shard!)).toBe(true);
+  expect(hasAdmittedProposalOutcome(shard!)).toBe(true);
   expect(ledger.snapshot().unresolvedAttempts).toEqual([]);
   expect(ledger.snapshot().pendingKeys).toEqual([]);
   expect(ledger.snapshot().successfulKeys).toEqual([key]);
@@ -175,7 +179,7 @@ it("does not treat a Core-invalid receive as an executable cache hit", async () 
   expect(result.interpreted).toBe(0);
   expect(readProviderRawAttempt(cacheRoot, key, 1)?.decoded_text).toBe(invalidBody);
   expect(shard?.admitted).toBe(false);
-  expect(isExecutableProposalShard(shard!)).toBe(false);
+  expect(hasAdmittedProposalOutcome(shard!)).toBe(false);
   expect(ledger.snapshot().unresolvedAttempts).toEqual([]);
   expect(ledger.snapshot().successfulKeys).toEqual([]);
   const second = extractor(["should-not-run"]);
@@ -213,11 +217,11 @@ it("replays interpreted JSON with a missing finish as cached incomplete", async 
   const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
   expect(first.calls).toHaveLength(1);
   expect(result.newly_admitted).toBe(0);
-  expect(result.terminal_failures).toBe(1);
+  expect(result).toMatchObject({ terminal_failures: 0, incomplete: 1, unknown: 0 });
   expect(shard?.admitted).toBe(false);
   expect(shard?.finish_reason).toBeNull();
   expect(shard?.outcome).toMatchObject({ status: "interpreted" });
-  expect(isExecutableProposalShard(shard!)).toBe(false);
+  expect(hasAdmittedProposalOutcome(shard!)).toBe(false);
   expect(raw?.finish_reason).toBeNull();
   expect(raw?.completion_witness).toBeNull();
   expect(ledger.snapshot().unresolvedAttempts).toEqual([]);
@@ -245,7 +249,7 @@ it("replays interpreted JSON with MAX_TOKENS as cached incomplete", async () => 
   expect(shard?.admitted).toBe(false);
   expect(shard?.finish_reason).toBe("MAX_TOKENS");
   expect(shard?.outcome).toMatchObject({ status: "interpreted" });
-  expect(isExecutableProposalShard(shard!)).toBe(false);
+  expect(hasAdmittedProposalOutcome(shard!)).toBe(false);
   expect(raw?.finish_reason).toBe("MAX_TOKENS");
   expect(raw?.completion_witness).toBe("finish_reason");
   expect(() => prepareSemanticProposal(prepared, cacheRoot, 128)).not.toThrow();
@@ -278,4 +282,5 @@ it("records unknown usage against one reserved attempt", async () => {
   expect(ledger.snapshot().unresolvedAttempts).toEqual([]);
   expect(ledger.snapshot().attempts).toBe(1);
   expect(ledger.snapshot().telemetry.usageUnavailableRequests).toBe(1);
+  expect(result).toMatchObject({ unknown: 0, pending: 0, incomplete: 0 });
 });

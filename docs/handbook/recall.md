@@ -1157,3 +1157,15 @@ the same cache; timestamps and companion keys do not renew request opportunities
 Existing ledger census and ceiling mismatches fail closed. A different attempt
 cannot settle an unresolved reservation; legacy lineages require explicit settled
 continuation before using the same cache. This repair does not grant new budget.
+
+Proposal publication verifies retained bytes and their exact reserved ordinal/key
+before writing a shard. Offline preparation and chain readers also require raw,
+reservation, and successful-admission closure; parsing a shard alone never makes
+it executable. Shared attempt-ledger v5 retains an additive `settled_attempts`
+history on settlement. Historical records without that field keep their identity;
+aggregate counts cannot supply missing settled ownership. Existing unresolved
+reservations can still recover through explicit fill. Reads never settle them:
+no raw is `unknown`, retained but unsettled output is `pending`, and neither is
+unattempted or a terminal failure. Completed incomplete output, rejected output,
+transport failure, abstention, and interpreted output remain distinct. Missing
+usage is accounting uncertainty and does not make completed output unknown.

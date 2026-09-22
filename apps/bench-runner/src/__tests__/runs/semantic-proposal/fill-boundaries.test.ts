@@ -12,7 +12,7 @@ import {
 } from "../../../runs/semantic-proposal/authority.js";
 import {
   inspectSemanticProposalShard, SemanticProposalIdentityError, SEMANTIC_PROPOSAL_CACHE_CONTRACT,
-  writeSemanticProposalShard, isExecutableProposalShard
+  writeSemanticProposalShard, hasAdmittedProposalOutcome
 } from "../../../runs/semantic-proposal/artifact.js";
 import {
   executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults
@@ -39,9 +39,9 @@ it("keeps admitted legacy shards without completion witnesses non-executable", (
     model: MODEL, request_profile: PROFILE, original_query: "Who?", system_prompt: "system", user_prompt: "user",
     raw_json: "{}", outcome: { status: "interpreted" }, admitted: true, attempt_ordinal: 1, extracted_at: "now"
   };
-  expect(isExecutableProposalShard(shard)).toBe(false);
-  expect(isExecutableProposalShard({ ...shard, finish_reason: "STOP" })).toBe(false);
-  expect(isExecutableProposalShard({ ...shard, finish_reason: "STOP", completion_witness: "finish_reason" })).toBe(true);
+  expect(hasAdmittedProposalOutcome(shard)).toBe(false);
+  expect(hasAdmittedProposalOutcome({ ...shard, finish_reason: "STOP" })).toBe(false);
+  expect(hasAdmittedProposalOutcome({ ...shard, finish_reason: "STOP", completion_witness: "finish_reason" })).toBe(true);
 });
 
 it.each([JSON.stringify({ contract: "source-semantic-query-response-v5", outcome: { status: "abstained" } }), "{}"])(

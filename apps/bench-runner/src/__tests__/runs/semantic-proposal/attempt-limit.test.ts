@@ -72,7 +72,7 @@ it("settles persisted malformed raw at the single-attempt limit before dispatchi
   } });
   expect(calls).toHaveLength(1);
   expect(calls[0]).toContain("Who inspected the pump?");
-  expect(result).toMatchObject({ attempts: 2, terminal_failures: 2 });
+  expect(result).toMatchObject({ attempts: 2, terminal_failures: 0, rejected: 2, unknown: 0 });
   expect(readSemanticProposalResults(workset, cacheRoot, 128).map(row => row.status)).toEqual(["invalid", "invalid"]);
   expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot()).toMatchObject({
     attempts: 2, maximumAttempts: 2, pendingKeys: [], unresolvedAttempts: []

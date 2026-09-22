@@ -4,6 +4,8 @@ import { chainIdentity, type SemanticChainPlan } from "./contract.js";
 import { materializeSemanticProposalLines, type SemanticProposalWorkset } from "../semantic-proposal/workset.js";
 import { SemanticProposalIdentityError, semanticProposalShardPath } from "../semantic-proposal/artifact.js";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
+import { ProviderRawAttemptIdentityError } from "../extraction/fill/provider-raw-attempt.js";
+import { ExtractionAttemptLimitError } from "../extraction/authority/attempt-ledger.js";
 
 /** Retain failed cache admission in its exact request slot, without repairing or borrowing output. */
 export function readSemanticChainProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number) {
@@ -14,7 +16,8 @@ export function readSemanticChainProposalResults(workset: SemanticProposalWorkse
     } catch (error) {
       let cacheIdentity = null;
       try { cacheIdentity = hashRegularFileNoFollow(semanticProposalShardPath(cacheRoot, line.key)); } catch { /* Unreadable is not a known cache identity. */ }
-      return { line, status: error instanceof SemanticProposalIdentityError ? "cache_invalid" as const : "unavailable" as const,
+      return { line, status: error instanceof SemanticProposalIdentityError || error instanceof ProviderRawAttemptIdentityError ||
+        error instanceof ExtractionAttemptLimitError ? "cache_invalid" as const : "unavailable" as const,
         cache_identity: cacheIdentity, error: error instanceof Error ? error.message : String(error), shard: undefined, received: undefined };
     }
   });

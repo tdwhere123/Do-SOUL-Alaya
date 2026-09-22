@@ -16,7 +16,7 @@ import {
 } from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import {
-  inspectSemanticProposalShard, isExecutableProposalShard
+  inspectSemanticProposalShard, hasAdmittedProposalOutcome
 } from "../../../runs/semantic-proposal/artifact.js";
 import {
   executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults
@@ -26,11 +26,15 @@ import {
 } from "../../../runs/semantic-proposal/workset.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
+import { proposalRecoveryCases } from "./proposal-recovery.test-support.js";
 
 const MODEL = "gemini-3.1-flash-lite";
 const PROFILE = "gemini-3.1-minimal-v1" as const;
 const ORIGINAL = "which parcel was sent and inspected?";
 const roots: string[] = [];
+
+proposalRecoveryCases({ workset: correspondenceWorkset,
+  body: line => selectionBody(line.request as SourceSemanticCorrespondenceRequest, "sent"), config });
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -213,7 +217,7 @@ it("admits an semantic_correspondence shard only after Core admission", async ()
   expect(result.newly_admitted).toBe(1);
   expect(result.interpreted).toBe(1);
   expect(shard?.admitted).toBe(true);
-  expect(isExecutableProposalShard(shard!)).toBe(true);
+  expect(hasAdmittedProposalOutcome(shard!)).toBe(true);
   const second = extractor(["should-not-run"]);
   const replayed = await executeSemanticProposalFill({
     workset: prepared, cacheRoot, authority, config: config(), extractor: second
@@ -240,7 +244,7 @@ it("retains a Core-invalid interpreted semantic_correspondence as non-executable
   expect(shard?.outcome).toMatchObject({ status: "interpreted" });
   expect(shard?.finish_reason).toBe("STOP");
   expect(readSemanticProposalResults(prepared, cacheRoot, 128)[0]?.status).toBe("core_rejected");
-  expect(isExecutableProposalShard(shard!)).toBe(false);
+  expect(hasAdmittedProposalOutcome(shard!)).toBe(false);
   expect(() => prepareSemanticProposal(prepared, cacheRoot, 128)).not.toThrow();
   const second = extractor(["should-not-run"]);
   const replayed = await executeSemanticProposalFill({

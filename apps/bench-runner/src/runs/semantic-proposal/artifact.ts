@@ -181,7 +181,8 @@ export function hasVerifiedProposalCompletion(shard: SemanticProposalShard): boo
   return shard.finish_reason === "STOP" && shard.completion_witness === "finish_reason";
 }
 
-export function isExecutableProposalShard(shard: SemanticProposalShard): boolean {
+/** Local outcome shape only; executable reads also require durable attempt/raw closure. */
+export function hasAdmittedProposalOutcome(shard: SemanticProposalShard): boolean {
   return shard.admitted === true && proposalOutcomeStatus(shard) === "interpreted" &&
     hasVerifiedProposalCompletion(shard);
 }

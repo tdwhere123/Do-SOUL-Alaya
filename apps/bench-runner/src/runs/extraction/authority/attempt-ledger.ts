@@ -61,6 +61,7 @@ export interface ExtractionAttemptLedgerSnapshot {
     readonly attemptOrdinal: number;
     readonly cacheKey: string;
   }>[];
+  readonly settledAttempts: readonly Readonly<{ attemptOrdinal: number; cacheKey: string }>[];
   readonly transportFailures: readonly Readonly<{
     readonly attemptOrdinal: number;
     readonly cacheKey: string;
@@ -96,6 +97,31 @@ export function readExtractionAttemptLedger(input: {
   current = reconcilePending(input.cacheRoot, current, path, false);
   assertSuccessfulShards(input.cacheRoot, current);
   return toSnapshot(current, path, envelope.rawSha256);
+}
+
+/** Durable state only: unlike recovery reads, this never infers settlement from a shard. */
+export function inspectExtractionAttemptLedger(input: {
+  readonly cacheRoot: string;
+  readonly lineageDigest: string;
+  readonly cacheIdentity: ExtractionAttemptLedgerCacheIdentity;
+}): ExtractionAttemptLedgerSnapshot | undefined {
+  assertExtractionAttemptLedgerCacheIdentity(input.cacheIdentity);
+  const path = ledgerPath(input.cacheRoot, input.lineageDigest);
+  if (!boundedArtifactEntryExists(path)) return undefined;
+  const envelope = readAttemptLedgerRecordEnvelope(path);
+  assertLedgerIdentity(envelope.record, input.lineageDigest, input.cacheIdentity);
+  return toSnapshot(envelope.record, path, envelope.rawSha256);
+}
+
+export function assertExtractionAttemptReservation(
+  snapshot: ExtractionAttemptLedgerSnapshot | undefined, cacheKey: string, attemptOrdinal: number
+): void {
+  const reserved = snapshot === undefined ? undefined : [
+    ...snapshot.unresolvedAttempts, ...snapshot.settledAttempts, ...snapshot.transportFailures
+  ].find(attempt => attempt.attemptOrdinal === attemptOrdinal);
+  if (reserved === undefined || reserved.cacheKey !== cacheKey) {
+    throw new ExtractionAttemptLimitError("provider raw lacks its exact reserved attempt");
+  }
 }
 
 export function readSettledExtractionAttemptLedger(input: {
@@ -435,6 +461,9 @@ function toSnapshot(
       attemptOrdinal: attempt.attempt_ordinal,
       cacheKey: attempt.cache_key
     }))),
+    settledAttempts: Object.freeze((record.settled_attempts ?? []).map(attempt => Object.freeze({
+      attemptOrdinal: attempt.attempt_ordinal, cacheKey: attempt.cache_key
+    }))),
     transportFailures: Object.freeze(record.transport_failures.map((failure) => Object.freeze({
       attemptOrdinal: failure.attempt_ordinal,
       cacheKey: failure.cache_key,
@@ -486,6 +515,9 @@ function canonicalLedgerRecord(record: ExtractionAttemptLedgerRecord) {
       attempt_ordinal: attempt.attempt_ordinal,
       cache_key: attempt.cache_key
     })),
+    ...(record.settled_attempts === undefined ? {} : { settled_attempts: record.settled_attempts.map(attempt => ({
+      attempt_ordinal: attempt.attempt_ordinal, cache_key: attempt.cache_key
+    })) }),
     transport_failures: record.transport_failures.map((failure) => ({
       attempt_ordinal: failure.attempt_ordinal,
       cache_key: failure.cache_key,

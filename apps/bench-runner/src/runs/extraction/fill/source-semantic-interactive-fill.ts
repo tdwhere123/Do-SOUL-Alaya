@@ -30,6 +30,7 @@ import {
 } from "./provider-raw-attempt.js";
 import { assertExtractionFillComplete } from "./fill-completion.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
+import { assertExtractionAttemptReservation } from "../authority/attempt-ledger.js";
 import {
   attemptInputByteUpperBound,
   assertAttemptInputWithinReceiptLimit,
@@ -160,6 +161,7 @@ function importInteractiveFromRaw(
     requestProfile: input.prepared.config.requestProfile,
     requestDigest: requestEnvelopeDigest(line.userPrompt)
   });
+  assertExtractionAttemptReservation(input.authority!.snapshot(), line.key, raw.attempt_ordinal);
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
     input.authority!.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);

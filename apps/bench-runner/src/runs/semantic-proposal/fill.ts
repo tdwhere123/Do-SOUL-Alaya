@@ -17,7 +17,7 @@ import { assertAttemptInputWithinReceiptLimit } from "../extraction/authority/re
 import { acquireExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 import { isCompleteGeminiFinish } from "../extraction/fill/batch/native-codec.js";
 import {
-  bindProviderRawAttempt, listProviderRawAttempts, readProviderRawAttempt,
+  listProviderRawAttempts, readProviderRawAttempt,
   writeProviderRawAttempt, retainedFailureOutcome, type ProviderRawAttempt
 } from "../extraction/fill/provider-raw-attempt.js";
 import { readLiveTransportFailure } from "../extraction/cache/cache-live-delegate.js";
@@ -28,14 +28,14 @@ import {
 import {
   type SemanticProposalAuthority, buildSemanticProposalPreflight, verifySemanticProposalAuthority, proposalAttemptLineage
 } from "./authority.js";
-import { openSemanticProposalAttemptLedger } from "./attempt.js";
+import { openSemanticProposalAttemptLedger, readSemanticProposalAttemptState, assertProposalRawReservation } from "./attempt.js";
 import {
-  inspectSemanticProposalShard, isExecutableProposalShard, hasVerifiedProposalCompletion, proposalOutcomeStatus,
+  hasAdmittedProposalOutcome, hasVerifiedProposalCompletion, proposalOutcomeStatus,
   writeSemanticProposalShard, SEMANTIC_PROPOSAL_CACHE_CONTRACT, SemanticProposalIdentityError,
   type SemanticProposalLookup, type SemanticProposalShard
 } from "./artifact.js";
 
-export type ProposalAttemptClass = "interpreted" | "abstained" | "retryable" | "terminal" | "incomplete";
+export type ProposalAttemptClass = "interpreted" | "abstained" | "retryable" | "terminal" | "incomplete" | "unknown" | "pending";
 
 export function classifyProposalOutcome(
   outcome: Readonly<{ status: string; reason?: string }>,
@@ -55,7 +55,7 @@ export function prepareSemanticProposal(
   const lines = materializeSemanticProposalLines(workset, maxOutputTokens);
   const cachedKeys = new Set<string>();
   for (const line of lines) {
-    const existing = inspectSemanticProposalShard(cacheRoot, line.key, lookupOf(workset, line, maxOutputTokens));
+    const existing = readSemanticProposalAttemptState(cacheRoot, line.key, lookupOf(workset, line, maxOutputTokens)).shard;
     if (existing !== undefined) {
       replayCachedProposalShard(line, existing);
       cachedKeys.add(line.key);
@@ -73,10 +73,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
   authority: SemanticProposalAuthority;
   config: CompileSeedExtractionConfig;
   extractor?: ReturnType<typeof createGeminiHttpExtractor>;
-}>): Promise<Readonly<{
-  requested: number; cache_hits: number; newly_admitted: number; terminal_failures: number; attempts: number;
-  interpreted: number; abstained: number; cached_invalid: number; unattempted: number;
-}>> {
+}>) {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifySemanticProposalAuthority(input.authority);
   input = { ...input, authority };
@@ -91,22 +88,18 @@ export async function executeSemanticProposalFill(input: Readonly<{
   const authorized = new Set(authority.keys);
   const dispatch: SemanticProposalLine[] = [];
   const retainedLines: SemanticProposalLine[] = [];
-  let cacheHits = 0, interpreted = 0, abstained = 0, cachedInvalid = 0, unattempted = 0;
+  let cacheHits = 0;
   for (const line of lines) {
-    const existing = inspectSemanticProposalShard(
+    const existing = readSemanticProposalAttemptState(
       input.cacheRoot, line.key, lookupOf(input.workset, line, maxOutputTokens)
-    );
+    ).shard;
     if (existing !== undefined) {
-      const classified = replayCachedProposalShard(line, existing);
+      replayCachedProposalShard(line, existing);
       cacheHits += 1;
-      if (isExecutableProposalShard(existing)) interpreted += 1;
-      else if (classified === "abstained") abstained += 1;
-      else cachedInvalid += 1;
       if (authorized.has(line.key)) retainedLines.push(line);
       continue;
     }
     if (!authorized.has(line.key)) {
-      unattempted += 1;
       continue;
     }
     dispatch.push(line);
@@ -115,7 +108,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
     throw new Error("semantic proposal authority has no remaining provider attempt capacity");
   }
   if (dispatch.length === 0 && retainedLines.length === 0) {
-    return summarize(lines.length, cacheHits, 0, 0, 0, interpreted, abstained, cachedInvalid, unattempted);
+    return summarize(input, cacheHits, 0, 0);
   }
   const lease = acquireExtractionCacheWriteLease(input.cacheRoot);
   try {
@@ -133,31 +126,33 @@ export async function executeSemanticProposalFill(input: Readonly<{
       }
     }
     const extractor = dispatch.length === 0 ? undefined : input.extractor ?? createGeminiHttpExtractor(input.config);
-    let newlyAdmitted = 0, terminalFailures = 0, attempts = 0;
+    let newlyAdmitted = 0, attempts = 0;
     for (const line of dispatch) {
       assertAttemptInputWithinReceiptLimit(line.inputByteUpper, authority.price.maximum_input_tokens_per_attempt);
       const filled = await fillLine(input, line, extractor!, ledger, maxOutputTokens);
       attempts += filled.attempts;
       if (filled.admitted) {
         newlyAdmitted += 1;
-        interpreted += 1;
-      } else if (filled.classified === "abstained") abstained += 1;
-      else terminalFailures += 1;
+      }
     }
-    return summarize(lines.length, cacheHits, newlyAdmitted, terminalFailures, attempts,
-      interpreted, abstained, cachedInvalid, unattempted);
+    return summarize(input, cacheHits, newlyAdmitted, attempts);
   } finally {
     lease.release();
   }
 }
 
 function summarize(
-  requested: number, cacheHits: number, newlyAdmitted: number, terminalFailures: number, attempts: number,
-  interpreted: number, abstained: number, cachedInvalid: number, unattempted: number
+  input: Parameters<typeof executeSemanticProposalFill>[0], cacheHits: number, newlyAdmitted: number, attempts: number
 ) {
+  const rows = readSemanticProposalResults(input.workset, input.cacheRoot, input.authority.limits.max_output_tokens);
+  const count = (...statuses: readonly string[]) => rows.filter(row => statuses.includes(row.status)).length;
   return {
-    requested, cache_hits: cacheHits, newly_admitted: newlyAdmitted, terminal_failures: terminalFailures,
-    attempts, interpreted, abstained, cached_invalid: cachedInvalid, unattempted
+    requested: rows.length, cache_hits: cacheHits, newly_admitted: newlyAdmitted,
+    terminal_failures: count("transport_failure"), attempts, interpreted: count("interpreted"),
+    abstained: count("abstained"), cached_invalid: rows.filter(row => row.shard !== undefined &&
+      ["invalid", "core_rejected", "incomplete", "transport_failure"].includes(row.status)).length,
+    unattempted: count("unattempted"), unknown: count("unknown"), pending: count("pending"),
+    incomplete: count("incomplete"), rejected: count("invalid", "core_rejected")
   };
 }
 
@@ -193,14 +188,19 @@ function lookupOf(
 /** Offline consumers use the same exact-request lookup, receiver and Core admission as fill. */
 export function readSemanticProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number) {
   return materializeSemanticProposalLines(workset, maxOutputTokens).map((line) => {
-    const shard = inspectSemanticProposalShard(cacheRoot, line.key, lookupOf(workset, line, maxOutputTokens));
+    const state = readSemanticProposalAttemptState(cacheRoot, line.key, lookupOf(workset, line, maxOutputTokens));
+    const shard = state.shard;
+    if (state.status !== "settled") return { line, shard, status: state.status };
     if (shard === undefined) return { line, status: "unattempted" as const };
     replayCachedProposalShard(line, shard);
-    if (!isExecutableProposalShard(shard)) {
+    if (!hasAdmittedProposalOutcome(shard)) {
       const outcome = proposalOutcomeStatus(shard);
       // Retry/cache classification is not a semantic outcome. In particular,
       // absent decoded text on a failed HTTP attempt is not valid-empty output.
-      const status = outcome !== "interpreted" ? outcome
+      const status = outcome === "transport_failure" ? outcome : !hasVerifiedProposalCompletion(shard) ||
+        typeof shard.outcome === "object" && shard.outcome !== null &&
+        "reason" in shard.outcome && shard.outcome.reason === "truncated_raw" ? "incomplete"
+        : outcome !== "interpreted" ? outcome
         : hasVerifiedProposalCompletion(shard) ? "core_rejected" : "incomplete";
       return { line, shard, status };
     }
@@ -255,7 +255,7 @@ async function fillLine(
       if (settled.classified !== "retryable" || lastAttempt) return settled;
       continue;
     }
-    writeProviderRawAttempt({
+    const raw = writeProviderRawAttempt({
       root: input.cacheRoot, cacheKey: line.key, attemptOrdinal: ordinal, kind: line.kind,
       model: input.workset.model, requestProfile: input.workset.request_profile,
       requestDigest: line.requestDigest, attemptLineageDigest: input.authority.attempt_lineage_digest,
@@ -263,12 +263,7 @@ async function fillLine(
       finishReason: extracted.responseMetadata?.finishReason ?? null,
       ...(extracted.usage === undefined ? {} : { usage: extracted.usage })
     });
-    const settled = settleDecoded(input, line, ledger, {
-      rawJson: extracted.rawJson,
-      finishReason: extracted.responseMetadata?.finishReason ?? null,
-      usage: extracted.usage,
-      replay: false
-    }, ordinal, lastAttempt);
+    const settled = replayPersistedProposalRaw(input, line, ledger, raw, lastAttempt);
     if (settled.classified !== "retryable" || lastAttempt) {
       return { ...settled, attempts: used };
     }
@@ -303,6 +298,19 @@ function replayExistingProposalRaws(
   const rawOrdinals = new Set(raws.map((item) => item.attempt_ordinal));
   const unresolved = snapshot.unresolvedAttempts.filter((item) => item.cacheKey === line.key);
   const unresolvedOrdinals = new Set(unresolved.map((item) => item.attemptOrdinal));
+  const missingCompleted = snapshot.settledAttempts.filter(attempt => attempt.cacheKey === line.key &&
+    !rawOrdinals.has(attempt.attemptOrdinal) && !snapshot.transportFailures.some(failure =>
+      failure.attemptOrdinal === attempt.attemptOrdinal));
+  if (missingCompleted.length > 0) {
+    const knownOrdinals = new Set([...snapshot.settledAttempts, ...snapshot.unresolvedAttempts, ...snapshot.transportFailures]
+      .filter(attempt => attempt.cacheKey === line.key).map(attempt => attempt.attemptOrdinal));
+    return { done: true, classified: "incomplete", admitted: false, attempts: knownOrdinals.size };
+  }
+  if (snapshot.pendingKeys.includes(line.key) && raws.length === 0 && unresolved.length === 0 &&
+      !snapshot.transportFailures.some(attempt => attempt.cacheKey === line.key)) {
+    // Legacy aggregate counts cannot reconstruct a lost exact reservation.
+    return { done: true, classified: "pending", admitted: false, attempts: 0 };
+  }
   for (const failure of snapshot.transportFailures) {
     if (failure.cacheKey !== line.key) continue;
     if (processed.has(failure.attemptOrdinal) || rawOrdinals.has(failure.attemptOrdinal) ||
@@ -314,7 +322,7 @@ function replayExistingProposalRaws(
     const raw = readProviderRawAttempt(input.cacheRoot, line.key, pending.attemptOrdinal);
     used += 1;
     processed.add(pending.attemptOrdinal);
-    if (raw === undefined) return { done: true, classified: "incomplete", admitted: false, attempts: used };
+    if (raw === undefined) return { done: true, classified: "unknown", admitted: false, attempts: used };
     const settled = replayPersistedProposalRaw(
       input, line, ledger, raw, used >= attemptLimit
     );
@@ -344,11 +352,7 @@ function replayPersistedProposalRaw(
   raw: ProviderRawAttempt,
   lastAttempt: boolean
 ): { classified: ProposalAttemptClass; admitted: boolean } {
-  bindProviderRawAttempt(raw, {
-    cacheKey: line.key, kind: line.kind, model: input.workset.model,
-    requestProfile: input.workset.request_profile,
-    requestDigest: line.requestDigest, attemptLineageDigest: input.authority.attempt_lineage_digest
-  });
+  assertProposalRawReservation(raw, ledger.snapshot(), lookupOf(input.workset, line, input.authority.limits.max_output_tokens), line.key);
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
     if (raw.failure_retryable !== true || lastAttempt) writeAttempt(input, line, raw.decoded_text, raw.usage ?? undefined,
@@ -368,8 +372,7 @@ function replayPersistedProposalRaw(
   return settleDecoded(input, line, ledger, {
     rawJson: raw.decoded_text,
     finishReason: raw.finish_reason,
-    usage: raw.usage ?? undefined,
-    replay: true
+    usage: raw.usage ?? undefined
   }, raw.attempt_ordinal, lastAttempt);
 }
 
@@ -380,7 +383,6 @@ function settleDecoded(
   decoded: Readonly<{
     rawJson: string; finishReason: string | null;
     usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
-    replay: boolean;
   }>,
   ordinal: number,
   lastAttempt: boolean

@@ -12,6 +12,7 @@ import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction
 import { parseSemanticProposalWorkset, materializeSemanticProposalLines } from "../../../runs/semantic-proposal/workset.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
+import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
 import { prepareSemanticChain, discoverSemanticChainQuery } from "../../../runs/semantic-chain/prepare.js";
 import { replaySemanticChain, measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { interveneSemanticChain } from "../../../runs/semantic-chain/intervene.js";
@@ -54,6 +55,21 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   const measured = measureSemanticChain(blockedRoot, blockedReplay.path,
     blocked.queries.map((row) => ({ query_key: row.query_key, source_units: [] })));
   expect(measured.result.rows.every((row) => row.measurement === null)).toBe(true);
+
+  const unknownCache = join(cacheRoot, "unknown-query-cache"), unknownRoot = join(cacheRoot, "unknown-query-chain");
+  const unknownAuthority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(queryWorkset, unknownCache, 4096), inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  const unknownKey = materializeSemanticProposalLines(queryWorkset, 4096)[0]!.key;
+  openSemanticProposalAttemptLedger({ cacheRoot: unknownCache, authority: unknownAuthority, kind: "query" })
+    .reserveAttemptOrdinal(unknownKey);
+  const unknownPlan = await prepareSemanticChain({ ...config, query_cache_root: unknownCache }, unknownRoot);
+  expect(unknownPlan.queries).toMatchObject([{ status: "blocked", reason: "unknown" },
+    { status: "blocked", reason: "unattempted" }]);
+  const unknownReplay = await replaySemanticChain(unknownRoot);
+  const unknownMeasurement = measureSemanticChain(unknownRoot, unknownReplay.path,
+    unknownPlan.queries.map(row => ({ query_key: row.query_key, source_units: [] })));
+  expect(unknownMeasurement.result.rows[0]).toMatchObject({ status: "blocked", reason: "unknown",
+    measurement: null, mechanism: { status: "unexercised" } });
 
   const oneQuery = { ...queryWorkset, items: queryWorkset.items.slice(0, 1) };
   const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(oneQuery, queryCache, 4096),

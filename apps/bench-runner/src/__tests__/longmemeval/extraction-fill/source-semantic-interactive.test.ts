@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
@@ -8,7 +8,7 @@ import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
-import { listProviderRawAttempts } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { listProviderRawAttempts, providerRawAttemptPath } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import type { LongMemEvalExpansionCapability } from "../../../datasets/longmemeval/promotion/expansion/expansion-capability.js";
@@ -362,7 +362,7 @@ it("does not classify a programmer extract error as transport failure", async ()
   expect(ledger.attempts).toBeLessThanOrEqual(fixture.keys.length);
 }, 60000);
 
-it("replays persisted raw without a second provider call after a shard write failure", async () => {
+it.each(["intact", "changed"] as const)("rechecks %s persisted raw after a shard write failure without a second provider call", async integrity => {
   const fixture = await setupInteractive();
   const buckets = [...new Set(fixture.keys.map((key) => join(cacheRoot, key.slice(0, 2))))];
   for (const bucket of buckets) {
@@ -379,6 +379,22 @@ it("replays persisted raw without a second provider call after a shard write fai
   expect(fixture.keys.some((key) => listProviderRawAttempts(cacheRoot, key).length > 0)).toBe(true);
   for (const bucket of buckets) chmodSync(bucket, 0o700);
   fixture.fetchMock.mockClear();
+  if (integrity === "changed") {
+    const retained = fixture.keys.flatMap(key => listProviderRawAttempts(cacheRoot, key))[0]!;
+    const rawPath = providerRawAttemptPath(cacheRoot, retained.cache_key, retained.attempt_ordinal);
+    const corrupted = JSON.stringify({ ...retained, decoded_text: `${retained.decoded_text} ` });
+    writeFileSync(rawPath, corrupted);
+    expect(await runCli([
+      "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
+      "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
+      "--extraction-source-packing", "complete-source", "--extraction-authority", fixture.receiptPath,
+      "--concurrency", "1"
+    ])).toBe(2);
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
+    expect(readFileSync(rawPath, "utf8")).toBe(corrupted);
+    expect(inspectCachedSourceSemantic(cacheRoot, retained.cache_key, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
+    return;
+  }
   expect(await runCli([
     "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
     "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",

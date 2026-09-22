@@ -151,7 +151,8 @@ it("holds the actual fill lease across processes and preserves a killed HTTP res
     await holder.done;
     const resumed = await runProcess(cacheRoot, "repinned.json").done;
     expect(resumed).toMatchObject({ code: 0 });
-    expect(JSON.parse(resumed.stdout.trim())).toMatchObject({ newly_admitted: 0, attempts: 1, terminal_failures: 1 });
+    expect(JSON.parse(resumed.stdout.trim())).toMatchObject({ newly_admitted: 0, attempts: 1, terminal_failures: 0,
+      unknown: 1, incomplete: 0, unattempted: 0 });
     expect(hits).toBe(1);
     const snapshot = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot();
     expect(snapshot.attempts).toBe(1);

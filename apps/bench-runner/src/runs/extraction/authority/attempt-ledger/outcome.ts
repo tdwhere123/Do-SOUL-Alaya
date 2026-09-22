@@ -163,6 +163,8 @@ function applySettledOutcome(
   const usage = input.usage;
   return {
     ...current,
+    settled_attempts: [...(current.settled_attempts ?? []), ...unresolved]
+      .sort((left, right) => left.attempt_ordinal - right.attempt_ordinal),
     unresolved_attempts: current.unresolved_attempts.filter((reservation) =>
       !unresolved.some((settled) => settled.attempt_ordinal === reservation.attempt_ordinal)),
     transport_failures: [...current.transport_failures, ...failures]

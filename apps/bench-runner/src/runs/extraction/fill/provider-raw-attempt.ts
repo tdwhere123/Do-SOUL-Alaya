@@ -99,6 +99,7 @@ export function bindProviderRawAttempt(
     requestDigest: string;
   } & RawAttemptOwner>
 ): ProviderRawAttempt {
+  assertProviderRawIntegrity(raw);
   if (raw.cache_key !== expected.cacheKey || raw.kind !== expected.kind ||
       raw.model !== expected.model || raw.request_profile !== expected.requestProfile ||
       raw.request_digest !== expected.requestDigest ||
@@ -115,13 +116,32 @@ export function readProviderRawAttempt(
 ): ProviderRawAttempt | undefined {
   const path = providerRawAttemptPath(root, key, ordinal);
   if (!boundedArtifactEntryExists(path)) return undefined;
-  const record = ProviderRawAttemptSchema.parse(JSON.parse(readBoundedCanonicalUtf8Artifact({
-    path, maxBytes: MAX_RECORD_BYTES, label: "provider raw attempt"
-  })));
+  const text = readBoundedCanonicalUtf8Artifact({ path, maxBytes: MAX_RECORD_BYTES, label: "provider raw attempt" });
+  let record: ProviderRawAttempt;
+  try { record = ProviderRawAttemptSchema.parse(JSON.parse(text)); }
+  catch { throw new ProviderRawAttemptIdentityError(`provider raw attempt is malformed: ${key}`); }
   if (record.cache_key !== key || record.attempt_ordinal !== ordinal) {
     throw new ProviderRawAttemptIdentityError(`provider raw attempt identity mismatch: ${key}`);
   }
+  assertProviderRawIntegrity(record);
   return record;
+}
+
+function assertProviderRawIntegrity(raw: ProviderRawAttempt): void {
+  const bytes = Buffer.from(raw.decoded_text, "utf8");
+  const complete = !raw.decoded_text_truncated;
+  const body = raw.response_body;
+  if (raw.full_replay_possible !== complete ||
+      raw.usage_known !== (raw.usage !== null) ||
+      raw.completion_witness !== (raw.finish_reason === null ? null : "finish_reason") ||
+      complete && (bytes.length > MAX_RETAINED_RAW_BYTES || raw.original_byte_length !== bytes.length ||
+        raw.decoded_text_digest !== createHash("sha256").update(bytes).digest("hex")) ||
+      !complete && (raw.original_byte_length <= MAX_RETAINED_RAW_BYTES || bytes.length > MAX_RETAINED_RAW_BYTES + 2) ||
+      body !== undefined && (!body.truncated && (Buffer.byteLength(body.text, "utf8") !== body.original_byte_length ||
+        createHash("sha256").update(body.text, "utf8").digest("hex") !== body.digest) ||
+        body.truncated && (body.original_byte_length <= 64 * 1024 || Buffer.byteLength(body.text, "utf8") > 64 * 1024 + 2))) {
+    throw new ProviderRawAttemptIdentityError(`provider raw attempt integrity mismatch: ${raw.cache_key}`);
+  }
 }
 
 export function writeProviderRawAttempt(input: Readonly<{
