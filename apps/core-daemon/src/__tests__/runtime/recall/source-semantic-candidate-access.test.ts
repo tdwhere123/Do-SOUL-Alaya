@@ -1,13 +1,59 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
 import { createSourceSemanticInterpretationHandler } from "../../../mcp-memory/tool/interpretation-handler.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { ACCESS_BUDGET, CLOCK, WS, accessCall, accessQuery, withAccessLibrary } from "./source-semantic-access.test-support.js";
+import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
+import { observeSourceSemanticAccess } from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
+import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 
 const orchid = "orchid irrigation", jasmine = "jasmine pruning";
 const prepare = (original: string) => ({ kind: "prepare_query" as const, original_query: original,
   query_semantics: accessQuery(original), budget: ACCESS_BUDGET });
+
+it("interleaves actual source, header and verification work before freezing reconciled source signals", async () => {
+  await withAccessLibrary(Array.from({ length: 50 }, (_, index) => ({ id: `source-${String(index).padStart(3, "0")}`,
+    text: index === 49 ? "Orchid irrigation." : "Granite walls.", reading: index === 49 ? orchid : "surround" })),
+  async ({ filename }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const trace: { phase: string; work: number; bytes: number }[] = [];
+    const reserve = SourceSemanticReadBudget.prototype.reserve, charge = SourceSemanticReadBudget.prototype.charge;
+    const reserveSpy = vi.spyOn(SourceSemanticReadBudget.prototype, "reserve").mockImplementation(function (this: SourceSemanticReadBudget, ...args) {
+      const result = reserve.apply(this, args);
+      if (args[2] === "access source extent metadata" || args[2] === "interpretation access header page") {
+        trace.push({ phase: args[2], work: this.spentWork, bytes: this.spentBytes });
+      }
+      return result;
+    });
+    const chargeSpy = vi.spyOn(SourceSemanticReadBudget.prototype, "charge").mockImplementation(function (this: SourceSemanticReadBudget, ...args) {
+      const result = charge.apply(this, args);
+      if (args[2] === "interpretation decoding") trace.push({ phase: args[2], work: this.spentWork, bytes: this.spentBytes });
+      return result;
+    });
+    try {
+      const meter = new SourceSemanticReadBudget(ACCESS_BUDGET);
+      const pool = database.connection.transaction(() => observeSourceSemanticAccess({ database } as RecallReadWorkerRuntime,
+        { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] }, request: prepare(orchid) },
+        ["project"], meter, orchid, accessQuery(orchid), "query-conditioned-v1", ACCESS_BUDGET))();
+      const phases = trace.map(row => row.phase), firstVerification = phases.indexOf("interpretation decoding");
+      expect(firstVerification).toBeGreaterThan(0);
+      expect(firstVerification).toBeLessThan(phases.lastIndexOf("interpretation access header page"));
+      expect(phases.slice(firstVerification + 1)).toContain("access source extent metadata");
+      expect(trace.every((row, index) => index === 0 || row.work >= trace[index - 1]!.work
+        && row.bytes >= trace[index - 1]!.bytes)).toBe(true);
+      expect(pool.access).toMatchObject({ observed_source_count: 50, observed_interpretation_count: 50,
+        unvisited_sources: false, unvisited_interpretations: false });
+      expect(pool.descriptors[0]?.source_id).toBe("source-049");
+      for (const row of pool.access.interpretation_candidates) expect(row.signal.source_text_score)
+        .toBe(pool.access.source_candidates.find(source => source.record_id === row.record_id)?.signal.source_text_score);
+      expect(meter.spentWork).toBeLessThanOrEqual(ACCESS_BUDGET.work_units);
+      expect(meter.spentBytes).toBeLessThanOrEqual(ACCESS_BUDGET.memory_bytes);
+    } finally {
+      reserveSpy.mockRestore(); chargeSpy.mockRestore(); database.close(); closeCachedDatabase(filename);
+    }
+  });
+});
 
 it("orders the complete observed pool for two queries before native descriptor pages and keeps raw sources without interpretations", async () => {
   await withAccessLibrary([

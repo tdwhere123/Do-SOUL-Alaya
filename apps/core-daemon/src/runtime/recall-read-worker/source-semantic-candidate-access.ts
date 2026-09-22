@@ -15,6 +15,7 @@ type SourceObservation = SourceSemanticAccessReceipt["source_candidates"][number
 type InterpretationObservation = SourceSemanticAccessReceipt["interpretation_candidates"][number];
 type Policy = ReturnType<typeof createSourceSemanticAccessPolicy>;
 type Stop = SourceSemanticAccessReceipt["stopping_reasons"][number];
+type InterpretationHeader = ReturnType<SqliteSourceHintReader["pageBoundInterpretationHeaders"]>["rows"][number] & { identity: string };
 const UNKNOWN: SourceSemanticAccessSignal = { source_text_score: null, interpretation_reading_score: 0 };
 
 export type SourceSemanticAccessPool = Readonly<{
@@ -38,25 +39,25 @@ export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, pa
   const policy = createSourceSemanticAccessPolicy(original, query, policyName, meter);
   // Keep output/lease and branch work available after bounded observation. These are portions of the same request ledger.
   const observation = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
-  const sourceMeter = new SourceSemanticReadBudget({ work_units: Math.floor(observation.work / 2), memory_bytes: Math.floor(observation.bytes / 2) });
-  const sources = sourceId === undefined ? listEligibleSemanticSources(runtime.database, payload.workspace_id, sourceMeter, authorized)
-    : restrictedSource(runtime, payload.workspace_id, sourceId, authorized, sourceMeter);
+  const sources = sourceId === undefined ? listEligibleSemanticSources(runtime.database, payload.workspace_id, observation, authorized)
+    : restrictedSource(runtime, payload.workspace_id, sourceId, authorized, observation);
   const records = sources.sources;
   const sourceRows = new Map<string, SourceObservation>();
   const stops = new Set<Stop>();
   for (const reason of sources.stopping_reasons) stops.add(reason);
-  for (const record of records) {
-    const read = readSourceText(runtime, record, policy, sourceMeter);
-    if (!read.complete) stops.add("source_tail");
-    sourceRows.set(record.identity, { source_id: record.source_id, record_id: record.identity,
-      ...read });
-  }
-  observation.absorb(sourceMeter);
   const interpretations = observeInterpretations(runtime, payload, authorized, observation, policy, records, sourceRows, stops, sourceId);
   meter.absorb(observation);
+  for (const record of records) if (!sourceRows.has(record.identity)) sourceRows.set(record.identity, {
+    source_id: record.source_id, record_id: record.identity, read_bytes: 0, body_bytes: null, complete: false, signal: UNKNOWN
+  });
+  if ([...sourceRows.values()].some(row => !row.complete)) stops.add("source_tail");
+  const reconciled = interpretations.rows.map(row => ({ ...row, signal: { ...row.signal,
+    source_text_score: sourceRows.get(row.record_id)?.signal.source_text_score ?? null } }));
+  meter.charge(reconciled.length, 0, "access final source signal reconciliation");
+  meter.retain(reconciled, "access reconciled interpretation signals");
   const orderedSources = policy.order([...sourceRows.values()].map((row) => ({ ...row, identity: row.record_id })), meter)
     .map(({ identity: _identity, ...row }) => row);
-  const orderedInterpretations = policy.order(interpretations.rows.map((row) => ({ ...row, identity: row.interpretation_id })), meter)
+  const orderedInterpretations = policy.order(reconciled.map((row) => ({ ...row, identity: row.interpretation_id })), meter)
     .map(({ identity: _identity, ...row }) => row);
   const inputId = accessInputIdentity(original, query, budget, policyName, sourceId);
   const receipt = {
@@ -119,70 +120,86 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
   records: readonly SourceRecordIdentity[], sources: Map<string, SourceObservation>, stops: Set<Stop>, sourceId?: string) {
   const descriptors = new Map<string, SourceSemanticHandleDescriptor>();
   const rows: InterpretationObservation[] = [];
-  const headers = observeInterpretationHeaders(runtime, payload.workspace_id, meter, stops);
-  let open = headers.open;
+  let pending: InterpretationHeader[] = [];
+  let after: string | null = null, pages = 0, sourceOffset = 0, headersDone = false, open = false;
   try {
-    meter.charge(records.length, records.length * 32, "access source hint projection");
-    const scheduled = policy.schedule(headers.rows, records.map((record) => ({ digest: record.content_digest,
-      signal: sources.get(record.identity)?.signal ?? UNKNOWN })), meter);
-    for (const row of scheduled) {
-      try {
-        const checked = loadVerified(runtime, payload.workspace_id, { evidence_object_id: row.object_id }, authorized, meter);
-        if (checked === null) continue;
-        const record = checked.stored.record, interpretation = checked.bound.interpretation;
-        if (sourceId !== undefined && record.source_id !== sourceId) continue;
-        const sourceSignal = sources.get(record.identity)?.signal ?? UNKNOWN;
-        const signal = policy.interpretation(sourceSignal, interpretation, meter);
-        const descriptor = { interpretation_id: checked.bound.interpretation_id,
-          source_id: record.source_id, source_version: record.source_version, content_digest: record.content_digest,
-          producer_id: interpretation.producer_id, producer_version: interpretation.producer_version, contract_version: interpretation.contract_version };
-        const observation = { interpretation_id: descriptor.interpretation_id, record_id: record.identity, signal };
-        meter.retain([descriptor, observation], "access interpretation retention");
-        descriptors.set(descriptor.interpretation_id, descriptor); rows.push(observation);
-      } catch (error) {
-        if (error instanceof SourceSemanticResourceExhausted) throw error;
-        if (!(error instanceof CoreError)) throw error;
-        if (!["filtered", "no_eligible_source"].includes(admissionOf(error) ?? "") && error.code !== "NOT_FOUND") {
-          open = true; stops.add("unavailable");
+    while (!headersDone || sourceOffset < records.length || pending.length > 0) {
+      if (!headersDone) {
+        const page = readInterpretationHeaderPage(runtime, payload.workspace_id, meter, after);
+        pages++; pending.push(...page.rows);
+        if (page.resourceLimited || page.truncated && (page.committedThrough === null || page.committedThrough === after)) {
+          headersDone = true; open = true; stops.add("unavailable");
+        } else if (!page.truncated) headersDone = true;
+        else if (pages === 32) { headersDone = true; open = true; stops.add("interpretation_limit"); }
+        after = page.committedThrough;
+      }
+      const through = Math.min(records.length, sourceOffset + SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE);
+      while (sourceOffset < through) {
+        const record = records[sourceOffset++]!;
+        sources.set(record.identity, { source_id: record.source_id, record_id: record.identity,
+          ...readSourceText(runtime, record, policy, meter) });
+      }
+      if (pending.length === 0) continue;
+      meter.charge(records.length, records.length * 32, "access source hint projection");
+      const scheduled = policy.schedule(pending, records.map((record) => ({ digest: record.content_digest,
+        signal: sources.get(record.identity)?.signal ?? UNKNOWN })), meter);
+      // Let unfinished observation producers progress between priority/exploration pairs.
+      const count = headersDone && sourceOffset === records.length ? scheduled.length : Math.min(2, scheduled.length);
+      for (const row of scheduled.slice(0, count)) {
+        try {
+          const verified = observeInterpretation(runtime, payload.workspace_id, row, authorized, meter, policy, sources, sourceId);
+          if (verified === null) continue;
+          descriptors.set(verified.descriptor.interpretation_id, verified.descriptor); rows.push(verified.observation);
+        } catch (error) {
+          if (error instanceof SourceSemanticResourceExhausted) throw error;
+          if (!(error instanceof CoreError)) throw error;
+          if (!["filtered", "no_eligible_source"].includes(admissionOf(error) ?? "") && error.code !== "NOT_FOUND") {
+            open = true; stops.add("unavailable");
+          }
         }
       }
+      meter.charge(pending.length, pending.length * 8, "access pending verification retention");
+      pending = scheduled.slice(count);
     }
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     stops.add("budget"); open = true;
   }
-  return { descriptors, rows, pages: headers.pages, open };
+  return { descriptors, rows, pages, open: open || !headersDone || pending.length > 0 };
 }
 
-function observeInterpretationHeaders(runtime: RecallReadWorkerRuntime, workspace: string,
-  meter: SourceSemanticReadBudget, stops: Set<Stop>) {
+function observeInterpretation(runtime: RecallReadWorkerRuntime, workspace: string, row: InterpretationHeader,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget, policy: Policy,
+  sources: ReadonlyMap<string, SourceObservation>, sourceId?: string) {
+  const checked = loadVerified(runtime, workspace, { evidence_object_id: row.object_id }, authorized, meter);
+  if (checked === null) return null;
+  const record = checked.stored.record, interpretation = checked.bound.interpretation;
+  if (sourceId !== undefined && record.source_id !== sourceId) return null;
+  const signal = policy.interpretation(sources.get(record.identity)?.signal ?? UNKNOWN, interpretation, meter);
+  const descriptor = { interpretation_id: checked.bound.interpretation_id,
+    source_id: record.source_id, source_version: record.source_version, content_digest: record.content_digest,
+    producer_id: interpretation.producer_id, producer_version: interpretation.producer_version, contract_version: interpretation.contract_version };
+  const observation = { interpretation_id: descriptor.interpretation_id, record_id: record.identity, signal };
+  meter.retain([descriptor, observation], "access interpretation retention");
+  return { descriptor, observation };
+}
+
+function readInterpretationHeaderPage(runtime: RecallReadWorkerRuntime, workspace: string,
+  meter: SourceSemanticReadBudget, after: string | null) {
   const reader = new SqliteSourceHintReader(runtime.database.connection);
-  const rows: (ReturnType<typeof reader.pageBoundInterpretationHeaders>["rows"][number] & { identity: string })[] = [];
-  let after: string | null = null, pages = 0;
-  try {
-    while (pages < 32) {
-      meter.reserve(1, 784, "interpretation access header page");
-      const page = reader.pageBoundInterpretationHeaders({ workspaceId: workspace,
-        limit: Math.min(SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE, meter.work),
-        afterCursor: after, nativeByteLimit: Math.min(Math.floor(meter.bytes / 8), 1_000_000) });
-      pages++; meter.read(page.nativeVisits, page.bytesRead);
-      for (const row of page.rows) {
-        meter.charge(1, 0, "access capsule lifecycle check");
-        if (row.lifecycle_state !== "active") continue;
-        const header = { ...row, identity: row.object_id };
-        meter.retain(header, "access interpretation header retention"); rows.push(header);
-      }
-      if (page.resourceLimited) { stops.add("unavailable"); return { rows, pages, open: true }; }
-      if (!page.truncated) return { rows, pages, open: false };
-      if (page.committedThrough === null || page.committedThrough === after) return { rows, pages, open: true };
-      after = page.committedThrough;
-    }
-    stops.add("interpretation_limit");
-  } catch (error) {
-    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-    stops.add("budget");
+  meter.reserve(1, 784, "interpretation access header page");
+  const page = reader.pageBoundInterpretationHeaders({ workspaceId: workspace,
+    limit: Math.min(SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE, meter.work),
+    afterCursor: after, nativeByteLimit: Math.min(Math.floor(meter.bytes / 8), 1_000_000) });
+  meter.read(page.nativeVisits, page.bytesRead);
+  const rows: InterpretationHeader[] = [];
+  for (const row of page.rows) {
+    meter.charge(1, 0, "access capsule lifecycle check");
+    if (row.lifecycle_state !== "active") continue;
+    const header = { ...row, identity: row.object_id };
+    meter.retain(header, "access interpretation header retention"); rows.push(header);
   }
-  return { rows, pages, open: true };
+  return { ...page, rows };
 }
 
 export function accessDescriptorPage(runtime: RecallReadWorkerRuntime, workspace: string, authorized: readonly string[] | null,
