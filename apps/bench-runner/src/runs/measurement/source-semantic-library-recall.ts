@@ -4,13 +4,13 @@ import {
   SoulMemorySearchResponseSchema, type Continuation, type InformationIndex, type MemorySearchResult,
   type SoulMemorySearchResponse
 } from "@do-soul/alaya-protocol";
-import { encodeSourceSemanticLibraryResults } from "@do-soul/alaya-core";
+import { encodeSourceSemanticLibraryResults, SOURCE_SEMANTIC_LIBRARY_ORDER } from "@do-soul/alaya-core";
 import { FirstExposureSession, type FirstExposurePage } from "./first-exposure-session.js";
 
 /** Shared native/benchmark configuration. Zero provider calls on this path. */
 export const SOURCE_SEMANTIC_LIBRARY_RECALL = Object.freeze({
   operation: "recall" as const,
-  enumeration_policy: "canonical" as const,
+  enumeration_policy: SOURCE_SEMANTIC_LIBRARY_ORDER.enumeration_policy,
   occupancy: SOURCE_SEMANTIC_LIBRARY_OCCUPANCY,
   occupancy_prefix: SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX,
   page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,

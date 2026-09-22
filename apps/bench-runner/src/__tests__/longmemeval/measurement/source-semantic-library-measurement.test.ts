@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SourceSemanticWorkerResultSchema } from "@do-soul/alaya-protocol";
-import { encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
+import { encodeSourceSemanticLibraryResponse, encodeSourceSemanticLibraryResults } from "@do-soul/alaya-core";
 import * as core from "@do-soul/alaya-core";
 import { REQUEST, GOLD, GOLD_TARGET, sourceOnly, proofEntry, assemble, workerRecall, nativeProofResponseFixture } from "./source-semantic-library-measurement-fixture.js";
 import { measureConditionalFieldResponse } from "../../../runs/measurement/conditional-field-measurement.js";
@@ -47,16 +47,28 @@ describe("source semantic library measurement", () => {
       .toMatchObject({ measurement: { status: "invalid" }, sourceBearingUnion: null });
   });
 
-  it("admits only the explicit historical source-only tuple while preserving its recorded identity and score", () => {
+  it("admits the historical canonical ten-slot tuple beyond five entries without changing its recorded bytes", () => {
     const response = structuredClone(encodeSourceSemanticLibraryResponse(workerRecall(assemble([sourceOnly("gold")], []))));
     if (response.operation !== "recall") throw new Error("native delivery expected");
     const input = { recallResult: response, firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: REQUEST, goldSourceUnits: [GOLD] };
     const evaluated = measureSourceSemanticLibraryResponse(input);
-    if (response.operation !== "recall" || response.index === undefined || evaluated.measurement?.status !== "validated") throw new Error("native delivery expected");
+    if (response.operation !== "recall" || response.index === undefined || response.order === undefined
+      || evaluated.measurement?.status !== "validated") throw new Error("native delivery expected");
     const stored = structuredClone(evaluated.measurement);
     Object.assign(response, { protocol_version: 1 });
-    Object.assign(response.index, { result_version: "source-semantic-library-v1" });
-    Object.assign(stored.delivered_index, { result_version: "source-semantic-library-v1" });
+    Object.assign(response.index, { result_version: "source-semantic-library-v1",
+      entries: [sourceOnly("gold"), ...Array.from({ length: 5 }, (_, index) => sourceOnly(`historical-${index}`))] });
+    Object.assign(response.index.representation, { page_budget: 10 });
+    Object.assign(response, { results: encodeSourceSemanticLibraryResults(response.index), total_count: 6,
+      slot_qualifiers: response.index.entries.map((_, index) => ({ index, evidence_kind: "source_evidence" })) });
+    Object.assign(response.order, { enumeration_policy: "canonical", page_budget: 10 });
+    input.firstExposurePage = recordSourceSemanticLibraryFirstExposure(response);
+    Object.assign(stored, { effective_page_budget: 10, delivered_index: response.index,
+      first_exposure_page: input.firstExposurePage, first_exposure_slots: input.firstExposurePage.initial!.slots,
+      slot_qualifiers: response.slot_qualifiers, metrics: {
+        mixed_kind_first_exposure: scoreMixedKindFirstExposure(input.firstExposurePage.initial!.slots, [GOLD]),
+        proof_conditioned_first_exposure: scoreProofConditionedFirstExposure(input.firstExposurePage.initial!.slots, [GOLD], new Set())
+      } });
     Object.assign(stored.identity, { result_version: "source-semantic-library-v1" });
     const before = JSON.stringify({ response, stored });
     expect(readmitSourceSemanticLibraryMeasurement(stored, input).measurement?.status).toBe("invalid");

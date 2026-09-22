@@ -1,4 +1,4 @@
-import { IndexEntrySchema, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
+import { IndexEntrySchema, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
   SourceSemanticWorkerResultSchema, type IndexEntry, type InformationIndex } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex,
   sourceSemanticLibrarySourceEntry, encodeSourceSemanticLibraryResponse, slotQualifiersFor } from "@do-soul/alaya-core";
@@ -53,7 +53,7 @@ export function workerRecall(index: InformationIndex) {
       : { evidence_kind: "source_evidence" as const })
   }));
   const result = SourceSemanticWorkerResultSchema.parse({
-    kind: "recall", request_budget: REQUEST, delivery_id: "delivery", protocol_version: 3, total_count: index.entries.length,
+    kind: "recall", request_budget: REQUEST, delivery_id: "delivery", protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, total_count: index.entries.length,
     index, page_purpose: "membership",
     discovery: {
       eligible_source_count: index.entries.length, visited_source_pages: 1, visited_source_interpretation_pages: 1,

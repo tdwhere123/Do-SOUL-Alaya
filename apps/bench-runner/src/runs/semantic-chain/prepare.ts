@@ -31,7 +31,7 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
         const querySemantics = row.received !== undefined && "query" in row.received ? row.received.query : undefined;
         if (querySemantics === undefined) { queries.push({ ...base, status: "blocked", reason: row.status }); continue; }
         let found;
-        try { found = await discover(daemon!, config, row.line.original_query, querySemantics); }
+        try { found = (await discoverSemanticChainQuery(daemon!, config, row.line.original_query, querySemantics)).discovery; }
         catch (error) { queries.push({ ...base, status: "blocked", reason: `discovery_unavailable: ${error instanceof Error ? error.message : String(error)}` }); continue; }
         const selected = found.descriptors.filter((descriptor) => descriptor.interpretation !== undefined).slice(0, config.correspondence_pair_cap);
         queries.push({ ...base, status: "ready", query_semantics: querySemantics, ...found,
@@ -64,12 +64,13 @@ function materializeCorrespondenceWorkset(plan: SemanticChainPlan, root: string)
   // existing proposal prepare command immediately before an authorized fill.
 }
 
-async function discover(daemon: BenchDaemonHandle, config: SemanticChainConfig, original: string, querySemantics: SourceSemanticQuery) {
+export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, config: SemanticChainConfig, original: string, querySemantics: SourceSemanticQuery) {
   const descriptors: SourceSemanticHandleDescriptor[] = [];
   const seen = new Set<string>();
   const handles = new Set<string>();
   const trace = [];
   let continuation: string | undefined;
+  let queryHandle: string | undefined;
   let pages = 0, open = false, remainingDescriptors = 0;
   let unvisitedInterpretations = false;
   let poolId: string | undefined;
@@ -87,6 +88,7 @@ async function discover(daemon: BenchDaemonHandle, config: SemanticChainConfig, 
       throw new Error("native discovery changed its bound candidate pool or offset");
     }
     poolId = access.pool_id;
+    queryHandle = response.query_handle;
     trace.push({ coverage: response.coverage, work: response.work, access, continuation_handle: response.continuation_handle ?? null,
       candidate_ids: response.candidates.map((candidate) => candidate.interpretation_id) });
     pages++;
@@ -103,7 +105,7 @@ async function discover(daemon: BenchDaemonHandle, config: SemanticChainConfig, 
     if (continuation !== undefined) handles.add(continuation);
     // Source trace pagination does not create another correspondence opportunity.
   } while (remainingDescriptors > 0 && continuation !== undefined && pages < config.discovery_page_cap);
-  return { descriptors, discovery_trace: trace, discovery_pages: pages, discovery_open: open || remainingDescriptors > 0,
+  return { query_handle: queryHandle, discovery: { descriptors, discovery_trace: trace, discovery_pages: pages, discovery_open: open || remainingDescriptors > 0,
     discovery_truncated: open || remainingDescriptors > 0,
-    unvisited_source_interpretation_count: unvisitedInterpretations ? null : 0 };
+    unvisited_source_interpretation_count: unvisitedInterpretations ? null : 0 } };
 }

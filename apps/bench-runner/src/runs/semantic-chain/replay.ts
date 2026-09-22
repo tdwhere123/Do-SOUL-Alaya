@@ -16,6 +16,7 @@ import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainAr
   assertChainSnapshot, withSemanticChainDaemon } from "./contract.js";
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { readSemanticChainCorrespondences, verifySemanticChainQueries } from "./inputs.js";
+import { discoverSemanticChainQuery } from "./prepare.js";
 
 export async function replaySemanticChain(root: string, arm: "retained" | "without_semantic_correspondences" = "retained") {
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(root, "prepare.json")));
@@ -60,19 +61,38 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
         }
         writeChainArtifact(reservation, { replay_identity: identity, query_key: query.query_key });
         const started = performance.now();
+        let prepared: Awaited<ReturnType<typeof discoverSemanticChainQuery>> | undefined;
+        let preparationError: string | null = null;
+        try { prepared = await discoverSemanticChainQuery(daemon, config, query.original_query, query.query_semantics); }
+        catch (error) { preparationError = error instanceof Error ? error.message : String(error); }
+        const preparationElapsed = performance.now() - started;
+        if (prepared?.query_handle === undefined || !sameSealedSnapshotObservation(query, prepared.discovery)) {
+          const row = { query_key: query.query_key, status: "native_unavailable", reason: prepared === undefined ? "preparation_unavailable"
+            : prepared.query_handle === undefined ? "handle_unavailable" : "prepared_access_pool_mismatch",
+            correspondence_outcomes: outcomes, first_exposure: null,
+            preparation_trace: prepared?.discovery.discovery_trace ?? null, preparation_error: preparationError,
+            preparation_elapsed_ms: preparationElapsed,
+            native_elapsed_ms: performance.now() - started };
+          writeChainArtifact(rowPath, row); rows.push(row); continue;
+        }
+        const poolId = prepared.discovery.discovery_trace.at(-1)!.access.pool_id;
         const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
           SoulInterpretationRequestSchema.parse({ operation: "recall", original_query: query.original_query, query_semantics: query.query_semantics,
+            query_handle: prepared.query_handle,
             semantic_correspondences: arm === "retained" ? ready : [], accepts_unreviewed_conditional_results: true,
             budget: config.budget, output_byte_limit: config.output_byte_limit, authorized_scopes: config.authorized_scopes,
             access_policy: config.access_policy })));
         if (response.operation !== "recall") throw new Error("native recall returned a different operation");
-        if (response.index !== undefined && response.discovery?.access?.policy !== config.access_policy) {
-          throw new Error("native recall did not bind the frozen access policy");
+        if (response.index !== undefined && (response.discovery?.access?.policy !== config.access_policy
+          || response.discovery.access.pool_id !== poolId)) {
+          throw new Error("native recall did not bind the prepared access pool");
         }
         const exposure = response.index === undefined || response.delivery_id === undefined ? null
           : recordSourceSemanticLibraryFirstExposure(response);
         const row = { query_key: query.query_key, status: exposure === null ? "native_unavailable" : "replayed",
-          correspondence_outcomes: outcomes, response, first_exposure: exposure, native_elapsed_ms: performance.now() - started };
+          correspondence_outcomes: outcomes, response, first_exposure: exposure,
+          preparation_trace: prepared.discovery.discovery_trace, preparation_elapsed_ms: preparationElapsed,
+          native_elapsed_ms: performance.now() - started };
         writeChainArtifact(rowPath, row); rows.push(row);
       }
     });
@@ -81,6 +101,15 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
     writeChainArtifact(output, result);
     return { path: output, result };
   });
+}
+
+/** Replay of the same sealed SQLite under the existing snapshot/revision guards, not general cross-library equivalence.
+ * Native pool_id includes SQLite connection-local revisions; every other observed receipt field and descriptor must match. */
+function sameSealedSnapshotObservation(expected: Awaited<ReturnType<typeof discoverSemanticChainQuery>>["discovery"],
+  actual: Awaited<ReturnType<typeof discoverSemanticChainQuery>>["discovery"]): boolean {
+  const comparable = (value: typeof actual) => ({ descriptors: value.descriptors,
+    access: value.discovery_trace.map(({ access: { pool_id: _connectionPoolId, ...observation } }) => observation) });
+  return canonicalJson(comparable(expected)) === canonicalJson(comparable(actual));
 }
 
 export function measureSemanticChain(root: string, replayPath: string, goldValue: unknown) {
@@ -134,6 +163,7 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
       source_interpretation_candidates: prepared.status === "ready" ? prepared.descriptors.length : 0,
       correspondence_opportunities: prepared.status === "ready" ? prepared.correspondence_opportunities : [],
       correspondence_outcomes: row.correspondence_outcomes ?? null },
+    preparation_trace: row.preparation_trace ?? null, preparation_elapsed_ms: row.preparation_elapsed_ms ?? null,
     diagnostics: row.response?.operation === "recall" ? {
       discovery: row.response.discovery, coverage: row.response.coverage, work: row.response.work,
       delivered_results: row.response.results?.length ?? 0, delivered_proofs: row.response.proofs?.length ?? 0,

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { expect } from "vitest";
 import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
   type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
-import { hashSourceRecordId, SoulInterpretationResponseSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+import { hashSourceRecordId, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, SourceSemanticAccessPolicySchema } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
@@ -12,12 +12,13 @@ import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction
 import { parseSemanticProposalWorkset, materializeSemanticProposalLines } from "../../../runs/semantic-proposal/workset.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
-import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
+import { prepareSemanticChain, discoverSemanticChainQuery } from "../../../runs/semantic-chain/prepare.js";
 import { replaySemanticChain, measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { interveneSemanticChain } from "../../../runs/semantic-chain/intervene.js";
-import { readChainArtifact, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { readChainArtifact, writeChainArtifact, withSemanticChainDaemon, type SemanticChainPlan } from "../../../runs/semantic-chain/contract.js";
 import { SemanticChainConfigSchema } from "../../../runs/semantic-chain/contract.js";
 import { assertPerQueryOpportunity } from "./native-semantic-arm.test-support.js";
+import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 
 export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySnapshot: { snapshot_path: string; db_sha256: string }): Promise<void> {
   const queryWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v2",
@@ -65,13 +66,15 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
     }) } });
   expect(fill.newly_admitted).toBe(1);
   await expect(replaySemanticChain(blockedRoot)).rejects.toThrow(/query-semantics state changed/u);
+  const limitedRoot = join(cacheRoot, "limited-observation-chain");
   const limited = await prepareSemanticChain({ ...config,
     budget: { ...config.budget, work_units: 200000, memory_bytes: 20000000 }
-  }, join(cacheRoot, "limited-observation-chain"));
+  }, limitedRoot);
   expect(limited.queries[0]).toMatchObject({ status: "ready", discovery_open: true,
     discovery_truncated: true, unvisited_source_interpretation_count: null,
     discovery_trace: [{ access: { unvisited_interpretations: true, stopping_reasons: ["budget"] } }] });
   if (limited.queries[0]?.status === "ready") expect(limited.queries[0].descriptors.length).toBeLessThan(18);
+  await assertReplayPreparationPool(limited, limitedRoot);
   const root = join(cacheRoot, "native-chain");
   const plan = await prepareSemanticChain(config, root);
   await expect(prepareSemanticChain({ ...config, access_policy: "query-conditioned-v1" }, root)).rejects.toThrow(/preparation inputs changed/u);
@@ -179,6 +182,55 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   expect(without.index?.as_of).toBe(config.interpretation_clock);
   await assertInterruptedExposure(root, proofReplay.path, ready.query_key);
   await assertPerQueryOpportunity(SemanticChainConfigSchema.parse(config), cacheRoot);
+}
+
+async function assertReplayPreparationPool(plan: SemanticChainPlan, root: string): Promise<void> {
+  const query = plan.queries[0];
+  if (query?.status !== "ready") throw new Error("bounded preparation required");
+  await withSemanticChainDaemon(plan.config, root, async (daemon) => {
+    const prepared = await discoverSemanticChainQuery(daemon, plan.config, query.original_query, query.query_semantics);
+    const request = { operation: "recall", original_query: query.original_query, query_semantics: query.query_semantics,
+      semantic_correspondences: [], accepts_unreviewed_conditional_results: true, budget: plan.config.budget,
+      output_byte_limit: plan.config.output_byte_limit, authorized_scopes: plan.config.authorized_scopes,
+      access_policy: plan.config.access_policy };
+    const oneShot = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
+      SoulInterpretationRequestSchema.parse(request)));
+    const leased = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
+      SoulInterpretationRequestSchema.parse({ ...request, query_handle: prepared.query_handle })));
+    if (oneShot.operation !== "recall" || leased.operation !== "recall") throw new Error("native recall required");
+    const access = prepared.discovery.discovery_trace.at(-1)!.access;
+    expect(oneShot.discovery?.access?.observed_interpretation_count).toBeLessThan(access.observed_interpretation_count);
+    expect(leased.discovery?.access).toMatchObject({ pool_id: access.pool_id,
+      observed_interpretation_count: access.observed_interpretation_count, unvisited_interpretations: true });
+  });
+  const replay = await replaySemanticChain(root);
+  const payload = readChainArtifact(replay.path) as { rows: { response?: unknown; preparation_trace: {
+    access: { pool_id: string }; work: { native_work: number } }[]; preparation_elapsed_ms: number; native_elapsed_ms: number }[] };
+  const row = payload.rows[0]!;
+  const response = SoulInterpretationResponseSchema.parse(row.response);
+  if (response.operation !== "recall") throw new Error("fresh replay recall required");
+  expect(response.discovery?.access).toMatchObject({ pool_id: row.preparation_trace.at(-1)!.access.pool_id,
+    observed_interpretation_count: query.discovery_trace[0]!.access.observed_interpretation_count,
+    unvisited_interpretations: true });
+  expect(row.preparation_trace[0]!.work.native_work).toBeGreaterThan(0);
+  expect(row.preparation_elapsed_ms).toBeGreaterThan(0);
+  expect(row.native_elapsed_ms).toBeGreaterThanOrEqual(row.preparation_elapsed_ms);
+  const localIdentityRoot = join(root, "connection-local-pool");
+  writeChainArtifact(join(localIdentityRoot, "prepare.json"), { ...plan, queries: plan.queries.map((entry) => entry.status !== "ready" ? entry
+    : { ...entry, discovery_trace: entry.discovery_trace.map((page) => ({ ...page,
+      access: { ...page.access, pool_id: `sha256:${"0".repeat(64)}` } })) }) });
+  expect((await replaySemanticChain(localIdentityRoot)).result).toMatchObject({ rows: [{ status: "replayed" }, { status: "blocked" }] });
+  const mismatchRoot = join(root, "changed-observation");
+  writeChainArtifact(join(mismatchRoot, "prepare.json"), { ...plan, queries: plan.queries.map((entry) => entry.status !== "ready" ? entry
+    : { ...entry, discovery_trace: entry.discovery_trace.map((page) => ({ ...page,
+      access: { ...page.access, observed_source_count: page.access.observed_source_count + 1 } })) }) });
+  const mismatch = await replaySemanticChain(mismatchRoot);
+  expect(mismatch.result).toMatchObject({ rows: [{ status: "native_unavailable", reason: "prepared_access_pool_mismatch", first_exposure: null },
+    { status: "blocked" }] });
+  const mismatchMeasured = measureSemanticChain(mismatchRoot, mismatch.path,
+    plan.queries.map((entry) => ({ query_key: entry.query_key, source_units: [] })));
+  expect(mismatchMeasured.result.rows[0]).toMatchObject({ measurement: null,
+    preparation_trace: [{ work: { native_work: expect.any(Number) } }], preparation_elapsed_ms: expect.any(Number) });
 }
 
 async function assertInterruptedExposure(root: string, output: string, queryKey: string): Promise<void> {

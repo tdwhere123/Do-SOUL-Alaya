@@ -1012,6 +1012,16 @@ trace continuation alone is not another correspondence opportunity or an open
 census: the receipt's offsets and omitted counts preserve the undisplayed rows.
 Actual unvisited interpretations retain an unknown count; observed descriptors left
 behind a page cap remain separately visible in the receipt and keep discovery open.
+Replay restores the sealed snapshot and repeats the same native preparation before
+immediately consuming its latest query handle. It compares the frozen descriptors
+and every observed access-receipt field except the connection-local `pool_id`;
+the recalled page must then bind that fresh preparation's exact pool ID. This is
+replay verification under the existing snapshot and implementation guards, not
+a general cross-library pool equivalence rule. Unavailable preparation, an absent
+handle and an observed pool mismatch remain distinct unavailable reasons.
+The repeated preparation's trace/work and elapsed time are recorded separately;
+total native elapsed time includes it. Matching a capped observed prefix does not
+close an unvisited residual or enlarge the frozen candidate opportunity.
 Missing interpretations never delete sources,
 and unavailable queries remain in the measurement denominator. Validated delivered
 proofs establish engineering mechanism exercise only. This arm changes neither
