@@ -732,6 +732,11 @@ Entity handles are arbitrary local references, never text support. A free report
 provides its original-question excerpt once; a named reporter already carries its
 excerpt. A reference reuses its declared entity's unambiguous support. Missing or
 fabricated excerpts remain invalid through the existing Core admission owner.
+Optional occurrence aliases are bookkeeping, not evidence. A single occurrence
+alias that collides with an entity declaration can use a fresh host ID only when
+no reference, return, gap, domain or evaluation uses that alias. Referenced,
+multiply declared or otherwise ambiguous collisions remain invalid; neither
+meaning nor an existing accepted identity is repaired by this allocation.
 The host derives frame views and execution groups from the original query semantics.
 A view retains governing context and sibling operands. It never introduces another
 query semantics or semantic correspondence identity.
@@ -759,7 +764,12 @@ for an unreused local referent. A compact source-proposal alias is required only
 co-reference, an occurrence reference, same-parent reuse, or a quantifier
 binding. Source-label equality is not identity. Nested expressions remain the
 scope owner; the host does not reconstruct lost scope from English labels or map
-a missing act to assertion. Protocol assigns canonical IDs and compiles mentions,
+a missing act to assertion. Role evidence alone does not define an argument
+target, and a local key cannot supply missing identifier or date text. A reporting
+event with its own time or other roles uses the ordinary statement with nested
+content; the `reported` scope operator does not supply those event attributes.
+These forms remain distinct, and neither asserts its embedded content independently.
+Protocol assigns canonical IDs and compiles mentions,
 slot/binding pairs, reciprocal context owners, assertion membership, quantifier
 binders and canonical outcome gaps. A plain occurrence reference does not embed
 its target. Unowned or conflicting scopes are rejected; the compiler never
@@ -784,13 +794,18 @@ schema for structured generation; reference validation and semantic admission
 still run locally after host expansion into the unchanged compiler. Decoder
 acceptance does not prove semantic fidelity or source coverage.
 Recorded requests without this marker keep their original recursive schema.
-Gemini decoding guidance has its own provider projection: those recursive schemas
-use JSON mode without a decoder schema, while the complete source schema is
-attached as system guidance. Local Protocol admission still requires all fields, expression
-operands and arguments. Recursive Gemini cache identities include the source
-schema, explicit absence of a decoder schema and exact appended guidance; acyclic
-historical keys and transmitted bytes remain unchanged. Provider acceptance and
-syntactic guidance do not certify language fidelity.
+Gemini decoding guidance has its own provider projection. Current recursive
+source proposal v5 and query response v5 schemas derive an acyclic structural
+constraint from that same authority, widening the first recursive back edge to
+its JSON types. Deeper expressions remain permitted; their fields and semantic
+refinements still require the complete schema instruction and local admission.
+The projection enforces conservative byte and expanded-node bounds and falls
+back to JSON mode when it cannot safely fit. Historical recursive contracts keep
+their JSON-mode path; existing acyclic keys and wire bytes remain unchanged.
+New structural cache material binds the complete schema, actual decoder schema
+and exact guidance together. A recorded request remains bound to its original
+candidate and wire identity. Provider acceptance and syntactic constraints do
+not certify language fidelity, coverage or operation execution.
 
 SOUL can prepare an explicit `source-semantic-revision-v1` input from retained
 JSON. The additive `source-semantic-revision-v2` records caller-observed complete

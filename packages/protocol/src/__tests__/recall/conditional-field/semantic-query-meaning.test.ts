@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
 import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
@@ -5,6 +6,7 @@ import {
   SourceSemanticQuerySchema,
   materializeSourceSemanticQueryMeaning, sourceSemanticQueryBranchViews
 } from "../../../recall/conditional-field/index.js";
+import { sourceSemanticQueryIdentity } from "../../../garden/source-semantic-identity.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
 const envelope = { original_query_digest: digest, producer_id: "qp", producer_version: "1" };
@@ -248,7 +250,135 @@ it("refuses cyclic, undeclared, and kind-conflicting references instead of repai
   ]))).toThrow(/undeclared local reference/u);
   expect(() => materializeSourceSemanticQueryMeaning(meaning(statement("send", [
     { role: "agent", target: { kind: "free", key: "send" }, excerpt: "Who" }
-  ])), envelope)).toThrow(/cannot share one variable/u);
+  ]), { return: ["send"] }), envelope)).toThrow(/cannot share one variable/u);
+});
+
+it.each(["shared", "person", "s1"])("allocates an unreferenced occurrence independently of entity alias %s", (key) => {
+  const query = compiled(statement("send", [
+    { role: "agent", target: { kind: "free", key }, excerpt: "Who" }
+  ], { key }));
+  const occurrence = key === "s1" ? "s2" : "s1";
+  expect(query.variables).toEqual([{ id: key, sort: "entity" }, { id: occurrence, sort: "proposition" }]);
+  expect(query.alternatives).toEqual([{
+    frames: [{ id: occurrence, variable: occurrence, predicate_reading: "send",
+      role_requirements: [{ id: "agent", role_reading: "agent", target_variable: key,
+        support: { kind: "query_text", excerpt: "Who" } }] }],
+    context_obligations: [{ frame: occurrence, kind: "asserted_at_source" }]
+  }]);
+  expect(query.return_variables).toEqual([]);
+});
+
+it("preserves embedding, explicit gaps and absent operation inputs when an unused nested alias collides", () => {
+  const gaps = [{ kind: "unsupported_meaning", affected_ids: ["promotion"],
+    support: [{ kind: "query_text", excerpt: "elapsed days" }], description: "The interval remains unrepresented." }];
+  const body = meaning(statement("promote", [], { key: "promotion", content: statement("occur_in", [
+    { role: "time", target: { kind: "named", key: "period", excerpt: "July 2027" } }
+  ], { key: "period" }) }), { return: [], gaps });
+  const before = JSON.stringify(body);
+  const query = materializeSourceSemanticQueryMeaning(body, envelope);
+  expect(JSON.stringify(body)).toBe(before);
+  expect(query.variables).toEqual([
+    { id: "promotion", sort: "proposition" },
+    { id: "period", sort: "entity", reference: { kind: "query_text", excerpt: "July 2027" } },
+    { id: "s1", sort: "proposition" }
+  ]);
+  expect(query.alternatives[0]!.frames.map(frame => [frame.id, frame.predicate_reading])).toEqual([
+    ["promotion", "promote"], ["s1", "occur_in"]
+  ]);
+  expect(query.alternatives[0]!.context_obligations).toEqual([
+    { frame: "promotion", kind: "asserted_at_source" },
+    { frame: "s1", kind: "explicit_embedded_structure", incidence: { kind: "embedding", other_frame: "promotion", role: "content" } }
+  ]);
+  expect(query.return_variables).toEqual([]);
+  expect(query.gaps).toEqual(gaps);
+  expect(query.requested_operation).toBeUndefined();
+  expect(query.alternatives[0]!.evidence_inputs).toBeUndefined();
+  expect(query.alternatives[0]!.answer_frames).toBeUndefined();
+});
+
+it("allocates an unreferenced context alias without changing a named reporter or its scope", () => {
+  const query = compiled({ kind: "reported", key: "speaker",
+    reporter: { kind: "named", key: "speaker", excerpt: "Mira" }, content: statement("left", []) });
+  expect(query.variables).toEqual([
+    { id: "speaker", sort: "entity", reference: { kind: "query_text", excerpt: "Mira" } },
+    { id: "left", sort: "proposition" }, { id: "c1", sort: "context" }
+  ]);
+  expect(query.alternatives[0]!.frames[0]).toMatchObject({ id: "c1", operator: "reported",
+    role_requirements: [{ target_variable: "speaker" }] });
+  expect(query.alternatives[0]!.context_obligations).toEqual([
+    { frame: "c1", kind: "asserted_at_source" },
+    { frame: "left", kind: "explicit_embedded_structure", incidence: { kind: "operator_operand", other_frame: "c1", role: "content" } }
+  ]);
+});
+
+const collided = () => statement("send", [
+  { role: "agent", target: { kind: "named", key: "shared", excerpt: "Mira" } }
+], { key: "shared" });
+const referenceProtections: readonly [string, () => unknown][] = [
+  ["explicit return", () => meaning(collided(), { return: ["shared"] })],
+  ["occurrence return", () => meaning({ ...collided(), return: true })],
+  ["inline target return", () => meaning(statement("send", [
+    { role: "agent", target: { kind: "free", key: "shared", return: true }, excerpt: "Who" }
+  ], { key: "shared" }))],
+  ["entity-table return", () => meaning(collided(), { entities: [{ kind: "named", key: "shared", excerpt: "Mira", return: true }] })],
+  ["gap target", () => meaning(collided(), { gaps: [{ kind: "unsupported_meaning", affected_ids: ["shared"],
+    support: [{ kind: "query_text", excerpt: "already" }] }] })],
+  ["domain declaration", () => meaning(collided(), { domains: [{ key: "shared", excerpt: "people" }] })],
+  ["occurrence reuse", () => ({ ...meaning(collided()), alternatives: [{ conditions: [collided(), { kind: "occurrence", key: "shared" }] }] })],
+  ["later alternative entity reference", () => ({ ...meaning(collided()), alternatives: [{ conditions: [collided()] },
+    { conditions: [statement("leave", [{ role: "agent", target: { kind: "reference", key: "shared" }, excerpt: "Mira" }])] }] })],
+  ["evidence occurrence reuse", () => ({ ...meaning(collided()), requested_operation: operation,
+    alternatives: [{ conditions: [collided()], evidence_inputs: [{ conditions: [{ kind: "occurrence", key: "shared" }] }] }] })],
+  ["evidence entity reference", () => ({ ...meaning(collided()), requested_operation: operation,
+    alternatives: [{ conditions: [collided()], evidence_inputs: [{ conditions: [statement("leave", [
+      { role: "agent", target: { kind: "reference", key: "shared" }, excerpt: "Mira" }
+    ])] }] }] })],
+  ["reported reference", () => meaning({ kind: "reported", reporter: { kind: "reference", key: "shared" }, content: collided() })],
+  ...(["domain", "binder", "local_variables"] as const).map((field): [string, () => unknown] => [
+    `universal ${field}`, () => meaning(collided(), { domains: [{ key: "population", excerpt: "people" }],
+      evaluation: { kind: "forall", domain: "population", binder: "person", local_variables: ["person"],
+        [field]: field === "local_variables" ? ["shared"] : "shared" } })
+  ])
+];
+
+it.each(referenceProtections)("does not retarget an alias used by %s", (_name, body) => {
+  expect(() => materializeSourceSemanticQueryMeaning(body(), envelope)).toThrow(/cannot share one variable/u);
+});
+
+it("rejects multiple occurrence declarations, other occurrence sorts and conflicting entity meanings", () => {
+  expect(() => materializeSourceSemanticQueryMeaning({ ...meaning(collided()),
+    alternatives: [{ conditions: [collided(), statement("leave", [], { key: "shared" })] }] }, envelope))
+    .toThrow(/cannot share one variable/u);
+  expect(() => compiled({ kind: "possible", key: "shared", content: statement("leave", [], { key: "shared" }) }))
+    .toThrow(/cannot share one variable/u);
+  expect(() => compiled(collided(), { entities: [{ kind: "named", key: "shared", excerpt: "Omar" }] }))
+    .toThrow(/named constraint excerpt conflicts/u);
+});
+
+it("preserves an accepted query's complete graph and existing identity material", () => {
+  const query = compiled(statement("send", [{ role: "agent", target: { kind: "free", key: "person" }, excerpt: "Who" }], {
+    content: { kind: "possible", content: { kind: "statement", predicate: "arrive",
+      arguments: [{ role: "agent", target: { kind: "reference", key: "person" }, excerpt: "Who" }] } }
+  }), { return: ["person"] });
+  const expected = SourceSemanticQuerySchema.parse({
+    contract: SOURCE_SEMANTIC_QUERY_CONTRACT, ...envelope, contract_version: SOURCE_SEMANTIC_QUERY_CONTRACT,
+    variables: [{ id: "send", sort: "proposition" }, { id: "person", sort: "entity" },
+      { id: "c1", sort: "context" }, { id: "s1", sort: "proposition" }],
+    alternatives: [{ frames: [
+      { id: "send", variable: "send", predicate_reading: "send", role_requirements: [{ id: "agent", role_reading: "agent",
+        target_variable: "person", support: { kind: "query_text", excerpt: "Who" } }] },
+      { id: "c1", variable: "c1", predicate_reading: "possible", operator: "possible", role_requirements: [] },
+      { id: "s1", variable: "s1", predicate_reading: "arrive", role_requirements: [{ id: "agent", role_reading: "agent",
+        target_variable: "person", support: { kind: "query_text", excerpt: "Who" } }] }
+    ], context_obligations: [
+      { frame: "send", kind: "asserted_at_source" },
+      { frame: "c1", kind: "explicit_embedded_structure", incidence: { kind: "embedding", other_frame: "send", role: "content" } },
+      { frame: "s1", kind: "explicit_embedded_structure", incidence: { kind: "operator_operand", other_frame: "c1", role: "content" } }
+    ] }], return_variables: ["person"], gaps: []
+  });
+  expect(query).toEqual(expected);
+  const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+  expect(sourceSemanticQueryIdentity(query, sha256)).toBe(sourceSemanticQueryIdentity(expected, sha256));
 });
 
 it("does not treat a legacy producer graph as meaning syntax or repair its sorts", () => {

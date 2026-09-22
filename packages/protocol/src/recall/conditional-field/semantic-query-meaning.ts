@@ -242,6 +242,7 @@ class QueryMeaningCompiler {
   private readonly used = new Set<string>();
   private readonly counters = new Map<string, number>();
   private readonly compiling = new Set<string>();
+  private readonly anonymousOccurrenceAliases = new Set<string>();
   private evidence = false;
 
   compile(body: SourceSemanticQueryMeaningBody): {
@@ -249,6 +250,7 @@ class QueryMeaningCompiler {
     alternatives: SourceSemanticQueryAlternative[];
     return_variables: string[];
   } {
+    this.collectAnonymousOccurrenceAliases(body);
     this.collect(body);
     if (body.return !== undefined) {
       for (const key of body.return) this.markReturn(key, ["return"]);
@@ -261,6 +263,54 @@ class QueryMeaningCompiler {
     }));
     if (variables.length === 0) fail(["alternatives"], "query meaning declares no variables");
     return { variables, alternatives, return_variables: [...this.returned] };
+  }
+
+  private collectAnonymousOccurrenceAliases(body: SourceSemanticQueryMeaningBody): void {
+    const referenced = new Set([
+      ...(body.return ?? []), ...body.gaps.flatMap((gap) => gap.affected_ids),
+      ...(body.domains ?? []).map((domain) => domain.key)
+    ]);
+    const evaluation = body.evaluation;
+    if (evaluation !== undefined) {
+      referenced.add(evaluation.domain);
+      if (evaluation.kind === "forall") {
+        for (const key of [evaluation.binder, ...evaluation.local_variables]) referenced.add(key);
+      } else {
+        referenced.add(evaluation.left);
+        if (evaluation.right !== undefined) referenced.add(evaluation.right);
+      }
+    }
+    const entities = new Set<string>(), occurrences = new Map<string, number>();
+    const target = (value: EntityTargetValue): void => {
+      if (value.kind === "reference" || value.return === true) referenced.add(value.key);
+      if (value.kind !== "reference") entities.add(value.key);
+    };
+    const visit = (value: QueryMeaning): void => {
+      if (value.kind === "occurrence") { referenced.add(value.key); return; }
+      if (value.key !== undefined) occurrences.set(value.key, (occurrences.get(value.key) ?? 0) + 1);
+      if (value.kind === "statement") {
+        if (value.return === true && value.key !== undefined) referenced.add(value.key);
+        for (const argument of value.arguments) target(argument.target);
+        if (value.content !== undefined) visit(value.content);
+      } else if (value.kind === "conditional") {
+        visit(value.antecedent); visit(value.consequent);
+      } else if (value.kind === "opaque") {
+        value.operands.forEach(visit);
+      } else {
+        if (value.kind === "reported" && value.reporter !== undefined) target(value.reporter);
+        visit(value.content);
+      }
+    };
+    body.entities?.forEach(target);
+    for (const alternative of body.alternatives) {
+      alternative.conditions.forEach(visit);
+      alternative.evidence_inputs?.forEach((input) => input.conditions.forEach(visit));
+    }
+    // Only an unused, single occurrence alias may yield to an entity declaration.
+    // References retain strict identity; fresh allocation never retargets them.
+    for (const [key, count] of occurrences) {
+      if (count === 1 && entities.has(key) && !referenced.has(key)) this.anonymousOccurrenceAliases.add(key);
+    }
   }
 
   private collect(body: SourceSemanticQueryMeaningBody): void {
@@ -469,7 +519,7 @@ class QueryMeaningCompiler {
 
   private occurrenceId(key: string | undefined, prefix: string, path: Path): string {
     const expected = prefix === "s" ? "proposition" : "context";
-    if (key !== undefined) {
+    if (key !== undefined && !this.anonymousOccurrenceAliases.has(key)) {
       if (this.sorts.get(key) !== expected) fail(path, "local key has the wrong node kind");
       this.used.add(key);
       return key;
@@ -480,7 +530,7 @@ class QueryMeaningCompiler {
   }
 
   private declareOccurrence(key: string | undefined, sort: "proposition" | "context", path: Path): void {
-    if (key === undefined) return;
+    if (key === undefined || this.anonymousOccurrenceAliases.has(key)) return;
     this.declare(key, sort, path);
   }
 
