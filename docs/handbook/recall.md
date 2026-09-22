@@ -1036,13 +1036,16 @@ rows retain this fresh cost. Historical records without it remain missing, while
 a newly evaluated source-only row has zero proof-verification cost. The frozen
 source-only arm still requires zero published interpretations.
 
-Bench orchestration also has an explicitly selected `longmemeval-native-semantic-v2`
+Bench orchestration also has an explicitly selected `longmemeval-native-semantic-v3`
 arm. It freezes the complete original source census, retained interpretation cache
 bytes and publication associations, query context/clock, workspace/scopes, native
-delivery contract and resource policy. Existing publication and generic semantic-chain
-owners perform preparation, snapshot reopen, discovery, correspondence receive,
-public recall and initial exposure. Plan v4 requires an explicit Protocol access
-policy in the frozen configuration and forwards it unchanged during preparation
+delivery contract and resource policy. Its order declaration derives from Core's
+native order, and measurement requires the delivered order to match that
+freeze. Native measurement uses `longmemeval-native-semantic-measurement-v2`;
+historical artifacts retain their original declarations. Existing publication and
+generic semantic-chain owners perform preparation, snapshot reopen, discovery,
+correspondence receive, public recall and initial exposure. The current plan
+requires an explicit Protocol access policy in the frozen configuration and forwards it unchanged during preparation
 and replay. The native arm pins `query-conditioned-v1`; the source-only arm pins
 `canonical-v1`. Historical source-only artifacts keep their explicit offline
 readmission owner; the current chain reader does not fall back to an older plan.

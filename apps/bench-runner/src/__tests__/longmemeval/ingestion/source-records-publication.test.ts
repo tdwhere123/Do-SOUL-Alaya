@@ -69,6 +69,7 @@ describe("complete-source census and publication", () => {
       recorded_at: CLOCK, producer_commit: "a".repeat(40), max_output_tokens: 4096, output_byte_limit: 1000000,
       budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000,
         finalization_reserve: 10000, min_envelope: 10 } }, root);
+    expect(frozen).toMatchObject({ contract: "longmemeval-semantic-development-v3", order_policy: "native_canonical_source_root_order" });
     expect(frozen.selected.map((row) => row.source_manifest.length)).toEqual([1, 1]);
     expect(frozen.selected.every((row) => row.interpretation_clock === AS_OF)).toBe(true);
     expect(JSON.stringify(frozen)).not.toContain("excluded gold");
@@ -91,7 +92,8 @@ describe("complete-source census and publication", () => {
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
     expect(filled.newly_admitted).toBe(2);
     const prepared = await prepareLongMemEvalSemanticRun(root);
-    expect(prepared.result.rows.every((row) => row.status === "prepared")).toBe(true);
+    expect(prepared.result.rows).toEqual(frozen.selected.map(({ question_id }) => ({ question_id, status: "prepared",
+      chain_root: expect.any(String), publication_path: expect.any(String), publication_identity: expect.any(String) })));
     for (const row of prepared.result.rows) {
       if (row.status !== "prepared") throw new Error(row.reason);
       const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(row.chain_root, "prepare.json")));
@@ -102,6 +104,7 @@ describe("complete-source census and publication", () => {
     const replayed = await replayLongMemEvalSemanticRun(root, prepared.path);
     expect(await replayLongMemEvalSemanticRun(root, prepared.path)).toEqual(replayed);
     const measured = await measureLongMemEvalSemanticRun(root, replayed.path);
+    expect(measured.result).toMatchObject({ contract: "longmemeval-semantic-measurement-v1", order_policy: "native_canonical_source_root_order" });
     expect(measured.result.inventory).toEqual({ questions: 3, answerable: 2, abstention: 1 });
     expect(measured.result.primary).toMatchObject({ eligible: 1, hits: 1, misses: 0, unknown: 0, target_decision: "development_only" });
     expect(measured.result.rows).toHaveLength(3);

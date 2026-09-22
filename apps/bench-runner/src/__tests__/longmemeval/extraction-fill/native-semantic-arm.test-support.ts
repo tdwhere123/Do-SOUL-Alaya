@@ -11,6 +11,7 @@ import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-recor
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { listRetainedSourceSemanticKeys } from "../../../runs/snapshot/source-records/publish.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
+import { LongMemEvalExperimentFreezeSchema } from "../../../runs/longmemeval-semantic/contract.js";
 import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun, LongMemEvalPublicationSchema } from "../../../runs/longmemeval-semantic/execute.js";
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
 import { SemanticChainPlanSchema, readChainArtifact, type SemanticChainConfig } from "../../../runs/semantic-chain/contract.js";
@@ -46,8 +47,11 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     recorded_at: "2026-09-21T00:00:00.000Z", producer_commit: "a".repeat(40), max_output_tokens: 4096, output_byte_limit: 100000,
     budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 }
   }, root);
-  expect(frozen.contract).toBe("longmemeval-native-semantic-v2");
-  expect(frozen).toMatchObject({ native_route: { access_policy: "query-conditioned-v1" } });
+  if (frozen.contract !== "longmemeval-native-semantic-v3") throw new Error("native freeze required");
+  expect(frozen).toMatchObject({ order_policy: "evidence_support",
+    native_route: { access_policy: "query-conditioned-v1", order: { enumeration_policy: "evidence_support" } } });
+  expect(LongMemEvalExperimentFreezeSchema.safeParse({ ...frozen, order_policy: "native_canonical_source_root_order" }).success).toBe(false);
+  expect(LongMemEvalExperimentFreezeSchema.safeParse({ ...frozen, contract: "longmemeval-native-semantic-v2" }).success).toBe(false);
   expect(frozen.metric).toBe("source-bearing-union-first-exposure-any-at-k-v1");
   expect(frozen.selected.map((row) => row.source_manifest.length)).toEqual([2, 2, 2, 2]);
   expect(JSON.stringify(frozen)).not.toContain("answer q0");
@@ -56,7 +60,8 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
   const invalidPath = semanticProposalShardPath(queryCache, invalidQuery.key);
   mkdirSync(dirname(invalidPath), { recursive: true }); writeFileSync(invalidPath, "{}");
   const prepared = await prepareLongMemEvalSemanticRun(root);
-  expect(prepared.result.rows.every((row) => row.status === "prepared")).toBe(true);
+  expect(prepared.result.rows).toEqual(frozen.selected.map(({ question_id }) => ({ question_id, status: "prepared",
+    chain_root: expect.any(String), publication_path: expect.any(String), publication_identity: expect.any(String) })));
   for (const row of prepared.result.rows) {
     if (row.status !== "prepared") throw new Error(row.reason);
     const publication = readChainArtifact(row.publication_path) as { census_count: number; admitted_count: number; published_count: number };
@@ -89,6 +94,8 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     if (row.question_id === "q2") { expect(native.rows[0]!.status).toBe("blocked"); continue; }
     const response = SoulInterpretationResponseSchema.parse(native.rows[0]!.response);
     if (response.operation !== "recall") throw new Error("native recall required");
+    expect(response.order).toEqual(frozen.native_route.order);
+    expect(response.order?.enumeration_policy).toBe(frozen.order_policy);
     if (row.question_id === "q3") {
       expect(response.proofs ?? []).toEqual([]);
       expect(JSON.stringify(response.results)).not.toMatch(/repair/u);
@@ -103,13 +110,15 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     expect(response.discovery?.access?.policy).toBe("query-conditioned-v1");
   }
   const measured = await measureLongMemEvalSemanticRun(root, replay.path);
-  expect(measured.result).toMatchObject({ contract: "longmemeval-native-semantic-measurement-v1", provider_calls: 0,
+  expect(measured.result).toMatchObject({ contract: "longmemeval-native-semantic-measurement-v2", provider_calls: 0,
+    order_policy: "evidence_support",
     primary: { eligible: 4, hits: 3, misses: 0, unknown: 1 } });
   expect(measured.result.rows.filter((row) => row.outcome === "hit" && row.question_id !== "q3").every((row) => row.mechanism === "proof_exercised")).toBe(true);
   expect(measured.result.rows.filter((row) => row.selected).every((row) => row.prior_development_exposure)).toBe(true);
   const unsupportedRow = measured.result.rows.find(row => row.question_id === "q3")!;
   expect(unsupportedRow).toMatchObject({ outcome: "hit", mechanism: "not_exercised" });
   expect(readChainArtifact(unsupportedRow.measurement_path!)).toMatchObject({ rows: [{
+    diagnostics: { order: frozen.native_route.order },
     measurement: { status: "validated", metrics: {
       mixed_kind_first_exposure: { any_at_5: { status: "hit" } },
       proof_conditioned_first_exposure: { any_at_5: { status: "miss" } }

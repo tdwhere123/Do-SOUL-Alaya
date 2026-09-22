@@ -165,7 +165,7 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
       correspondence_outcomes: row.correspondence_outcomes ?? null },
     preparation_trace: row.preparation_trace ?? null, preparation_elapsed_ms: row.preparation_elapsed_ms ?? null,
     diagnostics: row.response?.operation === "recall" ? {
-      discovery: row.response.discovery, coverage: row.response.coverage, work: row.response.work,
+      order: row.response.order, discovery: row.response.discovery, coverage: row.response.coverage, work: row.response.work,
       delivered_results: row.response.results?.length ?? 0, delivered_proofs: row.response.proofs?.length ?? 0,
       native_elapsed_ms: row.native_elapsed_ms ?? null
     } : null,

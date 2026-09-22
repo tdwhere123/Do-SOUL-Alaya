@@ -5,7 +5,7 @@ import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { SemanticChainConfigSchema, chainIdentity, readChainArtifact } from "../semantic-chain/contract.js";
 import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
-import { NativeSemanticRouteSchema, SourceCacheFreezeSchema } from "./native-arm.js";
+import { NATIVE_SEMANTIC_ROUTE, NativeSemanticRouteSchema, SourceCacheFreezeSchema } from "./native-arm.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const LongMemEvalSemanticConfigSchema = z.object({
@@ -42,8 +42,9 @@ export const LongMemEvalSemanticFreezeSchema = z.object({
   query_workset: SemanticProposalWorksetSchema
 }).strict();
 export const LongMemEvalNativeSemanticFreezeSchema = LongMemEvalSemanticFreezeSchema.extend({
-  contract: z.literal("longmemeval-native-semantic-v2"), config: LongMemEvalNativeSemanticConfigSchema,
+  contract: z.literal("longmemeval-native-semantic-v3"), config: LongMemEvalNativeSemanticConfigSchema,
   metric: z.literal("source-bearing-union-first-exposure-any-at-k-v1"),
+  order_policy: z.literal(NATIVE_SEMANTIC_ROUTE.order.enumeration_policy),
   mechanism: z.literal("native_source_interpretation_and_semantic_correspondence"),
   native_route: NativeSemanticRouteSchema, source_caches: z.array(SourceCacheFreezeSchema)
 }).strict();

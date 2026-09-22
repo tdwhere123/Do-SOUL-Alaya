@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
+import { SOURCE_SEMANTIC_LIBRARY_ORDER } from "@do-soul/alaya-core";
 import {
   SOURCE_SEMANTIC_CACHE_CONTRACT, SOURCE_SEMANTIC_PACKET_CONTRACT, SOURCE_SEMANTIC_QUERY_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
-  SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
-  SOURCE_SEMANTIC_LIBRARY_OCCUPANCY, SOURCE_SEMANTIC_LIBRARY_TIE_POLICY, SourceSemanticAccessPolicySchema
+  SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SourceSemanticAccessPolicySchema
 } from "@do-soul/alaya-protocol";
 import { cacheFilePath } from "../compile-seed/cache/cache-shard.js";
 import { listRetainedSourceSemanticKeys } from "../snapshot/source-records/publish.js";
@@ -15,8 +15,7 @@ import { chainIdentity } from "../semantic-chain/contract.js";
 /** Bench pins the public owner, never selects candidates or supplies a proof policy. */
 export const NATIVE_SEMANTIC_ROUTE = {
   surface: "soul.interpretation", operation: "recall", protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
-  result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
-  occupancy: SOURCE_SEMANTIC_LIBRARY_OCCUPANCY, tie_policy: SOURCE_SEMANTIC_LIBRARY_TIE_POLICY,
+  result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, order: SOURCE_SEMANTIC_LIBRARY_ORDER,
   source_interpretation: SOURCE_SEMANTIC_PACKET_CONTRACT, source_cache: SOURCE_SEMANTIC_CACHE_CONTRACT,
   query_semantics: SOURCE_SEMANTIC_QUERY_CONTRACT, semantic_correspondence: SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
   access_policy: SourceSemanticAccessPolicySchema.enum["query-conditioned-v1"],

@@ -164,7 +164,7 @@ benefit or formal 500-question success. Completed publication reports recover a
 missing orchestration receipt; incomplete publication or exposure fails closed.
 
 The same launcher also accepts an explicit `arm: "native_semantic"` config,
-freezing `longmemeval-native-semantic-v1`. In addition to the source-only config,
+freezing `longmemeval-native-semantic-v3`. In addition to the source-only config,
 it requires `workspace_prefix`, `source_cache_roots`,
 `source_publication_associations` (source ID/version, generation key and request
 digest), `correspondence_cache_root`, `discovery_page_cap`,
@@ -172,7 +172,7 @@ digest), `correspondence_cache_root`, `discovery_page_cap`,
 shards are frozen by content, including invalid artifacts. Preparation uses the
 existing native publication owner and retains every source even when its
 interpretation is absent or rejected. Changed source-cache inputs require a new
-freeze. The source-only development-v2 arm still rejects published interpretations
+freeze. The source-only development-v3 arm still rejects published interpretations
 and nonempty proof delivery.
 
 Native preparation emits one combined `semantic_correspondence-workset-<identity>.json`

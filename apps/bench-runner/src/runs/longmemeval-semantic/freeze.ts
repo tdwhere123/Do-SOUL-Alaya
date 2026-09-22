@@ -24,7 +24,7 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
       const frozen = LongMemEvalExperimentFreezeSchema.parse(existing);
       if (chainIdentity(frozen.config) !== chainIdentity(config)
         || frozen.implementation_revision !== readCurrentExtractionAuthorityRevision()) throw new Error("development freeze changed");
-      if (frozen.contract === "longmemeval-native-semantic-v2") assertSourceCaches(frozen.source_caches);
+      if (frozen.contract === "longmemeval-native-semantic-v3") assertSourceCaches(frozen.source_caches);
       writeChainJson(join(root, "query-workset.json"), frozen.query_workset);
       return frozen;
     }
@@ -60,13 +60,15 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
         }
       })) });
     const lines = materializeSemanticProposalLines(query_workset, config.max_output_tokens);
-    const arm = "arm" in config ? { contract: "longmemeval-native-semantic-v2",
+    const arm = "arm" in config ? { contract: "longmemeval-native-semantic-v3",
       metric: "source-bearing-union-first-exposure-any-at-k-v1", mechanism: "native_source_interpretation_and_semantic_correspondence",
+      order_policy: NATIVE_SEMANTIC_ROUTE.order.enumeration_policy,
       native_route: NATIVE_SEMANTIC_ROUTE, source_caches: freezeSourceCaches(config.source_cache_roots) }
       : { contract: "longmemeval-semantic-development-v3", metric: "session-bearing-source-round-mixed-any-at-5",
+        order_policy: "native_canonical_source_root_order",
         mechanism: "source_only_interpretation_and_correspondence_not_exercised" };
     const frozen = LongMemEvalExperimentFreezeSchema.parse({ ...arm, config,
-      implementation_revision: readCurrentExtractionAuthorityRevision(), order_policy: "native_canonical_source_root_order",
+      implementation_revision: readCurrentExtractionAuthorityRevision(),
       exposure: config.stage === "formal" ? "formal_with_recorded_development_exposure" : "development_exposed",
       inventory, selected: selected.map((row, index) => ({ ...row, query_key: lines[index]!.key })), query_workset });
     writeChainArtifact(join(root, "freeze.json"), frozen);
