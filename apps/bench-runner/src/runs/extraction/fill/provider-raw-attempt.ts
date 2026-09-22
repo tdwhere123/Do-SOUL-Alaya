@@ -14,7 +14,13 @@ import { BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES, BENCH_TE
 export const PROVIDER_RAW_ATTEMPT_CONTRACT = "provider-raw-attempt-v2" as const;
 const PROPOSAL_RAW_ATTEMPT_CONTRACT = "semantic-proposal-raw-attempt-v1" as const;
 const MAX_RETAINED_RAW_BYTES = 1024 * 1024;
-const MAX_RECORD_BYTES = 2 * 1024 * 1024;
+const MAX_RETAINED_RESPONSE_BODY_BYTES = 64 * 1024;
+// JSON can expand each retained byte to six ASCII bytes. A split UTF-8 code point
+// can add two bytes per retained string. The envelope reserve is not a schema
+// field limit: metadata is variable, so publication also checks actual bytes.
+const MAX_RECORD_ENVELOPE_BYTES = 64 * 1024;
+const MAX_RECORD_BYTES = 6 * (MAX_RETAINED_RAW_BYTES + 2 + MAX_RETAINED_RESPONSE_BODY_BYTES + 2)
+  + MAX_RECORD_ENVELOPE_BYTES;
 
 const UsageSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
@@ -159,9 +165,11 @@ function assertProviderRawIntegrity(raw: ProviderRawAttempt): void {
       complete && (bytes.length > MAX_RETAINED_RAW_BYTES || raw.original_byte_length !== bytes.length ||
         raw.decoded_text_digest !== createHash("sha256").update(bytes).digest("hex")) ||
       !complete && (raw.original_byte_length <= MAX_RETAINED_RAW_BYTES || bytes.length > MAX_RETAINED_RAW_BYTES + 2) ||
-      body !== undefined && (!body.truncated && (Buffer.byteLength(body.text, "utf8") !== body.original_byte_length ||
+      body !== undefined && (!body.truncated && (body.original_byte_length > MAX_RETAINED_RESPONSE_BODY_BYTES ||
+        Buffer.byteLength(body.text, "utf8") !== body.original_byte_length ||
         createHash("sha256").update(body.text, "utf8").digest("hex") !== body.digest) ||
-        body.truncated && (body.original_byte_length <= 64 * 1024 || Buffer.byteLength(body.text, "utf8") > 64 * 1024 + 2))) {
+        body.truncated && (body.original_byte_length <= MAX_RETAINED_RESPONSE_BODY_BYTES ||
+          Buffer.byteLength(body.text, "utf8") > MAX_RETAINED_RESPONSE_BODY_BYTES + 2))) {
     throw new ProviderRawAttemptIdentityError(`provider raw attempt integrity mismatch: ${raw.cache_key}`);
   }
 }
@@ -210,16 +218,19 @@ export function writeProviderRawAttempt(input: Readonly<{
     ...(input.responseBody === undefined ? {} : { response_body: retainResponseBody(input.responseBody) }),
     extracted_at: new Date().toISOString()
   });
+  const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`, "utf8");
+  if (bytes.byteLength > MAX_RECORD_BYTES) {
+    throw new ProviderRawAttemptIdentityError("provider raw attempt exceeds its size limit");
+  }
   const path = providerRawAttemptPath(input.root, input.cacheKey, input.attemptOrdinal);
   mkdirSync(dirname(path), { recursive: true });
-  writeBytesExclusiveDurable(path, Buffer.from(`${JSON.stringify(record, null, 2)}\n`, "utf8"));
+  writeBytesExclusiveDurable(path, bytes);
   return record;
 }
 
 function retainResponseBody(text: string) {
   const bytes = Buffer.from(text, "utf8");
-  // Leave space for escaped JSON and decoded text in the bounded record.
-  const cap = 64 * 1024;
+  const cap = MAX_RETAINED_RESPONSE_BODY_BYTES;
   return { text: bytes.subarray(0, cap).toString("utf8"), truncated: bytes.length > cap,
     original_byte_length: bytes.length, digest: createHash("sha256").update(bytes).digest("hex") };
 }

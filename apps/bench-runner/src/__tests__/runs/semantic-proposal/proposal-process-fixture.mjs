@@ -61,16 +61,19 @@ try {
     })}\n`);
     process.exit(0);
   }
-  if (mode === "fill") {
+  if (mode === "fill" || mode === "recover") {
     const fill = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/fill.ts");
     const worksets = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/workset.ts");
     const authorities = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/authority.ts");
     const workset = worksets.parseSemanticProposalWorkset(JSON.parse(readFileSync(join(cacheRoot, "workset.json"), "utf8")));
     try {
+      const authority = authorities.readSemanticProposalAuthority(process.env.PROPOSAL_AUTHORITY_PATH);
       const result = await fill.executeSemanticProposalFill({ workset, cacheRoot,
-        authority: authorities.readSemanticProposalAuthority(process.env.PROPOSAL_AUTHORITY_PATH),
-        config: { model: workset.model, requestProfile: workset.request_profile, providerUrl: workset.provider_url, apiKey: "loopback-only" } });
-      process.stdout.write(`${JSON.stringify(result)}\n`);
+        authority, config: { model: workset.model, requestProfile: workset.request_profile,
+          providerUrl: workset.provider_url, apiKey: mode === "recover" ? null : "loopback-only" } });
+      const output = mode === "recover" ? { summary: result,
+        statuses: fill.readSemanticProposalResults(workset, cacheRoot, authority.limits.max_output_tokens).map(row => row.status) } : result;
+      process.stdout.write(`${JSON.stringify(output)}\n`);
       process.exit(0);
     } catch (cause) {
       process.stderr.write(cause instanceof Error ? cause.message : String(cause));

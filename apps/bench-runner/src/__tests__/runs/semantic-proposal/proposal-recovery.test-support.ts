@@ -1,16 +1,21 @@
+import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { inspectExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
-import { providerRawAttemptPath, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { providerRawAttemptPath, readProviderRawAttempt, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { readSemanticChainProposalResults } from "../../../runs/semantic-chain/inputs.js";
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
 import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults } from "../../../runs/semantic-proposal/fill.js";
 import { materializeSemanticProposalLines, type SemanticProposalLine, type SemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
+
+const execFileAsync = promisify(execFile);
 
 /** The same filesystem recovery contract must hold for both proposal producers. */
 export function proposalRecoveryCases(input: {
@@ -21,24 +26,79 @@ export function proposalRecoveryCases(input: {
   describe("durable proposal recovery", () => {
     const roots: string[] = [];
     afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-    function fixture() {
+    function fixture(maxOutputTokens = 128) {
       const cacheRoot = mkdtempSync(join(tmpdir(), "proposal-recovery-")); roots.push(cacheRoot);
       const workset = input.workset();
-      const line = materializeSemanticProposalLines(workset, 128)[0]!;
-      const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, 128),
+      const line = materializeSemanticProposalLines(workset, maxOutputTokens)[0]!;
+      const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, maxOutputTokens),
         inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
       const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: workset.kind });
       const ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${authority.attempt_lineage_digest}.json`);
-      const raw = (ordinal: number, decodedText: string) => writeProviderRawAttempt({ root: cacheRoot,
+      const raw = (ordinal: number, decodedText: string, usage?: { inputTokens: number; outputTokens: number; totalTokens: number }) => writeProviderRawAttempt({ root: cacheRoot,
         cacheKey: line.key, attemptOrdinal: ordinal, kind: line.kind, model: workset.model,
         requestProfile: workset.request_profile, requestDigest: line.requestDigest,
-        attemptLineageDigest: authority.attempt_lineage_digest, decodedText, finishReason: "STOP" });
-      const read = () => readSemanticProposalResults(workset, cacheRoot, 128)[0]!;
-      const chain = () => readSemanticChainProposalResults(workset, cacheRoot, 128)[0]!;
+        attemptLineageDigest: authority.attempt_lineage_digest, decodedText, finishReason: "STOP", ...(usage ? { usage } : {}) });
+      const read = () => readSemanticProposalResults(workset, cacheRoot, maxOutputTokens)[0]!;
+      const chain = () => readSemanticChainProposalResults(workset, cacheRoot, maxOutputTokens)[0]!;
       const fill = () => executeSemanticProposalFill({ workset, cacheRoot, authority,
         config: { ...input.config(), apiKey: null }, extractor: { extract: async () => { throw new Error("unexpected dispatch"); } } });
-      return { cacheRoot, workset, line, authority, ledger, ledgerPath, raw, read, chain, fill };
+      const restart = async () => {
+        writeFileSync(join(cacheRoot, "workset.json"), JSON.stringify(workset));
+        const authorityPath = join(cacheRoot, "authority.json");
+        writeFileSync(authorityPath, JSON.stringify(authority));
+        const { stdout } = await execFileAsync(process.execPath, [join(import.meta.dirname, "proposal-process-fixture.mjs")], {
+          cwd: process.cwd(), timeout: 30_000, env: { ...process.env, PROPOSAL_CACHE_ROOT: cacheRoot,
+            PROPOSAL_PROCESS_MODE: "recover", PROPOSAL_AUTHORITY_PATH: authorityPath }
+        });
+        return JSON.parse(stdout.trim());
+      };
+      return { cacheRoot, workset, line, authority, ledger, ledgerPath, raw, read, chain, fill, restart };
     }
+
+    it.each([true, false].flatMap(truncated => [true, false].flatMap(usageKnown =>
+      ["live", "retained recovery"].map(path => ({ truncated, usageKnown, path })))))
+    ("reopens escaped proposal raw through $path with truncated=$truncated usageKnown=$usageKnown", async ({ truncated, usageKnown, path }) => {
+      const f = fixture(65536);
+      const prefix = truncated ? input.body(f.line) : "{}";
+      const text = prefix + "\n".repeat(1024 * 1024 - Buffer.byteLength(prefix) + (truncated ? 4 : 0));
+      const usage = usageKnown ? { inputTokens: 2, outputTokens: 3, totalTokens: 5 } : undefined;
+      let calls = 0;
+      if (path === "retained recovery") {
+        f.ledger.reserveAttemptOrdinal(f.line.key); f.raw(1, text, usage);
+        expect(f.read().status).toBe("pending");
+        expect(await f.restart()).toMatchObject({ statuses: [truncated ? "incomplete" : "invalid"] });
+      } else {
+        await executeSemanticProposalFill({ workset: f.workset, cacheRoot: f.cacheRoot, authority: f.authority,
+          config: input.config(), extractor: { extract: async () => {
+            calls += 1; return { rawJson: text, responseMetadata: { finishReason: "STOP" }, ...(usage ? { usage } : {}) };
+          } } });
+      }
+      const raw = readProviderRawAttempt(f.cacheRoot, f.line.key, 1)!;
+      expect(raw).toMatchObject({ full_replay_possible: !truncated, decoded_text_truncated: truncated,
+        original_byte_length: Buffer.byteLength(text), decoded_text_digest: createHash("sha256").update(text).digest("hex"),
+        finish_reason: "STOP", usage_known: usageKnown, usage: usage ?? null });
+      if (truncated) expect(JSON.parse(raw.decoded_text)).toEqual(JSON.parse(prefix));
+      const status = truncated ? "incomplete" : "invalid";
+      expect(f.read().status).toBe(status);
+      expect(f.chain().received).toBeUndefined();
+      expect(JSON.parse(readFileSync(semanticProposalShardPath(f.cacheRoot, f.line.key), "utf8"))).toMatchObject({ admitted: false });
+      const settled = JSON.parse(readFileSync(f.ledgerPath, "utf8"));
+      expect(settled).toMatchObject({ attempts: 1, unresolved_attempts: [],
+        settled_attempts: [{ cache_key: f.line.key, attempt_ordinal: 1 }], successful_shards: [],
+        telemetry: { input_tokens: usageKnown ? 2 : 0, output_tokens: usageKnown ? 3 : 0,
+          total_tokens: usageKnown ? 5 : 0, usage_unavailable_requests: usageKnown ? 0 : 1 } });
+      const rawBytes = readFileSync(providerRawAttemptPath(f.cacheRoot, f.line.key, 1));
+      for (let replay = 0; replay < 2; replay += 1) {
+        const summary = replay === 0 && path === "live" ? (await f.restart()).summary : await f.fill();
+        expect(summary).toMatchObject({ pending: 0, newly_admitted: 0, unknown: 0,
+          ...(truncated ? { incomplete: 1 } : { rejected: 1 }) });
+        expect(f.read().status).toBe(status);
+        expect(f.chain().received).toBeUndefined();
+        expect(JSON.parse(readFileSync(f.ledgerPath, "utf8"))).toEqual(settled);
+        expect(readFileSync(providerRawAttemptPath(f.cacheRoot, f.line.key, 1)).equals(rawBytes)).toBe(true);
+      }
+      expect(calls).toBe(path === "live" ? 1 : 0);
+    });
 
     it.each(["changed-raw", "unreserved-raw", "foreign-reservation"] as const)("rejects %s before any executable publication", async mode => {
       const f = fixture();

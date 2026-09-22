@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, expect, it, vi } from "vitest";
 import { runCli } from "../../../cli/cli.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
@@ -15,8 +17,9 @@ import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtraction
 const MODEL = "gemini-2.5-flash-lite";
 const REQUEST_PROFILE = "gemini-2.5-nonthinking-v1" as const;
 const ABSTAINED = JSON.stringify({ contract: "source-semantic-proposal-v5", outcome: { status: "abstained" } });
-const OVERSIZED = ABSTAINED + " ".repeat(1024 * 1024);
+const OVERSIZED = ABSTAINED + "\n".repeat(1024 * 1024);
 const FULL_DIGEST = createHash("sha256").update(OVERSIZED).digest("hex");
+const execFileAsync = promisify(execFile);
 let cacheRoot: string, dataDir: string, pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks(roots => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots), "longmemeval_s");
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -59,6 +62,11 @@ function ledger() {
   const records = listExtractionAttemptLedgerRecords(cacheRoot);
   expect(records).toHaveLength(1);
   return records[0]!;
+}
+
+async function restartCli(args: string[]) {
+  await execFileAsync(process.execPath, ["--use-env-proxy", resolve("apps/bench-runner/bin/alaya-bench-runner.mjs"), ...args],
+    { cwd: process.cwd(), env: process.env, timeout: 30_000 });
 }
 
 function expectSettledQuarantine(keys: readonly string[], usageKnown: boolean, fingerprint: string) {
@@ -107,7 +115,8 @@ it.each([
     expect(interrupted.pending_keys).toHaveLength(fixture.keys.length);
     expect(interrupted.telemetry).toMatchObject({ total_tokens: 0, usage_unavailable_requests: 0 });
   }
-  expect(await runCli(fixture.args)).toBe(0);
+  if (path === "retained recovery") await restartCli(fixture.args);
+  else expect(await runCli(fixture.args)).toBe(0);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(fixture.keys.length);
   const raws = fixture.keys.flatMap(key => rawAttempts.listProviderRawAttempts(cacheRoot, key));
   expect(raws).toHaveLength(fixture.keys.length);
@@ -129,6 +138,39 @@ it.each([
     expect(raws.map(raw => readFileSync(rawAttempts.providerRawAttemptPath(cacheRoot, raw.cache_key, raw.attempt_ordinal), "utf8"))).toEqual(rawBytes);
     expect(fixture.fetchMock).toHaveBeenCalledTimes(fixture.keys.length);
     expectSettledQuarantine(fixture.keys, usageKnown, FULL_DIGEST);
+  }
+}, 60000);
+
+it.each([true, false])("recovers a complete escaped source response with usageKnown=%s exactly once", async usageKnown => {
+  const response = ABSTAINED + "\n".repeat(1024 * 1024 - Buffer.byteLength(ABSTAINED));
+  const fixture = await setup(usageKnown, response);
+  const writeRaw = rawAttempts.writeProviderRawAttempt;
+  const interrupt = vi.spyOn(rawAttempts, "writeProviderRawAttempt").mockImplementation(input => {
+    writeRaw(input);
+    throw new Error("fixture interruption after durable raw publication");
+  });
+  expect(await runCli(fixture.args)).toBe(2);
+  interrupt.mockRestore();
+  expect(ledger().unresolved_attempts).toHaveLength(fixture.keys.length);
+  for (const key of fixture.keys) {
+    expect(rawAttempts.listProviderRawAttempts(cacheRoot, key)[0]).toMatchObject({ decoded_text: response,
+      decoded_text_truncated: false, full_replay_possible: true, original_byte_length: 1024 * 1024,
+      decoded_text_digest: createHash("sha256").update(response).digest("hex"), usage_known: usageKnown });
+  }
+  await restartCli(fixture.args);
+  const settled = ledger();
+  expect(settled).toMatchObject({ attempts: fixture.keys.length, unresolved_attempts: [], pending_keys: [],
+    transport_failures: [], telemetry: { input_tokens: usageKnown ? 20 : 0, output_tokens: usageKnown ? 40 : 0,
+      total_tokens: usageKnown ? 60 : 0, usage_unavailable_requests: usageKnown ? 0 : fixture.keys.length } });
+  expect(settled.successful_shards).toHaveLength(fixture.keys.length);
+  expect(settled.settled_attempts).toHaveLength(fixture.keys.length);
+  for (let replay = 0; replay < 2; replay += 1) {
+    expect(await runCli(fixture.args)).toBe(0);
+    expect(ledger()).toEqual(settled);
+    for (const key of fixture.keys) {
+      expect(sourceArtifacts.inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status).toBe("hit");
+    }
+    expect(fixture.fetchMock).toHaveBeenCalledTimes(fixture.keys.length);
   }
 }, 60000);
 
