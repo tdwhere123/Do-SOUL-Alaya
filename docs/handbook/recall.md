@@ -944,20 +944,25 @@ and modality foils may tie or outrank a relevant interpretation without acquirin
 assertion authority. A source without an interpretation remains a raw candidate.
 There is no query seek across unvisited sources or interpretation pages.
 
-Interpretation access first reads bounded headers through the existing capsule
-cursor index, charging inactive rows as well. Within that observed prefix, the
-query-conditioned policy alternates source-text hint priority with cursor
-exploration, deduplicating capsule identities. A capsule source hash only hints
-at scheduling; missing or wrong hashes and reading-only matches remain reachable.
-The canonical control verifies in cursor order. Each scheduled body is loaded and
-decoded once by the verification owner, which checks its derived capsule identity
-and authoritative current source, version, scope and location. Descriptor delivery
-independently rechecks currentness. Unverified headers remain an open residual;
-only verified interpretations enter the observed pool and its final access order.
-Header reads, association, scheduling, decoding and verification use the existing
-ledger and phase reserves. Bounded membership may change with the implementation;
-the pool identity binds actual observations and prepared benchmark plans also pin
-the implementation revision.
+Access progressively interleaves source-text observation, bounded header pages
+through the existing capsule cursor index, and whole interpretation verification
+within one observation envelope. Inactive header rows are charged as well. Each
+new source observation contributes its digest hint once to the request-local Core
+policy; duplicate digests retain the best signal under the same comparison owner.
+Within the observed header prefix, the query-conditioned policy alternates
+source-text hint priority with cursor exploration, deduplicating capsule
+identities. A capsule source hash only hints at scheduling; missing or wrong
+hashes and reading-only matches remain reachable. The canonical control verifies
+in cursor order. Each scheduled body is loaded and decoded once by the
+verification owner, which checks its derived capsule identity and authoritative
+current source, version, scope and location. Before freezing the whole observed
+pool, interpretation source scores reconcile against the final source observations
+by verified record identity. Descriptor delivery independently rechecks currentness.
+Unverified headers remain an open residual; only verified interpretations enter
+the observed pool and its final access order. Header reads, association, scheduling,
+decoding and verification use the existing ledger and phase reserves. Bounded
+membership may change with the implementation; the pool identity binds actual
+observations and prepared benchmark plans also pin the implementation revision.
 
 The access receipt retains identities, cached scores, source byte extents and
 open residuals, without duplicating interpretation bodies. It reports the total
@@ -973,9 +978,11 @@ policy, budget, scope and database revision; continuation cannot rescan or reord
 it, and query-handle recall uses all bound candidates beyond the first descriptor
 page. Source reads, metadata and interpretation decoding, verification, query
 normalization, scoring, ordering and retention consume the request ledger.
-Observation leaves capacity for descriptor/lease or library finalization; an
-unread body tail or budget-limited pool remains open. These are conservative
-logical charges, not a wall-clock guarantee or an RSS bound.
+The observation envelope leaves outer request capacity for descriptor/lease or
+library finalization. Source reads and whole interpretation verification do not
+resume after exhaustion; an unread body tail or budget-limited pool remains open,
+and frozen continuation does not resume observation. These are conservative logical
+charges, not a wall-clock guarantee or an RSS bound.
 Compatible source interpretation, query semantics, and semantic correspondence compile independently through the existing field; there is no
 cross-interpretation join. Native delivery selects at most five source roots
 (`source_gold_root_identity`) after reserving their complete support packages.

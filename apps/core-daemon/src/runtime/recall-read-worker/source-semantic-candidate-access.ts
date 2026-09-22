@@ -136,13 +136,13 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
       const through = Math.min(records.length, sourceOffset + SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE);
       while (sourceOffset < through) {
         const record = records[sourceOffset++]!;
+        const observation = readSourceText(runtime, record, policy, meter);
         sources.set(record.identity, { source_id: record.source_id, record_id: record.identity,
-          ...readSourceText(runtime, record, policy, meter) });
+          ...observation });
+        policy.associateSourceHint(record.content_digest, observation.signal, meter);
       }
       if (pending.length === 0) continue;
-      meter.charge(records.length, records.length * 32, "access source hint projection");
-      const scheduled = policy.schedule(pending, records.map((record) => ({ digest: record.content_digest,
-        signal: sources.get(record.identity)?.signal ?? UNKNOWN })), meter);
+      const scheduled = policy.schedule(pending, meter);
       // Let unfinished observation producers progress between priority/exploration pairs.
       const count = headersDone && sourceOffset === records.length ? scheduled.length : Math.min(2, scheduled.length);
       for (const row of scheduled.slice(0, count)) {

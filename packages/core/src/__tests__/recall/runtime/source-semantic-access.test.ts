@@ -26,19 +26,19 @@ it("interleaves a late source hint with cursor exploration without dropping unkn
     { identity: "c", source_hash: "weak" }, { identity: "y", source_hash: "relevant" },
     { identity: "z", source_hash: "relevant" }
   ];
-  const scheduled = policy.schedule(rows, [
-    { digest: "weak", signal: { source_text_score: 0, interpretation_reading_score: 0 } },
-    { digest: "relevant", signal: { source_text_score: 10, interpretation_reading_score: 0 } }
-  ], meter);
+  policy.associateSourceHint("weak", { source_text_score: 0, interpretation_reading_score: 0 }, meter);
+  policy.associateSourceHint("relevant", { source_text_score: 1, interpretation_reading_score: 0 }, meter);
+  const scheduled = policy.schedule(rows, meter);
   expect(scheduled.map((row) => row.identity)).toEqual(["y", "a", "z", "b", "c"]);
   expect(new Set(scheduled.map((row) => row.identity)).size).toBe(rows.length);
   expect(meter.spentWork).toBeGreaterThan(rows.length);
   expect(meter.spentBytes).toBeGreaterThan(0);
   const canonical = createSourceSemanticAccessPolicy("orchid", undefined, "canonical-v1", meter);
-  expect(canonical.schedule(rows, [], meter)).toEqual(rows);
+  canonical.associateSourceHint("relevant", { source_text_score: 1, interpretation_reading_score: 0 }, meter);
+  expect(canonical.schedule(rows, meter)).toEqual(rows);
 });
 
-it("recomputes best shared hints and reading ties without carrying them into later schedules", () => {
+it("retains incrementally observed best shared hints and reading ties across schedules", () => {
   const meter = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
   const policy = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", meter);
   const rows = [{ identity: "a", source_hash: null }, { identity: "b", source_hash: "wrong" },
@@ -50,11 +50,57 @@ it("recomputes best shared hints and reading ties without carrying them into lat
     { digest: "shared", signal: { source_text_score: 0.4, interpretation_reading_score: 0.8 } },
     { digest: "distinct", signal: { source_text_score: 0.4, interpretation_reading_score: 0.9 } }
   ];
-  expect(policy.schedule(rows, sources, meter).map(row => row.identity)).toEqual(["e", "a", "c", "b", "d"]);
-  expect(policy.schedule(rows, [...sources].reverse(), meter).map(row => row.identity)).toEqual(["e", "a", "c", "b", "d"]);
-  expect(policy.schedule(rows, [{ digest: "shared", signal: { source_text_score: 1, interpretation_reading_score: 0 } }], meter)
-    .map(row => row.identity)).toEqual(["c", "a", "d", "b", "e"]);
-  expect(policy.schedule(rows, [], meter).map(row => row.identity)).toEqual(["a", "b", "c", "d", "e"]);
+  for (const source of sources.slice(0, 3)) policy.associateSourceHint(source.digest, source.signal, meter);
+  expect(policy.schedule(rows, meter).map(row => row.identity)).toEqual(["c", "a", "d", "b", "e"]);
+  policy.associateSourceHint(sources[3]!.digest, sources[3]!.signal, meter);
+  expect(policy.schedule(rows, meter).map(row => row.identity)).toEqual(["e", "a", "c", "b", "d"]);
+  for (const source of [...sources].reverse()) {
+    const beforeWork = meter.spentWork, beforeBytes = meter.spentBytes;
+    policy.associateSourceHint(source.digest, source.signal, meter);
+    expect(meter.spentWork).toBeGreaterThan(beforeWork);
+    expect(meter.spentBytes).toBeGreaterThan(beforeBytes);
+  }
+  expect(policy.schedule(rows, meter).map(row => row.identity)).toEqual(["e", "a", "c", "b", "d"]);
+  policy.associateSourceHint("shared", { source_text_score: 1, interpretation_reading_score: 0 }, meter);
+  expect(policy.schedule(rows, meter).map(row => row.identity)).toEqual(["c", "a", "d", "b", "e"]);
+  const reversed = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", meter);
+  for (const source of [...sources].reverse()) reversed.associateSourceHint(source.digest, source.signal, meter);
+  expect(reversed.schedule(rows, meter).map(row => row.identity)).toEqual(["e", "a", "c", "b", "d"]);
+});
+
+it("keeps unknown and zero hints reachable without sharing associations between policy instances", () => {
+  const meter = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
+  const policy = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", meter);
+  const rows = [{ identity: "a", source_hash: "unknown" }, { identity: "b", source_hash: "relevant" },
+    { identity: "c", source_hash: null }];
+  const unknown = Object.freeze({ source_text_score: null, interpretation_reading_score: 0 });
+  policy.associateSourceHint("unknown", unknown, meter);
+  expect(policy.schedule(rows, meter).map(row => row.identity)).toEqual(["a", "b", "c"]);
+  policy.associateSourceHint("unknown", { source_text_score: 0, interpretation_reading_score: 0 }, meter);
+  expect(policy.schedule(rows, meter).map(row => row.identity)).toEqual(["a", "b", "c"]);
+  policy.associateSourceHint("relevant", { source_text_score: 0.8, interpretation_reading_score: 0 }, meter);
+  policy.associateSourceHint("relevant", unknown, meter);
+  expect(policy.schedule(rows, meter).map(row => row.identity)).toEqual(["b", "a", "c"]);
+  expect(unknown.source_text_score).toBeNull();
+  const fresh = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", meter);
+  expect(fresh.schedule(rows, meter).map(row => row.identity)).toEqual(["a", "b", "c"]);
+  fresh.associateSourceHint("unknown", { source_text_score: 1, interpretation_reading_score: 0 }, meter);
+  expect(fresh.schedule(rows, meter).map(row => row.identity)).toEqual(["a", "b", "c"]);
+  expect(policy.schedule(rows, meter).map(row => row.identity)).toEqual(["b", "a", "c"]);
+});
+
+it("rejects an uncharged hint before it can affect subsequent scheduling", () => {
+  const meter = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
+  const policy = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", meter);
+  const rows = [{ identity: "a", source_hash: null }, { identity: "b", source_hash: "relevant" }];
+  const signal = { source_text_score: 1, interpretation_reading_score: 0 };
+  for (const budget of [{ work_units: 0, memory_bytes: 1_000_000 }, { work_units: 100_000, memory_bytes: 0 }]) {
+    expect(() => policy.associateSourceHint("relevant", signal, new SourceSemanticResourceLedger(budget)))
+      .toThrow(SourceSemanticResourceExhausted);
+    expect(policy.schedule(rows, meter).map(row => row.identity)).toEqual(["a", "b"]);
+  }
+  policy.associateSourceHint("relevant", signal, meter);
+  expect(policy.schedule(rows, meter).map(row => row.identity)).toEqual(["b", "a"]);
 });
 
 it("reinterleaves the pending suffix and newly appended headers on each schedule", () => {
@@ -66,20 +112,21 @@ it("reinterleaves the pending suffix and newly appended headers on each schedule
     { digest: "e", signal: { source_text_score: 0.8, interpretation_reading_score: 0 } },
     { digest: "f", signal: { source_text_score: 0.7, interpretation_reading_score: 0 } }
   ];
-  const first = policy.schedule(rows, sources, meter);
+  for (const source of sources) policy.associateSourceHint(source.digest, source.signal, meter);
+  const first = policy.schedule(rows, meter);
   expect(first.map(row => row.identity)).toEqual(["d", "a", "e", "b", "f", "c"]);
   const pending = first.slice(2);
-  expect(policy.schedule(pending, sources, meter).map(row => row.identity)).toEqual(["e", "f", "b", "c"]);
-  expect(policy.schedule([...pending, { identity: "g", source_hash: "g" }], [
-    ...sources, { digest: "g", signal: { source_text_score: 1, interpretation_reading_score: 0 } }
-  ], meter).map(row => row.identity)).toEqual(["g", "e", "b", "f", "c"]);
+  expect(policy.schedule(pending, meter).map(row => row.identity)).toEqual(["e", "f", "b", "c"]);
+  policy.associateSourceHint("g", { source_text_score: 1, interpretation_reading_score: 0 }, meter);
+  expect(policy.schedule([...pending, { identity: "g", source_hash: "g" }], meter).map(row => row.identity))
+    .toEqual(["g", "e", "b", "f", "c"]);
   expect(pending.map(row => row.identity)).toEqual(["e", "b", "f", "c"]);
 });
 
 it("reuses retained headers without traversing their payload on repeated schedules", () => {
   const compileMeter = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
   const policy = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", compileMeter);
-  const sources = [{ digest: "relevant", signal: { source_text_score: 1, interpretation_reading_score: 0 } }];
+  policy.associateSourceHint("relevant", { source_text_score: 1, interpretation_reading_score: 0 }, compileMeter);
   const small = Object.freeze([{ identity: "a", source_hash: null, cursor: "small" },
     { identity: "b", source_hash: "relevant", cursor: "small" }].map(row => Object.freeze(row)));
   const large = Object.freeze(small.map(row => Object.freeze({ ...row, cursor: "retained cursor ".repeat(100_000) })));
@@ -87,7 +134,7 @@ it("reuses retained headers without traversing their payload on repeated schedul
   const largeMeter = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
   for (let round = 0; round < 3; round++) {
     const beforeWork = largeMeter.spentWork, beforeBytes = largeMeter.spentBytes;
-    const smallSchedule = policy.schedule(small, sources, smallMeter), largeSchedule = policy.schedule(large, sources, largeMeter);
+    const smallSchedule = policy.schedule(small, smallMeter), largeSchedule = policy.schedule(large, largeMeter);
     expect(smallSchedule.map(row => row.identity)).toEqual(["b", "a"]);
     expect(largeSchedule[0]).toBe(large[1]);
     expect(largeSchedule[1]).toBe(large[0]);
@@ -97,8 +144,8 @@ it("reuses retained headers without traversing their payload on repeated schedul
     expect(largeMeter.spentWork).toBe(smallMeter.spentWork);
     expect(largeMeter.spentBytes).toBe(smallMeter.spentBytes);
   }
-  expect(() => policy.schedule(large, sources, new SourceSemanticResourceLedger({ work_units: 0, memory_bytes: 1_000_000 })))
+  expect(() => policy.schedule(large, new SourceSemanticResourceLedger({ work_units: 0, memory_bytes: 1_000_000 })))
     .toThrow(SourceSemanticResourceExhausted);
-  expect(() => policy.schedule(large, sources, new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 0 })))
+  expect(() => policy.schedule(large, new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 0 })))
     .toThrow(SourceSemanticResourceExhausted);
 });

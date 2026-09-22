@@ -28,7 +28,9 @@ it("interleaves actual source, header and verification work before freezing reco
     });
     const chargeSpy = vi.spyOn(SourceSemanticReadBudget.prototype, "charge").mockImplementation(function (this: SourceSemanticReadBudget, ...args) {
       const result = charge.apply(this, args);
-      if (args[2] === "interpretation decoding") trace.push({ phase: args[2], work: this.spentWork, bytes: this.spentBytes });
+      if (args[2] === "interpretation decoding" || args[2] === "access source hint association") {
+        trace.push({ phase: args[2], work: this.spentWork, bytes: this.spentBytes });
+      }
       return result;
     });
     try {
@@ -40,6 +42,7 @@ it("interleaves actual source, header and verification work before freezing reco
       expect(firstVerification).toBeGreaterThan(0);
       expect(firstVerification).toBeLessThan(phases.lastIndexOf("interpretation access header page"));
       expect(phases.slice(firstVerification + 1)).toContain("access source extent metadata");
+      expect(phases.filter(phase => phase === "access source hint association")).toHaveLength(50);
       expect(trace.every((row, index) => index === 0 || row.work >= trace[index - 1]!.work
         && row.bytes >= trace[index - 1]!.bytes)).toBe(true);
       expect(pool.access).toMatchObject({ observed_source_count: 50, observed_interpretation_count: 50,

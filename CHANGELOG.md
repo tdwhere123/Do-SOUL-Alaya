@@ -12,6 +12,12 @@ below as the live ranking recipe.
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
 
+Native semantic access interleaves source observation, header discovery and whole
+interpretation verification within its bounded observation envelope. Scheduling
+reuses retained headers and associates each newly observed source hint once per
+request. Final source scores reconcile by verified record identity before the
+whole observed pool is ordered and frozen; exhausted observation remains open.
+
 Protocol 10.0.0 requires `request_identity` on native semantic library deliveries
 under invariant §25 (major: newly required public response field). Library
 protocol 5 binds the resolved original query, query semantics, correspondences,

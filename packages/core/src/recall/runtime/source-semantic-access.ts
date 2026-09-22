@@ -59,6 +59,7 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
     ledger.charge(rows.length * Math.ceil(Math.log2(rows.length + 1)), rows.length * 16, "access ordering");
     return [...rows].sort(compareRows);
   };
+  const sourceHints = new Map<string, SourceSemanticAccessSignal>();
   return {
     sourceCost: (length: number) => cost(length, originalProbes),
     source: (text: string, ledger: SourceSemanticResourceLedger): SourceSemanticAccessSignal => ({
@@ -79,22 +80,19 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
     },
     order: <T extends Scored>(rows: readonly T[], ledger: SourceSemanticResourceLedger): T[] =>
       order(rows, ledger, (a, b) => compare(a.identity, a.signal, b.identity, b.signal)),
+    associateSourceHint: (digest: string, signal: SourceSemanticAccessSignal, ledger: SourceSemanticResourceLedger): void => {
+      if (policy === "canonical-v1") return;
+      ledger.charge(1, digest.length * 2 + 48, "access source hint association");
+      const prior = sourceHints.get(digest);
+      if (prior === undefined || compare("", signal, "", prior) < 0) sourceHints.set(digest, signal);
+    },
     schedule: <T extends { readonly identity: string; readonly source_hash: string | null }>(rows: readonly T[],
-      sources: readonly { readonly digest: string; readonly signal: SourceSemanticAccessSignal }[],
       ledger: SourceSemanticResourceLedger): T[] => {
       ledger.charge(rows.length, rows.length * 8, "access verification schedule");
       if (policy === "canonical-v1") return [...rows];
-      const signals = new Map<string, SourceSemanticAccessSignal>();
-      for (const source of sources) {
-        ledger.charge(1, source.digest.length * 2 + 48, "access source hint association");
-        const prior = signals.get(source.digest);
-        if (prior === undefined || compare("", source.signal, "", prior) < 0) {
-          signals.set(source.digest, source.signal);
-        }
-      }
       // Headers are already retained by observation; ordering only copies their references.
-      const priority = order(rows, ledger, (a, b) => compare(a.identity, signals.get(a.source_hash ?? "") ?? UNKNOWN_SIGNAL,
-        b.identity, signals.get(b.source_hash ?? "") ?? UNKNOWN_SIGNAL));
+      const priority = order(rows, ledger, (a, b) => compare(a.identity, sourceHints.get(a.source_hash ?? "") ?? UNKNOWN_SIGNAL,
+        b.identity, sourceHints.get(b.source_hash ?? "") ?? UNKNOWN_SIGNAL));
       const seen = new Set<string>(), scheduled: T[] = [];
       // A hash only schedules work. Alternating cursor exploration keeps wrong/missing
       // hashes and reading-only matches reachable without granting the hint authority.
