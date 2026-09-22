@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { closeCachedDatabase, SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
+import { closeCachedDatabase, SqliteFieldSourceRecordRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
 import { createSourceSemanticInterpretationHandler } from "../../../mcp-memory/tool/interpretation-handler.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
@@ -55,6 +55,38 @@ it("interleaves actual source, header and verification work before freezing reco
     } finally {
       reserveSpy.mockRestore(); chargeSpy.mockRestore(); database.close(); closeCachedDatabase(filename);
     }
+  });
+});
+
+it("keeps chronological verification independent of navigation arrival across pages and shared identities", async () => {
+  await withAccessLibrary([{ id: "cursor", text: "Granite walls.", reading: "surround", count: 40 },
+    ...["nav-one", "nav-two", "nav-three"].map(id => ({ id, text: "Orchid irrigation.", reading: orchid }))],
+  async ({ filename, execute, ids }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const capsules = database.connection.prepare("SELECT object_id, json_extract(gist,'$.interpretation_id') AS interpretation_id FROM evidence_capsules")
+      .all() as { object_id: string; interpretation_id: string }[];
+    const cursorIds = capsules.filter(row => ids.get("cursor")!.includes(row.interpretation_id)).map(row => row.object_id).sort();
+    const nominees = capsules.filter(row => !ids.get("cursor")!.includes(row.interpretation_id)).map(row => row.object_id).sort();
+    const chronological = [nominees[2]!, ...cursorIds.slice(0, 15), nominees[0]!, ...cursorIds.slice(15), nominees[1]!];
+    const setTime = database.connection.prepare("UPDATE evidence_capsules SET created_at=? WHERE object_id=?");
+    chronological.forEach((identity, index) => setTime.run(new Date(Date.parse(CLOCK) + index * 1000).toISOString(), identity));
+    const read = vi.spyOn(SqliteSourceHintReader.prototype, "readBoundInterpretation");
+    try {
+      const meter = new SourceSemanticReadBudget(ACCESS_BUDGET);
+      const pool = database.connection.transaction(() => observeSourceSemanticAccess({ database } as RecallReadWorkerRuntime,
+        { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] }, request: prepare(orchid) },
+        ["project"], meter, orchid, accessQuery(orchid), "query-conditioned-v1", ACCESS_BUDGET))();
+      const attempted = read.mock.calls.map(([, identity]) => identity);
+      expect(attempted.slice(0, 4)).toEqual([nominees[0], nominees[2], nominees[1], cursorIds[0]]);
+      expect(new Set(attempted).size).toBe(43);
+      expect(attempted).toHaveLength(43);
+      expect(pool.access).toMatchObject({ observed_interpretation_count: 43,
+        unvisited_sources: false, unvisited_interpretations: false });
+    } finally { read.mockRestore(); database.close(); closeCachedDatabase(filename); }
+    const prepared = await accessCall(execute, prepare(orchid));
+    expect(prepared.candidates.slice(0, 3).map(row => row.source_id).sort()).toEqual(["nav-one", "nav-three", "nav-two"]);
+    expect(prepared.access).toMatchObject({ observed_interpretation_count: 43,
+      unvisited_sources: false, unvisited_interpretations: false });
   });
 });
 

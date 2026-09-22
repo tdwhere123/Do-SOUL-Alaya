@@ -970,7 +970,12 @@ new source observation contributes its digest hint once to the request-local Cor
 policy; duplicate digests retain the best signal under the same comparison owner.
 Within the observed headers, the query-conditioned policy alternates lexical
 nomination/source-text hint priority with cursor exploration, deduplicating
-capsule identities. A capsule source hash only hints at scheduling; missing or wrong
+capsule identities. Exploration retains its own chronological arrival sequence;
+consuming a pair removes identities from both arrival queues without feeding the
+priority order back into either queue. A pending lexical nominee encountered by
+the chronological reader also occupies that cursor position, while a previously
+consumed identity cannot be reintroduced. Each side advances past already selected
+identities before alternating. A capsule source hash only hints at scheduling; missing or wrong
 hashes and reading-only matches remain reachable. The canonical control verifies
 in cursor order. Each scheduled body is loaded and decoded once by the
 verification owner, which checks its derived capsule identity and authoritative

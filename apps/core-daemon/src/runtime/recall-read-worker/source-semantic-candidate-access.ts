@@ -123,8 +123,9 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
   stops: Set<Stop>, sourceId?: string) {
   const descriptors = new Map<string, SourceSemanticHandleDescriptor>();
   const rows: InterpretationObservation[] = [];
-  let pending: InterpretationHeader[] = [];
-  const seen = new Set<string>();
+  let pending: InterpretationHeader[] = [], exploration: InterpretationHeader[] = [];
+  // A retained header is still pending; null records a consumed identity across both producers.
+  const seen = new Map<string, InterpretationHeader | null>();
   let after: string | null = null, pages = 0, sourceOffset = 0, headersDone = false, open = false;
   try {
     const navigation = readInterpretationNavigation(runtime, payload.workspace_id, meter, policy);
@@ -134,7 +135,7 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
     while (!headersDone || sourceOffset < records.length || pending.length > 0) {
       if (!headersDone) {
         const page = readInterpretationHeaderPage(runtime, payload.workspace_id, meter, after);
-        pages++; appendInterpretationHeaders(pending, page.rows, seen, meter);
+        pages++; appendInterpretationHeaders(pending, page.rows, seen, meter, exploration);
         if (page.resourceLimited || page.truncated && (page.committedThrough === null || page.committedThrough === after)) {
           headersDone = true; open = true; stops.add("unavailable");
         } else if (!page.truncated) headersDone = true;
@@ -152,10 +153,12 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
         policy.associateSourceHint(record.content_digest, observation.signal, meter);
       }
       if (pending.length === 0) continue;
-      const scheduled = policy.schedule(pending, meter);
+      const scheduled = policy.schedule(pending, exploration, meter);
       // Let unfinished observation producers progress between priority/exploration pairs.
       const count = headersDone && sourceOffset === records.length ? scheduled.length : Math.min(2, scheduled.length);
+      meter.charge(2 * count, count * 8, "access selected verification references");
       for (const row of scheduled.slice(0, count)) {
+        seen.set(row.identity, null);
         try {
           const verified = observeInterpretation(runtime, payload.workspace_id, row, authorized, meter, policy, records, byId, sources, sourceId);
           if (verified === null) continue;
@@ -168,8 +171,9 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
           }
         }
       }
-      meter.charge(pending.length, pending.length * 8, "access pending verification retention");
-      pending = scheduled.slice(count);
+      meter.charge(pending.length + exploration.length, (pending.length + exploration.length) * 8, "access pending verification retention");
+      pending = pending.filter(row => seen.get(row.identity) !== null);
+      exploration = exploration.filter(row => seen.get(row.identity) !== null);
     }
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
@@ -209,12 +213,19 @@ function observeInterpretation(runtime: RecallReadWorkerRuntime, workspace: stri
 }
 
 function appendInterpretationHeaders(pending: InterpretationHeader[], rows: readonly InterpretationHeader[],
-  seen: Set<string>, meter: SourceSemanticReadBudget): void {
+  seen: Map<string, InterpretationHeader | null>, meter: SourceSemanticReadBudget, exploration?: InterpretationHeader[]): void {
   for (const row of rows) {
     meter.charge(1, 0, "access header identity check");
-    if (seen.has(row.identity)) continue;
-    meter.charge(0, row.identity.length * 2 + 48, "access header identity retention");
-    seen.add(row.identity); pending.push(row);
+    const existing = seen.get(row.identity);
+    if (existing === null) continue;
+    if (existing === undefined) {
+      meter.charge(0, row.identity.length * 2 + 56, "access header identity retention");
+      seen.set(row.identity, row); pending.push(row);
+    }
+    if (exploration !== undefined) {
+      meter.charge(0, 8, "access cursor reference retention");
+      exploration.push(existing ?? row);
+    }
   }
 }
 

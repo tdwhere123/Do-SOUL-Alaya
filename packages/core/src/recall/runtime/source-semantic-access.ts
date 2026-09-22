@@ -94,7 +94,7 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
       if (prior === undefined || compare("", signal, "", prior) < 0) sourceHints.set(digest, signal);
     },
     schedule: <T extends { readonly identity: string; readonly source_hash: string | null; readonly query_hint?: true }>(rows: readonly T[],
-      ledger: SourceSemanticResourceLedger): T[] => {
+      exploration: readonly T[], ledger: SourceSemanticResourceLedger): T[] => {
       ledger.charge(rows.length, rows.length * 8, "access verification schedule");
       if (policy === "canonical-v1") return [...rows];
       // Headers are already retained by observation; ordering only copies their references.
@@ -102,12 +102,21 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
         || compare(a.identity, sourceHints.get(a.source_hash ?? "") ?? UNKNOWN_SIGNAL,
           b.identity, sourceHints.get(b.source_hash ?? "") ?? UNKNOWN_SIGNAL));
       const seen = new Set<string>(), scheduled: T[] = [];
-      // Lexical nominations and hashes only schedule work. Cursor exploration keeps
-      // unmatched sources and reading-only matches reachable without granting proof.
-      for (let index = 0; index < rows.length; index++) for (const row of [priority[index]!, rows[index]!]) {
-        ledger.charge(1, 16, "access schedule deduplication");
-        if (seen.has(row.identity)) continue;
-        seen.add(row.identity); scheduled.push(row);
+      const takeNext = (queue: readonly T[], offset: number): number => {
+        while (offset < queue.length) {
+          const row = queue[offset++]!;
+          ledger.charge(1, 16, "access schedule deduplication");
+          if (seen.has(row.identity)) continue;
+          seen.add(row.identity); scheduled.push(row); break;
+        }
+        return offset;
+      };
+      // A lexical nominee may also occupy its independently observed cursor position.
+      // Advance past duplicates before alternating so a shared identity cannot waste a turn.
+      let priorityOffset = 0, cursorOffset = 0;
+      while (priorityOffset < priority.length || cursorOffset < exploration.length) {
+        priorityOffset = takeNext(priority, priorityOffset);
+        cursorOffset = takeNext(exploration, cursorOffset);
       }
       return scheduled;
     }
