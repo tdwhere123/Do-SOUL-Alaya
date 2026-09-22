@@ -36,7 +36,7 @@ function pageCommitment(page: Omit<FirstExposurePage, "commitment">): string {
   return createHash("sha256").update(stableCanonicalStringify(page)).digest("hex");
 }
 
-export function exposureSlots(response: SoulMemorySearchResponse): z.infer<typeof ExposureSlotSchema>[] {
+export function exposureSlots(response: Pick<SoulMemorySearchResponse, "results">): z.infer<typeof ExposureSlotSchema>[] {
   return response.results.slice(0, 10).map((result, offset) => ({
     rank: offset + 1, index_entry_offset: offset, relevance_score: result.relevance_score,
     ...(result.object_id === undefined ? {} : { object_id: result.object_id }),

@@ -142,13 +142,13 @@ function frame(input: {
   };
 }
 
-function mixedH(): SourceSemanticInterpretation {
+function mixedInterpretation(): SourceSemanticInterpretation {
   return {
     contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     source: { source_id: "src", source_version: "1", content_digest: digestOriginalQuery(AND_QUERY) },
-    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v4",
+    producer_id: "source-interpretation-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [
       mention("mSent", "sent", 1, [0, 4]), mention("mParcelSend", "parcel", 1, [5, 11]),
       mention("mInspected", "inspected", 2, [12, 21]), mention("mParcelInspect", "parcel", 2, [22, 28])
@@ -168,7 +168,7 @@ function mixedH(): SourceSemanticInterpretation {
   };
 }
 
-function orionH(extra: {
+function orionInterpretation(extra: {
   inspectTarget?: string;
   splitVega?: boolean;
 } = {}): SourceSemanticInterpretation {
@@ -194,7 +194,7 @@ function orionH(extra: {
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     source: { source_id: "orion", source_version: "1", content_digest: digestOriginalQuery(JOIN_QUERY) },
-    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v4",
+    producer_id: "source-interpretation-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [
       mention("mOrion", "Orion", 1, [0, 5]), mention("mSent", "sent", 1, [6, 10]),
       mention("mP1", "P", 1, [18, 19]), mention("mVega1", "Vega", 1, [23, 27]),
@@ -228,14 +228,14 @@ function orionH(extra: {
   };
 }
 
-function stanceH(act: "assertion" | "question" | "directive"): SourceSemanticInterpretation {
+function stanceInterpretation(act: "assertion" | "question" | "directive"): SourceSemanticInterpretation {
   const asserted = act === "assertion";
   return {
     contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     source: { source_id: "stance", source_version: act, content_digest: digestOriginalQuery(SEND_QUERY) },
-    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v4",
+    producer_id: "source-interpretation-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [mention("mSent", "sent", 1, [0, 4]), mention("mParcel", "parcel", 1, [5, 11])],
     referents: [{ id: "rParcel", referent_kind: "grouped", mentions: ["mParcel"] }],
     frames: [frame({
@@ -247,7 +247,7 @@ function stanceH(act: "assertion" | "question" | "directive"): SourceSemanticInt
   };
 }
 
-function correspondence(
+function endpointCorrespondence(
   query: SourceSemanticEndpointCorrespondence["query_endpoint"],
   source: SourceSemanticEndpointCorrespondence["source_endpoint"],
   excerpt: string,
@@ -261,15 +261,15 @@ function correspondence(
   };
 }
 
-function alignmentOf(
-  h: SourceSemanticInterpretation, q: SourceSemanticQuery, original: string,
+function correspondenceOf(
+  interpretation: SourceSemanticInterpretation, semantics: SourceSemanticQuery, original: string,
   correspondences: SourceSemanticEndpointCorrespondence[]
 ): SourceSemanticCorrespondence {
-  const admitted = admitSourceSemanticQuery(q, original);
+  const admitted = admitSourceSemanticQuery(semantics, original);
   if (admitted.kind !== "admitted") throw new Error("query must admit");
   return {
     contract: "source-semantic-correspondence-v3",
-    source_interpretation_id: sourceSemanticInterpretationIdentity(h, fieldContractSha256),
+    source_interpretation_id: sourceSemanticInterpretationIdentity(interpretation, fieldContractSha256),
     query_semantics_id: admitted.query_id,
     producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
     producer_version: "1",
@@ -279,30 +279,30 @@ function alignmentOf(
 }
 
 const SEND_AND = [
-  correspondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
-  correspondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mParcelSend"),
-  correspondence({ kind: "predicate", alternative: 0, frame: "qInspect" }, { kind: "frame", frame: "fInspect" }, "inspected", "mInspected"),
-  correspondence({ kind: "slot", alternative: 0, frame: "qInspect", slot: "object" }, { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", "mParcelInspect")
+  endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
+  endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mParcelSend"),
+  endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qInspect" }, { kind: "frame", frame: "fInspect" }, "inspected", "mInspected"),
+  endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qInspect", slot: "object" }, { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", "mParcelInspect")
 ];
 
 function joinCorrespondences(inspectMention = "mP2"): SourceSemanticEndpointCorrespondence[] {
   return [
-    correspondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
-    correspondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mP1"),
-    correspondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "recipient" }, { kind: "slot", frame: "fSend", slot: "recipient" }, "recipient", "mVega1"),
-    correspondence({ kind: "predicate", alternative: 0, frame: "qPromise" }, { kind: "frame", frame: "fPromise" }, "promised", "mPromised"),
-    correspondence({ kind: "slot", alternative: 0, frame: "qPromise", slot: "promisor" }, { kind: "slot", frame: "fPromise", slot: "promisor" }, "recipient", "mVega2"),
-    correspondence({ kind: "predicate", alternative: 0, frame: "qInspect" }, { kind: "frame", frame: "fInspect" }, "inspect", "mInspect"),
-    correspondence({ kind: "slot", alternative: 0, frame: "qInspect", slot: "object" }, { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", inspectMention)
+    endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
+    endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mP1"),
+    endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "recipient" }, { kind: "slot", frame: "fSend", slot: "recipient" }, "recipient", "mVega1"),
+    endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qPromise" }, { kind: "frame", frame: "fPromise" }, "promised", "mPromised"),
+    endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qPromise", slot: "promisor" }, { kind: "slot", frame: "fPromise", slot: "promisor" }, "recipient", "mVega2"),
+    endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qInspect" }, { kind: "frame", frame: "fInspect" }, "inspect", "mInspect"),
+    endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qInspect", slot: "object" }, { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", inspectMention)
   ];
 }
 
 function reason(
-  h: SourceSemanticInterpretation, q: SourceSemanticQuery, a: SourceSemanticCorrespondence | undefined,
+  interpretation: SourceSemanticInterpretation, semantics: SourceSemanticQuery, correspondence: SourceSemanticCorrespondence | undefined,
   original: string
 ) {
   return reasonSourceSemanticInterpretation({
-    source_interpretation: h, query_semantics: q, semantic_correspondence: a, original_query: original, workspaceId: "ws-semantic",
+    source_interpretation: interpretation, query_semantics: semantics, semantic_correspondence: correspondence, original_query: original, workspaceId: "ws-semantic",
     scope: "project", authorizedScopes: ["project"], asOf: CLOCK
   });
 }
@@ -318,10 +318,10 @@ function hasLeaf(
 }
 
 function assertOracle(
-  h: SourceSemanticInterpretation, q: SourceSemanticQuery, a: SourceSemanticCorrespondence,
+  interpretation: SourceSemanticInterpretation, semantics: SourceSemanticQuery, correspondence: SourceSemanticCorrespondence,
   result: ReturnType<typeof reason>, variables: readonly string[]
 ) {
-  const oracle = oracleSourceSemanticJoin(h, q, a);
+  const oracle = oracleSourceSemanticJoin(interpretation, semantics, correspondence);
   const decoded = decodeEngineBindings(result);
   expect(oracleBindingsMatchEngine(oracle, decoded, variables)).toBe(true);
   expect(oracleNecessaryLeavesHeld(oracle, result.consumed_leaves)).toBe(true);
@@ -331,10 +331,10 @@ function assertOracle(
 
 describe("source semantic query compilation", () => {
   it("joins a shared-variable AND on the same parcel", () => {
-    const h = mixedH();
-    const q = sendInspectQuery();
-    const a = alignmentOf(h, q, AND_QUERY, SEND_AND);
-    const result = reason(h, q, a, AND_QUERY);
+    const interpretation = mixedInterpretation();
+    const semantics = sendInspectQuery();
+    const correspondence = correspondenceOf(interpretation, semantics, AND_QUERY, SEND_AND);
+    const result = reason(interpretation, semantics, correspondence, AND_QUERY);
     expect(result.outcome.status).toBe("interpreted");
     expect(result.world_claim).toBe("unknown");
     expect(hasLeaf(result.consumed_leaves, "source_interpretation_presence", "fSend")).toBe(true);
@@ -345,7 +345,7 @@ describe("source semantic query compilation", () => {
     expect(hasLeaf(result.consumed_leaves, "source_interpretation_binding", "fInspect", "object")).toBe(true);
     expect(hasLeaf(result.consumed_leaves, "semantic_correspondence_predicate", "fSend")).toBe(true);
     expect(hasLeaf(result.consumed_leaves, "semantic_correspondence_predicate", "fInspect")).toBe(true);
-    const oracle = assertOracle(h, q, a, result, ["parcel", "fSend", "fInspect"]);
+    const oracle = assertOracle(interpretation, semantics, correspondence, result, ["parcel", "fSend", "fInspect"]);
     expect(oracle.assignments).toHaveLength(1);
     expect(oracle.assignments[0]!.bindings).toMatchObject({
       parcel: "rParcel", fSend: "fSend", fInspect: "fInspect"
@@ -353,10 +353,10 @@ describe("source semantic query compilation", () => {
   });
 
   it("proves the Orion join from source interpretation and semantic correspondence+assertion+content leaves and rejects inspect-object and same-name Vega", () => {
-    const h = orionH();
-    const q = joinQuery();
-    const a = alignmentOf(h, q, JOIN_QUERY, joinCorrespondences());
-    const result = reason(h, q, a, JOIN_QUERY);
+    const interpretation = orionInterpretation();
+    const semantics = joinQuery();
+    const correspondence = correspondenceOf(interpretation, semantics, JOIN_QUERY, joinCorrespondences());
+    const result = reason(interpretation, semantics, correspondence, JOIN_QUERY);
     expect(result.outcome.status).toBe("interpreted");
     expect(hasLeaf(result.consumed_leaves, "source_interpretation_presence", "fSend")).toBe(true);
     expect(hasLeaf(result.consumed_leaves, "source_interpretation_presence", "fPromise")).toBe(true);
@@ -373,97 +373,97 @@ describe("source semantic query compilation", () => {
     expect(hasLeaf(result.consumed_leaves, "semantic_correspondence_predicate", "fPromise")).toBe(true);
     expect(hasLeaf(result.consumed_leaves, "semantic_correspondence_predicate", "fInspect")).toBe(true);
     const joinVars = ["parcel", "recipient", "fSend", "fPromise", "fInspect"] as const;
-    const oracle = assertOracle(h, q, a, result, joinVars);
+    const oracle = assertOracle(interpretation, semantics, correspondence, result, joinVars);
     expect(oracle.assignments).toHaveLength(1);
     expect(oracle.assignments[0]!.bindings).toMatchObject({
       parcel: "rP", recipient: "rVega", fSend: "fSend", fPromise: "fPromise", fInspect: "fInspect"
     });
     const childFirst = {
-      ...q,
+      ...semantics,
       alternatives: [{
-        ...q.alternatives[0]!,
-        frames: [...q.alternatives[0]!.frames].reverse()
+        ...semantics.alternatives[0]!,
+        frames: [...semantics.alternatives[0]!.frames].reverse()
       }]
     };
-    const childFirstA = alignmentOf(h, childFirst, JOIN_QUERY, joinCorrespondences());
-    const childFirstResult = reason(h, childFirst, childFirstA, JOIN_QUERY);
+    const childFirstCorrespondence = correspondenceOf(interpretation, childFirst, JOIN_QUERY, joinCorrespondences());
+    const childFirstResult = reason(interpretation, childFirst, childFirstCorrespondence, JOIN_QUERY);
     expect(hasLeaf(childFirstResult.consumed_leaves, "source_interpretation_content", "fInspect")).toBe(true);
-    assertOracle(h, childFirst, childFirstA, childFirstResult, joinVars);
-    const wrongObject = orionH({ inspectTarget: "rQ" });
-    const wrongA = alignmentOf(wrongObject, q, JOIN_QUERY, joinCorrespondences("mQ"));
-    const wrongResult = reason(wrongObject, q, wrongA, JOIN_QUERY);
+    assertOracle(interpretation, childFirst, childFirstCorrespondence, childFirstResult, joinVars);
+    const wrongObject = orionInterpretation({ inspectTarget: "rQ" });
+    const wrongCorrespondence = correspondenceOf(wrongObject, semantics, JOIN_QUERY, joinCorrespondences("mQ"));
+    const wrongResult = reason(wrongObject, semantics, wrongCorrespondence, JOIN_QUERY);
     expect(wrongResult.consumed_leaves).toEqual([]);
-    assertOracle(wrongObject, q, wrongA, wrongResult, joinVars);
-    const split = orionH({ splitVega: true });
-    const splitA = alignmentOf(split, q, JOIN_QUERY, joinCorrespondences());
-    const splitResult = reason(split, q, splitA, JOIN_QUERY);
+    assertOracle(wrongObject, semantics, wrongCorrespondence, wrongResult, joinVars);
+    const split = orionInterpretation({ splitVega: true });
+    const splitCorrespondence = correspondenceOf(split, semantics, JOIN_QUERY, joinCorrespondences());
+    const splitResult = reason(split, semantics, splitCorrespondence, JOIN_QUERY);
     expect(splitResult.consumed_leaves).toEqual([]);
-    assertOracle(split, q, splitA, splitResult, joinVars);
+    assertOracle(split, semantics, splitCorrespondence, splitResult, joinVars);
   });
 
   it("does not treat promise-content inspect as an already-inspected event", () => {
-    const h = orionH();
-    const q = inspectedQuery();
-    const a = alignmentOf(h, q, INSPECTED_QUERY, [
-      correspondence({ kind: "predicate", alternative: 0, frame: "qInspect" }, { kind: "frame", frame: "fInspect" }, "inspect", "mInspect"),
-      correspondence({ kind: "slot", alternative: 0, frame: "qInspect", slot: "object" }, { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", "mP2")
+    const interpretation = orionInterpretation();
+    const semantics = inspectedQuery();
+    const correspondence = correspondenceOf(interpretation, semantics, INSPECTED_QUERY, [
+      endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qInspect" }, { kind: "frame", frame: "fInspect" }, "inspect", "mInspect"),
+      endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qInspect", slot: "object" }, { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", "mP2")
     ]);
-    const result = reason(h, q, a, INSPECTED_QUERY);
+    const result = reason(interpretation, semantics, correspondence, INSPECTED_QUERY);
     expect(result.outcome.status).toBe("interpreted");
     expect(result.world_claim).toBe("unknown");
     expect(result.consumed_leaves).toEqual([]);
-    expect(assertOracle(h, q, a, result, ["parcel", "fInspect"]).assignments).toEqual([]);
+    expect(assertOracle(interpretation, semantics, correspondence, result, ["parcel", "fInspect"]).assignments).toEqual([]);
   });
 
   it("cannot AND complementary correspondence documents and can AND one correspondence that maps both", () => {
-    const h = mixedH();
-    const q = sendInspectQuery();
-    const sendOnly = alignmentOf(h, q, AND_QUERY, SEND_AND.slice(0, 2));
-    const inspectOnly = alignmentOf(h, q, AND_QUERY, SEND_AND.slice(2));
-    const both = alignmentOf(h, q, AND_QUERY, SEND_AND);
+    const interpretation = mixedInterpretation();
+    const semantics = sendInspectQuery();
+    const sendOnly = correspondenceOf(interpretation, semantics, AND_QUERY, SEND_AND.slice(0, 2));
+    const inspectOnly = correspondenceOf(interpretation, semantics, AND_QUERY, SEND_AND.slice(2));
+    const both = correspondenceOf(interpretation, semantics, AND_QUERY, SEND_AND);
     const andVars = ["parcel", "fSend", "fInspect"] as const;
-    const sendOnlyResult = reason(h, q, sendOnly, AND_QUERY);
-    const inspectOnlyResult = reason(h, q, inspectOnly, AND_QUERY);
-    const bothResult = reason(h, q, both, AND_QUERY);
+    const sendOnlyResult = reason(interpretation, semantics, sendOnly, AND_QUERY);
+    const inspectOnlyResult = reason(interpretation, semantics, inspectOnly, AND_QUERY);
+    const bothResult = reason(interpretation, semantics, both, AND_QUERY);
     expect(sendOnlyResult.consumed_leaves).toEqual([]);
     expect(inspectOnlyResult.consumed_leaves).toEqual([]);
-    assertOracle(h, q, sendOnly, sendOnlyResult, andVars);
-    assertOracle(h, q, inspectOnly, inspectOnlyResult, andVars);
+    assertOracle(interpretation, semantics, sendOnly, sendOnlyResult, andVars);
+    assertOracle(interpretation, semantics, inspectOnly, inspectOnlyResult, andVars);
     expect(hasLeaf(bothResult.consumed_leaves, "semantic_correspondence_predicate", "fSend")).toBe(true);
-    assertOracle(h, q, both, bothResult, andVars);
+    assertOracle(interpretation, semantics, both, bothResult, andVars);
     expect(sendOnly.source_interpretation_id).toBe(inspectOnly.source_interpretation_id);
     expect(sendOnly.query_semantics_id).toBe(inspectOnly.query_semantics_id);
     expect(sendOnly.correspondences).not.toEqual(inspectOnly.correspondences);
   });
 
   it("does not treat question or directive entry as a completed send", () => {
-    const q = sendQuery();
-    const asserted = stanceH("assertion");
-    const question = stanceH("question");
-    const directive = stanceH("directive");
-    const map = (h: SourceSemanticInterpretation, mentionId: string) => alignmentOf(h, q, SEND_QUERY, [
-      correspondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
-      correspondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", mentionId)
+    const semantics = sendQuery();
+    const asserted = stanceInterpretation("assertion");
+    const question = stanceInterpretation("question");
+    const directive = stanceInterpretation("directive");
+    const map = (interpretation: SourceSemanticInterpretation, mentionId: string) => correspondenceOf(interpretation, semantics, SEND_QUERY, [
+      endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
+      endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", mentionId)
     ]);
     const sendVars = ["parcel", "fSend"] as const;
-    const assertedResult = reason(asserted, q, map(asserted, "mParcel"), SEND_QUERY);
-    const questionResult = reason(question, q, map(question, "mParcel"), SEND_QUERY);
-    const directiveResult = reason(directive, q, map(directive, "mParcel"), SEND_QUERY);
+    const assertedResult = reason(asserted, semantics, map(asserted, "mParcel"), SEND_QUERY);
+    const questionResult = reason(question, semantics, map(question, "mParcel"), SEND_QUERY);
+    const directiveResult = reason(directive, semantics, map(directive, "mParcel"), SEND_QUERY);
     expect(hasLeaf(assertedResult.consumed_leaves, "source_interpretation_assertion_permission", "fSend")).toBe(true);
-    assertOracle(asserted, q, map(asserted, "mParcel"), assertedResult, sendVars);
+    assertOracle(asserted, semantics, map(asserted, "mParcel"), assertedResult, sendVars);
     expect(questionResult.consumed_leaves).toEqual([]);
     expect(directiveResult.consumed_leaves).toEqual([]);
-    assertOracle(question, q, map(question, "mParcel"), questionResult, sendVars);
-    assertOracle(directive, q, map(directive, "mParcel"), directiveResult, sendVars);
+    assertOracle(question, semantics, map(question, "mParcel"), questionResult, sendVars);
+    assertOracle(directive, semantics, map(directive, "mParcel"), directiveResult, sendVars);
     const asked = queryOf(SEND_QUERY, [{
       id: "qSend", variable: "fSend", predicate_reading: "send", source_act: "question",
       role_requirements: [role("object", "parcel", "parcel")]
     }], [
       { id: "parcel", sort: "entity" }, { id: "fSend", sort: "proposition" }
     ], []);
-    const askedMap = (h: SourceSemanticInterpretation) => alignmentOf(h, asked, SEND_QUERY, [
-      correspondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
-      correspondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mParcel")
+    const askedMap = (interpretation: SourceSemanticInterpretation) => correspondenceOf(interpretation, asked, SEND_QUERY, [
+      endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
+      endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mParcel")
     ]);
     const askedAgainstAsserted = reason(asserted, asked, askedMap(asserted), SEND_QUERY);
     const askedAgainstQuestion = reason(question, asked, askedMap(question), SEND_QUERY);
@@ -474,71 +474,71 @@ describe("source semantic query compilation", () => {
   });
 
   it("drops a proof when a necessary correspondence leaf is withdrawn and keeps an unrelated send proof", () => {
-    const h = mixedH();
+    const interpretation = mixedInterpretation();
     const andQuery = sendInspectQuery();
     const onlySend = sendQuery();
-    const full = alignmentOf(h, andQuery, AND_QUERY, SEND_AND);
-    const withdrawn = alignmentOf(h, andQuery, AND_QUERY, SEND_AND.slice(0, 2));
+    const full = correspondenceOf(interpretation, andQuery, AND_QUERY, SEND_AND);
+    const withdrawn = correspondenceOf(interpretation, andQuery, AND_QUERY, SEND_AND.slice(0, 2));
     const andVars = ["parcel", "fSend", "fInspect"] as const;
-    const fullResult = reason(h, andQuery, full, AND_QUERY);
-    const withdrawnResult = reason(h, andQuery, withdrawn, AND_QUERY);
+    const fullResult = reason(interpretation, andQuery, full, AND_QUERY);
+    const withdrawnResult = reason(interpretation, andQuery, withdrawn, AND_QUERY);
     expect(fullResult.consumed_leaves.length).toBeGreaterThan(0);
-    assertOracle(h, andQuery, full, fullResult, andVars);
+    assertOracle(interpretation, andQuery, full, fullResult, andVars);
     expect(withdrawnResult.consumed_leaves).toEqual([]);
-    assertOracle(h, andQuery, withdrawn, withdrawnResult, andVars);
-    const sendA = alignmentOf(h, onlySend, SEND_QUERY, [
-      correspondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
-      correspondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mParcelSend")
+    assertOracle(interpretation, andQuery, withdrawn, withdrawnResult, andVars);
+    const sendCorrespondence = correspondenceOf(interpretation, onlySend, SEND_QUERY, [
+      endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
+      endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mParcelSend")
     ]);
-    const sendResult = reason(h, onlySend, sendA, SEND_QUERY);
+    const sendResult = reason(interpretation, onlySend, sendCorrespondence, SEND_QUERY);
     expect(hasLeaf(sendResult.consumed_leaves, "semantic_correspondence_predicate", "fSend")).toBe(true);
-    assertOracle(h, onlySend, sendA, sendResult, ["parcel", "fSend"]);
+    assertOracle(interpretation, onlySend, sendCorrespondence, sendResult, ["parcel", "fSend"]);
   });
 
   it("returns preparation_required when query semantics or semantic correspondence is missing", () => {
-    const h = mixedH();
-    const q = sendInspectQuery();
+    const interpretation = mixedInterpretation();
+    const semantics = sendInspectQuery();
     expect(reasonSourceSemanticInterpretation({
-      source_interpretation: h, original_query: AND_QUERY, workspaceId: "ws-semantic",
+      source_interpretation: interpretation, original_query: AND_QUERY, workspaceId: "ws-semantic",
       scope: "project", authorizedScopes: ["project"], asOf: CLOCK
     }).outcome).toEqual({ status: "preparation_required", missing: "query_semantics_and_correspondence" });
     expect(reasonSourceSemanticInterpretation({
-      source_interpretation: h, query_semantics: q, original_query: AND_QUERY, workspaceId: "ws-semantic",
+      source_interpretation: interpretation, query_semantics: semantics, original_query: AND_QUERY, workspaceId: "ws-semantic",
       scope: "project", authorizedScopes: ["project"], asOf: CLOCK
     }).outcome).toEqual({ status: "preparation_required", missing: "semantic_correspondence" });
-    expect(reason(h, q, undefined, AND_QUERY).outcome).toEqual({ status: "preparation_required", missing: "semantic_correspondence" });
+    expect(reason(interpretation, semantics, undefined, AND_QUERY).outcome).toEqual({ status: "preparation_required", missing: "semantic_correspondence" });
   });
 
   it("drops a proof when a necessary source interpretation binding is withdrawn, rebinds correspondence onto a new source-interpretation identity, and keeps an unrelated send", () => {
-    const original = mixedH();
+    const original = mixedInterpretation();
     const andQuery = sendInspectQuery();
     const onlySend = sendQuery();
-    const withdrawnH: SourceSemanticInterpretation = {
+    const withdrawnInterpretation: SourceSemanticInterpretation = {
       ...original,
       frames: original.frames.map((row) => row.id === "fInspect" ? { ...row, bindings: [] } : row)
     };
-    expect(sourceSemanticInterpretationIdentity(withdrawnH, fieldContractSha256))
+    expect(sourceSemanticInterpretationIdentity(withdrawnInterpretation, fieldContractSha256))
       .not.toBe(sourceSemanticInterpretationIdentity(original, fieldContractSha256));
-    const staleA = alignmentOf(original, andQuery, AND_QUERY, SEND_AND);
-    expect(reason(withdrawnH, andQuery, staleA, AND_QUERY).outcome).toEqual({
+    const staleCorrespondence = correspondenceOf(original, andQuery, AND_QUERY, SEND_AND);
+    expect(reason(withdrawnInterpretation, andQuery, staleCorrespondence, AND_QUERY).outcome).toEqual({
       status: "invalid", reason: "malformed_correspondence"
     });
-    const reboundAnd = alignmentOf(withdrawnH, andQuery, AND_QUERY, SEND_AND);
-    const reboundResult = reason(withdrawnH, andQuery, reboundAnd, AND_QUERY);
+    const reboundAnd = correspondenceOf(withdrawnInterpretation, andQuery, AND_QUERY, SEND_AND);
+    const reboundResult = reason(withdrawnInterpretation, andQuery, reboundAnd, AND_QUERY);
     expect(reboundResult.consumed_leaves).toEqual([]);
-    assertOracle(withdrawnH, andQuery, reboundAnd, reboundResult, ["parcel", "fSend", "fInspect"]);
-    const sendA = alignmentOf(withdrawnH, onlySend, SEND_QUERY, [
-      correspondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
-      correspondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mParcelSend")
+    assertOracle(withdrawnInterpretation, andQuery, reboundAnd, reboundResult, ["parcel", "fSend", "fInspect"]);
+    const sendCorrespondence = correspondenceOf(withdrawnInterpretation, onlySend, SEND_QUERY, [
+      endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
+      endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mParcelSend")
     ]);
-    const sendResult = reason(withdrawnH, onlySend, sendA, SEND_QUERY);
+    const sendResult = reason(withdrawnInterpretation, onlySend, sendCorrespondence, SEND_QUERY);
     expect(hasLeaf(sendResult.consumed_leaves, "semantic_correspondence_predicate", "fSend")).toBe(true);
-    assertOracle(withdrawnH, onlySend, sendA, sendResult, ["parcel", "fSend"]);
-    expect(sendA.source_interpretation_id).toBe(reboundAnd.source_interpretation_id);
+    assertOracle(withdrawnInterpretation, onlySend, sendCorrespondence, sendResult, ["parcel", "fSend"]);
+    expect(sendCorrespondence.source_interpretation_id).toBe(reboundAnd.source_interpretation_id);
   });
 
   it("keeps an independent send alternative after inspect correspondence leaves are withdrawn", () => {
-    const h = mixedH();
+    const interpretation = mixedInterpretation();
     const send = sendQuery();
     const inspect = inspectedQuery();
     const either: SourceSemanticQuery = {
@@ -551,51 +551,51 @@ describe("source semantic query compilation", () => {
       ],
       alternatives: [send.alternatives[0]!, inspect.alternatives[0]!]
     };
-    const bothA = alignmentOf(h, either, AND_QUERY, [
+    const bothCorrespondence = correspondenceOf(interpretation, either, AND_QUERY, [
       ...SEND_AND.slice(0, 2),
-      correspondence({ kind: "predicate", alternative: 1, frame: "qInspect" }, { kind: "frame", frame: "fInspect" }, "inspected", "mInspected"),
-      correspondence({ kind: "slot", alternative: 1, frame: "qInspect", slot: "object" }, { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", "mParcelInspect")
+      endpointCorrespondence({ kind: "predicate", alternative: 1, frame: "qInspect" }, { kind: "frame", frame: "fInspect" }, "inspected", "mInspected"),
+      endpointCorrespondence({ kind: "slot", alternative: 1, frame: "qInspect", slot: "object" }, { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", "mParcelInspect")
     ]);
-    const both = reason(h, either, bothA, AND_QUERY);
-    expect(assertOracle(h, either, bothA, both, ["parcel", "fSend", "fInspect"]).assignments).toHaveLength(2);
-    const sendOnlyA = alignmentOf(h, either, AND_QUERY, SEND_AND.slice(0, 2));
-    const remaining = reason(h, either, sendOnlyA, AND_QUERY);
-    const remainingOracle = assertOracle(h, either, sendOnlyA, remaining, ["parcel", "fSend", "fInspect"]);
+    const both = reason(interpretation, either, bothCorrespondence, AND_QUERY);
+    expect(assertOracle(interpretation, either, bothCorrespondence, both, ["parcel", "fSend", "fInspect"]).assignments).toHaveLength(2);
+    const sendOnlyCorrespondence = correspondenceOf(interpretation, either, AND_QUERY, SEND_AND.slice(0, 2));
+    const remaining = reason(interpretation, either, sendOnlyCorrespondence, AND_QUERY);
+    const remainingOracle = assertOracle(interpretation, either, sendOnlyCorrespondence, remaining, ["parcel", "fSend", "fInspect"]);
     expect(remainingOracle.assignments).toHaveLength(1);
     expect(remainingOracle.assignments[0]!.bindings).toMatchObject({ parcel: "rParcel", fSend: "fSend" });
     expect(hasLeaf(remaining.consumed_leaves, "semantic_correspondence_predicate", "fInspect")).toBe(false);
   });
 
   it("seeds every entry root rather than a single sending seed", () => {
-    const h = mixedH();
+    const interpretation = mixedInterpretation();
     const inspect = inspectedQuery();
-    const inspectA = alignmentOf(h, inspect, INSPECTED_QUERY, [
-      correspondence({ kind: "predicate", alternative: 0, frame: "qInspect" }, { kind: "frame", frame: "fInspect" }, "inspected", "mInspected"),
-      correspondence({ kind: "slot", alternative: 0, frame: "qInspect", slot: "object" }, { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", "mParcelInspect")
+    const inspectCorrespondence = correspondenceOf(interpretation, inspect, INSPECTED_QUERY, [
+      endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qInspect" }, { kind: "frame", frame: "fInspect" }, "inspected", "mInspected"),
+      endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qInspect", slot: "object" }, { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", "mParcelInspect")
     ]);
-    const inspectResult = reason(h, inspect, inspectA, INSPECTED_QUERY);
+    const inspectResult = reason(interpretation, inspect, inspectCorrespondence, INSPECTED_QUERY);
     expect(hasLeaf(inspectResult.consumed_leaves, "source_interpretation_presence", "fInspect")).toBe(true);
-    assertOracle(h, inspect, inspectA, inspectResult, ["parcel", "fInspect"]);
-    const reversed: SourceSemanticInterpretation = { ...h, entry_roots: ["fInspect", "fSend"] };
-    const reversedA = alignmentOf(reversed, inspect, INSPECTED_QUERY, inspectA.correspondences as SourceSemanticEndpointCorrespondence[]);
-    assertOracle(reversed, inspect, reversedA, reason(reversed, inspect, reversedA, INSPECTED_QUERY), ["parcel", "fInspect"]);
+    assertOracle(interpretation, inspect, inspectCorrespondence, inspectResult, ["parcel", "fInspect"]);
+    const reversed: SourceSemanticInterpretation = { ...interpretation, entry_roots: ["fInspect", "fSend"] };
+    const reversedCorrespondence = correspondenceOf(reversed, inspect, INSPECTED_QUERY, inspectCorrespondence.correspondences as SourceSemanticEndpointCorrespondence[]);
+    assertOracle(reversed, inspect, reversedCorrespondence, reason(reversed, inspect, reversedCorrespondence, INSPECTED_QUERY), ["parcel", "fInspect"]);
     const send = sendQuery();
-    const sendA = alignmentOf(h, send, SEND_QUERY, [
-      correspondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
-      correspondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mParcelSend")
+    const sendCorrespondence = correspondenceOf(interpretation, send, SEND_QUERY, [
+      endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qSend" }, { kind: "frame", frame: "fSend" }, "sent", "mSent"),
+      endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" }, { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mParcelSend")
     ]);
-    assertOracle(h, send, sendA, reason(h, send, sendA, SEND_QUERY), ["parcel", "fSend"]);
+    assertOracle(interpretation, send, sendCorrespondence, reason(interpretation, send, sendCorrespondence, SEND_QUERY), ["parcel", "fSend"]);
   });
 
   it("agrees under alpha-renamed query variables, ignored extra source interpretation frames, and swapped role order", () => {
-    const h = mixedH();
-    const q = sendInspectQuery();
+    const interpretation = mixedInterpretation();
+    const semantics = sendInspectQuery();
     const rename = (id: string) => id === "parcel" ? "item" : id === "fSend" ? "sendEvent" : id === "fInspect" ? "inspectEvent" : id;
     const renamed: SourceSemanticQuery = {
-      ...q,
-      variables: q.variables.map((row) => ({ ...row, id: rename(row.id) })),
-      return_variables: q.return_variables.map(rename),
-      alternatives: q.alternatives.map((alternative) => ({
+      ...semantics,
+      variables: semantics.variables.map((row) => ({ ...row, id: rename(row.id) })),
+      return_variables: semantics.return_variables.map(rename),
+      alternatives: semantics.alternatives.map((alternative) => ({
         ...alternative,
         frames: alternative.frames.map((frame) => ({
           ...frame,
@@ -606,27 +606,27 @@ describe("source semantic query compilation", () => {
         }))
       }))
     };
-    const renamedA = alignmentOf(h, renamed, AND_QUERY, SEND_AND);
-    const renamedResult = reason(h, renamed, renamedA, AND_QUERY);
-    const renamedOracle = assertOracle(h, renamed, renamedA, renamedResult, ["item", "sendEvent", "inspectEvent"]);
+    const renamedCorrespondence = correspondenceOf(interpretation, renamed, AND_QUERY, SEND_AND);
+    const renamedResult = reason(interpretation, renamed, renamedCorrespondence, AND_QUERY);
+    const renamedOracle = assertOracle(interpretation, renamed, renamedCorrespondence, renamedResult, ["item", "sendEvent", "inspectEvent"]);
     expect(renamedOracle.assignments[0]!.bindings).toMatchObject({
       item: "rParcel", sendEvent: "fSend", inspectEvent: "fInspect"
     });
     const extra: SourceSemanticInterpretation = {
-      ...h,
-      mentions: [...h.mentions, mention("mPacked", "packed", 3, [29, 35])],
-      referents: [...h.referents, { id: "rOther", referent_kind: "grouped", mentions: ["mPacked"] }],
-      frames: [...h.frames, frame({
+      ...interpretation,
+      mentions: [...interpretation.mentions, mention("mPacked", "packed", 3, [29, 35])],
+      referents: [...interpretation.referents, { id: "rOther", referent_kind: "grouped", mentions: ["mPacked"] }],
+      frames: [...interpretation.frames, frame({
         id: "fPack", reading: "pack", mention: "mPacked", assertion: 3,
         slots: [{ id: "object", target: "rOther", mention: "mPacked" }]
       })],
       entry_roots: ["fSend", "fInspect", "fPack"],
       asserted_at_scope: ["fSend", "fInspect", "fPack"]
     };
-    const extraA = alignmentOf(extra, q, AND_QUERY, SEND_AND);
-    const extraResult = reason(extra, q, extraA, AND_QUERY);
+    const extraCorrespondence = correspondenceOf(extra, semantics, AND_QUERY, SEND_AND);
+    const extraResult = reason(extra, semantics, extraCorrespondence, AND_QUERY);
     expect(hasLeaf(extraResult.consumed_leaves, "source_interpretation_presence", "fPack")).toBe(false);
-    assertOracle(extra, q, extraA, extraResult, ["parcel", "fSend", "fInspect"]);
+    assertOracle(extra, semantics, extraCorrespondence, extraResult, ["parcel", "fSend", "fInspect"]);
     const join = joinQuery();
     const swapped: SourceSemanticQuery = {
       ...join,
@@ -637,24 +637,24 @@ describe("source semantic query compilation", () => {
         })
       }]
     };
-    const orion = orionH();
-    const swappedA = alignmentOf(orion, swapped, JOIN_QUERY, joinCorrespondences());
-    assertOracle(orion, swapped, swappedA, reason(orion, swapped, swappedA, JOIN_QUERY), [
+    const orion = orionInterpretation();
+    const swappedCorrespondence = correspondenceOf(orion, swapped, JOIN_QUERY, joinCorrespondences());
+    assertOracle(orion, swapped, swappedCorrespondence, reason(orion, swapped, swappedCorrespondence, JOIN_QUERY), [
       "parcel", "recipient", "fSend", "fPromise", "fInspect"
     ]);
   });
 
   it("exhausts a shared budget without treating the interrupt as global absence", () => {
-    const h = mixedH();
-    const q = sendInspectQuery();
-    const a = alignmentOf(h, q, AND_QUERY, SEND_AND);
+    const interpretation = mixedInterpretation();
+    const semantics = sendInspectQuery();
+    const correspondence = correspondenceOf(interpretation, semantics, AND_QUERY, SEND_AND);
     const admitted = admitSourceSemanticCorrespondence({
-      semantic_correspondence: a, source_interpretation: h, query_semantics: q, original_query: AND_QUERY
+      semantic_correspondence: correspondence, source_interpretation: interpretation, query_semantics: semantics, original_query: AND_QUERY
     });
     expect(admitted.kind).toBe("admitted");
     if (admitted.kind !== "admitted") return;
     const result = reasonSourceSemanticInterpretation({
-      source_interpretation: h, query_semantics: q, semantic_correspondence: a, original_query: AND_QUERY, workspaceId: "ws-semantic",
+      source_interpretation: interpretation, query_semantics: semantics, semantic_correspondence: correspondence, original_query: AND_QUERY, workspaceId: "ws-semantic",
       scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
       request: {
         contract: "source-interpretation-reasoning-v4",
@@ -675,8 +675,8 @@ describe("source semantic query compilation", () => {
   });
 
   it("refuses a legacy packet as an open source interpretation", () => {
-    const h = mixedH(), q = sendInspectQuery(), a = alignmentOf(h, q, AND_QUERY, SEND_AND);
-    expect(reasonSourceSemanticInterpretation({ source_interpretation: { ...h, contract: "source-interpretation-v2" }, query_semantics: q, semantic_correspondence: a,
+    const interpretation = mixedInterpretation(), semantics = sendInspectQuery(), correspondence = correspondenceOf(interpretation, semantics, AND_QUERY, SEND_AND);
+    expect(reasonSourceSemanticInterpretation({ source_interpretation: { ...interpretation, contract: "source-interpretation-v2" }, query_semantics: semantics, semantic_correspondence: correspondence,
       original_query: AND_QUERY, workspaceId: "ws-semantic", scope: "project", authorizedScopes: ["project"], asOf: CLOCK
     }).outcome).toEqual({ status: "invalid", reason: "malformed_interpretation" });
   });

@@ -154,6 +154,7 @@ export function scoreProofConditionedFirstExposure(
 }
 
 export interface UnionProofAdmission {
+  readonly status: "admitted" | "invalid";
   readonly validatedRanks: ReadonlySet<number>;
   readonly unverifiedGoldRanks: ReadonlySet<number>;
 }
@@ -164,6 +165,7 @@ export function scoreSourceBearingUnionFirstExposure(
   goldUnits: readonly SourceGoldUnit[],
   admission: UnionProofAdmission
 ): SourceBearingUnionFirstExposureMetric {
+  if (admission.status !== "admitted") return unionUnavailable(goldUnits.length, "delivered slots differ from native index");
   if (goldUnits.length === 0) return unionUnavailable(0, "source gold join not supplied");
   if (slots.some((slot, offset) => slot.rank !== offset + 1)) {
     return unionUnavailable(goldUnits.length, "slots are not a native first-exposure order");

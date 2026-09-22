@@ -906,7 +906,11 @@ initial membership page recorded by the existing `FirstExposureSession` owner.
 This path does not replace ordinary `soul.recall`.
 
 The separately named source-bearing union metric scores the same initial occupied
-slots across source evidence and validated semantic proofs. A proof must bind its
+slots across source evidence and validated semantic proofs. The entire delivered
+slot sequence must bind to the native index before either source or proof
+scoring: count, order, kinds and product coordinates must match the native delivery
+owner. An inconsistent page is invalid, distinct from a consistent slot whose proof
+remains unverified. A proof must also bind its
 source record to the independently verified native snapshot publication, including
 root, workspace, version, digest and known scope; a self-consistent copied proof
 record is insufficient. Admission reuses the native execution and projection owners

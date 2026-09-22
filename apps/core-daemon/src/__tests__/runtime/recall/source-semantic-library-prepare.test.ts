@@ -70,7 +70,7 @@ function compactStatement(
   };
 }
 
-function receiveH(source: string, sourceId: string, raw: object) {
+function receiveInterpretation(source: string, sourceId: string, raw: object) {
   const received = proposeSourceSemantics({
     sourceCorpus: source, assertionIds: [1], source_id: sourceId, source_version: "1",
     producer_id: "test-author", producer_version: "p1"
@@ -81,7 +81,7 @@ function receiveH(source: string, sourceId: string, raw: object) {
   return { ...received, draft: received.draft, interpretation: received.interpretation };
 }
 
-function receiveQ(original: string): SourceSemanticQuery {
+function receiveQuerySemantics(original: string): SourceSemanticQuery {
   const received = authoredQuerySemantics({ original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" }, {
         variables: [
           { id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } },
@@ -106,50 +106,50 @@ function receiveQ(original: string): SourceSemanticQuery {
   return received.query;
 }
 
-function mention(h: SourceSemanticInterpretation, text: string) {
-  const row = h.mentions.find((item) => item.text === text);
-  if (row === undefined) throw new Error(`source interpretation lacks mention ${text}: ${h.mentions.map((item) => item.text).join(",")}`);
+function mention(interpretation: SourceSemanticInterpretation, text: string) {
+  const row = interpretation.mentions.find((item) => item.text === text);
+  if (row === undefined) throw new Error(`source interpretation lacks mention ${text}: ${interpretation.mentions.map((item) => item.text).join(",")}`);
   return row;
 }
 
-function frameOf(h: SourceSemanticInterpretation, reading: string) {
-  const row = h.frames.find((item) => item.predicate_support.reading === reading);
+function frameOf(interpretation: SourceSemanticInterpretation, reading: string) {
+  const row = interpretation.frames.find((item) => item.predicate_support.reading === reading);
   if (row === undefined) throw new Error(`source interpretation lacks frame ${reading}`);
   return row;
 }
 
-function slotOf(h: SourceSemanticInterpretation, reading: string, role: string) {
-  const row = frameOf(h, reading).slots.find((item) => item.role_reading === role);
+function slotOf(interpretation: SourceSemanticInterpretation, reading: string, role: string) {
+  const row = frameOf(interpretation, reading).slots.find((item) => item.role_reading === role);
   if (row === undefined) throw new Error(`source interpretation lacks ${role} on ${reading}`);
   return row;
 }
 
-function referentOf(h: SourceSemanticInterpretation, text: string) {
-  const id = mention(h, text).id;
-  const row = h.referents.find((item) => item.mentions.includes(id));
+function referentOf(interpretation: SourceSemanticInterpretation, text: string) {
+  const id = mention(interpretation, text).id;
+  const row = interpretation.referents.find((item) => item.mentions.includes(id));
   if (row === undefined) throw new Error(`source interpretation lacks referent for ${text}`);
   return row;
 }
 
-function isGoldH(h: SourceSemanticInterpretation): boolean {
-  return h.frames.some((row) => row.predicate_support.reading === "use")
-    && h.mentions.some((row) => row.text === "Alice")
-    && h.mentions.some((row) => row.text === "tools");
+function isGoldInterpretation(interpretation: SourceSemanticInterpretation): boolean {
+  return interpretation.frames.some((row) => row.predicate_support.reading === "use")
+    && interpretation.mentions.some((row) => row.text === "Alice")
+    && interpretation.mentions.some((row) => row.text === "tools");
 }
 
-function goldCorrespondenceJson(h: SourceSemanticInterpretation): string {
-  const actor = mention(h, "Alice"), tools = mention(h, "tools"), uses = mention(h, "uses");
-  const frame = frameOf(h, "use");
-  return correspondenceSelectionJson({ original_query: ORIGINAL, admitted_query_semantics: receiveQ(ORIGINAL),
-    source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(h, fieldContractSha256), interpretation: h }],
+function goldCorrespondenceJson(interpretation: SourceSemanticInterpretation): string {
+  const actor = mention(interpretation, "Alice"), tools = mention(interpretation, "tools"), uses = mention(interpretation, "uses");
+  const frame = frameOf(interpretation, "use");
+  return correspondenceSelectionJson({ original_query: ORIGINAL, admitted_query_semantics: receiveQuerySemantics(ORIGINAL),
+    source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(interpretation, fieldContractSha256), interpretation: interpretation }],
     producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, {
       correspondences: [
         { relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
-          source_endpoint: { kind: "referent", referent: referentOf(h, "Alice").id },
+          source_endpoint: { kind: "referent", referent: referentOf(interpretation, "Alice").id },
           query_support: { kind: "query_text", excerpt: "Alice" },
           source_semantic_support: [{ kind: "lexical", mentions: [actor.id] }] },
         { relation: "contextual_equivalence", query_endpoint: { kind: "slot", alternative: 0, frame: "qUse", slot: "agent" },
-          source_endpoint: { kind: "slot", frame: frame.id, slot: slotOf(h, "use", "agent").id },
+          source_endpoint: { kind: "slot", frame: frame.id, slot: slotOf(interpretation, "use", "agent").id },
           query_support: { kind: "query_text", excerpt: "Alice" },
           source_semantic_support: [{ kind: "lexical", mentions: [actor.id] }] },
         { relation: "contextual_equivalence", query_endpoint: { kind: "predicate", alternative: 0, frame: "qUse" },
@@ -157,7 +157,7 @@ function goldCorrespondenceJson(h: SourceSemanticInterpretation): string {
           query_support: { kind: "query_text", excerpt: "use" },
           source_semantic_support: [{ kind: "lexical", mentions: [uses.id] }] },
         { relation: "contextual_equivalence", query_endpoint: { kind: "slot", alternative: 0, frame: "qUse", slot: "theme" },
-          source_endpoint: { kind: "slot", frame: frame.id, slot: slotOf(h, "use", "theme").id },
+          source_endpoint: { kind: "slot", frame: frame.id, slot: slotOf(interpretation, "use", "theme").id },
           query_support: { kind: "query_text", excerpt: "tools" },
           source_semantic_support: [{ kind: "lexical", mentions: [tools.id] }] }
       ]
@@ -244,16 +244,16 @@ it("prepares bounded semantic correspondences from discovered source interpretat
       const alice = await prepareSource(session.handler, session.context, "artifact-alice");
       const silent = await prepareSource(session.handler, session.context, "artifact-silent");
       await proposeDraft(session.handler, session.context, alice.source_handle,
-        receiveH(ALICE, "artifact-alice", compactStatement(alice.catalog, "use", "uses", [
+        receiveInterpretation(ALICE, "artifact-alice", compactStatement(alice.catalog, "use", "uses", [
           { role: "agent", text: "Alice" }, { role: "theme", text: "tools" }
         ])).draft);
       await proposeDraft(session.handler, session.context, silent.source_handle,
-        receiveH(SILENT, "artifact-silent", compactStatement(silent.catalog, "stay", "stays", [
+        receiveInterpretation(SILENT, "artifact-silent", compactStatement(silent.catalog, "stay", "stays", [
           { role: "agent", text: "Bob" }, { role: "theme", text: "silent" }
         ])).draft);
-      const q = receiveQ(ORIGINAL);
+      const semantics = receiveQuerySemantics(ORIGINAL);
       const discovered = await callInterpretation(session.handler, {
-        operation: "prepare_query", original_query: ORIGINAL, query_semantics: q, budget: BUDGET, authorized_scopes: SCOPES
+        operation: "prepare_query", original_query: ORIGINAL, query_semantics: semantics, budget: BUDGET, authorized_scopes: SCOPES
       }, session.context);
       if (discovered.operation !== "prepare_query") throw new Error("prepare_query expected");
       const descriptors = discovered.candidates.flatMap((row) => {
@@ -261,18 +261,18 @@ it("prepares bounded semantic correspondences from discovered source interpretat
         return [{ source_interpretation_id: row.interpretation_id, interpretation: row.interpretation }];
       });
       expect(descriptors.length).toBeGreaterThan(1);
-      expect(descriptors.some((row) => isGoldH(row.interpretation))).toBe(true);
-      expect(descriptors.some((row) => !isGoldH(row.interpretation))).toBe(true);
+      expect(descriptors.some((row) => isGoldInterpretation(row.interpretation))).toBe(true);
+      expect(descriptors.some((row) => !isGoldInterpretation(row.interpretation))).toBe(true);
       const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("provider calls are forbidden"));
       try {
         let produceCalls = 0;
         const produce = (descriptor: (typeof descriptors)[number]) => {
           produceCalls += 1;
-          if (isGoldH(descriptor.interpretation)) return { rawJson: goldCorrespondenceJson(descriptor.interpretation) };
+          if (isGoldInterpretation(descriptor.interpretation)) return { rawJson: goldCorrespondenceJson(descriptor.interpretation) };
           return { status: "no_correspondence" as const };
         };
         const prepared = prepareSourceSemanticLibrary({
-          original_query: ORIGINAL, admitted_query_semantics: q, source_interpretation_descriptors: descriptors, produce,
+          original_query: ORIGINAL, admitted_query_semantics: semantics, source_interpretation_descriptors: descriptors, produce,
           producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1"
         });
         expect(fetch).not.toHaveBeenCalled();
@@ -285,7 +285,7 @@ it("prepares bounded semantic correspondences from discovered source interpretat
         for (const status of failureKinds) {
           const rawJson = JSON.stringify({ contract: "source-semantic-correspondence-response-v3",
             outcome: status === "invalid" ? { status, reason: "rejected" } : { status } });
-          const result = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_query_semantics: q,
+          const result = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_query_semantics: semantics,
             source_interpretation_descriptors: descriptors, produce: () => ({ rawJson }),
             producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" });
           expect(result.outcomes).toHaveLength(descriptors.length);
@@ -293,7 +293,7 @@ it("prepares bounded semantic correspondences from discovered source interpretat
             outcome: { status }, rawJson });
         }
         let attempts = 0;
-        const thrown = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_query_semantics: q,
+        const thrown = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_query_semantics: semantics,
           source_interpretation_descriptors: descriptors, produce: () => { attempts += 1; throw new Error("transport down"); }, cap: 1,
           producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" });
         expect(attempts).toBe(1);
@@ -301,10 +301,10 @@ it("prepares bounded semantic correspondences from discovered source interpretat
         expect(thrown.outcomes.slice(1).every((row) => row.status === "unattempted")).toBe(true);
         const forbidden = vi.fn(() => ({ status: "no_correspondence" as const }));
         for (const cap of [NaN, Infinity, -1, 1.5]) expect(() => prepareSourceSemanticLibrary({
-          original_query: ORIGINAL, admitted_query_semantics: q, source_interpretation_descriptors: descriptors, produce: forbidden, cap,
+          original_query: ORIGINAL, admitted_query_semantics: semantics, source_interpretation_descriptors: descriptors, produce: forbidden, cap,
           producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1"
         })).toThrow(/cap/u);
-        expect(() => prepareSourceSemanticLibrary({ original_query: "different", admitted_query_semantics: q,
+        expect(() => prepareSourceSemanticLibrary({ original_query: "different", admitted_query_semantics: semantics,
           source_interpretation_descriptors: descriptors, produce: forbidden, producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
           producer_version: "1" })).toThrow(/original query/u);
         expect(forbidden).not.toHaveBeenCalled();
@@ -319,7 +319,7 @@ it("prepares bounded semantic correspondences from discovered source interpretat
             .toBeUndefined();
         }
         const capped = prepareSourceSemanticLibrary({
-          original_query: ORIGINAL, admitted_query_semantics: q, source_interpretation_descriptors: descriptors, produce, cap: 1,
+          original_query: ORIGINAL, admitted_query_semantics: semantics, source_interpretation_descriptors: descriptors, produce, cap: 1,
           producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1"
         });
         expect(capped.outcomes[0]?.status).not.toBe("unattempted");
@@ -329,7 +329,7 @@ it("prepares bounded semantic correspondences from discovered source interpretat
           workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES,
           request: {
             kind: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
-            query_semantics: q, semantic_correspondences: prepared.semantic_correspondences, budget: BUDGET, output_byte_limit: 1_000_000
+            query_semantics: semantics, semantic_correspondences: prepared.semantic_correspondences, budget: BUDGET, output_byte_limit: 1_000_000
           }
         });
         if (recalled.kind !== "recall") throw new Error("library recall expected");

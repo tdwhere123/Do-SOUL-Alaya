@@ -8,14 +8,14 @@ import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-f
 import { deliveredSourceSemanticLibraryProof } from "../../../recall/runtime/source-semantic-library-proof.js";
 import { scopeSourceSemanticLibraryBranch, sourceSemanticLibraryQueryIdentity, slotQualifiersFor } from "../../../recall/runtime/source-semantic-library-recall.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
-import { source, query, align, CLOCK, ORIGINAL } from "./source-semantic-proof-fixture.js";
+import { source, query, correspondenceFor, CLOCK, ORIGINAL } from "./source-semantic-proof-fixture.js";
 import { finiteSource, finiteQuery, finiteCorrespondence, FINITE_QUERY } from "./source-semantic-finite-fixture.js";
 import { BindingContextStore, encodeBindingContext } from "../../../recall/conditional-field/engine/binding-environment.js";
 
 function deliveredFixture(input: { interpretation?: SourceSemanticInterpretation; semantics?: SourceSemanticQuery;
   correspondence?: SourceSemanticCorrespondence; original?: string; library?: boolean; budget?: RequestBudget } = {}) {
   const interpretation = input.interpretation ?? source(), semantics = input.semantics ?? query();
-  const correspondence = input.correspondence ?? align(interpretation, semantics), original = input.original ?? ORIGINAL;
+  const correspondence = input.correspondence ?? correspondenceFor(interpretation, semantics), original = input.original ?? ORIGINAL;
   const identity = hashSourceRecordId(interpretation.source, fieldContractSha256);
   const record = SourceRecordIdentitySchema.parse({ ...fieldReceiptContractFields({ identity,
     producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID, consumer: "projection_generation" }), schema_version: 1,
@@ -99,7 +99,7 @@ it("keeps proof verification exhaustion unavailable", () => {
 it("rejects substitution of another admitted alternative while preserving its original binding", () => {
   const interpretation = source(), initial = query();
   const semantics = { ...initial, alternatives: [...initial.alternatives, initial.alternatives[0]!] };
-  const original = align(interpretation, semantics);
+  const original = correspondenceFor(interpretation, semantics);
   const correspondence = { ...original, correspondences: [...original.correspondences,
     ...original.correspondences.flatMap((row) => row.query_endpoint.kind === "referent" ? []
       : [{ ...row, query_endpoint: { ...row.query_endpoint, alternative: 1 } }])] };

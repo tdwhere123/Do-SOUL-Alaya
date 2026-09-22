@@ -33,24 +33,24 @@ it("requires distinct restriction evidence and preserves missing restriction as 
 });
 
 it("does not replace literal source assertion with universal entailment", () => {
-  const h = finiteSource(), q = finiteQuery();
-  const literal: SourceSemanticQuery = { ...q, alternatives: q.alternatives.map((row) => ({ ...row,
+  const interpretation = finiteSource(), semantics = finiteQuery();
+  const literal: SourceSemanticQuery = { ...semantics, alternatives: semantics.alternatives.map((row) => ({ ...row,
     context_obligations: [{ frame: "qUse", kind: "asserted_at_source" }] })) };
-  expect(reasonFinite(h, literal).answers).toEqual([]);
+  expect(reasonFinite(interpretation, literal).answers).toEqual([]);
 });
 
 it("does not eliminate universals under negation or a conditional antecedent", () => {
   for (const context of ["not", "conditional"] as const) {
     const base = finiteSource();
-    const h = { ...base, frames: context === "not" ? base.frames : [...base.frames, { ...base.frames[1]!, id: "consequent",
+    const interpretation = { ...base, frames: context === "not" ? base.frames : [...base.frames, { ...base.frames[1]!, id: "consequent",
       context_owner: { kind: "operator" as const, operator_handle: "outer" } }], operators: [
       { ...base.operators[0]!, context_owner: { kind: "operator" as const, operator_handle: "outer" } },
       { id: "outer", assertion_ids: [1], context_owner: { kind: "source_act" as const, source_act: "assertion" as const }, additional_support: [],
         ...(context === "not" ? { operator: "not" as const, content: "allUsers" }
           : { operator: "conditional" as const, antecedent: "allUsers", consequent: "consequent" }) }
     ], entry_roots: ["outer", "fMemberAlice", "fMemberBob"], asserted_at_scope: ["outer", "fMemberAlice", "fMemberBob"] };
-    expect(SourceSemanticInterpretationSchema.safeParse(h).success).toBe(true);
-    const result = reasonFinite(h);
+    expect(SourceSemanticInterpretationSchema.safeParse(interpretation).success).toBe(true);
+    const result = reasonFinite(interpretation);
     expect(result.outcome.status).toBe("interpreted");
     expect(result.answers).toEqual([]);
   }
@@ -59,54 +59,54 @@ it("does not eliminate universals under negation or a conditional antecedent", (
 it("instantiates forall-not only as a preserved negative proposition", () => {
   const base = finiteSource(), quantifier = base.operators[0]!;
   if (quantifier.operator !== "forall") throw new Error("forall fixture");
-  const h = { ...base, frames: base.frames.map((row) => row.id !== "fAlice" ? row : { ...row,
+  const interpretation = { ...base, frames: base.frames.map((row) => row.id !== "fAlice" ? row : { ...row,
     context_owner: { kind: "operator" as const, operator_handle: "negativeBody" } }),
     operators: [{ ...quantifier, content: "negativeBody" }, { id: "negativeBody", operator: "not" as const,
       content: "fAlice", assertion_ids: [1], additional_support: [], context_owner: { kind: "operator" as const, operator_handle: "allUsers" } }] };
-  expect(reasonFinite(h).answers).toEqual([]);
+  expect(reasonFinite(interpretation).answers).toEqual([]);
   const positive = finiteQuery();
-  const q: SourceSemanticQuery = { ...positive, variables: [...positive.variables, { id: "negative", sort: "context" }],
+  const semantics: SourceSemanticQuery = { ...positive, variables: [...positive.variables, { id: "negative", sort: "context" }],
     alternatives: [{ frames: [{ id: "qNot", variable: "negative", predicate_reading: "not", operator: "not", role_requirements: [] },
       ...positive.alternatives[0]!.frames], context_obligations: [{ frame: "qNot", kind: "entailed_at_source" },
       { frame: "qUse", kind: "explicit_embedded_structure", incidence: { kind: "operator_operand", other_frame: "qNot", role: "content" } }] }] };
-  const result = reasonFinite(h, q);
+  const result = reasonFinite(interpretation, semantics);
   expect(result.outcome.status).toBe("interpreted");
   expect(result.answers?.map((row) => row.returned.actor!.node_id).sort()).toEqual(["rAlice", "rBob"]);
   expect(result.consumed_leaves).toEqual(expect.arrayContaining([expect.objectContaining({ leaf_kind: "source_interpretation_operator", value: "not" })]));
 }, 15000);
 
 it("reports exhausted finite enumeration without returning an empty success", () => {
-  const h = finiteSource(), q = finiteQuery(), a = finiteCorrespondence(h, q);
-  const result = reasonSourceSemanticInterpretation({ source_interpretation: h, query_semantics: q, semantic_correspondence: a, original_query: FINITE_QUERY, workspaceId: "ws",
+  const interpretation = finiteSource(), semantics = finiteQuery(), correspondence = finiteCorrespondence(interpretation, semantics);
+  const result = reasonSourceSemanticInterpretation({ source_interpretation: interpretation, query_semantics: semantics, semantic_correspondence: correspondence, original_query: FINITE_QUERY, workspaceId: "ws",
     scope: "project", authorizedScopes: ["project"], asOf: "2026-09-19T00:00:00.000Z",
     request: { contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
-      source_interpretation_id: a.source_interpretation_id, query_semantics_id: a.query_semantics_id, semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(a, fieldContractSha256), original_query: FINITE_QUERY,
+      source_interpretation_id: correspondence.source_interpretation_id, query_semantics_id: correspondence.query_semantics_id, semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(correspondence, fieldContractSha256), original_query: FINITE_QUERY,
       budget: { schema_version: 1, work_units: 1000, memory_bytes: 20000000, page_budget: 1, finalization_reserve: 10, min_envelope: 10 }, output_byte_limit: 1024 } });
   expect(result.outcome.status).toBe("resource_exhausted");
   expect(result.answers).toBeUndefined();
 });
 
 it("distinguishes closed finite, closed empty, and open empty universal evaluation", () => {
-  const h = finiteSource(), q = finiteQuery(true);
-  expect(reasonFinite(h, q).evaluation).toMatchObject({ status: "supported", vacuous: false });
-  const empty = { ...h, domains: h.domains!.map((row) => ({ ...row, members: [] })), measurements: [] };
-  const closed = reasonFinite(empty, q);
+  const interpretation = finiteSource(), semantics = finiteQuery(true);
+  expect(reasonFinite(interpretation, semantics).evaluation).toMatchObject({ status: "supported", vacuous: false });
+  const empty = { ...interpretation, domains: interpretation.domains!.map((row) => ({ ...row, members: [] })), measurements: [] };
+  const closed = reasonFinite(empty, semantics);
   expect(closed.evaluation).toMatchObject({ status: "supported", vacuous: true });
   expect(closed.answers?.map((row) => row.returned)).toEqual([{}]);
-  const witnessQuery: SourceSemanticQuery = { ...q, return_variables: ["tools"],
+  const witnessQuery: SourceSemanticQuery = { ...semantics, return_variables: ["tools"],
     evaluation: { kind: "forall", domain: "people", binder: "actor", local_variables: ["actor", "use"] } };
   expect(reasonFinite(empty, witnessQuery).answers).toEqual([]);
-  expect(reasonFinite({ ...empty, domains: empty.domains.map((row) => ({ ...row, closure: { kind: "open" as const } })) }, q).evaluation)
+  expect(reasonFinite({ ...empty, domains: empty.domains.map((row) => ({ ...row, closure: { kind: "open" as const } })) }, semantics).evaluation)
     .toMatchObject({ status: "unknown", vacuous: false, reasons: ["open_domain"] });
 });
 
 it("admits novel members only with a consumed conditional semantic_correspondence assumption", () => {
-  const base = finiteSource(), h = { ...base, domains: base.domains!.map((row) => ({ ...row, closure: { kind: "open" as const } })) };
-  const original = finiteQuery(), q = { ...original, variables: original.variables.map((row) => row.id === "actor"
+  const base = finiteSource(), interpretation = { ...base, domains: base.domains!.map((row) => ({ ...row, closure: { kind: "open" as const } })) };
+  const original = finiteQuery(), semantics = { ...original, variables: original.variables.map((row) => row.id === "actor"
     ? { ...row, reference: { kind: "query_text" as const, excerpt: "New" } } : row) };
-  const a = finiteCorrespondence(h, q);
-  expect(reasonFinite(h, q, a).answers).toEqual([]);
-  const result = reasonFinite(h, q, { ...a, membership_assumptions: [{ query_variable: "actor", source_domain: "users",
+  const correspondence = finiteCorrespondence(interpretation, semantics);
+  expect(reasonFinite(interpretation, semantics, correspondence).answers).toEqual([]);
+  const result = reasonFinite(interpretation, semantics, { ...correspondence, membership_assumptions: [{ query_variable: "actor", source_domain: "users",
     restrictions: [], status: "member", query_support: { kind: "query_text", excerpt: "New" }, description: "Assume New belongs to users." }] });
   expect(result.outcome.status).toBe("interpreted");
   expect(result.answers).toHaveLength(1);
@@ -119,14 +119,14 @@ it("keeps decimal equality exact and bounds unsupported magnitudes", () => {
   expect(canonicalSourceSemanticDecimal("2.100")).toBe("2.1");
   expect(compareSourceSemanticDecimals("0.100000000000000000001", "0.1")).toBe(1);
   expect(compareSourceSemanticDecimals("-3", "-2")).toBe(-1);
-  const h = finiteSource();
-  expect(SourceSemanticInterpretationSchema.safeParse({ ...h,
-    measurements: [{ ...h.measurements![0], value: `0.${"1".repeat(65)}` }] }).success).toBe(false);
+  const interpretation = finiteSource();
+  expect(SourceSemanticInterpretationSchema.safeParse({ ...interpretation,
+    measurements: [{ ...interpretation.measurements![0], value: `0.${"1".repeat(65)}` }] }).success).toBe(false);
 });
 
 it("delivers an explicit universal counterexample separately from missing body proof", () => {
   const base = finiteSource(), original = base.frames[0]!;
-  const h = { ...base, frames: [
+  const interpretation = { ...base, frames: [
     { ...original, context_owner: { kind: "source_act" as const, source_act: "assertion" as const },
       bindings: original.bindings.map((row) => row.slot_id === "agent" ? { ...row, target: { kind: "node" as const, id: "rAlice" } } : row) },
     ...base.frames.slice(1),
@@ -136,17 +136,17 @@ it("delivers an explicit universal counterexample separately from missing body p
     context_owner: { kind: "source_act" as const, source_act: "assertion" as const }, additional_support: [] }],
     entry_roots: ["fAlice", "fMemberAlice", "fMemberBob", "notBob"], asserted_at_scope: ["fAlice", "fMemberAlice", "fMemberBob", "notBob"] };
   const positive = finiteQuery(true);
-  expect(reasonFinite(h, positive).evaluation?.status).toBe("unknown");
-  const q: SourceSemanticQuery = { ...positive, variables: [...positive.variables, { id: "negative", sort: "context" }],
+  expect(reasonFinite(interpretation, positive).evaluation?.status).toBe("unknown");
+  const semantics: SourceSemanticQuery = { ...positive, variables: [...positive.variables, { id: "negative", sort: "context" }],
     evaluation: { kind: "forall", domain: "people", binder: "actor", local_variables: ["actor", "tools", "use", "negative"] },
     alternatives: [...positive.alternatives, { purpose: "counterexample", frames: [
       { id: "qNot", variable: "negative", predicate_reading: "not", operator: "not", role_requirements: [] }, ...positive.alternatives[0]!.frames],
       context_obligations: [{ frame: "qNot", kind: "asserted_at_source" }, { frame: "qUse", kind: "explicit_embedded_structure",
         incidence: { kind: "operator_operand", other_frame: "qNot", role: "content" } }] }] };
-  const a = finiteCorrespondence(h, q);
-  expect(SourceSemanticQuerySchema.safeParse({ ...q, alternatives: q.alternatives.map((row) => row.purpose !== "counterexample" ? row
+  const correspondence = finiteCorrespondence(interpretation, semantics);
+  expect(SourceSemanticQuerySchema.safeParse({ ...semantics, alternatives: semantics.alternatives.map((row) => row.purpose !== "counterexample" ? row
     : { ...row, frames: row.frames.map((frame) => frame.id === "qUse" ? { ...frame, predicate_reading: "unrelated" } : frame) }) }).success).toBe(false);
-  const result = reasonFinite(h, q, { ...a, correspondences: [...a.correspondences, ...a.correspondences.map((row) => ({ ...row,
+  const result = reasonFinite(interpretation, semantics, { ...correspondence, correspondences: [...correspondence.correspondences, ...correspondence.correspondences.map((row) => ({ ...row,
     query_endpoint: row.query_endpoint.kind === "referent" ? row.query_endpoint : { ...row.query_endpoint, alternative: 1 },
     source_endpoint: row.source_endpoint.kind === "referent" ? row.source_endpoint : { ...row.source_endpoint, frame: "negativeBody" }
   }))] });
@@ -158,30 +158,30 @@ it("delivers an explicit universal counterexample separately from missing body p
 }, 15000);
 
 it("rejects comparison branches whose frame constraints cannot be evaluated", () => {
-  const q = finiteQuery(true);
-  expect(SourceSemanticQuerySchema.safeParse({ ...q, evaluation: { kind: "comparison", domain: "people",
+  const semantics = finiteQuery(true);
+  expect(SourceSemanticQuerySchema.safeParse({ ...semantics, evaluation: { kind: "comparison", domain: "people",
     operation: "minimum", left: "actor", strict: false, metric: "speed", unit: "ms", context: "lab", scope: "asserted" } }).success).toBe(false);
 });
 
 it("requires measurement metadata requested by query semantics and refuses conflicting operand assignments", () => {
-  const h = finiteSource(), base = finiteQuery(true);
-  const q: SourceSemanticQuery = { ...base, variables: [
+  const interpretation = finiteSource(), base = finiteQuery(true);
+  const semantics: SourceSemanticQuery = { ...base, variables: [
     { id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } },
     { id: "tools", sort: "entity", reference: { kind: "query_text", excerpt: "Bob" } }],
     alternatives: [{ frames: [], context_obligations: [] }], return_variables: ["actor", "tools"],
     evaluation: { kind: "comparison", domain: "people", operation: "eq", left: "actor", right: "tools",
       strict: false, metric: "speed", unit: "ms", context: "lab", scope: "asserted" } };
-  const a = { ...finiteCorrespondence(h, q), correspondences: [["actor", "Alice"], ["tools", "Bob"]].map(([variable, name]) => ({
+  const correspondence = { ...finiteCorrespondence(interpretation, semantics), correspondences: [["actor", "Alice"], ["tools", "Bob"]].map(([variable, name]) => ({
     relation: "contextual_equivalence" as const, query_endpoint: { kind: "referent" as const, variable: variable! },
     source_endpoint: { kind: "referent" as const, referent: `r${name}` },
     query_support: { kind: "query_text" as const, excerpt: name! }, source_semantic_support: [] })) };
-  const equal = reasonFinite(h, q, a);
+  const equal = reasonFinite(interpretation, semantics, correspondence);
   expect(equal.outcome.status).toBe("interpreted");
   expect(equal.evaluation?.status).toBe("supported");
   expect(equal.consumed_leaves.filter((row) => row.leaf_kind === "source_interpretation_measurement").map((row) => row.measurement).sort()).toEqual(["valueAlice", "valueBob"]);
-  const wrongMetric = reasonFinite({ ...h, measurements: h.measurements!.map((row) => ({ ...row, metric: "weight" })) }, q, a);
+  const wrongMetric = reasonFinite({ ...interpretation, measurements: interpretation.measurements!.map((row) => ({ ...row, metric: "weight" })) }, semantics, correspondence);
   expect(wrongMetric.evaluation?.status).toBe("incomparable");
   expect(wrongMetric.answers).toEqual([]);
-  expect(SourceSemanticInterpretationSchema.safeParse({ ...h,
-    measurements: [...h.measurements!, { ...h.measurements![0]!, id: "contradictoryValue", value: "3" }] }).success).toBe(false);
+  expect(SourceSemanticInterpretationSchema.safeParse({ ...interpretation,
+    measurements: [...interpretation.measurements!, { ...interpretation.measurements![0]!, id: "contradictoryValue", value: "3" }] }).success).toBe(false);
 }, 15000);

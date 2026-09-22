@@ -49,9 +49,9 @@ Usage:
   alaya-bench-runner provider-preflight --mode probe|probe-sse --provider-route <url> [--model <id>]
   alaya-bench-runner provider-preflight --mode retire-obsolete --extraction-cache-root <dir> --expected-path <dir> --profile <profile> [--confirm-retire]
     Replay requires the canonical sealed request manifest and a credentialless environment. Probe requires credentials and a catalog binding. Retire-obsolete is a path/lock preflight and does not delete.
-  alaya-bench-runner semantic-proposal-fill --kind query|alignment --action prepare|authorize|fill --workset <json> --cache-root <dir> [--max-output-tokens N]
+  alaya-bench-runner semantic-proposal-fill --kind query|semantic_correspondence --action prepare|authorize|fill --workset <json> --cache-root <dir> [--max-output-tokens N]
     prepare writes --preflight-out. authorize reads --preflight and writes --receipt-out with prices. fill reads --authority.
-    Interactive Gemini streamGenerateContent; query/alignment schemas are caller-owned. Do not import runCli in-process when HTTPS_PROXY must be honored — use this bin.
+    Interactive Gemini streamGenerateContent; query/semantic correspondence schemas are caller-owned. Do not import runCli in-process when HTTPS_PROXY must be honored — use this bin.
   alaya-bench-runner extraction-fill --extraction-open-semantics [--extraction-source-packing complete-source] --extraction-authority <receipt.json> [ordinary fill options]
     Interactive Gemini generateContent shares Batch's whole-source request owner, codec, and admission. Sample authority stays Batch-only.
   alaya-bench-runner extraction-fill [ordinary fill options] [--extraction-packet-profile <profile.json> | --extraction-open-semantics] [--extraction-preflight-out <new-report.json> --extraction-preflight-keys <keys.json>] --batch-operation prepare|submit|status|resume|recover|import|cancel --batch-limits <json> [--batch-window <name>] [--batch-request-limit N] [--batch-local-job <id> --batch-remote-job <batches/id>]

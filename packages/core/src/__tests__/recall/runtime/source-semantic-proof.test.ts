@@ -7,7 +7,7 @@ import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-f
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { executeSourceSemanticInterpretation } from "../../../recall/runtime/source-semantic-reasoning.js";
 import { proofEntriesFromBranch } from "../../../recall/runtime/source-semantic-library-recall.js";
-import { source, catalog, query, align, run, ORIGINAL, BUDGET } from "./source-semantic-proof-fixture.js";
+import { source, catalog, query, correspondenceFor, run, ORIGINAL, BUDGET } from "./source-semantic-proof-fixture.js";
 
 function returned(result: SourceSemanticReasoningResult) {
   return [...new Set((result.answers ?? []).map((row) => JSON.stringify(Object.fromEntries(Object.entries(row.returned).map(([key, value]) => [key, value.node_id])))))].sort();
@@ -29,44 +29,44 @@ function proofLeaves(result: SourceSemanticReasoningResult, roots: readonly stri
   return leaves;
 }
 function wrapped(operator: "not" | "possible" | "reported"): SourceSemanticInterpretation {
-  const h = source();
-  return { ...h, frames: h.frames.map((row) => row.id === "fAlice" ? { ...row, context_owner: { kind: "operator", operator_handle: "outer" } } : row),
+  const interpretation = source();
+  return { ...interpretation, frames: interpretation.frames.map((row) => row.id === "fAlice" ? { ...row, context_owner: { kind: "operator", operator_handle: "outer" } } : row),
     operators: [{ id: "outer", operator, content: "fAlice", assertion_ids: [1], additional_support: [],
       ...(operator === "reported" ? { reporter: "rBob" } : {}), context_owner: { kind: "source_act", source_act: "assertion" } }],
     entry_roots: ["outer", "fBob"], asserted_at_scope: ["outer", "fBob"] };
 }
 function operatorQuery(operator: "not" | "possible" | "reported"): SourceSemanticQuery {
-  const q = query();
-  return { ...q, variables: [...q.variables, { id: "context", sort: "context" }],
-    alternatives: [{ frames: [{ id: "qOuter", variable: "context", operator, predicate_reading: operator, role_requirements: [] }, ...q.alternatives[0]!.frames],
+  const semantics = query();
+  return { ...semantics, variables: [...semantics.variables, { id: "context", sort: "context" }],
+    alternatives: [{ frames: [{ id: "qOuter", variable: "context", operator, predicate_reading: operator, role_requirements: [] }, ...semantics.alternatives[0]!.frames],
       context_obligations: [{ frame: "qOuter", kind: "asserted_at_source" }, { frame: "qUse", kind: "explicit_embedded_structure",
         incidence: { kind: "operator_operand", other_frame: "qOuter", role: "content" } }] }] };
 }
 
 describe("source semantic proof obligations", () => {
   it("keeps both use candidates and selects Alice only through an entity correspondence", () => {
-    const h = source(), q = query(), a = align(h, q);
-    const result = run(h, q, a);
+    const interpretation = source(), semantics = query(), correspondence = correspondenceFor(interpretation, semantics);
+    const result = run(interpretation, semantics, correspondence);
     expect(result.outcome.status).toBe("interpreted");
     expect(returned(result)).toEqual(['{"tools":"rX"}']);
-    expect(a.correspondences.filter((row) => row.query_endpoint.kind === "predicate")).toHaveLength(2);
+    expect(correspondence.correspondences.filter((row) => row.query_endpoint.kind === "predicate")).toHaveLength(2);
     for (const answer of result.answers!) {
       expect(answer.bindings.actor?.node_id).toBe("rAlice");
       const leaves = proofLeaves(result, answer.explanation_ids);
       expect(leaves.some((row) => row.leaf_kind === "semantic_correspondence_referent" && row.occurrence === "rAlice")).toBe(true);
       expect(leaves.some((row) => row.occurrence === "fBob")).toBe(false);
     }
-    const absent = { ...a, correspondences: a.correspondences.filter((row) => row.query_endpoint.kind !== "referent") };
-    expect(run(h, q, absent).answers).toEqual([]);
+    const absent = { ...correspondence, correspondences: correspondence.correspondences.filter((row) => row.query_endpoint.kind !== "referent") };
+    expect(run(interpretation, semantics, absent).answers).toEqual([]);
   });
   it("does not treat predicate-only set-valued correspondences as a completed group of answers", () => {
-    const text = "who uses which tools?", h = source();
-    const q = { ...query(text, false), return_variables: ["actor", "tools"] };
+    const text = "who uses which tools?", interpretation = source();
+    const semantics = { ...query(text, false), return_variables: ["actor", "tools"] };
     const predicatesOnly = {
-      ...align(h, q, false),
-      correspondences: align(h, q, false).correspondences.filter((row) => row.query_endpoint.kind === "predicate")
+      ...correspondenceFor(interpretation, semantics, false),
+      correspondences: correspondenceFor(interpretation, semantics, false).correspondences.filter((row) => row.query_endpoint.kind === "predicate")
     };
-    const result = run(h, q, predicatesOnly, text);
+    const result = run(interpretation, semantics, predicatesOnly, text);
     expect(result.outcome.status).toBe("interpreted");
     expect(result.answers ?? []).toEqual([]);
   });
@@ -96,9 +96,9 @@ describe("source semantic proof obligations", () => {
       .toEqual((result.answers ?? []).map((row) => row.binding_id).sort());
   });
   it("still compiles four complete groups to four answers", () => {
-    const text = "who uses which tools?", h = catalog(4);
-    const q = { ...query(text, false), return_variables: ["actor", "tools"] };
-    const result = run(h, q, align(h, q, false), text);
+    const text = "who uses which tools?", interpretation = catalog(4);
+    const semantics = { ...query(text, false), return_variables: ["actor", "tools"] };
+    const result = run(interpretation, semantics, correspondenceFor(interpretation, semantics, false), text);
     expect(result.outcome.status).toBe("interpreted");
     expect(result.answers).toHaveLength(4);
     expect(returned(result)).toEqual([
@@ -107,24 +107,24 @@ describe("source semantic proof obligations", () => {
     ]);
   });
   it("does not invent a second answer when the producer omitted the other matching frame", () => {
-    const text = "who uses which tools?", h = source(), q = query(text, false), complete = align(h, q, false);
+    const text = "who uses which tools?", interpretation = source(), semantics = query(text, false), complete = correspondenceFor(interpretation, semantics, false);
     const incomplete = { ...complete, correspondences: complete.correspondences.filter((row) =>
       row.source_endpoint.kind === "referent" || row.source_endpoint.frame === "fAlice"
     ) };
     expect(incomplete.correspondences).toHaveLength(3);
     expect(incomplete.correspondences.some((row) => row.source_endpoint.kind !== "referent"
       && row.source_endpoint.frame === "fBob")).toBe(false);
-    const result = run(h, q, incomplete, text);
+    const result = run(interpretation, semantics, incomplete, text);
     expect(result.outcome.status).toBe("interpreted");
     expect(returned(result)).toEqual(['{"tools":"rX"}']);
     expect(result.answers).toHaveLength(1);
   });
   it("returns separate real bindings and closed proof forests for two answers", () => {
-    const text = "who uses which tools?", h = source(), q = query(text, false), a = align(h, q, false);
-    const result = run(h, q, a, text);
+    const text = "who uses which tools?", interpretation = source(), semantics = query(text, false), correspondence = correspondenceFor(interpretation, semantics, false);
+    const result = run(interpretation, semantics, correspondence, text);
     expect(result.outcome.status).toBe("interpreted");
     expect(returned(result)).toEqual(['{"tools":"rX"}', '{"tools":"rY"}']);
-    expect(a.correspondences.filter((row) => row.source_endpoint.kind === "frame").map((row) =>
+    expect(correspondence.correspondences.filter((row) => row.source_endpoint.kind === "frame").map((row) =>
       row.source_endpoint.kind === "frame" ? row.source_endpoint.frame : undefined
     )).toEqual(["fAlice", "fBob"]);
     for (const answer of result.answers!) {
@@ -135,10 +135,10 @@ describe("source semantic proof obligations", () => {
     }
   });
   it("does not mix different source slots inside a single role proof", () => {
-    const h = source(), q = query(), a = align(h, q);
-    const extra = a.correspondences.find((row) => row.query_endpoint.kind === "slot" && row.query_endpoint.slot === "theme" && row.source_endpoint.kind === "slot" && row.source_endpoint.frame === "fAlice")!;
-    const widened = { ...a, correspondences: [...a.correspondences, { ...extra, source_endpoint: { kind: "slot" as const, frame: "fAlice", slot: "agent" } }] };
-    const result = run(h, q, widened);
+    const interpretation = source(), semantics = query(), correspondence = correspondenceFor(interpretation, semantics);
+    const extra = correspondence.correspondences.find((row) => row.query_endpoint.kind === "slot" && row.query_endpoint.slot === "theme" && row.source_endpoint.kind === "slot" && row.source_endpoint.frame === "fAlice")!;
+    const widened = { ...correspondence, correspondences: [...correspondence.correspondences, { ...extra, source_endpoint: { kind: "slot" as const, frame: "fAlice", slot: "agent" } }] };
+    const result = run(interpretation, semantics, widened);
     expect(result.outcome.status).toBe("interpreted");
     expect(returned(result)).toEqual(['{"tools":"rAlice"}', '{"tools":"rX"}']);
     for (const answer of result.answers!) {
@@ -151,48 +151,48 @@ describe("source semantic proof obligations", () => {
     }
   });
   it("preserves query gaps, rejects variable sort substitution, and validates source support excerpts", () => {
-    const h = source(), original = query();
-    const q = { ...original, gaps: [{ kind: "aggregate" as const, affected_ids: ["tools"],
+    const interpretation = source(), original = query();
+    const semantics = { ...original, gaps: [{ kind: "aggregate" as const, affected_ids: ["tools"],
       support: [{ kind: "query_text" as const, excerpt: "tools" }], description: "count requirement is not executable" }] };
-    const result = run(h, q, align(h, q));
-    expect(result.query_gaps).toEqual(q.gaps);
+    const result = run(interpretation, semantics, correspondenceFor(interpretation, semantics));
+    expect(result.query_gaps).toEqual(semantics.gaps);
     expect(result.answers!.every((answer) => answer.query_complete === false)).toBe(true);
     expect(SourceSemanticQuerySchema.safeParse({ ...original, variables: original.variables.map((row) => row.id === "use" ? { ...row, sort: "entity" } : row) }).success).toBe(false);
-    const a = align(h, original);
-    expect(admitSourceSemanticCorrespondence({ source_interpretation: h, query_semantics: original, semantic_correspondence: { ...a, correspondences: a.correspondences.map((row) => ({ ...row, query_support: { kind: "query_text", excerpt: "invented support" } })) }, original_query: ORIGINAL }).kind).toBe("invalid");
+    const correspondence = correspondenceFor(interpretation, original);
+    expect(admitSourceSemanticCorrespondence({ source_interpretation: interpretation, query_semantics: original, semantic_correspondence: { ...correspondence, correspondences: correspondence.correspondences.map((row) => ({ ...row, query_support: { kind: "query_text", excerpt: "invented support" } })) }, original_query: ORIGINAL }).kind).toBe("invalid");
   });
   it.each(["not", "possible", "reported"] as const)("matches %s explicitly without turning its content into a completed event", (kind) => {
-    const h = wrapped(kind), q = operatorQuery(kind), result = run(h, q, align(h, q));
+    const interpretation = wrapped(kind), semantics = operatorQuery(kind), result = run(interpretation, semantics, correspondenceFor(interpretation, semantics));
     expect(result.outcome.status).toBe("interpreted");
     expect(returned(result)).toEqual(['{"tools":"rX"}']);
     const leaves = proofLeaves(result, result.answers![0]!.explanation_ids);
     expect(leaves.some((row) => row.leaf_kind === "source_interpretation_operator" && row.value === kind)).toBe(true);
     expect(leaves.some((row) => row.leaf_kind === "source_interpretation_content" && row.parent === "outer" && row.role === "content")).toBe(true);
     const completed = query();
-    expect(run(h, completed, align(h, completed)).answers).toEqual([]);
+    expect(run(interpretation, completed, correspondenceFor(interpretation, completed)).answers).toEqual([]);
     const opposite = operatorQuery(kind === "not" ? "possible" : "not");
-    expect(run(h, opposite, align(h, opposite)).answers).toEqual([]);
+    expect(run(interpretation, opposite, correspondenceFor(interpretation, opposite)).answers).toEqual([]);
   });
   it("rejects contradictory source ownership and self-governing queries", () => {
-    const h = wrapped("not");
-    const draft = { contract: h.contract, mentions: h.mentions.map(({ text: _t, utf8_span: _s, ...m }) => m), referents: h.referents,
-      frames: h.frames.map((row) => ({ ...row, context_owner: { kind: "source_act", source_act: "assertion" } })), operators: h.operators, gaps: [] };
+    const interpretation = wrapped("not");
+    const draft = { contract: interpretation.contract, mentions: interpretation.mentions.map(({ text: _t, utf8_span: _s, ...m }) => m), referents: interpretation.referents,
+      frames: interpretation.frames.map((row) => ({ ...row, context_owner: { kind: "source_act", source_act: "assertion" } })), operators: interpretation.operators, gaps: [] };
     expect(SourceSemanticDraftSchema.safeParse(draft).success).toBe(false);
-    const q = operatorQuery("not");
-    const self = { ...q, alternatives: [{ ...q.alternatives[0]!, context_obligations: [{ frame: "qOuter", kind: "explicit_embedded_structure", incidence: { kind: "operator_operand", other_frame: "qOuter", role: "content" } }] }] };
+    const semantics = operatorQuery("not");
+    const self = { ...semantics, alternatives: [{ ...semantics.alternatives[0]!, context_obligations: [{ frame: "qOuter", kind: "explicit_embedded_structure", incidence: { kind: "operator_operand", other_frame: "qOuter", role: "content" } }] }] };
     expect(SourceSemanticQuerySchema.safeParse(self).success).toBe(false);
   });
   it("reports page/work/output exhaustion without a false complete result", () => {
-    const text = "who uses which tools?", h = source(), q = query(text, false), a = align(h, q, false);
-    const full = run(h, q, a, text);
+    const text = "who uses which tools?", interpretation = source(), semantics = query(text, false), correspondence = correspondenceFor(interpretation, semantics, false);
+    const full = run(interpretation, semantics, correspondence, text);
     expect(full.outcome.status).toBe("interpreted");
-    const page = run(h, q, a, text, { ...BUDGET, page_budget: 0 });
+    const page = run(interpretation, semantics, correspondence, text, { ...BUDGET, page_budget: 0 });
     expect(page.outcome.status).toBe("resource_exhausted");
-    const small = run(h, q, a, text, { ...BUDGET, work_units: 2000, finalization_reserve: 200 });
+    const small = run(interpretation, semantics, correspondence, text, { ...BUDGET, work_units: 2000, finalization_reserve: 200 });
     expect(small.outcome.status).toBe("resource_exhausted");
-    const output = run(h, q, a, text, BUDGET, 1024);
+    const output = run(interpretation, semantics, correspondence, text, BUDGET, 1024);
     expect(output.outcome.status).toBe("truncated");
     expect(output.answers).toBeUndefined(); expect(output.derivations).toBeUndefined(); expect(output.consumed_leaves).toEqual([]);
-    expect(returned(run(h, q, a, text, { ...BUDGET, work_units: BUDGET.work_units * 2 }))).toEqual(returned(full));
+    expect(returned(run(interpretation, semantics, correspondence, text, { ...BUDGET, work_units: BUDGET.work_units * 2 }))).toEqual(returned(full));
   });
 });

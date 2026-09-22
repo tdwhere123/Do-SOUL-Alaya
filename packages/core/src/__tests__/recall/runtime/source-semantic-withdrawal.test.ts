@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { SourceSemanticResourceLedger, interpretationNodeIdentity } from "@do-soul/alaya-protocol";
-import { source, query, align, BUDGET, CLOCK } from "./source-semantic-proof-fixture.js";
+import { source, query, correspondenceFor, BUDGET, CLOCK } from "./source-semantic-proof-fixture.js";
 import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-field/query/source-semantic-correspondence-admission.js";
 import { compileSourceSemanticQueryProgram } from "../../../recall/conditional-field/query/compile-source-semantic-query.js";
 import { compileConditionalFieldQuery } from "../../../recall/conditional-field/query/compile-query.js";
@@ -12,8 +12,8 @@ import { parseBindingContext } from "../../../recall/conditional-field/engine/bi
 import { executeSourceSemanticInterpretation } from "../../../recall/runtime/source-semantic-reasoning.js";
 
 it("records bounded same-compilation source interpretation and semantic correspondence withdrawals through the maintained execution owner", () => {
-  const original_query = "who uses which tools?", h = source(), q = query(original_query, false), a = align(h, q, false);
-  const input = { source_interpretation: h, query_semantics: q, semantic_correspondence: a, original_query, workspaceId: "ws", scope: "project", authorizedScopes: ["project"], asOf: CLOCK };
+  const original_query = "who uses which tools?", interpretation = source(), semantics = query(original_query, false), correspondence = correspondenceFor(interpretation, semantics, false);
+  const input = { source_interpretation: interpretation, query_semantics: semantics, semantic_correspondence: correspondence, original_query, workspaceId: "ws", scope: "project", authorizedScopes: ["project"], asOf: CLOCK };
   const normal = executeSourceSemanticInterpretation(input);
   expect(normal.withdrawal_trace).toBeUndefined();
   const diagnostic = executeSourceSemanticInterpretation({ ...input, withdrawal_trial_limit: 64 });
@@ -38,21 +38,21 @@ it("records bounded same-compilation source interpretation and semantic correspo
 });
 
 it("withdraws actual source-interpretation and semantic-correspondence leaves in a fixed conditional computation while preserving an independent proof", () => {
-  const text = "who uses which tools?", h = source(), q = query(text, false), a = align(h, q, false);
-  const admitted = admitSourceSemanticCorrespondence({ source_interpretation: h, query_semantics: q, semantic_correspondence: a, original_query: text });
+  const text = "who uses which tools?", interpretation = source(), semantics = query(text, false), correspondence = correspondenceFor(interpretation, semantics, false);
+  const admitted = admitSourceSemanticCorrespondence({ source_interpretation: interpretation, query_semantics: semantics, semantic_correspondence: correspondence, original_query: text });
   if (admitted.kind !== "admitted") throw new Error("fixture must admit");
   const meter = new SourceSemanticResourceLedger(BUDGET);
   const target = { kind: "source_evidence" as const, workspace_id: "ws", root_kind: "source_record" as const,
-    root_id: h.source.source_id, source_version: h.source.source_version, content_digest: h.source.content_digest, evidence_object_id: null };
-  const population = compileSourceSemanticPremises({ interpretation: h, semantic_correspondence: a, context_id: admitted.context_id,
+    root_id: interpretation.source.source_id, source_version: interpretation.source.source_version, content_digest: interpretation.source.content_digest, evidence_object_id: null };
+  const population = compileSourceSemanticPremises({ interpretation: interpretation, semantic_correspondence: correspondence, context_id: admitted.context_id,
     interpretation_id: admitted.interpretation_id, scope: "project", source_target: target, meter });
-  const program = compileSourceSemanticQueryProgram(q, meter), snapshot = `sha256:${"a".repeat(64)}`;
-  const interpretation = compileConditionalFieldQuery({ source: "typed", snapshot_id: snapshot, budget: BUDGET,
+  const program = compileSourceSemanticQueryProgram(semantics, meter), snapshot = `sha256:${"a".repeat(64)}`;
+  const compiled = compileConditionalFieldQuery({ source: "typed", snapshot_id: snapshot, budget: BUDGET,
     query_id: admitted.query_id, program, interpretation_clock: CLOCK,
     hypotheses: [{ schema_version: 1, hypothesis_id: admitted.context_id, bindings: [] }],
     view: { ...defaultView(), result_kind_view: "mixed", protocol_version: 1, supported_result_kinds: ["memory_entry", "source_evidence"] }, authorized_scopes: ["project"] });
-  const seeds = h.entry_roots.map((id) => interpretationNodeIdentity(population.coordinates.get(id)!));
-  const state = observeField(interpretation, { workspace_id: "ws", query_text: text, as_of: CLOCK, budget: BUDGET,
+  const seeds = interpretation.entry_roots.map((id) => interpretationNodeIdentity(population.coordinates.get(id)!));
+  const state = observeField(compiled, { workspace_id: "ws", query_text: text, as_of: CLOCK, budget: BUDGET,
     readers: sourceSemanticReaders(population, seeds), authorized_scopes: ["project"] });
   expect(state.binding.kind).toBe("bound");
   const accepted = (value: FieldEngineState) => {
@@ -71,5 +71,5 @@ it("withdraws actual source-interpretation and semantic-correspondence leaves in
   expect(accepted(withdrawDerivationLeaves(state, leafId("semantic_correspondence_predicate", "fAlice")))).toEqual(["rY"]);
   expect(accepted(withdrawDerivationLeaves(state, leafId("source_interpretation_binding", "fAlice", "theme")))).toEqual(["rY"]);
   expect(accepted(withdrawDerivationLeaves(state, leafId("source_interpretation_source_act", "fAlice")))).toEqual(["rX", "rY"]);
-  expect(admitted.context.source_interpretation_id).toBe(a.source_interpretation_id); expect(admitted.context.semantic_correspondence_id).toBe(admitted.semantic_correspondence_id);
+  expect(admitted.context.source_interpretation_id).toBe(correspondence.source_interpretation_id); expect(admitted.context.semantic_correspondence_id).toBe(admitted.semantic_correspondence_id);
 });

@@ -1,3 +1,6 @@
+import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
+
 type Schema = Record<string, unknown>;
 const mapPositions = ["properties", "patternProperties", "dependentSchemas"];
 const listPositions = ["allOf", "anyOf", "oneOf", "prefixItems"];
@@ -12,7 +15,7 @@ const GEMINI_ENVELOPE_EXPANSION_MAX_NODES = 1024;
 
 const ENVELOPE_SCHEMA_INSTRUCTION =
   "Return JSON satisfying this complete local response schema. All required fields, kinds and operands remain mandatory; omitted or invalid expressions will be rejected. Return the complete response envelope including its contract, outcome and body, not the schema itself.\n";
-// Retained H request identities bind these exact bytes. Only query semantics and semantic correspondence envelopes use
+// Retained source interpretation request identities bind these exact bytes. Only query semantics and semantic correspondence envelopes use
 // the corrected instruction; historical source artifacts remain replayable.
 const SOURCE_SCHEMA_INSTRUCTION =
   "Return JSON satisfying this complete local response schema. All required fields, kinds and operands remain mandatory; omitted or invalid expressions will be rejected. Return the complete source interpretation, not the schema itself.\n";
@@ -22,8 +25,8 @@ export function projectGeminiGenerationSchema(schema: object): { schema?: object
   const root = schema as Schema, recursiveReferences = new Map<string, boolean>();
   const contract = record(record(root.properties)?.contract);
   const values = Array.isArray(contract?.enum) ? contract.enum : [contract?.const];
-  const envelope = values.some(value => typeof value === "string"
-    && /^source-semantic-(query|alignment)-response-v[23]$/u.test(value));
+  const envelope = values.some(value => value === SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT
+    || value === SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT);
   const instruction = envelope ? ENVELOPE_SCHEMA_INSTRUCTION : SOURCE_SCHEMA_INSTRUCTION;
   const cycle = (value: unknown, visiting = new Set<string>()): boolean => {
     const node = record(value); if (node === undefined) return false;

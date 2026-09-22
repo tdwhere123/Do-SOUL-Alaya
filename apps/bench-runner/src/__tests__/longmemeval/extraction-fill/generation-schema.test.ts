@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, buildSourceSemanticRequest,
   buildSourceSemanticQueryRequest, officialApiExtractionResponseSchemaPreimage, parseSourceSemanticRequest,
-  receiveSourceSemantics, sourceSemanticQueryResponseJsonSchema, sourceSemanticSystemPrompt } from "@do-soul/alaya-soul";
+  receiveSourceSemantics, sourceSemanticQueryResponseJsonSchema, sourceSemanticSystemPrompt,
+  sourceSemanticCorrespondenceResponseJsonSchema, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
 import { projectGeminiGenerationSchema, geminiGenerationSchemaCacheMaterial,
   countGeminiEnvelopeExpandedNodes } from "../../../runs/extraction/fill/batch/generation-schema.js";
@@ -13,7 +15,8 @@ const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor mi
   source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
 
 describe("Gemini recursive decoding schema projection", () => {
-  it("keeps compact but exponentially expanded query envelopes in JSON mode", () => {
+  it.each([SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT])(
+    "keeps compact but exponentially expanded %s envelopes in JSON mode", (contract) => {
     const definitions: Record<string, object> = { leaf: { type: "string" } };
     let reference = "#/$defs/leaf";
     for (let depth = 0; depth < 12; depth += 1) {
@@ -23,16 +26,33 @@ describe("Gemini recursive decoding schema projection", () => {
       reference = `#/$defs/level${depth}`;
     }
     const schema = { type: "object", properties: {
-      contract: { enum: ["source-semantic-query-response-v3"] }, query: { $ref: reference }
+      contract: { enum: [contract] }, body: { $ref: reference }
     }, $defs: definitions };
     expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThan(4096);
     const projected = projectGeminiGenerationSchema(schema);
     expect(projected.recursive).toBe(false);
     expect(projected.schema).toBeUndefined();
     expect(projected.instruction).toContain(JSON.stringify(schema));
+    expect(projected.instruction).toContain("complete response envelope including its contract, outcome and body");
+    expect(JSON.parse(geminiGenerationSchemaCacheMaterial(JSON.stringify(schema))).instruction).toBe(projected.instruction);
     expect(projectGeminiGenerationSchema({ ...schema, properties: {
-      contract: { enum: ["source-semantic-query-response-v3"] }, query: { type: "string" }
+      contract: { enum: [contract] }, body: { type: "string" }
     } }).schema).toBeDefined();
+  });
+  it("keeps correspondence decoding structured until its actual schema exceeds the byte budget", () => {
+    const current = sourceSemanticCorrespondenceResponseJsonSchema();
+    expect(projectGeminiGenerationSchema(current).schema).toBeDefined();
+    expect(countGeminiEnvelopeExpandedNodes(current)).toBeLessThan(1024);
+    const large = { ...current, description: "A complete semantic correspondence response. ".repeat(512) };
+    const projected = projectGeminiGenerationSchema(large);
+    expect(projected.schema).toBeUndefined();
+    expect(projected.instruction).toContain("complete response envelope including its contract, outcome and body");
+    expect(projected.instruction).toContain(JSON.stringify(large));
+    const body = encodeGeminiGenerateContent({ userPrompt: "authored correspondence", systemPrompt: "Produce correspondence." },
+      { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1", maxOutputTokens: 4096, responseJsonSchema: large });
+    expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
+    expect(body).toMatchObject({ systemInstruction: { parts: [{ text: "Produce correspondence." }, { text: projected.instruction }] } });
+    expect(JSON.parse(geminiGenerationSchemaCacheMaterial(JSON.stringify(large))).instruction).toBe(projected.instruction);
   });
   it("supplies recursive structure as guidance in JSON mode without changing local schema", () => {
     const schema = { type: "object", properties: { root: { $ref: "#/$defs/node" } }, required: ["root"],

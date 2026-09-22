@@ -7,19 +7,19 @@ export type SourceSemanticOracleResult = Readonly<{ assignments: readonly Source
 export const leafKey = semanticLeafKey;
 
 /** Enumerates typed assignments independently of production compilation, paths and normalizers. */
-export function oracleSourceSemanticJoin(h: SourceSemanticInterpretation, q: SourceSemanticQuery, a: SourceSemanticCorrespondence): SourceSemanticOracleResult {
+export function oracleSourceSemanticJoin(interpretation: SourceSemanticInterpretation, semantics: SourceSemanticQuery, correspondence: SourceSemanticCorrespondence): SourceSemanticOracleResult {
   const assignments: SourceSemanticOracleAssignment[] = [];
-  for (const [alt, branch] of q.alternatives.entries()) {
+  for (const [alt, branch] of semantics.alternatives.entries()) {
     const used = new Set(branch.frames.flatMap((row) => [row.variable, ...row.role_requirements.map((role) => role.target_variable)]));
-    const variables = q.variables.filter((row) => used.has(row.id));
+    const variables = semantics.variables.filter((row) => used.has(row.id));
     const domains = variables.map((variable) => variable.sort === "entity"
-      ? h.referents.filter((r) => r.referent_kind === "grouped" || r.referent_kind === "unexpressed").map((row) => row.id)
-      : variable.sort === "proposition" ? h.frames.map((row) => row.id) : h.operators.map((row) => row.id));
+      ? interpretation.referents.filter((r) => r.referent_kind === "grouped" || r.referent_kind === "unexpressed").map((row) => row.id)
+      : variable.sort === "proposition" ? interpretation.frames.map((row) => row.id) : interpretation.operators.map((row) => row.id));
     let visits = 0;
     for (const values of cartesian(domains)) {
       if (++visits > 100000) throw new Error("independent oracle assignment bound exceeded");
       const bindings = Object.fromEntries(variables.map((row, index) => [row.id, values[index]!]));
-      for (const leaves of semanticAssignmentProofs(h, q, a, branch, alt, bindings)) assignments.push({ bindings, leaves });
+      for (const leaves of semanticAssignmentProofs(interpretation, semantics, correspondence, branch, alt, bindings)) assignments.push({ bindings, leaves });
     }
   }
   return { assignments };

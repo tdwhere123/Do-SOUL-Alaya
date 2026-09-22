@@ -93,7 +93,7 @@ formation; source preparation does not satisfy those enhancement prerequisites.
 ## Offline semantic chain
 
 After `pnpm build`, `node apps/bench-runner/dist/runs/semantic-chain/launch.js`
-provides `associate`, `prepare`, `replay`, and `measure`. These operations make
+provides `associate`, `prepare`, `replay`, `intervene`, and `measure`. These operations make
 no provider calls. Query-semantics and semantic-correspondence extraction still uses the existing
 `semantic-proposal-fill` preparation, authority, attempt ledger, and interactive
 SSE execution; the chain does not dispatch Batch or authorize extraction.
@@ -127,7 +127,7 @@ owners. It retains the original derivation graph, leaf origins, before/after pro
 results and answer differences. This is not the original MCP process's in-memory
 state or another first exposure. Missing native proofs remain `not_exercised`;
 baseline mismatch and resource failure do not establish a causal effect. The
-existing `without_alignments` replay remains a separate recompilation control.
+existing `without_semantic_correspondences` replay remains a separate recompilation control.
 
 For a bounded LongMemEval-S source-only development baseline, use the maintained
 entry below. Its [configuration](src/runs/longmemeval-semantic/contract.ts) requires
@@ -186,7 +186,7 @@ its working database for diagnosis; it is not automatically replayable.
 
 Gold input is an array of `{ "query_key": "...", "source_units": [...] }`,
 with exactly one row for every prepared question, including blocked questions.
-Missing gold is not an empty gold set. `--arm without_alignments` executes a
+Missing gold is not an empty gold set. `--arm without_semantic_correspondences` executes a
 separate native control with the same snapshot, query semantics, clock, budget, and scopes;
 it is not a fixed compiled-context leaf intervention. Successful authored
 fixtures do not establish actual-model extraction quality or full campaign

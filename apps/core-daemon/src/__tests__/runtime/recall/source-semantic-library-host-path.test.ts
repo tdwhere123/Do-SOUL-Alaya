@@ -78,7 +78,7 @@ function compactUse(catalog: SourceReferenceCatalog) {
   };
 }
 
-function receiveH(source: string, sourceId: string, raw: object, assertionIds: readonly number[] = [1]) {
+function receiveInterpretation(source: string, sourceId: string, raw: object, assertionIds: readonly number[] = [1]) {
   const received = proposeSourceSemantics({
     sourceCorpus: source, assertionIds, source_id: sourceId, source_version: "1",
     producer_id: "test-author", producer_version: "p1"
@@ -111,7 +111,7 @@ function existentialBody() {
   };
 }
 
-function receiveQ(original: string, body: object) {
+function receiveQuerySemantics(original: string, body: object) {
   const received = authoredQuerySemantics({ original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" }, body);
   if (received.outcome.status !== "interpreted" || received.query === undefined) {
     throw new Error(`query receive failed: ${JSON.stringify(received.outcome)}`);
@@ -119,41 +119,41 @@ function receiveQ(original: string, body: object) {
   return { ...received, query: received.query };
 }
 
-function mention(h: SourceSemanticInterpretation, text: string) {
-  const row = h.mentions.find((item) => item.text === text);
-  if (row === undefined) throw new Error(`source interpretation lacks mention ${text}: ${h.mentions.map((item) => item.text).join(",")}`);
+function mention(interpretation: SourceSemanticInterpretation, text: string) {
+  const row = interpretation.mentions.find((item) => item.text === text);
+  if (row === undefined) throw new Error(`source interpretation lacks mention ${text}: ${interpretation.mentions.map((item) => item.text).join(",")}`);
   return row;
 }
 
-function frameOf(h: SourceSemanticInterpretation, reading: string) {
-  const row = h.frames.find((item) => item.predicate_support.reading === reading);
+function frameOf(interpretation: SourceSemanticInterpretation, reading: string) {
+  const row = interpretation.frames.find((item) => item.predicate_support.reading === reading);
   if (row === undefined) throw new Error(`source interpretation lacks frame ${reading}`);
   return row;
 }
 
-function slotOf(h: SourceSemanticInterpretation, reading: string, role: string) {
-  const row = frameOf(h, reading).slots.find((item) => item.role_reading === role);
+function slotOf(interpretation: SourceSemanticInterpretation, reading: string, role: string) {
+  const row = frameOf(interpretation, reading).slots.find((item) => item.role_reading === role);
   if (row === undefined) throw new Error(`source interpretation lacks ${role} on ${reading}`);
   return row;
 }
 
-function referentOf(h: SourceSemanticInterpretation, text: string) {
-  const id = mention(h, text).id;
-  const row = h.referents.find((item) => item.mentions.includes(id));
+function referentOf(interpretation: SourceSemanticInterpretation, text: string) {
+  const id = mention(interpretation, text).id;
+  const row = interpretation.referents.find((item) => item.mentions.includes(id));
   if (row === undefined) throw new Error(`source interpretation lacks referent for ${text}`);
   return row;
 }
 
-function useCorrespondences(h: SourceSemanticInterpretation) {
-  const actor = mention(h, "Alice"), tools = mention(h, "tools"), uses = mention(h, "uses");
-  const frame = frameOf(h, "use");
+function useCorrespondences(interpretation: SourceSemanticInterpretation) {
+  const actor = mention(interpretation, "Alice"), tools = mention(interpretation, "tools"), uses = mention(interpretation, "uses");
+  const frame = frameOf(interpretation, "use");
   return [
     { relation: "contextual_equivalence" as const, query_endpoint: { kind: "referent" as const, variable: "actor" },
-      source_endpoint: { kind: "referent" as const, referent: referentOf(h, "Alice").id },
+      source_endpoint: { kind: "referent" as const, referent: referentOf(interpretation, "Alice").id },
       query_support: { kind: "query_text" as const, excerpt: "Alice" },
       source_semantic_support: [{ kind: "lexical" as const, mentions: [actor.id] }] },
     { relation: "contextual_equivalence" as const, query_endpoint: { kind: "slot" as const, alternative: 0, frame: "qUse", slot: "agent" },
-      source_endpoint: { kind: "slot" as const, frame: frame.id, slot: slotOf(h, "use", "agent").id },
+      source_endpoint: { kind: "slot" as const, frame: frame.id, slot: slotOf(interpretation, "use", "agent").id },
       query_support: { kind: "query_text" as const, excerpt: "Alice" },
       source_semantic_support: [{ kind: "lexical" as const, mentions: [actor.id] }] },
     { relation: "contextual_equivalence" as const, query_endpoint: { kind: "predicate" as const, alternative: 0, frame: "qUse" },
@@ -161,14 +161,14 @@ function useCorrespondences(h: SourceSemanticInterpretation) {
       query_support: { kind: "query_text" as const, excerpt: "use" },
       source_semantic_support: [{ kind: "lexical" as const, mentions: [uses.id] }] },
     { relation: "contextual_equivalence" as const, query_endpoint: { kind: "slot" as const, alternative: 0, frame: "qUse", slot: "theme" },
-      source_endpoint: { kind: "slot" as const, frame: frame.id, slot: slotOf(h, "use", "theme").id },
+      source_endpoint: { kind: "slot" as const, frame: frame.id, slot: slotOf(interpretation, "use", "theme").id },
       query_support: { kind: "query_text" as const, excerpt: "tools" },
       source_semantic_support: [{ kind: "lexical" as const, mentions: [tools.id] }] }
   ];
 }
 
-function receiveA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: string, extra: object = {}) {
-  const received = receiveAuthoredCorrespondence({ original_query: ORIGINAL, admitted_query_semantics: q, source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }], producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, { correspondences: useCorrespondences(h), ...extra }, { status: "interpreted", gaps: [] });
+function receiveCorrespondence(semantics: SourceSemanticQuery, interpretation: SourceSemanticInterpretation, interpretationId: string, extra: object = {}) {
+  const received = receiveAuthoredCorrespondence({ original_query: ORIGINAL, admitted_query_semantics: semantics, source_interpretation_descriptors: [{ source_interpretation_id: interpretationId, interpretation: interpretation }], producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, { correspondences: useCorrespondences(interpretation), ...extra }, { status: "interpreted", gaps: [] });
   if (received.outcome.status !== "interpreted" || received.semantic_correspondence === undefined) {
     throw new Error(`semantic_correspondence receive failed: ${JSON.stringify(received.outcome)}`);
   }
@@ -251,14 +251,14 @@ async function proposeDraft(handler: Handler, context: Context, sourceHandle: st
 }
 
 async function workerRecall(
-  session: Awaited<ReturnType<typeof openSession>>, q: SourceSemanticQuery, semantic_correspondences: readonly SourceSemanticCorrespondence[],
+  session: Awaited<ReturnType<typeof openSession>>, semantics: SourceSemanticQuery, semantic_correspondences: readonly SourceSemanticCorrespondence[],
   original = ORIGINAL
 ) {
   const recalled = await session.client.sourceSemanticsPort!.execute({
     workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES,
     request: {
       kind: "recall", accepts_unreviewed_conditional_results: true, original_query: original,
-      query_semantics: q, semantic_correspondences, budget: BUDGET, output_byte_limit: 1_000_000
+      query_semantics: semantics, semantic_correspondences, budget: BUDGET, output_byte_limit: 1_000_000
     }
   });
   if (recalled.kind !== "recall") throw new Error("library recall expected");
@@ -292,14 +292,14 @@ it("occupies one gold record identity for the same source with and without corre
   await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
-      receiveH(ALICE, "artifact-alice", compactUse(prepared.catalog)).draft, "p1");
-    const q = receiveQ(ORIGINAL, existentialBody()).query;
-    const semantic_correspondence = receiveA(q, published.interpretation, published.interpretation_id).semantic_correspondence;
-    const withA = await workerRecall(session, q, [semantic_correspondence]);
-    const withoutA = await workerRecall(session, q, []);
-    const proofSlot = withA.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === published.interpretation_id);
-    const proofEntry = proofSlot === undefined ? undefined : withA.index.entries[proofSlot.index];
-    const fallback = withoutA.index.entries.find((entry) => entry.target.kind === "source_evidence"
+      receiveInterpretation(ALICE, "artifact-alice", compactUse(prepared.catalog)).draft, "p1");
+    const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
+    const semantic_correspondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id).semantic_correspondence;
+    const withCorrespondence = await workerRecall(session, semantics, [semantic_correspondence]);
+    const withoutCorrespondence = await workerRecall(session, semantics, []);
+    const proofSlot = withCorrespondence.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === published.interpretation_id);
+    const proofEntry = proofSlot === undefined ? undefined : withCorrespondence.index.entries[proofSlot.index];
+    const fallback = withoutCorrespondence.index.entries.find((entry) => entry.target.kind === "source_evidence"
       && entry.target.root_id === published.source_target.root_id);
     expect(published.source_target.root_id).not.toBe("artifact-alice");
     expect(proofEntry?.target.kind).toBe("source_evidence");
@@ -308,7 +308,7 @@ it("occupies one gold record identity for the same source with and without corre
     }
     expect(sourceGoldRootIdentity(proofEntry.target)).toBe(sourceGoldRootIdentity(fallback.target));
     const provedTarget = proofEntry.target;
-    const occupied = withA.index.entries.filter((entry) => entry.target.kind === "source_evidence"
+    const occupied = withCorrespondence.index.entries.filter((entry) => entry.target.kind === "source_evidence"
       && sourceGoldRootIdentity(entry.target) === sourceGoldRootIdentity(provedTarget));
     expect(occupied).toHaveLength(1);
   });
@@ -318,25 +318,25 @@ it("binds the surviving semantic_correspondence closure when two legal semantic 
   await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
-      receiveH(ALICE, "artifact-alice", compactUse(prepared.catalog)).draft, "p1");
-    const q = receiveQ(ORIGINAL, existentialBody()).query;
-    const firstA = receiveA(q, published.interpretation, published.interpretation_id).semantic_correspondence;
+      receiveInterpretation(ALICE, "artifact-alice", compactUse(prepared.catalog)).draft, "p1");
+    const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
+    const firstCorrespondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id).semantic_correspondence;
     const rows = useCorrespondences(published.interpretation);
-    const secondA = receiveA(q, published.interpretation, published.interpretation_id, {
+    const secondCorrespondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id, {
       correspondences: [rows[3]!, rows[0]!, rows[1]!, rows[2]!]
     }).semantic_correspondence;
     const admittedFirst = admitSourceSemanticCorrespondence({
-      semantic_correspondence: firstA, source_interpretation: published.interpretation, query_semantics: q, original_query: ORIGINAL
+      semantic_correspondence: firstCorrespondence, source_interpretation: published.interpretation, query_semantics: semantics, original_query: ORIGINAL
     });
     const admittedSecond = admitSourceSemanticCorrespondence({
-      semantic_correspondence: secondA, source_interpretation: published.interpretation, query_semantics: q, original_query: ORIGINAL
+      semantic_correspondence: secondCorrespondence, source_interpretation: published.interpretation, query_semantics: semantics, original_query: ORIGINAL
     });
     expect(admittedFirst.kind).toBe("admitted");
     expect(admittedSecond.kind).toBe("admitted");
     if (admittedFirst.kind !== "admitted" || admittedSecond.kind !== "admitted") throw new Error("both correspondences must admit");
     expect(admittedFirst.semantic_correspondence_id).not.toBe(admittedSecond.semantic_correspondence_id);
-    const forward = await workerRecall(session, q, [firstA, secondA]);
-    const swapped = await workerRecall(session, q, [secondA, firstA]);
+    const forward = await workerRecall(session, semantics, [firstCorrespondence, secondCorrespondence]);
+    const swapped = await workerRecall(session, semantics, [secondCorrespondence, firstCorrespondence]);
     const forwardSlot = forward.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof");
     const swappedSlot = swapped.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof");
     expect(forward.discovery.omitted_duplicate_bindings).toBeGreaterThan(0);
@@ -358,10 +358,10 @@ it("accepts eleven duplicate semantic_correspondences without overflowing proofs
   await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
-      receiveH(ALICE, "artifact-alice", compactUse(prepared.catalog)).draft, "p1");
-    const q = receiveQ(ORIGINAL, existentialBody()).query;
-    const semantic_correspondence = receiveA(q, published.interpretation, published.interpretation_id).semantic_correspondence;
-    const recalled = await workerRecall(session, q, Array.from({ length: 11 }, () => semantic_correspondence));
+      receiveInterpretation(ALICE, "artifact-alice", compactUse(prepared.catalog)).draft, "p1");
+    const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
+    const semantic_correspondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id).semantic_correspondence;
+    const recalled = await workerRecall(session, semantics, Array.from({ length: 11 }, () => semantic_correspondence));
     expect(recalled.kind).toBe("recall");
     expect((recalled.proofs ?? []).length).toBeGreaterThan(0);
     expect((recalled.proofs ?? []).length).toBeLessThanOrEqual(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET);
@@ -392,8 +392,8 @@ it("does not resurrect an erased current source as evidence", async () => {
     }
     const session = await openSession(filename);
     try {
-      const q = receiveQ(ORIGINAL, existentialBody()).query;
-      const recalled = await workerRecall(session, q, []);
+      const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
+      const recalled = await workerRecall(session, semantics, []);
       const search = soulSearchFromLibraryRecall(recalled);
       expect(search.results.some((row) => row.content_preview?.includes(ALICE))).toBe(false);
       expect(search.results.some((row) => row.content_preview?.includes("Alice uses nothing."))).toBe(false);
@@ -409,8 +409,8 @@ it("does not resurrect an erased current source as evidence", async () => {
 it("does not claim complete public MCP payload after preview omission or shortening", async () => {
   expect(LONG.length).toBe(2001);
   await withHost([{ id: "artifact-long", content: LONG }, { id: "artifact-silent", content: SILENT }], async (session) => {
-    const q = receiveQ(ORIGINAL, existentialBody()).query;
-    const worker = await workerRecall(session, q, []);
+    const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
+    const worker = await workerRecall(session, semantics, []);
     const workerPreviews = Object.values(worker.previews ?? {});
     expect(workerPreviews.every((row) => row.length <= 4_096)).toBe(true);
     const mcp = await callAlayaMcpMemoryTool(
@@ -418,7 +418,7 @@ it("does not claim complete public MCP payload after preview omission or shorten
       "soul.interpretation",
       SoulInterpretationRequestSchema.parse({
         operation: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
-        query_semantics: q, semantic_correspondences: [], budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
+        query_semantics: semantics, semantic_correspondences: [], budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
       })
     );
     const publicRecall = mcpRecall(mcp.structuredContent);

@@ -19,7 +19,7 @@ function slot(offset: number, kind: "source_evidence" | "semantic_proof", target
 }
 
 function admit(validated: number[] = [], unverified: number[] = []) {
-  return { validatedRanks: new Set(validated), unverifiedGoldRanks: new Set(unverified) };
+  return { status: "admitted" as const, validatedRanks: new Set(validated), unverifiedGoldRanks: new Set(unverified) };
 }
 
 describe("source-bearing union first exposure", () => {
