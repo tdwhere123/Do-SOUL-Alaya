@@ -80,7 +80,47 @@ function supportHandles(supports: readonly SourceSemanticSupport[]): string[] {
   return supports.flatMap((support) => support.kind === "dominating" ? [support.via_id] : support.mentions);
 }
 
-function evidenceLinks(graph: SourceSemanticGraph): Map<string, readonly string[]> {
+/**
+ * Source dependencies of an already selected proof, including represented scope.
+ * Roots must come from the proof's source origins, never output values or prose.
+ * This does not verify a proof or discover meaning omitted by the interpretation.
+ * Unknown handles remain in the result so location consumers cannot lose them.
+ */
+export function sourceSemanticEvidenceClosure(
+  graph: SourceSemanticGraph, roots: readonly string[], meter: SourceSemanticResourceLedger
+): ReadonlySet<string> {
+  meter.retain(graph, "source support indexes");
+  meter.retain(roots, "source support roots");
+  const links = evidenceLinks(graph);
+  // Evidence points down the expression; support delivery also needs its owners.
+  for (const edge of sourceSemanticStructuralEdges(graph)) {
+    meter.charge(1, 16, "source support scope edges");
+    if (edge.governing) links.get(edge.to)?.push(edge.from);
+  }
+  for (const row of graph.operators) if (row.operator === "forall") {
+    meter.charge(1, 16, "source support domain edges");
+    links.get(row.id)!.push(row.domain);
+  }
+  for (const domain of graph.domains ?? []) {
+    if (domain.context !== null) {
+      meter.charge(1, 16, "source support context edges");
+      links.get(domain.id)!.push(domain.context);
+    }
+  }
+  // Only gaps incident to a required dependency extend this closure. Unrelated
+  // omissions do not make every local support window unavailable.
+  for (const gap of graph.gaps) {
+    const support = [...gap.affected_ids, ...supportHandles(gap.support)];
+    for (const id of gap.affected_ids) {
+      // Reserve the expanded incidence and traversal queue before copying it.
+      meter.charge(1 + support.length, support.length * 16, "source support gap edges");
+      links.get(id)?.push(...support);
+    }
+  }
+  return reachableEvidence(links, roots, meter);
+}
+
+function evidenceLinks(graph: SourceSemanticGraph): Map<string, string[]> {
   const links = new Map<string, string[]>();
   for (const row of graph.mentions) links.set(row.id, []);
   for (const row of graph.referents) links.set(row.id, [...row.mentions]);

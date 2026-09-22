@@ -22,6 +22,14 @@ exclusions, and measurement subjects through the shared entity-mention path.
 Catalog grounding and invalid-range rejection remain unchanged; previous raw
 responses and receipts retain their original identity and outcome.
 
+Protocol adds `sourceSemanticEvidenceClosure` for Core's bounded source-support
+window preparation, reusing the accounting and structural reference owners.
+Core preserves represented governing context and exact assertion intervals,
+with explicit missing-location and budget outcomes. This additive utility is
+included in the pending Protocol 9.0.0 release; MCP, EventLog and config schemas
+are unchanged. Native selection and public preview encoding are not yet wired
+to these windows.
+
 Library previews share the existing Recall token estimator and reserve display
 space for every occupied root before distributing the remaining allowance.
 Native preview reads use the existing UTF-8 hydration owner with a 4096-byte

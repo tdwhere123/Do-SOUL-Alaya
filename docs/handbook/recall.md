@@ -980,6 +980,18 @@ limit. Truncation preserves complete source characters. A hydrated empty source
 is distinct from unavailable text, and omission markers retain their actual token
 estimate even when a caller supplies too little preview allowance. A prefix is
 not certification that the source's supporting assertion or scope was delivered.
+
+Core's `sourceSemanticSupportWindow` prepares an atomic contiguous UTF-8 interval
+from already verified source locations and source handles supplied by a selected
+proof's origin owner. It reuses Protocol accounting's evidence reachability,
+including represented governing context and related gap support. Availability
+is relative to that admitted interpretation; an omitted language qualifier
+remains a fidelity issue. Unknown dependencies, missing locations, display limits
+and processing exhaustion stay distinct. Missing locations permit a complete
+retained-source fallback only within the same display and resource limits;
+window availability does not imply the original source is complete. This helper
+is not yet connected to native selection or the public preview encoder.
+
 Measurement retains requested budget separately from the fixed ten-slot
 page policy and requires the delivered source-interpretation, query-semantics, semantic-correspondence, and conditional-computation package and closed proof graph for
 proof-conditioned scoring; source retrieval remains independently scoreable.

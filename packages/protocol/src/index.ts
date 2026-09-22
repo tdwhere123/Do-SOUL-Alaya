@@ -268,6 +268,6 @@ export * from "./garden/source-semantic-interpretation.js";
 export * from "./garden/source-semantic-worker.js";
 export * from "./garden/source-semantic-identity.js";
 export * from "./garden/normalize-source-semantics.js";
-export { assertSourceSemanticAccounting } from "./garden/source-semantic-accounting.js";
+export { assertSourceSemanticAccounting, sourceSemanticEvidenceClosure } from "./garden/source-semantic-accounting.js";
 
 export { SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS, sourceInterpretationDependsOnRecord } from "./garden/source-interpretation-dependency.js";
