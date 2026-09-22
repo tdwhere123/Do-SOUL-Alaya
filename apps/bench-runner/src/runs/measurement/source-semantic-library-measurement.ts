@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   SourceRecordIdentitySchema, type SourceRecordIdentity, RequestBudgetSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SourceSemanticLibrarySlotQualifierSchema, SourceSemanticWorkerResultSchema, SoulInterpretationResponseSchema,
-  SoulInterpretationRecallDeliverySchema,
+  SoulInterpretationRecallDeliverySchema, SourceSemanticLibraryDiscoverySchema, SourceSemanticCoverageSchema,
   canonicalJson, InformationIndexSchema, ContinuationSchema, MemorySearchResultSchema, SourceSemanticLibraryProofSchema, type SourceSemanticLibraryProof, type InformationIndex, type RequestBudget, type SourceSemanticLibraryOrder,
   type SourceSemanticLibrarySlotQualifier
 } from "@do-soul/alaya-protocol";
@@ -13,12 +13,12 @@ import {
 import {
   MixedKindFirstExposureMetricSchema, ProofConditionedFirstExposureMetricSchema,
   SourceGoldUnitSchema, scoreMixedKindFirstExposure, scoreProofConditionedFirstExposure,
-  scoreSourceBearingUnionFirstExposure, sourceTargetJoinsGold,
+  scoreSourceBearingUnionFirstExposure, sourceTargetJoinsGold, SourceBearingUnionFirstExposureMetricSchema,
   type SourceBearingUnionFirstExposureMetric, type SourceGoldUnit, type UnionProofAdmission
 } from "./source-gold-join.js";
 import { soulSearchFromLibraryRecall } from "./source-semantic-library-recall.js";
 
-export const SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT = "source-semantic-library-delivered-slots-v1" as const;
+export const SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT = "source-semantic-library-delivered-slots-v2" as const;
 const HISTORICAL_SOURCE_ONLY_PAGE_BUDGET = 10;
 
 const InvalidReason = z.enum([
@@ -35,6 +35,8 @@ const ValidatedMeasurementRecord = z.object({
   effective_page_budget: z.literal(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET),
   delivered_index: InformationIndexSchema,
   delivered_proofs: z.array(SourceSemanticLibraryProofSchema).readonly(),
+  native_observation: z.object({ discovery: SourceSemanticLibraryDiscoverySchema,
+    coverage: SourceSemanticCoverageSchema }).strict().readonly(),
   source_records: z.array(SourceRecordIdentitySchema).readonly().optional(),
   identity: z.object({
     query_id: z.string(), snapshot_id: z.string(), interpretation_id: z.string().min(1),
@@ -48,10 +50,13 @@ const ValidatedMeasurementRecord = z.object({
   metrics: z.object({
     mixed_kind_first_exposure: MixedKindFirstExposureMetricSchema,
     proof_conditioned_first_exposure: ProofConditionedFirstExposureMetricSchema,
+    delivered_slot_union: SourceBearingUnionFirstExposureMetricSchema,
   }).strict().readonly()
 }).strict().readonly();
-const HistoricalValidatedMeasurementRecord = ValidatedMeasurementRecord.unwrap().extend({
-  effective_page_budget: z.literal(HISTORICAL_SOURCE_ONLY_PAGE_BUDGET)
+const HistoricalValidatedMeasurementRecord = ValidatedMeasurementRecord.unwrap().omit({ native_observation: true }).extend({
+  contract: z.literal("source-semantic-library-delivered-slots-v1"),
+  effective_page_budget: z.literal(HISTORICAL_SOURCE_ONLY_PAGE_BUDGET),
+  metrics: ValidatedMeasurementRecord.unwrap().shape.metrics.unwrap().omit({ delivered_slot_union: true }).readonly()
 }).readonly();
 type ValidatedMeasurement = z.infer<typeof ValidatedMeasurementRecord | typeof HistoricalValidatedMeasurementRecord>;
 
@@ -112,6 +117,8 @@ interface LibraryRecall {
   readonly results?: Parameters<typeof soulSearchFromLibraryRecall>[0]["results"];
   readonly total_count?: number;
   readonly previews?: Readonly<Record<string, string>>;
+  readonly discovery: z.infer<typeof SourceSemanticLibraryDiscoverySchema>;
+  readonly coverage: z.infer<typeof SourceSemanticCoverageSchema>;
 }
 
 /** One native admission supplies all metrics and a separate fresh evaluator cost. Never a CF execution receipt. */
@@ -131,21 +138,37 @@ function measureLibraryDelivery(input: SourceSemanticLibraryMeasurementInput,
   if (!gold.success || !records.success) return unavailableEvaluation(invalid("invalid_response"));
   const assessment = assessDeliveredProofSlots(admitted.slots, admitted.index, admitted.qualifiers, admitted.proofs,
     gold.data, records.data, admitted.budget);
+  const deliveredSlotUnion = scoreSourceBearingUnionFirstExposure(admitted.slots, gold.data, assessment.unionAdmission);
   const validated = (historicalSourceOnly ? HistoricalValidatedMeasurementRecord : ValidatedMeasurementRecord).safeParse({
-    schema_version: 1, status: "validated", contract: SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT,
+    schema_version: 1, status: "validated", contract: historicalSourceOnly
+      ? "source-semantic-library-delivered-slots-v1" : SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT,
     request: { budget: admitted.budget }, identity: admitted.identity,
     effective_page_budget: pageBudget, delivered_index: admitted.index, delivered_proofs: admitted.proofs,
     ...(input.sourceRecords === undefined ? {} : { source_records: input.sourceRecords }),
     first_exposure_page: admitted.exposure, first_exposure_slots: admitted.slots,
     slot_qualifiers: admitted.qualifiers, source_gold_units: gold.data, provider_calls: 0,
-    metrics: measurementMetrics(admitted.slots, gold.data, assessment)
+    ...(historicalSourceOnly ? {} : { native_observation: admitted.observation }),
+    metrics: { ...measurementMetrics(admitted.slots, gold.data, assessment),
+      ...(historicalSourceOnly ? {} : { delivered_slot_union: deliveredSlotUnion }) }
   });
   if (!validated.success || recordInconsistency(validated.data) !== undefined) {
     return unavailableEvaluation(invalid("invalid_response"), assessment.evaluator_usage);
   }
   return { measurement: validated.data, evaluator_usage: assessment.evaluator_usage,
     validatedProofRanks: [...assessment.unionAdmission.validatedRanks],
-    sourceBearingUnion: scoreSourceBearingUnionFirstExposure(admitted.slots, gold.data, assessment.unionAdmission) };
+    sourceBearingUnion: resolveNativeUnion(deliveredSlotUnion, admitted.observation) };
+}
+
+/** A delivered positive is observed; a negative cannot close native unvisited or unfinished work.
+ * Index pagination and unsupported client computation alone do not imply unvisited access. */
+function resolveNativeUnion(metric: SourceBearingUnionFirstExposureMetric,
+  observation: z.infer<typeof ValidatedMeasurementRecord>["native_observation"]): SourceBearingUnionFirstExposureMetric {
+  const { discovery, coverage } = observation;
+  if (!discovery.open_residuals && !discovery.truncated && coverage.discovery === "complete"
+    && !discovery.access?.unvisited_sources && !discovery.access?.unvisited_interpretations) return metric;
+  const resolve = (value: SourceBearingUnionFirstExposureMetric["any_at_5"]) => value.status !== "miss" ? value
+    : { status: "unavailable" as const, value: null, reason: "native access or computation remains unresolved" };
+  return { ...metric, any_at_1: resolve(metric.any_at_1), any_at_5: resolve(metric.any_at_5), any_at_10: resolve(metric.any_at_10) };
 }
 
 /** Archive shape is not admission. Bind its recorded source subset to independent publication records, then evaluate once. */
@@ -215,6 +238,7 @@ function admitLibraryMeasurement(
   readonly slots: z.infer<typeof ExposureSlotSchema>[];
   readonly qualifiers: readonly SourceSemanticLibrarySlotQualifier[];
   readonly index: InformationIndex; readonly proofs: readonly SourceSemanticLibraryProof[];
+  readonly observation: z.infer<typeof ValidatedMeasurementRecord>["native_observation"];
 } | Extract<SourceSemanticLibraryMeasurement, { status: "invalid" }> | null {
   if (!isRecord(input.recallResult)) return null;
   const zeroCall = zeroCallReason(input.recallResult);
@@ -246,6 +270,7 @@ function admitLibraryMeasurement(
   }, slots, search.delivery_id)) return invalid("missing_first_exposure");
   return {
     status: "admitted", budget: budget.data, index, proofs: recalled.proofs ?? [], exposure: exposure.data, slots, qualifiers: recalled.slot_qualifiers,
+    observation: { discovery: recalled.discovery, coverage: recalled.coverage },
     identity: {
       query_id: index.query_id, snapshot_id: index.snapshot_id, interpretation_id: index.interpretation_id,
       as_of: index.as_of, result_version: index.result_version
@@ -260,7 +285,8 @@ function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecall | "inva
     return {
       delivery_id: worker.data.delivery_id, index: worker.data.index, order: worker.data.order,
       slot_qualifiers: worker.data.slot_qualifiers, total_count: worker.data.total_count,
-      previews: worker.data.previews, proofs: worker.data.proofs, request_budget: worker.data.request_budget
+      previews: worker.data.previews, proofs: worker.data.proofs, request_budget: worker.data.request_budget,
+      discovery: worker.data.discovery, coverage: worker.data.coverage
     };
   }
   const mcp = SoulInterpretationResponseSchema.safeParse(raw);
@@ -268,12 +294,13 @@ function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecall | "inva
     if (mcp.data.operation !== "recall") return null;
     if (mcp.data.index === undefined) return null; // Protocol admitted an outcome-only response, not an empty delivery.
     if (mcp.data.index === undefined || mcp.data.order === undefined || mcp.data.results === undefined || mcp.data.total_count === undefined
-      || mcp.data.slot_qualifiers === undefined || mcp.data.delivery_id === undefined) {
+      || mcp.data.slot_qualifiers === undefined || mcp.data.delivery_id === undefined || mcp.data.discovery === undefined) {
       return looksLikeLibraryRecall(raw) ? "invalid" : null;
     }
     return {
       delivery_id: mcp.data.delivery_id, index: mcp.data.index, order: mcp.data.order,
-      slot_qualifiers: mcp.data.slot_qualifiers, proofs: mcp.data.proofs, request_budget: mcp.data.request_budget, results: mcp.data.results, total_count: mcp.data.total_count
+      slot_qualifiers: mcp.data.slot_qualifiers, proofs: mcp.data.proofs, request_budget: mcp.data.request_budget, results: mcp.data.results, total_count: mcp.data.total_count,
+      discovery: mcp.data.discovery, coverage: mcp.data.coverage
     };
   }
   return looksLikeLibraryRecall(raw) ? "invalid" : null;

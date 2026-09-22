@@ -1017,6 +1017,15 @@ by the admitted native request budget, including retained proof and replay costs
 the standalone Core helper defaults to the Core execution budget. Exhaustion leaves
 a proof unverified. Without another validated hit, an unverified
 gold proof within the cutoff makes the union unavailable, never a definitive miss.
+Native unvisited sources or interpretations, truncated discovery, and unfinished
+discovery or computation likewise keep a negative union outcome unavailable.
+Observed source hits and independently validated proof hits remain hits. A complete
+candidate pool split into frozen pages can still establish an initial-page miss;
+pagination alone does not indicate unvisited work. Current delivered-slot measurement
+v2 binds the native discovery and coverage observations and retains the pure
+`delivered_slot_union` as a separate diagnostic. Semantic-chain measurement v2 and
+source-only measurement v2 use the native-residual-aware union for their primary
+outcome. Historical measurement records retain their original bytes and contracts.
 One occupied root contributes once. This union does not
 replace either earlier metric or certify complete answer support. Frozen comparisons
 bind the summary, census, selected questions, preparation, publication, replay and
@@ -1041,7 +1050,7 @@ arm. It freezes the complete original source census, retained interpretation cac
 bytes and publication associations, query context/clock, workspace/scopes, native
 delivery contract and resource policy. Its order declaration derives from Core's
 native order, and measurement requires the delivered order to match that
-freeze. Native measurement uses `longmemeval-native-semantic-measurement-v2`;
+freeze. Native measurement uses `longmemeval-native-semantic-measurement-v3`;
 historical artifacts retain their original declarations. Existing publication and
 generic semantic-chain owners perform preparation, snapshot reopen, discovery,
 correspondence receive, public recall and initial exposure. The current plan

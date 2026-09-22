@@ -9,6 +9,7 @@ import {
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../runs/semantic-proposal/fill.js";
 import type { CompileSeedExtractionConfig } from "../../runs/compile-seed/compile-seed-types.js";
 import { isNativeGeminiRequestProfile } from "../../runs/extraction/request-profile.js";
+import { canonicalExtractionTargetRoot } from "../../runs/extraction/authority/target-root-binding.js";
 
 export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>): Promise<number> {
   try {
@@ -31,6 +32,9 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
     }
     if (action === "authorize") {
       const preflight = parseSemanticProposalPreflight(JSON.parse(readFileSync(required(args, "--preflight"), "utf8")));
+      if (canonicalExtractionTargetRoot(cacheRoot) !== preflight.execution_scope.execution_root_path) {
+        throw new Error("semantic proposal preflight execution root differs from selected root");
+      }
       const authority = pinSemanticProposalAuthority({
         preflight,
         inputUsdPerMillion: numberFlag(args, "--input-price-usd-per-million"),

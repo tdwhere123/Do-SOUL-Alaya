@@ -5,7 +5,8 @@ import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { inspectSemanticProposalShard, hasAdmittedProposalOutcome, SemanticProposalIdentityError,
   type SemanticProposalLookup, type SemanticProposalShard } from "./artifact.js";
-import type { SemanticProposalAuthority } from "./authority.js";
+import { assertSemanticProposalExecutionScope, verifySemanticProposalAuthority, type SemanticProposalAuthority } from "./authority.js";
+import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 import type { SemanticProposalKind } from "./workset.js";
 import { readProviderRawAttempt, bindProviderRawAttempt, verifyProviderRawReservation, listProviderRawAttempts,
   type ProviderRawAttempt } from "../extraction/fill/provider-raw-attempt.js";
@@ -70,7 +71,11 @@ export function openSemanticProposalAttemptLedger(input: Readonly<{
   cacheRoot: string;
   authority: SemanticProposalAuthority;
   kind: SemanticProposalKind;
+  writeLease?: ExtractionCacheWriteLease;
 }>) {
+  const authority = verifySemanticProposalAuthority(input.authority);
+  assertSemanticProposalExecutionScope(authority.execution_scope, input.cacheRoot, input.writeLease);
+  if (authority.kind !== input.kind) throw new Error("semantic proposal attempt ledger kind differs from authority");
   if (!isExtractionRequestProfile(input.authority.request_profile)) {
     throw new Error("semantic proposal attempt ledger requires an extraction request profile");
   }
@@ -86,6 +91,7 @@ export function openSemanticProposalAttemptLedger(input: Readonly<{
   }
   return openExtractionAttemptLedger({
     cacheRoot: input.cacheRoot,
+    publicationTemporaryDirectory: input.cacheRoot,
     lineageDigest: lineage,
     cacheIdentity: {
       model: input.authority.model,

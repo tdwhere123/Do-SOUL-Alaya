@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import {
@@ -14,7 +14,7 @@ import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../compile-seed/http/gemini
 import { resolveExtractionRequestTimeoutMs } from "../compile-seed/http/output-token-retry.js";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { assertAttemptInputWithinReceiptLimit } from "../extraction/authority/receipt-limits.js";
-import { acquireExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
+import { acquireExtractionCacheWriteLease, type ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 import { isCompleteGeminiFinish } from "../extraction/fill/batch/native-codec.js";
 import {
   listProviderRawAttempts, readProviderRawAttempt,
@@ -26,7 +26,8 @@ import {
   materializeSemanticProposalLines, semanticProposalRequestBinding
 } from "./workset.js";
 import {
-  type SemanticProposalAuthority, buildSemanticProposalPreflight, verifySemanticProposalAuthority, proposalAttemptLineage
+  type SemanticProposalAuthority, buildSemanticProposalPreflight, verifySemanticProposalAuthority, proposalAttemptLineage,
+  assertSemanticProposalExecutionScope, inspectSemanticProposalExecutionScope
 } from "./authority.js";
 import { openSemanticProposalAttemptLedger, readSemanticProposalAttemptState, assertProposalRawReservation } from "./attempt.js";
 import {
@@ -67,7 +68,7 @@ export function prepareSemanticProposal(
   }
   return buildSemanticProposalPreflight({
     kind: workset.kind, model: workset.model, request_profile: workset.request_profile,
-    maxOutputTokens, maxAttemptsPerKey, lines, cachedKeys
+    maxOutputTokens, maxAttemptsPerKey, lines, cachedKeys, executionScope: inspectSemanticProposalExecutionScope(cacheRoot)
   });
 }
 
@@ -80,7 +81,8 @@ export async function executeSemanticProposalFill(input: Readonly<{
 }>) {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifySemanticProposalAuthority(input.authority);
-  input = { ...input, authority };
+  assertSemanticProposalExecutionScope(authority.execution_scope, input.cacheRoot);
+  input = { ...input, authority, cacheRoot: authority.execution_scope.execution_root_path };
   if (authority.kind !== input.workset.kind || authority.model !== input.workset.model ||
       authority.request_profile !== input.workset.request_profile) {
     throw new Error("semantic proposal authority does not bind this workset");
@@ -88,7 +90,6 @@ export async function executeSemanticProposalFill(input: Readonly<{
   const maxOutputTokens = authority.limits.max_output_tokens;
   const lines = materializeSemanticProposalLines(input.workset, maxOutputTokens);
   assertAuthorizedProposalRequest(input, lines, maxOutputTokens);
-  mkdirSync(input.cacheRoot, { recursive: true });
   const authorized = new Set(authority.keys);
   const dispatch: SemanticProposalLine[] = [];
   const retainedLines: SemanticProposalLine[] = [];
@@ -116,9 +117,10 @@ export async function executeSemanticProposalFill(input: Readonly<{
   }
   const lease = acquireExtractionCacheWriteLease(input.cacheRoot);
   try {
-    lease.assertOwned();
+    assertSemanticProposalExecutionScope(authority.execution_scope, input.cacheRoot, lease);
+    input = { ...input, cacheRoot: lease.stableRootPath };
     const ledger = openSemanticProposalAttemptLedger({
-      cacheRoot: input.cacheRoot, authority, kind: input.workset.kind
+      cacheRoot: input.cacheRoot, authority, kind: input.workset.kind, writeLease: lease
     });
     for (const line of retainedLines) {
       if (!ledger.snapshot().pendingKeys.includes(line.key) &&
@@ -133,7 +135,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
     let newlyAdmitted = 0, attempts = 0;
     for (const line of dispatch) {
       assertAttemptInputWithinReceiptLimit(line.inputByteUpper, authority.price.maximum_input_tokens_per_attempt);
-      const filled = await fillLine(input, line, extractor!, ledger, maxOutputTokens);
+      const filled = await fillLine(input, line, extractor!, ledger, maxOutputTokens, lease);
       attempts += filled.attempts;
       if (filled.admitted) {
         newlyAdmitted += 1;
@@ -221,7 +223,8 @@ async function fillLine(
   line: SemanticProposalLine,
   extractor: ReturnType<typeof createGeminiHttpExtractor>,
   ledger: ProposalLedger,
-  maxOutputTokens: number
+  maxOutputTokens: number,
+  writeLease: ExtractionCacheWriteLease
 ): Promise<{ classified: ProposalAttemptClass; admitted: boolean; attempts: number }> {
   const replayed = replayExistingProposalRaws(input, line, ledger);
   if (replayed.done) {
@@ -237,6 +240,7 @@ async function fillLine(
     if (input.extractor === undefined && (input.config.apiKey === null || input.config.apiKey.trim().length === 0)) {
       throw new Error("garden API key is unavailable");
     }
+    assertSemanticProposalExecutionScope(input.authority.execution_scope, input.cacheRoot, writeLease);
     const ordinal = ledger.reserveAttemptOrdinal(line.key);
     used += 1;
     const lastAttempt = used >= attemptLimit || remainingGlobal <= 1;

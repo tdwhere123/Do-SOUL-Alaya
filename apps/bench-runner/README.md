@@ -102,6 +102,12 @@ default remains two. The [preflight and authority contracts](src/runs/semantic-p
 attempts and price. Fill and recovery consume the same authority, so a failed
 first key cannot borrow another key's single opportunity. This does not change
 generation/cache identity or authorize reopening a stopped window.
+The same authority binds the executable revision and physical execution root.
+Preparation only inspects the root; authorization initializes an absent or empty
+root and pins its canonical path, device, inode and marker through the existing
+extraction root owner. Fill and recovery reject a changed revision or root before
+attempt reservation. Reissuing a receipt preserves the attempt lineage and unknown
+reservations. Historical caches without this binding remain read-only evidence.
 
 ```bash
 node apps/bench-runner/dist/runs/semantic-chain/launch.js associate \
@@ -216,6 +222,10 @@ one admission. Its `evaluator_usage` records fresh proof-verification work and l
 allocation charges separately from native retrieval diagnostics. External stored
 measurements require fresh readmission with independent publication records;
 historical records without evaluator cost retain that absence.
+Current measurements retain native discovery and coverage. Unvisited or unfinished
+native work keeps a negative primary outcome unknown, while observed valid hits
+remain hits. The pure delivered-slot union remains a diagnostic. Frozen later pages
+alone do not prevent an initial-page miss when the candidate pool is complete.
 An interrupted exposure reservation without a result fails closed and retains
 its working database for diagnosis; it is not automatically replayable.
 

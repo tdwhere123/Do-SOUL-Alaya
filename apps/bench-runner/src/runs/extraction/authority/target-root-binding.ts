@@ -10,6 +10,7 @@ import {
   writeFileSync
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { z } from "zod";
 import type { ExtractionCacheWriteLease } from "../fill/manifest/fill-root-guard.js";
 import { readBoundedStableRegularFile } from
   "../cache-audit/bounded-artifact-reader.js";
@@ -21,12 +22,14 @@ export interface ExtractionTargetRootMarker {
   readonly kind: string;
 }
 
-export interface ExtractionTargetRootBinding {
-  readonly cache_root_sha256: string;
-  readonly cache_root_device: string;
-  readonly cache_root_inode: string;
-  readonly cache_root_marker_sha256: string;
-}
+export const ExtractionTargetRootBindingSchema = z.object({
+  cache_root_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  cache_root_device: z.string().min(1),
+  cache_root_inode: z.string().min(1),
+  cache_root_marker_sha256: z.string().regex(/^[a-f0-9]{64}$/u)
+}).strict().readonly();
+
+export type ExtractionTargetRootBinding = z.infer<typeof ExtractionTargetRootBindingSchema>;
 
 export function assertFreshExtractionTargetRootPath(cacheRoot: string): void {
   const root = resolve(cacheRoot);
@@ -43,6 +46,35 @@ interface TargetRootInput {
   readonly cacheRoot: string;
   readonly marker: ExtractionTargetRootMarker;
   readonly purpose: string;
+}
+
+/** Inspection never adopts unbound historical content as execution authority. */
+export function inspectExtractionTargetRoot(input: TargetRootInput): ExtractionTargetRootBinding | null {
+  const root = canonicalExtractionTargetRoot(input.cacheRoot);
+  let stat;
+  try { stat = lstatSync(root, { bigint: true }); }
+  catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw cause;
+  }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`${input.purpose} target root is not a real directory`);
+  if (readdirSync(root).length === 0) return null;
+  if (!existsSync(markerPathFor(root, input.marker))) {
+    throw new Error(`${input.purpose} unbound historical cache is read-only evidence, not an execution grant`);
+  }
+  return Object.freeze({ cache_root_sha256: hashRoot(root), cache_root_device: stat.dev.toString(),
+    cache_root_inode: stat.ino.toString(), cache_root_marker_sha256: readMarkerSha256(root, input.marker) });
+}
+
+/** Explicit authorization may initialize an absent/empty root; inspection cannot. */
+export function initializeExtractionTargetRoot(input: TargetRootInput): ExtractionTargetRootBinding {
+  const binding = inspectExtractionTargetRoot(input);
+  if (binding !== null) return binding;
+  const root = canonicalExtractionTargetRoot(input.cacheRoot);
+  mkdirSync(dirname(root), { recursive: true });
+  if (!existsSync(root)) return createFreshExtractionTargetRoot(input);
+  writeMarker(root, input.marker);
+  return inspectExtractionTargetRoot(input)!;
 }
 
 export function createFreshExtractionTargetRoot(
@@ -131,7 +163,25 @@ function hasUnchangedFreshTargetRoot(
 
 export function canonicalExtractionTargetRoot(cacheRoot: string): string {
   const absolute = resolve(cacheRoot);
-  return join(realpathSync(dirname(absolute)), basename(absolute));
+  let parent = dirname(absolute);
+  const missing = [basename(absolute)];
+  for (;;) {
+    try { return join(realpathSync(parent), ...missing); }
+    catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+      try { lstatSync(parent); }
+      catch (statCause) {
+        if ((statCause as NodeJS.ErrnoException).code !== "ENOENT") throw statCause;
+        const ancestor = dirname(parent);
+        if (ancestor === parent) throw cause;
+        missing.unshift(basename(parent));
+        parent = ancestor;
+        continue;
+      }
+      // A dangling symlink is existing state, never a prospective directory.
+      throw cause;
+    }
+  }
 }
 
 function createFreshRoot(

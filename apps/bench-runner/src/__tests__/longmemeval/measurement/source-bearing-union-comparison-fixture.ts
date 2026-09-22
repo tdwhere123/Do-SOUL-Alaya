@@ -9,7 +9,7 @@ import { REQUEST, CLOCK, DIGEST, sourceOnly, assemble, workerRecall } from "./so
 export const envelope = <T>(payload: T) => ({ identity: chainIdentity(payload), payload });
 
 /** Entirely authored native-envelope evidence; no model result or private history is a test input. */
-export function frozenUnionFixture() {
+export function frozenUnionFixture(openAccessAt?: number) {
   const inventory = Array.from({ length: 500 }, (_, index) => ({ index, question_id: `question-${index}`,
     cohort: index < 470 ? "answerable" as const : "abstention" as const }));
   const source = { source_id: "source-one", source_version: "1", content_digest: DIGEST,
@@ -44,8 +44,10 @@ export function frozenUnionFixture() {
       query_workset: { ...freeze.payload.query_workset, items: [freeze.payload.query_workset.items[row.index]] } },
       queries: [{ query_key: row.query_key, original_query: row.question }] };
     const plan_identity = put(`${chain_root}/prepare.json`, plan);
-    const result = workerRecall({ ...assemble([sourceOnly(row.index < 3 ? root : "distractor", workspace)], []),
+    const recalled = workerRecall({ ...assemble([sourceOnly(row.index < 3 ? root : "distractor", workspace)], []),
       query_id: sourceSemanticLibraryQueryIdentity(row.question) });
+    const result = row.index === openAccessAt
+      ? { ...recalled, discovery: { ...recalled.discovery, open_residuals: true, truncated: true } } : recalled;
     const first_exposure = recordSourceSemanticLibraryFirstExposure(result);
     const gold = [sourceGoldUnitFromPublishedRoot({ ...sourceOnly(root, workspace).target, kind: "source_evidence" } as Parameters<typeof sourceGoldUnitFromPublishedRoot>[0])];
     const measurement = row.index < 8 ? measureSourceSemanticLibraryResponse({ recallResult: result,

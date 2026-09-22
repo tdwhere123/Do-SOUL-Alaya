@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const repoRoot = process.cwd();
 const cacheRoot = process.env.PROPOSAL_CACHE_ROOT;
@@ -28,6 +28,39 @@ const server = await createServer({
   resolve: benchProject.resolve
 });
 try {
+  if (mode === "revision-drift") {
+    const fill = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/fill.ts");
+    const worksets = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/workset.ts");
+    const authorities = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/authority.ts");
+    const attempts = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/attempt.ts");
+    const ledgers = await server.ssrLoadModule("/apps/bench-runner/src/runs/extraction/authority/attempt-ledger.ts");
+    const workset = worksets.parseSemanticProposalWorkset(JSON.parse(readFileSync(process.env.PROPOSAL_WORKSET_PATH, "utf8")));
+    process.chdir(process.env.PROPOSAL_GIT_ROOT);
+    const pin = root => authorities.pinSemanticProposalAuthority({ preflight: fill.prepareSemanticProposal(workset, root, 128, 1),
+      inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+    const authority = pin(cacheRoot), freshRoot = `${cacheRoot}-unreserved`, freshAuthority = pin(freshRoot);
+    attempts.openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: workset.kind }).reserveAttemptOrdinal(authority.keys[0]);
+    const ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${authority.attempt_lineage_digest}.json`);
+    const before = readFileSync(ledgerPath, "utf8");
+    const request = worksets.materializeSemanticProposalLines(workset, 128)[0].requestDigest;
+    writeFileSync("host-only.ts", "export const admissionRevision = 2;\n");
+    const config = { model: workset.model, requestProfile: workset.request_profile, providerUrl: workset.provider_url, apiKey: "loopback-only" };
+    const errors = [];
+    for (const [root, receipt] of [[cacheRoot, authority], [freshRoot, freshAuthority]]) {
+      try { await fill.executeSemanticProposalFill({ workset, cacheRoot: root, authority: receipt, config }); errors.push(null); }
+      catch (cause) { errors.push(cause instanceof Error ? cause.message : String(cause)); }
+    }
+    const repinned = pin(cacheRoot);
+    const resumed = await fill.executeSemanticProposalFill({ workset, cacheRoot, authority: repinned, config });
+    process.stdout.write(`${JSON.stringify({
+      request_unchanged: request === worksets.materializeSemanticProposalLines(workset, 128)[0].requestDigest,
+      revision_changed: authority.execution_scope.implementation_revision !== repinned.execution_scope.implementation_revision,
+      old_fill_errors: errors, unknown_preserved: readFileSync(ledgerPath, "utf8") === before,
+      lineage_unchanged: authority.attempt_lineage_digest === repinned.attempt_lineage_digest,
+      ledger_count: ledgers.listExtractionAttemptLedgerRecords(cacheRoot).length, resumed
+    })}\n`);
+    process.exit(0);
+  }
   if (mode === "fill") {
     const fill = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/fill.ts");
     const worksets = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/workset.ts");

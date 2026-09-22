@@ -181,7 +181,8 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
     return { ...reportRow(row, true, typeof row.reason === "string" ? row.reason : "source_or_gold_mapping_incomplete", "unavailable", mixed),
       evaluator_usage: evaluated.evaluator_usage };
   }
-  return { ...reportRow(row, true, `validated native slots; proof ranks ${evaluated.validatedProofRanks.join(",") || "none"}`,
+  return { ...reportRow(row, true, union.any_at_5.status === "unavailable" ? union.any_at_5.reason
+    : `validated native slots; proof ranks ${evaluated.validatedProofRanks.join(",") || "none"}`,
     union.any_at_5.status, mixed), evaluator_usage: evaluated.evaluator_usage };
 }
 

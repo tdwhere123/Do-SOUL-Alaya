@@ -7,6 +7,16 @@ import { envelope, frozenUnionFixture } from "./source-bearing-union-comparison-
 afterEach(() => vi.restoreAllMocks());
 
 describe("frozen source-bearing union evidence admission", () => {
+  it("retains an unvisited native residual without rewriting the stored slot miss or denominator", () => {
+    const { evidence, read } = frozenUnionFixture(3);
+    const original = JSON.stringify(evidence.summary);
+    const report = reportFrozenSourceBearingUnion(evidence, read);
+    expect(report.rows[3]).toMatchObject({ stored_outcome: "miss", stored_mixed_any_at_5: "miss",
+      union_any_at_5: "unavailable", cause: "native access or computation remains unresolved" });
+    expect(report.development_n).toBe(20);
+    expect(report.bounds).toMatchObject({ hits: 3, unknown: 13, lower: 0.15, upper: 0.8 });
+    expect(JSON.stringify(evidence.summary)).toBe(original);
+  });
   it("rejects published interpretations through the shared source-only publication admission", () => {
     const { evidence, read, files } = frozenUnionFixture();
     const preparedRow = evidence.prepared.payload.rows[0]!;

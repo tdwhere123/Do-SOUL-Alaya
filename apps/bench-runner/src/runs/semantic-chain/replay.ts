@@ -110,7 +110,8 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
       goldSourceUnits: gold.find((entry) => entry.query_key === row.query_key)!.source_units
     });
     return { query_key: row.query_key, status: row.status,
-    reason: row.reason ?? null,
+    reason: row.reason ?? (evaluated?.sourceBearingUnion?.any_at_5.status === "unavailable"
+      ? evaluated.sourceBearingUnion.any_at_5.reason : null),
     mechanism: { status: (evaluated?.validatedProofRanks.length ?? 0) > 0 ? "proof_exercised" : "unexercised",
       reason: row.status === "blocked" ? row.reason : row.status === "native_unavailable" ? "native_unavailable"
         : (evaluated?.validatedProofRanks.length ?? 0) > 0 ? null : "no_validated_delivered_proof",
@@ -127,7 +128,7 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
     measurement: evaluated?.measurement ?? null, source_bearing_union: evaluated?.sourceBearingUnion ?? null,
     evaluator_usage: evaluated?.evaluator_usage ?? null };
   });
-  const result = { contract: "source-semantic-chain-measurement-v1", replay_identity: replay.identity, gold, rows };
+  const result = { contract: "source-semantic-chain-measurement-v2", replay_identity: replay.identity, gold, rows };
   const path = join(root, `measurement-${chainIdentity(result)}.json`);
   writeChainArtifact(path, result);
   return { path, result };

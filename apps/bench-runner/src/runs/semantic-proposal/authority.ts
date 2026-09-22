@@ -4,11 +4,24 @@ import { z } from "zod";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import type { SemanticProposalKind, SemanticProposalLine } from "./workset.js";
 import { ExtractionTransportProvenanceSchema } from "../extraction/transport-route.js";
+import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/inspection.js";
+import {
+  ExtractionTargetRootBindingSchema, assertExtractionTargetRootBinding, canonicalExtractionTargetRoot,
+  initializeExtractionTargetRoot, inspectExtractionTargetRoot
+} from "../extraction/authority/target-root-binding.js";
+import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 
-export const SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT = "source-semantic-proposal-authority-v4" as const;
+export const SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT = "source-semantic-proposal-authority-v5" as const;
 export const DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY = 2;
 const MILLION = 1_000_000;
 const AttemptsPerKeySchema = z.number().int().min(1).max(DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY);
+const executionRootMarker = Object.freeze({ filename: ".semantic-proposal-execution-root.json",
+  kind: "semantic-proposal-execution-root-v1" });
+const ExecutionScopeSchema = z.object({
+  execution_root_path: z.string().min(1),
+  execution_root_binding: ExtractionTargetRootBindingSchema.nullable(),
+  implementation_revision: z.string().min(1)
+}).strict();
 
 const AuthoritySchema = z.object({
   contract: z.literal(SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT),
@@ -17,6 +30,7 @@ const AuthoritySchema = z.object({
   model: z.string().min(1),
   request_profile: z.string().min(1),
   transport_provenance: ExtractionTransportProvenanceSchema,
+  execution_scope: ExecutionScopeSchema.extend({ execution_root_binding: ExtractionTargetRootBindingSchema }),
   attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u),
   generated_at: z.string().min(1),
   identity_digest: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -41,11 +55,12 @@ const AuthoritySchema = z.object({
 export type SemanticProposalAuthority = z.infer<typeof AuthoritySchema>;
 
 const PreflightSchema = z.object({
-  contract: z.literal("source-semantic-proposal-preflight-v4"),
+  contract: z.literal("source-semantic-proposal-preflight-v5"),
   kind: z.enum(["query", "semantic_correspondence"]),
   model: z.string().min(1),
   request_profile: z.string().min(1),
   transport_provenance: ExtractionTransportProvenanceSchema,
+  execution_scope: ExecutionScopeSchema,
   attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u),
   provider_calls: z.literal(0),
   missing: z.number().int().nonnegative(),
@@ -57,6 +72,30 @@ const PreflightSchema = z.object({
 }).strict();
 
 export type SemanticProposalPreflight = z.infer<typeof PreflightSchema>;
+
+/** Read-only preparation also serves callers rebuilding a frozen preflight for validation. */
+export function inspectSemanticProposalExecutionScope(cacheRoot: string): SemanticProposalPreflight["execution_scope"] {
+  return {
+    execution_root_path: canonicalExtractionTargetRoot(cacheRoot),
+    execution_root_binding: inspectExtractionTargetRoot({ cacheRoot, marker: executionRootMarker, purpose: "semantic proposal" }),
+    implementation_revision: readCurrentExtractionAuthorityRevision()
+  };
+}
+
+export function assertSemanticProposalExecutionScope(
+  scope: SemanticProposalAuthority["execution_scope"], cacheRoot: string, writeLease?: ExtractionCacheWriteLease
+): void {
+  if (scope.implementation_revision !== readCurrentExtractionAuthorityRevision()) {
+    throw new Error("semantic proposal executable revision changed");
+  }
+  writeLease?.assertRoot(cacheRoot);
+  const namedRoot = writeLease?.cacheRoot ?? cacheRoot;
+  if (canonicalExtractionTargetRoot(namedRoot) !== scope.execution_root_path) {
+    throw new Error("semantic proposal execution root differs from authorized root");
+  }
+  assertExtractionTargetRootBinding({ cacheRoot: namedRoot, marker: executionRootMarker, purpose: "semantic proposal",
+    binding: scope.execution_root_binding, ...(writeLease === undefined ? {} : { writeLease }) });
+}
 
 export function parseSemanticProposalPreflight(value: unknown): SemanticProposalPreflight {
   return PreflightSchema.parse(value);
@@ -70,6 +109,7 @@ export function buildSemanticProposalPreflight(input: Readonly<{
   maxAttemptsPerKey?: number;
   lines: readonly SemanticProposalLine[];
   cachedKeys: ReadonlySet<string>;
+  executionScope: SemanticProposalPreflight["execution_scope"];
 }>): SemanticProposalPreflight {
   const missingLines = input.lines.filter((line) => !input.cachedKeys.has(line.key));
   const attemptsPerKey = AttemptsPerKeySchema.parse(input.maxAttemptsPerKey ?? DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY);
@@ -79,9 +119,10 @@ export function buildSemanticProposalPreflight(input: Readonly<{
     throw new Error("semantic proposal preflight requires one resolved transport route");
   }
   return {
-    contract: "source-semantic-proposal-preflight-v4",
+    contract: "source-semantic-proposal-preflight-v5",
     kind: input.kind, model: input.model, request_profile: input.request_profile,
     transport_provenance: transport,
+    execution_scope: ExecutionScopeSchema.parse(input.executionScope),
     attempt_lineage_digest: proposalAttemptLineage({ ...input, transport_provenance: transport }),
     provider_calls: 0, missing: missingLines.length,
     maximum_attempts_per_key: attemptsPerKey,
@@ -98,14 +139,25 @@ export function pinSemanticProposalAuthority(input: Readonly<{
   outputUsdPerMillion: number;
   spendCeilingUsd?: number;
 }>): SemanticProposalAuthority {
+  const preflight = PreflightSchema.parse(input.preflight);
+  if (preflight.execution_scope.implementation_revision !== readCurrentExtractionAuthorityRevision()) {
+    throw new Error("semantic proposal executable revision changed since preflight");
+  }
   const estimated = estimatedUpperUsd(input.preflight, input.inputUsdPerMillion, input.outputUsdPerMillion);
   if (input.spendCeilingUsd !== undefined && estimated > input.spendCeilingUsd) {
     throw new Error(`semantic proposal receipt ${estimated} exceeds spend ceiling ${input.spendCeilingUsd}`);
   }
+  const scope = preflight.execution_scope;
+  const binding = scope.execution_root_binding;
+  const executionScope = { ...scope, execution_root_binding: binding ?? initializeExtractionTargetRoot({
+    cacheRoot: scope.execution_root_path, marker: executionRootMarker, purpose: "semantic proposal"
+  }) };
+  assertSemanticProposalExecutionScope(executionScope, scope.execution_root_path);
   const body = {
     contract: SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT, action: "fill" as const,
     kind: input.preflight.kind, model: input.preflight.model, request_profile: input.preflight.request_profile,
     transport_provenance: input.preflight.transport_provenance,
+    execution_scope: executionScope,
     attempt_lineage_digest: input.preflight.attempt_lineage_digest,
     generated_at: new Date().toISOString(),
     limits: {
@@ -171,7 +223,7 @@ export function verifySemanticProposalAuthority(authority: SemanticProposalAutho
   return authority;
 }
 
-/** Re-pinning a grant resumes the same bounded execution; it cannot renew its attempts. */
+/** Revision, root binding and receipt identity never renew this ledger's attempts. */
 export function proposalAttemptLineage(input: Pick<SemanticProposalAuthority,
   "kind" | "model" | "request_profile" | "transport_provenance">): string {
   return createHash("sha256").update(canonicalJson({ contract: "semantic-proposal-execution-lineage-v1",

@@ -32,6 +32,7 @@ import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
+import { ACCESS_BUDGET, accessCall, accessQuery, withAccessLibrary } from "./source-semantic-access.test-support.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { soulSearchFromLibraryRecall, recordSourceSemanticLibraryFirstExposure } from "../../../../../../apps/bench-runner/src/runs/measurement/source-semantic-library-recall.js";
 import { measureSourceSemanticLibraryResponse, readmitSourceSemanticLibraryMeasurement } from "../../../../../../apps/bench-runner/src/runs/measurement/source-semantic-library-measurement.js";
@@ -273,14 +274,14 @@ async function workerRecall(
 
 async function withHost(
   sources: Parameters<typeof admitSources>[1],
-  body: (session: Awaited<ReturnType<typeof openSession>>, filename: string) => Promise<void>
+  body: (session: Awaited<ReturnType<typeof openSession>>, filename: string, roots: Readonly<Record<string, string>>) => Promise<void>
 ) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-host-"));
   const filename = join(directory, "alaya.db");
   try {
-    await admitSources(filename, sources);
+    const roots = await admitSources(filename, sources);
     const session = await openSession(filename);
-    try { await body(session, filename); } finally { await closeSession(session, filename); }
+    try { await body(session, filename, roots); } finally { await closeSession(session, filename); }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -360,6 +361,9 @@ it.each([0, 5000])("measures a published source through reopened public recall a
       expect(proofSlots).toBeGreaterThan(0);
       expect(verify).toHaveBeenCalledTimes(proofSlots);
       expect(evaluated.measurement?.status).toBe("validated");
+      expect(evaluated.measurement).toMatchObject({ contract: "source-semantic-library-delivered-slots-v2",
+        native_observation: { discovery: withCorrespondence.discovery, coverage: withCorrespondence.coverage },
+        metrics: { delivered_slot_union: { any_at_5: { status: "hit" } } } });
       expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("hit");
       expect(evaluated.evaluator_usage).toMatchObject({ proof_slots_checked: proofSlots });
       expect(evaluated.evaluator_usage.work_units).toBeGreaterThan(0);
@@ -376,9 +380,87 @@ it.each([0, 5000])("measures a published source through reopened public recall a
   });
 }, 60000);
 
+it("keeps a late gold root unavailable after native source access stops while preserving observed raw and proof hits", async () => {
+  const sources = [{ id: "00-alice", content: ALICE },
+    ...Array.from({ length: 519 }, (_, index) => ({ id: `a-${String(index).padStart(3, "0")}`, content: "Granite stairs." })),
+    { id: "zz-gold", content: ALICE }];
+  await withHost(sources, async (session, filename, roots) => {
+    const prepared = await prepareSource(session.handler, session.context, "00-alice");
+    const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
+      receiveInterpretation(ALICE, "00-alice", compactUse(prepared.catalog)).draft, "p1");
+    const lateGold = { ...sourceGoldUnitFromPublishedRoot(published.source_target), root_id: roots["zz-gold"]! };
+    await closeSession(session, filename);
+    const reopened = await openSession(filename);
+    try {
+      const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
+      const correspondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id).semantic_correspondence;
+      for (const semanticCorrespondences of [[], [correspondence]]) {
+        const result = await callAlayaMcpMemoryTool(
+          { memoryToolHandler: reopened.handler, contextProvider: () => reopened.context }, "soul.interpretation",
+          SoulInterpretationRequestSchema.parse({ operation: "recall", accepts_unreviewed_conditional_results: true,
+            original_query: ORIGINAL, query_semantics: semantics, semantic_correspondences: semanticCorrespondences,
+            budget: ACCESS_BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES }));
+        const recalled = mcpRecall(result.structuredContent);
+        expect(recalled.discovery).toMatchObject({ open_residuals: true, truncated: true,
+          access: { observed_source_count: 512, unvisited_sources: true, stopping_reasons: ["source_limit"] } });
+        expect(recalled.index?.entries.some(entry => entry.target.kind === "source_evidence"
+          && entry.target.root_id === lateGold.root_id)).toBe(false);
+        const current = listEligibleSemanticSources(reopened.database, WS, new SourceSemanticReadBudget(ACCESS_BUDGET), ["project"]);
+        const input = { recallResult: recalled, firstExposurePage: recordSourceSemanticLibraryFirstExposure(recalled),
+          requestBudget: ACCESS_BUDGET, goldSourceUnits: [lateGold], sourceRecords: current.sources };
+        const evaluated = measureSourceSemanticLibraryResponse(input);
+        expect(evaluated.measurement).toMatchObject({ status: "validated", contract: "source-semantic-library-delivered-slots-v2",
+          native_observation: { discovery: recalled.discovery, coverage: recalled.coverage },
+          metrics: { delivered_slot_union: { any_at_5: { status: "miss", value: false } } } });
+        expect(evaluated.sourceBearingUnion?.any_at_5).toMatchObject({ status: "unavailable", value: null });
+        expect(readmitSourceSemanticLibraryMeasurement(evaluated.measurement, input)).toEqual(evaluated);
+        const observed = measureSourceSemanticLibraryResponse({ ...input,
+          goldSourceUnits: [sourceGoldUnitFromPublishedRoot(published.source_target)] });
+        const evidenceKind = semanticCorrespondences.length === 0 ? "source_evidence" : "semantic_proof";
+        const slot = recalled.index?.entries.findIndex(entry => entry.target.kind === "source_evidence"
+          && entry.target.root_id === published.source_target.root_id);
+        expect(recalled.slot_qualifiers?.[slot!]?.evidence_kind).toBe(evidenceKind);
+        expect(observed.sourceBearingUnion?.any_at_5.status).toBe("hit");
+        expect(observed.validatedProofRanks.length > 0).toBe(semanticCorrespondences.length > 0);
+      }
+    } finally { await closeSession(reopened, filename); }
+  });
+}, 60000);
+
+it("retains a native unvisited interpretation residual when the delivered raw slots miss gold", async () => {
+  await withAccessLibrary([{ id: "gold", text: "Granite stairs.", reading: ORIGINAL, count: 60 },
+    ...Array.from({ length: 6 }, (_, index) => ({ id: `query-${index}`, text: ORIGINAL }))], async ({ execute, filename }) => {
+    const budget = { ...ACCESS_BUDGET, work_units: 200_000, memory_bytes: 4_000_000 };
+    const recalled = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
+      original_query: ORIGINAL, query_semantics: accessQuery(ORIGINAL), semantic_correspondences: [],
+      budget, output_byte_limit: 1_000_000 });
+    expect(recalled.discovery).toMatchObject({ open_residuals: true, truncated: true,
+      access: { observed_source_count: 7, unvisited_sources: false, unvisited_interpretations: true } });
+    expect(recalled.discovery.access?.stopping_reasons).toContain("budget");
+    expect(recalled.discovery.access?.observed_interpretation_count).toBeLessThan(60);
+    expect(recalled.index.entries).toHaveLength(5);
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    try {
+      const current = listEligibleSemanticSources(database, WS, new SourceSemanticReadBudget(ACCESS_BUDGET), ["project"]);
+      const gold = current.sources.find(source => source.source_id === "gold")!;
+      expect(recalled.index.entries.some(entry => entry.target.kind === "source_evidence"
+        && entry.target.root_id === gold.identity)).toBe(false);
+      const evaluated = measureSourceSemanticLibraryResponse({ recallResult: recalled,
+        firstExposurePage: recordSourceSemanticLibraryFirstExposure(recalled), requestBudget: budget,
+        sourceRecords: current.sources, goldSourceUnits: [{ workspace_id: WS, root_kind: "source_record",
+          root_id: gold.identity, source_version: gold.source_version, content_digest: gold.content_digest }] });
+      expect(evaluated.measurement).toMatchObject({ status: "validated",
+        native_observation: { discovery: recalled.discovery, coverage: recalled.coverage },
+        metrics: { delivered_slot_union: { any_at_5: { status: "miss", value: false } } } });
+      expect(evaluated.sourceBearingUnion?.any_at_5).toMatchObject({ status: "unavailable", value: null });
+    } finally { database.close(); closeCachedDatabase(filename); }
+  });
+}, 60000);
+
 it("delivers frozen five-source pages through the public MCP request without rereading", async () => {
-  const sources = Array.from({ length: 12 }, (_, index) => ({ id: `raw-${index}`, content: `Weather entry ${index}.` }));
-  await withHost(sources, async session => {
+  const sources = Array.from({ length: 12 }, (_, index) => ({ id: `raw-${index}`,
+    content: index === 11 ? "Weather entry 11." : `Weather entry ${index}. ${ORIGINAL}` }));
+  await withHost(sources, async (session, _filename, roots) => {
     const request = { operation: "recall" as const, accepts_unreviewed_conditional_results: true as const,
       original_query: ORIGINAL, query_semantics: receiveQuerySemantics(ORIGINAL, existentialBody()).query,
       semantic_correspondences: [], budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES };
@@ -390,6 +472,19 @@ it("delivers frozen five-source pages through the public MCP request without rer
     };
     const first = await call();
     expect(first.results).toHaveLength(5);
+    expect(first.discovery).toMatchObject({ open_residuals: false, truncated: false,
+      access: { observed_source_count: 12, unvisited_sources: false, unvisited_interpretations: false } });
+    expect(first.coverage.discovery).toBe("complete");
+    expect(first.index?.completeness.logical_index).toBe("partial");
+    expect(first.index?.entries.some(entry => entry.target.kind === "source_evidence"
+      && entry.target.root_id === roots["raw-11"])).toBe(false);
+    const measured = measureSourceSemanticLibraryResponse({ recallResult: first,
+      firstExposurePage: recordSourceSemanticLibraryFirstExposure(first), requestBudget: BUDGET,
+      goldSourceUnits: [{ workspace_id: WS, root_kind: "source_record", root_id: roots["raw-11"]!,
+        source_version: "1", content_digest: `sha256:${fieldContractSha256("Weather entry 11.")}` }] });
+    expect(measured.measurement).toMatchObject({ status: "validated",
+      metrics: { delivered_slot_union: { any_at_5: { status: "miss", value: false } } } });
+    expect(measured.sourceBearingUnion?.any_at_5).toMatchObject({ status: "miss", value: false });
     if (first.index?.continuation == null) throw new Error("frozen second page expected");
     const next = await call(first.index.continuation);
     expect(next.results).toHaveLength(5);
@@ -401,6 +496,11 @@ it("delivers frozen five-source pages through the public MCP request without rer
       && entry.target.kind === "source_evidence" && prior.target.root_id === entry.target.root_id))).toBe(false);
     expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThanOrEqual(request.output_byte_limit);
     expect(Buffer.byteLength(JSON.stringify(next))).toBeLessThanOrEqual(request.output_byte_limit);
+    if (next.index?.continuation == null) throw new Error("frozen final page expected");
+    const last = await call(next.index.continuation);
+    expect(last.index?.entries.some(entry => entry.target.kind === "source_evidence"
+      && entry.target.root_id === roots["raw-11"])).toBe(true);
+    expect(last.work.native_work).toBe(0);
   });
 });
 

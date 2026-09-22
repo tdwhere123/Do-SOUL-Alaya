@@ -51,7 +51,6 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
         const measured = measureSemanticChain(replayed.chain_root, replayed.replay_path,
           [{ query_key: selected.query_key, source_units: gold }]);
         measurementPath = measured.path;
-        const measurement = measured.result.rows[0]?.measurement;
         const measuredRow = measured.result.rows[0];
         if (frozen.contract === "longmemeval-native-semantic-v3" && measuredRow?.status === "replayed"
           && chainIdentity(measuredRow.diagnostics?.order ?? null) !== chainIdentity(frozen.native_route.order)) {
@@ -65,8 +64,9 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
             evaluator_usage: measuredRow?.evaluator_usage ?? null, publication: {
               published_count: publication.published_count, sources: publication.sources } } };
         mechanism = measuredRow?.mechanism.status === "proof_exercised" ? "proof_exercised" : "not_exercised";
-        const metric = frozen.contract === "longmemeval-native-semantic-v3" ? measuredRow?.source_bearing_union?.any_at_5
-          : measurement?.status === "validated" ? measurement.metrics.mixed_kind_first_exposure.any_at_5 : undefined;
+        // Source-only replay rejects proof slots above, so the shared union admission
+        // preserves its source metric while retaining the same native residuals.
+        const metric = measuredRow?.source_bearing_union?.any_at_5;
         const complete = publication.admitted_count === selected.source_manifest.length
           && [...answerSessions].every((id) => goldSources.some((source) => source.session_id === id && source.record_id !== undefined));
         if (metric?.status === "hit") outcome = "hit";
@@ -98,7 +98,7 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
   const decision = !formal ? "development_only" : hits >= requiredHits ? "achieved"
     : hits + unknown < requiredHits ? "not_achieved" : "unresolved";
   const result = { contract: frozen.contract === "longmemeval-native-semantic-v3"
-    ? "longmemeval-native-semantic-measurement-v2" : "longmemeval-semantic-measurement-v1", freeze_identity: chainIdentity(frozen),
+    ? "longmemeval-native-semantic-measurement-v3" : "longmemeval-semantic-measurement-v2", freeze_identity: chainIdentity(frozen),
     replay_identity: chainIdentity(replay), dataset_sha256: frozen.config.dataset_sha256,
     exposure: frozen.exposure, metric: frozen.metric, order_policy: frozen.order_policy,
     mechanism: frozen.mechanism, provider_calls: 0,

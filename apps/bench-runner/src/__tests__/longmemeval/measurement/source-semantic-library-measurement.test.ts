@@ -24,6 +24,55 @@ function measureOf(result: ReturnType<typeof workerRecall>) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("source semantic library measurement", () => {
+  it.each(["source", "interpretation", "computation"] as const)("keeps an unvisited or unfinished %s negative unavailable in worker and public measurement", kind => {
+    const result = workerRecall(assemble([sourceOnly("other")], []));
+    const discovery = { ...result.discovery, ...(kind === "computation" ? { open_residuals: true } : { access: {
+      contract: "source-semantic-access-v1" as const, policy: "canonical-v1" as const,
+      input_id: GOLD.content_digest, pool_id: GOLD.content_digest,
+      observed_source_count: 1, observed_interpretation_count: 0, source_candidates: [], interpretation_candidates: [],
+      trace: { kind: "library_selection" as const, omitted_source_count: 0, omitted_interpretation_count: 0 },
+      unvisited_sources: kind === "source", unvisited_interpretations: kind === "interpretation", stopping_reasons: ["budget" as const]
+    } }) };
+    const worker = { ...result, discovery };
+    for (const recallResult of [worker, encodeSourceSemanticLibraryResponse(worker)]) {
+      if (!("index" in recallResult)) throw new Error("native delivery expected");
+      const input = { recallResult, firstExposurePage: recordSourceSemanticLibraryFirstExposure(recallResult),
+        requestBudget: REQUEST, goldSourceUnits: [GOLD] };
+      const evaluated = measureSourceSemanticLibraryResponse(input);
+      expect(evaluated.sourceBearingUnion?.any_at_5).toMatchObject({ status: "unavailable", value: null,
+        reason: "native access or computation remains unresolved" });
+      expect(evaluated.measurement).toMatchObject({ status: "validated", native_observation: { discovery },
+        metrics: { delivered_slot_union: { any_at_5: { status: "miss" } },
+          mixed_kind_first_exposure: { any_at_5: { status: "miss" } } } });
+      expect(readmitSourceSemanticLibraryMeasurement(evaluated.measurement, input)).toEqual(evaluated);
+      const changed = structuredClone(evaluated.measurement);
+      if (changed?.status !== "validated" || !("native_observation" in changed)) throw new Error("current native observation expected");
+      Object.assign(changed.native_observation.discovery, { open_residuals: !discovery.open_residuals });
+      expect(readmitSourceSemanticLibraryMeasurement(changed, input).measurement?.status).toBe("invalid");
+    }
+  });
+
+  it("preserves observed source and validated proof hits while unrelated native access remains open", () => {
+    const sourceResponse = encodeSourceSemanticLibraryResponse(workerRecall(assemble([sourceOnly("gold")], [])));
+    const proof = nativeProofResponseFixture();
+    for (const [response, gold, sourceRecords] of [[sourceResponse, GOLD, []], [proof.response, proof.gold, [proof.record]]] as const) {
+      if (response.operation !== "recall" || response.discovery === undefined) throw new Error("native response expected");
+      const recallResult = { ...response, discovery: { ...response.discovery, open_residuals: true, truncated: true } };
+      const evaluated = measureSourceSemanticLibraryResponse({ recallResult,
+        firstExposurePage: recordSourceSemanticLibraryFirstExposure(recallResult), requestBudget: REQUEST,
+        goldSourceUnits: [gold], sourceRecords });
+      expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("hit");
+    }
+  });
+
+  it("retains a complete-pool miss when only frozen later pages remain", () => {
+    const index = assemble(Array.from({ length: 6 }, (_, offset) => sourceOnly(`other-${offset}`)), []);
+    expect(index.continuation).not.toBeNull();
+    expect(index.completeness.logical_index).toBe("partial");
+    const evaluated = measureOf(workerRecall(index));
+    expect(evaluated.sourceBearingUnion?.any_at_5).toEqual({ status: "miss", value: false });
+  });
+
   it.each(["unknown_result_version", "old_result_version", "absent_protocol_version"])("rejects %s before source-only scoring", (mutation) => {
     const response = structuredClone(encodeSourceSemanticLibraryResponse(workerRecall(assemble([sourceOnly("gold")], []))));
     if (response.operation !== "recall" || response.index === undefined) throw new Error("native delivery expected");
@@ -55,6 +104,9 @@ describe("source semantic library measurement", () => {
     if (response.operation !== "recall" || response.index === undefined || response.order === undefined
       || evaluated.measurement?.status !== "validated") throw new Error("native delivery expected");
     const stored = structuredClone(evaluated.measurement);
+    Object.assign(stored, { contract: "source-semantic-library-delivered-slots-v1" });
+    Reflect.deleteProperty(stored, "native_observation");
+    Reflect.deleteProperty(stored.metrics, "delivered_slot_union");
     Object.assign(response, { protocol_version: 1 });
     Reflect.deleteProperty(response, "request_identity");
     Object.assign(response.index, { result_version: "source-semantic-library-v1",

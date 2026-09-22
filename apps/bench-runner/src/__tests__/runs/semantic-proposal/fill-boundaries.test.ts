@@ -455,6 +455,10 @@ it("does not dispatch another provider attempt when an unresolved reservation ha
 it("rejects a same-kind shard whose request body does not match the workset", async () => {
   const planted = tempRoot();
   const prepared = workset();
+  const authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(prepared, planted, 128),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2
+  });
   const line = materializeSemanticProposalLines(prepared, 128)[0]!;
   writeSemanticProposalShard(planted, {
     attempt_lineage_digest: "b".repeat(64), request_digest: "c".repeat(64),
@@ -468,10 +472,6 @@ it("rejects a same-kind shard whose request body does not match the workset", as
   });
   expect(() => prepareSemanticProposal(prepared, planted, 128)).toThrow(SemanticProposalIdentityError);
   const spy = extractor(["should-not-run"]);
-  const authority = pinSemanticProposalAuthority({
-    preflight: prepareSemanticProposal(prepared, tempRoot(), 128),
-    inputUsdPerMillion: 1, outputUsdPerMillion: 2
-  });
   await expect(executeSemanticProposalFill({
     workset: prepared, cacheRoot: planted, authority, config: config(), extractor: spy
   })).rejects.toThrow(SemanticProposalIdentityError);

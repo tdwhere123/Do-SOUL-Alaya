@@ -29,11 +29,19 @@ the same encoder enforces token and full-envelope byte limits before selection.
 Existing leases freeze pages and reservations. Historical source-only archives
 retain their original identities and page policies.
 
-Semantic proposal workset v3, preflight/authority v4, cache v3 and proposal
+Semantic proposal workset v3, preflight/authority v5, cache v3 and proposal
 raw-attempt v1 bind the resolved HTTP endpoint, physical model and exact encoded
-request. Reissued receipts share a durable execution lineage; unknown reservations
-retain their original attempt ownership. Historical raw evidence remains unchanged.
+request. Preflight and authority also bind the executable revision and physical
+execution root through the existing extraction root owner. Reissued receipts share
+a durable execution lineage; unknown reservations retain their original attempt
+ownership across revised receipts. Historical raw evidence remains unchanged.
 The per-key attempt ceiling stays one or two (default two).
+
+Current native library measurement retains discovery and coverage observations.
+Unvisited or unfinished native work keeps negative primary outcomes unknown;
+observed valid hits remain hits. Pure delivered-slot outcomes remain available as
+diagnostics, and complete pools can still establish initial-page misses when later
+frozen pages exist. Historical measurement artifacts retain their original contracts.
 
 Protocol 9.0.0 removes the separate finite query generation schema and depth
 export. SOUL generation and admission share the recursive meaning grammar,
