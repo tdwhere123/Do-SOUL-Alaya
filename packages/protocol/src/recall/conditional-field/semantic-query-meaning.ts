@@ -11,7 +11,6 @@ import {
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v1" as const;
 export const SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH = Math.min(8, SOURCE_SEMANTIC_MAX_DEPTH);
-export const SOURCE_SEMANTIC_QUERY_MEANING_GENERATION_DEPTH = 4;
 
 const Key = SourceSemanticHandleSchema;
 const Reading = SourceSemanticReadingSchema;
@@ -44,7 +43,6 @@ export type QueryMeaning =
   | QueryReportedMeaning
   | QueryConditionalMeaning
   | QueryOpaqueMeaning
-  | QueryForallMeaning
   | QueryOccurrenceMeaning;
 
 export type QueryStatementMeaning = Readonly<{
@@ -94,20 +92,9 @@ export type QueryOpaqueMeaning = Readonly<{
   readonly obligation?: ObligationKind;
   readonly source_act?: SourceActKind;
 }>;
-export type QueryForallMeaning = Readonly<{
-  readonly kind: "forall";
-  readonly key?: string;
-  readonly domain: string;
-  readonly binder: string;
-  readonly restriction?: QueryMeaning | null;
-  readonly content: QueryMeaning;
-  readonly obligation?: ObligationKind;
-  readonly source_act?: SourceActKind;
-}>;
 export type QueryOccurrenceMeaning = Readonly<{ kind: "occurrence"; readonly key: string }>;
 
-function meaningShape(inner?: z.ZodType<QueryMeaning>, includeForall = true): z.ZodType<QueryMeaning> {
-  const operand = inner ?? Occurrence;
+function meaningShape(operand: z.ZodType<QueryMeaning>): z.ZodType<QueryMeaning> {
   return z.discriminatedUnion("kind", [
     z.object({
       kind: z.literal("statement"), key: Key.optional(), predicate: Reading,
@@ -134,11 +121,6 @@ function meaningShape(inner?: z.ZodType<QueryMeaning>, includeForall = true): z.
       kind: z.literal("opaque"), key: Key.optional(), operands: z.array(operand).min(1).max(8).readonly(),
       obligation: Obligation.optional(), source_act: SourceAct.optional()
     }).strict().readonly(),
-    ...(includeForall ? [z.object({
-      kind: z.literal("forall"), key: Key.optional(), domain: Key, binder: Key,
-      restriction: operand.nullable().optional(), content: operand,
-      obligation: Obligation.optional(), source_act: SourceAct.optional()
-    }).strict().readonly()] : []),
     Occurrence
   ]);
 }
@@ -182,14 +164,6 @@ export const SourceSemanticQueryMeaningBodySchema = bodyShape(Meaning).superRefi
     }
   }
 });
-
-export const SourceSemanticQueryMeaningGenerationSchema = (() => {
-  let meaning: z.ZodType<QueryMeaning> | undefined;
-  for (let depth = SOURCE_SEMANTIC_QUERY_MEANING_GENERATION_DEPTH; depth >= 0; depth -= 1) {
-    meaning = meaningShape(meaning, false);
-  }
-  return bodyShape(meaning!);
-})();
 
 export type SourceSemanticQueryMeaningBody = z.infer<typeof SourceSemanticQueryMeaningBodySchema>;
 
@@ -323,9 +297,6 @@ class QueryMeaningCompiler {
       meaning.operands.forEach((operand, index) => this.collectMeaning(operand, [...path, "operands", index]));
       return;
     }
-    if (meaning.kind === "forall") {
-      fail(path, "nested forall is unsupported; use the explicit forall evaluation with domain and binder");
-    }
     this.collectMeaning(meaning.content, [...path, "content"]);
   }
 
@@ -373,7 +344,7 @@ class QueryMeaningCompiler {
     this.compiling.add(frameId);
     const variable = frameId;
     if (meaning.kind === "statement" && meaning.return === true) this.returned.add(frameId);
-    const operator = meaning.kind === "statement" ? undefined : meaning.kind === "forall" ? "forall"
+    const operator = meaning.kind === "statement" ? undefined
       : meaning.kind === "opaque" ? "opaque" : meaning.kind === "conditional" ? "conditional"
       : meaning.kind === "reported" ? "reported" : meaning.kind === "possible" ? "possible" : "not";
     this.frames.set(frameId, { variable, ...(operator === undefined ? {} : { operator }) });
@@ -407,13 +378,6 @@ class QueryMeaningCompiler {
     } else if (meaning.kind === "opaque") {
       meaning.operands.forEach((operand, index) => this.compileMeaning(operand, [...path, "operands", index],
         frames, obligations, { frame: frameId, operator: "opaque", role: "content" }));
-    } else if (meaning.kind === "forall") {
-      if (meaning.restriction !== undefined && meaning.restriction !== null) {
-        this.compileMeaning(meaning.restriction, [...path, "restriction"], frames, obligations,
-          { frame: frameId, operator: "forall", role: "restriction" });
-      }
-      this.compileMeaning(meaning.content, [...path, "content"], frames, obligations,
-        { frame: frameId, operator: "forall", role: "content" });
     } else if (meaning.kind !== "statement") {
       this.compileMeaning(meaning.content, [...path, "content"], frames, obligations,
         { frame: frameId, operator: meaning.kind, role: "content" });

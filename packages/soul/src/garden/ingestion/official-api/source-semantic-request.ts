@@ -16,7 +16,7 @@ import {
   SourceSemanticQueryGapSchema,
 
 
-  SourceSemanticQueryMeaningGenerationSchema, SourceSemanticCorrespondenceSelectionSchema,
+  SourceSemanticQueryMeaningBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceSelectionSchema,
   buildSourceReferenceCatalog, buildSourceSemanticCorrespondenceEndpointCatalog, canonicalJson,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery,
   type SourceSemanticCorrespondenceEndpointCatalog
@@ -377,7 +377,7 @@ export function sourceSemanticQueryResponseJsonSchema(): object {
   return producerResponseJsonSchema(z.object({
     contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT),
     outcome: QueryCorrespondenceGenerationOutcomeSchema,
-    query: SourceSemanticQueryMeaningGenerationSchema.optional()
+    query: SourceSemanticQueryMeaningBodySchema.optional()
   }).strict().readonly(), "ref");
 }
 
@@ -469,6 +469,7 @@ export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   "Propose query meaning for the original query only, using source-semantic-query-meaning-v1.",
   "Return nested meaning nodes. Do not write a flat variable/frame/sort graph, hashes, reciprocal incidence, answers, ranking, seeds, QueryProgram, programs, verdicts, or source answer IDs.",
   "Host derives occurrence IDs, sorts, and incidence from declared node kind and nesting. A person and an event cannot share one variable. Free answers may be unknown in value without unresolved meaning.",
+  `A nesting path may contain at most ${SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH + 1} statement/operator nodes. Deeper meaning must remain a located gap; never silently truncate its scope.`,
   "Ordinary form: statement with predicate and role arguments; operator with explicit operands; named for a name constraint; free for an answer target; reference only for reuse, coreference, a returned occurrence, or a binder.",
   "A statement's arguments[].target accepts only free, named or reference entities. Put an embedded event in the statement's content field, not in arguments[].target and not in an entity named after the entire event phrase. Preserve the embedded predicate, participants and their shared references. For example, ask(person, content=repair(item)) must not assert that the repair happened.",
   "Declare a named key once with one exact query excerpt; reuse it with {kind:reference,key}. Do not repeat the same named key with different excerpts in entities and arguments. entities is optional: ordinary inline named/free declarations need no duplicate table. Domains are also optional and do not stand for every participant or object category.",

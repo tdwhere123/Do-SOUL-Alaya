@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-  SourceSemanticQueryMeaningBodySchema, SourceSemanticQueryMeaningGenerationSchema,
+  SourceSemanticQueryMeaningBodySchema,
   SourceSemanticQuerySchema,
   materializeSourceSemanticQueryMeaning
 } from "../../../recall/conditional-field/index.js";
@@ -180,8 +180,8 @@ it("generates universal evaluation without advertising unsupported nested forall
     { role: "agent", target: { kind: "reference", key: "actor" } }
   ]), { domains: [{ key: "people", excerpt: "people" }],
     evaluation: { kind: "forall", domain: "people", binder: "actor", local_variables: ["actor"] } });
-  expect(SourceSemanticQueryMeaningGenerationSchema.safeParse(body).success).toBe(true);
-  expect(SourceSemanticQueryMeaningGenerationSchema.safeParse(meaning({
+  expect(SourceSemanticQueryMeaningBodySchema.safeParse(body).success).toBe(true);
+  expect(SourceSemanticQueryMeaningBodySchema.safeParse(meaning({
     kind: "forall", domain: "people", binder: "actor",
     content: statement("use", [])
   })).success).toBe(false);
@@ -191,7 +191,16 @@ it("rejects nested forall rather than erase its domain and binder", () => {
   expect(() => compiled({ kind: "possible", content: {
     kind: "forall", domain: "people", binder: "actor",
     content: statement("travel", [{ role: "agent", target: { kind: "reference", key: "actor" } }])
-  } }, { domains: [{ key: "people", excerpt: "people" }] })).toThrow(/nested forall is unsupported/u);
+  } }, { domains: [{ key: "people", excerpt: "people" }] })).toThrow(/Invalid/u);
+});
+
+it("uses recursive meaning while rejecting a ten-node nesting path before materialization", () => {
+  let node: object = statement("travel", []);
+  for (let index = 0; index < 5; index += 1) node = { kind: "possible", content: node };
+  expect(SourceSemanticQueryMeaningBodySchema.safeParse(meaning(node)).success).toBe(true);
+  expect(compiled(node).alternatives[0]!.frames).toHaveLength(6);
+  for (let index = 0; index < 4; index += 1) node = { kind: "possible", content: node };
+  expect(() => compiled(node)).toThrow(/query meaning nesting exceeds its bound/u);
 });
 
 it("refuses cyclic, undeclared, and kind-conflicting references instead of repairing them", () => {
@@ -222,11 +231,11 @@ it("does not treat a legacy producer graph as meaning syntax or repair its sorts
 });
 
 it("keeps generation schema on the meaning contract without host identities or sort tables", () => {
-  const parsed = SourceSemanticQueryMeaningGenerationSchema.parse(meaning(statement("hand", [
+  const parsed = SourceSemanticQueryMeaningBodySchema.parse(meaning(statement("hand", [
     { role: "agent", target: { kind: "free", key: "agent" }, excerpt: "Who" }
   ])));
   expect(parsed.contract).toBe(SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT);
-  expect(SourceSemanticQueryMeaningGenerationSchema.safeParse({
+  expect(SourceSemanticQueryMeaningBodySchema.safeParse({
     ...parsed, original_query_digest: digest
   }).success).toBe(false);
   expect(SourceSemanticQueryMeaningBodySchema.safeParse({

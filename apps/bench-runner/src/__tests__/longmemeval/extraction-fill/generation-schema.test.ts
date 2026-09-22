@@ -199,9 +199,8 @@ describe("Gemini recursive decoding schema projection", () => {
     expect(encoded).toContain("application/json");
     expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
     const projected = projectGeminiGenerationSchema(schema);
-    expect(projected.recursive).toBe(false);
+    expect(projected.recursive).toBe(true);
     expect(projected.schema).toBeUndefined();
-    expect(countGeminiEnvelopeExpandedNodes(schema)).toBeGreaterThan(1024);
     expect(projected.instruction).toContain(JSON.stringify(schema));
     const oldStructuredKey = createHash("sha256").update([
       "gemini-3.1-flash-lite", "gemini-3.1-minimal-v1", SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,

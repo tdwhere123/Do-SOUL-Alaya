@@ -292,9 +292,7 @@ export {
 export {
   SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH,
-  SOURCE_SEMANTIC_QUERY_MEANING_GENERATION_DEPTH,
   SourceSemanticQueryMeaningBodySchema,
-  SourceSemanticQueryMeaningGenerationSchema,
   materializeSourceSemanticQueryMeaning,
   type QueryMeaning,
   type SourceSemanticQueryMeaningBody,

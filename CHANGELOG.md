@@ -8,9 +8,15 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 8.0.0, engine gateway 1.0.0
+## Unreleased — protocol 9.0.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+Protocol 9.0.0 removes the separate finite query generation schema and depth
+export. SOUL generation and admission share the recursive meaning grammar,
+which excludes unsupported nested universal binders while retaining top-level
+universal evaluation. Existing receive depth and byte limits remain authoritative;
+native generation uses the existing recursive JSON guidance and cache identity.
 
 Protocol 8.0.0 additionally requires complete current library deliveries to identify
 protocol 2 and library v2, membership purpose and the ten-slot page budget. Worker
