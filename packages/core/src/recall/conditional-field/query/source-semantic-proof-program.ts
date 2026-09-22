@@ -32,11 +32,11 @@ export function semanticAlternatives(options: readonly QueryProgram[]): QueryPro
 }
 
 /** Follow the actual scope path and return. Negative/antecedent content cannot supply positive facts. */
-export function semanticOwnerProof(h: SourceSemanticInterpretation, occurrence: string, variable: string,
+export function semanticOwnerProof(sourceInterpretation: SourceSemanticInterpretation, occurrence: string, variable: string,
   meter: SourceSemanticResourceLedger, preserve: boolean): QueryProgram {
-  meter.charge((h.frames.length + h.operators.length) * 2, 0, "proof scope indexing");
-  const rows = new Map([...h.frames, ...h.operators].map((row) => [row.id, row]));
-  const incoming = new Map(sourceSemanticStructuralEdges(h).filter((row) => row.governing).map((row) => [row.to, row]));
+  meter.charge((sourceInterpretation.frames.length + sourceInterpretation.operators.length) * 2, 0, "proof scope indexing");
+  const rows = new Map([...sourceInterpretation.frames, ...sourceInterpretation.operators].map((row) => [row.id, row]));
+  const incoming = new Map(sourceSemanticStructuralEdges(sourceInterpretation).filter((row) => row.governing).map((row) => [row.to, row]));
   const forward: QueryProgram[] = [], backward: QueryProgram[] = [];
   let id = occurrence, current = variable, depth = 0;
   while (incoming.has(id)) {
@@ -54,7 +54,7 @@ export function semanticOwnerProof(h: SourceSemanticInterpretation, occurrence: 
 }
 
 export function semanticInstanceProof(variable: string, population: SourceSemanticPremisePopulation,
-  h: SourceSemanticInterpretation, meter: SourceSemanticResourceLedger, entailment = false): QueryProgram {
+  sourceInterpretation: SourceSemanticInterpretation, meter: SourceSemanticResourceLedger, entailment = false): QueryProgram {
   const options: QueryProgram[] = [semanticRelation(key(entailment ? "source_interpretation_assertion_permission" : "source_interpretation_original"), variable, variable, meter)];
   let ordinal = 0;
   for (const [nodeId, instance] of population.instances) {
@@ -71,12 +71,12 @@ export function semanticInstanceProof(variable: string, population: SourceSemant
     if (instance.assumption !== undefined) steps.push(semanticRelation(key("instance_assumption"), variable, variable, meter));
     if (instance.evidence !== undefined) steps.push(
       semanticRelation(key("instance_member"), variable, evidence, meter),
-      semanticOwnerProof(h, instance.evidence, evidence, meter, instance.context !== null),
+      semanticOwnerProof(sourceInterpretation, instance.evidence, evidence, meter, instance.context !== null),
       semanticRelation(key("instance_member_inv"), evidence, variable, meter));
     else if (instance.assumption === undefined) continue;
     if (instance.restrictionEvidence !== undefined) steps.push(
       semanticRelation(key("instance_restriction"), variable, restrictionEvidence, meter),
-      semanticOwnerProof(h, instance.restrictionEvidence, restrictionEvidence, meter, instance.context !== null),
+      semanticOwnerProof(sourceInterpretation, instance.restrictionEvidence, restrictionEvidence, meter, instance.context !== null),
       semanticRelation(key("instance_restriction_inv"), restrictionEvidence, variable, meter));
     options.push(semanticSequence(steps));
   }

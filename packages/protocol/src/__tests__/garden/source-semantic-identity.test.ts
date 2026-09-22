@@ -69,18 +69,18 @@ it("hashes source interpretation from semantic body, structural version, normali
 });
 
 it("keeps query-semantics identity independent of source interpretation", () => {
-  const qid = sourceSemanticQueryIdentity(query, sha);
+  const querySemanticsId = sourceSemanticQueryIdentity(query, sha);
   expect(canonicalJson(sourceSemanticQueryPreimage(query))).not.toContain("source_interpretation_id");
-  expect(qid).toBe(sourceSemanticQueryIdentity(query, sha));
-  expect(qid).not.toBe(sourceSemanticInterpretationIdentity(interpretation, sha));
+  expect(querySemanticsId).toBe(sourceSemanticQueryIdentity(query, sha));
+  expect(querySemanticsId).not.toBe(sourceSemanticInterpretationIdentity(interpretation, sha));
   expect(SourceSemanticQuerySchema.safeParse({ ...query, source_interpretation_id: digest }).success).toBe(false);
 });
 
 it("keeps semantic correspondence and conditional computation acyclic: correspondence hashes source interpretation and query semantics, computation hashes correspondence, and correspondence never contains computation", () => {
-  const hid = sourceSemanticInterpretationIdentity(interpretation, sha);
-  const qid = sourceSemanticQueryIdentity(query, sha);
+  const sourceInterpretationId = sourceSemanticInterpretationIdentity(interpretation, sha);
+  const querySemanticsId = sourceSemanticQueryIdentity(query, sha);
   const semantic_correspondence = SourceSemanticCorrespondenceSchema.parse({
-    contract: "source-semantic-correspondence-v3", source_interpretation_id: hid, query_semantics_id: qid,
+    contract: "source-semantic-correspondence-v3", source_interpretation_id: sourceInterpretationId, query_semantics_id: querySemanticsId,
     producer_id: "ap", producer_version: "1", contract_version: "source-semantic-correspondence-v3",
     correspondences: [{
       relation: "contextual_equivalence",
@@ -90,19 +90,19 @@ it("keeps semantic correspondence and conditional computation acyclic: correspon
       source_semantic_support: [{ kind: "lexical", mentions: ["mSent"] }]
     }]
   });
-  const aid = sourceSemanticCorrespondenceIdentity(semantic_correspondence, sha);
-  expect(canonicalJson(sourceSemanticCorrespondencePreimage(semantic_correspondence))).toContain(hid);
-  expect(canonicalJson(sourceSemanticCorrespondencePreimage(semantic_correspondence))).toContain(qid);
+  const semanticCorrespondenceId = sourceSemanticCorrespondenceIdentity(semantic_correspondence, sha);
+  expect(canonicalJson(sourceSemanticCorrespondencePreimage(semantic_correspondence))).toContain(sourceInterpretationId);
+  expect(canonicalJson(sourceSemanticCorrespondencePreimage(semantic_correspondence))).toContain(querySemanticsId);
   expect(SourceSemanticCorrespondenceSchema.safeParse({ ...semantic_correspondence, conditional_computation_id: other }).success).toBe(false);
   const context = SourceSemanticEvaluationContextSchema.parse({
-    contract: "source-semantic-context-v3", source_interpretation_id: hid, query_semantics_id: qid, semantic_correspondence_id: aid,
+    contract: "source-semantic-context-v3", source_interpretation_id: sourceInterpretationId, query_semantics_id: querySemanticsId, semantic_correspondence_id: semanticCorrespondenceId,
     k_version: "k1", lowering_version: "l1"
   });
-  const cid = sourceSemanticContextIdentity(context, sha);
-  expect(canonicalJson(sourceSemanticContextPreimage(context))).toContain(aid);
-  expect(canonicalJson(sourceSemanticCorrespondencePreimage(semantic_correspondence))).not.toContain(cid);
+  const conditionalComputationId = sourceSemanticContextIdentity(context, sha);
+  expect(canonicalJson(sourceSemanticContextPreimage(context))).toContain(semanticCorrespondenceId);
+  expect(canonicalJson(sourceSemanticCorrespondencePreimage(semantic_correspondence))).not.toContain(conditionalComputationId);
   expect(SourceSemanticEvaluationContextSchema.safeParse({
-    contract: "source-semantic-context-v3", source_interpretation_id: hid, query_semantics_id: qid, k_version: "k1", lowering_version: "l1"
+    contract: "source-semantic-context-v3", source_interpretation_id: sourceInterpretationId, query_semantics_id: querySemanticsId, k_version: "k1", lowering_version: "l1"
   }).success).toBe(false);
   expect(SourceSemanticEvaluationContextSchema.safeParse({ ...context, branch_id: other }).success).toBe(false);
 });

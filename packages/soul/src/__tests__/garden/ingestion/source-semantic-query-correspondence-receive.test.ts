@@ -186,20 +186,20 @@ describe("query meaning receive and semantic_correspondence selection", () => {
   });
 
   it("materializes catalog selections", () => {
-    const h = interpretation();
-    const hId = sourceSemanticInterpretationIdentity(h, semanticSha256);
+    const sourceInterpretation = interpretation();
+    const sourceInterpretationId = sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256);
     const admitted = canonicalQuery(EXISTENTIAL, existentialBody());
     const selected = proposeCorrespondenceSemantics({ original_query: EXISTENTIAL,
-      admitted_query_semantics: admitted, source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }],
-      producer_id: "align-producer", producer_version: "1"
+      admitted_query_semantics: admitted, source_interpretation_descriptors: [{ source_interpretation_id: sourceInterpretationId, interpretation: sourceInterpretation }],
+      producer_id: "correspondence-producer", producer_version: "1"
     });
     const predicate = selected.request.catalog?.query_endpoints.find((row) => row.kind === "predicate");
     const frame = selected.request.catalog?.source_endpoints.find((row) => row.kind === "frame");
     expect(predicate).toBeDefined();
     expect(frame).toBeDefined();
     const received = proposeCorrespondenceSemantics({ original_query: EXISTENTIAL,
-      admitted_query_semantics: admitted, source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }],
-      producer_id: "align-producer", producer_version: "1"
+      admitted_query_semantics: admitted, source_interpretation_descriptors: [{ source_interpretation_id: sourceInterpretationId, interpretation: sourceInterpretation }],
+      producer_id: "correspondence-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
         contract: "source-semantic-correspondence-response-v3",
@@ -233,11 +233,11 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     expect(query.outcome.status).toBe("invalid");
     expect(query.query).toBeUndefined();
 
-    const h = interpretation();
+    const sourceInterpretation = interpretation();
     const semantic_correspondence = proposeCorrespondenceSemantics({ original_query: EXISTENTIAL,
       admitted_query_semantics: canonicalQuery(EXISTENTIAL, existentialBody()),
-      source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
-      producer_id: "align-producer", producer_version: "1"
+      source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256), interpretation: sourceInterpretation }],
+      producer_id: "correspondence-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
         contract: "source-semantic-correspondence-response-v2", outcome: { status: "interpreted", gaps: [] },

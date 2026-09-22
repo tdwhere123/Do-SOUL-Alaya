@@ -1,11 +1,15 @@
 import { expect } from "vitest";
 import { oracleSourceSemanticJoin, decodeEngineBindings, oracleBindingsMatchEngine, oracleProofsMatchEngine } from "./source-semantic-relational-oracle.js";
 import { SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION, sourceSemanticInterpretationIdentity,
-  sourceSemanticQueryIdentity, type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticCorrespondence } from "@do-soul/alaya-protocol";
+  sourceSemanticQueryIdentity, type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticCorrespondence,
+  fieldReceiptContractFields, hashSourceRecordId, SourceRecordIdentitySchema, SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+  SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, sourceRecallTarget, type SourceSemanticLibraryProof, type RequestBudget } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 as sha } from "../../../shared/field-hash.js";
 import { SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID as QUERY_PRODUCER } from "../../../recall/conditional-field/query/source-semantic-query-producer-registry.js";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID as CORRESPONDENCE_PRODUCER } from "../../../recall/conditional-field/query/source-semantic-correspondence-producer-registry.js";
-import { reasonSourceSemanticInterpretation } from "../../../recall/runtime/source-semantic-reasoning.js";
+import { reasonSourceSemanticInterpretation, executeSourceSemanticInterpretation, SOURCE_SEMANTIC_REASONING_BUDGET } from "../../../recall/runtime/source-semantic-reasoning.js";
+import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-field/query/source-semantic-correspondence-admission.js";
+import { scopeSourceSemanticLibraryBranch, sourceSemanticLibraryQueryIdentity, slotQualifiersFor } from "../../../recall/runtime/source-semantic-library-recall.js";
 
 export const ORIGINAL = "which tools does Alice use?";
 export const CLOCK = "2026-09-18T00:00:00.000Z";
@@ -80,3 +84,36 @@ export function run(interpretation: SourceSemanticInterpretation, semantics: Sou
 }
 import { sourceSemanticCorrespondenceIdentity } from "@do-soul/alaya-protocol";
 function correspondenceId(correspondence: SourceSemanticCorrespondence) { return sourceSemanticCorrespondenceIdentity(correspondence, sha); }
+
+export function deliveredProofFixture(input: { interpretation?: SourceSemanticInterpretation; semantics?: SourceSemanticQuery;
+  correspondence?: SourceSemanticCorrespondence; original?: string; library?: boolean; budget?: RequestBudget; workspaceId?: string } = {}) {
+  const interpretation = input.interpretation ?? source(), semantics = input.semantics ?? query();
+  const correspondence = input.correspondence ?? correspondenceFor(interpretation, semantics), original = input.original ?? ORIGINAL;
+  const identity = hashSourceRecordId(interpretation.source, sha);
+  const record = SourceRecordIdentitySchema.parse({ ...fieldReceiptContractFields({ identity,
+    producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID, consumer: "projection_generation" }), schema_version: 1,
+    workspace_id: input.workspaceId ?? "ws", ...interpretation.source, evidence_object_id: null, recorded_at: CLOCK,
+    event_time: null, valid_from: null, valid_to: null, scope_class: "project", operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID });
+  const target = sourceRecallTarget({ workspace_id: record.workspace_id, root_kind: "source_record", root_id: record.identity,
+    source_version: record.source_version, content_digest: record.content_digest, evidence_object_id: record.evidence_object_id });
+  const admitted = admitSourceSemanticCorrespondence({ source_interpretation: interpretation, query_semantics: semantics,
+    semantic_correspondence: correspondence, original_query: original });
+  if (admitted.kind !== "admitted") throw new Error("fixture correspondence must be admitted");
+  const executed = executeSourceSemanticInterpretation({ source_interpretation: interpretation, query_semantics: semantics,
+    semantic_correspondence: correspondence, original_query: original, workspaceId: input.workspaceId ?? "ws", scope: "project",
+    authorizedScopes: ["project"], asOf: CLOCK, source_target: target, sourceValidity: record,
+    request: { contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+      source_interpretation_id: admitted.interpretation_id, query_semantics_id: admitted.query_id,
+      semantic_correspondence_id: admitted.semantic_correspondence_id, original_query: original,
+      budget: input.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET, output_byte_limit: 1_000_000 } });
+  if (executed.index === null) throw new Error("fixture must produce native proof");
+  const delivered = input.library ? scopeSourceSemanticLibraryBranch(executed.index, executed.result) : { ...executed, index: executed.index };
+  const proof: SourceSemanticLibraryProof = { ...delivered.result, original_query: original, interpretation,
+    query: semantics, semantic_correspondence: correspondence, context: admitted.context, source_record: record };
+  const index = { ...delivered.index, query_id: sourceSemanticLibraryQueryIdentity(original),
+    ...(input.library ? { result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION } : {}) };
+  const qualifiers = slotQualifiersFor(index, [proof]);
+  const offset = qualifiers.findIndex((row) => row.evidence_kind === "semantic_proof");
+  if (offset < 0) throw new Error("fixture must deliver a proof slot");
+  return { record, target, proof, index, entry: index.entries[offset]!, qualifier: qualifiers[offset]! };
+}

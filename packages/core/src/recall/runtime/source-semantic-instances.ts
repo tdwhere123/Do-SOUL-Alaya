@@ -15,9 +15,9 @@ export type SourceSemanticInstance = Readonly<{
 }>;
 
 /** Candidate substitution is structural. Permissions are proved by the query's instance gate. */
-export function groundSourceSemanticInstances(builder: PremiseBuilder, h: SourceSemanticInterpretation,
+export function groundSourceSemanticInstances(builder: PremiseBuilder, sourceInterpretation: SourceSemanticInterpretation,
   semantic_correspondence: SourceSemanticCorrespondence, query?: SourceSemanticQuery): void {
-  const meter = builder.input.meter, occurrenceCount = h.frames.length + h.operators.length;
+  const meter = builder.input.meter, occurrenceCount = sourceInterpretation.frames.length + sourceInterpretation.operators.length;
   for (const [index, assumption] of (semantic_correspondence.membership_assumptions ?? []).entries()) {
     meter.charge(1 + (query?.variables.length ?? 0) + semantic_correspondence.correspondences.length, 0, "assumed member admission");
     const variable = query?.variables.find((row) => row.id === assumption.query_variable);
@@ -33,12 +33,12 @@ export function groundSourceSemanticInstances(builder: PremiseBuilder, h: Source
     builder.self(id, ["semantic_correspondence_referent", variable.id], { leaf_kind: "semantic_correspondence_membership", occurrence: id,
       assumption_index: index, domain: assumption.source_domain });
   }
-  for (const operator of h.operators) {
+  for (const operator of sourceInterpretation.operators) {
     meter.charge(1, 0, "quantifier enumeration");
     if (operator.operator !== "forall") continue;
-    meter.charge(occurrenceCount * 2 + (h.domains?.length ?? 0), 0, "quantifier scope lookup");
-    if (nonMonotoneOwner(h, operator.id)) continue;
-    const domain = h.domains!.find((row) => row.id === operator.domain)!;
+    meter.charge(occurrenceCount * 2 + (sourceInterpretation.domains?.length ?? 0), 0, "quantifier scope lookup");
+    if (nonMonotoneOwner(sourceInterpretation, operator.id)) continue;
+    const domain = sourceInterpretation.domains!.find((row) => row.id === operator.domain)!;
     const members: Omit<SourceSemanticInstance, "template" | "root">[] = domain.members.map((row) => ({
       quantifier: operator.id, domain: domain.id, member: row.referent, evidence: row.evidence,
       restriction: operator.restriction, restrictionEvidence: row.restrictions.find((item) => item.restriction === operator.restriction)?.evidence,
@@ -62,16 +62,16 @@ export function groundSourceSemanticInstances(builder: PremiseBuilder, h: Source
         restriction: operator.restriction, restrictionAssumed: operator.restriction !== null && assumption.restrictions.includes(operator.restriction),
         context: domain.context });
     }
-    const templates = [...h.frames, ...h.operators].filter((row) => {
+    const templates = [...sourceInterpretation.frames, ...sourceInterpretation.operators].filter((row) => {
       meter.charge(occurrenceCount * 2, 0, "quantifier body scope");
-      return sourceSemanticContextContains(h, operator.content, row.id);
+      return sourceSemanticContextContains(sourceInterpretation, operator.content, row.id);
     });
-    for (const member of members) instantiate(builder, h, operator, templates, member);
+    for (const member of members) instantiate(builder, sourceInterpretation, operator, templates, member);
   }
 }
 
-function nonMonotoneOwner(h: SourceSemanticInterpretation, start: string): boolean {
-  const occurrences = new Map([...h.frames, ...h.operators].map((row) => [row.id, row]));
+function nonMonotoneOwner(sourceInterpretation: SourceSemanticInterpretation, start: string): boolean {
+  const occurrences = new Map([...sourceInterpretation.frames, ...sourceInterpretation.operators].map((row) => [row.id, row]));
   let child = occurrences.get(start);
   while (child !== undefined && child.context_owner.kind !== "source_act") {
     const owner = child.context_owner;
@@ -83,7 +83,7 @@ function nonMonotoneOwner(h: SourceSemanticInterpretation, start: string): boole
   return false;
 }
 
-function instantiate(builder: PremiseBuilder, h: SourceSemanticInterpretation,
+function instantiate(builder: PremiseBuilder, sourceInterpretation: SourceSemanticInterpretation,
   quantifier: Extract<SourceSemanticOperator, { operator: "forall" }>,
   templates: readonly (SourceSemanticFrame | SourceSemanticOperator)[], member: Omit<SourceSemanticInstance, "template" | "root">): void {
   const ids = new Map(templates.map((row) => [row.id, derivedId("instance", quantifier.id, member.member, row.id)]));
@@ -129,7 +129,7 @@ function instantiate(builder: PremiseBuilder, h: SourceSemanticInterpretation,
     if (member.assumption !== undefined) builder.self(nodeId, ["instance_assumption"], { leaf_kind: "semantic_correspondence_membership",
       occurrence: nodeId, domain: member.domain, member: member.member, assumption_index: member.assumption });
   }
-  const virtual = { ...h, frames, operators, referents: [], entry_roots: [], asserted_at_scope: [] };
+  const virtual = { ...sourceInterpretation, frames, operators, referents: [], entry_roots: [], asserted_at_scope: [] };
   populateOccurrences(builder, virtual); populateStructure(builder, virtual); populateBindings(builder, virtual);
   const contentId = id(quantifier.content);
   const contentLeaf = { leaf_kind: "source_interpretation_content" as const, occurrence: contentId, parent: quantifier.id,
@@ -137,9 +137,9 @@ function instantiate(builder: PremiseBuilder, h: SourceSemanticInterpretation,
   builder.edge(quantifier.id, contentId, key("source_interpretation_content", "operator_operand", "content"), contentLeaf);
   builder.edge(contentId, quantifier.id, key("source_interpretation_content_inverse", "operator_operand", "content"), contentLeaf);
   builder.self(contentId, ["source_interpretation_embedded"], contentLeaf);
-  for (const root of h.entry_roots) {
-    builder.input.meter.charge(h.frames.length + h.operators.length, 0, "instance source routing");
-    if (!sourceSemanticContextContains(h, root, quantifier.id)) continue;
+  for (const root of sourceInterpretation.entry_roots) {
+    builder.input.meter.charge(sourceInterpretation.frames.length + sourceInterpretation.operators.length, 0, "instance source routing");
+    if (!sourceSemanticContextContains(sourceInterpretation, root, quantifier.id)) continue;
     for (const nodeId of ids.values()) builder.edge(root, nodeId, key("candidate_route"));
   }
 }

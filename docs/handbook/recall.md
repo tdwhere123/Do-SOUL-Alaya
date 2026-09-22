@@ -714,7 +714,7 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent
 query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 6.7.0 uses `source-interpretation-v4`, `source-semantic-query-v2`,
+Garden v1. Protocol 7.0.0 uses `source-interpretation-v4`, `source-semantic-query-v2`,
 `source-semantic-correspondence-v3`, response envelope v5, reasoning v4, cache v3,
 library v2, public/worker recall protocol 2, and `source-semantic-k-v3`,
 `source-semantic-normalizer-v4` and `source-semantic-lowering-v5`. Each complete
@@ -926,6 +926,18 @@ bind the summary, census, selected questions, preparation, publication, replay a
 initial-exposure commitment, and reuse complete native response admission for budget
 and provider-call evidence. Missing, corrupt or incomplete evidence retains the
 frozen denominator as unknown; an incomplete source census cannot establish a miss.
+
+One measurement admission validates each actual proof slot at most once and derives
+both earlier metrics and the union from that assessment. Fresh archive readmission
+binds independent publication records and repeats native admission; serialized
+validated flags and proof ranks are not authority. Its returned `evaluator_usage`
+records proof slots checked, work units and conservative logical allocation charges,
+including unverified or exhausted attempts. These costs are separate from native
+retrieval and the proof's original execution receipt; allocation sums are not RSS
+or a peak-memory estimate. Semantic-chain measurement rows and frozen comparison
+rows retain this fresh cost. Historical records without it remain missing, while
+a newly evaluated source-only row has zero proof-verification cost. The frozen
+source-only arm still requires zero published interpretations.
 
 Current-source discovery scans at most 32 pages of 16 historical records. An
 incomplete or unavailable scan cannot establish currentness and emits no source

@@ -100,7 +100,7 @@ function interpretation() {
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
     source: { source_id: "src", source_version: "1", content_digest: `sha256:${sha256(ORIGINAL)}` },
-    producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v4",
+    producer_id: "source-interpretation-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [
       {
         id: "mSent", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" },
@@ -129,8 +129,8 @@ function interpretation() {
   });
 }
 
-function alignmentWorkset() {
-  const h = interpretation();
+function correspondenceWorkset() {
+  const sourceInterpretation = interpretation();
   return parseSemanticProposalWorkset({
     contract: "source-semantic-proposal-workset-v2",
     kind: "semantic_correspondence", model: MODEL, request_profile: PROFILE,
@@ -138,8 +138,8 @@ function alignmentWorkset() {
       original_query: ORIGINAL,
       admitted_query_semantics: admittedQuery(),
       source_interpretation_descriptors: [{
-        source_interpretation_id: sourceSemanticInterpretationIdentity(h, sha256),
-        interpretation: h
+        source_interpretation_id: sourceSemanticInterpretationIdentity(sourceInterpretation, sha256),
+        interpretation: sourceInterpretation
       }]
     }]
   });
@@ -165,7 +165,7 @@ function selectionBody(request: SourceSemanticCorrespondenceRequest, excerpt: st
 }
 
 it("rejects an semantic_correspondence workset whose original question differs from the admitted query digest", () => {
-  const workset = alignmentWorkset();
+  const workset = correspondenceWorkset();
   expect(() => materializeSemanticProposalLines({ ...workset, items: [{
     ...(workset.items[0] as Record<string, unknown>), original_query: "Another original question?"
   }] }, 128)).toThrow(/does not bind the original query/u);
@@ -173,7 +173,7 @@ it("rejects an semantic_correspondence workset whose original question differs f
 
 async function fillCorrespondence(excerpt: string) {
   const cacheRoot = join(tempRoot(), "cache");
-  const prepared = alignmentWorkset();
+  const prepared = correspondenceWorkset();
   const line = materializeSemanticProposalLines(prepared, 128)[0]!;
   const request = line.request as SourceSemanticCorrespondenceRequest;
   const body = selectionBody(request, excerpt);

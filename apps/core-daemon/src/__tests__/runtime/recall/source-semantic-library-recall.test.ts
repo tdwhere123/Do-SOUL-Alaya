@@ -115,12 +115,12 @@ function queryOf(): SourceSemanticQuery {
   };
 }
 
-function alignmentOf(hId: string, q: SourceSemanticQuery): SourceSemanticCorrespondence {
-  const admitted = admitSourceSemanticQuery(q, ORIGINAL);
+function correspondenceOf(sourceInterpretationId: string, querySemantics: SourceSemanticQuery): SourceSemanticCorrespondence {
+  const admitted = admitSourceSemanticQuery(querySemantics, ORIGINAL);
   if (admitted.kind !== "admitted") throw new Error("query must admit");
   return {
     contract: "source-semantic-correspondence-v3",
-    source_interpretation_id: hId, query_semantics_id: admitted.query_id,
+    source_interpretation_id: sourceInterpretationId, query_semantics_id: admitted.query_id,
     producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
     producer_version: "1", contract_version: "source-semantic-correspondence-v3",
     correspondences: [
@@ -214,7 +214,7 @@ it("discovers a relevant interpretation after the first descriptor page and keep
     expect(prepared.truncated).toBe(true);
     const gold = allIds.find((id) => !prepared.candidates.some((row) => row.interpretation_id === id));
     expect(gold).toBeDefined();
-    const recalled = await call(execute, recallRequest([alignmentOf(gold!, queryOf())]));
+    const recalled = await call(execute, recallRequest([correspondenceOf(gold!, queryOf())]));
     expect(recalled.kind).toBe("recall");
     if (recalled.kind !== "recall") throw new Error("library recall expected");
     expect(recalled.discovery.visited_source_interpretation_pages).toBeGreaterThanOrEqual(2);
@@ -240,7 +240,7 @@ it("discovers a relevant interpretation after the first descriptor page and keep
       query_id: search.index!.query_id, snapshot_id: search.index!.snapshot_id,
       interpretation_id: search.index!.interpretation_id!, as_of: search.index!.as_of!
     }, exposureSlots(search), search.delivery_id)).toBe(false);
-    const again = soulSearchFromLibraryRecall(await call(execute, recallRequest([alignmentOf(gold!, queryOf())])));
+    const again = soulSearchFromLibraryRecall(await call(execute, recallRequest([correspondenceOf(gold!, queryOf())])));
     expect(again.results.map((row) => row.target)).toEqual(search.results.map((row) => row.target));
     const { database } = await createRecallRealStorage(() => undefined, filename);
     expect(database.connection.prepare("SELECT count(*) AS n FROM memory_entries").get()).toEqual({ n: 0 });
@@ -301,7 +301,7 @@ it("examines aligned handles without hydrating every published descriptor", asyn
       { database } as RecallReadWorkerRuntime,
       {
         workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] },
-        request: recallRequest([alignmentOf(published.bound.interpretation_id, queryOf())])
+        request: recallRequest([correspondenceOf(published.bound.interpretation_id, queryOf())])
       },
       ["project"],
       new SourceSemanticReadBudget(BUDGET)
@@ -320,7 +320,7 @@ it("examines aligned handles without hydrating every published descriptor", asyn
     try {
       const incomplete = runSourceSemanticLibraryRecall({ database } as RecallReadWorkerRuntime, {
         workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] },
-        request: recallRequest([alignmentOf(published.bound.interpretation_id, queryOf())])
+        request: recallRequest([correspondenceOf(published.bound.interpretation_id, queryOf())])
       }, ["project"], new SourceSemanticReadBudget(BUDGET));
       if (incomplete.kind !== "recall") throw new Error("library recall expected");
       expect(incomplete.proofs?.[0]?.answers?.length).toBeGreaterThan(0);
@@ -335,7 +335,7 @@ it("examines aligned handles without hydrating every published descriptor", asyn
 
 it("drops a conditional proof when correspondence is absent and still returns the original source", async () => {
   await withLibrary(async ({ execute }) => {
-    const withProof = await call(execute, recallRequest([alignmentOf(
+    const withProof = await call(execute, recallRequest([correspondenceOf(
       (await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET })).candidates[0]!.interpretation_id,
       queryOf()
     )]));
@@ -357,7 +357,7 @@ it("keeps excluded source interpretation identities out of public discovery diag
     const { database } = await createRecallRealStorage(() => undefined, filename);
     database.connection.prepare("UPDATE source_records SET scope_class = 'global_core' WHERE source_id = 'artifact-1'").run();
     database.close(); closeCachedDatabase(filename);
-    const recalled = await call(execute, recallRequest([alignmentOf(allIds[0]!, queryOf())]));
+    const recalled = await call(execute, recallRequest([correspondenceOf(allIds[0]!, queryOf())]));
     expect(recalled.discovery).toMatchObject({ eligible_source_count: 1, candidate_prefix: [],
       visited_source_interpretation_descriptors: 0, unexamined_source_interpretation_count: 0, examined_source_interpretation_ids: [] });
     expect(recalled.proofs).toBeUndefined();
@@ -369,27 +369,27 @@ it("scores mixed-kind retrieval and proof-conditioned Any@K from one published s
   await withLibrary(async ({ allIds, execute, sourceTarget, filename }) => {
     const gold = sourceGoldUnitFromPublishedRoot(sourceTarget);
     expect(gold.root_id).toBe(sourceTarget.root_id);
-    const withA = await call(execute, recallRequest([alignmentOf(allIds[0]!, queryOf())]));
-    const withoutA = await call(execute, recallRequest([]));
-    expect(withA.kind).toBe("recall");
-    expect(withoutA.kind).toBe("recall");
-    if (withA.kind !== "recall" || withoutA.kind !== "recall") throw new Error("library recall expected");
+    const withCorrespondence = await call(execute, recallRequest([correspondenceOf(allIds[0]!, queryOf())]));
+    const withoutCorrespondence = await call(execute, recallRequest([]));
+    expect(withCorrespondence.kind).toBe("recall");
+    expect(withoutCorrespondence.kind).toBe("recall");
+    if (withCorrespondence.kind !== "recall" || withoutCorrespondence.kind !== "recall") throw new Error("library recall expected");
     const { database } = await createRecallRealStorage(() => undefined, filename);
     const current = listEligibleSemanticSources(database, WS, new SourceSemanticReadBudget(BUDGET), ["project"]);
     database.close(); closeCachedDatabase(filename);
     expect(current).toMatchObject({ open: false, truncated: false });
     expect(current.sources.some((record) => record.identity === sourceTarget.root_id)).toBe(true);
-    expect(measureSourceSemanticLibraryResponse({ recallResult: withA,
-      firstExposurePage: recordSourceSemanticLibraryFirstExposure(withA), requestBudget: BUDGET, goldSourceUnits: [gold] }))
+    expect(measureSourceSemanticLibraryResponse({ recallResult: withCorrespondence,
+      firstExposurePage: recordSourceSemanticLibraryFirstExposure(withCorrespondence), requestBudget: BUDGET, goldSourceUnits: [gold] }).measurement)
       .toMatchObject({ status: "validated", metrics: { proof_conditioned_first_exposure: { any_at_10: { status: "unavailable" } } } });
     const proof = measureSourceSemanticLibraryResponse({
-      recallResult: withA, firstExposurePage: recordSourceSemanticLibraryFirstExposure(withA),
+      recallResult: withCorrespondence, firstExposurePage: recordSourceSemanticLibraryFirstExposure(withCorrespondence),
       requestBudget: BUDGET, goldSourceUnits: [gold], sourceRecords: current.sources
-    });
+    }).measurement;
     const retrieval = measureSourceSemanticLibraryResponse({
-      recallResult: withoutA, firstExposurePage: recordSourceSemanticLibraryFirstExposure(withoutA),
+      recallResult: withoutCorrespondence, firstExposurePage: recordSourceSemanticLibraryFirstExposure(withoutCorrespondence),
       requestBudget: BUDGET, goldSourceUnits: [gold]
-    });
+    }).measurement;
     expect(proof).toMatchObject({
       status: "validated", provider_calls: 0,
       request: { budget: { page_budget: BUDGET.page_budget } },
@@ -400,28 +400,28 @@ it("scores mixed-kind retrieval and proof-conditioned Any@K from one published s
     });
     const changedDigest = `sha256:${"ef".repeat(32)}`;
     const tampered = [
-      { ...withA, proofs: [] },
-      { ...withA, proofs: withA.proofs?.map((row) => ({ ...row, outcome: { status: "invalid" as const, reason: "rejected" } })) },
-      { ...withA, proofs: withA.proofs?.map((row) => ({ ...row, evidence_leaves: row.evidence_leaves?.slice(1) })) },
-      { ...withA, proofs: withA.proofs?.map((row) => ({ ...row, consumed_leaves: [] })) },
-      { ...withA, proofs: withA.proofs?.map((row) => ({ ...row, context: { ...row.context, semantic_correspondence_id: changedDigest } })) },
-      { ...withA, slot_qualifiers: withA.slot_qualifiers.map((row) => row.evidence_kind === "semantic_proof" ? { ...row, conditional_computation_id: changedDigest } : row) },
-      { ...withA, index: { ...withA.index, query_id: changedDigest } },
-      { ...withA, index: { ...withA.index, entries: withA.index.entries.map((entry) => entry.interpretation_node === undefined ? entry
+      { ...withCorrespondence, proofs: [] },
+      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, outcome: { status: "invalid" as const, reason: "rejected" } })) },
+      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, evidence_leaves: row.evidence_leaves?.slice(1) })) },
+      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, consumed_leaves: [] })) },
+      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, context: { ...row.context, semantic_correspondence_id: changedDigest } })) },
+      { ...withCorrespondence, slot_qualifiers: withCorrespondence.slot_qualifiers.map((row) => row.evidence_kind === "semantic_proof" ? { ...row, conditional_computation_id: changedDigest } : row) },
+      { ...withCorrespondence, index: { ...withCorrespondence.index, query_id: changedDigest } },
+      { ...withCorrespondence, index: { ...withCorrespondence.index, entries: withCorrespondence.index.entries.map((entry) => entry.interpretation_node === undefined ? entry
         : { ...entry, target: { ...sourceTarget, source_version: "2", content_digest: changedDigest } }) },
-        proofs: withA.proofs?.map((row) => ({ ...row, source_target: { ...sourceTarget, source_version: "2", content_digest: changedDigest } })) }
+        proofs: withCorrespondence.proofs?.map((row) => ({ ...row, source_target: { ...sourceTarget, source_version: "2", content_digest: changedDigest } })) }
     ];
     for (const response of tampered) {
       const measured = measureSourceSemanticLibraryResponse({ recallResult: response,
-        firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: BUDGET, goldSourceUnits: [gold], sourceRecords: current.sources });
+        firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: BUDGET, goldSourceUnits: [gold], sourceRecords: current.sources }).measurement;
       expect(measured).toMatchObject({ status: "validated",
         metrics: { proof_conditioned_first_exposure: { any_at_10: { status: "unavailable", value: null } } } });
       if (measured?.status !== "validated") throw new Error("mixed source measurement missing");
       expect(measured.metrics.mixed_kind_first_exposure.any_at_10.status).not.toBe("unavailable");
     }
-    expect(measureSourceSemanticLibraryResponse({ recallResult: withA,
-      firstExposurePage: recordSourceSemanticLibraryFirstExposure(withA), requestBudget: { ...BUDGET, work_units: 1 },
-      goldSourceUnits: [gold] })).toMatchObject({ status: "invalid", reason: "request_budget_mismatch" });
+    expect(measureSourceSemanticLibraryResponse({ recallResult: withCorrespondence,
+      firstExposurePage: recordSourceSemanticLibraryFirstExposure(withCorrespondence), requestBudget: { ...BUDGET, work_units: 1 },
+      goldSourceUnits: [gold] }).measurement).toMatchObject({ status: "invalid", reason: "request_budget_mismatch" });
     expect(retrieval).toMatchObject({
       status: "validated", provider_calls: 0,
       request: { budget: { page_budget: BUDGET.page_budget } },
@@ -505,7 +505,7 @@ it("prepares multi-sentence sources with packing units instead of one whole-body
 
 it("binds delivery_id to the delivered first-exposure membership", async () => {
   await withLibrary(async ({ allIds, execute }) => {
-    const semantic_correspondences = [alignmentOf(allIds[0]!, queryOf())];
+    const semantic_correspondences = [correspondenceOf(allIds[0]!, queryOf())];
     const full = await call(execute, { ...recallRequest(semantic_correspondences), output_byte_limit: 1_000_000 });
     expect(full.kind).toBe("recall");
     if (full.kind !== "recall") throw new Error("library recall expected");

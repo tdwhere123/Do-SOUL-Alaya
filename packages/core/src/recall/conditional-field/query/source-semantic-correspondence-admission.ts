@@ -118,24 +118,24 @@ export function admitSourceSemanticCorrespondence(
   };
 }
 
-function validFiniteCorrespondence(semantic_correspondence: SourceSemanticCorrespondence, h: SourceSemanticInterpretation,
-  q: SourceSemanticQuery, text: string): boolean {
-  const domains = new Map((h.domains ?? []).map((row) => [row.id, row]));
+function validFiniteCorrespondence(semantic_correspondence: SourceSemanticCorrespondence, sourceInterpretation: SourceSemanticInterpretation,
+  querySemantics: SourceSemanticQuery, text: string): boolean {
+  const domains = new Map((sourceInterpretation.domains ?? []).map((row) => [row.id, row]));
   const seen = new Set<string>();
   for (const row of semantic_correspondence.domains ?? []) {
-    if (!domains.has(row.source_domain) || !q.domains?.some((domain) => domain.id === row.query_domain)
+    if (!domains.has(row.source_domain) || !querySemantics.domains?.some((domain) => domain.id === row.query_domain)
       || seen.has(row.query_domain) || !text.includes(row.query_support.excerpt)
-      || !supportOnInterpretation(row.source_semantic_support, h)) return false;
+      || !supportOnInterpretation(row.source_semantic_support, sourceInterpretation)) return false;
     seen.add(row.query_domain);
   }
   const assumptions = new Set<string>();
   for (const row of semantic_correspondence.membership_assumptions ?? []) {
-    const variable = q.variables.find((item) => item.id === row.query_variable), domain = domains.get(row.source_domain);
+    const variable = querySemantics.variables.find((item) => item.id === row.query_variable), domain = domains.get(row.source_domain);
     const key = JSON.stringify([row.query_variable, row.source_domain]);
     if (variable?.sort !== "entity" || variable.reference === undefined || domain === undefined
       || assumptions.has(key) || !text.includes(row.query_support.excerpt)) return false;
     assumptions.add(key);
-    if (row.restrictions.some((id) => !h.operators.some((op) => op.operator === "forall"
+    if (row.restrictions.some((id) => !sourceInterpretation.operators.some((op) => op.operator === "forall"
       && op.domain === domain.id && op.restriction === id))) return false;
     const source = semantic_correspondence.correspondences.find((item) => item.query_endpoint.kind === "referent"
       && item.query_endpoint.variable === variable.id)?.source_endpoint;

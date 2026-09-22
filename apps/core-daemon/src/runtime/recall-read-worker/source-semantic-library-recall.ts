@@ -73,27 +73,27 @@ function discoverLibraryDescriptors(runtime: RecallReadWorkerRuntime, payload: S
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, sources: ReturnType<typeof listEligibleSemanticSources>) {
   const current = new Map(sources.sources.map((row) => [row.source_id, row]));
   const descriptors: SourceSemanticHandleDescriptor[] = [];
-  let after: string | null = null, hPages = 0, hOpen = false, interpretationTruncated = false;
-  while (hPages < 32) {
+  let after: string | null = null, interpretationPages = 0, interpretationOpen = false, interpretationTruncated = false;
+  while (interpretationPages < 32) {
     let page: ReturnType<typeof discover>;
     try {
       page = discover(runtime, payload, authorized, meter, after, undefined, false);
     } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      hOpen = true; interpretationTruncated = true; break;
+      interpretationOpen = true; interpretationTruncated = true; break;
     }
-    hPages += 1;
+    interpretationPages += 1;
     descriptors.push(...page.candidates.filter((row) => {
       const source = current.get(row.source_id);
       return source !== undefined && source.source_version === row.source_version && source.content_digest === row.content_digest;
     }));
-    hOpen = hOpen || page.open;
+    interpretationOpen = interpretationOpen || page.open;
     interpretationTruncated = page.truncated;
     if (!page.truncated && !page.open) break;
-    if (page.cursor === after || page.cursor === null) { hOpen = true; break; }
+    if (page.cursor === after || page.cursor === null) { interpretationOpen = true; break; }
     after = page.cursor;
   }
-  return { descriptors, hPages, hOpen, interpretationTruncated };
+  return { descriptors, interpretationPages, interpretationOpen, interpretationTruncated };
 }
 
 function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
@@ -180,7 +180,7 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   sources: ReturnType<typeof listEligibleSemanticSources>, discovered: ReturnType<typeof discoverLibraryDescriptors>,
   branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string,
   issued: Continuation | undefined): SourceSemanticWorkerResult {
-  const { descriptors, hPages, hOpen } = discovered;
+  const { descriptors, interpretationPages, interpretationOpen } = discovered;
   const { proofGroups, proofs, examined, provedRoots, pairs, computeOpen } = branches;
   const interpretationTruncated = discovered.interpretationTruncated || branches.interpretationTruncated;
   const interpretationId = `sha256:${fieldContractSha256(canonicalJson({
@@ -200,7 +200,7 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
     if (entry.target.kind !== "source_evidence") return [];
     return provedRoots.has(sourceGoldRootIdentity(entry.target)) ? [] : [entry];
   });
-  const openResiduals = sources.open || sources.truncated || hOpen || interpretationTruncated || computeOpen
+  const openResiduals = sources.open || sources.truncated || interpretationOpen || interpretationTruncated || computeOpen
     || pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP;
   const offset = libraryPageOffset(request.continuation, issued, queryId, snapshotId, interpretationId);
   const requestDigest = fieldContractSha256(canonicalJson({
@@ -234,7 +234,7 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
     payload: previewed.truncated ? "truncated" as const : "complete" as const
   };
   const discovery = {
-    eligible_source_count: sources.sources.length, visited_source_pages: sources.pages, visited_source_interpretation_pages: hPages,
+    eligible_source_count: sources.sources.length, visited_source_pages: sources.pages, visited_source_interpretation_pages: interpretationPages,
     visited_source_interpretation_descriptors: descriptors.length,
     candidate_prefix: descriptors.slice(0, 64).map((row) => row.interpretation_id),
     examined_source_interpretation_ids: examined, unexamined_source_interpretation_count: Math.max(0, descriptors.length - examined.length),

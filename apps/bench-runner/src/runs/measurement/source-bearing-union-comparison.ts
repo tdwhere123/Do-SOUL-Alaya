@@ -5,9 +5,11 @@ import { fieldContractSha256, sourceSemanticLibraryQueryIdentity } from "@do-sou
 import { chainIdentity } from "../semantic-chain/contract.js";
 import { LongMemEvalSemanticFreezeSchema, assertLongMemEvalSemanticRows,
   type LongMemEvalSemanticFreeze } from "../longmemeval-semantic/contract.js";
-import { LongMemEvalPreparedSchema, LongMemEvalReplaySchema, LongMemEvalPublicationSchema } from "../longmemeval-semantic/execute.js";
-import { measureSourceSemanticLibraryResponse, SourceSemanticLibraryMeasurementSchema, sourceSemanticLibraryProofAdmission } from "./source-semantic-library-measurement.js";
-import { SOURCE_BEARING_UNION_FIRST_EXPOSURE_CONTRACT, scoreSourceBearingUnionFirstExposure } from "./source-gold-join.js";
+import { LongMemEvalPreparedSchema, LongMemEvalReplaySchema, LongMemEvalPublicationSchema,
+  LongMemEvalSourceOnlyResponseSchema } from "../longmemeval-semantic/execute.js";
+import { readmitSourceSemanticLibraryMeasurement, type SourceSemanticLibraryEvaluatorUsage } from "./source-semantic-library-measurement.js";
+import { SOURCE_BEARING_UNION_FIRST_EXPOSURE_CONTRACT, SourceGoldUnitSchema } from "./source-gold-join.js";
+import { FirstExposurePageSchema } from "./first-exposure-session.js";
 
 // This offline report admits the frozen population, not a runnable producer workset.
 const FrozenPopulationSchema = LongMemEvalSemanticFreezeSchema.pick({ config: true, implementation_revision: true, inventory: true, selected: true }).passthrough();
@@ -22,6 +24,7 @@ export interface FrozenUnionRowReport {
   readonly stored_mixed_any_at_5: "hit" | "miss" | "unavailable" | null;
   readonly union_any_at_5: "hit" | "miss" | "unavailable" | null;
   readonly in_development_denominator: boolean;
+  readonly evaluator_usage?: SourceSemanticLibraryEvaluatorUsage;
 }
 
 export interface FrozenUnionEvidence {
@@ -151,43 +154,32 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
     || canonicalJson(publication.sources.map(sourceIdentity)) !== canonicalJson(selected.source_manifest.map(sourceIdentity))) {
     throw new Error("question publication, plan, replay or measurement binding differs");
   }
-  const parsed = SourceSemanticLibraryMeasurementSchema.safeParse(chainRow.measurement);
-  if (!parsed.success || parsed.data.status !== "validated") return reportRow(row, true, "stored measurement unavailable or invalid", "unavailable");
-  const measured = parsed.data;
   const response = record(replayRow.response);
-  if (measured.identity.query_id !== sourceSemanticLibraryQueryIdentity(selected.question, measured.identity.result_version)
-    || measured.identity.as_of !== selected.interpretation_clock || canonicalJson(measured.request.budget) !== canonicalJson(config.budget)
-    || canonicalJson(measured.first_exposure_page) !== canonicalJson(replayRow.first_exposure)
-    || canonicalJson(measured.delivered_index) !== canonicalJson(response.index)
-    || canonicalJson(measured.delivered_proofs) !== canonicalJson(response.proofs ?? [])
-    || canonicalJson(measured.slot_qualifiers) !== canonicalJson(response.slot_qualifiers)
-    || canonicalJson(measured.source_gold_units) !== canonicalJson(gold.source_units)
-    || (measured.source_records ?? []).some((record) => !publication.sources.some((source) =>
-      source.admission === "admitted" && source.publication === "published" && source.record_id === record.identity
-      && canonicalJson(source.source_record) === canonicalJson(record)
-      && record.workspace_id === publication.workspace_id && record.scope_class != null))
-    || measured.source_gold_units.some((unit) => unit.workspace_id !== publication.workspace_id || !publication.sources.some((source) =>
+  LongMemEvalSourceOnlyResponseSchema.parse(response);
+  const index = record(response.index);
+  const sourceGoldUnits = SourceGoldUnitSchema.array().parse(gold.source_units);
+  if (typeof index.result_version !== "string" || index.query_id !== sourceSemanticLibraryQueryIdentity(selected.question, index.result_version)
+    || index.as_of !== selected.interpretation_clock
+    || sourceGoldUnits.some((unit) => unit.workspace_id !== publication.workspace_id || !publication.sources.some((source) =>
       source.admission === "admitted" && source.record_id === unit.root_id && unit.root_kind === "source_record"
       && source.record_id === hashSourceRecordId(source, fieldContractSha256)
       && source.source_version === unit.source_version && source.content_digest === unit.content_digest))) {
     throw new Error("stored measurement differs from native first exposure or gold publication");
   }
-  const admitted = measureSourceSemanticLibraryResponse({ recallResult: archivedSourceResponse(response),
-    firstExposurePage: measured.first_exposure_page, requestBudget: measured.request.budget,
-    goldSourceUnits: measured.source_gold_units,
-    ...(measured.source_records === undefined ? {} : { sourceRecords: measured.source_records }) });
-  if (admitted?.status !== "validated") throw new Error(`native response admission failed: ${admitted?.reason ?? "invalid_response"}`);
-  if (canonicalJson(admitted) !== canonicalJson(measured)) throw new Error("native response differs from stored measurement");
-  const admission = sourceSemanticLibraryProofAdmission(measured.first_exposure_slots, measured.delivered_index,
-    measured.slot_qualifiers, measured.delivered_proofs, measured.source_gold_units, measured.source_records ?? [], measured.request.budget);
-  const union = scoreSourceBearingUnionFirstExposure(measured.first_exposure_slots, measured.source_gold_units, admission);
+  const evaluated = readmitSourceSemanticLibraryMeasurement(chainRow.measurement, { recallResult: archivedSourceResponse(response),
+    firstExposurePage: FirstExposurePageSchema.parse(replayRow.first_exposure), requestBudget: frozen.config.budget,
+    goldSourceUnits: sourceGoldUnits });
+  const measured = evaluated.measurement, union = evaluated.sourceBearingUnion;
+  if (measured?.status !== "validated" || union === null) return { ...reportRow(row, true,
+    `native response admission failed: ${measured?.status === "invalid" ? measured.reason : "invalid_response"}`, "unavailable"), evaluator_usage: evaluated.evaluator_usage };
   const mixed = measured.metrics.mixed_kind_first_exposure.any_at_5.status;
   if (union.any_at_5.status === "miss" && (row.outcome !== "miss"
     || publication.admitted_count !== selected.source_manifest.length)) {
-    return reportRow(row, true, typeof row.reason === "string" ? row.reason : "source_or_gold_mapping_incomplete", "unavailable", mixed);
+    return { ...reportRow(row, true, typeof row.reason === "string" ? row.reason : "source_or_gold_mapping_incomplete", "unavailable", mixed),
+      evaluator_usage: evaluated.evaluator_usage };
   }
-  return reportRow(row, true, `validated native slots; proof ranks ${[...admission.validatedRanks].join(",") || "none"}`,
-    union.any_at_5.status, mixed);
+  return { ...reportRow(row, true, `validated native slots; proof ranks ${evaluated.validatedProofRanks.join(",") || "none"}`,
+    union.any_at_5.status, mixed), evaluator_usage: evaluated.evaluator_usage };
 }
 
 /** Archive-only field migration; the current native admission still owns every validity rule. */

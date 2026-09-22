@@ -31,13 +31,13 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
     const prepare = async (daemon?: BenchDaemonHandle) => {
       for (const row of results) {
         const base = { query_key: row.line.key, original_query: row.line.original_query, raw_digest: row.shard?.raw_digest ?? null };
-        const q = row.received !== undefined && "query" in row.received ? row.received.query : undefined;
-        if (q === undefined) { queries.push({ ...base, status: "blocked", reason: row.status }); continue; }
-        const found = await discover(daemon!, config, row.line.original_query, q);
+        const querySemantics = row.received !== undefined && "query" in row.received ? row.received.query : undefined;
+        if (querySemantics === undefined) { queries.push({ ...base, status: "blocked", reason: row.status }); continue; }
+        const found = await discover(daemon!, config, row.line.original_query, querySemantics);
         const selected = found.descriptors.filter((descriptor) => descriptor.interpretation !== undefined).slice(0, remaining);
         remaining -= selected.length;
-        queries.push({ ...base, status: "ready", query_semantics: q, ...found, selected_source_interpretation_ids: selected.map((entry) => entry.interpretation_id) });
-        for (const descriptor of selected) items.push({ original_query: row.line.original_query, admitted_query_semantics: q,
+        queries.push({ ...base, status: "ready", query_semantics: querySemantics, ...found, selected_source_interpretation_ids: selected.map((entry) => entry.interpretation_id) });
+        for (const descriptor of selected) items.push({ original_query: row.line.original_query, admitted_query_semantics: querySemantics,
           source_interpretation_descriptors: [{ source_interpretation_id: descriptor.interpretation_id, interpretation: descriptor.interpretation }] });
       }
     };
@@ -62,7 +62,7 @@ function materializeCorrespondenceWorkset(plan: SemanticChainPlan, root: string)
   // existing proposal prepare command immediately before an authorized fill.
 }
 
-async function discover(daemon: BenchDaemonHandle, config: SemanticChainConfig, original: string, q: SourceSemanticQuery) {
+async function discover(daemon: BenchDaemonHandle, config: SemanticChainConfig, original: string, querySemantics: SourceSemanticQuery) {
   const descriptors: SourceSemanticHandleDescriptor[] = [];
   const seen = new Set<string>();
   const handles = new Set<string>();
@@ -70,7 +70,7 @@ async function discover(daemon: BenchDaemonHandle, config: SemanticChainConfig, 
   let pages = 0, open = false, truncated = false;
   do {
     const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
-      SoulInterpretationRequestSchema.parse({ operation: "prepare_query", original_query: original, query_semantics: q,
+      SoulInterpretationRequestSchema.parse({ operation: "prepare_query", original_query: original, query_semantics: querySemantics,
         budget: config.budget, authorized_scopes: config.authorized_scopes,
         ...(continuation === undefined ? {} : { continuation_handle: continuation }) })));
     if (response.operation !== "prepare_query") throw new Error("native discovery returned a different operation");

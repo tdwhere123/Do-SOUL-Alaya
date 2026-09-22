@@ -3,7 +3,7 @@ import { measureSemanticChain } from "../semantic-chain/replay.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
-import { LongMemEvalReplaySchema, verifyLongMemEvalQuestionPublication } from "./execute.js";
+import { LongMemEvalReplaySchema, LongMemEvalSourceOnlyReplaySchema, verifyLongMemEvalQuestionPublication } from "./execute.js";
 import { assertLongMemEvalSemanticRows, loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze } from "./contract.js";
 
 type LongMemEvalOutcome = Readonly<{
@@ -42,6 +42,7 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
         const gold = goldSources.filter((source) => source.admission === "admitted" && source.record_id !== undefined)
           .map((source) => SourceGoldUnitSchema.parse({ workspace_id: publication.workspace_id, root_kind: "source_record",
             root_id: source.record_id, source_version: source.source_version, content_digest: source.content_digest }));
+        LongMemEvalSourceOnlyReplaySchema.parse(readChainArtifact(replayed.replay_path));
         const measured = measureSemanticChain(replayed.chain_root, replayed.replay_path,
           [{ query_key: selected.query_key, source_units: gold }]);
         measurementPath = measured.path;

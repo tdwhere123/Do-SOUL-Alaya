@@ -124,15 +124,15 @@ function offerSelections(
 }
 
 function receiveSelections(
-  h: ReturnType<typeof twoOfferInterpretation>,
+  sourceInterpretation: ReturnType<typeof twoOfferInterpretation>,
   selections: ReturnType<typeof offerSelections>
 ) {
-  const hId = sourceSemanticInterpretationIdentity(h, semanticSha256);
+  const sourceInterpretationId = sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256);
   const admitted = setValuedQuery();
   return proposeCorrespondenceSemantics({
     original_query: SET_VALUED, admitted_query_semantics: admitted,
-    source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }],
-    producer_id: "align-producer", producer_version: "1"
+    source_interpretation_descriptors: [{ source_interpretation_id: sourceInterpretationId, interpretation: sourceInterpretation }],
+    producer_id: "correspondence-producer", producer_version: "1"
   }, {
     rawJson: JSON.stringify({
       contract: "source-semantic-correspondence-response-v3",
@@ -169,15 +169,15 @@ describe("set-valued semantic_correspondence selections stay producer-owned", ()
   });
 
   it("still admits a first-pass single-frame selection as interpreted", () => {
-    const h = twoOfferInterpretation();
+    const sourceInterpretation = twoOfferInterpretation();
     const prepared = proposeCorrespondenceSemantics({
       original_query: SET_VALUED, admitted_query_semantics: setValuedQuery(),
-      source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
-      producer_id: "align-producer", producer_version: "1"
+      source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256), interpretation: sourceInterpretation }],
+      producer_id: "correspondence-producer", producer_version: "1"
     });
     const catalog = prepared.request.catalog!;
     expect(catalog.source_endpoints.filter((row) => row.kind === "frame" && row.reading === "offer")).toHaveLength(2);
-    const received = receiveSelections(h, offerSelections(catalog, ["fPhilips"]));
+    const received = receiveSelections(sourceInterpretation, offerSelections(catalog, ["fPhilips"]));
     expect(received.outcome.status).toBe("interpreted");
     expect(received.semantic_correspondence?.correspondences).toHaveLength(3);
     expect(received.semantic_correspondence?.correspondences.map((row) =>
@@ -186,33 +186,33 @@ describe("set-valued semantic_correspondence selections stay producer-owned", ()
   });
 
   it("rejects A2-shaped predicate-only groups as incomplete instead of compiling them as finished", () => {
-    const h = twoOfferInterpretation();
+    const sourceInterpretation = twoOfferInterpretation();
     const prepared = proposeCorrespondenceSemantics({
       original_query: SET_VALUED, admitted_query_semantics: setValuedQuery(),
-      source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
-      producer_id: "align-producer", producer_version: "1"
+      source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256), interpretation: sourceInterpretation }],
+      producer_id: "correspondence-producer", producer_version: "1"
     });
     const frames = prepared.request.catalog!.source_endpoints
       .filter((row) => row.kind === "frame" && row.reading === "offer")
       .map((row) => row.frame!);
-    const received = receiveSelections(h, predicateOnlySelections(prepared.request.catalog!, frames));
+    const received = receiveSelections(sourceInterpretation, predicateOnlySelections(prepared.request.catalog!, frames));
     expect(received.outcome).toEqual({ status: "invalid", reason: "incomplete_selection_group" });
     expect(received.semantic_correspondence).toBeUndefined();
   });
 
   it("materializes one selection group per matching frame without adding omitted pairs", () => {
-    const h = twoOfferInterpretation();
-    const hId = sourceSemanticInterpretationIdentity(h, semanticSha256);
+    const sourceInterpretation = twoOfferInterpretation();
+    const sourceInterpretationId = sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256);
     const admitted = setValuedQuery();
     const prepared = proposeCorrespondenceSemantics({
       original_query: SET_VALUED, admitted_query_semantics: admitted,
-      source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }],
-      producer_id: "align-producer", producer_version: "1"
+      source_interpretation_descriptors: [{ source_interpretation_id: sourceInterpretationId, interpretation: sourceInterpretation }],
+      producer_id: "correspondence-producer", producer_version: "1"
     });
     const received = proposeCorrespondenceSemantics({
       original_query: SET_VALUED, admitted_query_semantics: admitted,
-      source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }],
-      producer_id: "align-producer", producer_version: "1"
+      source_interpretation_descriptors: [{ source_interpretation_id: sourceInterpretationId, interpretation: sourceInterpretation }],
+      producer_id: "correspondence-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
         contract: "source-semantic-correspondence-response-v3",

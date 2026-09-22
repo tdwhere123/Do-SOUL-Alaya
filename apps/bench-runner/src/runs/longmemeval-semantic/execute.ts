@@ -17,7 +17,16 @@ export const LongMemEvalPublicationSchema = z.object({ workspace_id: z.string(),
   sources: z.array(z.object({ question_id: z.string(), session_id: z.string(), source_id: z.string(), source_version: z.string(),
     content_digest: z.string(), corpus_digest: z.string(), admission: z.enum(["admitted", "rejected"]), record_id: z.string().optional()
   }).passthrough())
-}).passthrough();
+}).passthrough().superRefine((report, ctx) => {
+  if (report.sources.some((source) => source.publication === "published")) {
+    ctx.addIssue({ code: "custom", path: ["sources"], message: "source-only publication cannot contain a published interpretation" });
+  }
+});
+/** This frozen arm never executes a published interpretation; generic semantic-chain replay may do so. */
+export const LongMemEvalSourceOnlyResponseSchema = z.object({ proofs: z.array(z.never()).optional() }).passthrough();
+export const LongMemEvalSourceOnlyReplaySchema = z.object({ rows: z.array(z.object({
+  response: LongMemEvalSourceOnlyResponseSchema.nullish()
+}).passthrough()) }).passthrough();
 const Unavailable = z.object({ question_id: z.string(), status: z.literal("unavailable"), reason: z.string() }).strict();
 export const LongMemEvalPreparedSchema = z.object({ contract: z.literal("longmemeval-semantic-prepared-v1"),
   freeze_identity: z.string(), rows: z.array(z.discriminatedUnion("status", [Unavailable,
@@ -110,6 +119,7 @@ export async function replayLongMemEvalSemanticRun(root: string, preparedPath: s
     if (row.status === "unavailable") { rows.push(row); continue; }
     try {
       const replay = await replaySemanticChain(row.chain_root);
+      LongMemEvalSourceOnlyReplaySchema.parse(replay.result);
       rows.push({ ...row, status: "replayed", replay_path: replay.path });
     } catch (error) { rows.push({ question_id: row.question_id, status: "unavailable", reason: error instanceof Error ? error.message : String(error) }); }
   }

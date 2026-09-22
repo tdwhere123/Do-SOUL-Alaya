@@ -49,7 +49,7 @@ export function frozenUnionFixture() {
     const first_exposure = recordSourceSemanticLibraryFirstExposure(result);
     const gold = [sourceGoldUnitFromPublishedRoot({ ...sourceOnly(root, workspace).target, kind: "source_evidence" } as Parameters<typeof sourceGoldUnitFromPublishedRoot>[0])];
     const measurement = row.index < 8 ? measureSourceSemanticLibraryResponse({ recallResult: result,
-      firstExposurePage: first_exposure, requestBudget: REQUEST, goldSourceUnits: gold }) : null;
+      firstExposurePage: first_exposure, requestBudget: REQUEST, goldSourceUnits: gold }).measurement : null;
     const replay = { contract: "source-semantic-chain-replay-v1", plan_identity, identity: `replay-${row.index}`, provider_calls: 0,
       rows: [{ query_key: row.query_key, response: result, first_exposure }] };
     put(`${chain_root}/replay.json`, replay);

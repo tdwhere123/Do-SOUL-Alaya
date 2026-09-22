@@ -1,7 +1,8 @@
 import { IndexEntrySchema, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
   SourceSemanticWorkerResultSchema, type IndexEntry, type InformationIndex } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex,
-  sourceSemanticLibrarySourceEntry } from "@do-soul/alaya-core";
+  sourceSemanticLibrarySourceEntry, encodeSourceSemanticLibraryResponse, slotQualifiersFor } from "@do-soul/alaya-core";
+import { deliveredProofFixture, source } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
 import { sourceGoldUnitFromPublishedRoot } from "../../../runs/measurement/source-gold-join.js";
 
 export const DIGEST = `sha256:${"ab".repeat(32)}`;
@@ -71,4 +72,22 @@ export function workerRecall(index: InformationIndex) {
 
 function proofsPresent(index: InformationIndex): boolean {
   return index.entries.some((entry) => entry.interpretation_node !== undefined && entry.explanation_ids.length > 0);
+}
+
+/** Actual execution/delivery witnesses. An optional first proof lacks independent publication admission. */
+export function nativeProofResponseFixture(unverifiedFirst = false, workspaceId = "ws") {
+  const first = deliveredProofFixture({ library: true, workspaceId });
+  const base = source();
+  const fixtures = [first, ...(unverifiedFirst ? [deliveredProofFixture({ library: true, workspaceId,
+    interpretation: { ...base, source: { ...base.source, source_id: "another-source" } } })] : [])];
+  const proofs = fixtures.map((fixture) => fixture.proof);
+  const index = assembleSourceSemanticLibraryIndex({ query_id: first.index.query_id, snapshot_id: first.index.snapshot_id,
+    interpretation_id: "library-interpretation", as_of: CLOCK, source_entries: [], truncated: false, open_residuals: false,
+    proof_groups: fixtures.map((fixture) => ({ entries: fixture.index.entries, explanations: fixture.index.explanations })) }).index;
+  const response = encodeSourceSemanticLibraryResponse({ ...workerRecall(index), proofs, slot_qualifiers: slotQualifiersFor(index, proofs) });
+  if (response.operation !== "recall") throw new Error("native proof response expected");
+  const target = index.entries[unverifiedFirst ? 1 : 0]!.target;
+  if (target.kind !== "source_evidence") throw new Error("native source root expected");
+  const record = fixtures.find((fixture) => fixture.record.identity === target.root_id)!.record;
+  return { response, record, gold: sourceGoldUnitFromPublishedRoot(target) };
 }

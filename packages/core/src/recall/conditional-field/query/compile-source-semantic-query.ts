@@ -38,10 +38,10 @@ function rel(predicate: string, from: string, to: string, meter: SourceSemanticR
     guard: GUARD, facet_mode: "same_path", threshold_milligrades: 0 };
 }
 
-export function compileSourceSemanticAlternative(q: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative, alt: number,
+export function compileSourceSemanticAlternative(querySemantics: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative, alt: number,
   meter: SourceSemanticResourceLedger, finite?: SourceSemanticCompilation, omitAccept = false, groupFrame?: string,
   acceptIndex?: number): QueryProgram {
-  const graph = buildGraph(q, alternative, alt, meter, groupFrame);
+  const graph = buildGraph(querySemantics, alternative, alt, meter, groupFrame);
   const root = alternative.frames[0]!.variable;
   const seed = groupFrame === undefined ? `@seed:${alt}` : `@seed:${alt}:${groupFrame}`;
   const steps = [rel(key("candidate_route"), seed, root, meter)];

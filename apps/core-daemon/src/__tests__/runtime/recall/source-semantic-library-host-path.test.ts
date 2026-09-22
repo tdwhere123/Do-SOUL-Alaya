@@ -2,7 +2,8 @@ import { authoredQuerySemantics, receiveAuthoredCorrespondence } from "./source-
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import * as core from "@do-soul/alaya-core";
 import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, hashLabeledIdentity,
   indexEntryCacheKey, materializeSourceSemanticCompactProposal,
@@ -25,13 +26,18 @@ import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handle
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
+import { SourceSemanticReadBudget, listEligibleSemanticSources } from "../../../runtime/field/source-semantic-read-stores.js";
 import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/memory/evidence-create/source-span-views.js";
 import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
-import { soulSearchFromLibraryRecall } from "../../../../../../apps/bench-runner/src/runs/measurement/source-semantic-library-recall.js";
+import { soulSearchFromLibraryRecall, recordSourceSemanticLibraryFirstExposure } from "../../../../../../apps/bench-runner/src/runs/measurement/source-semantic-library-recall.js";
+import { measureSourceSemanticLibraryResponse, readmitSourceSemanticLibraryMeasurement } from "../../../../../../apps/bench-runner/src/runs/measurement/source-semantic-library-measurement.js";
+import { sourceGoldUnitFromPublishedRoot } from "../../../../../../apps/bench-runner/src/runs/measurement/source-gold-join.js";
+
+afterEach(() => vi.restoreAllMocks());
 
 const CLOCK = "2026-09-18T00:00:00.000Z";
 const ALICE = "Alice uses tools.";
@@ -288,14 +294,21 @@ function mcpRecall(payload: unknown): RecallOut {
   return body.output;
 }
 
-it("occupies one gold record identity for the same source with and without correspondence", async () => {
+it("measures a published source through public recall and first exposure with one verification per proof slot", async () => {
   await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
       receiveInterpretation(ALICE, "artifact-alice", compactUse(prepared.catalog)).draft, "p1");
     const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
     const semantic_correspondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id).semantic_correspondence;
-    const withCorrespondence = await workerRecall(session, semantics, [semantic_correspondence]);
+    const publicResult = await callAlayaMcpMemoryTool(
+      { memoryToolHandler: session.handler, contextProvider: () => session.context }, "soul.interpretation",
+      SoulInterpretationRequestSchema.parse({ operation: "recall", accepts_unreviewed_conditional_results: true,
+        original_query: ORIGINAL, query_semantics: semantics, semantic_correspondences: [semantic_correspondence],
+        budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES })
+    );
+    const withCorrespondence = mcpRecall(publicResult.structuredContent);
+    if (withCorrespondence.index === undefined || withCorrespondence.slot_qualifiers === undefined) throw new Error("native slots expected");
     const withoutCorrespondence = await workerRecall(session, semantics, []);
     const proofSlot = withCorrespondence.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === published.interpretation_id);
     const proofEntry = proofSlot === undefined ? undefined : withCorrespondence.index.entries[proofSlot.index];
@@ -311,6 +324,22 @@ it("occupies one gold record identity for the same source with and without corre
     const occupied = withCorrespondence.index.entries.filter((entry) => entry.target.kind === "source_evidence"
       && sourceGoldRootIdentity(entry.target) === sourceGoldRootIdentity(provedTarget));
     expect(occupied).toHaveLength(1);
+    const current = listEligibleSemanticSources(session.database, WS, new SourceSemanticReadBudget(BUDGET), ["project"]);
+    expect(current).toMatchObject({ open: false, truncated: false });
+    const input = { recallResult: withCorrespondence, firstExposurePage: recordSourceSemanticLibraryFirstExposure(withCorrespondence),
+      requestBudget: BUDGET, goldSourceUnits: [sourceGoldUnitFromPublishedRoot(published.source_target)], sourceRecords: current.sources };
+    const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
+    const evaluated = measureSourceSemanticLibraryResponse(input);
+    const proofSlots = withCorrespondence.slot_qualifiers.filter((row) => row.evidence_kind === "semantic_proof").length;
+    expect(proofSlots).toBeGreaterThan(0);
+    expect(verify).toHaveBeenCalledTimes(proofSlots);
+    expect(evaluated.measurement?.status).toBe("validated");
+    expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("hit");
+    expect(evaluated.evaluator_usage).toMatchObject({ proof_slots_checked: proofSlots });
+    expect(evaluated.evaluator_usage.work_units).toBeGreaterThan(0);
+    verify.mockClear();
+    expect(readmitSourceSemanticLibraryMeasurement(evaluated.measurement, input)).toEqual(evaluated);
+    expect(verify).toHaveBeenCalledTimes(proofSlots);
   });
 }, 60000);
 

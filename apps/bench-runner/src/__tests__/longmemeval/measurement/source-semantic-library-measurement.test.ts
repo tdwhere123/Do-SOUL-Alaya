@@ -1,18 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET } from "@do-soul/alaya-protocol";
 import { encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
-import { REQUEST, GOLD, GOLD_TARGET, sourceOnly, proofEntry, assemble, workerRecall } from "./source-semantic-library-measurement-fixture.js";
+import * as core from "@do-soul/alaya-core";
+import { REQUEST, GOLD, GOLD_TARGET, sourceOnly, proofEntry, assemble, workerRecall, nativeProofResponseFixture } from "./source-semantic-library-measurement-fixture.js";
 import { measureConditionalFieldResponse } from "../../../runs/measurement/conditional-field-measurement.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
 import {
-  measureSourceSemanticLibraryResponse, sourceSemanticLibraryProofAdmission, SourceSemanticLibraryMeasurementSchema
+  measureSourceSemanticLibraryResponse, readmitSourceSemanticLibraryMeasurement
 } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import {
   PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT,
-  scoreMixedKindFirstExposure, scoreProofConditionedFirstExposure, scoreSourceBearingUnionFirstExposure
+  scoreMixedKindFirstExposure, scoreProofConditionedFirstExposure
 } from "../../../runs/measurement/source-gold-join.js";
-import { exposureSlots } from "../../../runs/measurement/first-exposure-session.js";
-import { soulSearchFromLibraryRecall } from "../../../runs/measurement/source-semantic-library-recall.js";
 
 function measureOf(result: ReturnType<typeof workerRecall>) {
   return measureSourceSemanticLibraryResponse({
@@ -22,8 +21,84 @@ function measureOf(result: ReturnType<typeof workerRecall>) {
     goldSourceUnits: [GOLD]
   });
 }
+afterEach(() => vi.restoreAllMocks());
 
 describe("source semantic library measurement", () => {
+  it.each([false, true])("verifies each actual proof slot once and retains a later valid hit (unverified first=%s)", (unverifiedFirst) => {
+    const { response, record, gold } = nativeProofResponseFixture(unverifiedFirst);
+    const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
+    const input = { recallResult: response, firstExposurePage: recordSourceSemanticLibraryFirstExposure(response),
+      requestBudget: REQUEST, goldSourceUnits: [gold], sourceRecords: [record] };
+    const evaluated = measureSourceSemanticLibraryResponse(input);
+    expect(verify).toHaveBeenCalledTimes(unverifiedFirst ? 2 : 1);
+    expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("hit");
+    expect(evaluated.validatedProofRanks).toEqual([unverifiedFirst ? 2 : 1]);
+    expect(evaluated.measurement).toMatchObject({ status: "validated", metrics: {
+      proof_conditioned_first_exposure: { any_at_5: { status: unverifiedFirst ? "unavailable" : "hit" } }
+    } });
+    expect(evaluated.evaluator_usage.proof_slots_checked).toBe(unverifiedFirst ? 2 : 1);
+    expect(evaluated.evaluator_usage.work_units).toBeGreaterThan(0);
+    expect(evaluated.evaluator_usage.logical_memory_bytes).toBeGreaterThan(0);
+    const freshWork = verify.mock.results.reduce((sum, result) => sum + (result.type === "return" ? result.value.resource_usage.work_units : 0), 0);
+    expect(evaluated.evaluator_usage.work_units).toBe(freshWork);
+    verify.mockClear();
+    expect(readmitSourceSemanticLibraryMeasurement(evaluated.measurement, input)).toEqual(evaluated);
+    expect(verify).toHaveBeenCalledTimes(unverifiedFirst ? 2 : 1);
+  });
+
+  it("freshly rejects a forged stored answer without trusting its previous validated measurement", () => {
+    const { response, record, gold } = nativeProofResponseFixture();
+    const input = { recallResult: response, firstExposurePage: recordSourceSemanticLibraryFirstExposure(response),
+      requestBudget: REQUEST, goldSourceUnits: [gold], sourceRecords: [record] };
+    const original = measureSourceSemanticLibraryResponse(input);
+    if (original.measurement?.status !== "validated") throw new Error("native proof measurement expected");
+    const changed = structuredClone(response), stored = structuredClone(original.measurement);
+    const answer = changed.proofs![0]!.answers![0]!;
+    Object.assign(answer.bindings.tools!, { node_id: "rY" });
+    Object.assign(answer.returned.tools!, { node_id: "rY" });
+    Object.assign(stored, { delivered_proofs: changed.proofs });
+    const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
+    const evaluated = readmitSourceSemanticLibraryMeasurement(stored, { ...input, recallResult: changed });
+    expect(evaluated.measurement?.status).toBe("invalid");
+    expect(evaluated.sourceBearingUnion).toBeNull();
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(evaluated.evaluator_usage.work_units).toBeGreaterThan(0);
+  });
+
+  it("records spent evaluator work when a native proof cannot be verified within the request budget", () => {
+    const { response, record, gold } = nativeProofResponseFixture();
+    const budget = { ...REQUEST, work_units: 100 };
+    const bounded = { ...response, request_budget: budget };
+    const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
+    const evaluated = measureSourceSemanticLibraryResponse({ recallResult: bounded,
+      firstExposurePage: recordSourceSemanticLibraryFirstExposure(bounded), requestBudget: budget,
+      goldSourceUnits: [gold], sourceRecords: [record] });
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(evaluated.measurement?.status).toBe("validated");
+    expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("unavailable");
+    expect(evaluated.evaluator_usage.work_units).toBeGreaterThan(0);
+    expect(evaluated.evaluator_usage.work_units).toBeLessThanOrEqual(budget.work_units);
+    expect(evaluated.evaluator_usage.logical_memory_bytes).toBeGreaterThan(0);
+  });
+
+  it("does not reuse admission across budget, exposure, provider or publication changes", () => {
+    const { response, record, gold } = nativeProofResponseFixture();
+    const input = { recallResult: response, firstExposurePage: recordSourceSemanticLibraryFirstExposure(response),
+      requestBudget: REQUEST, goldSourceUnits: [gold], sourceRecords: [record] };
+    const original = measureSourceSemanticLibraryResponse(input);
+    const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
+    const changed = structuredClone(response);
+    Object.assign(changed.results![0]!, { output_binding: "different" });
+    for (const rejected of [ { ...input, requestBudget: { ...REQUEST, work_units: 1 } },
+      { ...input, recallResult: { ...response, provider_attempts: 1 } }, { ...input, sourceRecords: [] },
+      { ...input, recallResult: changed, firstExposurePage: recordSourceSemanticLibraryFirstExposure(changed) } ]) {
+      expect(readmitSourceSemanticLibraryMeasurement(original.measurement, rejected).measurement?.status).toBe("invalid");
+    }
+    expect(verify).not.toHaveBeenCalled();
+    expect(readmitSourceSemanticLibraryMeasurement(original.measurement, input).sourceBearingUnion?.any_at_5.status).toBe("hit");
+    expect(verify).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["target", "hypothesis_id", "output_binding", "program_state", "time_state", "object_kind", "relevance_score",
     "missing", "extra", "reordered", "duplicate", "total_count", "qualifier", "missing_results", "missing_total_count"] as const)(
     "rejects delivered %s inconsistency before scoring source or proof slots", (kind) => {
@@ -46,19 +121,15 @@ describe("source semantic library measurement", () => {
       else Object.assign(result, { [kind]: "forged-coordinate" });
       const firstExposurePage = recordSourceSemanticLibraryFirstExposure(response);
       expect(measureSourceSemanticLibraryResponse({ recallResult: response, firstExposurePage, requestBudget: REQUEST, goldSourceUnits: [GOLD] }))
-        .toMatchObject({ status: "invalid" });
-      if (kind === "total_count" || kind === "missing_results" || kind === "missing_total_count") return;
-      const slots = exposureSlots(soulSearchFromLibraryRecall(response));
-      const admission = sourceSemanticLibraryProofAdmission(slots, response.index, response.slot_qualifiers, [], [GOLD], [], REQUEST);
-      expect(admission.status).toBe("invalid");
-      expect(scoreSourceBearingUnionFirstExposure(slots, [GOLD], admission).any_at_5.status).toBe("unavailable");
+        .toMatchObject({ measurement: { status: "invalid" }, sourceBearingUnion: null,
+          evaluator_usage: { proof_slots_checked: 0, work_units: 0, logical_memory_bytes: 0 } });
     });
 
   it("rejects a self-consistent stored exposure and metric for a root absent from the native index", () => {
     const response = encodeSourceSemanticLibraryResponse(workerRecall(assemble([sourceOnly("other")], [proofEntry("unverified")])));
     if (response.operation !== "recall" || response.results === undefined) throw new Error("native public recall expected");
     const measured = measureSourceSemanticLibraryResponse({ recallResult: response,
-      firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: REQUEST, goldSourceUnits: [GOLD] });
+      firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: REQUEST, goldSourceUnits: [GOLD] }).measurement;
     if (measured?.status !== "validated") throw new Error("native source measurement expected");
     expect(measured.metrics.mixed_kind_first_exposure.any_at_5.status).toBe("miss");
     expect(measured.metrics.proof_conditioned_first_exposure.any_at_5.status).toBe("unavailable");
@@ -69,7 +140,8 @@ describe("source semantic library measurement", () => {
     const changed = { ...measured, first_exposure_page, first_exposure_slots: slots,
       metrics: { ...measured.metrics, mixed_kind_first_exposure: scoreMixedKindFirstExposure(slots, [GOLD]) } };
     expect(changed.metrics.mixed_kind_first_exposure.any_at_5.status).toBe("hit");
-    expect(SourceSemanticLibraryMeasurementSchema.safeParse(changed).success).toBe(false);
+    expect(readmitSourceSemanticLibraryMeasurement(changed, { recallResult: forged, firstExposurePage: first_exposure_page,
+      requestBudget: REQUEST, goldSourceUnits: [GOLD] }).measurement?.status).toBe("invalid");
   });
 
   it("does not join a semantic_proof slot as mixed source retrieval", () => {
@@ -86,23 +158,22 @@ describe("source semantic library measurement", () => {
   });
 
   it("retains a native source hit when a different delivered proof remains unverified", () => {
-    const measured = measureOf(workerRecall(assemble([sourceOnly("gold")], [proofEntry("other")])));
+    const evaluated = measureOf(workerRecall(assemble([sourceOnly("gold")], [proofEntry("other")])));
+    const measured = evaluated.measurement;
     expect(measured).toMatchObject({ status: "validated", metrics: {
       mixed_kind_first_exposure: { any_at_5: { status: "hit" } },
       proof_conditioned_first_exposure: { any_at_5: { status: "unavailable" } }
     } });
     if (measured?.status !== "validated") throw new Error("consistent native page expected");
-    const admission = sourceSemanticLibraryProofAdmission(measured.first_exposure_slots, measured.delivered_index,
-      measured.slot_qualifiers, measured.delivered_proofs, measured.source_gold_units, [], measured.request.budget);
-    expect(admission.status).toBe("admitted");
-    expect(admission.validatedRanks.size).toBe(0);
-    expect(scoreSourceBearingUnionFirstExposure(measured.first_exposure_slots, measured.source_gold_units, admission).any_at_5.status)
-      .toBe("hit");
+    expect(evaluated.validatedProofRanks).toEqual([]);
+    expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("hit");
+    expect(evaluated.evaluator_usage.proof_slots_checked).toBe(1);
   });
 
   it("scores mixed source retrieval but rejects label-only proof claims", () => {
-    const withProof = measureOf(workerRecall(assemble([sourceOnly("gold")], [proofEntry("gold")])));
-    const withoutProof = measureOf(workerRecall(assemble([sourceOnly("gold")], [])));
+    const evaluated = measureOf(workerRecall(assemble([sourceOnly("gold")], [proofEntry("gold")])));
+    const withProof = evaluated.measurement;
+    const withoutProof = measureOf(workerRecall(assemble([sourceOnly("gold")], []))).measurement;
     expect(withProof).toMatchObject({
       status: "validated", provider_calls: 0,
       request: { budget: { page_budget: REQUEST.page_budget } },
@@ -124,12 +195,8 @@ describe("source semantic library measurement", () => {
     });
     expect(withProof && "request" in withProof ? "execution_receipt" in withProof.request : true).toBe(false);
     if (withProof?.status !== "validated") throw new Error("native measurement must retain unavailable proof status");
-    const proofAdmission = sourceSemanticLibraryProofAdmission(withProof.first_exposure_slots, withProof.delivered_index,
-      withProof.slot_qualifiers, withProof.delivered_proofs, withProof.source_gold_units, [], withProof.request.budget);
-    expect(proofAdmission.validatedRanks.size).toBe(0);
-    expect(proofAdmission.unverifiedGoldRanks.size).toBeGreaterThan(0);
-    expect(scoreSourceBearingUnionFirstExposure(withProof.first_exposure_slots, withProof.source_gold_units, proofAdmission).any_at_5.status)
-      .toBe("unavailable");
+    expect(evaluated.validatedProofRanks).toEqual([]);
+    expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("unavailable");
     expect(REQUEST.page_budget).not.toBe(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET);
     expect(withoutProof && "metrics" in withoutProof
       ? withoutProof.metrics.mixed_kind_first_exposure.any_at_10
@@ -155,6 +222,6 @@ describe("source semantic library measurement", () => {
       firstExposurePage: recordSourceSemanticLibraryFirstExposure(recalled),
       requestBudget: REQUEST,
       goldSourceUnits: [GOLD]
-    })).toEqual({ schema_version: 1, status: "invalid", reason: "request_budget_mismatch" });
+    }).measurement).toEqual({ schema_version: 1, status: "invalid", reason: "request_budget_mismatch" });
   });
 });

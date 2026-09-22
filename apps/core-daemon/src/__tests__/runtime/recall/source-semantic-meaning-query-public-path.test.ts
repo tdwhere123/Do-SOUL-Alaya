@@ -64,21 +64,21 @@ function segment(catalog: SourceReferenceCatalog, text: string): string {
   return row.id;
 }
 
-function mention(h: SourceSemanticInterpretation, text: string) {
-  const row = h.mentions.find((item) => item.text === text);
+function mention(sourceInterpretation: SourceSemanticInterpretation, text: string) {
+  const row = sourceInterpretation.mentions.find((item) => item.text === text);
   if (row === undefined) throw new Error(`source interpretation lacks ${text}`);
   return row;
 }
 
-function frameOf(h: SourceSemanticInterpretation, reading: string) {
-  const row = h.frames.find((item) => item.predicate_support.reading === reading);
+function frameOf(sourceInterpretation: SourceSemanticInterpretation, reading: string) {
+  const row = sourceInterpretation.frames.find((item) => item.predicate_support.reading === reading);
   if (row === undefined) throw new Error(`source interpretation lacks frame ${reading}`);
   return row;
 }
 
-function referentOf(h: SourceSemanticInterpretation, text: string) {
-  const id = mention(h, text).id;
-  const row = h.referents.find((item) => item.mentions.includes(id));
+function referentOf(sourceInterpretation: SourceSemanticInterpretation, text: string) {
+  const id = mention(sourceInterpretation, text).id;
+  const row = sourceInterpretation.referents.find((item) => item.mentions.includes(id));
   if (row === undefined) throw new Error(`source interpretation lacks referent for ${text}`);
   return row;
 }
@@ -131,7 +131,7 @@ async function interpret(handler: Handler, args: unknown, context: Context) {
   return SoulInterpretationResponseSchema.parse(result.output);
 }
 
-function receiveFrozenMeaningQ() {
+function receiveFrozenQuerySemantics() {
   const received = proposeQuerySemantics({
     original_query: ORIGINAL,
     producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
@@ -143,9 +143,9 @@ function receiveFrozenMeaningQ() {
   return { request: received.request, query: received.query };
 }
 
-function receiveLatheA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: string) {
-  const operate = frameOf(h, "operate");
-  const compiled = q.alternatives[0]?.frames.find((row) => row.predicate_reading === "operate");
+function receiveLatheCorrespondence(querySemantics: SourceSemanticQuery, sourceInterpretation: SourceSemanticInterpretation, sourceInterpretationId: string) {
+  const operate = frameOf(sourceInterpretation, "operate");
+  const compiled = querySemantics.alternatives[0]?.frames.find((row) => row.predicate_reading === "operate");
   const agent = compiled?.role_requirements.find((row) => row.role_reading === "agent");
   const theme = compiled?.role_requirements.find((row) => row.role_reading === "theme");
   const operateAgent = operate.slots.find((row) => row.role_reading === "agent");
@@ -154,27 +154,27 @@ function receiveLatheA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, 
     || operateAgent === undefined || operateTheme === undefined) {
     throw new Error("compiled operate slots required");
   }
-  const received = receiveAuthoredCorrespondence({ original_query: ORIGINAL, admitted_query_semantics: q, source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }], producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, { correspondences: [
+  const received = receiveAuthoredCorrespondence({ original_query: ORIGINAL, admitted_query_semantics: querySemantics, source_interpretation_descriptors: [{ source_interpretation_id: sourceInterpretationId, interpretation: sourceInterpretation }], producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, { correspondences: [
         { relation: "contextual_equivalence",
           query_endpoint: { kind: "referent", variable: "lathe" },
-          source_endpoint: { kind: "referent", referent: referentOf(h, "lathe").id },
+          source_endpoint: { kind: "referent", referent: referentOf(sourceInterpretation, "lathe").id },
           query_support: { kind: "query_text", excerpt: "lathe" },
-          source_semantic_support: [{ kind: "lexical", mentions: [mention(h, "lathe").id] }] },
+          source_semantic_support: [{ kind: "lexical", mentions: [mention(sourceInterpretation, "lathe").id] }] },
         { relation: "contextual_equivalence",
           query_endpoint: { kind: "predicate", alternative: 0, frame: compiled.id },
           source_endpoint: { kind: "frame", frame: operate.id },
           query_support: { kind: "query_text", excerpt: "operation" },
-          source_semantic_support: [{ kind: "lexical", mentions: [mention(h, "operate").id] }] },
+          source_semantic_support: [{ kind: "lexical", mentions: [mention(sourceInterpretation, "operate").id] }] },
         { relation: "contextual_equivalence",
           query_endpoint: { kind: "slot", alternative: 0, frame: compiled.id, slot: agent.id },
           source_endpoint: { kind: "slot", frame: operate.id, slot: operateAgent.id },
           query_support: { kind: "query_text", excerpt: "Whose" },
-          source_semantic_support: [{ kind: "lexical", mentions: [mention(h, "Ada").id] }] },
+          source_semantic_support: [{ kind: "lexical", mentions: [mention(sourceInterpretation, "Ada").id] }] },
         { relation: "contextual_equivalence",
           query_endpoint: { kind: "slot", alternative: 0, frame: compiled.id, slot: theme.id },
           source_endpoint: { kind: "slot", frame: operate.id, slot: operateTheme.id },
           query_support: { kind: "query_text", excerpt: "lathe" },
-          source_semantic_support: [{ kind: "lexical", mentions: [mention(h, "lathe").id] }] }
+          source_semantic_support: [{ kind: "lexical", mentions: [mention(sourceInterpretation, "lathe").id] }] }
       ] }, { status: "interpreted", gaps: [] });
   if (received.semantic_correspondence === undefined) {
     throw new Error(`Correspondence receive failed: ${JSON.stringify(received.outcome)}`);
@@ -187,17 +187,17 @@ function receiveLatheA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, 
  * opt-in typed source interpretation, query semantics, and semantic correspondence library path. Ordinary `soul.recall` is not that surface.
  */
 it("recalls a model-admitted query semantics through SQLite reopen, worker, and public interpretation", async () => {
-  const receivedQ = receiveFrozenMeaningQ();
-  expect(receivedQ.request.contract).toBe("source-semantic-query-request-v3");
-  expect(receivedQ.query.alternatives[0]?.frames.some((row) => row.operator === "possible")).toBe(true);
+  const receivedQuerySemantics = receiveFrozenQuerySemantics();
+  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v3");
+  expect(receivedQuerySemantics.query.alternatives[0]?.frames.some((row) => row.operator === "possible")).toBe(true);
 
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-meaning-public-"));
   const filename = join(directory, "alaya.db");
   try {
     await admitSource(filename);
     const session = await openSession(filename);
-    let hId: string;
-    let h: SourceSemanticInterpretation;
+    let sourceInterpretationId: string;
+    let sourceInterpretation: SourceSemanticInterpretation;
     try {
       const prepared = await interpret(session.handler, {
         operation: "prepare_source", source_id: "artifact-lathe", budget: BUDGET, authorized_scopes: SCOPES
@@ -206,7 +206,7 @@ it("recalls a model-admitted query semantics through SQLite reopen, worker, and 
         throw new Error("prepare_source required");
       }
       const catalog = prepared.catalog;
-      const receivedH = proposeSourceSemantics({
+      const receivedInterpretation = proposeSourceSemantics({
         sourceCorpus: SOURCE, assertionIds: [1], source_id: "artifact-lathe", source_version: "1",
         producer_id: "test-author", producer_version: "p1"
       }, {
@@ -225,38 +225,38 @@ it("recalls a model-admitted query semantics through SQLite reopen, worker, and 
           } }] }
         })
       });
-      if (receivedH.draft === undefined || receivedH.interpretation === undefined) {
-        throw new Error(`source-interpretation receive failed: ${JSON.stringify(receivedH.outcome)}`);
+      if (receivedInterpretation.draft === undefined || receivedInterpretation.interpretation === undefined) {
+        throw new Error(`source-interpretation receive failed: ${JSON.stringify(receivedInterpretation.outcome)}`);
       }
       const published = await interpret(session.handler, {
-        operation: "propose", source_handle: prepared.source_handle, draft: receivedH.draft,
+        operation: "propose", source_handle: prepared.source_handle, draft: receivedInterpretation.draft,
         producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4",
         budget: BUDGET, authorized_scopes: SCOPES
       }, session.context);
       if (published.operation !== "propose" || published.published === undefined) {
         throw new Error(`propose failed: ${JSON.stringify(published.outcome)}`);
       }
-      hId = published.published.interpretation_id;
-      h = published.published.interpretation;
+      sourceInterpretationId = published.published.interpretation_id;
+      sourceInterpretation = published.published.interpretation;
     } finally {
       await closeSession(session, filename);
     }
 
     const reopened = await openSession(filename);
     try {
-      const admitted = receiveFrozenMeaningQ();
+      const admitted = receiveFrozenQuerySemantics();
       expect(admitted.request.contract).toBe("source-semantic-query-request-v3");
-      const qAfter = admitted.query;
-      const semantic_correspondence = receiveLatheA(qAfter, h, hId);
+      const querySemanticsAfter = admitted.query;
+      const semantic_correspondence = receiveLatheCorrespondence(querySemanticsAfter, sourceInterpretation, sourceInterpretationId);
       const recalled = await interpret(reopened.handler, {
         operation: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
-        query_semantics: qAfter, semantic_correspondences: [semantic_correspondence], budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
+        query_semantics: querySemanticsAfter, semantic_correspondences: [semantic_correspondence], budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
       }, reopened.context);
       if (recalled.operation !== "recall") throw new Error(`recall expected: ${JSON.stringify(recalled)}`);
       expect(recalled.provider_attempts).toBe(0);
-      const proofSlot = recalled.slot_qualifiers?.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === hId);
+      const proofSlot = recalled.slot_qualifiers?.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === sourceInterpretationId);
       expect(proofSlot).toBeDefined();
-      expect(recalled.proofs?.some((row) => row.source_interpretation_id === hId && (row.answers?.length ?? 0) > 0)).toBe(true);
+      expect(recalled.proofs?.some((row) => row.source_interpretation_id === sourceInterpretationId && (row.answers?.length ?? 0) > 0)).toBe(true);
       expect(recalled.results?.[proofSlot!.index]?.object_kind).toBe("semantic_proof");
       expect(recalled.delivery_id).toEqual(expect.any(String));
     } finally {

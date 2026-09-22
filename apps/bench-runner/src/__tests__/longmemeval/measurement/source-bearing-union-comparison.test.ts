@@ -1,9 +1,51 @@
-import { describe, expect, it } from "vitest";
-import { SourceSemanticLibraryMeasurementSchema } from "../../../runs/measurement/source-semantic-library-measurement.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as core from "@do-soul/alaya-core";
+import { readmitSourceSemanticLibraryMeasurement } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import { reportFrozenSourceBearingUnion } from "../../../runs/measurement/source-bearing-union-comparison.js";
+import { LongMemEvalPublicationSchema, LongMemEvalSourceOnlyReplaySchema } from "../../../runs/longmemeval-semantic/execute.js";
 import { envelope, frozenUnionFixture } from "./source-bearing-union-comparison-fixture.js";
+afterEach(() => vi.restoreAllMocks());
 
 describe("frozen source-bearing union evidence admission", () => {
+  it("rejects published interpretations through the shared source-only publication admission", () => {
+    const { evidence, read, files } = frozenUnionFixture();
+    const preparedRow = evidence.prepared.payload.rows[0]!;
+    const publication = JSON.parse(read(preparedRow.publication_path)).payload;
+    publication.sources[0].publication = "published";
+    expect(LongMemEvalPublicationSchema.safeParse(publication).success).toBe(false);
+    const sealed = envelope(publication);
+    files.set(preparedRow.publication_path, JSON.stringify(sealed));
+    preparedRow.publication_identity = sealed.identity;
+    evidence.prepared = envelope(evidence.prepared.payload);
+    evidence.replay.payload.rows[0]!.publication_identity = sealed.identity;
+    evidence.replay = envelope({ ...evidence.replay.payload, prepared_identity: evidence.prepared.identity });
+    evidence.summary = envelope({ ...evidence.summary.payload, replay_identity: evidence.replay.identity });
+    const report = reportFrozenSourceBearingUnion(evidence, read);
+    expect(report.rows[0]?.union_any_at_5).toBe("unavailable");
+    expect(report.rows[0]?.cause).toContain("source-only publication");
+  });
+
+  it("rejects nonempty proofs in the source-only replay before evaluator verification", () => {
+    const { evidence, read, files } = frozenUnionFixture();
+    const path = evidence.replay.payload.rows[0]!.replay_path;
+    const replay = JSON.parse(read(path)).payload;
+    replay.rows[0].response.proofs = [{}];
+    expect(LongMemEvalSourceOnlyReplaySchema.safeParse(replay).success).toBe(false);
+    files.set(path, JSON.stringify(envelope(replay)));
+    const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
+    const report = reportFrozenSourceBearingUnion(evidence, read);
+    expect(report.rows[0]?.union_any_at_5).toBe("unavailable");
+    expect(verify).not.toHaveBeenCalled();
+  });
+  it("records fresh source-only evaluation cost without inventing historical costs", () => {
+    const { evidence, read } = frozenUnionFixture();
+    const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
+    const report = reportFrozenSourceBearingUnion(evidence, read);
+    expect(report.rows[0]?.union_any_at_5).toBe("hit");
+    expect(verify).not.toHaveBeenCalled();
+    expect(report.rows[0]?.evaluator_usage).toEqual({ proof_slots_checked: 0, work_units: 0, logical_memory_bytes: 0 });
+    expect(report.rows[20]?.evaluator_usage).toBeUndefined();
+  });
   it("preserves the authored 500-row census and selected 20-question denominator", () => {
     const { evidence, read } = frozenUnionFixture();
     const report = reportFrozenSourceBearingUnion(evidence, read);
@@ -64,7 +106,10 @@ describe("frozen source-bearing union evidence admission", () => {
     if (kind === "commitment") measurement.first_exposure_page.commitment = "f".repeat(64);
     else if (kind === "identity") measurement.first_exposure_page.initial.identity.query_id = "another-question";
     else measurement.delivered_index.query_id = "another-question";
-    expect(SourceSemanticLibraryMeasurementSchema.safeParse(measurement).success).toBe(false);
+    const replay = JSON.parse(read(evidence.replay.payload.rows[0]!.replay_path)).payload.rows[0];
+    expect(readmitSourceSemanticLibraryMeasurement(measurement, { recallResult: replay.response,
+      firstExposurePage: replay.first_exposure, requestBudget: evidence.freeze.payload.config.budget,
+      goldSourceUnits: chain.payload.gold[0].source_units }).measurement?.status).toBe("invalid");
   });
 
   it.each(["results", "delivery"] as const)("rejects a resealed native replay with a different %s", (kind) => {

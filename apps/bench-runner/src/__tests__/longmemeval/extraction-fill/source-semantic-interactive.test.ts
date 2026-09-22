@@ -133,13 +133,13 @@ it("fills complete-source open semantics through interactive generateContent wit
   const census = await censusCompleteSourceRecords({ population: "fixture", dataDir, pinnedMetaRoot });
   const publicationAssociations = census.records.map((source) => {
     const key = fixture.keys.find((candidate) => {
-      const h = inspectCachedSourceSemantic(cacheRoot, candidate, MODEL, REQUEST_PROFILE);
-      return h.status === "hit" && h.admitted.request.source_catalog.source_digest === source.corpus_digest;
+      const cachedInterpretation = inspectCachedSourceSemantic(cacheRoot, candidate, MODEL, REQUEST_PROFILE);
+      return cachedInterpretation.status === "hit" && cachedInterpretation.admitted.request.source_catalog.source_digest === source.corpus_digest;
     })!;
-    const h = inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE);
-    if (h.status !== "hit") throw new Error("fixture source interpretation missing");
+    const cachedInterpretation = inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE);
+    if (cachedInterpretation.status !== "hit") throw new Error("fixture source interpretation missing");
     return { source_id: source.source_id, source_version: source.source_version,
-      generation_key: key, request_digest: h.requestDigest };
+      generation_key: key, request_digest: cachedInterpretation.requestDigest };
   });
   const secondCache = join(dirname(cacheRoot), "second-generation");
   mkdirSync(secondCache);

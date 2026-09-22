@@ -181,6 +181,11 @@ context. Resume rebuilds a missing identical semantic-correspondence workset; ru
 proposal preparation command to inspect current cache state before any paid
 fill. A changed input requires a new preparation root or replay identity.
 Replay records native first exposure through the existing measurement owner.
+Measurement derives mixed, proof-conditioned and source-bearing union metrics from
+one admission. Its `evaluator_usage` records fresh proof-verification work and logical
+allocation charges separately from native retrieval diagnostics. External stored
+measurements require fresh readmission with independent publication records;
+historical records without evaluator cost retain that absence.
 An interrupted exposure reservation without a result fails closed and retains
 its working database for diagnosis; it is not automatically replayable.
 

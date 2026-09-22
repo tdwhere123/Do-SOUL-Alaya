@@ -35,7 +35,7 @@ async function fixture(duplicate = false, abstention = false) {
     question("mixed-roles", [[{ role: "user", content: "A café source record." },
       { role: "assistant", content: "Noted the café source." }]]),
     question("repeated-text", [[{ role: "user", content: "Please note this. The cat sat. The cat sat. Done." }]]),
-    question(abstention ? "absent-h_abs" : "absent-h", [[{ role: "user", content: "Unrelated distractor lives in Suzhou." }]]),
+    question(abstention ? "absent-interpretation_abs" : "absent-interpretation", [[{ role: "user", content: "Unrelated distractor lives in Suzhou." }]]),
     ...(duplicate ? [question("same-text-other-session", [[{ role: "user", content: "Unrelated distractor lives in Suzhou." }]])] : [])
   ]);
   await writeFile(join(dataDir, "longmemeval_s.json"), source);
@@ -62,7 +62,7 @@ describe("complete-source census and publication", () => {
     const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
     const root = join(f.root, "development"), queryCache = join(f.root, "query-cache");
     const frozen = await freezeLongMemEvalSemanticRun({ data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot,
-      dataset_sha256: census.dataset_sha256, dataset_question_count: 3, question_ids: ["mixed-roles", "absent-h_abs"],
+      dataset_sha256: census.dataset_sha256, dataset_question_count: 3, question_ids: ["mixed-roles", "absent-interpretation_abs"],
       model: "gemini-2.5-flash-lite", request_profile: "gemini-2.5-nonthinking-v1", query_cache_root: queryCache,
       recorded_at: CLOCK, producer_commit: "a".repeat(40), max_output_tokens: 4096, output_byte_limit: 1000000,
       budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000,
@@ -96,7 +96,7 @@ describe("complete-source census and publication", () => {
     expect(measured.result.inventory).toEqual({ questions: 3, answerable: 2, abstention: 1 });
     expect(measured.result.primary).toMatchObject({ eligible: 1, hits: 1, misses: 0, unknown: 0, target_decision: "development_only" });
     expect(measured.result.rows).toHaveLength(3);
-    expect(measured.result.rows.find((row) => row.question_id === "absent-h_abs")?.outcome).toBe("uncalibrated");
+    expect(measured.result.rows.find((row) => row.question_id === "absent-interpretation_abs")?.outcome).toBe("uncalibrated");
     expect(measured.result.rows.find((row) => row.question_id === "repeated-text")?.outcome).toBe("not_selected_development");
     const receipt = readFileSync(published.publication_path, "utf8");
     const changed = JSON.parse(receipt).payload;
@@ -177,7 +177,7 @@ describe("complete-source census and publication", () => {
     expect(census.records).toHaveLength(3);
     expect(census.records.map((row) => row.source_id).every((id) => !/^[a-f0-9]{64}$/u.test(id))).toBe(true);
     expect(census.records.map((row) => row.source_id).sort()).toEqual([
-      "fixture:absent-h-s0-r0", "fixture:mixed-roles-s0-r0", "fixture:repeated-text-s0-r0"
+      "fixture:absent-interpretation-s0-r0", "fixture:mixed-roles-s0-r0", "fixture:repeated-text-s0-r0"
     ].sort());
     expect(new Set(census.records.map((row) => row.source_version))).toEqual(new Set([census.dataset_sha256]));
     const mixed = census.records.find((row) => row.question_id === "mixed-roles")!;

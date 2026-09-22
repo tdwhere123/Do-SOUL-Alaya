@@ -213,10 +213,10 @@ function agentQuery(): SourceSemanticQuery {
   };
 }
 
-function themeCorrespondence(hId: string, qId: string) {
+function themeCorrespondence(sourceInterpretationId: string, querySemanticsId: string) {
   return {
     contract: "source-semantic-correspondence-v3" as const,
-    source_interpretation_id: hId, query_semantics_id: qId,
+    source_interpretation_id: sourceInterpretationId, query_semantics_id: querySemanticsId,
     producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
     producer_version: "1", contract_version: "source-semantic-correspondence-v3",
     correspondences: [
@@ -330,7 +330,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
     if (proposed.output.operation !== "propose" || proposed.output.published === undefined) {
       throw new Error("propose must publish the source interpretation");
     }
-    const hId = proposed.output.published.interpretation_id;
+    const sourceInterpretationId = proposed.output.published.interpretation_id;
     expect(publishDb.connection.prepare("SELECT count(*) AS n FROM memory_entries").get()).toEqual({ n: 0 });
     expect(publishDb.connection.prepare("SELECT count(*) AS n FROM relation_assertions").get()).toEqual({ n: 0 });
     publishDb.close();
@@ -349,9 +349,9 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
     });
     try {
       await reopened.ready();
-      const q = queryOf();
+      const querySemantics = queryOf();
       const prepareQueryArgs = SoulInterpretationRequestSchema.parse({
-        operation: "prepare_query", original_query: ORIGINAL, query_semantics: q, budget: BUDGET
+        operation: "prepare_query", original_query: ORIGINAL, query_semantics: querySemantics, budget: BUDGET
       });
       const preparedQuery = await callInterpretation(freshHandler, {
         toolName: "soul.interpretation", arguments: prepareQueryArgs, context
@@ -362,12 +362,12 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       if (preparedQuery.output.operation !== "prepare_query" || preparedQuery.output.query_handle === undefined) {
         throw new Error("prepare_query must return a handle");
       }
-      expect(preparedQuery.output.candidates.some((row) => row.interpretation_id === hId)).toBe(true);
-      const admitted = admitSourceSemanticQuery(q, ORIGINAL);
+      expect(preparedQuery.output.candidates.some((row) => row.interpretation_id === sourceInterpretationId)).toBe(true);
+      const admitted = admitSourceSemanticQuery(querySemantics, ORIGINAL);
       if (admitted.kind !== "admitted") throw new Error("query must admit");
-      const a = {
+      const semanticCorrespondence = {
         contract: "source-semantic-correspondence-v3" as const,
-        source_interpretation_id: hId, query_semantics_id: admitted.query_id,
+        source_interpretation_id: sourceInterpretationId, query_semantics_id: admitted.query_id,
         producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
         producer_version: "1", contract_version: "source-semantic-correspondence-v3",
         correspondences: [
@@ -392,7 +392,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
         operation: "reason",
         accepts_unreviewed_conditional_results: true,
         query_handle: preparedQuery.output.query_handle,
-        semantic_correspondence: a, budget: BUDGET, output_byte_limit: 1000000
+        semantic_correspondence: semanticCorrespondence, budget: BUDGET, output_byte_limit: 1000000
       });
       const direct = await callInterpretation(freshHandler, {
         toolName: "soul.interpretation", arguments: reasonArgs, context
@@ -419,16 +419,16 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       expect(direct.output.result.outcome.status).toBe("interpreted");
       expect(direct.output.result.world_claim).toBe("unknown");
       expect(direct.output.result.semantic_status).toBe("unreviewed");
-      expect(direct.output.result.source_interpretation_id).toBe(hId);
+      expect(direct.output.result.source_interpretation_id).toBe(sourceInterpretationId);
       expect(direct.output.coverage.conditional_computation).toBe("complete");
       expect(direct.output.coverage.discovery).not.toBe("unexercised");
       const interpretation = direct.output.interpretation;
       const semantic_correspondence = direct.output.semantic_correspondence;
       expect(semantic_correspondence).toBeDefined();
-      if (semantic_correspondence === undefined) throw new Error("reason must return A");
+      if (semantic_correspondence === undefined) throw new Error("reason must return semantic correspondence");
       expect(interpretation).toBeDefined();
       if (interpretation === undefined) throw new Error("reason must return the source interpretation");
-      const oracle = oracleSourceSemanticJoin(interpretation, q, semantic_correspondence);
+      const oracle = oracleSourceSemanticJoin(interpretation, querySemantics, semantic_correspondence);
       const decoded = decodeEngineBindings(direct.output.result);
       expect(oracleBindingsMatchEngine(oracle, decoded, ["tools", "fUse"])).toBe(true);
       expect(oracleNecessaryLeavesHeld(oracle, direct.output.result.consumed_leaves)).toBe(true);
@@ -521,16 +521,16 @@ it("publishes a legal ablated source interpretation, rebinds semantic correspond
     if (!first.ok || first.output.operation !== "propose" || first.output.published === undefined) {
       throw new Error("first propose must publish the source interpretation");
     }
-    const hId1 = first.output.published.interpretation_id;
+    const firstInterpretationId = first.output.published.interpretation_id;
     expect(first.output.published.interpretation.frames[0]?.slots.some((row) => row.id === "theme")).toBe(true);
-    const q = queryOf();
-    const admitted = admitSourceSemanticQuery(q, ORIGINAL);
+    const querySemantics = queryOf();
+    const admitted = admitSourceSemanticQuery(querySemantics, ORIGINAL);
     if (admitted.kind !== "admitted") throw new Error("theme query must admit");
     const before = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
-        source_interpretation_id: hId1, query_semantics: q, semantic_correspondence: themeCorrespondence(hId1, admitted.query_id), original_query: ORIGINAL,
+        source_interpretation_id: firstInterpretationId, query_semantics: querySemantics, semantic_correspondence: themeCorrespondence(firstInterpretationId, admitted.query_id), original_query: ORIGINAL,
         budget: BUDGET, output_byte_limit: 1000000
       }),
       context
@@ -554,29 +554,29 @@ it("publishes a legal ablated source interpretation, rebinds semantic correspond
     if (!ablated.ok || ablated.output.operation !== "propose" || ablated.output.published === undefined) {
       throw new Error("ablated propose must publish a new source interpretation");
     }
-    const hId2 = ablated.output.published.interpretation_id;
-    expect(hId2).not.toBe(hId1);
+    const secondInterpretationId = ablated.output.published.interpretation_id;
+    expect(secondInterpretationId).not.toBe(firstInterpretationId);
     expect(ablated.output.published.interpretation.frames[0]?.slots.some((row) => row.id === "theme")).toBe(true);
     expect(ablated.output.published.interpretation.frames[0]?.bindings.some((row) => row.slot_id === "theme")).toBe(false);
     const stale = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
-        source_interpretation_id: hId2, query_semantics: q, semantic_correspondence: themeCorrespondence(hId1, admitted.query_id), original_query: ORIGINAL,
+        source_interpretation_id: secondInterpretationId, query_semantics: querySemantics, semantic_correspondence: themeCorrespondence(firstInterpretationId, admitted.query_id), original_query: ORIGINAL,
         budget: BUDGET, output_byte_limit: 1000000
       }),
       context
     });
     expect(stale.ok).toBe(true);
     if (!stale.ok || stale.output.operation !== "reason" || stale.output.result === undefined) {
-      throw new Error("stale A must return a reason result");
+      throw new Error("stale semantic correspondence must return a reason result");
     }
     expect(stale.output.result.outcome).toEqual({ status: "invalid", reason: "malformed_correspondence" });
     const rebound = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
-        source_interpretation_id: hId2, query_semantics: q, semantic_correspondence: themeCorrespondence(hId2, admitted.query_id), original_query: ORIGINAL,
+        source_interpretation_id: secondInterpretationId, query_semantics: querySemantics, semantic_correspondence: themeCorrespondence(secondInterpretationId, admitted.query_id), original_query: ORIGINAL,
         budget: BUDGET, output_byte_limit: 1000000
       }),
       context
@@ -593,10 +593,10 @@ it("publishes a legal ablated source interpretation, rebinds semantic correspond
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
-        source_interpretation_id: hId2, query_semantics: who,
+        source_interpretation_id: secondInterpretationId, query_semantics: who,
         semantic_correspondence: {
           contract: "source-semantic-correspondence-v3",
-          source_interpretation_id: hId2, query_semantics_id: admittedWho.query_id,
+          source_interpretation_id: secondInterpretationId, query_semantics_id: admittedWho.query_id,
           producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
           producer_version: "1", contract_version: "source-semantic-correspondence-v3",
           correspondences: [
@@ -626,7 +626,7 @@ it("publishes a legal ablated source interpretation, rebinds semantic correspond
     }
     expect(remaining.output.result.outcome.status).toBe("interpreted");
     expect(remaining.output.result.consumed_leaves.some((row) => row.leaf_kind === "source_interpretation_binding" && row.slot_id === "agent")).toBe(true);
-    expect(remaining.output.result.source_interpretation_id).toBe(hId2);
+    expect(remaining.output.result.source_interpretation_id).toBe(secondInterpretationId);
     expect(remaining.output.provider_attempts).toBe(0);
   } finally {
     try { publishDb.close(); } catch { /* closed */ }

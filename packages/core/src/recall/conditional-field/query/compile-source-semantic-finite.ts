@@ -23,15 +23,15 @@ const DOMAIN = "@finite:domain";
 
 /** Expand finite obligations only. Every outcome is still decided by the conditional-field engine. */
 export function compileSourceSemanticExecution(input: Input): SourceSemanticExecutionPlan {
-  const { query_semantics: q, source_interpretation: h, semantic_correspondence: a, meter, population } = input;
-  if (q.evaluation === undefined) {
-    const finite = { source_interpretation: h, population, semantic_correspondence: a };
+  const { query_semantics: querySemantics, source_interpretation: sourceInterpretation, semantic_correspondence: semanticCorrespondence, meter, population } = input;
+  if (querySemantics.evaluation === undefined) {
+    const finite = { source_interpretation: sourceInterpretation, population, semantic_correspondence: semanticCorrespondence };
     let acceptIndex = 0;
-    const groupPhases = q.alternatives.flatMap((alternative, index) => {
-      const frames = correspondenceGroupPhases(q, a, index);
+    const groupPhases = querySemantics.alternatives.flatMap((alternative, index) => {
+      const frames = correspondenceGroupPhases(querySemantics, semanticCorrespondence, index);
       return frames.map((group) => {
         const phase = {
-          program: compileSourceSemanticGroupProgram(q, alternative, index, meter, finite, group, acceptIndex),
+          program: compileSourceSemanticGroupProgram(querySemantics, alternative, index, meter, finite, group, acceptIndex),
           alternative: index, acceptIndex, groupFrame: group
         };
         acceptIndex += 1;
@@ -44,10 +44,10 @@ export function compileSourceSemanticExecution(input: Input): SourceSemanticExec
       branches, missingOperands: false, groupPhases
     };
   }
-  const mapping = a.domains?.find((row) => row.query_domain === q.evaluation!.domain);
-  const domain = h.domains?.find((row) => row.id === mapping?.source_domain);
+  const mapping = semanticCorrespondence.domains?.find((row) => row.query_domain === querySemantics.evaluation!.domain);
+  const domain = sourceInterpretation.domains?.find((row) => row.id === mapping?.source_domain);
   if (domain === undefined) return { program: emptySemanticProgram, branches: [], missingOperands: false };
-  return q.evaluation.kind === "forall" ? compileUniversal(input, domain) : compileComparison(input, domain);
+  return querySemantics.evaluation.kind === "forall" ? compileUniversal(input, domain) : compileComparison(input, domain);
 }
 
 function domainEntry(input: Input, domain: SourceSemanticDomain): QueryProgram[] {
@@ -75,20 +75,20 @@ function memberProof(input: Input, domain: SourceSemanticDomain, member: SourceS
 }
 
 function compileUniversal(input: Input, domain: SourceSemanticDomain): SourceSemanticExecutionPlan {
-  const { query_semantics: q, meter } = input, evaluation = q.evaluation!;
+  const { query_semantics: querySemantics, meter } = input, evaluation = querySemantics.evaluation!;
   if (evaluation.kind !== "forall") throw new TypeError("expected universal evaluation");
   if (domain.context !== null) return { program: emptySemanticProgram, branches: [], domain, missingOperands: false };
   const branches: SourceSemanticProofBranch[] = [], options: QueryProgram[] = [];
   const body = (member: SourceSemanticDomain["members"][number], memberIndex: number, counterexample: boolean) => {
     const finite = { source_interpretation: input.source_interpretation, population: input.population, semantic_correspondence: input.semantic_correspondence };
-    const choices = q.alternatives.flatMap((alternative, index) => {
+    const choices = querySemantics.alternatives.flatMap((alternative, index) => {
       if ((alternative.purpose === "counterexample") !== counterexample) return [];
-      const frames = correspondenceGroupPhases(q, input.semantic_correspondence, index);
+      const frames = correspondenceGroupPhases(querySemantics, input.semantic_correspondence, index);
       return frames.map((group, groupIndex) => {
         meter.charge(1, 1024, "finite universal branch");
         const suffix = `:member${memberIndex}:alt${index}:g${groupIndex}`;
         const rename = (name: string) => evaluation.local_variables.includes(name) || name.startsWith("@") ? `${name}${suffix}` : name;
-        const program = compileSourceSemanticAlternative(q, alternative, index, meter, finite, true, group);
+        const program = compileSourceSemanticAlternative(querySemantics, alternative, index, meter, finite, true, group);
         return sequence([memberProof(input, domain, member, rename(evaluation.binder), `${memberIndex}:${index}:${groupIndex}`),
           renameProgram(program, rename, meter),
           rel(key("domain_return", domain.id), rename(alternative.frames[0]!.variable), DOMAIN, meter)]);
@@ -97,7 +97,7 @@ function compileUniversal(input: Input, domain: SourceSemanticDomain): SourceSem
     return alternatives(choices);
   };
   if (domain.closure.kind === "closed" && domain.context === null
-    && (domain.members.length > 0 || q.return_variables.length === 0)) {
+    && (domain.members.length > 0 || querySemantics.return_variables.length === 0)) {
     const premises = domain.members.map((member, index) => body(member, index, false));
     const all: QueryProgram = premises.length === 0 ? { schema_version: 1, kind: "epsilon" }
       : { schema_version: 1, kind: "hyperedge", join: "and", premises };
@@ -105,7 +105,7 @@ function compileUniversal(input: Input, domain: SourceSemanticDomain): SourceSem
     options.push(sequence([...domainEntry(input, domain), closureProof(input, domain), all,
       rel(key("accept"), DOMAIN, `@accepted:${index}`, meter)]));
   }
-  if (q.alternatives.some((row) => row.purpose === "counterexample")) for (const [memberIndex, member] of domain.members.entries()) {
+  if (querySemantics.alternatives.some((row) => row.purpose === "counterexample")) for (const [memberIndex, member] of domain.members.entries()) {
     const index = branches.push({ purpose: "counterexample", alternative: 0, candidate: member.referent }) - 1;
     options.push(sequence([...domainEntry(input, domain), body(member, memberIndex, true),
       rel(key("accept"), DOMAIN, `@accepted:${index}`, meter)]));

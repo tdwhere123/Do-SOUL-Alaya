@@ -150,7 +150,7 @@ describe("500Q expansion receipt binding", () => {
     })).rejects.toThrow(/approved expansion spend envelope/u);
   });
 
-  it("admits a receipt-bound repair limited to the existing first 100query-semantics cache", async () => {
+  it("admits a receipt-bound repair limited to the existing first 100-question cache", async () => {
     mocks.readReceipt.mockReturnValue(repairReceiptFixture());
 
     await expect(runExtractionFill({

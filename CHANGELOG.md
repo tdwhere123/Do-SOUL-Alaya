@@ -8,9 +8,16 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 6.7.0, engine gateway 0.4.0
+## Unreleased — protocol 7.0.0, engine gateway 1.0.0
 
-`@do-soul/alaya-engine-gateway` is `0.4.0`; app packages remain `0.3.11`.
+`@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+These major versions record the breaking opt-in interpretation surface migration:
+public H/Q/A/C fields and obsolete producer exports are replaced by their current
+responsibility names and envelope contracts below. This authorized replacement
+does not retain deprecated aliases or dual readers; consumers must migrate
+together. MCP schema and tool-description snapshots and their SemVer sidecars
+pin the new public surface.
 
 Opt-in producer APIs add source selection, query meaning, and semantic correspondence selection
 schemas/materializers in Protocol and their request/response builders in SOUL.

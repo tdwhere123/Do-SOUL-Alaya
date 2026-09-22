@@ -25,7 +25,7 @@ function proofBinding(root: string, binding: string, node: string): IndexEntry {
     ...base,
     output_binding: binding,
     explanation_ids: ["ex-1"],
-    interpretation_node: { packet_id: `h-${root}`, hypothesis_id: base.hypothesis_id, node_id: node }
+    interpretation_node: { packet_id: `interpretation-${root}`, hypothesis_id: base.hypothesis_id, node_id: node }
   });
 }
 

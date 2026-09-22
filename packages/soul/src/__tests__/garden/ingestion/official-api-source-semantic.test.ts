@@ -336,14 +336,14 @@ describe("query and semantic_correspondence proposal entry points", () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("provider calls are forbidden"));
     try {
       const source = sourceInput(), sourceRequest = buildSourceSemanticRequest(source);
-      const h = proposeSourceSemantics(source, { rawJson: interpretedJson(sourceRequest) }).interpretation!;
+      const sourceInterpretation = proposeSourceSemantics(source, { rawJson: interpretedJson(sourceRequest) }).interpretation!;
       const query = admittedQuery();
       const queryInput = { original_query: "which folio was accessioned into bay B?", producer_id: "query-producer", producer_version: "1" };
-      const alignmentInput = { original_query: "which folio was accessioned into bay B?", admitted_query_semantics: query,
-        source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
-        producer_id: "align-producer", producer_version: "1" };
+      const correspondenceInput = { original_query: "which folio was accessioned into bay B?", admitted_query_semantics: query,
+        source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256), interpretation: sourceInterpretation }],
+        producer_id: "correspondence-producer", producer_version: "1" };
       const preparedQuery = proposeQuerySemantics(queryInput);
-      const preparedCorrespondence = proposeCorrespondenceSemantics(alignmentInput);
+      const preparedCorrespondence = proposeCorrespondenceSemantics(correspondenceInput);
       for (const prepared of [preparedQuery, preparedCorrespondence]) {
         expect(prepared.outcome).toEqual({ status: "unexercised" });
         expect(prepared.provider_attempts).toBe(0);
@@ -353,7 +353,7 @@ describe("query and semantic_correspondence proposal entry points", () => {
       expect(preparedQuery.system_prompt).toContain("Query.gaps is the authoritative gap list");
       expect(preparedCorrespondence.system_prompt).toContain("request-local handle source1, source2");
       for (const valid of [false, true]) {
-        const q = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
+        const querySemantics = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
           contract: "source-semantic-query-response-v3", outcome: { status: "interpreted", gaps: [] },
           query: {
             contract: "source-semantic-query-meaning-v1",
@@ -368,16 +368,16 @@ describe("query and semantic_correspondence proposal entry points", () => {
             gaps: []
           }
         }) : "{}" });
-        const a = proposeCorrespondenceSemantics(alignmentInput, { rawJson: valid ? JSON.stringify({
+        const semanticCorrespondence = proposeCorrespondenceSemantics(correspondenceInput, { rawJson: valid ? JSON.stringify({
           contract: "source-semantic-correspondence-response-v3", outcome: { status: "interpreted", gaps: [] },
           semantic_correspondence: { contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1", selections: [] }
         }) : "{}" });
-        expect(q.outcome.status).toBe(valid ? "interpreted" : "invalid");
-        expect(a.outcome.status).toBe(valid ? "interpreted" : "invalid");
-        expect(q.system_prompt).toBe(preparedQuery.system_prompt);
-        expect(a.system_prompt).toBe(preparedCorrespondence.system_prompt);
-        expect(q.request).toEqual(preparedQuery.request);
-        expect(a.request).toEqual(preparedCorrespondence.request);
+        expect(querySemantics.outcome.status).toBe(valid ? "interpreted" : "invalid");
+        expect(semanticCorrespondence.outcome.status).toBe(valid ? "interpreted" : "invalid");
+        expect(querySemantics.system_prompt).toBe(preparedQuery.system_prompt);
+        expect(semanticCorrespondence.system_prompt).toBe(preparedCorrespondence.system_prompt);
+        expect(querySemantics.request).toEqual(preparedQuery.request);
+        expect(semanticCorrespondence.request).toEqual(preparedCorrespondence.request);
       }
       expect(fetch).not.toHaveBeenCalled();
     } finally { fetch.mockRestore(); }
@@ -406,10 +406,10 @@ describe("query and semantic_correspondence proposal entry points", () => {
 
   it("rejects semantic_correspondence outcome gaps rather than returning successful empty gaps", () => {
     const input = sourceInput(), request = buildSourceSemanticRequest(input);
-    const h = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
+    const sourceInterpretation = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
     const received = proposeCorrespondenceSemantics({ original_query: "which folio was accessioned into bay B?", admitted_query_semantics: admittedQuery(),
-      source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
-      producer_id: "align-producer", producer_version: "1" }, { rawJson: JSON.stringify({
+      source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256), interpretation: sourceInterpretation }],
+      producer_id: "correspondence-producer", producer_version: "1" }, { rawJson: JSON.stringify({
       contract: "source-semantic-correspondence-response-v3",
       outcome: { status: "interpreted", gaps: [{ kind: "unsupported_meaning", affected_ids: [], support: [] }] },
       semantic_correspondence: { contract: "source-semantic-correspondence-selection-v2", selections: [] }
@@ -453,23 +453,23 @@ describe("query and semantic_correspondence proposal entry points", () => {
 
   it("accepts admitted query semantics plus source-interpretation descriptors and rejects ranking or seeds", () => {
     const input = sourceInput(), request = buildSourceSemanticRequest(input);
-    const h = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
-    const alignmentInput = { original_query: "which folio was accessioned into bay B?",
+    const sourceInterpretation = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
+    const correspondenceInput = { original_query: "which folio was accessioned into bay B?",
       admitted_query_semantics: admittedQuery(),
       source_interpretation_descriptors: [{
-        source_interpretation_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h
+        source_interpretation_id: sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256), interpretation: sourceInterpretation
       }],
-      producer_id: "align-producer", producer_version: "1"
+      producer_id: "correspondence-producer", producer_version: "1"
     };
-    const prepared = proposeCorrespondenceSemantics(alignmentInput);
-    expect(prepared.request.original_query).toBe(alignmentInput.original_query);
-    expect(() => proposeCorrespondenceSemantics({ ...alignmentInput,
+    const prepared = proposeCorrespondenceSemantics(correspondenceInput);
+    expect(prepared.request.original_query).toBe(correspondenceInput.original_query);
+    expect(() => proposeCorrespondenceSemantics({ ...correspondenceInput,
       original_query: "a different query" })).toThrow(/does not bind the original query/u);
-    expect(() => proposeCorrespondenceSemantics({ ...alignmentInput,
+    expect(() => proposeCorrespondenceSemantics({ ...correspondenceInput,
       original_query: "" })).toThrow(/requires the original query/u);
     const predicate = prepared.request.catalog?.query_endpoints.find((row) => row.kind === "predicate");
     const frame = prepared.request.catalog?.source_endpoints.find((row) => row.kind === "frame");
-    const received = proposeCorrespondenceSemantics(alignmentInput, {
+    const received = proposeCorrespondenceSemantics(correspondenceInput, {
       rawJson: JSON.stringify({
         contract: "source-semantic-correspondence-response-v3",
         outcome: { status: "interpreted", gaps: [] },
@@ -489,7 +489,7 @@ describe("query and semantic_correspondence proposal entry points", () => {
     expect(() => proposeCorrespondenceSemantics({ original_query: "which folio was accessioned into bay B?",
       admitted_query_semantics: admittedQuery(),
       source_interpretation_descriptors: [{ source_interpretation_id: digest, source_id: "src", source_version: "1", frames: [] }],
-      producer_id: "align-producer", producer_version: "1",
+      producer_id: "correspondence-producer", producer_version: "1",
       ranking: [digest], seeds: ["fAccession"]
     } as never)).toThrow(/ranking|seeds/u);
   });

@@ -66,11 +66,11 @@ export function discover(runtime: RecallReadWorkerRuntime, payload: SourceSemant
 function verifiedHandle(runtime: RecallReadWorkerRuntime, workspace: string, interpretationId: string,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget): SourceSemanticHandleDescriptor {
   const checked = loadVerified(runtime, workspace, interpretationId, authorized, meter);
-  const h = checked.bound.interpretation;
+  const sourceInterpretation = checked.bound.interpretation;
   return {
-    interpretation_id: checked.bound.interpretation_id, source_id: h.source.source_id, source_version: h.source.source_version,
-    content_digest: h.source.content_digest, producer_id: h.producer_id, producer_version: h.producer_version,
-    contract_version: h.contract_version, interpretation: h
+    interpretation_id: checked.bound.interpretation_id, source_id: sourceInterpretation.source.source_id, source_version: sourceInterpretation.source.source_version,
+    content_digest: sourceInterpretation.source.content_digest, producer_id: sourceInterpretation.producer_id, producer_version: sourceInterpretation.producer_version,
+    contract_version: sourceInterpretation.contract_version, interpretation: sourceInterpretation
   };
 }
 

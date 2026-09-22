@@ -40,7 +40,7 @@ afterEach(async () => {
 });
 
 describe("Canary query-window compatibility", () => {
-  it("admits a 3Q window that is a subset of a larger 100query-semantics cache", async () => {
+  it("admits a 3Q window that is a subset of a larger 100-question cache", async () => {
     const prior = await windowIdentity("query-3q.json", WINDOW);
     const current = await windowIdentity("query-100q.json", [...WINDOW, EXTRA_QUERY]);
     expect(prior.query_factor_cache?.file_sha256)

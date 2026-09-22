@@ -110,18 +110,22 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
       } catch { return []; }
     });
   } finally { connection.close(); }
-  const rows = replay.rows.map((row) => ({ query_key: row.query_key, status: row.status,
+  const rows = replay.rows.map((row) => {
+    const evaluated = row.first_exposure == null ? null : measureSourceSemanticLibraryResponse({
+      recallResult: row.response, firstExposurePage: row.first_exposure,
+      requestBudget: plan.config.budget, sourceRecords: sourceRecords.filter((record) => row.response?.operation === "recall"
+        && row.response.proofs?.some((proof) => proof.source_record.identity === record.identity)), goldSourceUnits: gold.find((entry) => entry.query_key === row.query_key)!.source_units
+    });
+    return { query_key: row.query_key, status: row.status,
     reason: row.reason ?? null,
     diagnostics: row.response?.operation === "recall" ? {
       discovery: row.response.discovery, coverage: row.response.coverage, work: row.response.work,
       delivered_results: row.response.results?.length ?? 0, delivered_proofs: row.response.proofs?.length ?? 0,
       native_elapsed_ms: row.native_elapsed_ms ?? null
     } : null,
-    measurement: row.first_exposure == null ? null : measureSourceSemanticLibraryResponse({
-      recallResult: row.response, firstExposurePage: row.first_exposure,
-      requestBudget: plan.config.budget, sourceRecords: sourceRecords.filter((record) => row.response?.operation === "recall"
-        && row.response.proofs?.some((proof) => proof.source_record.identity === record.identity)), goldSourceUnits: gold.find((entry) => entry.query_key === row.query_key)!.source_units
-    }) }));
+    measurement: evaluated?.measurement ?? null, source_bearing_union: evaluated?.sourceBearingUnion ?? null,
+    evaluator_usage: evaluated?.evaluator_usage ?? null };
+  });
   const result = { contract: "source-semantic-chain-measurement-v1", replay_identity: replay.identity, gold, rows };
   const path = join(root, `measurement-${chainIdentity(result)}.json`);
   writeChainArtifact(path, result);

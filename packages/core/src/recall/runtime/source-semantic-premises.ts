@@ -77,18 +77,18 @@ type Input = Readonly<{
 
 /** Source interpretation forms bindings independently; semantic correspondence supplies endpoint-bound adapters, not answer seeds. */
 export function compileSourceSemanticPremises(input: Input): SourceSemanticPremisePopulation {
-  const { meter, interpretation: h } = input;
+  const { meter, interpretation: sourceInterpretation } = input;
   const workBefore = meter.spentWork, bytesBefore = meter.spentBytes;
-  meter.retain(h, "premise preparation");
+  meter.retain(sourceInterpretation, "premise preparation");
   const builder = new PremiseBuilder(input);
-  for (const row of [...h.referents, ...h.frames, ...h.operators]) builder.node(row.id);
-  for (const [fi, frame] of h.frames.entries()) for (const [si, slot] of frame.slots.entries()) {
+  for (const row of [...sourceInterpretation.referents, ...sourceInterpretation.frames, ...sourceInterpretation.operators]) builder.node(row.id);
+  for (const [fi, frame] of sourceInterpretation.frames.entries()) for (const [si, slot] of frame.slots.entries()) {
     const id = sourceSemanticSlotNodeId(fi, si);
     builder.slotNodes.set(JSON.stringify([frame.id, slot.id]), id); builder.node(id);
   }
-  populateOccurrences(builder, h); populateStructure(builder, h); populateBindings(builder, h);
-  groundSourceSemanticInstances(builder, h, input.semantic_correspondence, input.query);
-  populateSourceSemanticFiniteFacts(builder, h, input.semantic_correspondence);
+  populateOccurrences(builder, sourceInterpretation); populateStructure(builder, sourceInterpretation); populateBindings(builder, sourceInterpretation);
+  groundSourceSemanticInstances(builder, sourceInterpretation, input.semantic_correspondence, input.query);
+  populateSourceSemanticFiniteFacts(builder, sourceInterpretation, input.semantic_correspondence);
   populateCorrespondence(builder, input.semantic_correspondence);
   return { nodes: builder.nodes, rows: builder.rows, coordinates: builder.coordinates,
     adjacency: builder.adjacency, positions: builder.positions, origins: builder.origins,
@@ -149,9 +149,9 @@ export class PremiseBuilder {
   }
 }
 
-export function populateOccurrences(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
-  const asserted = new Set(h.asserted_at_scope);
-  for (const row of [...h.frames, ...h.operators]) {
+export function populateOccurrences(builder: PremiseBuilder, sourceInterpretation: SourceSemanticInterpretation): void {
+  const asserted = new Set(sourceInterpretation.asserted_at_scope);
+  for (const row of [...sourceInterpretation.frames, ...sourceInterpretation.operators]) {
     builder.self(row.id, ["source_interpretation_presence"], { leaf_kind: "source_interpretation_presence", occurrence: row.id });
     if (!builder.instances.has(row.id)) builder.self(row.id, ["source_interpretation_original"]);
     const sort = "operator" in row ? "context" : "proposition";
@@ -163,21 +163,21 @@ export function populateOccurrences(builder: PremiseBuilder, h: SourceSemanticIn
       { leaf_kind: "source_interpretation_source_act", occurrence: row.id, value: row.context_owner.source_act });
     builder.self(row.id, ["candidate_route"]); builder.self(row.id, ["accept"]);
   }
-  for (const row of h.referents) if (row.referent_kind === "grouped" || row.referent_kind === "unexpressed") {
+  for (const row of sourceInterpretation.referents) if (row.referent_kind === "grouped" || row.referent_kind === "unexpressed") {
     builder.self(row.id, ["source_interpretation_sort", "entity"], { leaf_kind: "source_interpretation_sort", occurrence: row.id, value: "entity" });
   }
 }
 
-export function populateStructure(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
+export function populateStructure(builder: PremiseBuilder, sourceInterpretation: SourceSemanticInterpretation): void {
   const parents = new Map<string, string>();
-  for (const edge of sourceSemanticStructuralEdges(h)) {
+  for (const edge of sourceSemanticStructuralEdges(sourceInterpretation)) {
     const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "source_interpretation_content", occurrence: edge.to,
       parent: edge.from, relation_kind: edge.kind, role: edge.role };
     builder.edge(edge.from, edge.to, sourceSemanticRelationKey("source_interpretation_content", edge.kind, edge.role), leaf);
     builder.edge(edge.to, edge.from, sourceSemanticRelationKey("source_interpretation_content_inverse", edge.kind, edge.role), leaf);
     if (edge.governing) { parents.set(edge.to, edge.from); builder.self(edge.to, ["source_interpretation_embedded"], leaf); }
   }
-  for (const row of [...h.frames, ...h.operators]) {
+  for (const row of [...sourceInterpretation.frames, ...sourceInterpretation.operators]) {
     let ancestor = parents.get(row.id);
     const visited = new Set<string>([row.id]);
     while (ancestor !== undefined) {
@@ -188,8 +188,8 @@ export function populateStructure(builder: PremiseBuilder, h: SourceSemanticInte
   }
 }
 
-export function populateBindings(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
-  for (const frame of h.frames) for (const binding of frame.bindings) {
+export function populateBindings(builder: PremiseBuilder, sourceInterpretation: SourceSemanticInterpretation): void {
+  for (const frame of sourceInterpretation.frames) for (const binding of frame.bindings) {
     if (binding.target.kind !== "node") continue;
     const slot = builder.slotNodes.get(JSON.stringify([frame.id, binding.slot_id]))!;
     const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "source_interpretation_binding", occurrence: frame.id, slot_id: binding.slot_id, target: binding.target.id };

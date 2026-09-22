@@ -236,7 +236,7 @@ describe("source semantic interpretation publication", () => {
     expect(countRows(fixture.database, "SELECT COUNT(*) AS n FROM relation_assertions")).toBe(beforeRelations);
     expect(countRows(fixture.database, "SELECT COUNT(*) AS n FROM evidence_capsules")).toBe(1);
     const evidenceId = first.evidence.object_id;
-    const hid = first.bound.interpretation_id;
+    const sourceInterpretationId = first.bound.interpretation_id;
     const rootId = first.bound.source_target.root_id;
     fixture.database.close();
     databases.delete(fixture.database);
@@ -246,13 +246,13 @@ describe("source semantic interpretation publication", () => {
     const evidence = await reopened.evidenceService.findById(evidenceId);
     expect(evidence?.object_id).toBe(evidenceId);
     const rebound = SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(evidence!.gist));
-    expect(rebound.interpretation_id).toBe(hid);
+    expect(rebound.interpretation_id).toBe(sourceInterpretationId);
     expect(rebound.source_target.root_id).toBe(rootId);
     expect(rebound.source_target.evidence_object_id).toBeNull();
     const checked = verifyPublishedSourceSemanticInterpretation(
       reopened.owner, rebound, REAL_SQLITE_TEST_WORKSPACE_ID
     );
-    expect(checked.bound.interpretation_id).toBe(hid);
+    expect(checked.bound.interpretation_id).toBe(sourceInterpretationId);
     expect(checked.stored.record.identity).toBe(rootId);
     expect(countRows(reopened.database, "SELECT COUNT(*) AS n FROM memory_entries")).toBe(beforeMemory);
     expect(countRows(reopened.database, "SELECT COUNT(*) AS n FROM relation_assertions")).toBe(beforeRelations);

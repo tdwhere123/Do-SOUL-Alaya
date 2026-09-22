@@ -4,8 +4,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { type PremiseBuilder, sourceSemanticRelationKey as key, sourceSemanticDerivedNodeId } from "./source-semantic-premises.js";
 
-function semanticOwnerPath(h: SourceSemanticInterpretation, ownerId: string): readonly string[] {
-  const rows = new Map([...h.frames, ...h.operators].map((row) => [row.id, row]));
+function semanticOwnerPath(sourceInterpretation: SourceSemanticInterpretation, ownerId: string): readonly string[] {
+  const rows = new Map([...sourceInterpretation.frames, ...sourceInterpretation.operators].map((row) => [row.id, row]));
   const path: string[] = [];
   let row = rows.get(ownerId);
   while (row !== undefined && row.context_owner.kind !== "source_act") {
@@ -17,20 +17,20 @@ function semanticOwnerPath(h: SourceSemanticInterpretation, ownerId: string): re
 }
 
 /** These are evidence atoms and arithmetic primitives, never selected answers or ranking seeds. */
-export function populateSourceSemanticFiniteFacts(builder: PremiseBuilder, h: SourceSemanticInterpretation,
+export function populateSourceSemanticFiniteFacts(builder: PremiseBuilder, sourceInterpretation: SourceSemanticInterpretation,
   semantic_correspondence: SourceSemanticCorrespondence): void {
   const ownerPaths = new Map<string, string>();
-  for (const value of h.measurements ?? []) {
+  for (const value of sourceInterpretation.measurements ?? []) {
     if (ownerPaths.has(value.owner)) continue;
-    builder.input.meter.charge(h.frames.length + h.operators.length, 0, "measurement scope indexing");
-    ownerPaths.set(value.owner, canonicalJson(semanticOwnerPath(h, value.owner)));
+    builder.input.meter.charge(sourceInterpretation.frames.length + sourceInterpretation.operators.length, 0, "measurement scope indexing");
+    ownerPaths.set(value.owner, canonicalJson(semanticOwnerPath(sourceInterpretation, value.owner)));
   }
-  for (const domain of h.domains ?? []) {
+  for (const domain of sourceInterpretation.domains ?? []) {
     builder.node(domain.id);
     builder.self(domain.id, ["source_interpretation_domain", domain.id], { leaf_kind: "source_interpretation_domain", domain: domain.id });
     builder.self(domain.id, ["accept"]);
     // Domain routing chooses one neutral entry; evidence permission is checked separately.
-    if (h.entry_roots[0] !== undefined) builder.edge(h.entry_roots[0], domain.id, key("candidate_route"));
+    if (sourceInterpretation.entry_roots[0] !== undefined) builder.edge(sourceInterpretation.entry_roots[0], domain.id, key("candidate_route"));
     for (const member of domain.members) {
       const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "source_interpretation_membership", occurrence: member.evidence,
         domain: domain.id, member: member.referent };
@@ -46,22 +46,22 @@ export function populateSourceSemanticFiniteFacts(builder: PremiseBuilder, h: So
     for (const [index, mapping] of (semantic_correspondence.domains ?? []).entries()) if (mapping.source_domain === domain.id) {
       builder.self(domain.id, ["semantic_correspondence_domain", mapping.query_domain], { leaf_kind: "semantic_correspondence_domain", domain: domain.id, correspondence_index: index });
     }
-    for (const id of [...h.frames, ...h.operators].map((row) => row.id).concat([...builder.instances.keys()])) {
+    for (const id of [...sourceInterpretation.frames, ...sourceInterpretation.operators].map((row) => row.id).concat([...builder.instances.keys()])) {
       builder.edge(domain.id, id, key("candidate_route"));
       builder.edge(id, domain.id, key("domain_return", domain.id));
     }
   }
-  for (const row of h.referents) builder.self(row.id, ["source_interpretation_identity", row.id]);
+  for (const row of sourceInterpretation.referents) builder.self(row.id, ["source_interpretation_identity", row.id]);
   for (const row of builder.derivedNodes) if (row.kind === "query_entity") builder.self(row.node_id, ["source_interpretation_identity", row.node_id]);
-  for (const value of h.measurements ?? []) {
+  for (const value of sourceInterpretation.measurements ?? []) {
     builder.node(value.id);
     builder.edge(value.id, value.owner, key("measurement_owner"), measurementLeaf(value));
     builder.edge(value.owner, value.id, key("measurement_owner_inv"), measurementLeaf(value));
     builder.edge(value.id, value.subject, key("measurement_subject"), measurementLeaf(value));
     builder.edge(value.subject, value.id, key("measurement_subject_inv"), measurementLeaf(value));
     builder.self(value.id, ["source_interpretation_measurement", value.id], measurementLeaf(value));
-    const domain = h.domains!.find((row) => row.id === value.population)!;
-    builder.input.meter.charge(h.domains!.length + domain.members.length, 0, "measurement membership lookup");
+    const domain = sourceInterpretation.domains!.find((row) => row.id === value.population)!;
+    builder.input.meter.charge(sourceInterpretation.domains!.length + domain.members.length, 0, "measurement membership lookup");
     const member = domain.members.find((row) => row.referent === value.subject);
     if (member !== undefined) {
       const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "source_interpretation_membership", occurrence: member.evidence,
@@ -80,7 +80,7 @@ export function populateSourceSemanticFiniteFacts(builder: PremiseBuilder, h: So
       builder.edge(value.subject, value.id, key("measurement_assumed_membership_inv", assumption.query_variable));
     }
   }
-  for (const left of h.measurements ?? []) for (const right of h.measurements ?? []) {
+  for (const left of sourceInterpretation.measurements ?? []) for (const right of sourceInterpretation.measurements ?? []) {
     builder.input.meter.charge(1, 0, "numeric pair preparation");
     if (left.population !== right.population) continue;
     const id = comparisonNodeId(left.id, right.id);
