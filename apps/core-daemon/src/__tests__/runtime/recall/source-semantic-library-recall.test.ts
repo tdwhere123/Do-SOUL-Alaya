@@ -445,7 +445,7 @@ it("scores mixed-kind retrieval and proof-conditioned Any@K from one published s
   }, 1);
 });
 
-it.each([2001, 70000])("reports shortened %i-character source previews in both public coverage fields", async (length) => {
+it.each([2001, 70000])("reports the actual UTF-8 preview extent for a %i-character source", async (length) => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-library-long-"));
   const filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
@@ -468,9 +468,9 @@ it.each([2001, 70000])("reports shortened %i-character source previews in both p
     if (recalled.kind !== "recall") throw new Error("library recall expected");
     const publicResult = encodeSourceSemanticLibraryResponse(recalled);
     if (publicResult.operation !== "recall") throw new Error("public recall expected");
-    expect(publicResult.coverage.payload).toBe("truncated");
-    expect(publicResult.index?.completeness.payload).toBe("partial");
-    expect(publicResult.results?.[0]?.content_preview).toHaveLength(2000);
+    expect(publicResult.coverage.payload).toBe(length > 4096 ? "truncated" : "complete");
+    expect(publicResult.index?.completeness.payload).toBe(length > 4096 ? "partial" : "complete");
+    expect(publicResult.results?.[0]?.content_preview).toBe(long.slice(0, 4096));
     const capped = await call((input) => client.sourceSemanticsPort!.execute(input), { ...recallRequest([]), output_byte_limit: 4096 });
     expect(Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(capped)))).toBeLessThanOrEqual(4096);
     const preview = Object.values(recalled.previews ?? {})[0] ?? "";
