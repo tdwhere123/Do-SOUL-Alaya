@@ -1,5 +1,5 @@
 import {
-  SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
+  SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
   SourceSemanticResourceExhausted, canonicalJson, type SourceRecordIdentity,
   type SourceSemanticAccessReceipt, type SourceSemanticAccessSignal, type SourceSemanticAccessPolicy,
   type SourceSemanticHandleDescriptor, type SourceSemanticQuery, type RequestBudget
@@ -52,7 +52,7 @@ export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, pa
       ...read });
   }
   observation.absorb(sourceMeter);
-  const interpretations = observeInterpretations(runtime, payload, authorized, observation, policy, sourceRows, stops, sourceId);
+  const interpretations = observeInterpretations(runtime, payload, authorized, observation, policy, records, sourceRows, stops, sourceId);
   meter.absorb(observation);
   const orderedSources = policy.order([...sourceRows.values()].map((row) => ({ ...row, identity: row.record_id })), meter)
     .map(({ identity: _identity, ...row }) => row);
@@ -116,58 +116,21 @@ function readSourceText(runtime: RecallReadWorkerRuntime, record: SourceRecordId
 
 function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, policy: Policy,
-  sources: Map<string, SourceObservation>, stops: Set<Stop>, sourceId?: string) {
+  records: readonly SourceRecordIdentity[], sources: Map<string, SourceObservation>, stops: Set<Stop>, sourceId?: string) {
   const descriptors = new Map<string, SourceSemanticHandleDescriptor>();
   const rows: InterpretationObservation[] = [];
-  let after: string | null = null, pages = 0, open = false;
-  while (pages < 32) {
-    const result = observeInterpretationPage(runtime, payload, authorized, meter, policy, sources, stops, after, sourceId);
-    pages += result.visited ? 1 : 0;
-    for (const row of result.rows) {
-      if (descriptors.has(row.descriptor.interpretation_id)) continue;
-      descriptors.set(row.descriptor.interpretation_id, row.descriptor);
-      rows.push(row.observation);
-    }
-    open ||= result.open;
-    if (!result.truncated || result.budgetStopped) return { descriptors, rows, pages, open };
-    if (result.cursor === null || result.cursor === after) return { descriptors, rows, pages, open: true };
-    after = result.cursor;
-  }
-  stops.add("interpretation_limit");
-  return { descriptors, rows, pages, open: true };
-}
-
-function observeInterpretationPage(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget, policy: Policy,
-  sources: Map<string, SourceObservation>, stops: Set<Stop>, after: string | null, sourceId?: string) {
-  const rows: { descriptor: SourceSemanticHandleDescriptor; observation: InterpretationObservation }[] = [];
-  let cursor = after, open = false, visited = false;
+  const headers = observeInterpretationHeaders(runtime, payload.workspace_id, meter, stops);
+  let open = headers.open;
   try {
-    meter.reserve(1, 16, "interpretation access page");
-    const page = new SqliteSourceHintReader(runtime.database.connection).pageBoundInterpretations({
-      workspaceId: payload.workspace_id, limit: SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
-      nativeLimit: Math.min(32, meter.work), afterCursor: after,
-      nativeByteLimit: Math.min(Math.floor(meter.bytes / 8), 1_000_000), maxGistBytes: 1_000_000,
-      activeOnly: true, matches: () => true
-    });
-    visited = true;
-    meter.read(page.nativeVisits, page.bytesRead);
-    open = page.unavailable || page.resourceLimited === true;
-    if (open) stops.add("unavailable");
-    for (const row of page.rows) {
-      meter.charge(row.gist.length + 1, row.gist.length * 4, "interpretation access metadata decoding");
-      let raw: unknown;
-      try { raw = JSON.parse(row.gist); } catch { open = true; stops.add("unavailable"); cursor = row.cursor; continue; }
-      if (typeof raw !== "object" || raw === null || !("contract" in raw) || raw.contract !== SOURCE_SEMANTIC_PUBLISHED_CONTRACT) {
-        cursor = row.cursor; continue;
-      }
-      if (!("interpretation_id" in raw) || typeof raw.interpretation_id !== "string") {
-        open = true; stops.add("unavailable"); cursor = row.cursor; continue;
-      }
+    meter.charge(records.length, records.length * 32, "access source hint projection");
+    const scheduled = policy.schedule(headers.rows, records.map((record) => ({ digest: record.content_digest,
+      signal: sources.get(record.identity)?.signal ?? UNKNOWN })), meter);
+    for (const row of scheduled) {
       try {
-        const checked = loadVerified(runtime, payload.workspace_id, raw.interpretation_id, authorized, meter);
+        const checked = loadVerified(runtime, payload.workspace_id, { evidence_object_id: row.object_id }, authorized, meter);
+        if (checked === null) continue;
         const record = checked.stored.record, interpretation = checked.bound.interpretation;
-        if (sourceId !== undefined && record.source_id !== sourceId) { cursor = row.cursor; continue; }
+        if (sourceId !== undefined && record.source_id !== sourceId) continue;
         const sourceSignal = sources.get(record.identity)?.signal ?? UNKNOWN;
         const signal = policy.interpretation(sourceSignal, interpretation, meter);
         const descriptor = { interpretation_id: checked.bound.interpretation_id,
@@ -175,7 +138,7 @@ function observeInterpretationPage(runtime: RecallReadWorkerRuntime, payload: So
           producer_id: interpretation.producer_id, producer_version: interpretation.producer_version, contract_version: interpretation.contract_version };
         const observation = { interpretation_id: descriptor.interpretation_id, record_id: record.identity, signal };
         meter.retain([descriptor, observation], "access interpretation retention");
-        rows.push({ descriptor, observation });
+        descriptors.set(descriptor.interpretation_id, descriptor); rows.push(observation);
       } catch (error) {
         if (error instanceof SourceSemanticResourceExhausted) throw error;
         if (!(error instanceof CoreError)) throw error;
@@ -183,14 +146,43 @@ function observeInterpretationPage(runtime: RecallReadWorkerRuntime, payload: So
           open = true; stops.add("unavailable");
         }
       }
-      cursor = row.cursor;
     }
-    return { rows, cursor: page.committedThrough, open, truncated: page.truncated, visited, budgetStopped: false };
+  } catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+    stops.add("budget"); open = true;
+  }
+  return { descriptors, rows, pages: headers.pages, open };
+}
+
+function observeInterpretationHeaders(runtime: RecallReadWorkerRuntime, workspace: string,
+  meter: SourceSemanticReadBudget, stops: Set<Stop>) {
+  const reader = new SqliteSourceHintReader(runtime.database.connection);
+  const rows: (ReturnType<typeof reader.pageBoundInterpretationHeaders>["rows"][number] & { identity: string })[] = [];
+  let after: string | null = null, pages = 0;
+  try {
+    while (pages < 32) {
+      meter.reserve(1, 784, "interpretation access header page");
+      const page = reader.pageBoundInterpretationHeaders({ workspaceId: workspace,
+        limit: Math.min(SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE, meter.work),
+        afterCursor: after, nativeByteLimit: Math.min(Math.floor(meter.bytes / 8), 1_000_000) });
+      pages++; meter.read(page.nativeVisits, page.bytesRead);
+      for (const row of page.rows) {
+        meter.charge(1, 0, "access capsule lifecycle check");
+        if (row.lifecycle_state !== "active") continue;
+        const header = { ...row, identity: row.object_id };
+        meter.retain(header, "access interpretation header retention"); rows.push(header);
+      }
+      if (page.resourceLimited) { stops.add("unavailable"); return { rows, pages, open: true }; }
+      if (!page.truncated) return { rows, pages, open: false };
+      if (page.committedThrough === null || page.committedThrough === after) return { rows, pages, open: true };
+      after = page.committedThrough;
+    }
+    stops.add("interpretation_limit");
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     stops.add("budget");
-    return { rows, cursor, open: true, truncated: true, visited, budgetStopped: true };
   }
+  return { rows, pages, open: true };
 }
 
 export function accessDescriptorPage(runtime: RecallReadWorkerRuntime, workspace: string, authorized: readonly string[] | null,

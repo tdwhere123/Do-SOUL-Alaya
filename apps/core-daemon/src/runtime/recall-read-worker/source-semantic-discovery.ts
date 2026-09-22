@@ -1,5 +1,5 @@
 import {
-  SourceSemanticPublishedInterpretationSchema, type SourceSemanticCoverage
+  SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SourceSemanticPublishedInterpretationSchema, type SourceSemanticCoverage
 } from "@do-soul/alaya-protocol";
 import { CoreError, fieldContractSha256, semanticInterpretationEvidenceId,
   verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
@@ -14,11 +14,18 @@ export const IDLE: SourceSemanticCoverage = {
   semantic_correspondence: "unexercised", conditional_computation: "unexercised", payload: "complete"
 };
 
-export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, interpretationId: string,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget) {
+type VerifiedInterpretation = ReturnType<typeof verifyPublishedSourceSemanticInterpretation>;
+export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, identity: string,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget): VerifiedInterpretation;
+export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, identity: Readonly<{ evidence_object_id: string }>,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget): VerifiedInterpretation | null;
+export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, identity: string | Readonly<{ evidence_object_id: string }>,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget): VerifiedInterpretation | null {
+  const expected = typeof identity === "string" ? identity : undefined;
+  const objectId = typeof identity === "string" ? semanticInterpretationEvidenceId(identity, fieldContractSha256) : identity.evidence_object_id;
   meter.reserve(1, 16);
   const capsule = new SqliteSourceHintReader(runtime.database.connection).readBoundInterpretation(
-    workspace, semanticInterpretationEvidenceId(interpretationId, fieldContractSha256), meter.bytes);
+    workspace, objectId, meter.bytes);
   meter.read(capsule.nativeVisits, capsule.bytesRead);
   if (capsule.status !== "complete" || capsule.gist === null) {
     throw new CoreError("CONFLICT", `source semantic interpretation read is ${capsule.status}`, { details: { admission: "unavailable", unavailable: capsule.status } });
@@ -28,13 +35,18 @@ export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string
   try { raw = JSON.parse(capsule.gist); } catch {
     throw new CoreError("VALIDATION", "stored interpretation is malformed", { details: { admission: "invalid" } });
   }
+  if (expected === undefined && (typeof raw !== "object" || raw === null || !("contract" in raw)
+      || raw.contract !== SOURCE_SEMANTIC_PUBLISHED_CONTRACT)) return null;
   const parsed = SourceSemanticPublishedInterpretationSchema.safeParse(raw);
   if (!parsed.success) {
     throw new CoreError("VALIDATION", "stored interpretation is malformed",
       { details: { admission: "invalid", reason: "malformed_interpretation" } });
   }
   const bound = parsed.data;
-  if (bound.interpretation_id !== interpretationId) throw new CoreError("VALIDATION", "interpretation identity mismatch");
+  if (expected !== undefined && bound.interpretation_id !== expected
+      || semanticInterpretationEvidenceId(bound.interpretation_id, fieldContractSha256) !== objectId) {
+    throw new CoreError("VALIDATION", "interpretation identity mismatch");
+  }
   const stores = sourceSemanticReadStores(runtime.database, workspace, bound.interpretation.source.source_id, meter, authorized);
   meter.retain(bound, "interpretation verification");
   return verifyPublishedSourceSemanticInterpretation({ stores, sha256: fieldContractSha256, meter }, bound, workspace);

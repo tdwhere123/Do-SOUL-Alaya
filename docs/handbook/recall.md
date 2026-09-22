@@ -922,6 +922,21 @@ and modality foils may tie or outrank a relevant interpretation without acquirin
 assertion authority. A source without an interpretation remains a raw candidate.
 There is no query seek across unvisited sources or interpretation pages.
 
+Interpretation access first reads bounded headers through the existing capsule
+cursor index, charging inactive rows as well. Within that observed prefix, the
+query-conditioned policy alternates source-text hint priority with cursor
+exploration, deduplicating capsule identities. A capsule source hash only hints
+at scheduling; missing or wrong hashes and reading-only matches remain reachable.
+The canonical control verifies in cursor order. Each scheduled body is loaded and
+decoded once by the verification owner, which checks its derived capsule identity
+and authoritative current source, version, scope and location. Descriptor delivery
+independently rechecks currentness. Unverified headers remain an open residual;
+only verified interpretations enter the observed pool and its final access order.
+Header reads, association, scheduling, decoding and verification use the existing
+ledger and phase reserves. Bounded membership may change with the implementation;
+the pool identity binds actual observations and prepared benchmark plans also pin
+the implementation revision.
+
 The access receipt retains identities, cached scores, source byte extents and
 open residuals, without duplicating interpretation bodies. It reports the total
 observed source and interpretation counts separately from rows omitted from the

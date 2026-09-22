@@ -44,6 +44,35 @@ afterEach(() => {
 });
 
 describe("source discovery sqlite lookup", () => {
+  it("meters inactive capsule headers through the cursor index without loading their bodies", () => {
+    const database = openFieldDatabase(); tracked.add(database);
+    for (let index = 0; index < 3; index++) {
+      insertBoundGist(database, `header-${index}`, "alpha", "root", "sha256:" + "a".repeat(64), null, { predicate: "alpha" });
+    }
+    database.connection.prepare("UPDATE evidence_capsules SET gist=?, lifecycle_state='withdrawn' WHERE object_id<'header-2'")
+      .run("unparsed ".repeat(100_000));
+    const prepare = vi.spyOn(database.connection, "prepare"), reader = new SqliteSourceHintReader(database.connection);
+    const first = reader.pageBoundInterpretationHeaders({ workspaceId: "workspace-1", limit: 2, afterCursor: null, nativeByteLimit: 2048 });
+    const sql = prepare.mock.calls.find(([sql]) => sql.includes("FROM evidence_capsules INDEXED BY"))![0];
+    prepare.mockRestore();
+    expect(sql).not.toContain("gist");
+    expect(first).toMatchObject({ nativeVisits: 2, truncated: true, resourceLimited: false });
+    expect(first.rows.map((row) => row.lifecycle_state)).toEqual(["withdrawn", "withdrawn"]);
+    expect(first.bytesRead).toBeLessThan(1024);
+    const resumed = reader.pageBoundInterpretationHeaders({ workspaceId: "workspace-1", limit: 2,
+      afterCursor: first.committedThrough, nativeByteLimit: 2048 });
+    expect(resumed).toMatchObject({ nativeVisits: 2, truncated: false, resourceLimited: false });
+    expect(resumed.rows.map((row) => row.object_id)).toEqual(["header-2"]);
+    expect(reader.pageBoundInterpretationHeaders({ workspaceId: "workspace-1", limit: 2, afterCursor: null, nativeByteLimit: 783 }))
+      .toMatchObject({ rows: [], nativeVisits: 0, bytesRead: 0, resourceLimited: true });
+    for (const seek of [["", ""], JSON.parse(first.committedThrough!)]) {
+      const plan = database.connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all("workspace-1", ...seek) as { detail: string }[];
+      expect(plan.some((row) => row.detail.includes("SEARCH evidence_capsules USING INDEX idx_evidence_capsules_source_cursor")
+        && row.detail.includes("(created_at,object_id)>(?,?)"))).toBe(true);
+      expect(plan.some((row) => /TEMP B-TREE|SCAN evidence_capsules/.test(row.detail))).toBe(false);
+    }
+  });
+
   it("uses the tuple index on initial and resumed scans and charges the empty probe", () => {
     const database = openFieldDatabase(); tracked.add(database);
     for (let i = 0; i < 30; i++) {

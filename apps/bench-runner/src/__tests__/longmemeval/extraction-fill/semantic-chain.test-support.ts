@@ -41,6 +41,10 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   expect(blocked.queries.every((row) => row.status === "blocked")).toBe(true);
   expect(blocked.correspondence_workset).toBeNull();
   expect(existsSync(join(blockedRoot, "semantic_correspondence-workset.json"))).toBe(false);
+  const oldImplementationRoot = join(cacheRoot, "foreign-implementation-chain");
+  writeChainArtifact(join(oldImplementationRoot, "prepare.json"), { ...blocked, config: { ...blocked.config,
+    implementation_revision: `git-worktree-v1:${"0".repeat(40)}:${"0".repeat(64)}` } });
+  await expect(replaySemanticChain(oldImplementationRoot)).rejects.toThrow(/implementation changed/u);
   const blockedReplay = await replaySemanticChain(blockedRoot);
   const blockedWithdrawal = interveneSemanticChain(blockedRoot, blockedReplay.path);
   expect((readChainArtifact(blockedWithdrawal.path) as { rows: { status: string }[] }).rows
@@ -72,7 +76,8 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   }, limitedRoot);
   expect(limited.queries[0]).toMatchObject({ status: "ready", discovery_open: true,
     discovery_truncated: true, unvisited_source_interpretation_count: null,
-    discovery_trace: [{ access: { unvisited_interpretations: true, stopping_reasons: ["budget"] } }] });
+    discovery_trace: expect.arrayContaining([expect.objectContaining({
+      access: expect.objectContaining({ unvisited_interpretations: true, stopping_reasons: ["budget"] }) })]) });
   if (limited.queries[0]?.status === "ready") expect(limited.queries[0].descriptors.length).toBeLessThan(18);
   await assertReplayPreparationPool(limited, limitedRoot);
   const root = join(cacheRoot, "native-chain");
@@ -230,7 +235,8 @@ async function assertReplayPreparationPool(plan: SemanticChainPlan, root: string
   const mismatchMeasured = measureSemanticChain(mismatchRoot, mismatch.path,
     plan.queries.map((entry) => ({ query_key: entry.query_key, source_units: [] })));
   expect(mismatchMeasured.result.rows[0]).toMatchObject({ measurement: null,
-    preparation_trace: [{ work: { native_work: expect.any(Number) } }], preparation_elapsed_ms: expect.any(Number) });
+    preparation_trace: expect.arrayContaining([expect.objectContaining({
+      work: expect.objectContaining({ native_work: expect.any(Number) }) })]), preparation_elapsed_ms: expect.any(Number) });
 }
 
 async function assertInterruptedExposure(root: string, output: string, queryKey: string): Promise<void> {

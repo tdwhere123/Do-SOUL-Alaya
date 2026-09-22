@@ -33,6 +33,20 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
     ledger.charge(needed.work_units, needed.memory_bytes, "access text normalization and scoring");
     return scoreQueryEvidenceContent(text, probes);
   };
+  type Scored = { readonly identity: string; readonly signal: SourceSemanticAccessSignal };
+  const compare = (a: Scored, b: Scored): number => {
+    if (policy === "query-conditioned-v1") {
+      const raw = (b.signal.source_text_score ?? 0) - (a.signal.source_text_score ?? 0);
+      if (raw !== 0) return raw;
+      const reading = b.signal.interpretation_reading_score - a.signal.interpretation_reading_score;
+      if (reading !== 0) return reading;
+    }
+    return a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0;
+  };
+  const order = <T extends Scored>(rows: readonly T[], ledger: SourceSemanticResourceLedger): T[] => {
+    ledger.charge(rows.length * Math.ceil(Math.log2(rows.length + 1)), rows.length * 16, "access ordering");
+    return [...rows].sort(compare);
+  };
   return {
     sourceCost: (length: number) => cost(length, originalProbes),
     source: (text: string, ledger: SourceSemanticResourceLedger): SourceSemanticAccessSignal => ({
@@ -51,18 +65,32 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
       }
       return best;
     },
-    order: <T extends { readonly identity: string; readonly signal: SourceSemanticAccessSignal }>(
-      rows: readonly T[], ledger: SourceSemanticResourceLedger): T[] => {
-      ledger.charge(rows.length * Math.ceil(Math.log2(rows.length + 1)), rows.length * 16, "access ordering");
-      return [...rows].sort((a, b) => {
-        if (policy === "query-conditioned-v1") {
-          const raw = (b.signal.source_text_score ?? 0) - (a.signal.source_text_score ?? 0);
-          if (raw !== 0) return raw;
-          const reading = b.signal.interpretation_reading_score - a.signal.interpretation_reading_score;
-          if (reading !== 0) return reading;
+    order,
+    schedule: <T extends { readonly identity: string; readonly source_hash: string | null }>(rows: readonly T[],
+      sources: readonly { readonly digest: string; readonly signal: SourceSemanticAccessSignal }[],
+      ledger: SourceSemanticResourceLedger): T[] => {
+      ledger.charge(rows.length, rows.length * 8, "access verification schedule");
+      if (policy === "canonical-v1") return [...rows];
+      const signals = new Map<string, SourceSemanticAccessSignal>();
+      for (const source of sources) {
+        ledger.charge(1, source.digest.length * 2 + 48, "access source hint association");
+        const prior = signals.get(source.digest);
+        if (prior === undefined || compare({ identity: "", signal: source.signal }, { identity: "", signal: prior }) < 0) {
+          signals.set(source.digest, source.signal);
         }
-        return a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0;
-      });
+      }
+      const hinted = rows.map((row) => ({ ...row, signal: signals.get(row.source_hash ?? "")
+        ?? { source_text_score: null, interpretation_reading_score: 0 } }));
+      ledger.retain(hinted, "access header hints");
+      const priority = order(hinted, ledger), seen = new Set<string>(), scheduled: T[] = [];
+      // A hash only schedules work. Alternating cursor exploration keeps wrong/missing
+      // hashes and reading-only matches reachable without granting the hint authority.
+      for (let index = 0; index < rows.length; index++) for (const row of [priority[index]!, rows[index]!]) {
+        ledger.charge(1, 16, "access schedule deduplication");
+        if (seen.has(row.identity)) continue;
+        seen.add(row.identity); scheduled.push(row);
+      }
+      return scheduled;
     }
   };
 }

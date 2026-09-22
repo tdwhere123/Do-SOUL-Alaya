@@ -6,6 +6,9 @@ const PAGE_MAX = 512;
 const GIST_BYTE_MAX = 65_536;
 
 type BoundInterpretationHintRow = Readonly<{ object_id: string; gist: string; cursor: string }>;
+type BoundInterpretationHeader = Readonly<{
+  object_id: string; source_hash: string | null; lifecycle_state: string; cursor: string;
+}>;
 export type BoundInterpretationHintPage = Readonly<{
   rows: readonly BoundInterpretationHintRow[];
   nativeVisits: number;
@@ -22,6 +25,43 @@ export type BoundInterpretationHintPage = Readonly<{
 /** Mechanical bounded candidates. Core supplies matching; hydration owns eligibility. */
 export class SqliteSourceHintReader {
   public constructor(private readonly db: SqliteConnection) {}
+
+  /** Every cursor row is charged, including inactive capsules; no body or JSON projection is read. */
+  public pageBoundInterpretationHeaders(input: Readonly<{
+    workspaceId: string; limit: number; afterCursor: string | null; nativeByteLimit: number;
+  }>) {
+    const limit = boundedLimit(input.limit), allowance = boundedBytes(input.nativeByteLimit);
+    const rows: BoundInterpretationHeader[] = [];
+    let cursor = input.afterCursor, visits = 0, bytes = 0, exhausted = false, resourceLimited = false;
+    let seek: readonly [string, string] = cursor === null ? ["", ""] : JSON.parse(cursor);
+    if (!Array.isArray(seek) || seek.length !== 2 || !seek.every((value) => typeof value === "string")) {
+      throw new Error("invalid source-hint cursor");
+    }
+    const statement = this.db.prepare(`SELECT
+      CASE WHEN octet_length(object_id)<=512 THEN object_id ELSE NULL END AS object_id,
+      CASE WHEN octet_length(created_at)<=64 THEN created_at ELSE NULL END AS created_at,
+      CASE WHEN octet_length(lifecycle_state)<=64 THEN lifecycle_state ELSE NULL END AS lifecycle_state,
+      CASE WHEN octet_length(source_hash)<=128 THEN source_hash ELSE NULL END AS source_hash
+      FROM evidence_capsules INDEXED BY idx_evidence_capsules_source_cursor
+      WHERE workspace_id=? AND (created_at,object_id)>(?,?)
+      ORDER BY evidence_capsules.created_at,evidence_capsules.object_id LIMIT 1`);
+    while (visits < limit) {
+      if (allowance - bytes < 784) { resourceLimited = true; break; }
+      visits++;
+      const row = statement.get(input.workspaceId, ...seek) as {
+        object_id: string | null; created_at: string | null; lifecycle_state: string | null; source_hash: string | null;
+      } | undefined;
+      bytes += 16;
+      if (row === undefined) { exhausted = true; break; }
+      bytes += Object.values(row).reduce((sum, value) => sum + Buffer.byteLength(value ?? ""), 0);
+      if (row.object_id === null || row.created_at === null || row.lifecycle_state === null) { resourceLimited = true; break; }
+      seek = [row.created_at, row.object_id]; cursor = JSON.stringify(seek);
+      // An absent or oversized hash remains an unknown navigation hint, never a filter.
+      rows.push({ object_id: row.object_id, source_hash: row.source_hash, lifecycle_state: row.lifecycle_state, cursor });
+    }
+    return { rows, nativeVisits: visits, bytesRead: bytes, committedThrough: cursor,
+      truncated: !exhausted, resourceLimited };
+  }
 
   /** One active packet by identity; a refused body is distinct from absence. */
   public readBoundInterpretation(workspaceId: string, objectId: string, byteLimit: number) {

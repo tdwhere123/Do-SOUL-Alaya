@@ -119,6 +119,34 @@ it("preserves lexical role foils and query order under source ID and insertion o
   }
 });
 
+it("treats missing and wrong hashes as hints while independently verifying shared-content roots and capsule identity", async () => {
+  await withAccessLibrary([
+    { id: "first", text: "The launch was put off.", reading: "postpone" },
+    { id: "second", text: "The launch was put off.", reading: "postpone" },
+    { id: "private", text: "The launch was put off.", reading: "postpone", scope: "global_core" }
+  ], async ({ execute, filename, ids }) => {
+    const request = { ...prepare("defer"), query_semantics: accessQuery("defer", "postpone") };
+    for (const hint of [null, "wrong"]) {
+      const current = await createRecallRealStorage(() => undefined, filename);
+      current.database.connection.prepare("UPDATE evidence_capsules SET source_hash=?").run(hint);
+      current.database.close(); closeCachedDatabase(filename);
+      const result = await accessCall(execute, request);
+      expect(result.candidates.map((row) => row.source_id).sort()).toEqual(["first", "second"]);
+      expect(result.access?.unvisited_interpretations).toBe(false);
+      expect(result.access?.interpretation_candidates.every((row) => row.signal.source_text_score === 0
+        && row.signal.interpretation_reading_score > 0)).toBe(true);
+    }
+    const current = await createRecallRealStorage(() => undefined, filename);
+    current.database.connection.prepare("UPDATE evidence_capsules SET gist=json_set(gist,'$.interpretation_id',?) WHERE json_extract(gist,'$.interpretation_id')=?")
+      .run(ids.get("second")![0], ids.get("first")![0]);
+    current.database.close(); closeCachedDatabase(filename);
+    const tampered = await accessCall(execute, request);
+    expect(tampered.candidates.map((row) => row.source_id)).toEqual(["second"]);
+    expect(tampered.access?.unvisited_interpretations).toBe(true);
+    expect(tampered.access?.stopping_reasons).toContain("unavailable");
+  });
+});
+
 it.each([80_000, 200_000])("keeps unvisited growth and body tails open within %i work units", async (workUnits) => {
   await withAccessLibrary([{ id: "many", text: "Orchid irrigation.", reading: orchid, count: 60 },
     { id: "tail", text: "granite ".repeat(20_000) }], async ({ execute }) => {
