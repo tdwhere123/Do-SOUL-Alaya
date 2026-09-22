@@ -17,6 +17,10 @@ export. SOUL generation and admission share the recursive meaning grammar,
 which excludes unsupported nested universal binders while retaining top-level
 universal evaluation. Existing receive depth and byte limits remain authoritative;
 native generation uses the existing recursive JSON guidance and cache identity.
+Source normalization v5 also lowers range-valued reporters, domain members and
+exclusions, and measurement subjects through the shared entity-mention path.
+Catalog grounding and invalid-range rejection remain unchanged; previous raw
+responses and receipts retain their original identity and outcome.
 
 Protocol 8.0.0 additionally requires complete current library deliveries to identify
 protocol 2 and library v2, membership purpose and the ten-slot page budget. Worker

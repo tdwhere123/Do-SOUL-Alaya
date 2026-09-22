@@ -228,7 +228,8 @@ class SelectionLowerer {
   }
 
   private referent(value: unknown, path: Path): unknown {
-    if (isAnchor(value)) return value;
+    if (typeof value === "string") return value;
+    if (isAnchor(value)) return { kind: "entity", mentions: this.support(value, path, 64) };
     const record = asRecord(value, path);
     if (record.kind !== "entity" && record.kind !== undefined) {
       invalid(path, "invalid_semantic_value", String(record.kind), "Expected an entity or source selection.");

@@ -168,7 +168,7 @@ describe("historical graph proposals and source-independent query producers", ()
     expect(request.profile).toBeUndefined();
     expect(request.source_request.k_version).toBe("source-semantic-k-v3");
     expect(request.source_request.proposal_contract).toBe("source-semantic-proposal-v1");
-    expect(request.source_request.normalizer_version).toBe("source-semantic-normalizer-v4");
+    expect(request.source_request.normalizer_version).toBe("source-semantic-normalizer-v5");
     expect(request.source_request.producer_capability.proposes).toBe("draft_semantics");
     expect(request.source_request.resource_limits.output_byte_limit).toBe(1024 * 1024);
     expect(request.source_catalog.assertions.length).toBe(1);
@@ -528,7 +528,7 @@ it("replays explicitly historical requests without upgrading their normalizer or
     ...current.source_request, normalizer_version: "source-semantic-normalizer-v3"
   } })).toThrow(/proposal contract and normalizer version/u);
   expect(() => parseSourceSemanticRequest({ ...current, source_request: {
-    ...legacyBody, normalizer_version: "source-semantic-normalizer-v4"
+    ...legacyBody, normalizer_version: "source-semantic-normalizer-v5"
   } })).toThrow(/proposal contract and normalizer version/u);
   expect(JSON.stringify(sourceSemanticResponseJsonSchema(legacy))).toContain("source-interpretation-response-v5");
   expect(sourceSemanticSystemPrompt(legacy)).toContain('"contract":"source-interpretation-response-v5"');

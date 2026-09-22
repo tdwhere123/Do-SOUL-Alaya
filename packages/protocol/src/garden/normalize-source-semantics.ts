@@ -22,7 +22,7 @@ import {
 } from "./source-semantic-interpretation.js";
 
 export const SOURCE_SEMANTIC_K_VERSION = "source-semantic-k-v3" as const;
-export const SOURCE_SEMANTIC_NORMALIZER_VERSION = "source-semantic-normalizer-v4" as const;
+export const SOURCE_SEMANTIC_NORMALIZER_VERSION = "source-semantic-normalizer-v5" as const;
 /** Historical request/cache replay only; new publication requires the current normalizer. */
 export const SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION = "source-semantic-normalizer-v3" as const;
 
