@@ -14,6 +14,7 @@ import { restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js"
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { runSourceSemanticPublicationLauncher } from "../../../runs/snapshot/source-records/launch-publication.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
+import { prepareSourcePublicationAssociations } from "../../../runs/snapshot/source-records/prepare-associations.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
 import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/execute.js";
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
@@ -26,24 +27,25 @@ const CLOCK = "2026-09-13T00:00:00.000Z";
 const AS_OF = "2023-09-13T00:00:00.000Z";
 afterEach(async () => { for (const root of roots) await rm(root, { recursive: true, force: true }); roots.clear(); });
 
-async function fixture(duplicate = false, abstention = false) {
+async function fixture(duplicate = false, abstention = false, authoredQuestions?: ReturnType<typeof question>[]) {
   const root = await mkdtemp(join(tmpdir(), "source-records-publication-"));
   roots.add(root);
   const dataDir = join(root, "data");
   const pinnedMetaRoot = join(root, "meta");
   const cacheRoot = join(root, "cache");
   await mkdir(dataDir); await mkdir(pinnedMetaRoot); await mkdir(join(cacheRoot, "ab"), { recursive: true });
-  const source = JSON.stringify([
+  const questions = authoredQuestions ?? [
     question("mixed-roles", [[{ role: "user", content: "A café source record." },
       { role: "assistant", content: "Noted the café source." }]]),
     question("repeated-text", [[{ role: "user", content: "Please note this. The cat sat. The cat sat. Done." }]]),
     question(abstention ? "absent-interpretation_abs" : "absent-interpretation", [[{ role: "user", content: "Unrelated distractor lives in Suzhou." }]]),
     ...(duplicate ? [question("same-text-other-session", [[{ role: "user", content: "Unrelated distractor lives in Suzhou." }]])] : [])
-  ]);
+  ];
+  const source = JSON.stringify(questions);
   await writeFile(join(dataDir, "longmemeval_s.json"), source);
   await writeFile(join(pinnedMetaRoot, "longmemeval_s.meta.json"), JSON.stringify({
     sha256: createHash("sha256").update(source).digest("hex"),
-    size_bytes: Buffer.byteLength(source), question_count: duplicate ? 4 : 3
+    size_bytes: Buffer.byteLength(source), question_count: questions.length
   }));
   await writeFile(join(cacheRoot, "ab", `${"ab".repeat(32)}.json`), "{}");
   return { root, dataDir, pinnedMetaRoot, cacheRoot };
@@ -162,6 +164,73 @@ describe("complete-source census and publication", () => {
     expect(duplicate).toHaveLength(2);
     expect(new Set(duplicate.map((row) => row.source_id)).size).toBe(2);
     expect(new Set(duplicate.map((row) => row.session_id)).size).toBe(2);
+  });
+  it("preserves repeated session labels at distinct positions and their dates through native freeze and reopened publication", async () => {
+    const session = [{ role: "user", content: "I recorded the amber parcel." },
+      { role: "assistant", content: "The amber parcel was noted." }];
+    const repeated = { ...question("repeated-session", [session, session]),
+      haystack_session_ids: ["shared-session", "shared-session"],
+      haystack_dates: ["2023/09/10 (Sun) 00:00", "2023/09/12 (Tue) 00:00"] };
+    const f = await fixture(false, false, [repeated]);
+    const population = { name: "longmemeval_s", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot,
+      model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1" as const };
+    const census = await censusCompleteSourceRecords({ population: population.name, ...population });
+    const expected = [
+      { source_id: "longmemeval_s:repeated-session-s0-r0", session_index: 0, source_observed_at: "2023-09-10T00:00:00.000Z" },
+      { source_id: "longmemeval_s:repeated-session-s1-r0", session_index: 1, source_observed_at: "2023-09-12T00:00:00.000Z" }
+    ];
+    expect(census.records).toHaveLength(2);
+    expect(census.records).toMatchObject(expected.map(row => ({ ...row, session_id: "shared-session", round_index: 0,
+      roles: ["user", "assistant"], source_version: census.dataset_sha256 })));
+    expect(census.records[0]!.content_bytes).toBe(census.records[1]!.content_bytes);
+    expect(census.records[0]!.content_digest).toBe(census.records[1]!.content_digest);
+    expect(census.records[0]!.corpus_digest).toBe(census.records[1]!.corpus_digest);
+    const freezeRoot = join(f.root, "freeze");
+    const frozen = await freezeLongMemEvalSemanticRun({
+      arm: "native_semantic", workspace_prefix: "source-occurrences", source_cache_roots: [],
+      source_publication_associations: [], correspondence_cache_root: join(f.root, "correspondence-cache"),
+      discovery_page_cap: 4, correspondence_pair_cap: 2, authorized_scopes: { mode: "named", scopes: ["project"] },
+      data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot, dataset_sha256: census.dataset_sha256,
+      dataset_question_count: 1, question_ids: ["repeated-session"],
+      model: population.model, provider_url: "http://127.0.0.1:9", request_profile: population.requestProfile,
+      query_cache_root: join(f.root, "query-cache"), recorded_at: CLOCK, producer_commit: "a".repeat(40),
+      max_output_tokens: 4096, output_byte_limit: 1000000,
+      budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000,
+        finalization_reserve: 10000, min_envelope: 10 }
+    }, freezeRoot);
+    expect(frozen.contract).toBe("longmemeval-native-semantic-v3");
+    expect(frozen.selected).toHaveLength(1);
+    expect(frozen.selected[0]!.source_manifest).toHaveLength(2);
+    expect(frozen.selected[0]!.source_manifest).toMatchObject(expected);
+    expect(readChainArtifact(join(freezeRoot, "freeze.json"))).toEqual(frozen);
+    const preflightPath = join(f.root, "retained-preflight.json");
+    await writeFile(preflightPath, JSON.stringify({ planned_requests: [] }));
+    const associations = await prepareSourcePublicationAssociations({ ...population, cacheRoot: f.cacheRoot },
+      preflightPath, join(f.root, "associations.json"));
+    expect(associations.publicationAssociations).toEqual([]);
+    expect(associations.sources).toEqual(expected.map(({ source_id }) => ({
+      source_id, source_version: census.dataset_sha256, status: "unbound"
+    })));
+    const report = await publishSourceSemanticSnapshot({ snapshotPath: join(f.root, "occurrences.sqlite"),
+      dataDirRoot: join(f.root, "seed"), recordedAt: CLOCK, producerCommit: "a".repeat(40), populations: [population] });
+    expect(report).toMatchObject({ census_count: 2, admitted_count: 2, rejected_count: 0 });
+    expect(report.sources.map(row => row.session_id)).toEqual(["shared-session", "shared-session"]);
+    expect(new Set(report.sources.map(row => row.record_id)).size).toBe(2);
+    for (let reopen = 0; reopen < 2; reopen += 1) {
+      const db = new Database(report.snapshot_path, { readonly: true });
+      try {
+        expect(db.prepare("SELECT source_id, source_version, source_body, event_time, recorded_at FROM source_records ORDER BY source_id").all())
+          .toEqual(expected.map(({ source_id, source_observed_at }) => ({ source_id, source_version: census.dataset_sha256,
+            source_body: census.records[0]!.content_bytes, event_time: source_observed_at, recorded_at: CLOCK })));
+      } finally { db.close(); }
+    }
+  }, 60000);
+  it.each(["same-label", "changed-label"])("rejects repeated logical source identity even with %s", async label => {
+    const first = { ...question("duplicate-source", [[{ role: "user", content: "I recorded the amber parcel." }]]),
+      haystack_session_ids: ["same-label"] };
+    const f = await fixture(false, false, [first, { ...first, haystack_session_ids: [label] }]);
+    await expect(censusCompleteSourceRecords({ population: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot }))
+      .rejects.toThrow("duplicate logical source occurrence");
   });
   it("rejects repeated cache roots and ambiguous generation keys before creating any snapshot", async () => {
     const f = await fixture();
