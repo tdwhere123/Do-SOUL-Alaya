@@ -26,7 +26,7 @@ import { batchDigest } from "./batch/plan.js";
 import { encodeGeminiGenerateContent, isCompleteGeminiFinish, isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import {
   bindProviderRawAttempt, listProviderRawAttempts, readProviderRawAttempt, requestEnvelopeDigest,
-  writeProviderRawAttempt, retainedFailureOutcome, assertProviderRawReservation, type ProviderRawAttempt
+  writeProviderRawAttempt, retainedFailureOutcome, verifyProviderRawReservation, type ProviderRawAttempt
 } from "./provider-raw-attempt.js";
 import { assertExtractionFillComplete } from "./fill-completion.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
@@ -160,7 +160,7 @@ function importInteractiveFromRaw(
     requestProfile: input.prepared.config.requestProfile,
     requestDigest: requestEnvelopeDigest(line.userPrompt)
   });
-  assertProviderRawReservation(raw, input.authority!.snapshot());
+  if (verifyProviderRawReservation(raw, input.authority!.snapshot()) === "rejected") return "quarantined";
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
     input.authority!.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);

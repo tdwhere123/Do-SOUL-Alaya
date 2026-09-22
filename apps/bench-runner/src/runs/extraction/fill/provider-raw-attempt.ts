@@ -112,9 +112,10 @@ export function bindProviderRawAttempt(
   return raw;
 }
 
-export function assertProviderRawReservation(
+/** A settled source rejection remains final even if admission is attempted again. */
+export function verifyProviderRawReservation(
   raw: ProviderRawAttempt, ledger: ExtractionAttemptLedgerSnapshot | undefined
-): void {
+): "rejected" | undefined {
   assertExtractionAttemptReservation(ledger, raw.cache_key, raw.attempt_ordinal);
   const failure = ledger?.transportFailures.find(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
   const settled = ledger?.settledAttempts.some(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
@@ -129,6 +130,7 @@ export function assertProviderRawReservation(
       settled && failure === undefined && raw.transport_failure !== undefined) {
     throw new ProviderRawAttemptIdentityError("provider raw differs from its settled transport outcome");
   }
+  return sourceRejection ? "rejected" : undefined;
 }
 
 export function readProviderRawAttempt(

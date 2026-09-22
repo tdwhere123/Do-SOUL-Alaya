@@ -194,10 +194,14 @@ it("quarantines an interactive generateContent line through the same source-sema
   expect(existsSync(join(cacheRoot, "gemini-batch-plan.json"))).toBe(false);
 }, 60000);
 
-it.each(["transport", "admission"] as const)("rejects raw contradicting settled %s failure before source publication", async failure => {
-  const fixture = await setupInteractive("unknown_alias");
+it.each(["transport", "admission", "completion"] as const)("keeps settled %s failure non-executable after raw replacement", async failure => {
+  const fixture = await setupInteractive(failure === "completion" ? "semantic" : "unknown_alias");
   if (failure === "transport") fixture.fetchMock.mockImplementation(async () =>
     Response.json({ error: { message: "fixture server failure" } }, { status: 500 }));
+  if (failure === "completion") fixture.fetchMock.mockImplementation(async (_url, init) => {
+    const prompt = JSON.parse(String(init?.body)).contents[0].parts[0].text as string;
+    return Response.json({ candidates: [{ content: { parts: [{ text: authoredResponse(prompt) }] } }] });
+  });
   const args = [
     "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
     "--extraction-cache-root", cacheRoot, "--extraction-open-semantics", "--concurrency", "1",
@@ -219,7 +223,7 @@ it.each(["transport", "admission"] as const)("rejects raw contradicting settled 
     decodedText: authoredResponse(prompt), finishReason: "STOP" });
   const replacement = readFileSync(rawPath, "utf8");
   fixture.fetchMock.mockClear();
-  expect(await runCli(args)).toBe(2);
+  expect(await runCli(args)).toBe(failure === "completion" ? 0 : 2);
   expect(fixture.fetchMock).not.toHaveBeenCalled();
   expect(inspectCachedSourceSemantic(cacheRoot, raw.cache_key, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
   expect(existsSync(cacheFilePath(cacheRoot, raw.cache_key))).toBe(false);

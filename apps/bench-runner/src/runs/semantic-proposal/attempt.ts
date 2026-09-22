@@ -7,7 +7,7 @@ import { inspectSemanticProposalShard, hasAdmittedProposalOutcome, SemanticPropo
   type SemanticProposalLookup, type SemanticProposalShard } from "./artifact.js";
 import type { SemanticProposalAuthority } from "./authority.js";
 import type { SemanticProposalKind } from "./workset.js";
-import { readProviderRawAttempt, bindProviderRawAttempt, assertProviderRawReservation, listProviderRawAttempts,
+import { readProviderRawAttempt, bindProviderRawAttempt, verifyProviderRawReservation, listProviderRawAttempts,
   type ProviderRawAttempt } from "../extraction/fill/provider-raw-attempt.js";
 
 export function readSemanticProposalAttemptState(
@@ -53,7 +53,7 @@ export function assertProposalRawReservation(
   bindProviderRawAttempt(raw, { cacheKey, kind: expected.kind, model: expected.model,
     requestProfile: expected.request_profile, requestDigest: expected.request_digest ?? raw.request_digest,
     attemptLineageDigest: expected.attempt_lineage_digest });
-  assertProviderRawReservation(raw, ledger);
+  verifyProviderRawReservation(raw, ledger);
 }
 
 function assertProposalShardRaw(shard: SemanticProposalShard, raw: ProviderRawAttempt): void {

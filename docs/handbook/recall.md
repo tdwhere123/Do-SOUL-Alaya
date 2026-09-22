@@ -1174,5 +1174,6 @@ Source Interpretation interactive recovery and both proposal producers share the
 raw/reservation outcome check before publication. Retained output cannot
 contradict an already settled transport failure. Source admission rejection of
 a completed response is bound to that response's digest and remains replayable
-as quarantine; it does not imply a failed HTTP response. Live source output uses
-the same retained-raw path as recovery.
+as quarantine; its settled rejection is not reopened by changed completion
+metadata or a new admission attempt. It does not imply a failed HTTP response.
+Live source output uses the same retained-raw path as recovery.
