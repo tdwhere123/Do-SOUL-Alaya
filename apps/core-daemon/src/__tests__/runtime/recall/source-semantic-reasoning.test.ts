@@ -466,10 +466,14 @@ it("does not let a cache hit bypass erasure in the worker snapshot", async () =>
 it("paginates current interpretations including a large source interpretation and exposes the semantic body needed by semantic correspondence", async () => {
   await withPublished(async ({ allIds, execute }) => {
     const querySemantics = queryOf(), seen = new Set<string>();
+    const limited = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: querySemantics, budget: BUDGET });
+    expect(limited.kind === "prepare_query" && limited.access?.unvisited_interpretations).toBe(true);
+    expect(limited.coverage.discovery).toBe("truncated");
+    const observationBudget = { ...BUDGET, work_units: 1_000_000 };
     let continuation: string | undefined;
     let count = 0;
     do {
-      const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: querySemantics, budget: BUDGET,
+      const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: querySemantics, budget: observationBudget,
         ...(continuation === undefined ? {} : { continuation_handle: continuation }) });
       expect(page.kind).toBe("prepare_query");
       if (page.kind !== "prepare_query") throw new Error("expected query page");

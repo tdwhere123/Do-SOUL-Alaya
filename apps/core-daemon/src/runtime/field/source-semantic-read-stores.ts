@@ -59,40 +59,43 @@ export function sourceSemanticReadStores(database: StorageDatabase, workspace: s
 export function listEligibleSemanticSources(
   database: StorageDatabase, workspace: string, meter: SourceSemanticReadBudget,
   authorized: readonly string[] | null
-): { sources: SourceRecordIdentity[]; truncated: boolean; open: boolean; pages: number } {
+): { sources: SourceRecordIdentity[]; truncated: boolean; open: boolean; pages: number;
+  stopping_reasons: readonly ("budget" | "source_limit" | "unavailable")[] } {
   const repo = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
   const sources: SourceRecordIdentity[] = [];
+  const stoppingReasons = new Set<"budget" | "source_limit" | "unavailable">();
   let afterSourceId: string | null = null, pages = 0, truncated = true, open = false;
   // Every seek skips the preceding source's entire history. The remaining sources stay unvisited.
   while (pages < 512) {
     try { meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION); }
     catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      open = true; truncated = true; break;
+      open = true; truncated = true; stoppingReasons.add("budget"); break;
     }
     const page = repo.findNextCurrentBounded(workspace, afterSourceId, 1);
     meter.read(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
     pages += 1;
     if (page === null) { truncated = false; break; }
-    if (page.record === null) { open = true; break; }
+    if (page.record === null) { open = true; stoppingReasons.add("unavailable"); break; }
     const record = sourceRecordFromRow(page.record);
     afterSourceId = record.source_id;
     if (page.record.source_body === null || page.invalidOffset) {
-      if (page.bodyBytes > 0 || page.invalidOffset) open = true;
+      if (page.bodyBytes > 0 || page.invalidOffset) { open = true; stoppingReasons.add("unavailable"); }
       continue;
     }
     try { authorizeSemanticScope(record.scope_class, authorized); } catch { continue; }
     try { meter.retain(record, "current source catalog"); }
     catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      open = true; break;
+      open = true; stoppingReasons.add("budget"); break;
     }
     sources.push(record);
   }
   if (truncated) open = true;
+  if (truncated && pages >= 512) stoppingReasons.add("source_limit");
   return {
-    sources: sources.sort((left, right) => left.identity.localeCompare(right.identity)),
-    truncated, open, pages
+    sources,
+    truncated, open, pages, stopping_reasons: [...stoppingReasons]
   };
 }
 

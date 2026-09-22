@@ -1,0 +1,77 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildSourceReferenceCatalog, sourceReferenceResolver, type SourceSemanticQuery, type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
+import { createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
+  fieldContractSha256, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
+import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
+import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
+import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
+import { createRecallReadWorkerClient, type RecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
+import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
+import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/memory/evidence-create/source-span-views.js";
+import { digestOriginalQuery } from "../../../../../../packages/core/src/recall/conditional-field/query/compile-query-identity.js";
+import { createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS }
+  from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
+
+export { WS };
+export const CLOCK = "2026-09-18T00:00:00.000Z";
+export const ACCESS_BUDGET = { schema_version: 1 as const, work_units: 10_000_000, memory_bytes: 200_000_000,
+  page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 };
+export type AccessFixtureSource = Readonly<{ id: string; text: string; reading?: string; count?: number; scope?: "project" | "global_core" }>;
+type Execute = NonNullable<RecallReadWorkerClient["sourceSemanticsPort"]>["execute"];
+
+export function accessQuery(original: string, reading = original): SourceSemanticQuery {
+  return { contract: "source-semantic-query-v3", original_query_digest: digestOriginalQuery(original),
+    producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1", contract_version: "source-semantic-query-v3",
+    variables: [{ id: "statement", sort: "proposition" }], alternatives: [{ frames: [{ id: "qStatement", variable: "statement",
+      predicate_reading: reading, role_requirements: [] }], context_obligations: [{ frame: "qStatement", kind: "asserted_at_source" }] }],
+    return_variables: ["statement"], gaps: [] };
+}
+
+export async function accessCall<K extends SourceSemanticWorkerRequest["kind"]>(execute: Execute,
+  request: Extract<SourceSemanticWorkerRequest, { kind: K }>, scopes: readonly string[] = ["project"]) {
+  const result = await execute({ workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes }, request });
+  if (result.kind !== request.kind) throw new Error("worker operation mismatch");
+  return result as Extract<SourceSemanticWorkerResult, { kind: K }>;
+}
+
+export async function withAccessLibrary(sources: readonly AccessFixtureSource[], body: (input: {
+  execute: Execute; filename: string; ids: ReadonlyMap<string, readonly string[]>;
+}) => Promise<void>) {
+  const directory = await mkdtemp(join(tmpdir(), "source-semantic-access-")), filename = join(directory, "alaya.db");
+  const { database } = await createRecallRealStorage(() => undefined, filename);
+  const eventLogRepo = new SqliteEventLogRepo(database), runtimeNotifier = { notifyEntry: async () => undefined };
+  const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
+  const evidenceService = new EvidenceService({ eventLogRepo, runtimeNotifier,
+    evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => CLOCK });
+  const admission = createAuditedSourceAdmission({ stores, eventLogRepo, runtimeNotifier, sha256: fieldContractSha256 });
+  const ids = new Map<string, string[]>();
+  for (const fixture of sources) {
+    const source = `User: ${fixture.text}`;
+    await admission.admit({ workspace_id: WS, source_id: fixture.id, source_version: "1", content_bytes: source,
+      evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
+      speaker: "user", scope_class: fixture.scope ?? "project", spans: deriveAddressableSpanViews(source) }, { workspaceId: WS });
+    if (fixture.reading === undefined) { ids.set(fixture.id, []); continue; }
+    const catalog = buildSourceReferenceCatalog(fieldContractSha256(fixture.text), [{ assertion_id: 1, text: fixture.text }], fieldContractSha256);
+    const sourceRef = sourceReferenceResolver(catalog, fieldContractSha256).referenceForSpan(1, [0, fixture.text.length]);
+    const publishedIds: string[] = [];
+    for (let index = 0; index < (fixture.count ?? 1); index += 1) {
+      const published = await createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 }).publish({
+        workspaceId: WS, runId: RUN, artifactKey: fixture.id, source, catalog, provenance: { producer_id: "access-test-author" },
+        producer_version: `p${index}`, contract_version: "source-interpretation-v4", draft: {
+          contract: "source-interpretation-v4", mentions: [{ id: "mStatement", assertion_id: 1, source_ref: sourceRef }], referents: [],
+          frames: [{ id: "fStatement", assertion_ids: [1], context_owner: { kind: "source_act", source_act: "assertion" },
+            additional_support: [], predicate_support: { kind: "explicit", reading: fixture.reading, mentions: ["mStatement"] },
+            slots: [], bindings: [] }], operators: [], gaps: []
+        }
+      });
+      publishedIds.push(published.bound.interpretation_id);
+    }
+    ids.set(fixture.id, publishedIds);
+  }
+  database.close(); closeCachedDatabase(filename);
+  const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
+  try { await client.ready(); await body({ execute: (input) => client.sourceSemanticsPort!.execute(input), filename, ids }); }
+  finally { await client.close(); closeCachedDatabase(filename); await rm(directory, { recursive: true, force: true }); }
+}

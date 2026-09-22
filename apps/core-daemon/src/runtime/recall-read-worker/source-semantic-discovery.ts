@@ -1,7 +1,5 @@
 import {
-  SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
-  SourceSemanticHandleDescriptorSchema, SourceSemanticPublishedInterpretationSchema, SourceSemanticResourceExhausted,
-  type SourceSemanticCoverage, type SourceSemanticHandleDescriptor
+  SourceSemanticPublishedInterpretationSchema, type SourceSemanticCoverage
 } from "@do-soul/alaya-protocol";
 import { CoreError, fieldContractSha256, semanticInterpretationEvidenceId,
   verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
@@ -16,84 +14,6 @@ export const IDLE: SourceSemanticCoverage = {
   semantic_correspondence: "unexercised", conditional_computation: "unexercised", payload: "complete"
 };
 
-/** prepare_query verifies bodies it returns. Library recall pages handle identity only. */
-export function discover(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget, after: string | null, sourceId?: string,
-  verify = true) {
-  const page = new SqliteSourceHintReader(runtime.database.connection).pageBoundInterpretations({
-    workspaceId: payload.workspace_id, limit: SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE, nativeLimit: Math.min(32, meter.work), afterCursor: after,
-    nativeByteLimit: Math.min(meter.bytes, 1_000_000), maxGistBytes: 1_000_000, activeOnly: true,
-    matches: (gist) => { try {
-      const contract = JSON.parse(gist)?.contract;
-      return contract === SOURCE_SEMANTIC_PUBLISHED_CONTRACT;
-    } catch { return false; } }
-  });
-  try {
-    meter.read(page.nativeVisits, page.bytesRead);
-  } catch (error) {
-    if (verify || !(error instanceof SourceSemanticResourceExhausted)) throw error;
-    return { candidates: [] as SourceSemanticHandleDescriptor[], open: true, cursor: after, truncated: true };
-  }
-  const candidates: SourceSemanticHandleDescriptor[] = [];
-  let open = page.unavailable || page.resourceLimited === true, cursor = after, outputBytes = 0, stopped = false;
-  for (const row of page.rows) {
-    const identity = publishedHandleIdentity(row.gist);
-    if (identity === null) { open = true; cursor = row.cursor; continue; }
-    if (sourceId !== undefined && identity.descriptor.source_id !== sourceId) { cursor = row.cursor; continue; }
-    if (identity.k_version !== SOURCE_SEMANTIC_K_VERSION) { open = true; cursor = row.cursor; continue; }
-    try {
-      const candidate = verify
-        ? verifiedHandle(runtime, payload.workspace_id, identity.descriptor.interpretation_id, authorized, meter)
-        : identity.descriptor;
-      if (candidate.interpretation !== undefined && candidate.interpretation.k_version !== SOURCE_SEMANTIC_K_VERSION) {
-        open = true; cursor = row.cursor; continue;
-      }
-      const size = Buffer.byteLength(JSON.stringify(candidate));
-      if (outputBytes + size > 800_000) { stopped = true; break; }
-      meter.retain(candidate, "descriptor delivery"); candidates.push(candidate); outputBytes += size; cursor = row.cursor;
-    } catch (error) {
-      if (!verify && error instanceof SourceSemanticResourceExhausted) { stopped = true; open = true; break; }
-      if (!(error instanceof CoreError)) throw error;
-      const admission = admissionOf(error);
-      if (admission !== "filtered" && admission !== "no_eligible_source" && error.code !== "NOT_FOUND") open = true;
-      cursor = row.cursor;
-    }
-  }
-  if (!stopped) cursor = page.committedThrough;
-  return { candidates, open, cursor, truncated: stopped || page.truncated };
-}
-
-function verifiedHandle(runtime: RecallReadWorkerRuntime, workspace: string, interpretationId: string,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget): SourceSemanticHandleDescriptor {
-  const checked = loadVerified(runtime, workspace, interpretationId, authorized, meter);
-  const sourceInterpretation = checked.bound.interpretation;
-  return {
-    interpretation_id: checked.bound.interpretation_id, source_id: sourceInterpretation.source.source_id, source_version: sourceInterpretation.source.source_version,
-    content_digest: sourceInterpretation.source.content_digest, producer_id: sourceInterpretation.producer_id, producer_version: sourceInterpretation.producer_version,
-    contract_version: sourceInterpretation.contract_version, interpretation: sourceInterpretation
-  };
-}
-
-function publishedHandleIdentity(gist: string): { descriptor: SourceSemanticHandleDescriptor; k_version: string } | null {
-  try {
-    const raw = JSON.parse(gist) as Record<string, unknown> | null;
-    const body = raw?.interpretation as Record<string, unknown> | undefined;
-    const source = body?.source as Record<string, unknown> | undefined;
-    if (raw === null || raw.contract !== SOURCE_SEMANTIC_PUBLISHED_CONTRACT || body === undefined || source === undefined) return null;
-    if (typeof raw.interpretation_id !== "string" || typeof source.source_id !== "string"
-      || typeof source.source_version !== "string" || typeof source.content_digest !== "string"
-      || typeof body.producer_id !== "string" || typeof body.producer_version !== "string"
-      || typeof body.contract_version !== "string" || typeof body.k_version !== "string") return null;
-    const parsed = SourceSemanticHandleDescriptorSchema.safeParse({
-      interpretation_id: raw.interpretation_id, source_id: source.source_id, source_version: source.source_version,
-      content_digest: source.content_digest, producer_id: body.producer_id, producer_version: body.producer_version,
-      contract_version: body.contract_version
-    });
-    if (!parsed.success) return null;
-    return { descriptor: parsed.data, k_version: body.k_version };
-  } catch { return null; }
-}
-
 export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, interpretationId: string,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget) {
   meter.reserve(1, 16);
@@ -103,7 +23,7 @@ export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string
   if (capsule.status !== "complete" || capsule.gist === null) {
     throw new CoreError("CONFLICT", `source semantic interpretation read is ${capsule.status}`, { details: { admission: "unavailable", unavailable: capsule.status } });
   }
-  meter.charge(1, capsule.bytesRead * 4, "interpretation decoding");
+  meter.charge(capsule.gist.length + 1, capsule.bytesRead * 4, "interpretation decoding");
   let raw: unknown;
   try { raw = JSON.parse(capsule.gist); } catch {
     throw new CoreError("VALIDATION", "stored interpretation is malformed", { details: { admission: "invalid" } });

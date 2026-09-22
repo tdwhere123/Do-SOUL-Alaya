@@ -547,7 +547,11 @@ it("discovers a compact-published interpretation after the first descriptor page
           : undefined;
         const interpretation = descriptor?.interpretation ?? receivedInterpretation.interpretation;
         const receivedCorrespondence = receiveCorrespondence(receivedQuery.query, interpretation, gold!);
-        const recalled = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQuery.query, [receivedCorrespondence.semantic_correspondence]);
+        const recalled = await callInterpretation(reopened.handler, {
+          operation: "recall", accepts_unreviewed_conditional_results: true, query_handle: preparedQuery.query_handle,
+          semantic_correspondences: [receivedCorrespondence.semantic_correspondence], budget: BUDGET,
+          output_byte_limit: 1_000_000, authorized_scopes: SCOPES
+        }, reopened.context);
         if (recalled.operation !== "recall") throw new Error("library recall expected");
         expect(recalled.discovery?.visited_source_interpretation_pages).toBeGreaterThanOrEqual(2);
         expect(recalled.discovery?.visited_source_interpretation_descriptors).toBeGreaterThan(16);

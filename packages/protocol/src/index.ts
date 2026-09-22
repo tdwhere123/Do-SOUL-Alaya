@@ -266,6 +266,7 @@ export { canonicalSourceSemanticDecimal, compareSourceSemanticDecimals } from ".
 export { SourceSemanticDiagnosticsSchema, sourceSemanticValidationDiagnostics } from "./garden/source-semantic-diagnostics.js";
 export * from "./garden/source-semantic-interpretation.js";
 export * from "./garden/source-semantic-worker.js";
+export * from "./garden/source-semantic-access.js";
 export * from "./garden/source-semantic-identity.js";
 export * from "./garden/normalize-source-semantics.js";
 export { assertSourceSemanticAccounting, sourceSemanticEvidenceClosure } from "./garden/source-semantic-accounting.js";

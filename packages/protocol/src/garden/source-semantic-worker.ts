@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema } from "./source-semantic-access.js";
 import { SourceRecordIdentitySchema } from "../recall/field-contract/source-span.js";
 import { BoundedIdSchema, BoundedLabelSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { SourceReferenceCatalogSchema } from "../evidence/source-reference.js";
@@ -62,6 +63,7 @@ const PrepareSourceRequestSchema = z.object({
 
 const PrepareQueryRequestSchema = z.object({
   kind: z.literal("prepare_query"),
+  access_policy: SourceSemanticAccessPolicySchema.optional(),
   original_query: z.string().min(1).max(8192),
   query_semantics: SourceSemanticQuerySchema.optional(),
   source_handle: BoundedIdSchema.optional(),
@@ -97,6 +99,7 @@ const ReasonRequestSchema = z.object({
 
 const RecallRequestSchema = z.object({
   kind: z.literal("recall"),
+  access_policy: SourceSemanticAccessPolicySchema.optional(),
   accepts_unreviewed_conditional_results: z.literal(true),
   query_handle: BoundedIdSchema.optional(),
   query_semantics: SourceSemanticQuerySchema.optional(),
@@ -122,6 +125,7 @@ export const SourceSemanticWorkerRequestSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const SourceSemanticLibraryDiscoverySchema = z.object({
+  access: SourceSemanticAccessReceiptSchema.optional(),
   eligible_source_count: NonNegativeIntSchema,
   visited_source_pages: NonNegativeIntSchema,
   visited_source_interpretation_pages: NonNegativeIntSchema,
@@ -228,6 +232,7 @@ export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
   }).strict().readonly(),
   z.object({
     kind: z.literal("prepare_query"),
+    access: SourceSemanticAccessReceiptSchema.optional(),
     query_handle: BoundedIdSchema.optional(),
     continuation_handle: BoundedIdSchema.optional(),
     query_semantics_id: Sha256DigestSchema.optional(),

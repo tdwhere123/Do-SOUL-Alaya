@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema } from "../garden/source-semantic-access.js";
 import { BoundedIdSchema, BoundedLabelSchema } from "../shared/schema-primitives.js";
 import { SourceReferenceCatalogSchema } from "../evidence/source-reference.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
@@ -56,6 +57,7 @@ export const SoulInterpretationProposeRequestSchema = z.object({
 
 export const SoulInterpretationPrepareQueryRequestSchema = z.object({
   operation: z.literal("prepare_query"),
+  access_policy: SourceSemanticAccessPolicySchema.optional(),
   original_query: z.string().min(1).max(8192),
   query_semantics: SourceSemanticQuerySchema.optional(),
   source_handle: BoundedIdSchema.optional(),
@@ -79,6 +81,7 @@ export const SoulInterpretationReasonRequestSchema = z.object({
 
 const SoulInterpretationRecallRequestSchema = z.object({
   operation: z.literal("recall"),
+  access_policy: SourceSemanticAccessPolicySchema.optional(),
   accepts_unreviewed_conditional_results: z.literal(true),
   query_handle: BoundedIdSchema.optional(),
   query_semantics: SourceSemanticQuerySchema.optional(),
@@ -120,6 +123,7 @@ export const SoulInterpretationProposeResponseSchema = z.object({
 
 export const SoulInterpretationPrepareQueryResponseSchema = z.object({
   operation: z.literal("prepare_query"),
+  access: SourceSemanticAccessReceiptSchema.optional(),
   query_handle: BoundedIdSchema.optional(),
   continuation_handle: BoundedIdSchema.optional(),
   query_semantics_id: Sha256DigestSchema.optional(),

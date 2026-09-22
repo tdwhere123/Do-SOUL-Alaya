@@ -10,7 +10,8 @@ import type { WorkerOperationPayload } from "./operation-schemas.js";
 import { sourceSemanticReadStores, currentSemanticSource, authorizeSemanticScope, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { issueSemanticLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow, sourceSemanticRevision, type SourceSemanticLease } from "./source-semantic-leases.js";
 import { runSourceSemanticLibraryRecall } from "./source-semantic-library-recall.js";
-import { IDLE, discover, loadVerified, workOf } from "./source-semantic-discovery.js";
+import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
+import { accessDescriptorPage, accessInputIdentity, observeSourceSemanticAccess, preparationAccessReceipt } from "./source-semantic-candidate-access.js";
 
 type Payload = WorkerOperationPayload<"conditionalField.sourceSemantics">;
 
@@ -87,23 +88,37 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
       throw new CoreError("VALIDATION", "preparation source is no longer current", { details: { admission: "filtered" } });
     }
   }
-  const discovery = discover(runtime, payload, authorized, meter, prior?.after_cursor ?? null, scopeLease?.source_id);
-  const open = discovery.open || prior?.discovery_open === true;
+  const query = admission.kind === "admitted" ? admission.query : undefined;
+  const policy = request.access_policy ?? prior?.access_pool?.access.policy ?? "query-conditioned-v1";
+  const inputId = accessInputIdentity(request.original_query, query, request.budget, policy, scopeLease?.source_id);
+  if (prior !== undefined && prior.access_pool?.access.input_id !== inputId) {
+    throw new CoreError("VALIDATION", "preparation continuation access policy or budget changed", { details: { admission: "bound" } });
+  }
+  const pool = prior?.access_pool ?? observeSourceSemanticAccess(runtime, payload, authorized, meter,
+    request.original_query, query, policy, request.budget, scopeLease?.source_id);
+  if (prior?.access_pool !== undefined) meter.retain(pool, "continued access pool");
+  const discovery = accessDescriptorPage(runtime, payload.workspace_id, authorized, meter, pool, prior?.access_offset ?? 0);
+  const sourceOffset = prior?.access_source_offset ?? 0;
+  const access = preparationAccessReceipt(pool, sourceOffset, prior?.access_offset ?? 0, discovery.candidates.length, meter);
+  const nextSourceOffset = sourceOffset + access.source_candidates.length;
+  const sourceTraceRemaining = nextSourceOffset < pool.sources.length;
+  const open = pool.access.unvisited_sources || pool.access.unvisited_interpretations;
   const coverage: SourceSemanticCoverage = { ...IDLE, discovery: discovery.truncated || open ? "truncated" : "complete",
     source_interpretation: "open", query_semantics: admission.kind === "admitted" && admission.query.gaps.length === 0 ? "complete" : "open" };
   const base: Omit<SourceSemanticLease, "kind"> = { ...leaseBase(runtime, payload, authorized),
     ...(scopeLease === undefined ? {} : { source_id: scopeLease.source_id, source_version: scopeLease.source_version, content_digest: scopeLease.content_digest }),
     original_query: request.original_query, query_semantics_id: querySemanticsId, query_semantics: admission.kind === "admitted" ? admission.query : undefined,
-    candidates: discovery.candidates.map((row) => row.interpretation_id), truncated: discovery.truncated || open,
-    after_cursor: discovery.cursor, discovery_open: open };
+    candidates: pool.descriptors.map((row) => row.interpretation_id), truncated: discovery.truncated || open,
+    access_pool: pool, access_offset: discovery.offset, access_source_offset: nextSourceOffset };
   const query_handle = admission.kind === "admitted" ? issueSemanticLease(runtime, { ...base, kind: "query" }, meter) : undefined;
-  const continuation_handle = discovery.truncated && discovery.cursor !== null && discovery.cursor !== (prior?.after_cursor ?? null)
+  const continuation_handle = (discovery.truncated || sourceTraceRemaining)
+    && (discovery.offset > (prior?.access_offset ?? 0) || nextSourceOffset > sourceOffset)
     ? issueSemanticLease(runtime, { ...base, kind: "page" }, meter) : undefined;
   const outcome = admission.kind === "admitted" ? undefined : admission.kind === "absent"
     ? { status: "preparation_required" as const, missing: "query_semantics" as const }
     : { status: "invalid" as const, reason: admission.kind === "unsupported" ? "unsupported_producer" : "malformed_query" };
   return SourceSemanticWorkerResultSchema.parse({ kind: "prepare_query", query_handle, continuation_handle, query_semantics_id: querySemanticsId,
-    candidates: discovery.candidates, truncated: discovery.truncated || open, outcome, coverage, work: workOf(meter) });
+    access, candidates: discovery.candidates, truncated: discovery.truncated || sourceTraceRemaining || open, outcome, coverage, work: workOf(meter) });
 }
 
 function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null,

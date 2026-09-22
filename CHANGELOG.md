@@ -50,6 +50,12 @@ verifies siblings, and reports shared answer/input support with unknown cross-so
 compatibility and distinctness. Unfinished phases remain resource-exhausted/partial.
 Archive-only source-evidence v1 identities, pages and order remain unchanged.
 
+Opt-in interpretation preparation and recall now share query-conditioned native
+candidate access and a budget-bound frozen pool. An explicit canonical policy
+retains the diagnostic control. Bounded receipt pages preserve unvisited and
+partial-body states without repeating native reads; these additive public fields
+are included in the pending Protocol 9.0.0 release.
+
 Protocol 8.0.0 additionally requires complete current library deliveries to identify
 protocol 2 and library v2, membership purpose and the ten-slot page budget. Worker
 and public schemas derive these fields from one delivery contract. Outcome-only

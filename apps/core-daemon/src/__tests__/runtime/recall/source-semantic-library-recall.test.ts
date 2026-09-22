@@ -221,7 +221,8 @@ it("discovers a relevant interpretation after the first descriptor page and keep
     expect(prepared.truncated).toBe(true);
     const gold = allIds.find((id) => !prepared.candidates.some((row) => row.interpretation_id === id));
     expect(gold).toBeDefined();
-    const recalled = await call(execute, recallRequest([correspondenceOf(gold!, queryOf())]));
+    const boundRequest = { ...recallRequest([correspondenceOf(gold!, queryOf())]), query_handle: prepared.query_handle };
+    const recalled = await call(execute, boundRequest);
     expect(recalled.kind).toBe("recall");
     if (recalled.kind !== "recall") throw new Error("library recall expected");
     expect(recalled.discovery.visited_source_interpretation_pages).toBeGreaterThanOrEqual(2);
@@ -229,6 +230,10 @@ it("discovers a relevant interpretation after the first descriptor page and keep
     expect(recalled.discovery.examined_source_interpretation_ids).toEqual([gold]);
     expect(recalled.discovery.unexamined_source_interpretation_count).toBeGreaterThan(0);
     expect(recalled.discovery.eligible_source_count).toBeGreaterThanOrEqual(2);
+    const leased = await call(execute, { ...recallRequest([correspondenceOf(gold!, queryOf())]),
+      original_query: undefined, query_semantics: undefined, query_handle: prepared.query_handle });
+    expect(leased.discovery.access?.pool_id).toEqual(prepared.access?.pool_id);
+    expect(leased.slot_qualifiers.some((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === gold)).toBe(true);
     expect(recalled.order.enumeration_policy).toBe("canonical");
     expect(recalled.order.occupancy).toBe("source_gold_root_identity");
     const search = soulSearchFromLibraryRecall(recalled);
@@ -247,7 +252,7 @@ it("discovers a relevant interpretation after the first descriptor page and keep
       query_id: search.index!.query_id, snapshot_id: search.index!.snapshot_id,
       interpretation_id: search.index!.interpretation_id!, as_of: search.index!.as_of!
     }, exposureSlots(search), search.delivery_id)).toBe(false);
-    const again = soulSearchFromLibraryRecall(await call(execute, recallRequest([correspondenceOf(gold!, queryOf())])));
+    const again = soulSearchFromLibraryRecall(await call(execute, boundRequest));
     expect(again.results.map((row) => row.target)).toEqual(search.results.map((row) => row.target));
     const { database } = await createRecallRealStorage(() => undefined, filename);
     expect(database.connection.prepare("SELECT count(*) AS n FROM memory_entries").get()).toEqual({ n: 0 });
@@ -255,7 +260,7 @@ it("discovers a relevant interpretation after the first descriptor page and keep
   }, 20);
 }, 60000);
 
-it("examines aligned handles without hydrating every published descriptor", async () => {
+it("verifies observed interpretation bodies and keeps malformed metadata open instead of admitting descriptors", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-library-identity-"));
   const filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
@@ -315,10 +320,12 @@ it("examines aligned handles without hydrating every published descriptor", asyn
     );
     expect(recalled.kind).toBe("recall");
     if (recalled.kind !== "recall") throw new Error("library recall expected");
-    expect(recalled.discovery.visited_source_interpretation_descriptors).toBe(20);
+    expect(recalled.discovery.visited_source_interpretation_descriptors).toBe(1);
     expect(recalled.discovery.visited_source_interpretation_pages).toBeGreaterThanOrEqual(2);
     expect(recalled.discovery.examined_source_interpretation_ids).toEqual([published.bound.interpretation_id]);
-    expect(hydrate).toHaveBeenCalledTimes(1);
+    expect(hydrate).toHaveBeenCalledTimes(21);
+    expect(recalled.discovery.access?.unvisited_interpretations).toBe(true);
+    expect(recalled.discovery.access?.stopping_reasons).toContain("unavailable");
     const executeBranch = Core.executeSourceSemanticInterpretation;
     const partial = vi.spyOn(Core, "executeSourceSemanticInterpretation").mockImplementation((input) => {
       const actual = executeBranch(input);
@@ -471,8 +478,10 @@ it.each([2001, 70000])("reports the actual UTF-8 preview extent for a %i-charact
     expect(publicResult.coverage.payload).toBe(length > 4096 ? "truncated" : "complete");
     expect(publicResult.index?.completeness.payload).toBe(length > 4096 ? "partial" : "complete");
     expect(publicResult.results?.[0]?.content_preview).toBe(long.slice(0, 4096));
-    const capped = await call((input) => client.sourceSemanticsPort!.execute(input), { ...recallRequest([]), output_byte_limit: 4096 });
-    expect(Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(capped)))).toBeLessThanOrEqual(4096);
+    await expect(call((input) => client.sourceSemanticsPort!.execute(input), { ...recallRequest([]), output_byte_limit: 4096 }))
+      .rejects.toThrow(/output budget cannot retain interpretation qualifiers/u);
+    const capped = await call((input) => client.sourceSemanticsPort!.execute(input), { ...recallRequest([]), output_byte_limit: 8192 });
+    expect(Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(capped)))).toBeLessThanOrEqual(8192);
     const preview = Object.values(recalled.previews ?? {})[0] ?? "";
     expect(preview.length).toBeLessThanOrEqual(4_096);
     expect(preview.length).toBeGreaterThan(0);

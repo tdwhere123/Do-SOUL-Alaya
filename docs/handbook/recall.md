@@ -912,6 +912,33 @@ remain provider-free; query semantics and semantic correspondence are supplied b
 cache. Discovery pages current source records and published source interpretations beyond a single
 16-row descriptor page, records the eligible population, visited pages, candidate
 prefix and open residuals, and does not treat query hints as semantic membership.
+`prepare_query` and library `recall` share Core's `source-semantic-access` owner.
+The `query-conditioned-v1` policy scores original query against observed source
+text, then uses independently verified query/source predicate readings to break
+access ties. `canonical-v1` is the explicit diagnostic control over the same
+metered observations. Both order the whole observed pool before descriptor pages
+or native correspondence opportunities. Scores are lexical access signals; role
+and modality foils may tie or outrank a relevant interpretation without acquiring
+assertion authority. A source without an interpretation remains a raw candidate.
+There is no query seek across unvisited sources or interpretation pages.
+
+The access receipt retains identities, cached scores, source byte extents and
+open residuals, without duplicating interpretation bodies. It reports the total
+observed source and interpretation counts separately from rows omitted from the
+current trace. Preparation continuation pages at most 16 source trace rows and
+16 interpretation descriptors; their offsets refer to the same frozen pool.
+Trace-only source pages make no native reads or scoring calls and do not reopen
+an already complete census. Library delivery includes only examined interpretation
+and returned-source trace rows. Unvisited observations remain open regardless of
+how many trace pages have been displayed. Query/page/library
+leases retain the full compact observed pool and its order. The pool binds query,
+policy, budget, scope and database revision; continuation cannot rescan or reorder
+it, and query-handle recall uses all bound candidates beyond the first descriptor
+page. Source reads, metadata and interpretation decoding, verification, query
+normalization, scoring, ordering and retention consume the request ledger.
+Observation leaves capacity for descriptor/lease or library finalization; an
+unread body tail or budget-limited pool remains open. These are conservative
+logical charges, not a wall-clock guarantee or an RSS bound.
 Compatible source interpretation, query semantics, and semantic correspondence compile independently through the existing field; there is no
 cross-interpretation join. Delivery uses canonical `sortIndexEntries` with source-root occupancy
 (`source_gold_root_identity`) and a membership page of at most 10. Equal grades

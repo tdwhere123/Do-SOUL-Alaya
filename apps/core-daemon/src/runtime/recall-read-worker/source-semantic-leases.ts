@@ -3,6 +3,7 @@ import { canonicalJson, type SourceSemanticQuery, type Continuation } from "@do-
 import { CoreError } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
+import type { SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
 
 export type SourceSemanticLease = Readonly<{
   kind: "source" | "query" | "page" | "library";
@@ -12,12 +13,12 @@ export type SourceSemanticLease = Readonly<{
   source_id?: string; source_version?: string; content_digest?: string;
   original_query?: string; query_semantics?: SourceSemanticQuery; query_semantics_id?: string;
   candidates?: readonly string[];
-  after_cursor?: string | null; discovery_open?: boolean; truncated?: boolean;
+  access_pool?: SourceSemanticAccessPool; access_offset?: number; access_source_offset?: number; truncated?: boolean;
   continuation?: Continuation; request_identity?: string;
 }>;
 type Clock = Readonly<{ as_of: string; lifetime_now?: string }>;
 type Caller = Clock & Readonly<{ workspace_id: string; principal?: string }>;
-const LEASES = new WeakMap<RecallReadWorkerRuntime, Map<string, SourceSemanticLease>>();
+const LEASES = new WeakMap<RecallReadWorkerRuntime, Map<string, { lease: SourceSemanticLease; bytes: number }>>();
 const MAX_BYTES = 8_000_000;
 
 /** Interpretation time may be frozen; capability lifetime must keep advancing. */
@@ -34,17 +35,21 @@ export function issueSemanticLease(runtime: RecallReadWorkerRuntime, lease: Sour
   meter.retain(lease, "preparation lease");
   let rows = LEASES.get(runtime);
   if (rows === undefined) { rows = new Map(); LEASES.set(runtime, rows); }
-  for (const [id, row] of rows) if (row.expires_at <= sourceSemanticLifetimeNow(lease)) rows.delete(id);
-  const id = issuedId ?? randomUUID(); rows.set(id, lease);
-  const size = () => [...rows.values()].reduce((sum, row) => sum + 4 * canonicalJson(row).length, 0);
-  while (rows.size > 32 || size() > MAX_BYTES) rows.delete(rows.keys().next().value!);
+  meter.charge(rows.size * 2, 0, "preparation lease retention accounting");
+  for (const [id, row] of rows) if (row.lease.expires_at <= sourceSemanticLifetimeNow(lease)) rows.delete(id);
+  const id = issuedId ?? randomUUID(); rows.set(id, { lease, bytes: 4 * canonicalJson(lease).length });
+  let bytes = [...rows.values()].reduce((sum, row) => sum + row.bytes, 0);
+  while (rows.size > 32 || bytes > MAX_BYTES) {
+    const oldest = rows.keys().next().value!;
+    bytes -= rows.get(oldest)!.bytes; rows.delete(oldest);
+  }
   if (!rows.has(id)) throw new CoreError("CONFLICT", "source semantic preparation exceeds lease capacity", { subCode: "RETRYABLE_BACKPRESSURE" });
   return id;
 }
 
 export function readSemanticLease(runtime: RecallReadWorkerRuntime, caller: Caller, id: string,
   authorized: readonly string[] | null, kind: SourceSemanticLease["kind"]): SourceSemanticLease {
-  const rows = LEASES.get(runtime), lease = rows?.get(id);
+  const rows = LEASES.get(runtime), lease = rows?.get(id)?.lease;
   if (lease === undefined || lease.expires_at <= sourceSemanticLifetimeNow(caller)) {
     rows?.delete(id); throw new CoreError("VALIDATION", "source semantic preparation handle expired", { details: { admission: "expired" } });
   }
