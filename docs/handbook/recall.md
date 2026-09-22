@@ -909,10 +909,18 @@ The separately named source-bearing union metric scores the same initial occupie
 slots across source evidence and validated semantic proofs. A proof must bind its
 source record to the independently verified native snapshot publication, including
 root, workspace, version, digest and known scope; a self-consistent copied proof
-record is insufficient. One occupied root contributes once. This union does not
+record is insufficient. Admission reuses the native execution and projection owners
+to reproduce the accepting binding, selected alternative, returned coordinates and
+explanation witness. Each proof verification has a separate explicit budget bounded
+by the admitted native request budget, including retained proof and replay costs;
+the standalone Core helper defaults to the Core execution budget. Exhaustion leaves
+a proof unverified. Without another validated hit, an unverified
+gold proof within the cutoff makes the union unavailable, never a definitive miss.
+One occupied root contributes once. This union does not
 replace either earlier metric or certify complete answer support. Frozen comparisons
 bind the summary, census, selected questions, preparation, publication, replay and
-initial-exposure commitment. Missing, corrupt or incomplete evidence retains the
+initial-exposure commitment, and reuse complete native response admission for budget
+and provider-call evidence. Missing, corrupt or incomplete evidence retains the
 frozen denominator as unknown; an incomplete source census cannot establish a miss.
 
 Current-source discovery scans at most 32 pages of 16 historical records. An
@@ -947,7 +955,7 @@ disagreement is invalid rather than repaired or silently discarded. Semantic cor
 gap channel, so an interpreted semantic correspondence requires empty outcome gaps. Partial source interpretation and query semantics
 remain valid with matching, structurally valid gaps. Protocol owns this binding
 rule and bounded validation diagnostics; raw response identity remains intact.
-SOUL `proposeQuerySemantics` and `proposeAlignmentSemantics` expose the native
+SOUL `proposeQuerySemantics` and `proposeCorrespondenceSemantics` expose the native
 `system_prompt` beside the strict request body. Without an injected response,
 they prepare these inputs with `unexercised` and zero provider attempts. With
 an injected response, the same preparation metadata accompanies success or

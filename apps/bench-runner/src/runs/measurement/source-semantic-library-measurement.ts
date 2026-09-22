@@ -50,7 +50,7 @@ const ValidatedMeasurement = z.object({
   }).strict().readonly()
 }).strict().readonly().superRefine((value, context) => {
   const proofRanks = proofRanksFromLibrary(value.first_exposure_slots, value.delivered_index,
-    value.slot_qualifiers, value.delivered_proofs, value.source_records ?? []);
+    value.slot_qualifiers, value.delivered_proofs, value.source_records ?? [], value.request.budget);
   const mixed = scoreMixedKindFirstExposure(value.first_exposure_slots, value.source_gold_units);
   const proof = proofMetric(value.first_exposure_slots, value.source_gold_units, proofRanks);
   const slotsMatch = JSON.stringify(value.first_exposure_slots)
@@ -165,7 +165,7 @@ function admitLibraryMeasurement(
     query_id: index.query_id, snapshot_id: index.snapshot_id,
     interpretation_id: index.interpretation_id, as_of: index.as_of
   }, slots, search.delivery_id)) return invalid("missing_first_exposure");
-  const proofRanks = proofRanksFromLibrary(slots, index, recalled.slot_qualifiers, recalled.proofs ?? [], input.sourceRecords ?? []);
+  const proofRanks = proofRanksFromLibrary(slots, index, recalled.slot_qualifiers, recalled.proofs ?? [], input.sourceRecords ?? [], budget.data);
   return {
     status: "admitted", budget: budget.data, index, proofs: recalled.proofs ?? [], exposure: exposure.data, slots, qualifiers: recalled.slot_qualifiers,
     proofRanks, identity: {
@@ -209,7 +209,7 @@ function proofRanksFromLibrary(
   slots: readonly z.infer<typeof ExposureSlotSchema>[],
   index: InformationIndex,
   qualifiers: readonly SourceSemanticLibrarySlotQualifier[], proofs: readonly SourceSemanticLibraryProof[],
-  sourceRecords: readonly SourceRecordIdentity[]
+  sourceRecords: readonly SourceRecordIdentity[], verificationBudget: RequestBudget
 ): ReadonlySet<number> | null {
   if (qualifiers.length !== index.entries.length) return null;
   const ranks = new Set<number>();
@@ -225,7 +225,7 @@ function proofRanksFromLibrary(
     if (fromQualifier) {
       if (deliveredSourceSemanticLibraryProof(index, entry, qualifier, proofs,
         sourceRecords.find((record) => entry.target.kind === "source_evidence" && record.identity === entry.target.root_id
-          && record.workspace_id === entry.target.workspace_id)) === undefined) return null;
+          && record.workspace_id === entry.target.workspace_id), verificationBudget) === undefined) return null;
       ranks.add(slot.rank);
     }
   }
@@ -235,7 +235,7 @@ function proofRanksFromLibrary(
 export function sourceSemanticLibraryProofAdmission(
   slots: readonly z.infer<typeof ExposureSlotSchema>[], index: InformationIndex,
   qualifiers: readonly SourceSemanticLibrarySlotQualifier[], proofs: readonly SourceSemanticLibraryProof[],
-  gold: readonly SourceGoldUnit[], sourceRecords: readonly SourceRecordIdentity[]
+  gold: readonly SourceGoldUnit[], sourceRecords: readonly SourceRecordIdentity[], verificationBudget: RequestBudget
 ): UnionProofAdmission {
   const validatedRanks = new Set<number>();
   const unverifiedGoldRanks = new Set<number>();
@@ -248,7 +248,7 @@ export function sourceSemanticLibraryProofAdmission(
       && entry.interpretation_node !== undefined && entry.explanation_ids.length > 0
       && deliveredSourceSemanticLibraryProof(index, entry, qualifier, proofs,
         sourceRecords.find((record) => entry.target.kind === "source_evidence" && record.identity === entry.target.root_id
-          && record.workspace_id === entry.target.workspace_id)) !== undefined;
+          && record.workspace_id === entry.target.workspace_id), verificationBudget) !== undefined;
     if (delivered) validatedRanks.add(slot.rank);
     else if (gold.some((unit) => sourceTargetJoinsGold(slot, unit))) unverifiedGoldRanks.add(slot.rank);
   }
@@ -259,7 +259,7 @@ function proofMetric(slots: readonly z.infer<typeof ExposureSlotSchema>[], gold:
   ranks: ReadonlySet<number> | null) {
   const metric = scoreProofConditionedFirstExposure(slots, gold, ranks ?? new Set());
   if (ranks !== null) return metric;
-  const unavailable = { status: "unavailable" as const, value: null, reason: "delivered conditional proof is missing or inconsistent" };
+  const unavailable = { status: "unavailable" as const, value: null, reason: "delivered conditional proof is missing, inconsistent or not verified within budget" };
   return { ...metric, any_at_1: unavailable, any_at_5: unavailable, any_at_10: unavailable };
 }
 

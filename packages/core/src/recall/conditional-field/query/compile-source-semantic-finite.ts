@@ -17,15 +17,15 @@ export type SourceSemanticExecutionPlan = Readonly<{
   missingOperands: boolean; missingMembership?: boolean;
   groupPhases?: readonly SourceSemanticGroupPhase[];
 }>;
-type Input = Readonly<{ h: SourceSemanticInterpretation; q: SourceSemanticQuery; a: SourceSemanticCorrespondence;
+type Input = Readonly<{ source_interpretation: SourceSemanticInterpretation; query_semantics: SourceSemanticQuery; semantic_correspondence: SourceSemanticCorrespondence;
   population: SourceSemanticPremisePopulation; meter: SourceSemanticResourceLedger }>;
 const DOMAIN = "@finite:domain";
 
 /** Expand finite obligations only. Every outcome is still decided by the conditional-field engine. */
 export function compileSourceSemanticExecution(input: Input): SourceSemanticExecutionPlan {
-  const { q, h, a, meter, population } = input;
+  const { query_semantics: q, source_interpretation: h, semantic_correspondence: a, meter, population } = input;
   if (q.evaluation === undefined) {
-    const finite = { h, population, semantic_correspondence: a };
+    const finite = { source_interpretation: h, population, semantic_correspondence: a };
     let acceptIndex = 0;
     const groupPhases = q.alternatives.flatMap((alternative, index) => {
       const frames = correspondenceGroupPhases(q, a, index);
@@ -53,15 +53,15 @@ export function compileSourceSemanticExecution(input: Input): SourceSemanticExec
 function domainEntry(input: Input, domain: SourceSemanticDomain): QueryProgram[] {
   return [rel(key("candidate_route"), "@finite:seed", DOMAIN, input.meter),
     rel(key("source_interpretation_domain", domain.id), DOMAIN, DOMAIN, input.meter),
-    rel(key("semantic_correspondence_domain", input.q.evaluation!.domain), DOMAIN, DOMAIN, input.meter)];
+    rel(key("semantic_correspondence_domain", input.query_semantics.evaluation!.domain), DOMAIN, DOMAIN, input.meter)];
 }
 
 function closureProof(input: Input, domain: SourceSemanticDomain): QueryProgram {
   if (domain.closure.kind !== "closed") return emptySemanticProgram;
   const evidence = "@finite:closure";
-  const preserve = input.q.evaluation?.kind === "comparison" && input.q.evaluation.scope === "preserve";
+  const preserve = input.query_semantics.evaluation?.kind === "comparison" && input.query_semantics.evaluation.scope === "preserve";
   return sequence([rel(key("domain_closed"), DOMAIN, evidence, input.meter),
-    semanticOwnerProof(input.h, domain.closure.evidence, evidence, input.meter, preserve),
+    semanticOwnerProof(input.source_interpretation, domain.closure.evidence, evidence, input.meter, preserve),
     rel(key("domain_closed_inv"), evidence, DOMAIN, input.meter)]);
 }
 
@@ -70,20 +70,20 @@ function memberProof(input: Input, domain: SourceSemanticDomain, member: SourceS
   const evidence = `@member:${suffix}`;
   return sequence([rel(key("domain_member", member.referent), DOMAIN, variable, input.meter),
     rel(key("domain_member_evidence", domain.id), variable, evidence, input.meter),
-    semanticOwnerProof(input.h, member.evidence, evidence, input.meter, domain.context !== null),
+    semanticOwnerProof(input.source_interpretation, member.evidence, evidence, input.meter, domain.context !== null),
     rel(key("domain_member_return", domain.id), evidence, DOMAIN, input.meter)]);
 }
 
 function compileUniversal(input: Input, domain: SourceSemanticDomain): SourceSemanticExecutionPlan {
-  const { q, meter } = input, evaluation = q.evaluation!;
+  const { query_semantics: q, meter } = input, evaluation = q.evaluation!;
   if (evaluation.kind !== "forall") throw new TypeError("expected universal evaluation");
   if (domain.context !== null) return { program: emptySemanticProgram, branches: [], domain, missingOperands: false };
   const branches: SourceSemanticProofBranch[] = [], options: QueryProgram[] = [];
   const body = (member: SourceSemanticDomain["members"][number], memberIndex: number, counterexample: boolean) => {
-    const finite = { h: input.h, population: input.population, semantic_correspondence: input.a };
+    const finite = { source_interpretation: input.source_interpretation, population: input.population, semantic_correspondence: input.semantic_correspondence };
     const choices = q.alternatives.flatMap((alternative, index) => {
       if ((alternative.purpose === "counterexample") !== counterexample) return [];
-      const frames = correspondenceGroupPhases(q, input.a, index);
+      const frames = correspondenceGroupPhases(q, input.semantic_correspondence, index);
       return frames.map((group, groupIndex) => {
         meter.charge(1, 1024, "finite universal branch");
         const suffix = `:member${memberIndex}:alt${index}:g${groupIndex}`;
@@ -133,7 +133,7 @@ function comparisonOrders(operation: string): readonly string[] {
 function numericProof(input: Input, domain: SourceSemanticDomain,
   leftVariable: string, rightVariable: string, orders: readonly string[], suffix: string,
   subjectCondition?: "allow_self" | "distinct"): QueryProgram {
-  const evaluation = input.q.evaluation!;
+  const evaluation = input.query_semantics.evaluation!;
   if (evaluation.kind !== "comparison") throw new TypeError("expected comparison");
   const pair = `@pair:${suffix}`, a = `@measure:${suffix}:left`, b = `@measure:${suffix}:right`;
   const leftOwner = `@owner:${suffix}:left`, rightOwner = `@owner:${suffix}:right`;
@@ -141,10 +141,10 @@ function numericProof(input: Input, domain: SourceSemanticDomain,
     const membership = `@membership:${suffix}:${side}`;
     const membershipProof = domain.context === null
       ? rel(key("source_interpretation_assertion_permission"), membership, membership, input.meter)
-      : alternatives(domain.members.map((row) => semanticOwnerProof(input.h, row.evidence, membership, input.meter, evaluation.scope === "preserve")));
+      : alternatives(domain.members.map((row) => semanticOwnerProof(input.source_interpretation, row.evidence, membership, input.meter, evaluation.scope === "preserve")));
     const memberships = [sequence([rel(key("measurement_membership"), variable, membership, input.meter), membershipProof,
       rel(key("measurement_membership_inv"), membership, variable, input.meter)])];
-    if (input.a.membership_assumptions?.some((row) => row.status === "member" && row.source_domain === domain.id
+    if (input.semantic_correspondence.membership_assumptions?.some((row) => row.status === "member" && row.source_domain === domain.id
       && row.query_variable === subject)) memberships.push(sequence([
       rel(key("measurement_assumed_membership", subject), variable, subject, input.meter),
       rel(key("semantic_correspondence_referent", subject), subject, subject, input.meter),
@@ -153,17 +153,17 @@ function numericProof(input: Input, domain: SourceSemanticDomain,
       ? sequence([rel(key("measurement_owner"), variable, owner, input.meter),
         rel(key("source_interpretation_assertion_permission"), owner, owner, input.meter),
         rel(key("measurement_owner_inv"), owner, variable, input.meter)])
-      : alternatives((input.h.measurements ?? []).filter((row) => row.population === domain.id).map((measurement) => sequence([
+      : alternatives((input.source_interpretation.measurements ?? []).filter((row) => row.population === domain.id).map((measurement) => sequence([
         rel(key("source_interpretation_measurement", measurement.id), variable, variable, input.meter),
         rel(key("measurement_owner"), variable, owner, input.meter),
-        semanticOwnerProof(input.h, measurement.owner, owner, input.meter, true),
+        semanticOwnerProof(input.source_interpretation, measurement.owner, owner, input.meter, true),
         rel(key("measurement_owner_inv"), owner, variable, input.meter)
       ])));
     const steps = [rel(key(`numeric_${side}`), pair, variable, input.meter),
       ownerPermission,
       alternatives(memberships),
       rel(key("measurement_subject"), variable, subject, input.meter)];
-    if (input.q.variables.find((row) => row.id === subject)?.reference !== undefined) {
+    if (input.query_semantics.variables.find((row) => row.id === subject)?.reference !== undefined) {
       steps.push(rel(key("semantic_correspondence_referent", subject), subject, subject, input.meter));
     }
     steps.push(rel(key("measurement_subject_inv"), subject, variable, input.meter),
@@ -181,9 +181,9 @@ function numericProof(input: Input, domain: SourceSemanticDomain,
 }
 
 function compileComparison(input: Input, domain: SourceSemanticDomain): SourceSemanticExecutionPlan {
-  const evaluation = input.q.evaluation!;
+  const evaluation = input.query_semantics.evaluation!;
   if (evaluation.kind !== "comparison") throw new TypeError("expected comparison evaluation");
-  const values = (input.h.measurements ?? []).filter((row) => row.population === domain.id);
+  const values = (input.source_interpretation.measurements ?? []).filter((row) => row.population === domain.id);
   const branches: SourceSemanticProofBranch[] = [], options: QueryProgram[] = [];
   const add = (purpose: SourceSemanticProofBranch["purpose"], body: QueryProgram, candidate?: string, closed = false) => {
     const index = branches.push({ purpose, alternative: 0, ...(candidate === undefined ? {} : { candidate }) }) - 1;
@@ -222,7 +222,7 @@ function compileComparison(input: Input, domain: SourceSemanticDomain): SourceSe
       branches[branches.length - 1] = { ...branches.at(-1)!, candidate_variable: evaluation.left };
     }
   }
-  const referenced = (id: string | undefined) => input.a.correspondences.find((row) => row.query_endpoint.kind === "referent"
+  const referenced = (id: string | undefined) => input.semantic_correspondence.correspondences.find((row) => row.query_endpoint.kind === "referent"
     && row.query_endpoint.variable === id)?.source_endpoint;
   const operands = [referenced(evaluation.left), referenced(evaluation.right)].flatMap((row) => row?.kind === "referent" ? [row.referent] : []);
   const missingOperands = extreme ? domain.members.some((row) => !values.some((value) => value.subject === row.referent))

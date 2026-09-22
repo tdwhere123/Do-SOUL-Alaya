@@ -135,7 +135,7 @@ export type AcceptingProjectionInput = Readonly<{
   readonly observer?: ObserverCoverage;
   readonly interpretation_status?: QueryInterpretationStatus;
   readonly selected_interpretation?: PublishedSourceInterpretationPacket;
-  readonly selected_semantics?: Readonly<{ h: SourceSemanticInterpretation; context: SourceSemanticEvaluationContext;
+  readonly selected_semantics?: Readonly<{ source_interpretation: SourceSemanticInterpretation; context: SourceSemanticEvaluationContext;
     source_target: SourceEvidenceTarget; compiled_nodes?: ReadonlyMap<string, InterpretationNodeCoordinate> }>;
   readonly interpretation_id?: string;
   readonly interpretation_clock?: string;
@@ -211,8 +211,8 @@ function admitSelectedInterpretation(input: AcceptingProjectionInput): Accepting
   const target = semantic?.source_target ?? bound!.source_target;
   const ids = semantic === undefined
     ? [...bound!.packet.referents, ...bound!.packet.propositions, ...bound!.packet.operators].map((row) => row.id)
-    : [...semantic.h.referents, ...semantic.h.frames, ...semantic.h.operators].map((row) => row.id)
-      .concat(semantic.h.frames.flatMap((frame, fi) => frame.slots.map((_slot, si) => sourceSemanticSlotNodeId(fi, si))));
+    : [...semantic.source_interpretation.referents, ...semantic.source_interpretation.frames, ...semantic.source_interpretation.operators].map((row) => row.id)
+      .concat(semantic.source_interpretation.frames.flatMap((frame, fi) => frame.slots.map((_slot, si) => sourceSemanticSlotNodeId(fi, si))));
   for (const [id, coordinate] of semantic?.compiled_nodes ?? []) {
     if (id !== coordinate.node_id || coordinate.packet_id !== packetId || coordinate.hypothesis_id !== hypothesisId) {
       throw new CoreError("VALIDATION", "compiled coordinate leaves its selected interpretation");
@@ -223,7 +223,7 @@ function admitSelectedInterpretation(input: AcceptingProjectionInput): Accepting
   const work = count + input.snapshot.seeds.length + input.snapshot.values.length + 2 * input.snapshot.retained_transitions.length + 1;
   const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
   if (work > allowance || count * 128 > (input.remaining_memory_bytes ?? input.budget.memory_bytes)) return null;
-  if (semantic === undefined ? packetId !== hypothesisId : sourceSemanticInterpretationIdentity(semantic.h, fieldContractSha256) !== packetId) {
+  if (semantic === undefined ? packetId !== hypothesisId : sourceSemanticInterpretationIdentity(semantic.source_interpretation, fieldContractSha256) !== packetId) {
     throw new CoreError("VALIDATION", "selected interpretation identity mismatch");
   }
   const nodes = new Set(ids);

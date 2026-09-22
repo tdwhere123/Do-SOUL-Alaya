@@ -415,7 +415,7 @@ describe("source semantic query compilation", () => {
     expect(assertOracle(h, q, a, result, ["parcel", "fInspect"]).assignments).toEqual([]);
   });
 
-  it("cannot AND complementary A documents and can AND one A that maps both", () => {
+  it("cannot AND complementary correspondence documents and can AND one correspondence that maps both", () => {
     const h = mixedH();
     const q = sendInspectQuery();
     const sendOnly = alignmentOf(h, q, AND_QUERY, SEND_AND.slice(0, 2));
@@ -473,7 +473,7 @@ describe("source semantic query compilation", () => {
     assertOracle(question, asked, askedMap(question), askedAgainstQuestion, sendVars);
   });
 
-  it("drops a proof when a necessary A leaf is withdrawn and keeps an unrelated send proof", () => {
+  it("drops a proof when a necessary correspondence leaf is withdrawn and keeps an unrelated send proof", () => {
     const h = mixedH();
     const andQuery = sendInspectQuery();
     const onlySend = sendQuery();
@@ -509,7 +509,7 @@ describe("source semantic query compilation", () => {
     expect(reason(h, q, undefined, AND_QUERY).outcome).toEqual({ status: "preparation_required", missing: "semantic_correspondence" });
   });
 
-  it("drops a proof when a necessary source interpretation binding is withdrawn, rebinds A onto a new source-interpretation identity, and keeps an unrelated send", () => {
+  it("drops a proof when a necessary source interpretation binding is withdrawn, rebinds correspondence onto a new source-interpretation identity, and keeps an unrelated send", () => {
     const original = mixedH();
     const andQuery = sendInspectQuery();
     const onlySend = sendQuery();
@@ -537,7 +537,7 @@ describe("source semantic query compilation", () => {
     expect(sendA.source_interpretation_id).toBe(reboundAnd.source_interpretation_id);
   });
 
-  it("keeps an independent send alternative after inspect A leaves are withdrawn", () => {
+  it("keeps an independent send alternative after inspect correspondence leaves are withdrawn", () => {
     const h = mixedH();
     const send = sendQuery();
     const inspect = inspectedQuery();

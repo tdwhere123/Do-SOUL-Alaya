@@ -4,11 +4,11 @@ import { REQUEST, GOLD, GOLD_TARGET, sourceOnly, proofEntry, assemble, workerRec
 import { measureConditionalFieldResponse } from "../../../runs/measurement/conditional-field-measurement.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
 import {
-  measureSourceSemanticLibraryResponse
+  measureSourceSemanticLibraryResponse, sourceSemanticLibraryProofAdmission
 } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import {
   PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT,
-  scoreMixedKindFirstExposure, scoreProofConditionedFirstExposure
+  scoreMixedKindFirstExposure, scoreProofConditionedFirstExposure, scoreSourceBearingUnionFirstExposure
 } from "../../../runs/measurement/source-gold-join.js";
 
 function measureOf(result: ReturnType<typeof workerRecall>) {
@@ -57,6 +57,13 @@ describe("source semantic library measurement", () => {
       }
     });
     expect(withProof && "request" in withProof ? "execution_receipt" in withProof.request : true).toBe(false);
+    if (withProof?.status !== "validated") throw new Error("native measurement must retain unavailable proof status");
+    const proofAdmission = sourceSemanticLibraryProofAdmission(withProof.first_exposure_slots, withProof.delivered_index,
+      withProof.slot_qualifiers, withProof.delivered_proofs, withProof.source_gold_units, [], withProof.request.budget);
+    expect(proofAdmission.validatedRanks.size).toBe(0);
+    expect(proofAdmission.unverifiedGoldRanks.size).toBeGreaterThan(0);
+    expect(scoreSourceBearingUnionFirstExposure(withProof.first_exposure_slots, withProof.source_gold_units, proofAdmission).any_at_5.status)
+      .toBe("unavailable");
     expect(REQUEST.page_budget).not.toBe(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET);
     expect(withoutProof && "metrics" in withoutProof
       ? withoutProof.metrics.mixed_kind_first_exposure.any_at_10

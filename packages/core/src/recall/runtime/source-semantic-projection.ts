@@ -25,11 +25,11 @@ export function projectSourceSemanticState(input: Readonly<{
   };
   const beforeProjection = Math.max(0, state.remaining_exploration + state.remaining_reserve);
   let afterProjection = beforeProjection;
-  const index = projectAcceptingIndex({ snapshot: state.binding.snapshot, view: query.view, query_id: query.query_id,
+  const index = { ...projectAcceptingIndex({ snapshot: state.binding.snapshot, view: query.view, query_id: query.query_id,
     snapshot_id: snapshot, result_version: "source-interpretation-reasoning-v4",
     budget: { ...remaining, work_units: state.remaining_exploration, memory_bytes: state.remaining_memory_bytes },
     binding_contexts: state.binding_contexts,
-    selected_semantics: { h: admission.interpretation, context: admission.context, source_target: sourceTarget,
+    selected_semantics: { source_interpretation: admission.interpretation, context: admission.context, source_target: sourceTarget,
       compiled_nodes: population.coordinates },
     observer: { outcome: { schema_version: 1, status: state.closure.observation }, open_regions: state.residuals },
     interpretation_status: query.status, resume_cursors: state.resume_cursors,
@@ -37,7 +37,8 @@ export function projectSourceSemanticState(input: Readonly<{
     resource_work: state.memory_exhausted || state.remaining_work.length > 0 ? "open" : "complete",
     transition_derivations: state.transition_derivations, grounding_progress: state.grounding_progress,
     grounding_transitions: [...state.transitions], grounding_seeds: [...state.seeds], grounding_derivations: [...state.derivations],
-    derivations: [...state.derivations], projection_facets: [...state.facets], remaining_memory_bytes: state.remaining_memory_bytes });
+    derivations: [...state.derivations], projection_facets: [...state.facets], remaining_memory_bytes: state.remaining_memory_bytes }),
+    as_of: query.interpretation_clock };
   meter.charge(Math.max(0, beforeProjection - afterProjection), 0, "index projection");
   if (index.entries.some((entry) => entry.interpretation_node?.packet_id !== admission.interpretation_id || entry.hypothesis_id !== admission.context_id)) {
     throw new CoreError("OBLIGATION_VIOLATION", "conditional result escaped its evaluation context");

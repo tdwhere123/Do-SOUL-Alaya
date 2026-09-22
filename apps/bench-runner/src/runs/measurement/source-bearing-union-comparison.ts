@@ -6,9 +6,7 @@ import { chainIdentity } from "../semantic-chain/contract.js";
 import { LongMemEvalSemanticFreezeSchema, assertLongMemEvalSemanticRows,
   type LongMemEvalSemanticFreeze } from "../longmemeval-semantic/contract.js";
 import { LongMemEvalPreparedSchema, LongMemEvalReplaySchema, LongMemEvalPublicationSchema } from "../longmemeval-semantic/execute.js";
-import { SourceSemanticLibraryMeasurementSchema, sourceSemanticLibraryProofAdmission } from "./source-semantic-library-measurement.js";
-import { exposureSlots, firstExposureMismatch } from "./first-exposure-session.js";
-import { soulSearchFromLibraryRecall } from "./source-semantic-library-recall.js";
+import { measureSourceSemanticLibraryResponse, SourceSemanticLibraryMeasurementSchema, sourceSemanticLibraryProofAdmission } from "./source-semantic-library-measurement.js";
 import { SOURCE_BEARING_UNION_FIRST_EXPOSURE_CONTRACT, scoreSourceBearingUnionFirstExposure } from "./source-gold-join.js";
 
 // This offline report admits the frozen population, not a runnable producer workset.
@@ -157,12 +155,6 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
   if (!parsed.success || parsed.data.status !== "validated") return reportRow(row, true, "stored measurement unavailable or invalid", "unavailable");
   const measured = parsed.data;
   const response = record(replayRow.response);
-  // Reconstruct the actual delivered page through the shared native exposure adapter.
-  // The archive envelope itself is not a current runnable public-protocol request.
-  const delivered = soulSearchFromLibraryRecall(response as Parameters<typeof soulSearchFromLibraryRecall>[0]);
-  const { result_version: _resultVersion, ...exposureIdentity } = measured.identity;
-  if (firstExposureMismatch(measured.first_exposure_page, exposureIdentity,
-    exposureSlots(delivered), delivered.delivery_id)) throw new Error("native response differs from first exposure");
   if (measured.identity.query_id !== sourceSemanticLibraryQueryIdentity(selected.question, measured.identity.result_version)
     || measured.identity.as_of !== selected.interpretation_clock || canonicalJson(measured.request.budget) !== canonicalJson(config.budget)
     || canonicalJson(measured.first_exposure_page) !== canonicalJson(replayRow.first_exposure)
@@ -180,8 +172,14 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
       && source.source_version === unit.source_version && source.content_digest === unit.content_digest))) {
     throw new Error("stored measurement differs from native first exposure or gold publication");
   }
+  const admitted = measureSourceSemanticLibraryResponse({ recallResult: archivedSourceResponse(response),
+    firstExposurePage: measured.first_exposure_page, requestBudget: measured.request.budget,
+    goldSourceUnits: measured.source_gold_units,
+    ...(measured.source_records === undefined ? {} : { sourceRecords: measured.source_records }) });
+  if (admitted?.status !== "validated") throw new Error(`native response admission failed: ${admitted?.reason ?? "invalid_response"}`);
+  if (canonicalJson(admitted) !== canonicalJson(measured)) throw new Error("native response differs from stored measurement");
   const admission = sourceSemanticLibraryProofAdmission(measured.first_exposure_slots, measured.delivered_index,
-    measured.slot_qualifiers, measured.delivered_proofs, measured.source_gold_units, measured.source_records ?? []);
+    measured.slot_qualifiers, measured.delivered_proofs, measured.source_gold_units, measured.source_records ?? [], measured.request.budget);
   const union = scoreSourceBearingUnionFirstExposure(measured.first_exposure_slots, measured.source_gold_units, admission);
   const mixed = measured.metrics.mixed_kind_first_exposure.any_at_5.status;
   if (union.any_at_5.status === "miss" && (row.outcome !== "miss"
@@ -190,6 +188,30 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
   }
   return reportRow(row, true, `validated native slots; proof ranks ${[...admission.validatedRanks].join(",") || "none"}`,
     union.any_at_5.status, mixed);
+}
+
+/** Archive-only field migration; the current native admission still owns every validity rule. */
+function archivedSourceResponse(response: Record<string, unknown>): Record<string, unknown> {
+  if (response.protocol_version !== 1) return response;
+  if (response.operation !== "recall" || record(response.index).result_version !== "source-semantic-library-v1"
+    || records(response.proofs ?? []).length !== 0
+    || records(response.slot_qualifiers).some((slot) => slot.evidence_kind !== "source_evidence")) {
+    throw new Error("unsupported historical response");
+  }
+  const rename = (value: unknown, fields: Readonly<Record<string, string>>) => {
+    const result = { ...record(value) };
+    for (const [oldName, name] of Object.entries(fields)) {
+      if (!(oldName in result) || name in result) throw new Error("ambiguous historical response fields");
+      result[name] = result[oldName];
+      delete result[oldName];
+    }
+    return result;
+  };
+  return { ...response, protocol_version: 2,
+    coverage: rename(response.coverage, { h: "source_interpretation", q: "query_semantics", a: "semantic_correspondence", computation: "conditional_computation" }),
+    discovery: rename(response.discovery, { visited_h_pages: "visited_source_interpretation_pages",
+      visited_h_descriptors: "visited_source_interpretation_descriptors", examined_h_ids: "examined_source_interpretation_ids",
+      unexamined_h_count: "unexamined_source_interpretation_count" }) };
 }
 
 function sourceIdentity(row: { source_id: string; source_version: string; content_digest: string; session_id: string }) {

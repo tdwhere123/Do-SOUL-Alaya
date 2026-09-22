@@ -17,7 +17,7 @@ import { compileSourceSemanticPremises, sourceSemanticReaders } from "./source-s
 import { traceSourceSemanticWithdrawals, type SourceSemanticWithdrawalTrace } from "./source-semantic-withdrawal.js";
 import { projectSourceSemanticState, type SourceSemanticResultBody as ResultBody } from "./source-semantic-projection.js";
 
-const BUDGET = { schema_version: 1 as const, work_units: 200000, memory_bytes: 20000000,
+export const SOURCE_SEMANTIC_REASONING_BUDGET = { schema_version: 1 as const, work_units: 200000, memory_bytes: 20000000,
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 };
 export type ReasonSourceSemanticInterpretationInput = Readonly<{
   request?: SourceSemanticReasoningRequest;
@@ -45,7 +45,7 @@ export function reasonSourceSemanticInterpretation(input: ReasonSourceSemanticIn
 /** Same one-source-interpretation and one-semantic-correspondence owner as reason, plus the accepting index that library delivery must reuse. */
 export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticInterpretationInput): SourceSemanticInterpretationExecution {
   const request = input.request === undefined ? undefined : SourceSemanticReasoningRequestSchema.parse(input.request);
-  const budget = request?.budget ?? BUDGET, meter = new SourceSemanticResourceLedger(budget);
+  const budget = request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET, meter = new SourceSemanticResourceLedger(budget);
   const original = request?.original_query ?? input.original_query;
   let body: ResultBody;
   let index: InformationIndex | null = null;
@@ -105,11 +105,11 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   const population = compileSourceSemanticPremises({ interpretation: admission.interpretation, semantic_correspondence: admission.semantic_correspondence,
     context_id: admission.context_id, interpretation_id: admission.interpretation_id, scope: input.scope,
     source_target: sourceTarget, meter, sourceValidity: input.sourceValidity, query: admission.query });
-  const execution = compileSourceSemanticExecution({ h: admission.interpretation, q: admission.query,
-    a: admission.semantic_correspondence, population, meter });
+  const execution = compileSourceSemanticExecution({ source_interpretation: admission.interpretation, query_semantics: admission.query,
+    semantic_correspondence: admission.semantic_correspondence, population, meter });
   const seeds = [...admission.interpretation.entry_roots].sort().map((id) => interpretationNodeIdentity(population.coordinates.get(id)!));
-  const snapshot = `sha256:${fieldContractSha256(canonicalJson({ c: admission.context_id, scopes: input.authorizedScopes, as_of: input.asOf }))}`;
-  const remaining = { ...(request?.budget ?? BUDGET), ...meter.remaining() };
+  const snapshot = `sha256:${fieldContractSha256(canonicalJson({ conditional_computation_id: admission.context_id, scopes: input.authorizedScopes, as_of: input.asOf }))}`;
+  const remaining = { ...(request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET), ...meter.remaining() };
   if (remaining.work_units < remaining.finalization_reserve + remaining.min_envelope) throw new SourceSemanticResourceExhausted("engine envelope");
   const phases = execution.groupPhases ?? [];
   if (phases.length > 1) {
@@ -119,7 +119,7 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   }
   const program = execution.program;
   const query = compileConditionalFieldQuery({ source: "typed", snapshot_id: snapshot, budget: remaining,
-    query_id: `sha256:${fieldContractSha256(canonicalJson({ c: admission.context_id, query: original }))}`,
+    query_id: `sha256:${fieldContractSha256(canonicalJson({ conditional_computation_id: admission.context_id, query: original }))}`,
     program, interpretation_clock: input.asOf, hypotheses: [{ schema_version: 1, hypothesis_id: admission.context_id, bindings: [] }],
     view: { ...defaultView(), result_kind_view: "mixed", protocol_version: 1, supported_result_kinds: ["source_evidence", "memory_entry"] },
     authorized_scopes: input.authorizedScopes });
@@ -135,7 +135,7 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   const withdrawal_trace = traceSourceSemanticWithdrawals({ state, origins: population.origins,
     prefix_resource_usage: { work_units: prefixWork, memory_bytes: prefixBytes },
     baseline: finish(baseline.body), limit: input.withdrawal_trial_limit, project: (withdrawn, _leafId) => {
-      const trialMeter = new SourceSemanticResourceLedger(request?.budget ?? BUDGET);
+      const trialMeter = new SourceSemanticResourceLedger(request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET);
       let trial: ResultBody;
       try {
         trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
@@ -170,7 +170,7 @@ function observeCorrespondenceGroups(input: Readonly<{
     if (remaining.work_units < remaining.finalization_reserve + remaining.min_envelope) break;
     const execution = executionForPhase(phase);
     const query = compileConditionalFieldQuery({ source: "typed", snapshot_id: snapshot, budget: remaining,
-      query_id: `sha256:${fieldContractSha256(canonicalJson({ c: admission.context_id, query: original, group: phase.groupFrame ?? "" }))}`,
+      query_id: `sha256:${fieldContractSha256(canonicalJson({ conditional_computation_id: admission.context_id, query: original, group: phase.groupFrame ?? "" }))}`,
       program: phase.program, interpretation_clock: input.input.asOf,
       hypotheses: [{ schema_version: 1, hypothesis_id: admission.context_id, bindings: [] }],
       view: { ...defaultView(), result_kind_view: "mixed", protocol_version: 1, supported_result_kinds: ["source_evidence", "memory_entry"] },
@@ -202,7 +202,7 @@ function observeCorrespondenceGroups(input: Readonly<{
   const withdrawal_trace = traceSourceSemanticWithdrawals({ state: runs[0]!.state, origins: population.origins,
     prefix_resource_usage: { work_units: prefixWork, memory_bytes: prefixBytes },
     baseline: finish(baseline.body), limit: input.input.withdrawal_trial_limit, project: (_withdrawn, leafId) => {
-      const trialMeter = new SourceSemanticResourceLedger(request?.budget ?? BUDGET);
+      const trialMeter = new SourceSemanticResourceLedger(request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET);
       try {
         trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
         const trials = runs.map((run, index) => {

@@ -238,10 +238,10 @@ function receiveCorrespondenceSemantics(
       outcome: { status: "interpreted", gaps: envelope.data.outcome.gaps ?? [] }, gaps: []
     });
     if (semantic_correspondence.query_semantics_id !== sourceSemanticQueryIdentity(request.admitted_query_semantics, semanticSha256)) {
-      return { ...attempt, outcome: { status: "invalid", reason: "correspondence_q_mismatch" } };
+      return { ...attempt, outcome: { status: "invalid", reason: "correspondence_query_semantics_mismatch" } };
     }
     if (!request.source_interpretation_descriptors.some((row) => row.source_interpretation_id === semantic_correspondence.source_interpretation_id)) {
-      return { ...attempt, outcome: { status: "invalid", reason: "correspondence_h_mismatch" } };
+      return { ...attempt, outcome: { status: "invalid", reason: "correspondence_source_interpretation_mismatch" } };
     }
     return { ...attempt, outcome: { status: "interpreted", gaps: [] }, semantic_correspondence };
   } catch (error) {

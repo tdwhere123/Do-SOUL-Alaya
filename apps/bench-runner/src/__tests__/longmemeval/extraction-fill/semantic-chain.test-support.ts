@@ -124,7 +124,7 @@ export async function assertNativeSemanticChain(cacheRoot: string): Promise<void
   expect(proofMeasurement.metrics.proof_conditioned_first_exposure.any_at_5.status).toBe("hit");
   const admittedProofs = sourceSemanticLibraryProofAdmission(proofMeasurement.first_exposure_slots,
     proofMeasurement.delivered_index, proofMeasurement.slot_qualifiers, proofMeasurement.delivered_proofs,
-    proofMeasurement.source_gold_units, proofMeasurement.source_records!);
+    proofMeasurement.source_gold_units, proofMeasurement.source_records!, proofMeasurement.request.budget);
   expect(admittedProofs.validatedRanks.size).toBeGreaterThan(0);
   expect(scoreSourceBearingUnionFirstExposure(proofMeasurement.first_exposure_slots,
     proofMeasurement.source_gold_units, admittedProofs).any_at_5.status).toBe("hit");

@@ -90,4 +90,18 @@ describe("frozen source-bearing union evidence admission", () => {
     expect(report.bounds).toMatchObject({ hits: 0, unknown: 20 });
     expect(report.rows[0]?.cause).toContain("binding differs");
   });
+
+  it.each(["provider_calls", "provider_attempts", "garden_enqueue", "request_budget", "missing_budget", "unknown_field"] as const)(
+    "uses native response admission for resealed %s contradictions", (kind) => {
+      const { evidence, read, files } = frozenUnionFixture();
+      const path = evidence.replay.payload.rows[0]!.replay_path;
+      const replay = JSON.parse(read(path)), response = replay.payload.rows[0].response;
+      if (kind === "request_budget") response.request_budget.work_units = 7;
+      else if (kind === "missing_budget") delete response.request_budget;
+      else response[kind] = 1;
+      files.set(path, JSON.stringify(envelope(replay.payload)));
+      const report = reportFrozenSourceBearingUnion(evidence, read);
+      expect(report.rows[0]).toMatchObject({ union_any_at_5: "unavailable", cause: expect.stringContaining("native response admission failed") });
+      expect(report.bounds).toMatchObject({ hits: 2, unknown: 13 });
+    });
 });

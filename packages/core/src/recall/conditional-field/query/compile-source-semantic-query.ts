@@ -11,7 +11,7 @@ type Graph = Readonly<{ edges: readonly Edge[]; properties: ReadonlyMap<string, 
 
 /** Finite graph walk; every conjunct is visited, including reverse and non-tree edges. */
 export type SourceSemanticCompilation = Readonly<{
-  h: SourceSemanticInterpretation; population: SourceSemanticPremisePopulation; semantic_correspondence?: SourceSemanticCorrespondence;
+  source_interpretation: SourceSemanticInterpretation; population: SourceSemanticPremisePopulation; semantic_correspondence?: SourceSemanticCorrespondence;
 }>;
 
 export function compileSourceSemanticQueryProgram(query: SourceSemanticQuery, meter: SourceSemanticResourceLedger,
@@ -57,14 +57,14 @@ export function compileSourceSemanticAlternative(q: SourceSemanticQuery, alterna
     const properties = graph.properties.get(variable) ?? [];
     for (const predicate of properties) {
       if (finite !== undefined && predicate === key("source_interpretation_entailed_permission")) {
-        steps.push(semanticInstanceProof(variable, finite.population, finite.h, meter, true));
+        steps.push(semanticInstanceProof(variable, finite.population, finite.source_interpretation, meter, true));
       } else {
         steps.push(rel(predicate === key("source_interpretation_entailed_permission") ? key("source_interpretation_assertion_permission") : predicate, variable, variable, meter));
       }
     }
     if (finite !== undefined && finite.population.instances.size > 0 && properties.includes(key("source_interpretation_presence"))
       && !properties.includes(key("source_interpretation_entailed_permission"))) {
-      steps.push(semanticInstanceProof(variable, finite.population, finite.h, meter));
+      steps.push(semanticInstanceProof(variable, finite.population, finite.source_interpretation, meter));
     }
   };
   type Visit = { variable: string; next: number; back?: { predicate: string; target: string } };

@@ -498,7 +498,7 @@ it("preserves compact source interpretation and receiver query semantics and sem
         expect(compared.coverage?.semantic_correspondence).toBe("unexercised");
 
         const withoutA = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQ.query, []);
-        if (withoutA.operation !== "recall") throw new Error("A-absent recall expected");
+        if (withoutA.operation !== "recall") throw new Error("Correspondence-absent recall expected");
         expect(withoutA.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof")).toBe(false);
         expect(soulSearchFromLibraryRecall(withoutA).results.some((row) => row.target.kind === "source_evidence"
           && row.target.kind === "source_evidence" && row.target.root_id === published.source_target.root_id)).toBe(true);

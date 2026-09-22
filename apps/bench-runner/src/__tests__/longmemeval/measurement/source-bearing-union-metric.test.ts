@@ -38,7 +38,7 @@ describe("source-bearing union first exposure", () => {
     expect(kept.any_at_5).toEqual({ status: "hit", value: true });
     expect(kept.joined_unit_count).toBe(1);
     expect(scoreSourceBearingUnionFirstExposure(proofOnly, [GOLD], admit([], [1])).any_at_5)
-      .toEqual({ status: "miss", value: false });
+      .toEqual({ status: "unavailable", value: null, reason: "delivered gold proof has not been verified" });
   });
 
   it("rejects a root-identity mismatch and does not let an object id replace it", () => {
@@ -107,6 +107,9 @@ describe("source-bearing union first exposure", () => {
     const union = scoreSourceBearingUnionFirstExposure([...fillers, lateProof], [GOLD], admit([6]));
     expect(union.any_at_5).toEqual({ status: "miss", value: false });
     expect(union.any_at_10).toEqual({ status: "hit", value: true });
+    const unverified = scoreSourceBearingUnionFirstExposure([...fillers, lateProof], [GOLD], admit([], [6]));
+    expect(unverified.any_at_5).toEqual({ status: "miss", value: false });
+    expect(unverified.any_at_10.status).toBe("unavailable");
     expect(scoreSourceBearingUnionFirstExposure(
       [{ rank: 1, object_kind: "source_evidence", target: GOLD_TARGET }, { rank: 1, object_kind: "source_evidence", target: GOLD_TARGET }],
       [GOLD], admit()

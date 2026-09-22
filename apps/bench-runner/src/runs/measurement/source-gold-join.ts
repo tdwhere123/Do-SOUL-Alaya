@@ -170,7 +170,13 @@ export function scoreSourceBearingUnionFirstExposure(
   }
   const joined = goldUnits.filter((unit) => slots.some((slot) =>
     unionSlotJoinsGold(slot, unit, admission.validatedRanks))).length;
-  const at = (k: number): FirstExposureBinaryMetric => hitOrMiss(unionGoldHitAt(slots, goldUnits, admission.validatedRanks, k));
+  const at = (k: number): FirstExposureBinaryMetric => {
+    if (unionGoldHitAt(slots, goldUnits, admission.validatedRanks, k)) return hitOrMiss(true);
+    if (slots.slice(0, k).some((slot) => admission.unverifiedGoldRanks.has(slot.rank))) {
+      return unavailable("delivered gold proof has not been verified");
+    }
+    return hitOrMiss(false);
+  };
   return unionMetric(goldUnits.length, joined, { any_at_1: at(1), any_at_5: at(5), any_at_10: at(10) });
 }
 

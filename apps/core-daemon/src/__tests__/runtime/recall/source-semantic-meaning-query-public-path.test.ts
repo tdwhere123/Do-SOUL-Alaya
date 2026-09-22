@@ -177,7 +177,7 @@ function receiveLatheA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, 
           source_semantic_support: [{ kind: "lexical", mentions: [mention(h, "lathe").id] }] }
       ] }, { status: "interpreted", gaps: [] });
   if (received.semantic_correspondence === undefined) {
-    throw new Error(`A receive failed: ${JSON.stringify(received.outcome)}`);
+    throw new Error(`Correspondence receive failed: ${JSON.stringify(received.outcome)}`);
   }
   return received.semantic_correspondence;
 }

@@ -291,7 +291,7 @@ describe("source semantic semantic_correspondence admission", () => {
     expect(sourceSemanticInterpretationIdentity(foreignVersion, fieldContractSha256)).not.toBe(hId);
   });
 
-  it("omitting a correspondence leaves that A leaf absent with no silent fill", () => {
+  it("omitting a correspondence leaves that correspondence leaf absent with no silent fill", () => {
     const sendOnly = admitPair([SEND_PRED, SEND_OBJECT]).admission;
     const both = admitPair([SEND_PRED, SEND_OBJECT, INSPECT_PRED, INSPECT_OBJECT]).admission;
     expect(sendOnly.kind).toBe("admitted");

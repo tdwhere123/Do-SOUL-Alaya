@@ -288,7 +288,7 @@ function mcpRecall(payload: unknown): RecallOut {
   return body.output;
 }
 
-it("occupies one gold record identity for the same source with A and without A", async () => {
+it("occupies one gold record identity for the same source with and without correspondence", async () => {
   await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
@@ -333,7 +333,7 @@ it("binds the surviving semantic_correspondence closure when two legal semantic 
     });
     expect(admittedFirst.kind).toBe("admitted");
     expect(admittedSecond.kind).toBe("admitted");
-    if (admittedFirst.kind !== "admitted" || admittedSecond.kind !== "admitted") throw new Error("both A's must admit");
+    if (admittedFirst.kind !== "admitted" || admittedSecond.kind !== "admitted") throw new Error("both correspondences must admit");
     expect(admittedFirst.semantic_correspondence_id).not.toBe(admittedSecond.semantic_correspondence_id);
     const forward = await workerRecall(session, q, [firstA, secondA]);
     const swapped = await workerRecall(session, q, [secondA, firstA]);

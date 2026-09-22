@@ -333,7 +333,7 @@ it("examines aligned handles without hydrating every published descriptor", asyn
   }
 });
 
-it("drops a conditional proof when A is absent and still returns the original source", async () => {
+it("drops a conditional proof when correspondence is absent and still returns the original source", async () => {
   await withLibrary(async ({ execute }) => {
     const withProof = await call(execute, recallRequest([alignmentOf(
       (await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET })).candidates[0]!.interpretation_id,
@@ -366,7 +366,7 @@ it("keeps excluded source interpretation identities out of public discovery diag
 });
 
 it("scores mixed-kind retrieval and proof-conditioned Any@K from one published source interpretation", async () => {
-  await withLibrary(async ({ allIds, execute, sourceTarget }) => {
+  await withLibrary(async ({ allIds, execute, sourceTarget, filename }) => {
     const gold = sourceGoldUnitFromPublishedRoot(sourceTarget);
     expect(gold.root_id).toBe(sourceTarget.root_id);
     const withA = await call(execute, recallRequest([alignmentOf(allIds[0]!, queryOf())]));
@@ -374,9 +374,17 @@ it("scores mixed-kind retrieval and proof-conditioned Any@K from one published s
     expect(withA.kind).toBe("recall");
     expect(withoutA.kind).toBe("recall");
     if (withA.kind !== "recall" || withoutA.kind !== "recall") throw new Error("library recall expected");
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const current = listEligibleSemanticSources(database, WS, new SourceSemanticReadBudget(BUDGET), ["project"]);
+    database.close(); closeCachedDatabase(filename);
+    expect(current).toMatchObject({ open: false, truncated: false });
+    expect(current.sources.some((record) => record.identity === sourceTarget.root_id)).toBe(true);
+    expect(measureSourceSemanticLibraryResponse({ recallResult: withA,
+      firstExposurePage: recordSourceSemanticLibraryFirstExposure(withA), requestBudget: BUDGET, goldSourceUnits: [gold] }))
+      .toMatchObject({ status: "validated", metrics: { proof_conditioned_first_exposure: { any_at_10: { status: "unavailable" } } } });
     const proof = measureSourceSemanticLibraryResponse({
       recallResult: withA, firstExposurePage: recordSourceSemanticLibraryFirstExposure(withA),
-      requestBudget: BUDGET, goldSourceUnits: [gold]
+      requestBudget: BUDGET, goldSourceUnits: [gold], sourceRecords: current.sources
     });
     const retrieval = measureSourceSemanticLibraryResponse({
       recallResult: withoutA, firstExposurePage: recordSourceSemanticLibraryFirstExposure(withoutA),
@@ -405,7 +413,7 @@ it("scores mixed-kind retrieval and proof-conditioned Any@K from one published s
     ];
     for (const response of tampered) {
       const measured = measureSourceSemanticLibraryResponse({ recallResult: response,
-        firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: BUDGET, goldSourceUnits: [gold] });
+        firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: BUDGET, goldSourceUnits: [gold], sourceRecords: current.sources });
       expect(measured).toMatchObject({ status: "validated",
         metrics: { proof_conditioned_first_exposure: { any_at_10: { status: "unavailable", value: null } } } });
       if (measured?.status !== "validated") throw new Error("mixed source measurement missing");
