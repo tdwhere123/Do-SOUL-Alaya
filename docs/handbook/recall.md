@@ -712,24 +712,24 @@ implementation guidance or target KPI certification.
 
 ## Opt-in open source semantics
 
-The `soul.interpretation` channel retains its source-local H, source-independent
-Q, explicit A, and selected C. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 6.6.0 uses H `source-interpretation-v4`, Q/A v2, envelope 5,
-reasoning/cache v3, `source-semantic-k-v3`,
-`source-semantic-normalizer-v4` and `source-semantic-lowering-v4`. Each complete
+The `soul.interpretation` channel retains its source-local source interpretation, source-independent
+query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
+Garden v1. Protocol 6.7.0 uses `source-interpretation-v4`, `source-semantic-query-v2`,
+`source-semantic-correspondence-v3`, response envelope v5, reasoning v4, cache v3,
+library v2, public/worker recall protocol 2, and `source-semantic-k-v3`,
+`source-semantic-normalizer-v4` and `source-semantic-lowering-v5`. Each complete
 source-frame group is a jointly constrained compile alternative; slots must not
-float off that group's predicate frame. An older open
-H is not relabeled or silently promoted; recreate its interpretation explicitly.
+float off that group's predicate frame. An older open source interpretation is not relabeled or silently promoted; recreate its interpretation explicitly.
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
 
-New H extraction uses the producer-only `source-semantic-proposal-v4` contract
+New source-interpretation extraction uses the producer-only `source-semantic-proposal-v4` contract
 with `host-owned-expression-schema-v1` at canonical domination depth 16. Optional
 quantified and measurement fields remain in that recorded projection; omit empty
 tables when the source does not support them. The producer owns predicate/role
 readings, co-reference, semantic scope, speech acts, domain membership/closure
 and measurement context. Compact catalog anchors and inline mentions are enough
-for an unreused local referent. A producer alias is required only for
+for an unreused local referent. A compact source-proposal alias is required only for
 co-reference, an occurrence reference, same-parent reuse, or a quantifier
 binding. Source-label equality is not identity. Nested expressions remain the
 scope owner; the host does not reconstruct lost scope from English labels or map
@@ -739,7 +739,7 @@ binders and canonical outcome gaps. A plain occurrence reference does not embed
 its target. Unowned or conflicting scopes are rejected; the compiler never
 guesses assertion permission, pronoun antecedents or domain facts. Compilation
 and normalization share one resource ledger. Structural admission and located
-gaps cannot certify language completeness. The canonical H and response-envelope
+gaps cannot certify language completeness. The canonical source interpretation and response-envelope
 shapes remain unchanged. Recorded v1/v2/v3 proposals select their original
 prompt/schema explicitly for replay. Marker-absent normalizer-v3 requests retain
 an explicit historical replay path; new publication requires normalizer-v4.
@@ -775,7 +775,7 @@ and prior raw bytes; the chain is validated before use and capped at three
 revisions. The shared compiler rederives structural diagnostics, including exact
 alias and ownership paths. Separately labeled source-review comments are bounded
 to selected assertions and remain proposed interpretations. Revision input does
-not become H evidence or relax admission. Preparation is provider-free and never
+not become source-interpretation evidence or relax admission. Preparation is provider-free and never
 automatically retries. The native Batch flag `--extraction-source-revisions`
 requires `--extraction-open-semantics` and a bounded registry produced by SOUL.
 The registry is pinned in generation identity and must match the source inventory;
@@ -799,7 +799,7 @@ segments) apply; oversize input fails preparation without implicit partitioning.
 Recorded requests without the scope marker remain limited to eight selected
 units and retain their historical replay. Closed Garden/profile extraction
 rejects complete-source packing. This supplies source context without deciding
-co-reference or enlarging canonical H, output, or execution budgets. It does
+co-reference or enlarging canonical source interpretation, output, or execution budgets. It does
 not claim access to conversation outside the supplied source corpus.
 
 Normalizer-v4 accounts for selected assertions without connected evidence,
@@ -808,7 +808,7 @@ parent bindings as located gaps. It never invents missing relations or bindings.
 Core checks the same accounting on normalized admission and persisted reopen;
 stripping gaps cannot bypass it. Host expansion beyond graph or work/memory
 capacity is resource exhaustion. These structural checks cannot discover every
-omitted qualifier inside a supported clause: an admitted H remains unreviewed
+omitted qualifier inside a supported clause: an admitted source interpretation remains unreviewed
 for language fidelity, even when no structural accounting gaps remain.
 
 Protocol owns operator/embedding incidence and the exact host-derived entry
@@ -824,7 +824,7 @@ Gap locations may also name declared mentions, so an uninterpreted clause can
 remain a source-located gap without inventing a frame. Neither a target nor a
 gap location may cite an undeclared handle. Producer guidance explains these
 distinct reference domains; Protocol remains their admission authority.
-The Q context obligation `unresolved` requires no completed-event assertion and
+The query-semantics context obligation `unresolved` requires no completed-event assertion and
 excludes source assertion occurrences. It accepts question, directive,
 unresolved source acts and embedded/operator content through the non-asserted
 context premise; it is not a positive test for `source_act=unresolved`.
@@ -841,7 +841,7 @@ rejected instead of treating an unrelated negated clause as a falsifier.
 Elimination does not cross negation, opaque operators or conditional antecedents.
 `entailed_at_source` distinguishes an inferred instance from literal
 `asserted_at_source`. Promise, report and possibility content retain their path.
-Novel query entities require explicit A membership assumptions; their derived
+Novel query entities require explicit semantic-correspondence membership assumptions; their derived
 coordinates and assumption leaves remain visible in the conditional proof.
 
 Measurements declare a subject, owner occurrence, population, metric, unit,
@@ -849,7 +849,7 @@ context and exact decimal value (at most 128 digits and 64 fractional digits).
 Comparisons use identical units without conversion. Missing operands remain
 unknown; incompatible signatures remain incomparable. Extrema require closed
 populations, retain non-strict ties, and have no winner in empty populations.
-Each operand consumes membership evidence or an explicit A assumption for its
+Each operand consumes membership evidence or an explicit semantic-correspondence assumption for its
 aligned query referent. Open unknown membership remains unresolved; measurement
 metadata alone does not establish eligibility. Excluded subjects and subjects
 absent from closed populations cannot have measurements in that population.
@@ -860,8 +860,8 @@ assertion versus preserved context. Subjective adjectives alone create no numeri
 measurement or objective ordering. All finite obligations lower to existing
 relation gates and AND joins; only arithmetic order is a primitive evidence atom.
 Enumeration, proof material and encoded output consume the request resource
-ledger. Compiler coordinates are compact, C-bound, and explicitly described in
-proof output; they do not become declarations or assertion permissions in H.
+ledger. Compiler coordinates are compact, bound to the conditional computation, and explicitly described in
+proof output; they do not become declarations or assertion permissions in the source interpretation.
 
 Core publishes source UTF-8 assertion locations and re-resolves mention
 selectors at both the normalized-IR entrance and SQLite reopen. Ambiguous
@@ -869,8 +869,8 @@ repeated text requires explicit host locations. The unique-text compatibility
 adapter is not permission to guess an occurrence. Source revision, authorized
 scope and erasure still govern every read and audited publication.
 
-`prepare_query` returns bounded current full-H descriptors and optional
-`continuation_handle` pages. Q generation is source-independent; A generation
+`prepare_query` returns bounded current source-interpretation descriptors and optional
+`continuation_handle` pages. Query-semantics generation is source-independent; semantic-correspondence generation
 uses these exact descriptors, including roles, bindings, mentions and contexts.
 Host operations accept the same `authorized_scopes` admission as ordinary Recall
 (`unrestricted`, `named`, or `denied`); omitting it stays unrestricted for the
@@ -887,54 +887,64 @@ library discovery ran. There is no cross-run semantic result/coverage cache.
 
 `soul.interpretation` `recall` is the opt-in library path shared by native callers
 and the benchmark. Original query and authorized scope enter once. Host operations
-remain provider-free; Q and A are supplied by explicit producers or a prepared
-cache. Discovery pages current source records and published H beyond a single
+remain provider-free; query semantics and semantic correspondence are supplied by explicit producers or a prepared
+cache. Discovery pages current source records and published source interpretations beyond a single
 16-row descriptor page, records the eligible population, visited pages, candidate
 prefix and open residuals, and does not treat query hints as semantic membership.
-Compatible H/Q/A compile independently through the existing field; there is no
-cross-H join. Delivery uses canonical `sortIndexEntries` with source-root occupancy
+Compatible source interpretation, query semantics, and semantic correspondence compile independently through the existing field; there is no
+cross-interpretation join. Delivery uses canonical `sortIndexEntries` with source-root occupancy
 (`source_gold_root_identity`) and a membership page of at most 10. Equal grades
 use canonical identity ties; this is not learned relevance. Proof-bearing slots
-keep H/Q/A/C closure. Delivery and first-exposure `object_kind` is
+keep source-interpretation, query-semantics, semantic-correspondence, and conditional-computation closure. Delivery and first-exposure `object_kind` is
 `semantic_proof` on those slots and `source_evidence` on a source excerpt
 without a closed proof. Mixed Any@K joins only `object_kind: source_evidence`;
 proof-conditioned Any@K joins closed proof ranks; the two metrics must not
 collapse. A source excerpt without a closed proof is source evidence, not
-assertion truth or H/A success. Over-budget proof-bearing conclusions are
+assertion truth or source-interpretation or semantic-correspondence success. Over-budget proof-bearing conclusions are
 omitted rather than delivered after stripping assumptions. First exposure is the
 initial membership page recorded by the existing `FirstExposureSession` owner.
 This path does not replace ordinary `soul.recall`.
 
+The separately named source-bearing union metric scores the same initial occupied
+slots across source evidence and validated semantic proofs. A proof must bind its
+source record to the independently verified native snapshot publication, including
+root, workspace, version, digest and known scope; a self-consistent copied proof
+record is insufficient. One occupied root contributes once. This union does not
+replace either earlier metric or certify complete answer support. Frozen comparisons
+bind the summary, census, selected questions, preparation, publication, replay and
+initial-exposure commitment. Missing, corrupt or incomplete evidence retains the
+frozen denominator as unknown; an incomplete source census cannot establish a miss.
+
 Current-source discovery scans at most 32 pages of 16 historical records. An
 incomplete or unavailable scan cannot establish currentness and emits no source
 identities, with discovery left open/truncated. Indexed current-source enumeration
-is needed before scaling beyond this bound. H candidate diagnostics include only
+is needed before scaling beyond this bound. Source-interpretation candidate diagnostics include only
 authorized current sources. Library continuation leases bind the first clock,
 request budget, caller/session, scope and database revision; changing any bound
 input requires a fresh request. Proof demotion preserves occupied positions.
 Public payload coverage and index payload completeness both report shortened
 previews. Measurement retains requested budget separately from the fixed ten-slot
-page policy and requires the delivered H/Q/A/C package and closed proof graph for
+page policy and requires the delivered source-interpretation, query-semantics, semantic-correspondence, and conditional-computation package and closed proof graph for
 proof-conditioned scoring; source retrieval remains independently scoreable.
 
 Results expose actual accepting bindings and returned variables, per-answer
 explanation roots, the existing derivation forest, and exact observation-to-leaf
 attribution. `consumed_leaves` is only a summary, not a replacement for the proof
 forest. A source or query gap is not filled by a structural match. In particular,
-query gaps retain `query_complete=false`; fixed-C computation completion does
-not certify H, Q, A fidelity or exhaust possible interpretations.
+query gaps retain `query_complete=false`; fixed conditional-computation completion does
+not certify source-interpretation, query-semantics, or semantic-correspondence fidelity or exhaust possible interpretations.
 
-Q gaps use query-owned support: each gap carries at least one
+Query-semantics gaps use query-owned support: each gap carries at least one
 `{kind:"query_text",excerpt}` copied from the original question. Core checks those
 excerpts and the query schema checks affected variable, frame or domain handles.
-H mention handles cannot locate a Q gap because Q has no H mention catalog.
-Legacy nonempty Q gaps using H support or empty support are invalid; they are not
+Source-interpretation mention handles cannot locate a query-semantics gap because query semantics has no source-interpretation mention catalog.
+Legacy nonempty query-semantics gaps using source-interpretation support or empty support are invalid; they are not
 silently upgraded. Queries with no gaps retain their canonical bytes and identity.
 
-For interpreted producer responses, H draft gaps and Q body gaps own the
+For interpreted producer responses, source-interpretation draft gaps and query-semantics body gaps own the
 executable qualifiers. `outcome.gaps` must echo that body's gaps exactly;
-disagreement is invalid rather than repaired or silently discarded. A has no
-gap channel, so an interpreted A requires empty outcome gaps. Partial H and Q
+disagreement is invalid rather than repaired or silently discarded. Semantic correspondence has no
+gap channel, so an interpreted semantic correspondence requires empty outcome gaps. Partial source interpretation and query semantics
 remain valid with matching, structurally valid gaps. Protocol owns this binding
 rule and bounded validation diagnostics; raw response identity remains intact.
 SOUL `proposeQuerySemantics` and `proposeAlignmentSemantics` expose the native
@@ -948,7 +958,7 @@ Preparation, compilation, solving, projection and proof materialization share
 remaining budgets. Incomplete observation/solver/index/proof or a page/output
 cap must not become complete-empty. When the output cap cannot retain proof and
 qualifiers, conclusions are removed rather than delivered without assumptions.
-The generic evidence-capsule text-size bound still applies before durable H
+The generic evidence-capsule text-size bound still applies before durable source-interpretation
 publication; successful source parsing alone does not establish publication.
 
 A nonempty source with no executable proposition may carry a located, unreviewed
@@ -956,6 +966,6 @@ A nonempty source with no executable proposition may carry a located, unreviewed
 no eligible source, an admitted source whose current body is `unavailable`,
 invalid output, transport failure and unexercised work.
 Batch retains the request-bound raw response; MCP can return the source-bound
-disposition without minting an empty H or a memory object. The host operations
+disposition without minting an empty source interpretation or a memory object. The host operations
 remain provider-free. Authored/native regressions establish engineering
 behavior, not real-model extraction quality or benchmark utility.

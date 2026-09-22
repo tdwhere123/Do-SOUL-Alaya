@@ -271,7 +271,7 @@ describe("recall-eval diagnostics evidence", () => {
     })).not.toThrow();
   });
 
-  it("rejects D2Q identity that disagrees with the persisted workspace schema", () => {
+  it("rejects D2query-semantics identity that disagrees with the persisted workspace schema", () => {
     expect(() => buildRecallEvalDiagnosticsEvidence({
       questions: [question("q-d2q-drift", "returned")],
       embeddingSupplement: { ...biIdentity, d2q_input: "raw_content" },

@@ -6,7 +6,7 @@ import { prepareSourcePublicationAssociations } from "../snapshot/source-records
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 
-/** Offline orchestration. Paid Q/A uses the existing semantic-proposal-fill entry and its explicit authority. */
+/** Offline orchestration. Paid query semantics and semantic correspondence uses the existing semantic-proposal-fill entry and its explicit authority. */
 export async function runSemanticChainLauncher(args: readonly string[]): Promise<number> {
   try {
     const [operation, ...rest] = args;
@@ -23,7 +23,7 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
     let result: unknown;
     if (operation === "prepare") result = await prepareSemanticChain(json(required("--config")), required("--root"));
     else if (operation === "replay") result = await replaySemanticChain(required("--root"),
-      z.enum(["retained", "without_alignments"]).parse(flags.get("--arm") ?? "retained"));
+      z.enum(["retained", "without_semantic_correspondences"]).parse(flags.get("--arm") ?? "retained"));
     else if (operation === "measure") result = measureSemanticChain(required("--root"), required("--replay"), json(required("--gold")));
     else if (operation === "intervene") result = interveneSemanticChain(required("--root"), required("--replay"),
       Number(flags.get("--leaf-trials") ?? "32"));

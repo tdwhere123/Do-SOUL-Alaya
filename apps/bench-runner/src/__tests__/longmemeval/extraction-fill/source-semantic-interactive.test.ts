@@ -137,7 +137,7 @@ it("fills complete-source open semantics through interactive generateContent wit
       return h.status === "hit" && h.admitted.request.source_catalog.source_digest === source.corpus_digest;
     })!;
     const h = inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE);
-    if (h.status !== "hit") throw new Error("fixture H missing");
+    if (h.status !== "hit") throw new Error("fixture source interpretation missing");
     return { source_id: source.source_id, source_version: source.source_version,
       generation_key: key, request_digest: h.requestDigest };
   });
@@ -157,8 +157,8 @@ it("fills complete-source open semantics through interactive generateContent wit
     populations: [{ name: "fixture", dataDir, pinnedMetaRoot, cacheRoots: [cacheRoot, secondCache], model: MODEL, requestProfile: REQUEST_PROFILE, publicationAssociations }]
   });
   expect(report.published_count).toBe(census.records.length);
-  expect(report.h_binding_complete).toBe(true);
-  expect(report.sources.every((source) => source.h_binding?.kind === "host_publication_association")).toBe(true);
+  expect(report.source_interpretation_binding_complete).toBe(true);
+  expect(report.sources.every((source) => source.source_interpretation_binding?.kind === "host_publication_association")).toBe(true);
   const providerCalls = fixture.fetchMock.mock.calls.length;
   await assertNativeSemanticChain(cacheRoot);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);

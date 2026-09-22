@@ -48,9 +48,10 @@ export type SourcePublicationDisposition = Readonly<{
   admission: "admitted" | "rejected";
   admission_reason?: string;
   record_id?: string;
-  h: "interpreted" | "abstained" | "no_executable_proposition" | "no_eligible_source" | "absent" | "invalid" | "conflict";
-  h_generation_key?: string;
-  h_binding?: Readonly<{ kind: "host_publication_association"; request_digest: string }>;
+  source_record?: import("@do-soul/alaya-protocol").SourceRecordIdentity;
+  source_interpretation: "interpreted" | "abstained" | "no_executable_proposition" | "no_eligible_source" | "absent" | "invalid" | "conflict";
+  source_interpretation_generation_key?: string;
+  source_interpretation_binding?: Readonly<{ kind: "host_publication_association"; request_digest: string }>;
   publication: "published" | "not_attempted" | "failed";
   publication_error?: string;
   interpretation_id?: string;
@@ -58,7 +59,7 @@ export type SourcePublicationDisposition = Readonly<{
 }>;
 
 export type SourcePublicationReport = Readonly<{
-  schema_version: 1;
+  schema_version: 2;
   artifact_domain: "source_semantic_publication";
   recorded_at: string;
   workspace_id: string;
@@ -69,13 +70,13 @@ export type SourcePublicationReport = Readonly<{
   admitted_count: number;
   rejected_count: number;
   published_count: number;
-  h_counts: Readonly<Record<SourcePublicationDisposition["h"], number>>;
+  source_interpretation_counts: Readonly<Record<SourcePublicationDisposition["source_interpretation"], number>>;
   sources: readonly SourcePublicationDisposition[];
-  unbound_h_artifacts: readonly UnboundHArtifact[];
-  h_binding_complete: boolean;
+  unbound_source_interpretation_artifacts: readonly UnboundSourceInterpretationArtifact[];
+  source_interpretation_binding_complete: boolean;
 }>;
 
-type UnboundHArtifact = Readonly<{ population: string; generation_key: string; status: "invalid" | "unbound" }>;
+type UnboundSourceInterpretationArtifact = Readonly<{ population: string; generation_key: string; status: "invalid" | "unbound" }>;
 
 export async function publishSourceSemanticSnapshot(input: Readonly<{
   snapshotPath: string;
@@ -168,12 +169,12 @@ async function admitOneSource(
       scope_class: "project", spans: deriveAddressableSpanViews(source.content_bytes),
       ...(source.speaker === undefined ? {} : { speaker: source.speaker })
     });
-    return { ...base, admission: "admitted", record_id: admitted.record.identity, h: "absent", publication: "not_attempted" };
+    return { ...base, admission: "admitted", record_id: admitted.record.identity, source_record: admitted.record, source_interpretation: "absent", publication: "not_attempted" };
   } catch (error) {
     return {
       ...base, admission: "rejected",
       admission_reason: error instanceof Error ? error.message.slice(0, 300) : String(error),
-      h: "absent", publication: "not_attempted"
+      source_interpretation: "absent", publication: "not_attempted"
     };
   }
 }
@@ -216,19 +217,19 @@ async function publishOneSource(
 ): Promise<SourcePublicationDisposition> {
   if (retained === undefined) return current;
   if (retained.status !== "hit") {
-    return { ...current, h: retained.status, ...(retained.key === undefined ? {} : { h_generation_key: retained.key }) };
+    return { ...current, source_interpretation: retained.status, ...(retained.key === undefined ? {} : { source_interpretation_generation_key: retained.key }) };
   }
   const native = retained.native;
-  const h = classifyRetainedH(native.admitted.outcome.status);
-  const generation = { h, h_generation_key: retained.key,
-    h_binding: { kind: "host_publication_association" as const, request_digest: native.requestDigest } };
-  if (h !== "interpreted") return { ...current, ...generation };
+  const source_interpretation = classifyRetainedInterpretation(native.admitted.outcome.status);
+  const generation = { source_interpretation, source_interpretation_generation_key: retained.key,
+    source_interpretation_binding: { kind: "host_publication_association" as const, request_digest: native.requestDigest } };
+  if (source_interpretation !== "interpreted") return { ...current, ...generation };
   const request = native.admitted.request;
   const locations = request.source_request.assertion_locations;
   const interpretation = native.admitted.interpretation;
   const draft = native.admitted.draft;
   if (interpretation === undefined && draft === undefined) {
-    return { ...current, ...generation, publication: "failed", publication_error: "interpreted H has no draft or normalized interpretation" };
+    return { ...current, ...generation, publication: "failed", publication_error: "interpreted source interpretation has no draft or normalized interpretation" };
   }
   try {
     const published = await publishAdmittedSourceSemanticInterpretation({
@@ -258,31 +259,31 @@ type RetainedSemantics =
 
 function indexRetainedSemantics(
   census: readonly SourceCensus[], populations: readonly SourcePublicationPopulation[]
-): { joined: Map<string, RetainedSemantics>; unbound: UnboundHArtifact[] } {
+): { joined: Map<string, RetainedSemantics>; unbound: UnboundSourceInterpretationArtifact[] } {
   const joined = new Map<string, RetainedSemantics>();
-  const unbound: UnboundHArtifact[] = [];
+  const unbound: UnboundSourceInterpretationArtifact[] = [];
   for (const population of populations) {
     const sources = new Map(census.find((row) => row.population === population.name)!.records.map((source) => [source.source_id, source]));
     const bindings = population.publicationAssociations ?? [];
     const cacheRoots = population.cacheRoots ?? [];
     if (new Set(cacheRoots.map((root) => resolve(root))).size !== cacheRoots.length) {
-      throw new Error("retained H cache roots repeat a generation directory");
+      throw new Error("retained source interpretation cache roots repeat a generation directory");
     }
-    if (bindings.length > 0 && cacheRoots.length === 0) throw new Error("retained H association requires a cache root");
+    if (bindings.length > 0 && cacheRoots.length === 0) throw new Error("retained source interpretation association requires a cache root");
     const boundSources = new Set<string>();
     for (const binding of bindings) {
       const source = sources.get(binding.source_id);
       if (source === undefined || source.source_version !== binding.source_version ||
           !/^[a-f0-9]{64}$/u.test(binding.generation_key) || !/^[a-f0-9]{64}$/u.test(binding.request_digest)) {
-        throw new Error("retained H binding does not match the frozen source census");
+        throw new Error("retained source-interpretation binding does not match the frozen source census");
       }
-      if (boundSources.has(binding.source_id)) throw new Error("retained H association repeats a source");
+      if (boundSources.has(binding.source_id)) throw new Error("retained source interpretation association repeats a source");
       boundSources.add(binding.source_id);
     }
     const seenKeys = new Set<string>();
     for (const cacheRoot of cacheRoots) {
       for (const key of listRetainedSourceSemanticKeys(cacheRoot)) {
-        if (seenKeys.has(key)) throw new Error("retained H generation key occurs in multiple cache roots");
+        if (seenKeys.has(key)) throw new Error("retained source interpretation generation key occurs in multiple cache roots");
         seenKeys.add(key);
         const native = inspectCachedSourceSemantic(cacheRoot, key, population.model, population.requestProfile);
         const matched = bindings.filter((binding) => binding.generation_key === key);
@@ -350,35 +351,35 @@ function checkpointSnapshot(snapshotPath: string): void {
 function sealReport(input: Readonly<{
   recordedAt: string; workspaceId: string; runId: string; snapshotPath: string;
   census: readonly SourceCensus[]; dispositions: readonly SourcePublicationDisposition[];
-  unbound: readonly UnboundHArtifact[];
+  unbound: readonly UnboundSourceInterpretationArtifact[];
 }>): SourcePublicationReport {
-  const hCounts = {
+  const interpretationCounts = {
     interpreted: 0, abstained: 0, no_executable_proposition: 0, no_eligible_source: 0,
     absent: 0, invalid: 0, conflict: 0
   };
-  for (const row of input.dispositions) hCounts[row.h] += 1;
+  for (const row of input.dispositions) interpretationCounts[row.source_interpretation] += 1;
   return {
-    schema_version: 1, artifact_domain: "source_semantic_publication",
+    schema_version: 2, artifact_domain: "source_semantic_publication",
     recorded_at: input.recordedAt, workspace_id: input.workspaceId, run_id: input.runId,
     snapshot_path: input.snapshotPath, db_sha256: hashRegularFileNoFollow(input.snapshotPath),
     census_count: input.dispositions.length,
     admitted_count: input.dispositions.filter((row) => row.admission === "admitted").length,
     rejected_count: input.dispositions.filter((row) => row.admission === "rejected").length,
     published_count: input.dispositions.filter((row) => row.publication === "published").length,
-    h_counts: hCounts, sources: input.dispositions,
-    unbound_h_artifacts: input.unbound, h_binding_complete: input.unbound.length === 0 &&
-      input.dispositions.every((row) => row.h !== "invalid" && row.h !== "conflict")
+    source_interpretation_counts: interpretationCounts, sources: input.dispositions,
+    unbound_source_interpretation_artifacts: input.unbound, source_interpretation_binding_complete: input.unbound.length === 0 &&
+      input.dispositions.every((row) => row.source_interpretation !== "invalid" && row.source_interpretation !== "conflict")
   };
 }
 
-function classifyRetainedH(status: string): SourcePublicationDisposition["h"] {
+function classifyRetainedInterpretation(status: string): SourcePublicationDisposition["source_interpretation"] {
   if (status === "interpreted" || status === "abstained" || status === "no_executable_proposition" || status === "no_eligible_source") {
     return status;
   }
   return "invalid";
 }
 
-function dispositionBase(source: SourceCensusRecord): Omit<SourcePublicationDisposition, "admission" | "h" | "publication"> {
+function dispositionBase(source: SourceCensusRecord): Omit<SourcePublicationDisposition, "admission" | "source_interpretation" | "publication"> {
   return {
     source_id: source.source_id, source_version: source.source_version, content_digest: source.content_digest,
     corpus_digest: source.corpus_digest, population: source.population, question_id: source.question_id,

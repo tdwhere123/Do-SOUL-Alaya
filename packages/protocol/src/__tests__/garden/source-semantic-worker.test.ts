@@ -11,8 +11,9 @@ const budget = {
   page_budget: 1, finalization_reserve: 0, min_envelope: 0
 };
 const coverage = {
-  discovery: "complete" as const, h: "unexercised" as const, q: "unexercised" as const,
-  a: "unexercised" as const, computation: "unexercised" as const, payload: "complete" as const
+  discovery: "complete" as const, source_interpretation: "unexercised" as const,
+  query_semantics: "unexercised" as const, semantic_correspondence: "unexercised" as const,
+  conditional_computation: "unexercised" as const, payload: "complete" as const
 };
 const work = { native_work: 1, native_bytes: 2, logical_memory_bytes: 3, rss_bytes: 4 };
 
@@ -35,19 +36,19 @@ it("admits prepare and one-shot reason without a continuation token", () => {
     budget, output_byte_limit: 1024,
     continuation: {
       schema_version: 1, continuation_id: "page-10", query_id: "q1", snapshot_id: digest,
-      result_version: "source-semantic-library-v1", expires_at: "2099-01-01T00:00:00.000Z",
+      result_version: "source-semantic-library-v2", expires_at: "2099-01-01T00:00:00.000Z",
       cursor: "offset-10"
     }
   }).kind).toBe("recall");
   const result = SourceSemanticWorkerResultSchema.parse({
     kind: "reason",
     result: {
-      contract: "source-interpretation-reasoning-v3",
+      contract: "source-interpretation-reasoning-v4",
       outcome: { status: "truncated" }, consumed_leaves: [],
       semantic_status: "unreviewed", conclusion_scope: "conditional_on_interpretation",
       world_claim: "unknown"
     },
-    coverage: { ...coverage, payload: "truncated", computation: "open" }, work
+    coverage: { ...coverage, payload: "truncated", conditional_computation: "open" }, work
   });
   expect("continuation" in result).toBe(false);
   if (result.kind !== "reason") throw new Error("expected a reasoning result");

@@ -1,8 +1,8 @@
 import {
-  type QueryProgram, type SourceSemanticQuery, type SourceSemanticAlignment, type SourceSemanticInterpretation,
+  type QueryProgram, type SourceSemanticQuery, type SourceSemanticCorrespondence, type SourceSemanticInterpretation,
   type SourceSemanticResourceLedger, type SourceSemanticDomain
 } from "@do-soul/alaya-protocol";
-import { sourceSemanticRelationKey as key, alignmentGroupPhases, type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
+import { sourceSemanticRelationKey as key, correspondenceGroupPhases, type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
 import { compileSourceSemanticAlternative, compileSourceSemanticGroupProgram } from "./compile-source-semantic-query.js";
 import { semanticRelation as rel, semanticSequence as sequence, semanticAlternatives as alternatives,
   semanticOwnerProof, emptySemanticProgram } from "./source-semantic-proof-program.js";
@@ -17,7 +17,7 @@ export type SourceSemanticExecutionPlan = Readonly<{
   missingOperands: boolean; missingMembership?: boolean;
   groupPhases?: readonly SourceSemanticGroupPhase[];
 }>;
-type Input = Readonly<{ h: SourceSemanticInterpretation; q: SourceSemanticQuery; a: SourceSemanticAlignment;
+type Input = Readonly<{ h: SourceSemanticInterpretation; q: SourceSemanticQuery; a: SourceSemanticCorrespondence;
   population: SourceSemanticPremisePopulation; meter: SourceSemanticResourceLedger }>;
 const DOMAIN = "@finite:domain";
 
@@ -25,10 +25,10 @@ const DOMAIN = "@finite:domain";
 export function compileSourceSemanticExecution(input: Input): SourceSemanticExecutionPlan {
   const { q, h, a, meter, population } = input;
   if (q.evaluation === undefined) {
-    const finite = { h, population, alignment: a };
+    const finite = { h, population, semantic_correspondence: a };
     let acceptIndex = 0;
     const groupPhases = q.alternatives.flatMap((alternative, index) => {
-      const frames = alignmentGroupPhases(q, a, index);
+      const frames = correspondenceGroupPhases(q, a, index);
       return frames.map((group) => {
         const phase = {
           program: compileSourceSemanticGroupProgram(q, alternative, index, meter, finite, group, acceptIndex),
@@ -52,8 +52,8 @@ export function compileSourceSemanticExecution(input: Input): SourceSemanticExec
 
 function domainEntry(input: Input, domain: SourceSemanticDomain): QueryProgram[] {
   return [rel(key("candidate_route"), "@finite:seed", DOMAIN, input.meter),
-    rel(key("h_domain", domain.id), DOMAIN, DOMAIN, input.meter),
-    rel(key("a_domain", input.q.evaluation!.domain), DOMAIN, DOMAIN, input.meter)];
+    rel(key("source_interpretation_domain", domain.id), DOMAIN, DOMAIN, input.meter),
+    rel(key("semantic_correspondence_domain", input.q.evaluation!.domain), DOMAIN, DOMAIN, input.meter)];
 }
 
 function closureProof(input: Input, domain: SourceSemanticDomain): QueryProgram {
@@ -80,10 +80,10 @@ function compileUniversal(input: Input, domain: SourceSemanticDomain): SourceSem
   if (domain.context !== null) return { program: emptySemanticProgram, branches: [], domain, missingOperands: false };
   const branches: SourceSemanticProofBranch[] = [], options: QueryProgram[] = [];
   const body = (member: SourceSemanticDomain["members"][number], memberIndex: number, counterexample: boolean) => {
-    const finite = { h: input.h, population: input.population, alignment: input.a };
+    const finite = { h: input.h, population: input.population, semantic_correspondence: input.a };
     const choices = q.alternatives.flatMap((alternative, index) => {
       if ((alternative.purpose === "counterexample") !== counterexample) return [];
-      const frames = alignmentGroupPhases(q, input.a, index);
+      const frames = correspondenceGroupPhases(q, input.a, index);
       return frames.map((group, groupIndex) => {
         meter.charge(1, 1024, "finite universal branch");
         const suffix = `:member${memberIndex}:alt${index}:g${groupIndex}`;
@@ -140,21 +140,21 @@ function numericProof(input: Input, domain: SourceSemanticDomain,
   const visit = (variable: string, owner: string, subject: string, side: string) => {
     const membership = `@membership:${suffix}:${side}`;
     const membershipProof = domain.context === null
-      ? rel(key("h_assertion_permission"), membership, membership, input.meter)
+      ? rel(key("source_interpretation_assertion_permission"), membership, membership, input.meter)
       : alternatives(domain.members.map((row) => semanticOwnerProof(input.h, row.evidence, membership, input.meter, evaluation.scope === "preserve")));
     const memberships = [sequence([rel(key("measurement_membership"), variable, membership, input.meter), membershipProof,
       rel(key("measurement_membership_inv"), membership, variable, input.meter)])];
     if (input.a.membership_assumptions?.some((row) => row.status === "member" && row.source_domain === domain.id
       && row.query_variable === subject)) memberships.push(sequence([
       rel(key("measurement_assumed_membership", subject), variable, subject, input.meter),
-      rel(key("a_referent", subject), subject, subject, input.meter),
+      rel(key("semantic_correspondence_referent", subject), subject, subject, input.meter),
       rel(key("measurement_assumed_membership_inv", subject), subject, variable, input.meter)]));
     const ownerPermission = evaluation.scope === "asserted"
       ? sequence([rel(key("measurement_owner"), variable, owner, input.meter),
-        rel(key("h_assertion_permission"), owner, owner, input.meter),
+        rel(key("source_interpretation_assertion_permission"), owner, owner, input.meter),
         rel(key("measurement_owner_inv"), owner, variable, input.meter)])
       : alternatives((input.h.measurements ?? []).filter((row) => row.population === domain.id).map((measurement) => sequence([
-        rel(key("h_measurement", measurement.id), variable, variable, input.meter),
+        rel(key("source_interpretation_measurement", measurement.id), variable, variable, input.meter),
         rel(key("measurement_owner"), variable, owner, input.meter),
         semanticOwnerProof(input.h, measurement.owner, owner, input.meter, true),
         rel(key("measurement_owner_inv"), owner, variable, input.meter)
@@ -164,7 +164,7 @@ function numericProof(input: Input, domain: SourceSemanticDomain,
       alternatives(memberships),
       rel(key("measurement_subject"), variable, subject, input.meter)];
     if (input.q.variables.find((row) => row.id === subject)?.reference !== undefined) {
-      steps.push(rel(key("a_referent", subject), subject, subject, input.meter));
+      steps.push(rel(key("semantic_correspondence_referent", subject), subject, subject, input.meter));
     }
     steps.push(rel(key("measurement_subject_inv"), subject, variable, input.meter),
       rel(key(`numeric_${side}_inv`), variable, pair, input.meter));

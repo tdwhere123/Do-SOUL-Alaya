@@ -33,7 +33,7 @@ function tempRoot(): string {
 
 function queryWorkset(originalQuery: string) {
   return parseSemanticProposalWorkset({
-    contract: "source-semantic-proposal-workset-v1",
+    contract: "source-semantic-proposal-workset-v2",
     kind: "query", model: MODEL, request_profile: PROFILE,
     items: [{ original_query: originalQuery }]
   });
@@ -125,7 +125,7 @@ it.each([
   { support: [{ kind: "query_text", excerpt: "sample" }], status: "interpreted", admitted: true },
   { support: [{ kind: "query_text", excerpt: "foreign wording" }], status: "core_rejected", admitted: false },
   { support: [{ kind: "lexical", mentions: ["sample"] }], status: "invalid", admitted: false }
-])("persists and replays located query gaps as $status without inventing H mentions", async ({ support, status, admitted }) => {
+])("persists and replays located query gaps as $status without inventing source-interpretation mentions", async ({ support, status, admitted }) => {
   const body = JSON.parse(meaningBody("sample"));
   body.query.gaps = [{ kind: "unsupported_meaning", affected_ids: ["send"], support }];
   const rawJson = JSON.stringify(body);

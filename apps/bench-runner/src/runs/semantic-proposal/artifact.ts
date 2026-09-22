@@ -6,7 +6,7 @@ import { canonicalJson } from "@do-soul/alaya-protocol";
 import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durable-exclusive-publication.js";
 import { proposalCacheKey, type SemanticProposalKind } from "./workset.js";
 
-export const SEMANTIC_PROPOSAL_CACHE_CONTRACT = "source-semantic-proposal-cache-v1" as const;
+export const SEMANTIC_PROPOSAL_CACHE_CONTRACT = "source-semantic-proposal-cache-v2" as const;
 
 export class SemanticProposalIdentityError extends Error {
   constructor(message: string) {
@@ -28,7 +28,7 @@ const TransportProvenanceSchema = z.object({
 
 const ShardSchema = z.object({
   contract: z.literal(SEMANTIC_PROPOSAL_CACHE_CONTRACT),
-  kind: z.enum(["query", "alignment"]),
+  kind: z.enum(["query", "semantic_correspondence"]),
   cache_key: z.string().regex(/^[0-9a-f]{64}$/u),
   model: z.string().min(1),
   request_profile: z.string().min(1),

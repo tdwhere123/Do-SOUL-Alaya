@@ -5,9 +5,9 @@ import {
   sourceSemanticInterpretationIdentity
 } from "@do-soul/alaya-protocol";
 import {
-  SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT, semanticSha256
+  SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, semanticSha256
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
-import { proposeAlignmentSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
+import { proposeCorrespondenceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 
 const SET_VALUED = "Which brands offer which items?";
 
@@ -84,7 +84,7 @@ function twoOfferInterpretation() {
 }
 
 function predicateOnlySelections(
-  catalog: NonNullable<ReturnType<typeof proposeAlignmentSemantics>["request"]["catalog"]>,
+  catalog: NonNullable<ReturnType<typeof proposeCorrespondenceSemantics>["request"]["catalog"]>,
   frames: readonly string[]
 ) {
   const predicate = catalog.query_endpoints.find((row) => row.kind === "predicate")!;
@@ -98,7 +98,7 @@ function predicateOnlySelections(
 }
 
 function offerSelections(
-  catalog: NonNullable<ReturnType<typeof proposeAlignmentSemantics>["request"]["catalog"]>,
+  catalog: NonNullable<ReturnType<typeof proposeCorrespondenceSemantics>["request"]["catalog"]>,
   frames: readonly string[]
 ) {
   const queryByKind = {
@@ -129,31 +129,31 @@ function receiveSelections(
 ) {
   const hId = sourceSemanticInterpretationIdentity(h, semanticSha256);
   const admitted = setValuedQuery();
-  return proposeAlignmentSemantics({
-    original_query: SET_VALUED, admitted_q: admitted,
-    h_descriptors: [{ h_id: hId, interpretation: h }],
+  return proposeCorrespondenceSemantics({
+    original_query: SET_VALUED, admitted_query_semantics: admitted,
+    source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }],
     producer_id: "align-producer", producer_version: "1"
   }, {
     rawJson: JSON.stringify({
-      contract: "source-semantic-alignment-response-v3",
+      contract: "source-semantic-correspondence-response-v3",
       outcome: { status: "interpreted" },
-      alignment: { contract: "source-semantic-alignment-selection-v1", h: "h1", selections }
+      semantic_correspondence: { contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1", selections }
     })
   });
 }
 
-describe("set-valued alignment selections stay producer-owned", () => {
+describe("set-valued semantic_correspondence selections stay producer-owned", () => {
   it("requires each set-valued group to bind returned-variable slots, not a predicate row alone", () => {
-    expect(SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT).toContain(
+    expect(SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT).toContain(
       "slot binding for every returned variable"
     );
-    expect(SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT).toContain(
+    expect(SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT).toContain(
       "A predicate-only group is incomplete and must not be handed in as a group"
     );
-    expect(SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT).not.toMatch(
+    expect(SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT).not.toMatch(
       /predicate-only group is (?:complete|enough|finished)/iu
     );
-    for (const match of SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT.matchAll(/"selections"\s*:\s*(\[[\s\S]*?\])/gu)) {
+    for (const match of SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT.matchAll(/"selections"\s*:\s*(\[[\s\S]*?\])/gu)) {
       const rows = JSON.parse(match[1]!) as readonly { query?: string; source?: string }[];
       const bySource = new Map<string, { query: string }[]>();
       for (const row of rows) {
@@ -170,26 +170,26 @@ describe("set-valued alignment selections stay producer-owned", () => {
 
   it("still admits a first-pass single-frame selection as interpreted", () => {
     const h = twoOfferInterpretation();
-    const prepared = proposeAlignmentSemantics({
-      original_query: SET_VALUED, admitted_q: setValuedQuery(),
-      h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
+    const prepared = proposeCorrespondenceSemantics({
+      original_query: SET_VALUED, admitted_query_semantics: setValuedQuery(),
+      source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
       producer_id: "align-producer", producer_version: "1"
     });
     const catalog = prepared.request.catalog!;
     expect(catalog.source_endpoints.filter((row) => row.kind === "frame" && row.reading === "offer")).toHaveLength(2);
     const received = receiveSelections(h, offerSelections(catalog, ["fPhilips"]));
     expect(received.outcome.status).toBe("interpreted");
-    expect(received.alignment?.correspondences).toHaveLength(3);
-    expect(received.alignment?.correspondences.map((row) =>
+    expect(received.semantic_correspondence?.correspondences).toHaveLength(3);
+    expect(received.semantic_correspondence?.correspondences.map((row) =>
       row.source_endpoint.kind === "referent" ? undefined : row.source_endpoint.frame
     )).toEqual(["fPhilips", "fPhilips", "fPhilips"]);
   });
 
   it("rejects A2-shaped predicate-only groups as incomplete instead of compiling them as finished", () => {
     const h = twoOfferInterpretation();
-    const prepared = proposeAlignmentSemantics({
-      original_query: SET_VALUED, admitted_q: setValuedQuery(),
-      h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
+    const prepared = proposeCorrespondenceSemantics({
+      original_query: SET_VALUED, admitted_query_semantics: setValuedQuery(),
+      source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
       producer_id: "align-producer", producer_version: "1"
     });
     const frames = prepared.request.catalog!.source_endpoints
@@ -197,35 +197,35 @@ describe("set-valued alignment selections stay producer-owned", () => {
       .map((row) => row.frame!);
     const received = receiveSelections(h, predicateOnlySelections(prepared.request.catalog!, frames));
     expect(received.outcome).toEqual({ status: "invalid", reason: "incomplete_selection_group" });
-    expect(received.alignment).toBeUndefined();
+    expect(received.semantic_correspondence).toBeUndefined();
   });
 
   it("materializes one selection group per matching frame without adding omitted pairs", () => {
     const h = twoOfferInterpretation();
     const hId = sourceSemanticInterpretationIdentity(h, semanticSha256);
     const admitted = setValuedQuery();
-    const prepared = proposeAlignmentSemantics({
-      original_query: SET_VALUED, admitted_q: admitted,
-      h_descriptors: [{ h_id: hId, interpretation: h }],
+    const prepared = proposeCorrespondenceSemantics({
+      original_query: SET_VALUED, admitted_query_semantics: admitted,
+      source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }],
       producer_id: "align-producer", producer_version: "1"
     });
-    const received = proposeAlignmentSemantics({
-      original_query: SET_VALUED, admitted_q: admitted,
-      h_descriptors: [{ h_id: hId, interpretation: h }],
+    const received = proposeCorrespondenceSemantics({
+      original_query: SET_VALUED, admitted_query_semantics: admitted,
+      source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }],
       producer_id: "align-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-alignment-response-v3",
+        contract: "source-semantic-correspondence-response-v3",
         outcome: { status: "interpreted" },
-        alignment: {
-          contract: "source-semantic-alignment-selection-v1", h: "h1",
+        semantic_correspondence: {
+          contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1",
           selections: offerSelections(prepared.request.catalog!, ["fPhilips", "fLutron"])
         }
       })
     });
     expect(received.outcome.status).toBe("interpreted");
-    expect(received.alignment?.correspondences).toHaveLength(6);
-    expect(new Set(received.alignment?.correspondences.map((row) =>
+    expect(received.semantic_correspondence?.correspondences).toHaveLength(6);
+    expect(new Set(received.semantic_correspondence?.correspondences.map((row) =>
       row.source_endpoint.kind === "referent" ? undefined : row.source_endpoint.frame
     ))).toEqual(new Set(["fPhilips", "fLutron"]));
   });

@@ -3,7 +3,7 @@ import { CoreError } from "../../shared/errors.js";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
 import type { compileConditionalFieldQuery } from "../conditional-field/query/compile-query.js";
-import type { admitSourceSemanticAlignment } from "../conditional-field/query/source-semantic-alignment-admission.js";
+import type { admitSourceSemanticCorrespondence } from "../conditional-field/query/source-semantic-correspondence-admission.js";
 import type { SourceSemanticExecutionPlan } from "../conditional-field/query/compile-source-semantic-finite.js";
 import type { SourceSemanticPremisePopulation } from "./source-semantic-premises.js";
 import { deliverSourceSemanticProof } from "./source-semantic-delivery.js";
@@ -14,10 +14,10 @@ export type SourceSemanticResultBody = Omit<SourceSemanticReasoningResult, "cont
 export function projectSourceSemanticState(input: Readonly<{
   state: FieldEngineState; meter: SourceSemanticResourceLedger; remaining: RequestBudget;
   query: ReturnType<typeof compileConditionalFieldQuery>; snapshot: string;
-  admission: Extract<ReturnType<typeof admitSourceSemanticAlignment>, { kind: "admitted" }>;
+  admission: Extract<ReturnType<typeof admitSourceSemanticCorrespondence>, { kind: "admitted" }>;
   population: SourceSemanticPremisePopulation; execution: SourceSemanticExecutionPlan;
   sourceTarget: SourceEvidenceTarget;
-  qualified: Pick<SourceSemanticReasoningResult, "c_id" | "h_id" | "q_id" | "a_id" | "source_target" | "query_gaps">;
+  qualified: Pick<SourceSemanticReasoningResult, "conditional_computation_id" | "source_interpretation_id" | "query_semantics_id" | "semantic_correspondence_id" | "source_target" | "query_gaps">;
 }>) {
   const { state, meter, remaining, query, snapshot, admission, population, execution, sourceTarget, qualified } = input;
   if (state.binding.kind !== "bound") return {
@@ -26,7 +26,7 @@ export function projectSourceSemanticState(input: Readonly<{
   const beforeProjection = Math.max(0, state.remaining_exploration + state.remaining_reserve);
   let afterProjection = beforeProjection;
   const index = projectAcceptingIndex({ snapshot: state.binding.snapshot, view: query.view, query_id: query.query_id,
-    snapshot_id: snapshot, result_version: "source-interpretation-reasoning-v3",
+    snapshot_id: snapshot, result_version: "source-interpretation-reasoning-v4",
     budget: { ...remaining, work_units: state.remaining_exploration, memory_bytes: state.remaining_memory_bytes },
     binding_contexts: state.binding_contexts,
     selected_semantics: { h: admission.interpretation, context: admission.context, source_target: sourceTarget,

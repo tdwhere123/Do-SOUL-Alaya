@@ -14,6 +14,21 @@ export const SOURCE_GOLD_JOIN_DENOMINATOR = "source_gold_root_identity" as const
 export const HISTORICAL_MEMORY_ANY_AT_K_CONTRACT = "gold-memory-ids-any-at-k" as const;
 export const HISTORICAL_MEMORY_ANY_AT_K_DENOMINATOR = "gold_memory_ids" as const;
 export const PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT = "proof-conditioned-first-exposure-any-at-k-v1" as const;
+/** Same initial slots as mixed-v1 and proof-conditioned-v1. Does not replace either contract. */
+export const SOURCE_BEARING_UNION_FIRST_EXPOSURE_CONTRACT = "source-bearing-union-first-exposure-any-at-k-v1" as const;
+export const SOURCE_BEARING_UNION_CONTROLS = [
+  { finding: "unvalidated-proof-declaration", control: "not a hit, and it does not erase a source hit" },
+  { finding: "validated-proof-without-source-slot", control: "union Any@5 hits while mixed misses" },
+  { finding: "memory-id-for-root", control: "object id does not join" },
+  { finding: "digest-or-span-mismatch", control: "root identity mismatch does not join" },
+  { finding: "source-and-proof-same-root", control: "one joined unit" },
+  { finding: "support-or-coverage-text", control: "not scored and not folded into the hit" },
+  { finding: "complete-answer-request", control: "union hit stays evidence demand; complete answer stays partial or unsupported" },
+  { finding: "session-deduped-list", control: "not this denominator" },
+  { finding: "per-kind-top-five", control: "a later proof is not Any@5" },
+  { finding: "abstention", control: "uncalibrated and outside 470" },
+  { finding: "missing-measurement", control: "unknown, and N stays unchanged" }
+] as const;
 
 const UnavailableMetric = z.object({
   status: z.literal("unavailable"), value: z.null(), reason: z.string()
@@ -62,10 +77,21 @@ export const ProofConditionedFirstExposureMetricSchema = z.object({
   any_at_10: FirstExposureBinaryMetricSchema
 }).strict().readonly();
 
+export const SourceBearingUnionFirstExposureMetricSchema = z.object({
+  contract: z.literal(SOURCE_BEARING_UNION_FIRST_EXPOSURE_CONTRACT),
+  denominator: z.literal(SOURCE_GOLD_JOIN_DENOMINATOR),
+  gold_unit_count: z.number().int().nonnegative(),
+  joined_unit_count: z.number().int().nonnegative(),
+  any_at_1: FirstExposureBinaryMetricSchema,
+  any_at_5: FirstExposureBinaryMetricSchema,
+  any_at_10: FirstExposureBinaryMetricSchema
+}).strict().readonly();
+
 export type SourceGoldUnit = z.infer<typeof SourceGoldUnitSchema>;
 export type MixedKindFirstExposureMetric = z.infer<typeof MixedKindFirstExposureMetricSchema>;
 export type HistoricalMemoryAnyAtKMetric = z.infer<typeof HistoricalMemoryAnyAtKMetricSchema>;
 export type ProofConditionedFirstExposureMetric = z.infer<typeof ProofConditionedFirstExposureMetricSchema>;
+export type SourceBearingUnionFirstExposureMetric = z.infer<typeof SourceBearingUnionFirstExposureMetricSchema>;
 export type FirstExposureBinaryMetric = z.infer<typeof FirstExposureBinaryMetricSchema>;
 
 /** Gold root identity. Omits evidence_object_id, span, hypothesis, and interpretation node. */
@@ -127,6 +153,45 @@ export function scoreProofConditionedFirstExposure(
   };
 }
 
+export interface UnionProofAdmission {
+  readonly validatedRanks: ReadonlySet<number>;
+  readonly unverifiedGoldRanks: ReadonlySet<number>;
+}
+
+/** Same slot array as mixed-v1. One failed proof slot does not erase another validated proof. */
+export function scoreSourceBearingUnionFirstExposure(
+  slots: readonly FirstExposureSlot[],
+  goldUnits: readonly SourceGoldUnit[],
+  admission: UnionProofAdmission
+): SourceBearingUnionFirstExposureMetric {
+  if (goldUnits.length === 0) return unionUnavailable(0, "source gold join not supplied");
+  if (slots.some((slot, offset) => slot.rank !== offset + 1)) {
+    return unionUnavailable(goldUnits.length, "slots are not a native first-exposure order");
+  }
+  const joined = goldUnits.filter((unit) => slots.some((slot) =>
+    unionSlotJoinsGold(slot, unit, admission.validatedRanks))).length;
+  const at = (k: number): FirstExposureBinaryMetric => hitOrMiss(unionGoldHitAt(slots, goldUnits, admission.validatedRanks, k));
+  return unionMetric(goldUnits.length, joined, { any_at_1: at(1), any_at_5: at(5), any_at_10: at(10) });
+}
+
+function unionMetric(
+  goldUnitCount: number, joined: number,
+  anyAt: Pick<SourceBearingUnionFirstExposureMetric, "any_at_1" | "any_at_5" | "any_at_10">
+): SourceBearingUnionFirstExposureMetric {
+  return SourceBearingUnionFirstExposureMetricSchema.parse({
+    contract: SOURCE_BEARING_UNION_FIRST_EXPOSURE_CONTRACT, denominator: SOURCE_GOLD_JOIN_DENOMINATOR,
+    gold_unit_count: goldUnitCount, joined_unit_count: joined, ...anyAt
+  });
+}
+
+function unionUnavailable(goldUnitCount: number, reason: string): SourceBearingUnionFirstExposureMetric {
+  const any = unavailable(reason);
+  return SourceBearingUnionFirstExposureMetricSchema.parse({
+    contract: SOURCE_BEARING_UNION_FIRST_EXPOSURE_CONTRACT, denominator: SOURCE_GOLD_JOIN_DENOMINATOR,
+    gold_unit_count: goldUnitCount, joined_unit_count: 0, any_at_1: any, any_at_5: any, any_at_10: any
+  });
+}
+
 export function scoreHistoricalMemoryAnyAtK(
   slots: readonly FirstExposureSlot[],
   goldMemoryIds: readonly string[] | undefined
@@ -169,6 +234,13 @@ function sourceGoldHitAt(
   return slots.slice(0, k).some((slot) => goldUnits.some((unit) => sourceSlotJoinsGold(slot, unit)));
 }
 
+function unionGoldHitAt(
+  slots: readonly FirstExposureSlot[], goldUnits: readonly SourceGoldUnit[],
+  proofRanks: ReadonlySet<number>, k: number
+): boolean {
+  return slots.slice(0, k).some((slot) => goldUnits.some((unit) => unionSlotJoinsGold(slot, unit, proofRanks)));
+}
+
 function proofGoldHitAt(
   slots: readonly FirstExposureSlot[], goldUnits: readonly SourceGoldUnit[],
   proofRanks: ReadonlySet<number>, k: number
@@ -181,12 +253,22 @@ function sourceIdentityMatchesGold(slot: FirstExposureSlot, unit: SourceGoldUnit
   return slot.target.kind === "source_evidence" && sourceGoldUnitMatches(unit, slot.target);
 }
 
+export function sourceTargetJoinsGold(slot: FirstExposureSlot, unit: SourceGoldUnit): boolean {
+  return sourceIdentityMatchesGold(slot, unit);
+}
+
 function sourceSlotJoinsGold(slot: FirstExposureSlot, unit: SourceGoldUnit): boolean {
-  return slot.object_kind === "source_evidence" && sourceIdentityMatchesGold(slot, unit);
+  return slot.object_kind === "source_evidence" && sourceTargetJoinsGold(slot, unit);
 }
 
 function proofSlotJoinsGold(slot: FirstExposureSlot, unit: SourceGoldUnit): boolean {
   return slot.object_kind === "semantic_proof" && sourceIdentityMatchesGold(slot, unit);
+}
+
+function unionSlotJoinsGold(
+  slot: FirstExposureSlot, unit: SourceGoldUnit, proofRanks: ReadonlySet<number>
+): boolean {
+  return sourceSlotJoinsGold(slot, unit) || (proofRanks.has(slot.rank) && proofSlotJoinsGold(slot, unit));
 }
 
 function sourceGoldUnitMatches(unit: SourceGoldUnit, target: SourceEvidenceTarget): boolean {

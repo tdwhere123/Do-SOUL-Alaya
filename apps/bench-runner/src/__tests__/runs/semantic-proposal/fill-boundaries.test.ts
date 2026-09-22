@@ -82,7 +82,7 @@ function tempRoot(): string {
 
 function workset(context = true, queries: readonly string[] = ["Who chairs SHADOW?"]) {
   return parseSemanticProposalWorkset({
-    contract: "source-semantic-proposal-workset-v1",
+    contract: "source-semantic-proposal-workset-v2",
     kind: "query", model: MODEL, request_profile: PROFILE,
     items: queries.map((original_query) => ({
       original_query,
@@ -166,7 +166,7 @@ it("rejects a foreign-kind shard at the lookup path instead of treating it as a 
   const lines = prepareSemanticProposal(prepared, root, 128);
   const key = lines.keys[0]!;
   writeSemanticProposalShard(root, {
-    contract: SEMANTIC_PROPOSAL_CACHE_CONTRACT, kind: "alignment", cache_key: key,
+    contract: SEMANTIC_PROPOSAL_CACHE_CONTRACT, kind: "semantic_correspondence", cache_key: key,
     model: MODEL, request_profile: PROFILE, original_query: "who?",
     system_prompt: "sys", user_prompt: "user", raw_json: "{}",
     outcome: { status: "abstained" }, admitted: true, attempt_ordinal: 1,
@@ -779,7 +779,7 @@ it("rejects a planted foreign raw at the resume path instead of treating it as t
   const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
   const ordinal = ledger.reserveAttemptOrdinal(key);
   writeProviderRawAttempt({
-    root: cacheRoot, cacheKey: key, attemptOrdinal: ordinal, kind: "alignment",
+    root: cacheRoot, cacheKey: key, attemptOrdinal: ordinal, kind: "semantic_correspondence",
     model: MODEL, requestProfile: PROFILE, requestDigest: requestEnvelopeDigest("{\"foreign\":true}"),
     decodedText: '{"outcome":{"status":"abstained"}}', finishReason: "STOP",
     usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }

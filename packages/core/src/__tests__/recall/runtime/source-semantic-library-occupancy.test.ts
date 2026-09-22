@@ -29,7 +29,7 @@ function proofBinding(root: string, binding: string, node: string): IndexEntry {
   });
 }
 
-it("occupies one first-five slot per source root and keeps a source without H", () => {
+it("occupies one first-five slot per source root and keeps a source without a source interpretation", () => {
   const goldProofs = Array.from({ length: 6 }, (_, index) => proofBinding("gold", `bind-${String(index)}`, `n${String(index)}`));
   const failed = sourceOnly("failed");
   const assembled = assembleSourceSemanticLibraryIndex({

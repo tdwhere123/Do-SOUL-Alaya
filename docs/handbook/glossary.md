@@ -225,7 +225,7 @@ vocabulary, not an ordinary Recall scheduling rule.
 **Gamma_q** — Historical query-proof vocabulary: query-compiled,
 selected-set-dependent marginal strata (answer binding/position,
 required-proposition, compiler-required certified-independent support).
-Compiled Gamma and the later `Q(S)` evidence-set objective are retired decision
+Compiled Gamma and the later evidence-set objective are retired decision
 contracts. The current owner is the conditional accepting index in `recall.md`.
 
 **Budgeted Capture Walk** — **LIVE:** observer work and page budget on the

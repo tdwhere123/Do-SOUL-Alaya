@@ -14,8 +14,8 @@ type Publication = Readonly<{
 }>;
 
 /**
- * Typed cache artifacts stay unbound. Runtime recall hydrates H only after this
- * audited Core publication. Failed or empty H must not erase the original source.
+ * Typed cache artifacts stay unbound. Runtime recall hydrates a source interpretation only after this
+ * audited Core publication. Failed or empty source interpretation must not erase the original source.
  */
 export async function publishAdmittedSourceSemanticInterpretation(input: Readonly<{
   publication: Publication; workspaceId: string; runId: string; artifactKey: string; source: string;

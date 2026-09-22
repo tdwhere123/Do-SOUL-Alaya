@@ -21,8 +21,8 @@ import {
 } from "./source-semantic-draft.js";
 
 export const SOURCE_SEMANTIC_PUBLISHED_CONTRACT = "published-source-interpretation-v4" as const;
-export const SOURCE_SEMANTIC_RESPONSE_CONTRACT = "source-interpretation-response-v4" as const;
-export const SOURCE_SEMANTIC_REASONING_CONTRACT = "source-interpretation-reasoning-v3" as const;
+export const SOURCE_SEMANTIC_RESPONSE_CONTRACT = "source-interpretation-response-v5" as const;
+export const SOURCE_SEMANTIC_REASONING_CONTRACT = "source-interpretation-reasoning-v4" as const;
 export const SOURCE_SEMANTIC_CACHE_CONTRACT = "source-interpretation-cache-v3" as const;
 export const SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION = 5 as const;
 
@@ -144,7 +144,7 @@ export const SourceSemanticOutcomeSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("transport_failure") }).strict().readonly(),
   z.object({ status: z.literal("resource_exhausted") }).strict().readonly(),
   z.object({ status: z.literal("unexercised") }).strict().readonly(),
-  z.object({ status: z.literal("preparation_required"), missing: z.enum(["q", "a", "q_and_a"]) }).strict().readonly()
+  z.object({ status: z.literal("preparation_required"), missing: z.enum(["query_semantics", "semantic_correspondence", "query_semantics_and_correspondence"]) }).strict().readonly()
 ]);
 
 const SourceSemanticQueryOutcomeSchema = z.discriminatedUnion("status", [
@@ -199,9 +199,9 @@ export const SourceSemanticQueryOutcomeGapBindingSchema = z.object({
 export const SourceSemanticReasoningRequestSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_REASONING_CONTRACT),
   accepts_unreviewed_conditional_results: z.literal(true),
-  h_id: Sha256DigestSchema,
-  q_id: Sha256DigestSchema,
-  a_id: Sha256DigestSchema,
+  source_interpretation_id: Sha256DigestSchema,
+  query_semantics_id: Sha256DigestSchema,
+  semantic_correspondence_id: Sha256DigestSchema,
   original_query: z.string().min(1).max(8192),
   budget: RequestBudgetSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000)
@@ -209,9 +209,9 @@ export const SourceSemanticReasoningRequestSchema = z.object({
 
 export const SourceSemanticConsumedLeafSchema = z.object({
   leaf_kind: z.enum([
-    "h_presence", "h_binding", "h_assertion_permission", "h_content",
-    "a_predicate", "a_slot", "a_referent", "h_source_act", "h_operator", "h_sort", "h_context",
-    "h_domain", "h_membership", "h_restriction", "h_closure", "h_measurement", "h_numeric_order", "h_instantiation", "a_membership", "a_domain"
+    "source_interpretation_presence", "source_interpretation_binding", "source_interpretation_assertion_permission", "source_interpretation_content",
+    "semantic_correspondence_predicate", "semantic_correspondence_slot", "semantic_correspondence_referent", "source_interpretation_source_act", "source_interpretation_operator", "source_interpretation_sort", "source_interpretation_context",
+    "source_interpretation_domain", "source_interpretation_membership", "source_interpretation_restriction", "source_interpretation_closure", "source_interpretation_measurement", "source_interpretation_numeric_order", "source_interpretation_instantiation", "semantic_correspondence_membership", "semantic_correspondence_domain"
   ]),
   occurrence: SourceSemanticHandleSchema.optional(),
   slot_id: SourceSemanticHandleSchema.optional(),
@@ -271,10 +271,10 @@ export const SourceSemanticAnswerSchema = z.object({
 export const SourceSemanticReasoningResultSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_REASONING_CONTRACT),
   outcome: SourceSemanticOutcomeSchema,
-  c_id: Sha256DigestSchema.optional(),
-  h_id: Sha256DigestSchema.optional(),
-  q_id: Sha256DigestSchema.optional(),
-  a_id: Sha256DigestSchema.optional(),
+  conditional_computation_id: Sha256DigestSchema.optional(),
+  source_interpretation_id: Sha256DigestSchema.optional(),
+  query_semantics_id: Sha256DigestSchema.optional(),
+  semantic_correspondence_id: Sha256DigestSchema.optional(),
   consumed_leaves: z.array(SourceSemanticConsumedLeafSchema).max(4096).readonly(),
   answers: z.array(SourceSemanticAnswerSchema).max(1000).readonly().optional(),
   derivations: z.array(DerivationSchema).max(1000).readonly().optional(),

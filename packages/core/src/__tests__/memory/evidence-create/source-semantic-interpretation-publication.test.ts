@@ -195,7 +195,7 @@ describe("source semantic interpretation publication", () => {
       .toThrow(/accounting gaps/u);
   });
 
-  it("publishes a draft, reopens the same H/source, and does not mint memory or relations", async () => {
+  it("publishes a draft, reopens the same source interpretation/source, and does not mint memory or relations", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-source-semantic-"));
     const filename = join(directory, "memory.sqlite");
     const fixture = await openFixture(filename);
@@ -367,7 +367,7 @@ describe("source semantic interpretation publication", () => {
     )).toThrow(/no longer current|differs from source/);
   });
 
-  it("does not drop the source when H publication fails, and erasure still finds a damaged body", async () => {
+  it("does not drop the source when source-interpretation publication fails, and erasure still finds a damaged body", async () => {
     const fixture = await openFixture();
     const admitted = await admitSource(fixture);
     const catalog = catalogFor(ASSERTION);
@@ -408,7 +408,7 @@ describe("source semantic interpretation publication", () => {
       .toBe(SOURCE);
   });
 
-  it("keeps H id across span rewrite, ignores envelope-only provenance, and rejects forged stance", async () => {
+  it("keeps source-interpretation id across span rewrite, ignores envelope-only provenance, and rejects forged stance", async () => {
     const fixture = await openFixture();
     const admitted = await admitSource(fixture);
     const catalog = catalogFor(ASSERTION);

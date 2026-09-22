@@ -12,7 +12,7 @@ const GEMINI_ENVELOPE_EXPANSION_MAX_NODES = 1024;
 
 const ENVELOPE_SCHEMA_INSTRUCTION =
   "Return JSON satisfying this complete local response schema. All required fields, kinds and operands remain mandatory; omitted or invalid expressions will be rejected. Return the complete response envelope including its contract, outcome and body, not the schema itself.\n";
-// Retained H request identities bind these exact bytes. Only Q/A envelopes use
+// Retained H request identities bind these exact bytes. Only query semantics and semantic correspondence envelopes use
 // the corrected instruction; historical source artifacts remain replayable.
 const SOURCE_SCHEMA_INSTRUCTION =
   "Return JSON satisfying this complete local response schema. All required fields, kinds and operands remain mandatory; omitted or invalid expressions will be rejected. Return the complete source interpretation, not the schema itself.\n";
@@ -66,7 +66,7 @@ export function countGeminiEnvelopeExpandedNodes(schema: object): number {
 }
 
 /** Compact shared definitions can still expand exponentially at the provider.
- * This guard applies to Q/A envelopes; retained H decoding identities stay fixed. */
+ * This guard applies to query semantics and semantic correspondence envelopes; retained source interpretation decoding identities stay fixed. */
 function expandedEnvelopeNodes(root: Schema): number {
   const memo = new Map<string, number>();
   const count = (value: unknown): number => {

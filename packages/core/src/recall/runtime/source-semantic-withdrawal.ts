@@ -21,11 +21,11 @@ export function traceSourceSemanticWithdrawals(input: Readonly<{
 }>): SourceSemanticWithdrawalTrace {
   const consumed = new Set(input.baseline.evidence_leaves?.map((row) => row.observation_id) ?? []);
   const candidates = [...input.origins].filter(([id, leaf]) => consumed.has(id)
-    && (leaf.leaf_kind.startsWith("h_") || leaf.leaf_kind.startsWith("a_")));
-  const h = candidates.filter(([, leaf]) => leaf.leaf_kind.startsWith("h_"));
-  const a = candidates.filter(([, leaf]) => leaf.leaf_kind.startsWith("a_"));
+    && (leaf.leaf_kind.startsWith("source_interpretation_") || leaf.leaf_kind.startsWith("semantic_correspondence_")));
+  const interpretationLeaves = candidates.filter(([, leaf]) => leaf.leaf_kind.startsWith("source_interpretation_"));
+  const correspondenceLeaves = candidates.filter(([, leaf]) => leaf.leaf_kind.startsWith("semantic_correspondence_"));
   // A bounded trial must not silently starve either semantic family.
-  const selected = Array.from({ length: Math.max(h.length, a.length) }, (_, index) => [h[index], a[index]])
+  const selected = Array.from({ length: Math.max(interpretationLeaves.length, correspondenceLeaves.length) }, (_, index) => [interpretationLeaves[index], correspondenceLeaves[index]])
     .flat().filter((row): row is NonNullable<typeof row> => row !== undefined).slice(0, input.limit);
   const roots = new Map((input.baseline.derivations ?? []).map((row) => [row.derivation_id, row]));
   const dependencies = (input.baseline.answers ?? []).map((answer) => {

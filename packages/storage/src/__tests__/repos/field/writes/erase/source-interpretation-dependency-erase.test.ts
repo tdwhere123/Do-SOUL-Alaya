@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("source interpretation dependency erase", () => {
-  it("scrubs damaged v3 H gist without a full semantic parse and leaves the source row", () => {
+  it("scrubs a damaged v3 source-interpretation gist without a full semantic parse and leaves the source row", () => {
     const database = openFieldDatabase();
     tracked.add(database);
     const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);

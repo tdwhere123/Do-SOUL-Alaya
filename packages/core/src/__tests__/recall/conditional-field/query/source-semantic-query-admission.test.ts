@@ -140,7 +140,7 @@ describe("source semantic query admission", () => {
       frame.role_requirements.filter((row) => row.id === "object").map((row) => row.target_variable)
     );
     expect(objectTargets).toEqual(["parcel", "parcel"]);
-    expect(JSON.stringify(admission.query)).not.toMatch(/entity_id|answer_id|h_id/u);
+    expect(JSON.stringify(admission.query)).not.toMatch(/entity_id|answer_id|source_interpretation_id/u);
     expect(admission.query.alternatives[0]!.frames[0]!.role_requirements[0]!.support).toEqual({
       kind: "query_text",
       excerpt: "parcel"
@@ -251,7 +251,7 @@ describe("source semantic query admission", () => {
       { ...proposed, conditions: [{ kind: "authorization", verdict: "true" }] },
       { ...proposed, entity_id: "memory-a" },
       { ...proposed, answer_id: "answer-1" },
-      { ...proposed, h_id: digestOriginalQuery(SAME_PARCEL) }
+      { ...proposed, source_interpretation_id: digestOriginalQuery(SAME_PARCEL) }
     ];
     for (const forged of forgeries) {
       expect(SourceSemanticQuerySchema.safeParse(forged).success).toBe(false);
@@ -302,7 +302,7 @@ describe("source semantic query admission", () => {
     expect(admission).not.toHaveProperty("program");
   });
 
-  it("rejects original-query byte substitution and does not treat ordinary text as semantic Q", () => {
+  it("rejects original-query byte substitution and does not treat ordinary text as query semantics", () => {
     const proposed = sameParcelQuery();
     expect(admitSourceSemanticQuery(proposed, "a different original query").kind).toBe("invalid");
     expect(admitSourceSemanticQuery(SAME_PARCEL, SAME_PARCEL).kind).toBe("invalid");

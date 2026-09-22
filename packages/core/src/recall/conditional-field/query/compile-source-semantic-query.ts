@@ -1,7 +1,7 @@
 import { SourceSemanticResourceLedger, type QueryProgram, type SourceSemanticQuery, type SourceSemanticQueryAlternative,
-  type SourceSemanticAlignment, type SourceSemanticInterpretation } from "@do-soul/alaya-protocol";
+  type SourceSemanticCorrespondence, type SourceSemanticInterpretation } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../../shared/errors.js";
-import { sourceSemanticRelationKey as key, alignmentGroupPhases, alignmentPredicateKey, alignmentSlotKey,
+import { sourceSemanticRelationKey as key, correspondenceGroupPhases, correspondencePredicateKey, correspondenceSlotKey,
   type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
 import { semanticInstanceProof } from "./source-semantic-proof-program.js";
 
@@ -11,7 +11,7 @@ type Graph = Readonly<{ edges: readonly Edge[]; properties: ReadonlyMap<string, 
 
 /** Finite graph walk; every conjunct is visited, including reverse and non-tree edges. */
 export type SourceSemanticCompilation = Readonly<{
-  h: SourceSemanticInterpretation; population: SourceSemanticPremisePopulation; alignment?: SourceSemanticAlignment;
+  h: SourceSemanticInterpretation; population: SourceSemanticPremisePopulation; semantic_correspondence?: SourceSemanticCorrespondence;
 }>;
 
 export function compileSourceSemanticQueryProgram(query: SourceSemanticQuery, meter: SourceSemanticResourceLedger,
@@ -19,7 +19,7 @@ export function compileSourceSemanticQueryProgram(query: SourceSemanticQuery, me
   meter.retain(query, "query compilation");
   let acceptIndex = 0;
   const options = query.alternatives.flatMap((alternative, index) => {
-    const frames = alignmentGroupPhases(query, finite?.alignment, index);
+    const frames = correspondenceGroupPhases(query, finite?.semantic_correspondence, index);
     return frames.map((group) => compileSourceSemanticAlternative(query, alternative, index, meter, finite, false, group, acceptIndex++));
   });
   return options.length === 1 ? options[0]! : { schema_version: 1, kind: "alternative", options };
@@ -56,14 +56,14 @@ export function compileSourceSemanticAlternative(q: SourceSemanticQuery, alterna
     visited.add(variable);
     const properties = graph.properties.get(variable) ?? [];
     for (const predicate of properties) {
-      if (finite !== undefined && predicate === key("h_entailed_permission")) {
+      if (finite !== undefined && predicate === key("source_interpretation_entailed_permission")) {
         steps.push(semanticInstanceProof(variable, finite.population, finite.h, meter, true));
       } else {
-        steps.push(rel(predicate === key("h_entailed_permission") ? key("h_assertion_permission") : predicate, variable, variable, meter));
+        steps.push(rel(predicate === key("source_interpretation_entailed_permission") ? key("source_interpretation_assertion_permission") : predicate, variable, variable, meter));
       }
     }
-    if (finite !== undefined && finite.population.instances.size > 0 && properties.includes(key("h_presence"))
-      && !properties.includes(key("h_entailed_permission"))) {
+    if (finite !== undefined && finite.population.instances.size > 0 && properties.includes(key("source_interpretation_presence"))
+      && !properties.includes(key("source_interpretation_entailed_permission"))) {
       steps.push(semanticInstanceProof(variable, finite.population, finite.h, meter));
     }
   };
@@ -117,37 +117,37 @@ function buildGraph(query: SourceSemanticQuery, alternative: SourceSemanticQuery
   };
   const used = new Set<string>(), byFrame = new Map(alternative.frames.map((frame) => [frame.id, frame]));
   for (const [fi, frame] of alternative.frames.entries()) {
-    used.add(frame.variable); add(frame.variable, "h_presence");
-    if (frame.operator === undefined) addKey(frame.variable, alignmentPredicateKey(alt, frame.id, groupFrame));
-    else add(frame.variable, "h_operator", frame.operator);
+    used.add(frame.variable); add(frame.variable, "source_interpretation_presence");
+    if (frame.operator === undefined) addKey(frame.variable, correspondencePredicateKey(alt, frame.id, groupFrame));
+    else add(frame.variable, "source_interpretation_operator", frame.operator);
     if (frame.source_act !== undefined) add(frame.variable, "source_act", frame.source_act);
     for (const [ri, role] of frame.role_requirements.entries()) {
       used.add(role.target_variable);
       if (frame.operator === "reported") {
-        edge(frame.variable, role.target_variable, key("h_content", "operator_operand", "reporter"), key("h_content_inv", "operator_operand", "reporter"));
+        edge(frame.variable, role.target_variable, key("source_interpretation_content", "operator_operand", "reporter"), key("source_interpretation_content_inverse", "operator_operand", "reporter"));
       } else {
         const slot = groupFrame === undefined ? `@slot:${alt}:${fi}:${ri}` : `@slot:${alt}:${fi}:${ri}:${groupFrame}`;
-        edge(frame.variable, slot, alignmentSlotKey("a_slot", alt, frame.id, role.id, groupFrame),
-          alignmentSlotKey("a_slot_inv", alt, frame.id, role.id, groupFrame));
-        edge(slot, role.target_variable, key("h_binding"), key("h_binding_inv"));
+        edge(frame.variable, slot, correspondenceSlotKey("semantic_correspondence_slot", alt, frame.id, role.id, groupFrame),
+          correspondenceSlotKey("semantic_correspondence_slot_inverse", alt, frame.id, role.id, groupFrame));
+        edge(slot, role.target_variable, key("source_interpretation_binding"), key("source_interpretation_binding_inv"));
       }
     }
   }
   for (const obligation of alternative.context_obligations) {
     const frame = byFrame.get(obligation.frame)!;
-    add(frame.variable, obligation.kind === "asserted_at_source" ? "h_assertion_permission"
-      : obligation.kind === "entailed_at_source" ? "h_entailed_permission"
-      : obligation.kind === "explicit_embedded_structure" ? "h_embedded" : "open_context");
+    add(frame.variable, obligation.kind === "asserted_at_source" ? "source_interpretation_assertion_permission"
+      : obligation.kind === "entailed_at_source" ? "source_interpretation_entailed_permission"
+      : obligation.kind === "explicit_embedded_structure" ? "source_interpretation_embedded" : "open_context");
     if (obligation.incidence !== undefined) {
       const incidence = obligation.incidence;
       edge(byFrame.get(incidence.other_frame)!.variable, frame.variable,
-        key("h_content", incidence.kind, incidence.role ?? "content"), key("h_content_inv", incidence.kind, incidence.role ?? "content"));
+        key("source_interpretation_content", incidence.kind, incidence.role ?? "content"), key("source_interpretation_content_inverse", incidence.kind, incidence.role ?? "content"));
     }
   }
   for (const variable of query.variables) {
     if (!used.has(variable.id)) continue;
-    add(variable.id, "h_sort", variable.sort);
-    if (variable.reference !== undefined) add(variable.id, "a_referent", variable.id);
+    add(variable.id, "source_interpretation_sort", variable.sort);
+    if (variable.reference !== undefined) add(variable.id, "semantic_correspondence_referent", variable.id);
   }
   return { edges, properties };
 }

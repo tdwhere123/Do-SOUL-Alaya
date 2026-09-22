@@ -10,7 +10,7 @@ export type SourceSemanticLease = Readonly<{
   lifetime_now?: string;
   expires_at: string; revision: string;
   source_id?: string; source_version?: string; content_digest?: string;
-  original_query?: string; q?: SourceSemanticQuery; q_id?: string;
+  original_query?: string; query_semantics?: SourceSemanticQuery; query_semantics_id?: string;
   candidates?: readonly string[];
   after_cursor?: string | null; discovery_open?: boolean; truncated?: boolean;
   continuation?: Continuation; request_identity?: string;

@@ -9,7 +9,7 @@ import { CoreError } from "../../shared/errors.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { compileConditionalFieldQuery } from "../conditional-field/query/compile-query.js";
 import { defaultView } from "../conditional-field/query/query-admission.js";
-import { admitSourceSemanticAlignment } from "../conditional-field/query/source-semantic-alignment-admission.js";
+import { admitSourceSemanticCorrespondence } from "../conditional-field/query/source-semantic-correspondence-admission.js";
 import { compileSourceSemanticExecution, type SourceSemanticExecutionPlan, type SourceSemanticGroupPhase } from "../conditional-field/query/compile-source-semantic-finite.js";
 import { withdrawDerivationLeaves, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { observeField } from "./conditional-field-observe.js";
@@ -20,7 +20,11 @@ import { projectSourceSemanticState, type SourceSemanticResultBody as ResultBody
 const BUDGET = { schema_version: 1 as const, work_units: 200000, memory_bytes: 20000000,
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 };
 export type ReasonSourceSemanticInterpretationInput = Readonly<{
-  request?: SourceSemanticReasoningRequest; h: unknown; q?: unknown; a?: unknown; original_query?: string;
+  request?: SourceSemanticReasoningRequest;
+  source_interpretation: unknown;
+  query_semantics?: unknown;
+  semantic_correspondence?: unknown;
+  original_query?: string;
   workspaceId: string; scope: string; authorizedScopes: readonly string[] | null; asOf: string;
   sourceValidity?: Readonly<{ valid_from: string | null; valid_to: string | null }>;
   source_target?: SourceEvidenceTarget;
@@ -33,12 +37,12 @@ export type SourceSemanticInterpretationExecution = Readonly<{
   withdrawal_trace?: SourceSemanticWithdrawalTrace;
 }>;
 
-/** One budget and one fixed C; missing semantic preparation never calls a provider. */
+/** One budget and one fixed conditional computation; missing semantic preparation never calls a provider. */
 export function reasonSourceSemanticInterpretation(input: ReasonSourceSemanticInterpretationInput): SourceSemanticReasoningResult {
   return executeSourceSemanticInterpretation(input).result;
 }
 
-/** Same one-H/one-A owner as reason, plus the accepting index that library delivery must reuse. */
+/** Same one-source-interpretation and one-semantic-correspondence owner as reason, plus the accepting index that library delivery must reuse. */
 export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticInterpretationInput): SourceSemanticInterpretationExecution {
   const request = input.request === undefined ? undefined : SourceSemanticReasoningRequestSchema.parse(input.request);
   const budget = request?.budget ?? BUDGET, meter = new SourceSemanticResourceLedger(budget);
@@ -49,11 +53,15 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
   if (input.withdrawal_trial_limit !== undefined && (!Number.isInteger(input.withdrawal_trial_limit)
     || input.withdrawal_trial_limit < 1 || input.withdrawal_trial_limit > 64)) throw new CoreError("VALIDATION", "withdrawal trial limit must be 1..64");
   try {
-    if (original === undefined || input.q === undefined || input.a === undefined) {
-      const missing = input.q === undefined ? input.a === undefined ? "q_and_a" : "q" : "a";
+    if (original === undefined || input.query_semantics === undefined || input.semantic_correspondence === undefined) {
+      const missing = input.query_semantics === undefined
+        ? input.semantic_correspondence === undefined ? "query_semantics_and_correspondence" : "query_semantics"
+        : "semantic_correspondence";
       body = { outcome: { status: "preparation_required", missing }, consumed_leaves: [] };
     } else {
-      meter.retain(input.h, "H admission"); meter.retain(input.q, "Q admission"); meter.retain(input.a, "A admission");
+      meter.retain(input.source_interpretation, "source interpretation admission");
+      meter.retain(input.query_semantics, "query semantics admission");
+      meter.retain(input.semantic_correspondence, "semantic correspondence admission");
       const prepared = reasonPrepared(input, original, request, meter);
       body = prepared.body; index = prepared.index;
       withdrawalTrace = prepared.withdrawal_trace;
@@ -69,14 +77,19 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
 
 function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original: string,
   request: SourceSemanticReasoningRequest | undefined, meter: SourceSemanticResourceLedger): Prepared {
-  const published = SourceSemanticPublishedInterpretationSchema.safeParse(input.h);
+  const published = SourceSemanticPublishedInterpretationSchema.safeParse(input.source_interpretation);
   const parsed = published.success ? { success: true as const, data: published.data.interpretation }
-    : SourceSemanticInterpretationSchema.safeParse(input.h);
+    : SourceSemanticInterpretationSchema.safeParse(input.source_interpretation);
   if (!parsed.success) return { body: invalid("malformed_interpretation"), index: null };
   if (parsed.data.k_version !== SOURCE_SEMANTIC_K_VERSION) return { body: invalid("unsupported_structural_contract"), index: null };
-  const admission = admitSourceSemanticAlignment({ alignment: input.a, h: parsed.data, q: input.q, original_query: original });
-  if (admission.kind !== "admitted") return { body: invalid(admission.kind === "unsupported" ? "unsupported_producer" : "malformed_alignment"), index: null };
-  if (request !== undefined && (request.h_id !== admission.interpretation_id || request.q_id !== admission.query_id || request.a_id !== admission.alignment_id)) {
+  const admission = admitSourceSemanticCorrespondence({
+    semantic_correspondence: input.semantic_correspondence,
+    source_interpretation: parsed.data,
+    query_semantics: input.query_semantics,
+    original_query: original
+  });
+  if (admission.kind !== "admitted") return { body: invalid(admission.kind === "unsupported" ? "unsupported_producer" : "malformed_correspondence"), index: null };
+  if (request !== undefined && (request.source_interpretation_id !== admission.interpretation_id || request.query_semantics_id !== admission.query_id || request.semantic_correspondence_id !== admission.semantic_correspondence_id)) {
     return { body: invalid("identity_mismatch"), index: null };
   }
   if (input.authorizedScopes !== null && !input.authorizedScopes.includes(input.scope)) return { body: invalid("unauthorized_scope"), index: null };
@@ -87,20 +100,20 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   };
   if (sourceTarget.workspace_id !== input.workspaceId || sourceTarget.source_version !== parsed.data.source.source_version
     || sourceTarget.content_digest !== parsed.data.source.content_digest) return { body: invalid("source_binding_mismatch"), index: null };
-  const qualified = { c_id: admission.context_id, h_id: admission.interpretation_id, q_id: admission.query_id, a_id: admission.alignment_id,
+  const qualified = { conditional_computation_id: admission.context_id, source_interpretation_id: admission.interpretation_id, query_semantics_id: admission.query_id, semantic_correspondence_id: admission.semantic_correspondence_id,
     source_target: sourceTarget, query_gaps: admission.query.gaps };
-  const population = compileSourceSemanticPremises({ interpretation: admission.interpretation, alignment: admission.alignment,
+  const population = compileSourceSemanticPremises({ interpretation: admission.interpretation, semantic_correspondence: admission.semantic_correspondence,
     context_id: admission.context_id, interpretation_id: admission.interpretation_id, scope: input.scope,
     source_target: sourceTarget, meter, sourceValidity: input.sourceValidity, query: admission.query });
   const execution = compileSourceSemanticExecution({ h: admission.interpretation, q: admission.query,
-    a: admission.alignment, population, meter });
+    a: admission.semantic_correspondence, population, meter });
   const seeds = [...admission.interpretation.entry_roots].sort().map((id) => interpretationNodeIdentity(population.coordinates.get(id)!));
   const snapshot = `sha256:${fieldContractSha256(canonicalJson({ c: admission.context_id, scopes: input.authorizedScopes, as_of: input.asOf }))}`;
   const remaining = { ...(request?.budget ?? BUDGET), ...meter.remaining() };
   if (remaining.work_units < remaining.finalization_reserve + remaining.min_envelope) throw new SourceSemanticResourceExhausted("engine envelope");
   const phases = execution.groupPhases ?? [];
   if (phases.length > 1) {
-    return observeAlignmentGroups({
+    return observeCorrespondenceGroups({
       input, request, meter, original, admission, population, execution, phases, seeds, snapshot, remaining, qualified, sourceTarget
     });
   }
@@ -136,14 +149,14 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   return { ...baseline, withdrawal_trace };
 }
 
-function observeAlignmentGroups(input: Readonly<{
+function observeCorrespondenceGroups(input: Readonly<{
   input: ReasonSourceSemanticInterpretationInput; request: SourceSemanticReasoningRequest | undefined;
   meter: SourceSemanticResourceLedger; original: string;
-  admission: Extract<ReturnType<typeof admitSourceSemanticAlignment>, { kind: "admitted" }>;
+  admission: Extract<ReturnType<typeof admitSourceSemanticCorrespondence>, { kind: "admitted" }>;
   population: ReturnType<typeof compileSourceSemanticPremises>;
   execution: SourceSemanticExecutionPlan; phases: readonly SourceSemanticGroupPhase[];
   seeds: readonly string[]; snapshot: string; remaining: import("@do-soul/alaya-protocol").RequestBudget;
-  qualified: Pick<SourceSemanticReasoningResult, "c_id" | "h_id" | "q_id" | "a_id" | "source_target" | "query_gaps">;
+  qualified: Pick<SourceSemanticReasoningResult, "conditional_computation_id" | "source_interpretation_id" | "query_semantics_id" | "semantic_correspondence_id" | "source_target" | "query_gaps">;
   sourceTarget: SourceEvidenceTarget;
 }>): Prepared {
   const { request, meter, original, admission, population, snapshot, qualified, sourceTarget } = input;
@@ -241,7 +254,7 @@ function prefixGroupIndex(index: InformationIndex | null, prefix: string): Infor
   };
 }
 
-function mergeGroupBodies(qualified: ResultBody extends never ? never : Pick<SourceSemanticReasoningResult, "c_id" | "h_id" | "q_id" | "a_id" | "source_target" | "query_gaps">,
+function mergeGroupBodies(qualified: ResultBody extends never ? never : Pick<SourceSemanticReasoningResult, "conditional_computation_id" | "source_interpretation_id" | "query_semantics_id" | "semantic_correspondence_id" | "source_target" | "query_gaps">,
   bodies: readonly ResultBody[]): ResultBody {
   const first = bodies[0]!;
   return {
@@ -263,12 +276,12 @@ function mergeGroupIndexes(indexes: InformationIndex[]): InformationIndex | null
 
 function invalid(reason: string): ResultBody { return { outcome: { status: "invalid", reason }, consumed_leaves: [] }; }
 function finish(result: ResultBody, outputLimit = 1_000_000): SourceSemanticReasoningResult {
-  const checked = SourceSemanticReasoningResultSchema.parse({ contract: "source-interpretation-reasoning-v3",
+  const checked = SourceSemanticReasoningResultSchema.parse({ contract: "source-interpretation-reasoning-v4",
     semantic_status: "unreviewed", conclusion_scope: "conditional_on_interpretation", world_claim: "unknown", ...result });
   if (Buffer.byteLength(JSON.stringify(checked)) <= outputLimit) return checked;
   const limited = SourceSemanticReasoningResultSchema.parse({ contract: checked.contract,
     semantic_status: checked.semantic_status, conclusion_scope: checked.conclusion_scope, world_claim: checked.world_claim,
-    c_id: checked.c_id, h_id: checked.h_id, q_id: checked.q_id, a_id: checked.a_id,
+    conditional_computation_id: checked.conditional_computation_id, source_interpretation_id: checked.source_interpretation_id, query_semantics_id: checked.query_semantics_id, semantic_correspondence_id: checked.semantic_correspondence_id,
     outcome: { status: "truncated" }, consumed_leaves: [], resource_usage: checked.resource_usage });
   if (Buffer.byteLength(JSON.stringify(limited)) > outputLimit) throw new CoreError("VALIDATION", "output budget cannot retain interpretation qualifiers");
   return limited;

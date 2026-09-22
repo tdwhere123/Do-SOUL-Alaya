@@ -189,7 +189,7 @@ describe("complete-source census and publication", () => {
     expect(repeated.speaker).toBe("user");
   });
 
-  it("admits every census source when H is absent and keeps failed-H source retrieval", async () => {
+  it("admits every census source when source interpretation is absent and keeps failed source interpretation source retrieval", async () => {
     const f = await fixture();
     const report = await publishSourceSemanticSnapshot({
       snapshotPath: join(f.root, "library.sqlite"), dataDirRoot: join(f.root, "seed"),
@@ -203,11 +203,11 @@ describe("complete-source census and publication", () => {
     expect(report.admitted_count).toBe(3);
     expect(report.rejected_count).toBe(0);
     expect(report.published_count).toBe(0);
-    expect(report.h_counts.absent).toBe(3);
-    expect(report.unbound_h_artifacts).toEqual([{ population: "fixture", generation_key: "ab".repeat(32), status: "invalid" }]);
-    expect(report.h_binding_complete).toBe(false);
+    expect(report.source_interpretation_counts.absent).toBe(3);
+    expect(report.unbound_source_interpretation_artifacts).toEqual([{ population: "fixture", generation_key: "ab".repeat(32), status: "invalid" }]);
+    expect(report.source_interpretation_binding_complete).toBe(false);
     expect(report.sources.every((row) => row.admission === "admitted")).toBe(true);
-    expect(report.sources.every((row) => row.h === "absent" && row.publication === "not_attempted")).toBe(true);
+    expect(report.sources.every((row) => row.source_interpretation === "absent" && row.publication === "not_attempted")).toBe(true);
     const db = new Database(report.snapshot_path, { readonly: true });
     try {
       expect(db.prepare("SELECT count(*) AS n FROM source_records").get()).toMatchObject({ n: 3 });

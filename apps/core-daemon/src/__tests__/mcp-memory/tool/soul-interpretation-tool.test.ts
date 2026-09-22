@@ -36,10 +36,10 @@ const CATALOG = buildSourceReferenceCatalog(fieldContractSha256(SOURCE), [
 
 const IDLE = {
   discovery: "unexercised",
-  h: "unexercised",
-  q: "unexercised",
-  a: "unexercised",
-  computation: "unexercised",
+  source_interpretation: "unexercised",
+  query_semantics: "unexercised",
+  semantic_correspondence: "unexercised",
+  conditional_computation: "unexercised",
   payload: "complete"
 } as const;
 
@@ -85,24 +85,24 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
   if (request.kind === "prepare_query") {
     return {
       kind: "prepare_query",
-      outcome: { status: "preparation_required", missing: "q" },
+      outcome: { status: "preparation_required", missing: "query_semantics" },
       candidates: [],
       truncated: false,
-      coverage: { ...IDLE, q: "open" },
+      coverage: { ...IDLE, query_semantics: "open" },
       work: WORK
     };
   }
   return {
     kind: "reason",
     result: {
-      contract: "source-interpretation-reasoning-v3",
+      contract: "source-interpretation-reasoning-v4",
       semantic_status: "unreviewed",
       world_claim: "unknown",
       consumed_leaves: [],
       conclusion_scope: "conditional_on_interpretation",
       outcome: { status: "interpreted", gaps: [] }
     },
-    coverage: { ...IDLE, computation: "complete" },
+    coverage: { ...IDLE, conditional_computation: "complete" },
     work: WORK
   };
 }
@@ -196,10 +196,10 @@ describe("soul.interpretation MCP/CLI surface", () => {
       })
     ]);
     expect(direct.ok).toBe(true);
-    if (!direct.ok) throw new Error("reason missing A must succeed as a tool result");
+    if (!direct.ok) throw new Error("reason missing semantic correspondence must succeed as a tool result");
     expect(direct.output).toMatchObject({
       operation: "reason",
-      outcome: { status: "preparation_required", missing: "q_and_a" },
+      outcome: { status: "preparation_required", missing: "query_semantics_and_correspondence" },
       provider_attempts: 0
     });
     expect((mcp.structuredContent as { output: SoulInterpretationResponse }).output).toEqual(direct.output);
@@ -363,8 +363,8 @@ it("does not fold an unavailable body during propose into malformed interpretati
   expect(result).toMatchObject({ ok: true, output: { outcome: { status: "unavailable", reason: "source_body" }, provider_attempts: 0 } });
 });
 
-it("accepts a located no-proposition disposition without publishing a fictitious H", async () => {
-  const publish = vi.fn<SourceSemanticPublicationPort["publish"]>(async () => { throw new Error("no H should be published"); });
+it("accepts a located no-proposition disposition without publishing a fictitious source interpretation", async () => {
+  const publish = vi.fn<SourceSemanticPublicationPort["publish"]>(async () => { throw new Error("no source interpretation should be published"); });
   const handler = createHandler({ sourceSemanticsPort: createPort(), publication: { publish } });
   const row = CATALOG.assertions[0]!;
   const result = await callInterpretation(handler, { operation: "propose", source_handle: "source-handle",

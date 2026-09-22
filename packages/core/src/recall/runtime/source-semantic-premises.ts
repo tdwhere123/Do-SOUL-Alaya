@@ -1,6 +1,6 @@
 import {
   interpretationNodeIdentity, sourceSemanticStructuralEdges, sourceSemanticSlotNodeId, SourceSemanticResourceLedger,
-  type InterpretationNodeCoordinate, type SourceEvidenceTarget, type SourceSemanticAlignment,
+  type InterpretationNodeCoordinate, type SourceEvidenceTarget, type SourceSemanticCorrespondence,
   type SourceSemanticConsumedLeaf, type SourceSemanticInterpretation, type SourceSemanticQuery,
   type SourceSemanticDerivedNode
 } from "@do-soul/alaya-protocol";
@@ -11,15 +11,15 @@ import { fieldContractSha256 } from "../../shared/field-hash.js";
 import type { ObserverReaders, RelationObserverRow, SourceObserverRow } from "../conditional-field/observers/observe.js";
 
 export function sourceSemanticRelationKey(...parts: readonly (string | number)[]): string {
-  return JSON.stringify(["source-interpretation-v4", ...parts]);
+  return JSON.stringify(["source-semantic-relations-v5", ...parts]);
 }
 /** Predicate-aligned source frames for one query alternative, in stable order. */
-export function alignmentPredicateGroups(
-  alignment: SourceSemanticAlignment | undefined, alternative: number, queryFrame?: string
+export function correspondencePredicateGroups(
+  semantic_correspondence: SourceSemanticCorrespondence | undefined, alternative: number, queryFrame?: string
 ): readonly string[] {
-  if (alignment === undefined) return [];
+  if (semantic_correspondence === undefined) return [];
   const frames = new Set<string>();
-  for (const row of alignment.correspondences) {
+  for (const row of semantic_correspondence.correspondences) {
     const query = row.query_endpoint, source = row.source_endpoint;
     if (query.kind === "predicate" && source.kind === "frame" && query.alternative === alternative
       && (queryFrame === undefined || query.frame === queryFrame)) {
@@ -29,29 +29,29 @@ export function alignmentPredicateGroups(
   return [...frames].sort();
 }
 /** Split only when one query predicate is instantiated on several source frames. */
-export function alignmentGroupPhases(
-  query: SourceSemanticQuery | undefined, alignment: SourceSemanticAlignment | undefined, alternative: number
+export function correspondenceGroupPhases(
+  query: SourceSemanticQuery | undefined, semantic_correspondence: SourceSemanticCorrespondence | undefined, alternative: number
 ): readonly (string | undefined)[] {
   const branch = query?.alternatives[alternative];
   const predicateFrames = branch?.frames.filter((frame) => frame.operator === undefined) ?? [];
   if (predicateFrames.length !== 1) return [undefined];
-  const frames = alignmentPredicateGroups(alignment, alternative, predicateFrames[0]!.id);
+  const frames = correspondencePredicateGroups(semantic_correspondence, alternative, predicateFrames[0]!.id);
   return frames.length === 0 ? [undefined] : frames;
 }
 /** Slots stay on the chosen predicate frame; a shared query key searches every aligned frame. */
-export function alignmentPredicateKey(alternative: number, queryFrame: string, groupFrame?: string): string {
+export function correspondencePredicateKey(alternative: number, queryFrame: string, groupFrame?: string): string {
   return groupFrame === undefined
-    ? sourceSemanticRelationKey("a_predicate", alternative, queryFrame)
-    : sourceSemanticRelationKey("a_predicate", alternative, queryFrame, groupFrame);
+    ? sourceSemanticRelationKey("semantic_correspondence_predicate", alternative, queryFrame)
+    : sourceSemanticRelationKey("semantic_correspondence_predicate", alternative, queryFrame, groupFrame);
 }
-export function alignmentSlotKey(
-  direction: "a_slot" | "a_slot_inv", alternative: number, queryFrame: string, slot: string, groupFrame?: string
+export function correspondenceSlotKey(
+  direction: "semantic_correspondence_slot" | "semantic_correspondence_slot_inverse", alternative: number, queryFrame: string, slot: string, groupFrame?: string
 ): string {
   return groupFrame === undefined
     ? sourceSemanticRelationKey(direction, alternative, queryFrame, slot)
     : sourceSemanticRelationKey(direction, alternative, queryFrame, slot, groupFrame);
 }
-/** Coordinates remain bounded independently of source-handle lengths; C binds their meaning. */
+/** Coordinates remain bounded independently of source-handle lengths; conditional computation binds their meaning. */
 export function sourceSemanticDerivedNodeId(kind: string, ...parts: readonly string[]): string {
   return `@${kind}:${fieldContractSha256(JSON.stringify(parts)).slice(0, 48)}`;
 }
@@ -68,14 +68,14 @@ export type SourceSemanticPremisePopulation = Readonly<{
   derivedNodes: readonly SourceSemanticDerivedNode[];
 }>;
 type Input = Readonly<{
-  interpretation: SourceSemanticInterpretation; alignment: SourceSemanticAlignment;
+  interpretation: SourceSemanticInterpretation; semantic_correspondence: SourceSemanticCorrespondence;
   context_id: string; interpretation_id: string; scope: string; source_target: SourceEvidenceTarget;
   meter: SourceSemanticResourceLedger;
   query?: SourceSemanticQuery;
   sourceValidity?: Readonly<{ valid_from: string | null; valid_to: string | null }>;
 }>;
 
-/** H forms bindings independently; A supplies endpoint-bound adapters, not answer seeds. */
+/** Source interpretation forms bindings independently; semantic correspondence supplies endpoint-bound adapters, not answer seeds. */
 export function compileSourceSemanticPremises(input: Input): SourceSemanticPremisePopulation {
   const { meter, interpretation: h } = input;
   const workBefore = meter.spentWork, bytesBefore = meter.spentBytes;
@@ -87,9 +87,9 @@ export function compileSourceSemanticPremises(input: Input): SourceSemanticPremi
     builder.slotNodes.set(JSON.stringify([frame.id, slot.id]), id); builder.node(id);
   }
   populateOccurrences(builder, h); populateStructure(builder, h); populateBindings(builder, h);
-  groundSourceSemanticInstances(builder, h, input.alignment, input.query);
-  populateSourceSemanticFiniteFacts(builder, h, input.alignment);
-  populateAlignment(builder, input.alignment);
+  groundSourceSemanticInstances(builder, h, input.semantic_correspondence, input.query);
+  populateSourceSemanticFiniteFacts(builder, h, input.semantic_correspondence);
+  populateCorrespondence(builder, input.semantic_correspondence);
   return { nodes: builder.nodes, rows: builder.rows, coordinates: builder.coordinates,
     adjacency: builder.adjacency, positions: builder.positions, origins: builder.origins,
     work: meter.spentWork - workBefore, bytes: meter.spentBytes - bytesBefore,
@@ -152,30 +152,30 @@ export class PremiseBuilder {
 export function populateOccurrences(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
   const asserted = new Set(h.asserted_at_scope);
   for (const row of [...h.frames, ...h.operators]) {
-    builder.self(row.id, ["h_presence"], { leaf_kind: "h_presence", occurrence: row.id });
-    if (!builder.instances.has(row.id)) builder.self(row.id, ["h_original"]);
+    builder.self(row.id, ["source_interpretation_presence"], { leaf_kind: "source_interpretation_presence", occurrence: row.id });
+    if (!builder.instances.has(row.id)) builder.self(row.id, ["source_interpretation_original"]);
     const sort = "operator" in row ? "context" : "proposition";
-    builder.self(row.id, ["h_sort", sort], { leaf_kind: "h_sort", occurrence: row.id, value: sort });
-    if ("operator" in row) builder.self(row.id, ["h_operator", row.operator], { leaf_kind: "h_operator", occurrence: row.id, value: row.operator });
-    if (asserted.has(row.id)) builder.self(row.id, ["h_assertion_permission"], { leaf_kind: "h_assertion_permission", occurrence: row.id });
-    else builder.self(row.id, ["open_context"], { leaf_kind: "h_context", occurrence: row.id });
+    builder.self(row.id, ["source_interpretation_sort", sort], { leaf_kind: "source_interpretation_sort", occurrence: row.id, value: sort });
+    if ("operator" in row) builder.self(row.id, ["source_interpretation_operator", row.operator], { leaf_kind: "source_interpretation_operator", occurrence: row.id, value: row.operator });
+    if (asserted.has(row.id)) builder.self(row.id, ["source_interpretation_assertion_permission"], { leaf_kind: "source_interpretation_assertion_permission", occurrence: row.id });
+    else builder.self(row.id, ["open_context"], { leaf_kind: "source_interpretation_context", occurrence: row.id });
     if (row.context_owner.kind === "source_act") builder.self(row.id, ["source_act", row.context_owner.source_act],
-      { leaf_kind: "h_source_act", occurrence: row.id, value: row.context_owner.source_act });
+      { leaf_kind: "source_interpretation_source_act", occurrence: row.id, value: row.context_owner.source_act });
     builder.self(row.id, ["candidate_route"]); builder.self(row.id, ["accept"]);
   }
   for (const row of h.referents) if (row.referent_kind === "grouped" || row.referent_kind === "unexpressed") {
-    builder.self(row.id, ["h_sort", "entity"], { leaf_kind: "h_sort", occurrence: row.id, value: "entity" });
+    builder.self(row.id, ["source_interpretation_sort", "entity"], { leaf_kind: "source_interpretation_sort", occurrence: row.id, value: "entity" });
   }
 }
 
 export function populateStructure(builder: PremiseBuilder, h: SourceSemanticInterpretation): void {
   const parents = new Map<string, string>();
   for (const edge of sourceSemanticStructuralEdges(h)) {
-    const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "h_content", occurrence: edge.to,
+    const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "source_interpretation_content", occurrence: edge.to,
       parent: edge.from, relation_kind: edge.kind, role: edge.role };
-    builder.edge(edge.from, edge.to, sourceSemanticRelationKey("h_content", edge.kind, edge.role), leaf);
-    builder.edge(edge.to, edge.from, sourceSemanticRelationKey("h_content_inv", edge.kind, edge.role), leaf);
-    if (edge.governing) { parents.set(edge.to, edge.from); builder.self(edge.to, ["h_embedded"], leaf); }
+    builder.edge(edge.from, edge.to, sourceSemanticRelationKey("source_interpretation_content", edge.kind, edge.role), leaf);
+    builder.edge(edge.to, edge.from, sourceSemanticRelationKey("source_interpretation_content_inverse", edge.kind, edge.role), leaf);
+    if (edge.governing) { parents.set(edge.to, edge.from); builder.self(edge.to, ["source_interpretation_embedded"], leaf); }
   }
   for (const row of [...h.frames, ...h.operators]) {
     let ancestor = parents.get(row.id);
@@ -192,43 +192,43 @@ export function populateBindings(builder: PremiseBuilder, h: SourceSemanticInter
   for (const frame of h.frames) for (const binding of frame.bindings) {
     if (binding.target.kind !== "node") continue;
     const slot = builder.slotNodes.get(JSON.stringify([frame.id, binding.slot_id]))!;
-    const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "h_binding", occurrence: frame.id, slot_id: binding.slot_id, target: binding.target.id };
-    builder.edge(slot, binding.target.id, sourceSemanticRelationKey("h_binding"), leaf);
-    builder.edge(binding.target.id, slot, sourceSemanticRelationKey("h_binding_inv"), leaf);
+    const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "source_interpretation_binding", occurrence: frame.id, slot_id: binding.slot_id, target: binding.target.id };
+    builder.edge(slot, binding.target.id, sourceSemanticRelationKey("source_interpretation_binding"), leaf);
+    builder.edge(binding.target.id, slot, sourceSemanticRelationKey("source_interpretation_binding_inv"), leaf);
   }
 }
 
-function populateAlignment(builder: PremiseBuilder, alignment: SourceSemanticAlignment): void {
+function populateCorrespondence(builder: PremiseBuilder, semantic_correspondence: SourceSemanticCorrespondence): void {
   const grouped = new Map<number, readonly (string | undefined)[]>();
   const groupFrame = (alternative: number, frame: string): string | undefined => {
-    const frames = grouped.get(alternative) ?? alignmentGroupPhases(builder.input.query, alignment, alternative);
+    const frames = grouped.get(alternative) ?? correspondenceGroupPhases(builder.input.query, semantic_correspondence, alternative);
     if (!grouped.has(alternative)) grouped.set(alternative, frames);
     return frames.includes(frame) ? frame : undefined;
   };
-  for (const [index, correspondence] of alignment.correspondences.entries()) {
+  for (const [index, correspondence] of semantic_correspondence.correspondences.entries()) {
     const query = correspondence.query_endpoint, source = correspondence.source_endpoint;
     if (query.kind === "referent" && source.kind === "referent") {
-      builder.self(source.referent, ["a_referent", query.variable], { leaf_kind: "a_referent", occurrence: source.referent, correspondence_index: index });
+      builder.self(source.referent, ["semantic_correspondence_referent", query.variable], { leaf_kind: "semantic_correspondence_referent", occurrence: source.referent, correspondence_index: index });
     } else if (query.kind === "predicate" && source.kind === "frame") {
       const group = groupFrame(query.alternative, source.frame);
       builder.self(source.frame, group === undefined
-        ? ["a_predicate", query.alternative, query.frame]
-        : ["a_predicate", query.alternative, query.frame, group],
-        { leaf_kind: "a_predicate", occurrence: source.frame, correspondence_index: index });
+        ? ["semantic_correspondence_predicate", query.alternative, query.frame]
+        : ["semantic_correspondence_predicate", query.alternative, query.frame, group],
+        { leaf_kind: "semantic_correspondence_predicate", occurrence: source.frame, correspondence_index: index });
       for (const [id, template] of builder.aliases) if (template === source.frame) builder.self(id,
-        group === undefined ? ["a_predicate", query.alternative, query.frame] : ["a_predicate", query.alternative, query.frame, group],
-        { leaf_kind: "a_predicate", occurrence: id, correspondence_index: index });
+        group === undefined ? ["semantic_correspondence_predicate", query.alternative, query.frame] : ["semantic_correspondence_predicate", query.alternative, query.frame, group],
+        { leaf_kind: "semantic_correspondence_predicate", occurrence: id, correspondence_index: index });
     } else if (query.kind === "slot" && source.kind === "slot") {
       const slot = builder.slotNodes.get(JSON.stringify([source.frame, source.slot]))!;
       const group = groupFrame(query.alternative, source.frame);
-      const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "a_slot", occurrence: source.frame, slot_id: source.slot, correspondence_index: index };
-      builder.edge(source.frame, slot, alignmentSlotKey("a_slot", query.alternative, query.frame, query.slot, group), leaf);
-      builder.edge(slot, source.frame, alignmentSlotKey("a_slot_inv", query.alternative, query.frame, query.slot, group), leaf);
+      const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "semantic_correspondence_slot", occurrence: source.frame, slot_id: source.slot, correspondence_index: index };
+      builder.edge(source.frame, slot, correspondenceSlotKey("semantic_correspondence_slot", query.alternative, query.frame, query.slot, group), leaf);
+      builder.edge(slot, source.frame, correspondenceSlotKey("semantic_correspondence_slot_inverse", query.alternative, query.frame, query.slot, group), leaf);
       for (const [id, template] of builder.aliases) if (template === source.frame) {
         const derivedSlot = builder.slotNodes.get(JSON.stringify([id, source.slot]))!;
         const derivedLeaf = { ...leaf, occurrence: id, derived_target: derivedSlot };
-        builder.edge(id, derivedSlot, alignmentSlotKey("a_slot", query.alternative, query.frame, query.slot, group), derivedLeaf);
-        builder.edge(derivedSlot, id, alignmentSlotKey("a_slot_inv", query.alternative, query.frame, query.slot, group), derivedLeaf);
+        builder.edge(id, derivedSlot, correspondenceSlotKey("semantic_correspondence_slot", query.alternative, query.frame, query.slot, group), derivedLeaf);
+        builder.edge(derivedSlot, id, correspondenceSlotKey("semantic_correspondence_slot_inverse", query.alternative, query.frame, query.slot, group), derivedLeaf);
       }
     }
   }

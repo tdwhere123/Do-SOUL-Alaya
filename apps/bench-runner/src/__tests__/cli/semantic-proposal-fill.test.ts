@@ -36,7 +36,7 @@ it("prepares a query workset without provider calls", async () => {
     const workset = join(directory, "workset.json");
     const preflight = join(directory, "preflight.json");
     await writeFile(workset, `${JSON.stringify({
-      contract: "source-semantic-proposal-workset-v1",
+      contract: "source-semantic-proposal-workset-v2",
       kind: "query",
       model: "gemini-3.1-flash-lite",
       request_profile: "gemini-3.1-minimal-v1",

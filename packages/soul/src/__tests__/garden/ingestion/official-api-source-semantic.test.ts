@@ -1,17 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_QUERY_CONTRACT,
   sourceReferenceResolver, sourceSemanticInterpretationIdentity, type SourceInterpretationProfile
 } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/official-api/source-packet-request.js";
 import {
-  SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
   buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, semanticSha256,
   sourceSemanticResponseJsonSchema, parseSourceSemanticRequest, sourceSemanticSystemPrompt
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import {
-  MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeAlignmentSemantics, proposeQuerySemantics,
+  MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeCorrespondenceSemantics, proposeQuerySemantics,
   proposeSourceSemantics as proposeCurrentSourceSemantics, receiveSourceSemantics
 } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 
@@ -276,7 +275,7 @@ describe("historical graph proposals and source-independent query producers", ()
     expect(received.interpretation).toBeUndefined();
   });
 
-  it("quarantines bad catalog references rather than admitting an H", () => {
+  it("quarantines bad catalog references rather than admitting a source interpretation", () => {
     const input = sourceInput();
     const request = buildSourceSemanticRequest(input);
     const draft = accessionDraft(request);
@@ -302,7 +301,7 @@ describe("historical graph proposals and source-independent query producers", ()
   });
 
   it("keeps incomplete JSON as invalid rather than truncated or abstained", () => {
-    for (const rawJson of ['{"contract":"source-interpretation-response-v4"', '{"a":', "[", '{"a":"']) {
+    for (const rawJson of ['{"contract":"source-interpretation-response-v5"', '{"a":', "[", '{"a":"']) {
       const received = proposeSourceSemantics(sourceInput(), { rawJson });
       expect(received.outcome, rawJson).toEqual({ status: "invalid", reason: "malformed_json" });
       expect(received.provider_attempts).toBe(1);
@@ -332,27 +331,27 @@ describe("historical graph proposals and source-independent query producers", ()
   });
 });
 
-describe("query and alignment proposal entry points", () => {
-  it("prepares native Q/A prompts without provider calls and retains them on injected success or failure", () => {
+describe("query and semantic_correspondence proposal entry points", () => {
+  it("prepares native query-semantics and semantic-correspondence prompts without provider calls and retains them on injected success or failure", () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("provider calls are forbidden"));
     try {
       const source = sourceInput(), sourceRequest = buildSourceSemanticRequest(source);
       const h = proposeSourceSemantics(source, { rawJson: interpretedJson(sourceRequest) }).interpretation!;
       const query = admittedQuery();
       const queryInput = { original_query: "which folio was accessioned into bay B?", producer_id: "query-producer", producer_version: "1" };
-      const alignmentInput = { original_query: "which folio was accessioned into bay B?", admitted_q: query,
-        h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
+      const alignmentInput = { original_query: "which folio was accessioned into bay B?", admitted_query_semantics: query,
+        source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
         producer_id: "align-producer", producer_version: "1" };
       const preparedQuery = proposeQuerySemantics(queryInput);
-      const preparedAlignment = proposeAlignmentSemantics(alignmentInput);
-      for (const prepared of [preparedQuery, preparedAlignment]) {
+      const preparedCorrespondence = proposeCorrespondenceSemantics(alignmentInput);
+      for (const prepared of [preparedQuery, preparedCorrespondence]) {
         expect(prepared.outcome).toEqual({ status: "unexercised" });
         expect(prepared.provider_attempts).toBe(0);
         expect(prepared.raw_response_id).toBeUndefined();
         expect(prepared.request).not.toHaveProperty("system_prompt");
       }
       expect(preparedQuery.system_prompt).toContain("Query.gaps is the authoritative gap list");
-      expect(preparedAlignment.system_prompt).toContain("request-local handle h1, h2");
+      expect(preparedCorrespondence.system_prompt).toContain("request-local handle source1, source2");
       for (const valid of [false, true]) {
         const q = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
           contract: "source-semantic-query-response-v3", outcome: { status: "interpreted", gaps: [] },
@@ -369,31 +368,32 @@ describe("query and alignment proposal entry points", () => {
             gaps: []
           }
         }) : "{}" });
-        const a = proposeAlignmentSemantics(alignmentInput, { rawJson: valid ? JSON.stringify({
-          contract: "source-semantic-alignment-response-v3", outcome: { status: "interpreted", gaps: [] },
-          alignment: { contract: "source-semantic-alignment-selection-v1", h: "h1", selections: [] }
+        const a = proposeCorrespondenceSemantics(alignmentInput, { rawJson: valid ? JSON.stringify({
+          contract: "source-semantic-correspondence-response-v3", outcome: { status: "interpreted", gaps: [] },
+          semantic_correspondence: { contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1", selections: [] }
         }) : "{}" });
         expect(q.outcome.status).toBe(valid ? "interpreted" : "invalid");
         expect(a.outcome.status).toBe(valid ? "interpreted" : "invalid");
         expect(q.system_prompt).toBe(preparedQuery.system_prompt);
-        expect(a.system_prompt).toBe(preparedAlignment.system_prompt);
+        expect(a.system_prompt).toBe(preparedCorrespondence.system_prompt);
         expect(q.request).toEqual(preparedQuery.request);
-        expect(a.request).toEqual(preparedAlignment.request);
+        expect(a.request).toEqual(preparedCorrespondence.request);
       }
       expect(fetch).not.toHaveBeenCalled();
     } finally { fetch.mockRestore(); }
   });
 
   it.each([false, true])("validates query outcome gaps against the admitted body (matching=%s)", (matching) => {
-    const query = admittedQuery();
     const gaps = [{ kind: "unresolved_referent", affected_ids: ["bay"],
       support: [{ kind: "query_text", excerpt: "bay B" }] }];
     const received = proposeQuerySemantics({ original_query: "which folio was accessioned into bay B?",
-      producer_id: "query-producer", producer_version: "1",
-      query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT }, { rawJson: JSON.stringify({
-      contract: "source-semantic-query-response-v2", outcome: { status: "interpreted", gaps },
-      query: { variables: query.variables, alternatives: query.alternatives,
-        return_variables: query.return_variables, gaps: matching ? gaps : [] }
+      producer_id: "query-producer", producer_version: "1" }, { rawJson: JSON.stringify({
+      contract: "source-semantic-query-response-v3", outcome: { status: "interpreted", gaps },
+      query: { contract: "source-semantic-query-meaning-v1", alternatives: [{ meaning: {
+        kind: "statement", key: "accession", predicate: "accession", arguments: [
+          { role: "object", target: { kind: "free", key: "folio" }, excerpt: "folio" },
+          { role: "bay", target: { kind: "named", key: "bay", excerpt: "bay B" }, excerpt: "bay B" }
+        ] } }], return: ["folio"], gaps: matching ? gaps : [] }
     }) });
     if (matching) {
       expect(received.outcome).toEqual({ status: "interpreted", gaps });
@@ -404,19 +404,18 @@ describe("query and alignment proposal entry points", () => {
     }
   });
 
-  it("rejects alignment outcome gaps rather than returning successful empty gaps", () => {
+  it("rejects semantic_correspondence outcome gaps rather than returning successful empty gaps", () => {
     const input = sourceInput(), request = buildSourceSemanticRequest(input);
     const h = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
-    const received = proposeAlignmentSemantics({ original_query: "which folio was accessioned into bay B?", admitted_q: admittedQuery(),
-      h_descriptors: [{ h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
-      producer_id: "align-producer", producer_version: "1",
-      alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT }, { rawJson: JSON.stringify({
-      contract: "source-semantic-alignment-response-v2",
+    const received = proposeCorrespondenceSemantics({ original_query: "which folio was accessioned into bay B?", admitted_query_semantics: admittedQuery(),
+      source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h }],
+      producer_id: "align-producer", producer_version: "1" }, { rawJson: JSON.stringify({
+      contract: "source-semantic-correspondence-response-v3",
       outcome: { status: "interpreted", gaps: [{ kind: "unsupported_meaning", affected_ids: [], support: [] }] },
-      alignment: { correspondences: [] }
+      semantic_correspondence: { contract: "source-semantic-correspondence-selection-v2", selections: [] }
     }) });
     expect(received.outcome).toMatchObject({ status: "invalid", diagnostics: [{ code: "outcome_gap_mismatch", path: ["outcome", "gaps"] }] });
-    expect(received.alignment).toBeUndefined();
+    expect(received.semantic_correspondence).toBeUndefined();
   });
 
   it("accepts the original query and approved context and rejects answers or programs", () => {
@@ -452,30 +451,30 @@ describe("query and alignment proposal entry points", () => {
     } as never)).toThrow(/answers/u);
   });
 
-  it("accepts admitted Q plus H descriptors and rejects ranking or seeds", () => {
+  it("accepts admitted query semantics plus source-interpretation descriptors and rejects ranking or seeds", () => {
     const input = sourceInput(), request = buildSourceSemanticRequest(input);
     const h = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
     const alignmentInput = { original_query: "which folio was accessioned into bay B?",
-      admitted_q: admittedQuery(),
-      h_descriptors: [{
-        h_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h
+      admitted_query_semantics: admittedQuery(),
+      source_interpretation_descriptors: [{
+        source_interpretation_id: sourceSemanticInterpretationIdentity(h, semanticSha256), interpretation: h
       }],
       producer_id: "align-producer", producer_version: "1"
     };
-    const prepared = proposeAlignmentSemantics(alignmentInput);
+    const prepared = proposeCorrespondenceSemantics(alignmentInput);
     expect(prepared.request.original_query).toBe(alignmentInput.original_query);
-    expect(() => proposeAlignmentSemantics({ ...alignmentInput,
+    expect(() => proposeCorrespondenceSemantics({ ...alignmentInput,
       original_query: "a different query" })).toThrow(/does not bind the original query/u);
-    expect(() => proposeAlignmentSemantics({ ...alignmentInput,
+    expect(() => proposeCorrespondenceSemantics({ ...alignmentInput,
       original_query: "" })).toThrow(/requires the original query/u);
     const predicate = prepared.request.catalog?.query_endpoints.find((row) => row.kind === "predicate");
     const frame = prepared.request.catalog?.source_endpoints.find((row) => row.kind === "frame");
-    const received = proposeAlignmentSemantics(alignmentInput, {
+    const received = proposeCorrespondenceSemantics(alignmentInput, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-alignment-response-v3",
+        contract: "source-semantic-correspondence-response-v3",
         outcome: { status: "interpreted", gaps: [] },
-        alignment: {
-          contract: "source-semantic-alignment-selection-v1", h: "h1",
+        semantic_correspondence: {
+          contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1",
           selections: [{
             query: predicate!.handle, source: frame!.handle, query_excerpt: "accessioned",
             source_semantic_support: [{ kind: "lexical", mentions: ["mAccessioned"] }]
@@ -483,13 +482,13 @@ describe("query and alignment proposal entry points", () => {
         }
       })
     });
-    expect(received.request.contract).toBe(SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT);
-    expect(received.alignment?.correspondences).toHaveLength(1);
-    expect(received.request.h_descriptors[0]!.interpretation.mentions.length).toBe(6);
-    expect(received.request.h_descriptors[0]!.interpretation.frames[0]!.bindings.length).toBe(3);
-    expect(() => proposeAlignmentSemantics({ original_query: "which folio was accessioned into bay B?",
-      admitted_q: admittedQuery(),
-      h_descriptors: [{ h_id: digest, source_id: "src", source_version: "1", frames: [] }],
+    expect(received.request.contract).toBe(SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT);
+    expect(received.semantic_correspondence?.correspondences).toHaveLength(1);
+    expect(received.request.source_interpretation_descriptors[0]!.interpretation.mentions.length).toBe(6);
+    expect(received.request.source_interpretation_descriptors[0]!.interpretation.frames[0]!.bindings.length).toBe(3);
+    expect(() => proposeCorrespondenceSemantics({ original_query: "which folio was accessioned into bay B?",
+      admitted_query_semantics: admittedQuery(),
+      source_interpretation_descriptors: [{ source_interpretation_id: digest, source_id: "src", source_version: "1", frames: [] }],
       producer_id: "align-producer", producer_version: "1",
       ranking: [digest], seeds: ["fAccession"]
     } as never)).toThrow(/ranking|seeds/u);
@@ -517,7 +516,7 @@ it("replays explicitly historical requests without upgrading their normalizer or
   const legacy = parseSourceSemanticRequest({ ...current, source_request: {
     ...legacyBody, normalizer_version: "source-semantic-normalizer-v3"
   } });
-  const rawJson = JSON.stringify({ contract: "source-interpretation-response-v4",
+  const rawJson = JSON.stringify({ contract: "source-interpretation-response-v5",
     outcome: { status: "interpreted", gaps: [] }, draft: accessionDraft(current) });
   const historical = receiveSourceSemantics(rawJson, legacy, input);
   expect(historical.outcome.status).toBe("interpreted");
@@ -531,8 +530,8 @@ it("replays explicitly historical requests without upgrading their normalizer or
   expect(() => parseSourceSemanticRequest({ ...current, source_request: {
     ...legacyBody, normalizer_version: "source-semantic-normalizer-v4"
   } })).toThrow(/proposal contract and normalizer version/u);
-  expect(JSON.stringify(sourceSemanticResponseJsonSchema(legacy))).toContain("source-interpretation-response-v4");
-  expect(sourceSemanticSystemPrompt(legacy)).toContain('"contract":"source-interpretation-response-v4"');
+  expect(JSON.stringify(sourceSemanticResponseJsonSchema(legacy))).toContain("source-interpretation-response-v5");
+  expect(sourceSemanticSystemPrompt(legacy)).toContain('"contract":"source-interpretation-response-v5"');
   expect(sourceSemanticSystemPrompt(legacy)).not.toContain('"contract":"source-semantic-proposal-v1"');
   expect(JSON.stringify(sourceSemanticResponseJsonSchema(current))).toContain("source-semantic-proposal-v1");
 });

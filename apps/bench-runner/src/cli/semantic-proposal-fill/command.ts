@@ -14,7 +14,7 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
   try {
     const action = required(args, "--action");
     const kind = required(args, "--kind");
-    if (kind !== "query" && kind !== "alignment") throw new Error("--kind must be query or alignment");
+    if (kind !== "query" && kind !== "semantic_correspondence") throw new Error("--kind must be query or semantic_correspondence");
     if (action !== "prepare" && action !== "authorize" && action !== "fill") {
       throw new Error("--action must be prepare, authorize, or fill");
     }

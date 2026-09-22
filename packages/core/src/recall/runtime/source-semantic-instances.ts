@@ -1,6 +1,6 @@
 import {
   sourceSemanticContextContains,
-  type SourceSemanticAlignment, type SourceSemanticInterpretation, type SourceSemanticQuery,
+  type SourceSemanticCorrespondence, type SourceSemanticInterpretation, type SourceSemanticQuery,
   type SourceSemanticFrame, type SourceSemanticOperator, type SourceSemanticContextOwner
 } from "@do-soul/alaya-protocol";
 import {
@@ -16,21 +16,21 @@ export type SourceSemanticInstance = Readonly<{
 
 /** Candidate substitution is structural. Permissions are proved by the query's instance gate. */
 export function groundSourceSemanticInstances(builder: PremiseBuilder, h: SourceSemanticInterpretation,
-  alignment: SourceSemanticAlignment, query?: SourceSemanticQuery): void {
+  semantic_correspondence: SourceSemanticCorrespondence, query?: SourceSemanticQuery): void {
   const meter = builder.input.meter, occurrenceCount = h.frames.length + h.operators.length;
-  for (const [index, assumption] of (alignment.membership_assumptions ?? []).entries()) {
-    meter.charge(1 + (query?.variables.length ?? 0) + alignment.correspondences.length, 0, "assumed member admission");
+  for (const [index, assumption] of (semantic_correspondence.membership_assumptions ?? []).entries()) {
+    meter.charge(1 + (query?.variables.length ?? 0) + semantic_correspondence.correspondences.length, 0, "assumed member admission");
     const variable = query?.variables.find((row) => row.id === assumption.query_variable);
     if (variable?.reference === undefined || assumption.status !== "member") continue;
-    if (alignment.correspondences.some((row) => row.query_endpoint.kind === "referent"
+    if (semantic_correspondence.correspondences.some((row) => row.query_endpoint.kind === "referent"
       && row.query_endpoint.variable === variable.id)) continue;
     const id = derivedId("query", variable.id);
     if (!builder.coordinates.has(id)) {
       builder.node(id); builder.derivedNodes.push({ kind: "query_entity", node_id: id,
         query_variable: variable.id, excerpt: variable.reference.excerpt });
-      builder.self(id, ["h_sort", "entity"], { leaf_kind: "h_sort", occurrence: id, value: "entity" });
+      builder.self(id, ["source_interpretation_sort", "entity"], { leaf_kind: "source_interpretation_sort", occurrence: id, value: "entity" });
     }
-    builder.self(id, ["a_referent", variable.id], { leaf_kind: "a_membership", occurrence: id,
+    builder.self(id, ["semantic_correspondence_referent", variable.id], { leaf_kind: "semantic_correspondence_membership", occurrence: id,
       assumption_index: index, domain: assumption.source_domain });
   }
   for (const operator of h.operators) {
@@ -44,10 +44,10 @@ export function groundSourceSemanticInstances(builder: PremiseBuilder, h: Source
       restriction: operator.restriction, restrictionEvidence: row.restrictions.find((item) => item.restriction === operator.restriction)?.evidence,
       restrictionAssumed: false, context: domain.context
     }));
-    for (const [index, assumption] of (alignment.membership_assumptions ?? []).entries()) {
-      meter.charge(1 + alignment.correspondences.length + members.length, 0, "conditional member enumeration");
+    for (const [index, assumption] of (semantic_correspondence.membership_assumptions ?? []).entries()) {
+      meter.charge(1 + semantic_correspondence.correspondences.length + members.length, 0, "conditional member enumeration");
       if (assumption.status !== "member" || assumption.source_domain !== domain.id) continue;
-      const correspondence = alignment.correspondences.find((row) => row.query_endpoint.kind === "referent"
+      const correspondence = semantic_correspondence.correspondences.find((row) => row.query_endpoint.kind === "referent"
         && row.query_endpoint.variable === assumption.query_variable)?.source_endpoint;
       const member = correspondence?.kind === "referent" ? correspondence.referent : derivedId("query", assumption.query_variable);
       const existing = members.findIndex((row) => row.member === member);
@@ -117,26 +117,26 @@ function instantiate(builder: PremiseBuilder, h: SourceSemanticInterpretation,
         builder.derivedNodes.push({ kind: "instance_slot", node_id: slotId, instance: nodeId, slot_id: slot.id });
       }
     }
-    builder.self(nodeId, ["h_instance", nodeId], { leaf_kind: "h_instantiation", occurrence: template.id,
+    builder.self(nodeId, ["source_interpretation_instance", nodeId], { leaf_kind: "source_interpretation_instantiation", occurrence: template.id,
       derived_node: nodeId, quantifier: quantifier.id, binder: quantifier.binder, member: member.member });
     builder.edge(nodeId, quantifier.id, key("instance_rule")); builder.edge(quantifier.id, nodeId, key("instance_rule_inv"));
-    const evidence = (target: string, label: string, kind: "h_membership" | "h_restriction") => {
+    const evidence = (target: string, label: string, kind: "source_interpretation_membership" | "source_interpretation_restriction") => {
       const leaf = { leaf_kind: kind, occurrence: target, domain: member.domain, member: member.member };
       builder.edge(nodeId, target, key(label), leaf); builder.edge(target, nodeId, key(`${label}_inv`), leaf);
     };
-    if (member.evidence !== undefined) evidence(member.evidence, "instance_member", "h_membership");
-    if (member.restrictionEvidence !== undefined) evidence(member.restrictionEvidence, "instance_restriction", "h_restriction");
-    if (member.assumption !== undefined) builder.self(nodeId, ["instance_assumption"], { leaf_kind: "a_membership",
+    if (member.evidence !== undefined) evidence(member.evidence, "instance_member", "source_interpretation_membership");
+    if (member.restrictionEvidence !== undefined) evidence(member.restrictionEvidence, "instance_restriction", "source_interpretation_restriction");
+    if (member.assumption !== undefined) builder.self(nodeId, ["instance_assumption"], { leaf_kind: "semantic_correspondence_membership",
       occurrence: nodeId, domain: member.domain, member: member.member, assumption_index: member.assumption });
   }
   const virtual = { ...h, frames, operators, referents: [], entry_roots: [], asserted_at_scope: [] };
   populateOccurrences(builder, virtual); populateStructure(builder, virtual); populateBindings(builder, virtual);
   const contentId = id(quantifier.content);
-  const contentLeaf = { leaf_kind: "h_content" as const, occurrence: contentId, parent: quantifier.id,
+  const contentLeaf = { leaf_kind: "source_interpretation_content" as const, occurrence: contentId, parent: quantifier.id,
     relation_kind: "operator_operand" as const, role: "content" as const };
-  builder.edge(quantifier.id, contentId, key("h_content", "operator_operand", "content"), contentLeaf);
-  builder.edge(contentId, quantifier.id, key("h_content_inv", "operator_operand", "content"), contentLeaf);
-  builder.self(contentId, ["h_embedded"], contentLeaf);
+  builder.edge(quantifier.id, contentId, key("source_interpretation_content", "operator_operand", "content"), contentLeaf);
+  builder.edge(contentId, quantifier.id, key("source_interpretation_content_inverse", "operator_operand", "content"), contentLeaf);
+  builder.self(contentId, ["source_interpretation_embedded"], contentLeaf);
   for (const root of h.entry_roots) {
     builder.input.meter.charge(h.frames.length + h.operators.length, 0, "instance source routing");
     if (!sourceSemanticContextContains(h, root, quantifier.id)) continue;

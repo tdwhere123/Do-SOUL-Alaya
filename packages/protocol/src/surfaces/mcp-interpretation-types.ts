@@ -5,7 +5,7 @@ import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
 import { AuthorizedScopesAdmissionSchema } from "../governance/active-constraints-policy.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceSemanticQuerySchema } from "../recall/conditional-field/semantic-query.js";
-import { SourceSemanticAlignmentSchema } from "../recall/conditional-field/semantic-alignment.js";
+import { SourceSemanticCorrespondenceSchema } from "../recall/conditional-field/semantic-correspondence.js";
 import { SourceSemanticEvaluationContextSchema } from "../recall/conditional-field/interpretation-context.js";
 import { SourceSemanticDraftSchema } from "../garden/source-semantic-draft.js";
 import {
@@ -61,7 +61,7 @@ export const SoulInterpretationProposeRequestSchema = z.object({
 export const SoulInterpretationPrepareQueryRequestSchema = z.object({
   operation: z.literal("prepare_query"),
   original_query: z.string().min(1).max(8192),
-  q: SourceSemanticQuerySchema.optional(),
+  query_semantics: SourceSemanticQuerySchema.optional(),
   source_handle: BoundedIdSchema.optional(),
   continuation_handle: BoundedIdSchema.optional(),
   budget: RequestBudgetSchema,
@@ -72,9 +72,9 @@ export const SoulInterpretationReasonRequestSchema = z.object({
   operation: z.literal("reason"),
   accepts_unreviewed_conditional_results: z.literal(true),
   query_handle: BoundedIdSchema.optional(),
-  h_id: Sha256DigestSchema.optional(),
-  q: SourceSemanticQuerySchema.optional(),
-  a: SourceSemanticAlignmentSchema.optional(),
+  source_interpretation_id: Sha256DigestSchema.optional(),
+  query_semantics: SourceSemanticQuerySchema.optional(),
+  semantic_correspondence: SourceSemanticCorrespondenceSchema.optional(),
   original_query: z.string().min(1).max(8192).optional(),
   budget: RequestBudgetSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000),
@@ -85,9 +85,9 @@ const SoulInterpretationRecallRequestSchema = z.object({
   operation: z.literal("recall"),
   accepts_unreviewed_conditional_results: z.literal(true),
   query_handle: BoundedIdSchema.optional(),
-  q: SourceSemanticQuerySchema.optional(),
+  query_semantics: SourceSemanticQuerySchema.optional(),
   original_query: z.string().min(1).max(8192).optional(),
-  alignments: z.array(SourceSemanticAlignmentSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
+  semantic_correspondences: z.array(SourceSemanticCorrespondenceSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   budget: RequestBudgetSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000),
   authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
@@ -126,7 +126,7 @@ export const SoulInterpretationPrepareQueryResponseSchema = z.object({
   operation: z.literal("prepare_query"),
   query_handle: BoundedIdSchema.optional(),
   continuation_handle: BoundedIdSchema.optional(),
-  q_id: Sha256DigestSchema.optional(),
+  query_semantics_id: Sha256DigestSchema.optional(),
   outcome: SourceSemanticOutcomeSchema.optional(),
   candidates: z.array(SourceSemanticHandleDescriptorSchema).max(64).readonly(),
   truncated: z.boolean(),
@@ -138,7 +138,7 @@ export const SoulInterpretationReasonResponseSchema = z.object({
   result: SourceSemanticReasoningResultSchema.optional(),
   interpretation: SourceSemanticInterpretationSchema.optional(),
   query: SourceSemanticQuerySchema.optional(),
-  alignment: SourceSemanticAlignmentSchema.optional(),
+  semantic_correspondence: SourceSemanticCorrespondenceSchema.optional(),
   context: SourceSemanticEvaluationContextSchema.optional(),
   outcome: SourceSemanticOutcomeSchema.optional(),
   ...CoverageWork
@@ -147,7 +147,7 @@ export const SoulInterpretationReasonResponseSchema = z.object({
 const SoulInterpretationRecallResponseSchema = z.object({
   operation: z.literal("recall"),
   delivery_id: BoundedIdSchema.optional(),
-  protocol_version: z.literal(1).optional(),
+  protocol_version: z.literal(2).optional(),
   results: z.array(MemorySearchResultSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly().optional(),
   total_count: z.number().int().nonnegative().optional(),
   index: InformationIndexSchema.optional(),

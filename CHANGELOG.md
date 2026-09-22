@@ -12,19 +12,29 @@ below as the live ranking recipe.
 
 `@do-soul/alaya-engine-gateway` is `0.4.0`; app packages remain `0.3.11`.
 
-Opt-in producer APIs add source selection, query meaning, and alignment selection
+Opt-in producer APIs add source selection, query meaning, and semantic correspondence selection
 schemas/materializers in Protocol and their request/response builders in SOUL.
-These additive exports serve SOUL and the bench runner; the MCP, EventLog, and
-runtime-config schema surfaces remain unchanged by this producer repair (§25).
+These producer exports serve SOUL and the bench runner. The opt-in semantic
+interfaces now use responsibility names throughout; EventLog and runtime config
+are unchanged. Query and correspondence readers accept only their current
+meaning and endpoint-selection envelopes, without legacy graph readers.
 Query meaning preserves named comparison operands and rejects unsupported nested
 universal binders. Retained provider failures keep their original classification,
 completion evidence, and raw response; terminal proposal publication resumes
 idempotently. Source publication requires an explicit association to a frozen
 source/version and retained request, without claiming historical generation origin.
 
-Under invariant §25, this is an additive minor: opt-in `soul.interpretation`
-`recall` accepts prepared Q/A and returns source-root occupancy pages, complete
-conditional H/Q/A/C proof packages, explicit coverage and the actual request
+Under invariant §25, the opt-in migration versions its serialized interfaces:
+response envelope v5, reasoning v4, library v2, public/worker recall protocol 2,
+semantic correspondence v3, proposal workset/cache/authority/preflight v2,
+provider raw-attempt v2, chain replay/withdrawal v2, development freeze v2,
+publication report schema 2,
+relation namespace v5 and lowering v5. Existing generic engine `hypothesis_id`
+continues to identify an engine hypothesis; semantic results expose
+`conditional_computation_id`. Historical raw responses and measurements are
+unchanged. The opt-in `soul.interpretation`
+`recall` accepts prepared query semantics and semantic correspondences and returns source-root occupancy pages, complete
+conditional proof packages binding source interpretation, query semantics and semantic correspondence, explicit coverage and the actual request
 budget. Ordinary `soul.recall` and its defaults are unchanged. Continuations
 bind the initial clock, caller/session, scopes, budgets and current database
 revision; stale generations fail closed. Payload demotion preserves occupied
@@ -70,7 +80,7 @@ through nesting and entities where used; the shared compiler generates canonical
 identities and lowers through the existing content compiler. Explicit co-reference,
 same-parent content reuse and non-governing references remain distinct semantic
 choices. SOUL selects schemas, prompts and revision validation by the recorded
-producer contract, preserving v2 raw replay. Canonical H and consumer admission
+producer contract, preserving v2 raw replay. Canonical source interpretation and consumer admission
 remain unchanged; this interface does not certify semantic completeness.
 
 The native Gemini codec uses JSON mode for recursive schemas and carries the full
@@ -96,14 +106,14 @@ Protocol 6.2.0 adds the source-semantic content proposal and deterministic
 compiler under invariant §25. Producers choose predicates, roles, co-reference,
 scope, speech acts and domain evidence. The host generates mention identities,
 slot/binding pairs, reciprocal ownership and quantifier binders before existing
-canonical H validation. References and embedded content remain distinct;
+canonical source interpretation validation. References and embedded content remain distinct;
 orphaned or conflicting scope is rejected rather than asserted. Compilation
 and normalization share one resource ledger. Recorded graph proposals retain
-their exact request-selected schema and prompt for replay. Canonical H, MCP,
+their exact request-selected schema and prompt for replay. Canonical source interpretation, MCP,
 EventLog and config schemas are unchanged; structural admission still does
 not certify language completeness.
 
-Protocol 6.0.0 versions source semantics as H v4, Q/A v2, envelope 5,
+Protocol 6.0.0 versions source semantics as source interpretation v4, query semantics and semantic correspondence v2, envelope 5,
 and reasoning/cache v3. Explicit finite domains, universal templates,
 conditional membership assumptions, and exact decimal measurements lower
 through the existing conditional-field engine. Proofs retain instantiated
@@ -123,30 +133,30 @@ enforced by the existing authority and attempt-ledger owners.
 Protocol 6.1.0 is additive under handbook invariant §25: it exports the producer
 proposal contract/schema/materializer, shared accounting validator and explicit
 legacy normalizer version. MCP, EventLog and config schemas remain unchanged.
-H extraction now uses `source-semantic-proposal-v1`: Protocol derives redundant
+Source-interpretation extraction now uses `source-semantic-proposal-v1`: Protocol derives redundant
 embedding self-references and outcome gap copies. Normalizer-v4 records
 structurally unaccounted source assertions/evidence and incomplete bindings as
 located gaps; Core enforces the same rule during publication and SQLite reopen.
 Accounting expansion consumes the resource budget and preserves exhaustion as
-a distinct outcome. Historical normalizer-v3 requests and stored H remain
-explicit replay/read paths; Core's internal normalized-H publication entrance
-requires v4, while MCP propose continues to accept canonical drafts. Canonical H v4 and
+a distinct outcome. Historical normalizer-v3 requests and stored source interpretations remain
+explicit replay/read paths; Core's internal normalized-source-interpretation publication entrance
+requires v4, while MCP propose continues to accept canonical drafts. Canonical source interpretation v4 and
 response-envelope shapes are unchanged. This provider-free repair does not
 certify language completeness or change historical paid extraction verdicts.
 
 Protocol 5.2.0 adds optional bounded path/code/reference diagnostics to invalid
 source-semantic outcomes. Interpreted producer envelopes must echo the body's
-gaps; H and Q no longer discard conflicting outcome-only gaps, and A rejects
+gaps; source interpretation and query semantics no longer discard conflicting outcome-only gaps, and semantic correspondence rejects
 gaps it cannot represent. Matching partial interpretations remain supported.
 The producer prompt distinguishes catalog selectors from graph mention handles
 and includes a schema-checked neutral example. Batch quarantine retains the
 diagnostic and raw response identity. Historical raw responses are not repaired
 or relabeled, and new producer prompts use the existing request/cache identity
 owner. This engineering repair does not establish actual-model quality.
-Q/A proposal preparation now returns its native system prompt as separate
+Query-semantics and semantic-correspondence proposal preparation now returns its native system prompt as separate
 metadata; strict request bodies and MCP schemas are unchanged. Unconsumed
 module exports remain private, and unused request type aliases are removed.
-H producer guidance now distinguishes argument node targets from mention
+Source-interpretation producer guidance now distinguishes argument node targets from mention
 evidence and gap locations, with a neutral partial example that anchors an
 uninterpreted clause without inventing a frame. Existing reference validation
 and historical raw rejection remain unchanged; this does not certify model
@@ -157,12 +167,12 @@ opt-in `soul.interpretation` channel adds qualified answer bindings,
 per-answer proof forests, located `no_executable_proposition`
 dispositions, host-only `unavailable` source reads, optional
 `authorized_scopes` admission on the four host operations, and paged
-full-H preparation. Structural/normalizer/lowering versions are 2;
+full-source-interpretation preparation. Structural/normalizer/lowering versions are 2;
 version-1 open hypotheses require new explicit preparation, not
 relabeling. Operator ownership, named query referents, variable sorts,
-non-tree query incidences and fixed-C completion are enforced before
+non-tree query incidences and fixed conditional computation completion are enforced before
 qualified delivery. Source references are revalidated on publish and
-reopen. Bounded preparation leases retain candidate/Q/scope identity;
+reopen. Bounded preparation leases retain candidate/query-semantics/scope identity;
 one-shot results do not replay another run's coverage. Ordinary Recall,
 Garden v1 and profile-bound v2 contracts are unchanged. Real-model
 quality and default activation remain unexercised.

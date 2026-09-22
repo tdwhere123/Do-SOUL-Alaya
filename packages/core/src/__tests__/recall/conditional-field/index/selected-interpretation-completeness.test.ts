@@ -31,7 +31,7 @@ it("retains global hypothesis uncertainty while closing a validated finite selec
     logical_index: "complete", observed_coverage: "exhausted_empty", interpretation_coverage: "open", transport: "complete", payload: "complete" });
 });
 
-it("rejects wrong-H and foreign-source seeds before authorizing finite empty closure", () => {
+it("rejects wrong source interpretation and foreign-source seeds before authorizing finite empty closure", () => {
   const wrong = { ...product, hypothesis_id: "foreign", interpretation_node: { ...product.interpretation_node!, hypothesis_id: "foreign" } };
   const foreignSource = { ...product, target: { ...source, root_id: "foreign" } };
   for (const state of [wrong, foreignSource]) {
@@ -40,7 +40,7 @@ it("rejects wrong-H and foreign-source seeds before authorizing finite empty clo
   }
 });
 
-it("does not close a selected-H empty result when observation, resource work, or domain validation is unfinished", () => {
+it("does not close a selected source interpretation empty result when observation, resource work, or domain validation is unfinished", () => {
   for (const overrides of [{ resource_work: "open" as const }, { support_work_status: "open" as const },
     { observer: { outcome: { schema_version: 1 as const, status: "interrupted" as const }, open_regions: [] } },
     { remaining_reserve: 0 }]) {

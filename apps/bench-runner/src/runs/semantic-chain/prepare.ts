@@ -22,12 +22,12 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
     if (existing !== undefined) {
       const plan = SemanticChainPlanSchema.parse(existing);
       if (plan.input_identity !== inputIdentity) throw new Error("semantic chain preparation inputs changed; use a new stage root");
-      materializeAlignmentWorkset(plan, root);
+      materializeCorrespondenceWorkset(plan, root);
       return plan;
     }
     const queries: SemanticChainPlan["queries"] = [];
     const items: unknown[] = [];
-    let remaining = config.alignment_pair_cap;
+    let remaining = config.correspondence_pair_cap;
     const prepare = async (daemon?: BenchDaemonHandle) => {
       for (const row of results) {
         const base = { query_key: row.line.key, original_query: row.line.original_query, raw_digest: row.shard?.raw_digest ?? null };
@@ -36,28 +36,28 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
         const found = await discover(daemon!, config, row.line.original_query, q);
         const selected = found.descriptors.filter((descriptor) => descriptor.interpretation !== undefined).slice(0, remaining);
         remaining -= selected.length;
-        queries.push({ ...base, status: "ready", q, ...found, selected_h_ids: selected.map((entry) => entry.interpretation_id) });
-        for (const descriptor of selected) items.push({ original_query: row.line.original_query, admitted_q: q,
-          h_descriptors: [{ h_id: descriptor.interpretation_id, interpretation: descriptor.interpretation }] });
+        queries.push({ ...base, status: "ready", query_semantics: q, ...found, selected_source_interpretation_ids: selected.map((entry) => entry.interpretation_id) });
+        for (const descriptor of selected) items.push({ original_query: row.line.original_query, admitted_query_semantics: q,
+          source_interpretation_descriptors: [{ source_interpretation_id: descriptor.interpretation_id, interpretation: descriptor.interpretation }] });
       }
     };
     if (results.some((row) => row.received !== undefined)) await withSemanticChainDaemon(config, root, prepare);
     else await prepare();
     const workset = items.length === 0 ? null : parseSemanticProposalWorkset({
-      contract: SEMANTIC_PROPOSAL_WORKSET_CONTRACT, kind: "alignment", model: config.query_workset.model,
+      contract: SEMANTIC_PROPOSAL_WORKSET_CONTRACT, kind: "semantic_correspondence", model: config.query_workset.model,
       request_profile: config.query_workset.request_profile, items
     });
-    const plan = SemanticChainPlanSchema.parse({ contract: "source-semantic-chain-plan-v1", input_identity: inputIdentity,
-      config, queries, alignment_workset: workset });
+    const plan = SemanticChainPlanSchema.parse({ contract: "source-semantic-chain-plan-v2", input_identity: inputIdentity,
+      config, queries, correspondence_workset: workset });
     writeChainArtifact(path, plan);
-    materializeAlignmentWorkset(plan, root);
+    materializeCorrespondenceWorkset(plan, root);
     return plan;
   });
 }
 
-function materializeAlignmentWorkset(plan: SemanticChainPlan, root: string): void {
-  if (plan.alignment_workset === null) return;
-  writeChainJson(join(root, "alignment-workset.json"), plan.alignment_workset);
+function materializeCorrespondenceWorkset(plan: SemanticChainPlan, root: string): void {
+  if (plan.correspondence_workset === null) return;
+  writeChainJson(join(root, "semantic_correspondence-workset.json"), plan.correspondence_workset);
   // Preflight is a cache-state inspection, not an immutable request. Consumers run the
   // existing proposal prepare command immediately before an authorized fill.
 }
@@ -70,7 +70,7 @@ async function discover(daemon: BenchDaemonHandle, config: SemanticChainConfig, 
   let pages = 0, open = false, truncated = false;
   do {
     const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
-      SoulInterpretationRequestSchema.parse({ operation: "prepare_query", original_query: original, q,
+      SoulInterpretationRequestSchema.parse({ operation: "prepare_query", original_query: original, query_semantics: q,
         budget: config.budget, authorized_scopes: config.authorized_scopes,
         ...(continuation === undefined ? {} : { continuation_handle: continuation }) })));
     if (response.operation !== "prepare_query") throw new Error("native discovery returned a different operation");
@@ -86,5 +86,5 @@ async function discover(daemon: BenchDaemonHandle, config: SemanticChainConfig, 
     if (continuation !== undefined) handles.add(continuation);
   } while (continuation !== undefined && pages < config.discovery_page_cap);
   return { descriptors, discovery_pages: pages, discovery_open: open || continuation !== undefined,
-    discovery_truncated: truncated || continuation !== undefined, unvisited_h_count: null };
+    discovery_truncated: truncated || continuation !== undefined, unvisited_source_interpretation_count: null };
 }

@@ -1,20 +1,20 @@
 import {
-  SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT,
+
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, sourceSemanticQueryIdentity,
-  type SourceSemanticAlignment, type SourceSemanticQuery, type SourceSemanticOutcome
+  type SourceSemanticCorrespondence, type SourceSemanticQuery, type SourceSemanticOutcome
 } from "@do-soul/alaya-protocol";
-import { MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeAlignmentSemantics } from "./source-semantic-receive.js";
-import { semanticSha256, type SourceSemanticHDescriptor } from "./source-semantic-request.js";
+import { MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeCorrespondenceSemantics } from "./source-semantic-receive.js";
+import { semanticSha256, type SourceInterpretationDescriptor } from "./source-semantic-request.js";
 
 export type SourceSemanticLibraryProduceResult =
   | Readonly<{ rawJson: string }>
-  | Readonly<{ status: "no_alignment" }>
+  | Readonly<{ status: "no_correspondence" }>
   | Readonly<{ status: "unattempted" }>;
 
-export type SourceSemanticLibraryPrepareStatus = "interpreted" | "no_alignment" | "invalid" | "failed" | "unattempted";
+export type SourceSemanticLibraryPrepareStatus = "interpreted" | "no_correspondence" | "invalid" | "failed" | "unattempted";
 
 export type SourceSemanticLibraryPrepareOutcome = Readonly<{
-  h_id: string;
+  source_interpretation_id: string;
   status: SourceSemanticLibraryPrepareStatus;
   outcome?: SourceSemanticOutcome;
   rawJson?: string;
@@ -24,94 +24,92 @@ export type SourceSemanticLibraryPrepareOutcome = Readonly<{
 
 export type SourceSemanticLibraryPrepareCacheEntry = Readonly<{
   rawJson: string;
-  alignment: SourceSemanticAlignment;
+  semantic_correspondence: SourceSemanticCorrespondence;
 }>;
 
 export type SourceSemanticLibraryPrepareInput = Readonly<{
   original_query: string;
-  admitted_q: SourceSemanticQuery;
-  h_descriptors: readonly SourceSemanticHDescriptor[];
-  produce: (descriptor: SourceSemanticHDescriptor) => SourceSemanticLibraryProduceResult;
+  admitted_query_semantics: SourceSemanticQuery;
+  source_interpretation_descriptors: readonly SourceInterpretationDescriptor[];
+  produce: (descriptor: SourceInterpretationDescriptor) => SourceSemanticLibraryProduceResult;
   cap?: number;
   producer_id: string;
   producer_version: string;
-  alignment_syntax?: typeof SOURCE_SEMANTIC_ALIGNMENT_CONTRACT | typeof SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT;
 }>;
 
 export type SourceSemanticLibraryPrepareResult = Readonly<{
-  alignments: readonly SourceSemanticAlignment[];
+  semantic_correspondences: readonly SourceSemanticCorrespondence[];
   outcomes: readonly SourceSemanticLibraryPrepareOutcome[];
   cache: Readonly<Record<string, SourceSemanticLibraryPrepareCacheEntry>>;
 }>;
 
-/** Cache key for one admitted Q and one H. Distinct H stay distinct. */
-export function sourceSemanticLibraryAlignmentCacheKey(q_id: string, h_id: string): string {
-  return `${q_id}:${h_id}`;
+/** Cache key for one admitted query semantics and one source interpretation. Distinct source interpretations stay distinct. */
+export function sourceSemanticLibraryCorrespondenceCacheKey(query_semantics_id: string, source_interpretation_id: string): string {
+  return `${query_semantics_id}:${source_interpretation_id}`;
 }
 
-/** Provider-free bounded A preparation. The caller supplies `produce`; this module never dispatches a provider. */
+/** Provider-free bounded semantic-correspondence preparation. The caller supplies `produce`; this module never dispatches a provider. */
 export function prepareSourceSemanticLibrary(
   input: SourceSemanticLibraryPrepareInput
 ): SourceSemanticLibraryPrepareResult {
   if (input.cap !== undefined && (!Number.isSafeInteger(input.cap) || input.cap < 0)) {
-    throw new Error("alignment preparation cap must be a nonnegative safe integer");
+    throw new Error("semantic_correspondence preparation cap must be a nonnegative safe integer");
   }
-  if (input.admitted_q.original_query_digest !== `sha256:${semanticSha256(input.original_query)}`) {
-    throw new Error("alignment preparation Q does not bind the original query");
+  if (input.admitted_query_semantics.original_query_digest !== `sha256:${semanticSha256(input.original_query)}`) {
+    throw new Error("semantic_correspondence preparation does not bind the original query");
   }
   const cap = Math.max(0, Math.min(
     input.cap ?? SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
     SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP
   ));
-  const q_id = sourceSemanticQueryIdentity(input.admitted_q, semanticSha256);
-  const alignments: SourceSemanticAlignment[] = [];
+  const query_semantics_id = sourceSemanticQueryIdentity(input.admitted_query_semantics, semanticSha256);
+  const semantic_correspondences: SourceSemanticCorrespondence[] = [];
   const outcomes: SourceSemanticLibraryPrepareOutcome[] = [];
   const cache: Record<string, SourceSemanticLibraryPrepareCacheEntry> = {};
-  for (const [index, descriptor] of input.h_descriptors.entries()) {
+  for (const [index, descriptor] of input.source_interpretation_descriptors.entries()) {
     if (index >= cap) {
-      outcomes.push({ h_id: descriptor.h_id, status: "unattempted" });
+      outcomes.push({ source_interpretation_id: descriptor.source_interpretation_id, status: "unattempted" });
       continue;
     }
     let produced: SourceSemanticLibraryProduceResult;
     try { produced = input.produce(descriptor); }
     catch (error) {
-      outcomes.push({ h_id: descriptor.h_id, status: "failed", outcome: { status: "transport_failure" },
+      outcomes.push({ source_interpretation_id: descriptor.source_interpretation_id, status: "failed", outcome: { status: "transport_failure" },
         diagnostic: error instanceof Error ? error.message.slice(0, 256) : "producer threw" });
       continue;
     }
     if ("status" in produced) {
-      outcomes.push({ h_id: descriptor.h_id, status: produced.status });
+      outcomes.push({ source_interpretation_id: descriptor.source_interpretation_id, status: produced.status });
       continue;
     }
-    let received: ReturnType<typeof proposeAlignmentSemantics>;
+    let received: ReturnType<typeof proposeCorrespondenceSemantics>;
     const rawJson = Buffer.from(produced.rawJson).subarray(0, MAX_SOURCE_SEMANTIC_RESPONSE_BYTES).toString("utf8");
-    try { received = proposeAlignmentSemantics({
+    try { received = proposeCorrespondenceSemantics({
       original_query: input.original_query,
-      admitted_q: input.admitted_q,
-      h_descriptors: [descriptor],
+      admitted_query_semantics: input.admitted_query_semantics,
+      source_interpretation_descriptors: [descriptor],
       producer_id: input.producer_id,
-      producer_version: input.producer_version,
-      ...(input.alignment_syntax === undefined ? {} : { alignment_syntax: input.alignment_syntax })
+      producer_version: input.producer_version
     }, { rawJson: produced.rawJson }); }
     catch (error) {
-      outcomes.push({ h_id: descriptor.h_id, status: "failed", rawJson, raw_truncated: rawJson !== produced.rawJson,
-        diagnostic: error instanceof Error ? error.message.slice(0, 256) : "alignment receiver failed" });
+      outcomes.push({ source_interpretation_id: descriptor.source_interpretation_id, status: "failed", rawJson, raw_truncated: rawJson !== produced.rawJson,
+        diagnostic: error instanceof Error ? error.message.slice(0, 256) : "semantic_correspondence receiver failed" });
       continue;
     }
-    if (received.outcome.status === "interpreted" && received.alignment !== undefined) {
-      alignments.push(received.alignment);
-      cache[sourceSemanticLibraryAlignmentCacheKey(q_id, descriptor.h_id)] = {
-        rawJson: produced.rawJson, alignment: received.alignment
+    if (received.outcome.status === "interpreted" && received.semantic_correspondence !== undefined) {
+      semantic_correspondences.push(received.semantic_correspondence);
+      cache[sourceSemanticLibraryCorrespondenceCacheKey(query_semantics_id, descriptor.source_interpretation_id)] = {
+        rawJson: produced.rawJson, semantic_correspondence: received.semantic_correspondence
       };
-      outcomes.push({ h_id: descriptor.h_id, status: "interpreted" });
+      outcomes.push({ source_interpretation_id: descriptor.source_interpretation_id, status: "interpreted" });
       continue;
     }
     outcomes.push({
-      h_id: descriptor.h_id,
+      source_interpretation_id: descriptor.source_interpretation_id,
       status: received.outcome.status === "invalid" ? "invalid"
-        : received.outcome.status === "abstained" ? "no_alignment" : "failed",
+        : received.outcome.status === "abstained" ? "no_correspondence" : "failed",
       outcome: received.outcome, rawJson, raw_truncated: rawJson !== produced.rawJson
     });
   }
-  return { alignments, outcomes, cache };
+  return { semantic_correspondences, outcomes, cache };
 }

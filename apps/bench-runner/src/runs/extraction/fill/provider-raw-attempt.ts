@@ -10,7 +10,7 @@ import { writeBytesExclusiveDurable } from "./manifest/durable-exclusive-publica
 import { BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES, BENCH_TERMINAL_RETRY_CLASSIFICATIONS,
   type BenchTransportFailureAttempt, type BenchTerminalRetryClassification } from "../../compile-seed/compile-seed-types.js";
 
-export const PROVIDER_RAW_ATTEMPT_CONTRACT = "provider-raw-attempt-v1" as const;
+export const PROVIDER_RAW_ATTEMPT_CONTRACT = "provider-raw-attempt-v2" as const;
 const MAX_RETAINED_RAW_BYTES = 1024 * 1024;
 const MAX_RECORD_BYTES = 2 * 1024 * 1024;
 
@@ -24,7 +24,7 @@ const ProviderRawAttemptSchema = z.object({
   contract: z.literal(PROVIDER_RAW_ATTEMPT_CONTRACT),
   cache_key: z.string().regex(/^[0-9a-f]{64}$/u),
   attempt_ordinal: z.number().int().positive(),
-  kind: z.enum(["query", "alignment", "source_semantic"]),
+  kind: z.enum(["query", "semantic_correspondence", "source_semantic"]),
   model: z.string().min(1),
   request_profile: z.string().min(1),
   request_digest: z.string().regex(/^[0-9a-f]{64}$/u),

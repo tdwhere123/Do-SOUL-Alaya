@@ -1,16 +1,16 @@
 import { expect, it } from "vitest";
 import { SourceSemanticInterpretationSchema, SourceSemanticQuerySchema, canonicalSourceSemanticDecimal,
-  compareSourceSemanticDecimals, sourceSemanticAlignmentIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
-import { finiteSource, finiteQuery, finiteAlignment, reasonFinite, FINITE_QUERY } from "./source-semantic-finite-fixture.js";
+  compareSourceSemanticDecimals, sourceSemanticCorrespondenceIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
+import { finiteSource, finiteQuery, finiteCorrespondence, reasonFinite, FINITE_QUERY } from "./source-semantic-finite-fixture.js";
 import { reasonSourceSemanticInterpretation } from "../../../recall/runtime/source-semantic-reasoning.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 
-it("instantiates declared members with rule, membership, binding and alignment leaves", () => {
+it("instantiates declared members with rule, membership, binding and semantic_correspondence leaves", () => {
   const result = reasonFinite(finiteSource());
   expect(result.outcome.status).toBe("interpreted");
   expect(result.answers?.map((row) => row.returned.actor!.node_id).sort()).toEqual(["rAlice", "rBob"]);
   expect(result.consumed_leaves.map((row) => row.leaf_kind)).toEqual(expect.arrayContaining([
-    "h_instantiation", "h_membership", "h_assertion_permission", "h_binding", "a_predicate", "a_slot"
+    "source_interpretation_instantiation", "source_interpretation_membership", "source_interpretation_assertion_permission", "source_interpretation_binding", "semantic_correspondence_predicate", "semantic_correspondence_slot"
   ]));
   expect(result.derived_nodes?.filter((row) => row.kind === "instantiation")).toHaveLength(2);
 });
@@ -29,7 +29,7 @@ it("requires distinct restriction evidence and preserves missing restriction as 
   const result = reasonFinite(restricted);
   expect(result.outcome.status).toBe("interpreted");
   expect(result.answers?.map((row) => row.returned.actor!.node_id)).toEqual(["rAlice"]);
-  expect(result.consumed_leaves).toEqual(expect.arrayContaining([expect.objectContaining({ leaf_kind: "h_restriction", occurrence: "eligibleAlice" })]));
+  expect(result.consumed_leaves).toEqual(expect.arrayContaining([expect.objectContaining({ leaf_kind: "source_interpretation_restriction", occurrence: "eligibleAlice" })]));
 });
 
 it("does not replace literal source assertion with universal entailment", () => {
@@ -72,15 +72,15 @@ it("instantiates forall-not only as a preserved negative proposition", () => {
   const result = reasonFinite(h, q);
   expect(result.outcome.status).toBe("interpreted");
   expect(result.answers?.map((row) => row.returned.actor!.node_id).sort()).toEqual(["rAlice", "rBob"]);
-  expect(result.consumed_leaves).toEqual(expect.arrayContaining([expect.objectContaining({ leaf_kind: "h_operator", value: "not" })]));
+  expect(result.consumed_leaves).toEqual(expect.arrayContaining([expect.objectContaining({ leaf_kind: "source_interpretation_operator", value: "not" })]));
 }, 15000);
 
 it("reports exhausted finite enumeration without returning an empty success", () => {
-  const h = finiteSource(), q = finiteQuery(), a = finiteAlignment(h, q);
-  const result = reasonSourceSemanticInterpretation({ h, q, a, original_query: FINITE_QUERY, workspaceId: "ws",
+  const h = finiteSource(), q = finiteQuery(), a = finiteCorrespondence(h, q);
+  const result = reasonSourceSemanticInterpretation({ source_interpretation: h, query_semantics: q, semantic_correspondence: a, original_query: FINITE_QUERY, workspaceId: "ws",
     scope: "project", authorizedScopes: ["project"], asOf: "2026-09-19T00:00:00.000Z",
-    request: { contract: "source-interpretation-reasoning-v3", accepts_unreviewed_conditional_results: true,
-      h_id: a.h_id, q_id: a.q_id, a_id: sourceSemanticAlignmentIdentity(a, fieldContractSha256), original_query: FINITE_QUERY,
+    request: { contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+      source_interpretation_id: a.source_interpretation_id, query_semantics_id: a.query_semantics_id, semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(a, fieldContractSha256), original_query: FINITE_QUERY,
       budget: { schema_version: 1, work_units: 1000, memory_bytes: 20000000, page_budget: 1, finalization_reserve: 10, min_envelope: 10 }, output_byte_limit: 1024 } });
   expect(result.outcome.status).toBe("resource_exhausted");
   expect(result.answers).toBeUndefined();
@@ -100,11 +100,11 @@ it("distinguishes closed finite, closed empty, and open empty universal evaluati
     .toMatchObject({ status: "unknown", vacuous: false, reasons: ["open_domain"] });
 });
 
-it("admits novel members only with a consumed conditional alignment assumption", () => {
+it("admits novel members only with a consumed conditional semantic_correspondence assumption", () => {
   const base = finiteSource(), h = { ...base, domains: base.domains!.map((row) => ({ ...row, closure: { kind: "open" as const } })) };
   const original = finiteQuery(), q = { ...original, variables: original.variables.map((row) => row.id === "actor"
     ? { ...row, reference: { kind: "query_text" as const, excerpt: "New" } } : row) };
-  const a = finiteAlignment(h, q);
+  const a = finiteCorrespondence(h, q);
   expect(reasonFinite(h, q, a).answers).toEqual([]);
   const result = reasonFinite(h, q, { ...a, membership_assumptions: [{ query_variable: "actor", source_domain: "users",
     restrictions: [], status: "member", query_support: { kind: "query_text", excerpt: "New" }, description: "Assume New belongs to users." }] });
@@ -112,7 +112,7 @@ it("admits novel members only with a consumed conditional alignment assumption",
   expect(result.answers).toHaveLength(1);
   expect(result.derived_nodes).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "query_entity", query_variable: "actor" })]));
   expect(result.derived_nodes?.every((row) => row.node_id.length <= 64)).toBe(true);
-  expect(result.consumed_leaves.some((row) => row.leaf_kind === "a_membership")).toBe(true);
+  expect(result.consumed_leaves.some((row) => row.leaf_kind === "semantic_correspondence_membership")).toBe(true);
 });
 
 it("keeps decimal equality exact and bounds unsupported magnitudes", () => {
@@ -143,7 +143,7 @@ it("delivers an explicit universal counterexample separately from missing body p
       { id: "qNot", variable: "negative", predicate_reading: "not", operator: "not", role_requirements: [] }, ...positive.alternatives[0]!.frames],
       context_obligations: [{ frame: "qNot", kind: "asserted_at_source" }, { frame: "qUse", kind: "explicit_embedded_structure",
         incidence: { kind: "operator_operand", other_frame: "qNot", role: "content" } }] }] };
-  const a = finiteAlignment(h, q);
+  const a = finiteCorrespondence(h, q);
   expect(SourceSemanticQuerySchema.safeParse({ ...q, alternatives: q.alternatives.map((row) => row.purpose !== "counterexample" ? row
     : { ...row, frames: row.frames.map((frame) => frame.id === "qUse" ? { ...frame, predicate_reading: "unrelated" } : frame) }) }).success).toBe(false);
   const result = reasonFinite(h, q, { ...a, correspondences: [...a.correspondences, ...a.correspondences.map((row) => ({ ...row,
@@ -154,7 +154,7 @@ it("delivers an explicit universal counterexample separately from missing body p
   expect(result.answers).toEqual([]);
   expect(result.evaluation?.status).toBe("refuted");
   expect(result.evaluation?.counterexample_explanation_ids.length).toBeGreaterThan(0);
-  expect(result.consumed_leaves).toEqual(expect.arrayContaining([expect.objectContaining({ leaf_kind: "h_operator", occurrence: "notBob", value: "not" })]));
+  expect(result.consumed_leaves).toEqual(expect.arrayContaining([expect.objectContaining({ leaf_kind: "source_interpretation_operator", occurrence: "notBob", value: "not" })]));
 }, 15000);
 
 it("rejects comparison branches whose frame constraints cannot be evaluated", () => {
@@ -163,7 +163,7 @@ it("rejects comparison branches whose frame constraints cannot be evaluated", ()
     operation: "minimum", left: "actor", strict: false, metric: "speed", unit: "ms", context: "lab", scope: "asserted" } }).success).toBe(false);
 });
 
-it("requires measurement metadata requested by Q and refuses conflicting operand assignments", () => {
+it("requires measurement metadata requested by query semantics and refuses conflicting operand assignments", () => {
   const h = finiteSource(), base = finiteQuery(true);
   const q: SourceSemanticQuery = { ...base, variables: [
     { id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } },
@@ -171,14 +171,14 @@ it("requires measurement metadata requested by Q and refuses conflicting operand
     alternatives: [{ frames: [], context_obligations: [] }], return_variables: ["actor", "tools"],
     evaluation: { kind: "comparison", domain: "people", operation: "eq", left: "actor", right: "tools",
       strict: false, metric: "speed", unit: "ms", context: "lab", scope: "asserted" } };
-  const a = { ...finiteAlignment(h, q), correspondences: [["actor", "Alice"], ["tools", "Bob"]].map(([variable, name]) => ({
+  const a = { ...finiteCorrespondence(h, q), correspondences: [["actor", "Alice"], ["tools", "Bob"]].map(([variable, name]) => ({
     relation: "contextual_equivalence" as const, query_endpoint: { kind: "referent" as const, variable: variable! },
     source_endpoint: { kind: "referent" as const, referent: `r${name}` },
     query_support: { kind: "query_text" as const, excerpt: name! }, source_semantic_support: [] })) };
   const equal = reasonFinite(h, q, a);
   expect(equal.outcome.status).toBe("interpreted");
   expect(equal.evaluation?.status).toBe("supported");
-  expect(equal.consumed_leaves.filter((row) => row.leaf_kind === "h_measurement").map((row) => row.measurement).sort()).toEqual(["valueAlice", "valueBob"]);
+  expect(equal.consumed_leaves.filter((row) => row.leaf_kind === "source_interpretation_measurement").map((row) => row.measurement).sort()).toEqual(["valueAlice", "valueBob"]);
   const wrongMetric = reasonFinite({ ...h, measurements: h.measurements!.map((row) => ({ ...row, metric: "weight" })) }, q, a);
   expect(wrongMetric.evaluation?.status).toBe("incomparable");
   expect(wrongMetric.answers).toEqual([]);

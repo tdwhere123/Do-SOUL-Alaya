@@ -1,8 +1,8 @@
 import { expect, it } from "vitest";
 import {
-  SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT, SourceSemanticAlignmentProducerBodySchema,
-  SourceSemanticAlignmentSelectionSchema, buildSourceSemanticAlignmentEndpointCatalog,
-  materializeSourceSemanticAlignmentSelection
+  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
+  SourceSemanticCorrespondenceSelectionSchema, buildSourceSemanticCorrespondenceEndpointCatalog,
+  materializeSourceSemanticCorrespondenceSelection
 } from "../../../recall/conditional-field/index.js";
 import type { SourceSemanticQuery } from "../../../recall/conditional-field/semantic-query.js";
 import type { SourceSemanticInterpretation } from "../../../garden/source-semantic-interpretation.js";
@@ -44,8 +44,8 @@ const interpretation = {
 } as unknown as SourceSemanticInterpretation;
 
 it("advertises named query referents, predicates, and slots without pairing or unresolved source referents", () => {
-  const catalog = buildSourceSemanticAlignmentEndpointCatalog(query, [
-    { h: "h1", interpretation }
+  const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(query, [
+    { source_interpretation_handle: "source1", interpretation }
   ]);
   expect(catalog.query_endpoints.map((row) => row.kind)).toEqual(["referent", "predicate", "slot"]);
   expect(catalog.query_endpoints.find((row) => row.kind === "referent")?.variable).toBe("bay");
@@ -56,30 +56,30 @@ it("advertises named query referents, predicates, and slots without pairing or u
 });
 
 it("materializes local selections into canonical correspondences and refuses unknown handles", () => {
-  const catalog = buildSourceSemanticAlignmentEndpointCatalog(query, [{ h: "h1", interpretation }]);
+  const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(query, [{ source_interpretation_handle: "source1", interpretation }]);
   const predicate = catalog.query_endpoints.find((row) => row.kind === "predicate")!;
   const frame = catalog.source_endpoints.find((row) => row.kind === "frame")!;
-  const alignment = materializeSourceSemanticAlignmentSelection({
-    contract: SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT,
-    h: "h1",
+  const semantic_correspondence = materializeSourceSemanticCorrespondenceSelection({
+    contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
+    source_interpretation_handle: "source1",
     selections: [{
       query: predicate.handle, source: frame.handle, query_excerpt: "accessioned",
       source_semantic_support: [{ kind: "lexical", mentions: ["mAccessioned"] }]
     }]
-  }, catalog, { h_id: digest, q_id: digest, producer_id: "ap", producer_version: "1" });
-  expect(alignment.correspondences[0]).toMatchObject({
+  }, catalog, { source_interpretation_id: digest, query_semantics_id: digest, producer_id: "ap", producer_version: "1" });
+  expect(semantic_correspondence.correspondences[0]).toMatchObject({
     relation: "contextual_equivalence",
     query_endpoint: { kind: "predicate", alternative: 0, frame: "qAccession" },
     source_endpoint: { kind: "frame", frame: "fAccession" }
   });
-  expect(() => materializeSourceSemanticAlignmentSelection({
-    contract: SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT,
+  expect(() => materializeSourceSemanticCorrespondenceSelection({
+    contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
     selections: [{ query: "qe9", source: frame.handle, query_excerpt: "accessioned", source_semantic_support: [] }]
-  }, catalog, { h_id: digest, q_id: digest, producer_id: "ap", producer_version: "1" }))
+  }, catalog, { source_interpretation_id: digest, query_semantics_id: digest, producer_id: "ap", producer_version: "1" }))
     .toThrow(/undeclared local reference/u);
 });
 
-it("keeps the legacy producer body on its own version and rejects selection fields there", () => {
+it("rejects legacy endpoint graphs at the catalog-selection boundary", () => {
   const body = {
     correspondences: [{
       relation: "contextual_equivalence" as const,
@@ -88,11 +88,7 @@ it("keeps the legacy producer body on its own version and rejects selection fiel
       query_support: { kind: "query_text" as const, excerpt: "accessioned" },
       source_semantic_support: []
     }],
-    h: "h1"
+    source_interpretation_handle: "source1"
   };
-  expect(SourceSemanticAlignmentProducerBodySchema.parse(body).h).toBe("h1");
-  expect(SourceSemanticAlignmentSelectionSchema.safeParse(body).success).toBe(false);
-  expect(SourceSemanticAlignmentProducerBodySchema.safeParse({
-    contract: SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT, selections: [], h: "h1"
-  }).success).toBe(false);
+  expect(SourceSemanticCorrespondenceSelectionSchema.safeParse(body).success).toBe(false);
 });

@@ -16,7 +16,7 @@ export const SOURCE_SEMANTIC_LIBRARY_RECALL = Object.freeze({
   page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
   scoring_k: 5,
   examination_cap: SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
-  h_page_size: 16,
+  source_interpretation_page_size: 16,
   result_kind_view: "mixed" as const,
   provider_calls: 0
 });

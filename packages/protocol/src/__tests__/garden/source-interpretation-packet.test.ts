@@ -50,10 +50,10 @@ it("recognizes only exact workspace and source record dependencies without faili
 
 it("does not permit a local interpretation coordinate to masquerade as a memory product", () => {
   const memory = memoryProductStateKey({ workspace_id: "workspace", object_id: "object", source_revision: "1",
-    program_state: "state", binding_context: "context", hypothesis_id: "H", time_state: "as_of" });
+    program_state: "state", binding_context: "context", hypothesis_id: "packet", time_state: "as_of" });
   expect(ProductStateKeySchema.safeParse(memory).success).toBe(true);
   expect(ProductStateKeySchema.safeParse({ ...memory,
-    interpretation_node: { packet_id: "H", hypothesis_id: "H", node_id: "node" } }).success).toBe(false);
+    interpretation_node: { packet_id: "packet", hypothesis_id: "packet", node_id: "node" } }).success).toBe(false);
 });
 
 it("keeps all admitted symbols queryable including maximum JSON escaping without widening the query contract", () => {

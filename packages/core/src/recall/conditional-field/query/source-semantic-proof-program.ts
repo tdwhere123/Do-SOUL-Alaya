@@ -45,17 +45,17 @@ export function semanticOwnerProof(h: SourceSemanticInterpretation, occurrence: 
     if ("operator" in parent && (parent.operator === "not" || parent.operator === "opaque"
       || parent.operator === "conditional" && edge.role === "antecedent")) return emptySemanticProgram;
     const next = `${variable}:owner${depth++}`;
-    forward.push(semanticRelation(key("h_content_inv", edge.kind, edge.role), current, next, meter));
-    if ("operator" in parent) forward.push(semanticRelation(key("h_operator", parent.operator), next, next, meter));
-    backward.unshift(semanticRelation(key("h_content", edge.kind, edge.role), next, current, meter));
+    forward.push(semanticRelation(key("source_interpretation_content_inverse", edge.kind, edge.role), current, next, meter));
+    if ("operator" in parent) forward.push(semanticRelation(key("source_interpretation_operator", parent.operator), next, next, meter));
+    backward.unshift(semanticRelation(key("source_interpretation_content", edge.kind, edge.role), next, current, meter));
     current = next; id = edge.from;
   }
-  return semanticSequence([...forward, semanticRelation(key("h_assertion_permission"), current, current, meter), ...backward]);
+  return semanticSequence([...forward, semanticRelation(key("source_interpretation_assertion_permission"), current, current, meter), ...backward]);
 }
 
 export function semanticInstanceProof(variable: string, population: SourceSemanticPremisePopulation,
   h: SourceSemanticInterpretation, meter: SourceSemanticResourceLedger, entailment = false): QueryProgram {
-  const options: QueryProgram[] = [semanticRelation(key(entailment ? "h_assertion_permission" : "h_original"), variable, variable, meter)];
+  const options: QueryProgram[] = [semanticRelation(key(entailment ? "source_interpretation_assertion_permission" : "source_interpretation_original"), variable, variable, meter)];
   let ordinal = 0;
   for (const [nodeId, instance] of population.instances) {
     meter.charge(1, 0, "instance proof alternatives");
@@ -64,9 +64,9 @@ export function semanticInstanceProof(variable: string, population: SourceSemant
     const rule = `@gate:${variable}:${ordinal}:rule`, evidence = `@gate:${variable}:${ordinal}:evidence`;
     const restrictionEvidence = `@gate:${variable}:${ordinal}:restriction`;
     ordinal++;
-    const steps = [semanticRelation(key("h_instance", nodeId), variable, variable, meter),
+    const steps = [semanticRelation(key("source_interpretation_instance", nodeId), variable, variable, meter),
       semanticRelation(key("instance_rule"), variable, rule, meter),
-      semanticRelation(key(entailment ? "h_assertion_permission" : "h_presence"), rule, rule, meter),
+      semanticRelation(key(entailment ? "source_interpretation_assertion_permission" : "source_interpretation_presence"), rule, rule, meter),
       semanticRelation(key("instance_rule_inv"), rule, variable, meter)];
     if (instance.assumption !== undefined) steps.push(semanticRelation(key("instance_assumption"), variable, variable, meter));
     if (instance.evidence !== undefined) steps.push(

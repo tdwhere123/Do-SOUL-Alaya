@@ -1,5 +1,5 @@
-import { sourceSemanticAlignmentIdentity, sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
-  type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticAlignment } from "@do-soul/alaya-protocol";
+import { sourceSemanticCorrespondenceIdentity, sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
+  type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticCorrespondence } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 as sha } from "../../../shared/field-hash.js";
 import { reasonSourceSemanticInterpretation } from "../../../recall/runtime/source-semantic-reasoning.js";
 import { source, event, query, align, CLOCK } from "./source-semantic-proof-fixture.js";
@@ -34,7 +34,7 @@ export function finiteQuery(exhaustive = false): SourceSemanticQuery {
       evaluation: { kind: "forall" as const, domain: "people", binder: "actor", local_variables: ["actor", "tools", "use"] } } : {}) };
 }
 
-export function finiteAlignment(h: SourceSemanticInterpretation, q: SourceSemanticQuery): SourceSemanticAlignment {
+export function finiteCorrespondence(h: SourceSemanticInterpretation, q: SourceSemanticQuery): SourceSemanticCorrespondence {
   const a = align(h, q, false);
   return { ...a, correspondences: a.correspondences.filter((row) => row.source_endpoint.kind !== "frame"
     && row.source_endpoint.kind !== "slot" || row.source_endpoint.frame === "fAlice"),
@@ -43,11 +43,11 @@ export function finiteAlignment(h: SourceSemanticInterpretation, q: SourceSemant
       source_semantic_support: [{ kind: "lexical" as const, mentions: ["mAlice"] }] }] }) };
 }
 
-export function reasonFinite(h: SourceSemanticInterpretation, q = finiteQuery(), a = finiteAlignment(h, q)) {
-  const aligned = { ...a, h_id: sourceSemanticInterpretationIdentity(h, sha), q_id: sourceSemanticQueryIdentity(q, sha) };
-  return reasonSourceSemanticInterpretation({ h, q, a: aligned, workspaceId: "ws", scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
-    request: { contract: "source-interpretation-reasoning-v3", accepts_unreviewed_conditional_results: true,
-      h_id: aligned.h_id, q_id: aligned.q_id, a_id: sourceSemanticAlignmentIdentity(aligned, sha), original_query: FINITE_QUERY,
+export function reasonFinite(h: SourceSemanticInterpretation, q = finiteQuery(), a = finiteCorrespondence(h, q)) {
+  const aligned = { ...a, source_interpretation_id: sourceSemanticInterpretationIdentity(h, sha), query_semantics_id: sourceSemanticQueryIdentity(q, sha) };
+  return reasonSourceSemanticInterpretation({ source_interpretation: h, query_semantics: q, semantic_correspondence: aligned, workspaceId: "ws", scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
+    request: { contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+      source_interpretation_id: aligned.source_interpretation_id, query_semantics_id: aligned.query_semantics_id, semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(aligned, sha), original_query: FINITE_QUERY,
       budget: { schema_version: 1, work_units: 10000000, memory_bytes: 60000000,
         page_budget: 10000, finalization_reserve: 50000, min_envelope: 10 }, output_byte_limit: 1000000 } });
 }

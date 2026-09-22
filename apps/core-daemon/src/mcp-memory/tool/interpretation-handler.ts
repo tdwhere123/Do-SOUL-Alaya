@@ -7,7 +7,10 @@ import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import { ToolUnavailableError, ToolValidationError } from "./tool-handler-support.js";
 import type { McpMemoryToolCallContext } from "./tool-handler-types.js";
 
-const IDLE = { discovery: "unexercised", h: "unexercised", q: "unexercised", a: "unexercised", computation: "unexercised", payload: "complete" } as const;
+const IDLE = {
+  discovery: "unexercised", source_interpretation: "unexercised", query_semantics: "unexercised",
+  semantic_correspondence: "unexercised", conditional_computation: "unexercised", payload: "complete"
+} as const;
 const ZERO_WORK = { native_work: 0, native_bytes: 0, logical_memory_bytes: 0, rss_bytes: 0 } as const;
 const DEFAULT_BUDGET: RequestBudget = { schema_version: 1, work_units: 200000, memory_bytes: 20000000,
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 };
@@ -32,16 +35,16 @@ export function createSourceSemanticInterpretationHandler(input: Dependencies):
   return async (request, context) => {
     throwIfAborted(context.abortSignal);
     if (request.operation === "propose") return propose(input, request, context);
-    if (request.operation === "reason" && (request.a === undefined || request.query_handle === undefined &&
-        (request.h_id === undefined || request.q === undefined || request.original_query === undefined))) {
+    if (request.operation === "reason" && (request.semantic_correspondence === undefined || request.query_handle === undefined &&
+        (request.source_interpretation_id === undefined || request.query_semantics === undefined || request.original_query === undefined))) {
       return SoulInterpretationResponseSchema.parse({ operation: "reason",
-        outcome: { status: "preparation_required", missing: request.a === undefined ? request.q === undefined && request.query_handle === undefined ? "q_and_a" : "a" : "q" },
+        outcome: { status: "preparation_required", missing: request.semantic_correspondence === undefined ? request.query_semantics === undefined && request.query_handle === undefined ? "query_semantics_and_correspondence" : "semantic_correspondence" : "query_semantics" },
         coverage: IDLE, work: ZERO_WORK, provider_attempts: 0 });
     }
     if (request.operation === "recall" && request.query_handle === undefined &&
-        (request.q === undefined || request.original_query === undefined)) {
+        (request.query_semantics === undefined || request.original_query === undefined)) {
       return SoulInterpretationResponseSchema.parse({ operation: "recall",
-        outcome: { status: "preparation_required", missing: "q" },
+        outcome: { status: "preparation_required", missing: "query_semantics" },
         coverage: IDLE, work: ZERO_WORK, provider_attempts: 0 });
     }
     const { operation, authorized_scopes, ...rest } = request;
@@ -91,7 +94,7 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
       const outcome = verifySourceSemanticDisposition(request.disposition, prepared.catalog, fieldContractSha256);
       return SoulInterpretationResponseSchema.parse({ operation: "propose", outcome, semantic_status: "unreviewed",
         source_binding: { source_id: prepared.source_id, source_version: prepared.source_version, content_digest: prepared.content_digest },
-        coverage: { ...IDLE, discovery: "complete", h: "open" }, work: { ...prepared.work, logical_work: preparedWork.logical_work + meter.spentWork, logical_memory_bytes: prepared.work.logical_memory_bytes + meter.spentBytes }, provider_attempts: 0 });
+        coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" }, work: { ...prepared.work, logical_work: preparedWork.logical_work + meter.spentWork, logical_memory_bytes: prepared.work.logical_memory_bytes + meter.spentBytes }, provider_attempts: 0 });
     }
     const usedWork = prepared.work.logical_work ?? prepared.work.native_work;
     const remaining = { ...budget, work_units: budget.work_units - usedWork,
@@ -103,7 +106,7 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
       draft: request.draft, producer_version: request.producer_version, contract_version: request.contract_version });
     return SoulInterpretationResponseSchema.parse({ operation: "propose",
       outcome: { status: "interpreted", gaps: published.bound.interpretation.gaps }, published: published.bound,
-      evidence_object_id: published.evidence.object_id, coverage: { ...IDLE, discovery: "complete", h: "open" },
+      evidence_object_id: published.evidence.object_id, coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" },
       work: { ...prepared.work, native_work: prepared.work.native_work + (published.resource_usage?.native_work ?? 0),
         native_bytes: prepared.work.native_bytes + (published.resource_usage?.native_bytes ?? 0), logical_work: usedWork + (published.resource_usage?.work_units ?? 0),
         logical_memory_bytes: prepared.work.logical_memory_bytes + (published.resource_usage?.memory_bytes ?? 0) }, provider_attempts: 0 });

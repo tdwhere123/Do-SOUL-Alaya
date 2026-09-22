@@ -1,3 +1,4 @@
+import { authoredQuerySemantics, receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,18 +6,18 @@ import { expect, it } from "vitest";
 import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, hashLabeledIdentity,
   type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
-  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT
 } from "@do-soul/alaya-protocol";
 import {
   admitSourceSemanticQuery, createAuditedSourceAdmission,
   createSourceSemanticInterpretationPublication, EvidenceService, fieldContractSha256,
-  SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
+  SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
   sourceGoldRootIdentity
 } from "@do-soul/alaya-core";
 import {
   closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteFieldEraseBarrierRepo
 } from "@do-soul/alaya-storage";
-import { proposeAlignmentSemantics, proposeQuerySemantics, proposeSourceSemantics } from "@do-soul/alaya-soul";
+import { proposeCorrespondenceSemantics, proposeQuerySemantics, proposeSourceSemantics } from "@do-soul/alaya-soul";
 import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
@@ -27,7 +28,7 @@ import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
-import { finiteSource, finiteQuery, finiteAlignment, FINITE_QUERY }
+import { finiteSource, finiteQuery, finiteCorrespondence, FINITE_QUERY }
   from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-finite-fixture.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import {
@@ -146,12 +147,7 @@ function existentialBody() {
 }
 
 function receiveQ(original: string, body: object) {
-  const received = proposeQuerySemantics({
-    original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1",
-    query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT,
-  }, {
-    rawJson: JSON.stringify({ contract: "source-semantic-query-response-v2", outcome: { status: "interpreted" }, query: body })
-  });
+  const received = authoredQuerySemantics({ original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" }, body);
   if (received.outcome.status !== "interpreted" || received.query === undefined) {
     throw new Error(`query receive failed: ${JSON.stringify(received.outcome)}`);
   }
@@ -160,26 +156,26 @@ function receiveQ(original: string, body: object) {
 
 function mention(h: SourceSemanticInterpretation, text: string) {
   const row = h.mentions.find((item) => item.text === text);
-  if (row === undefined) throw new Error(`H lacks mention ${text}: ${h.mentions.map((item) => item.text).join(",")}`);
+  if (row === undefined) throw new Error(`source interpretation lacks mention ${text}: ${h.mentions.map((item) => item.text).join(",")}`);
   return row;
 }
 
 function frameOf(h: SourceSemanticInterpretation, reading: string) {
   const row = h.frames.find((item) => item.predicate_support.reading === reading);
-  if (row === undefined) throw new Error(`H lacks frame ${reading}`);
+  if (row === undefined) throw new Error(`source interpretation lacks frame ${reading}`);
   return row;
 }
 
 function slotOf(h: SourceSemanticInterpretation, reading: string, role: string) {
   const row = frameOf(h, reading).slots.find((item) => item.role_reading === role);
-  if (row === undefined) throw new Error(`H lacks ${role} on ${reading}`);
+  if (row === undefined) throw new Error(`source interpretation lacks ${role} on ${reading}`);
   return row;
 }
 
 function referentOf(h: SourceSemanticInterpretation, text: string) {
   const id = mention(h, text).id;
   const row = h.referents.find((item) => item.mentions.includes(id));
-  if (row === undefined) throw new Error(`H lacks referent for ${text}`);
+  if (row === undefined) throw new Error(`source interpretation lacks referent for ${text}`);
   return row;
 }
 
@@ -217,21 +213,11 @@ function withoutNecessaryAgentBinding(
 }
 
 function receiveA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, hId: string, extra: { correspondences?: unknown; domains?: unknown } = {}, original_query = ORIGINAL) {
-  const received = proposeAlignmentSemantics({ original_query,
-    admitted_q: q, h_descriptors: [{ h_id: hId, interpretation: h }],
-    producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1",
-    alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
-  }, {
-    rawJson: JSON.stringify({
-      contract: "source-semantic-alignment-response-v2",
-      outcome: { status: "interpreted", gaps: [] },
-      alignment: { correspondences: extra.correspondences ?? useCorrespondences(h), ...extra }
-    })
-  });
-  if (received.outcome.status !== "interpreted" || received.alignment === undefined) {
-    throw new Error(`alignment receive failed: ${JSON.stringify(received.outcome)}`);
+  const received = receiveAuthoredCorrespondence({ original_query, admitted_query_semantics: q, source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }], producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, { correspondences: extra.correspondences ?? useCorrespondences(h), ...extra }, { status: "interpreted", gaps: [] });
+  if (received.outcome.status !== "interpreted" || received.semantic_correspondence === undefined) {
+    throw new Error(`semantic_correspondence receive failed: ${JSON.stringify(received.outcome)}`);
   }
-  return { ...received, alignment: received.alignment };
+  return { ...received, semantic_correspondence: received.semantic_correspondence };
 }
 
 async function admitSources(filename: string, sources: readonly { id: string; content: string; version?: string; recordedAt?: string }[]) {
@@ -311,9 +297,9 @@ async function proposeDraft(handler: Handler, context: Context, sourceHandle: st
   return output.published;
 }
 
-function queryHandleRecall(handler: Handler, context: Context, original: string, q: SourceSemanticQuery, alignments: object[], budget = BUDGET) {
+function queryHandleRecall(handler: Handler, context: Context, original: string, q: SourceSemanticQuery, semantic_correspondences: object[], budget = BUDGET) {
   return callInterpretation(handler, {
-    operation: "recall", accepts_unreviewed_conditional_results: true, original_query: original, q, alignments,
+    operation: "recall", accepts_unreviewed_conditional_results: true, original_query: original, query_semantics: q, semantic_correspondences,
     budget, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
   }, context);
 }
@@ -342,16 +328,16 @@ it("preserves positive finite-domain and measured-comparison proofs through publ
       const base = finiteQuery(true);
       const { variables, alternatives, return_variables, gaps, domains, evaluation } = base;
       const q = receiveQ(FINITE_QUERY, { variables, alternatives, return_variables, gaps, domains, evaluation }).query;
-      const a = finiteAlignment(published!.interpretation, q);
+      const a = finiteCorrespondence(published!.interpretation, q);
       const aligned = receiveA(q, published!.interpretation, published!.interpretation_id,
         { correspondences: a.correspondences, domains: a.domains }, FINITE_QUERY);
-      const forall = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, q, [aligned.alignment], budget);
+      const forall = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, q, [aligned.semantic_correspondence], budget);
       if (forall.operation !== "recall") throw new Error("native forall recall required");
       expect(forall.provider_attempts).toBe(0);
       expect(forall.proofs).toHaveLength(1);
       expect(forall.proofs![0]!.evaluation).toMatchObject({ status: "supported", vacuous: false });
       expect(forall.proofs![0]!.consumed_leaves.map((row) => row.leaf_kind)).toEqual(expect.arrayContaining([
-        "h_membership", "h_instantiation", "a_domain"
+        "source_interpretation_membership", "source_interpretation_instantiation", "semantic_correspondence_domain"
       ]));
       const comparison = receiveQ(FINITE_QUERY, { variables: [
         { id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } },
@@ -366,11 +352,11 @@ it("preserves positive finite-domain and measured-comparison proofs through publ
           query_support: { kind: "query_text", excerpt: name }, source_semantic_support: []
         }))
       }, FINITE_QUERY);
-      const compared = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, comparison, [comparisonA.alignment], budget);
+      const compared = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, comparison, [comparisonA.semantic_correspondence], budget);
       if (compared.operation !== "recall") throw new Error("native comparison recall required");
       expect(compared.proofs).toHaveLength(1);
       expect(compared.proofs![0]!.evaluation).toMatchObject({ status: "supported" });
-      expect(compared.proofs![0]!.consumed_leaves.filter((row) => row.leaf_kind === "h_measurement")
+      expect(compared.proofs![0]!.consumed_leaves.filter((row) => row.leaf_kind === "source_interpretation_measurement")
         .map((row) => row.measurement).sort()).toEqual(["valueAlice", "valueBob"]);
       const withdrawn = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, comparison, [], budget);
       if (withdrawn.operation !== "recall") throw new Error("native source fallback required");
@@ -381,7 +367,7 @@ it("preserves positive finite-domain and measured-comparison proofs through publ
   } finally { await rm(directory, { recursive: true, force: true }); }
 }, 60000);
 
-it("preserves compact H and receiver Q/A through publish, reopen, MCP recall and first exposure", async () => {
+it("preserves compact source interpretation and receiver query semantics and semantic correspondence through publish, reopen, MCP recall and first exposure", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-native-chain-"));
   const filename = join(directory, "alaya.db");
   const started = Date.now();
@@ -410,23 +396,23 @@ it("preserves compact H and receiver Q/A through publish, reopen, MCP recall and
         const admittedQ = admitSourceSemanticQuery(receivedQ.query, ORIGINAL);
         expect(admittedQ.kind).toBe("admitted");
         const preparedQuery = await callInterpretation(reopened.handler, {
-          operation: "prepare_query", original_query: ORIGINAL, q: receivedQ.query, budget: BUDGET, authorized_scopes: SCOPES
+          operation: "prepare_query", original_query: ORIGINAL, query_semantics: receivedQ.query, budget: BUDGET, authorized_scopes: SCOPES
         }, reopened.context);
         if (preparedQuery.operation !== "prepare_query") throw new Error("prepare_query expected");
         expect(preparedQuery.provider_attempts).toBe(0);
         expect(preparedQuery.candidates.some((row) => row.interpretation_id === hId)).toBe(true);
         const receivedA = receiveA(receivedQ.query, published.interpretation, hId);
-        expect(receivedA.alignment.h_id).toBe(hId);
-        expect(receivedA.alignment.q_id).toBe(admittedQ.kind === "admitted" ? admittedQ.query_id : "");
+        expect(receivedA.semantic_correspondence.source_interpretation_id).toBe(hId);
+        expect(receivedA.semantic_correspondence.query_semantics_id).toBe(admittedQ.kind === "admitted" ? admittedQ.query_id : "");
         const wallStart = Date.now();
-        const recalled = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQ.query, [receivedA.alignment]);
+        const recalled = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQ.query, [receivedA.semantic_correspondence]);
         const wallMs = Date.now() - wallStart;
         const mcp = await callAlayaMcpMemoryTool(
           { memoryToolHandler: reopened.handler, contextProvider: () => reopened.context },
           "soul.interpretation",
           SoulInterpretationRequestSchema.parse({
             operation: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
-            q: receivedQ.query, alignments: [receivedA.alignment], budget: BUDGET, output_byte_limit: 1_000_000,
+            query_semantics: receivedQ.query, semantic_correspondences: [receivedA.semantic_correspondence], budget: BUDGET, output_byte_limit: 1_000_000,
             authorized_scopes: SCOPES
           })
         );
@@ -435,12 +421,12 @@ it("preserves compact H and receiver Q/A through publish, reopen, MCP recall and
         expect((mcp.structuredContent as { output: { operation: string } }).output.operation).toBe("recall");
         expect(recalled.discovery?.eligible_source_count).toBeGreaterThanOrEqual(2);
         expect(recalled.order?.enumeration_policy).toBe("canonical");
-        expect(recalled.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof" && row.h_id === hId)).toBe(true);
-        const proof = recalled.proofs?.find((row) => row.h_id === hId);
-        expect(proof?.consumed_leaves.some((row) => row.leaf_kind === "h_binding")).toBe(true);
+        expect(recalled.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === hId)).toBe(true);
+        const proof = recalled.proofs?.find((row) => row.source_interpretation_id === hId);
+        expect(proof?.consumed_leaves.some((row) => row.leaf_kind === "source_interpretation_binding")).toBe(true);
         expect(proof?.world_claim).toBe("unknown");
         const search = soulSearchFromLibraryRecall(recalled);
-        const goldSlot = recalled.slot_qualifiers?.find((row) => row.evidence_kind === "semantic_proof" && row.h_id === hId);
+        const goldSlot = recalled.slot_qualifiers?.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === hId);
         expect(goldSlot).toBeDefined();
         expect(search.results.some((row) => row.content_preview?.includes("Alice uses tools."))).toBe(true);
         expect(search.results.some((row) => row.content_preview?.includes(SILENT) && row.object_kind === "source_evidence")).toBe(true);
@@ -508,7 +494,8 @@ it("preserves compact H and receiver Q/A through publish, reopen, MCP recall and
         if (compared.operation !== "recall") throw new Error("comparison recall expected");
         expect(compared.provider_attempts).toBe(0);
         expect(compared.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof")).toBe(false);
-        expect(compared.coverage?.computation).not.toBe("unexercised");
+        expect(compared.coverage?.conditional_computation).toBe("open");
+        expect(compared.coverage?.semantic_correspondence).toBe("unexercised");
 
         const withoutA = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQ.query, []);
         if (withoutA.operation !== "recall") throw new Error("A-absent recall expected");
@@ -544,7 +531,7 @@ it("discovers a compact-published interpretation after the first descriptor page
       try {
         const receivedQ = receiveQ(ORIGINAL, existentialBody());
         const preparedQuery = await callInterpretation(reopened.handler, {
-          operation: "prepare_query", original_query: ORIGINAL, q: receivedQ.query, budget: BUDGET, authorized_scopes: SCOPES
+          operation: "prepare_query", original_query: ORIGINAL, query_semantics: receivedQ.query, budget: BUDGET, authorized_scopes: SCOPES
         }, reopened.context);
         if (preparedQuery.operation !== "prepare_query") throw new Error("prepare_query expected");
         expect(preparedQuery.candidates.length).toBe(16);
@@ -552,7 +539,7 @@ it("discovers a compact-published interpretation after the first descriptor page
         const gold = ids.find((id) => !preparedQuery.candidates.some((row) => row.interpretation_id === id));
         expect(gold).toBeDefined();
         const goldH = (await callInterpretation(reopened.handler, {
-          operation: "prepare_query", original_query: ORIGINAL, q: receivedQ.query, budget: BUDGET, authorized_scopes: SCOPES,
+          operation: "prepare_query", original_query: ORIGINAL, query_semantics: receivedQ.query, budget: BUDGET, authorized_scopes: SCOPES,
           continuation_handle: preparedQuery.continuation_handle
         }, reopened.context));
         const descriptor = goldH.operation === "prepare_query"
@@ -560,14 +547,14 @@ it("discovers a compact-published interpretation after the first descriptor page
           : undefined;
         const interpretation = descriptor?.interpretation ?? receivedH.interpretation;
         const receivedA = receiveA(receivedQ.query, interpretation, gold!);
-        const recalled = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQ.query, [receivedA.alignment]);
+        const recalled = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQ.query, [receivedA.semantic_correspondence]);
         if (recalled.operation !== "recall") throw new Error("library recall expected");
-        expect(recalled.discovery?.visited_h_pages).toBeGreaterThanOrEqual(2);
-        expect(recalled.discovery?.visited_h_descriptors).toBeGreaterThan(16);
-        expect(recalled.discovery?.examined_h_ids).toContain(gold);
-        expect(recalled.discovery?.examined_h_ids).toHaveLength(1);
-        expect(recalled.discovery?.unexamined_h_count).toBeGreaterThan(0);
-        expect(recalled.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof" && row.h_id === gold)).toBe(true);
+        expect(recalled.discovery?.visited_source_interpretation_pages).toBeGreaterThanOrEqual(2);
+        expect(recalled.discovery?.visited_source_interpretation_descriptors).toBeGreaterThan(16);
+        expect(recalled.discovery?.examined_source_interpretation_ids).toContain(gold);
+        expect(recalled.discovery?.examined_source_interpretation_ids).toHaveLength(1);
+        expect(recalled.discovery?.unexamined_source_interpretation_count).toBeGreaterThan(0);
+        expect(recalled.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === gold)).toBe(true);
       } finally {
         await closeSession(reopened, filename);
       }
@@ -612,15 +599,7 @@ it("retrieves promised source evidence without minting a completed-event proof",
           gaps: []
         });
         const sendFrame = frameOf(published.interpretation, "send");
-        const receivedA = proposeAlignmentSemantics({ original_query: SENT,
-          admitted_q: sendQ.query, h_descriptors: [{ h_id: published.interpretation_id, interpretation: published.interpretation }],
-          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1",
-          alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
-        }, {
-          rawJson: JSON.stringify({
-            contract: "source-semantic-alignment-response-v2",
-            outcome: { status: "interpreted", gaps: [] },
-            alignment: {
+        const receivedA = receiveAuthoredCorrespondence({ original_query: SENT, admitted_query_semantics: sendQ.query, source_interpretation_descriptors: [{ source_interpretation_id: published.interpretation_id, interpretation: published.interpretation }], producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, {
               correspondences: [
                 { relation: "contextual_equivalence", query_endpoint: { kind: "predicate", alternative: 0, frame: "qSend" },
                   source_endpoint: { kind: "frame", frame: sendFrame.id },
@@ -631,11 +610,9 @@ it("retrieves promised source evidence without minting a completed-event proof",
                   query_support: { kind: "query_text", excerpt: "tools" },
                   source_semantic_support: [{ kind: "lexical", mentions: [mention(published.interpretation, "tools").id] }] }
               ]
-            }
-          })
-        });
-        expect(receivedA.alignment).toBeDefined();
-        const recalled = await queryHandleRecall(reopened.handler, reopened.context, SENT, sendQ.query, [receivedA.alignment!]);
+            }, { status: "interpreted", gaps: [] });
+        expect(receivedA.semantic_correspondence).toBeDefined();
+        const recalled = await queryHandleRecall(reopened.handler, reopened.context, SENT, sendQ.query, [receivedA.semantic_correspondence!]);
         if (recalled.operation !== "recall") throw new Error("library recall expected");
         expect(recalled.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof")).toBe(false);
         expect(soulSearchFromLibraryRecall(recalled).results.some((row) => row.content_preview?.includes("promised"))).toBe(true);
@@ -650,7 +627,7 @@ it("retrieves promised source evidence without minting a completed-event proof",
   }
 }, 60000);
 
-it("drops only dependent proof when a necessary H binding is withdrawn and isolates same-name entities", async () => {
+it("drops only dependent proof when a necessary source interpretation binding is withdrawn and isolates same-name entities", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-native-identity-"));
   const filename = join(directory, "alaya.db");
   try {
@@ -690,16 +667,16 @@ it("drops only dependent proof when a necessary H binding is withdrawn and isola
         const receivedQ = receiveQ(ORIGINAL, existentialBody());
         const withBinding = receiveA(receivedQ.query, published.interpretation, published.interpretation_id);
         const recalled = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQ.query, [
-          withBinding.alignment
+          withBinding.semantic_correspondence
         ]);
         const ablated = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQ.query, [
-          receiveA(receivedQ.query, withdrawn.interpretation, withdrawn.interpretation_id).alignment
+          receiveA(receivedQ.query, withdrawn.interpretation, withdrawn.interpretation_id).semantic_correspondence
         ]);
         if (recalled.operation !== "recall" || ablated.operation !== "recall") throw new Error("library recall expected");
-        expect(recalled.slot_qualifiers?.some((row) => row.h_id === published.interpretation_id)).toBe(true);
+        expect(recalled.slot_qualifiers?.some((row) => row.source_interpretation_id === published.interpretation_id)).toBe(true);
         expect(ablated.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof")).toBe(false);
         expect(soulSearchFromLibraryRecall(ablated).results.some((row) => row.target.kind === "source_evidence" && row.target.root_id === published.source_target.root_id)).toBe(true);
-        expect(recalled.slot_qualifiers?.some((row) => row.h_id === publishedOther.interpretation_id)).toBe(false);
+        expect(recalled.slot_qualifiers?.some((row) => row.source_interpretation_id === publishedOther.interpretation_id)).toBe(false);
         expect(soulSearchFromLibraryRecall(recalled).results.some((row) => row.content_preview?.includes("stays home"))).toBe(true);
       } finally {
         await closeSession(reopened, filename);
@@ -728,7 +705,7 @@ it("keeps a failed source available, records nested-binder gaps, and truncates h
       try {
         const receivedQ = receiveQ(ORIGINAL, existentialBody());
         const receivedA = receiveA(receivedQ.query, published.interpretation, published.interpretation_id);
-        const full = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQ.query, [receivedA.alignment]);
+        const full = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQ.query, [receivedA.semantic_correspondence]);
         if (full.operation !== "recall") throw new Error("full recall expected");
         expect(soulSearchFromLibraryRecall(full).results.some((row) => row.content_preview?.includes(SILENT))).toBe(true);
         const execute = reopened.client.sourceSemanticsPort!.execute;
@@ -736,7 +713,7 @@ it("keeps a failed source available, records nested-binder gaps, and truncates h
           workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES,
           request: {
             kind: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
-            q: receivedQ.query, alignments: [receivedA.alignment], budget: BUDGET, output_byte_limit: 1_000_000
+            query_semantics: receivedQ.query, semantic_correspondences: [receivedA.semantic_correspondence], budget: BUDGET, output_byte_limit: 1_000_000
           }
         });
         const workerBytes = Buffer.byteLength(JSON.stringify(workerFull));
@@ -744,13 +721,13 @@ it("keeps a failed source available, records nested-binder gaps, and truncates h
           workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES,
           request: {
             kind: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
-            q: receivedQ.query, alignments: [receivedA.alignment], budget: BUDGET,
+            query_semantics: receivedQ.query, semantic_correspondences: [receivedA.semantic_correspondence], budget: BUDGET,
             output_byte_limit: Math.max(1024, workerBytes - 1)
           }
         });
         expect(workerLimited.kind).toBe("recall");
         if (workerLimited.kind !== "recall") throw new Error("limited worker recall expected");
-        expect(workerLimited.coverage.payload === "truncated" || workerLimited.coverage.computation === "open").toBe(true);
+        expect(workerLimited.coverage.payload === "truncated" || workerLimited.coverage.conditional_computation === "open").toBe(true);
         expect(soulSearchFromLibraryRecall(workerLimited).results.some((row) => row.object_kind === "memory_entry")).toBe(false);
         expect(full.provider_attempts).toBe(0);
       } finally {
@@ -773,14 +750,14 @@ it("invalidates stale results after source update and recovers a pre-failure cop
     const session = await openSession(filename);
     let hId = "";
     let q: SourceSemanticQuery | undefined;
-    let alignment: object | undefined;
+    let semantic_correspondence: object | undefined;
     try {
       const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
       const receivedH = receiveH(ALICE, "artifact-alice", compactUse(prepared.catalog));
       const published = await proposeDraft(session.handler, session.context, prepared.source_handle, receivedH.draft, "p1");
       hId = published.interpretation_id;
       q = receiveQ(ORIGINAL, existentialBody()).query;
-      alignment = receiveA(q, published.interpretation, hId).alignment;
+      semantic_correspondence = receiveA(q, published.interpretation, hId).semantic_correspondence;
       await closeSession(session, filename);
       await copyFile(filename, backup);
       for (const suffix of ["-wal", "-shm"]) {
@@ -794,17 +771,17 @@ it("invalidates stale results after source update and recovers a pre-failure cop
     ]);
     const updated = await openSession(filename);
     try {
-      const stale = await queryHandleRecall(updated.handler, updated.context, ORIGINAL, q!, [alignment!]);
+      const stale = await queryHandleRecall(updated.handler, updated.context, ORIGINAL, q!, [semantic_correspondence!]);
       if (stale.operation !== "recall") throw new Error("updated recall expected");
-      expect(stale.slot_qualifiers?.some((row) => row.h_id === hId)).toBe(false);
+      expect(stale.slot_qualifiers?.some((row) => row.source_interpretation_id === hId)).toBe(false);
     } finally {
       await closeSession(updated, filename);
     }
     const recovered = await openSession(backup);
     try {
-      const replay = await queryHandleRecall(recovered.handler, recovered.context, ORIGINAL, q!, [alignment!]);
+      const replay = await queryHandleRecall(recovered.handler, recovered.context, ORIGINAL, q!, [semantic_correspondence!]);
       if (replay.operation !== "recall") throw new Error("recovered recall expected");
-      expect(replay.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof" && row.h_id === hId)).toBe(true);
+      expect(replay.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === hId)).toBe(true);
     } finally {
       await closeSession(recovered, backup);
     }
@@ -822,9 +799,9 @@ it("invalidates stale results after source update and recovers a pre-failure cop
     }
     const erased = await openSession(backup);
     try {
-      const afterErase = await queryHandleRecall(erased.handler, erased.context, ORIGINAL, q!, [alignment!]);
+      const afterErase = await queryHandleRecall(erased.handler, erased.context, ORIGINAL, q!, [semantic_correspondence!]);
       if (afterErase.operation !== "recall") throw new Error("erased recall expected");
-      expect(afterErase.slot_qualifiers?.some((row) => row.h_id === hId)).toBe(false);
+      expect(afterErase.slot_qualifiers?.some((row) => row.source_interpretation_id === hId)).toBe(false);
       expect(soulSearchFromLibraryRecall(afterErase).results.some((row) => row.target.kind === "source_evidence"
         && sourceGoldRootIdentity(row.target).includes("artifact-alice"))).toBe(false);
     } finally {

@@ -26,7 +26,7 @@ function proposal() {
 it("derives the occurrence self-reference and the canonical gap echo without changing raw input", () => {
   const input = proposal(), before = JSON.stringify(input);
   const canonical = materializeSourceSemanticProposal(input);
-  expect(canonical.contract).toBe("source-interpretation-response-v4");
+  expect(canonical.contract).toBe("source-interpretation-response-v5");
   expect(canonical.draft?.frames[1]?.context_owner).toEqual({
     kind: "embedding", parent_frame: "fPromise", content_argument: "fSend"
   });

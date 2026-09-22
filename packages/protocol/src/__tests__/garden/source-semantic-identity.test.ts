@@ -3,10 +3,10 @@ import { expect, it } from "vitest";
 import { canonicalJson } from "../../recall/selection/capture/canonical-json.js";
 import { SourceSemanticInterpretationSchema } from "../../garden/source-semantic-interpretation.js";
 import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
-import { SourceSemanticAlignmentSchema } from "../../recall/conditional-field/semantic-alignment.js";
+import { SourceSemanticCorrespondenceSchema } from "../../recall/conditional-field/semantic-correspondence.js";
 import { SourceSemanticEvaluationContextSchema } from "../../recall/conditional-field/interpretation-context.js";
 import {
-  sourceSemanticAlignmentIdentity, sourceSemanticAlignmentPreimage, sourceSemanticContextIdentity,
+  sourceSemanticCorrespondenceIdentity, sourceSemanticCorrespondencePreimage, sourceSemanticContextIdentity,
   sourceSemanticContextPreimage, sourceSemanticInterpretationIdentity, sourceSemanticInterpretationPreimage,
   sourceSemanticQueryIdentity, sourceSemanticQueryPreimage
 } from "../../garden/source-semantic-identity.js";
@@ -46,7 +46,7 @@ const query = SourceSemanticQuerySchema.parse({
   return_variables: ["parcel"], gaps: []
 });
 
-it("hashes H from semantic body, K/normalizer, source binding, and producer versions only", () => {
+it("hashes source interpretation from semantic body, structural version, normalizer, source binding, and producer versions only", () => {
   const preimage = canonicalJson(sourceSemanticInterpretationPreimage(interpretation));
   expect(preimage).toContain("k1");
   expect(preimage).toContain("producer");
@@ -68,20 +68,20 @@ it("hashes H from semantic body, K/normalizer, source binding, and producer vers
     .toBe(sourceSemanticInterpretationIdentity(interpretation, sha));
 });
 
-it("keeps Q identity independent of H", () => {
+it("keeps query-semantics identity independent of source interpretation", () => {
   const qid = sourceSemanticQueryIdentity(query, sha);
-  expect(canonicalJson(sourceSemanticQueryPreimage(query))).not.toContain("h_id");
+  expect(canonicalJson(sourceSemanticQueryPreimage(query))).not.toContain("source_interpretation_id");
   expect(qid).toBe(sourceSemanticQueryIdentity(query, sha));
   expect(qid).not.toBe(sourceSemanticInterpretationIdentity(interpretation, sha));
-  expect(SourceSemanticQuerySchema.safeParse({ ...query, h_id: digest }).success).toBe(false);
+  expect(SourceSemanticQuerySchema.safeParse({ ...query, source_interpretation_id: digest }).success).toBe(false);
 });
 
-it("keeps A and C acyclic: A hashes H and Q, C hashes A_id, A never contains C", () => {
+it("keeps semantic correspondence and conditional computation acyclic: correspondence hashes source interpretation and query semantics, computation hashes correspondence, and correspondence never contains computation", () => {
   const hid = sourceSemanticInterpretationIdentity(interpretation, sha);
   const qid = sourceSemanticQueryIdentity(query, sha);
-  const alignment = SourceSemanticAlignmentSchema.parse({
-    contract: "source-semantic-alignment-v2", h_id: hid, q_id: qid,
-    producer_id: "ap", producer_version: "1", contract_version: "source-semantic-alignment-v2",
+  const semantic_correspondence = SourceSemanticCorrespondenceSchema.parse({
+    contract: "source-semantic-correspondence-v3", source_interpretation_id: hid, query_semantics_id: qid,
+    producer_id: "ap", producer_version: "1", contract_version: "source-semantic-correspondence-v3",
     correspondences: [{
       relation: "contextual_equivalence",
       query_endpoint: { kind: "predicate", alternative: 0, frame: "qSend" },
@@ -90,19 +90,19 @@ it("keeps A and C acyclic: A hashes H and Q, C hashes A_id, A never contains C",
       source_semantic_support: [{ kind: "lexical", mentions: ["mSent"] }]
     }]
   });
-  const aid = sourceSemanticAlignmentIdentity(alignment, sha);
-  expect(canonicalJson(sourceSemanticAlignmentPreimage(alignment))).toContain(hid);
-  expect(canonicalJson(sourceSemanticAlignmentPreimage(alignment))).toContain(qid);
-  expect(SourceSemanticAlignmentSchema.safeParse({ ...alignment, c_id: other }).success).toBe(false);
+  const aid = sourceSemanticCorrespondenceIdentity(semantic_correspondence, sha);
+  expect(canonicalJson(sourceSemanticCorrespondencePreimage(semantic_correspondence))).toContain(hid);
+  expect(canonicalJson(sourceSemanticCorrespondencePreimage(semantic_correspondence))).toContain(qid);
+  expect(SourceSemanticCorrespondenceSchema.safeParse({ ...semantic_correspondence, conditional_computation_id: other }).success).toBe(false);
   const context = SourceSemanticEvaluationContextSchema.parse({
-    contract: "source-semantic-context-v2", h_id: hid, q_id: qid, a_id: aid,
+    contract: "source-semantic-context-v3", source_interpretation_id: hid, query_semantics_id: qid, semantic_correspondence_id: aid,
     k_version: "k1", lowering_version: "l1"
   });
   const cid = sourceSemanticContextIdentity(context, sha);
   expect(canonicalJson(sourceSemanticContextPreimage(context))).toContain(aid);
-  expect(canonicalJson(sourceSemanticAlignmentPreimage(alignment))).not.toContain(cid);
+  expect(canonicalJson(sourceSemanticCorrespondencePreimage(semantic_correspondence))).not.toContain(cid);
   expect(SourceSemanticEvaluationContextSchema.safeParse({
-    contract: "source-semantic-context-v2", h_id: hid, q_id: qid, k_version: "k1", lowering_version: "l1"
+    contract: "source-semantic-context-v3", source_interpretation_id: hid, query_semantics_id: qid, k_version: "k1", lowering_version: "l1"
   }).success).toBe(false);
   expect(SourceSemanticEvaluationContextSchema.safeParse({ ...context, branch_id: other }).success).toBe(false);
 });

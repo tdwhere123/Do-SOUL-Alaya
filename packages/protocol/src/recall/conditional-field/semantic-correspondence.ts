@@ -5,9 +5,9 @@ import {
   SOURCE_SEMANTIC_MAX_BYTES, SourceSemanticHandleSchema, SourceSemanticSupportSchema
 } from "../../garden/source-semantic-draft.js";
 
-export const SOURCE_SEMANTIC_ALIGNMENT_CONTRACT = "source-semantic-alignment-v2" as const;
-export const SOURCE_SEMANTIC_ALIGNMENT_RELATION = "contextual_equivalence" as const;
-export const SOURCE_SEMANTIC_ALIGNMENT_DESCRIPTOR_HANDLE = /^h([1-9][0-9]{0,2})$/u;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT = "source-semantic-correspondence-v3" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_RELATION = "contextual_equivalence" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_DESCRIPTOR_HANDLE = /^source([1-9][0-9]{0,2})$/u;
 
 const Handle = SourceSemanticHandleSchema;
 
@@ -23,8 +23,8 @@ export const SourceSemanticSourceEndpointSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("slot"), frame: Handle, slot: Handle }).strict().readonly()
 ]);
 
-export const SourceSemanticCorrespondenceSchema = z.object({
-  relation: z.literal(SOURCE_SEMANTIC_ALIGNMENT_RELATION),
+export const SourceSemanticEndpointCorrespondenceSchema = z.object({
+  relation: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_RELATION),
   query_endpoint: SourceSemanticQueryEndpointSchema,
   source_endpoint: SourceSemanticSourceEndpointSchema,
   query_support: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly(),
@@ -32,14 +32,14 @@ export const SourceSemanticCorrespondenceSchema = z.object({
   applicable_context: Handle.optional()
 }).strict().readonly();
 
-const SourceSemanticAlignmentObjectSchema = z.object({
-  contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_CONTRACT),
-  h_id: Sha256DigestSchema,
-  q_id: Sha256DigestSchema,
+const SourceSemanticCorrespondenceObjectSchema = z.object({
+  contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT),
+  source_interpretation_id: Sha256DigestSchema,
+  query_semantics_id: Sha256DigestSchema,
   producer_id: BoundedIdSchema,
   producer_version: BoundedLabelSchema,
   contract_version: BoundedLabelSchema,
-  correspondences: z.array(SourceSemanticCorrespondenceSchema).max(256).readonly(),
+  correspondences: z.array(SourceSemanticEndpointCorrespondenceSchema).max(256).readonly(),
   domains: z.array(z.object({ query_domain: Handle, source_domain: Handle,
     query_support: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly(),
     source_semantic_support: z.array(SourceSemanticSupportSchema).max(8).readonly()
@@ -51,26 +51,13 @@ const SourceSemanticAlignmentObjectSchema = z.object({
   }).strict().readonly()).max(64).readonly().optional()
 }).strict();
 
-/** Producer body omits host hashes and producer identities; `h` is a request-local descriptor handle. */
-export const SourceSemanticAlignmentProducerBodySchema = SourceSemanticAlignmentObjectSchema.omit({
-  contract: true,
-  h_id: true,
-  q_id: true,
-  producer_id: true,
-  producer_version: true,
-  contract_version: true
-}).extend({
-  h: z.string().regex(SOURCE_SEMANTIC_ALIGNMENT_DESCRIPTOR_HANDLE).optional()
-}).strict().readonly();
-
-export const SourceSemanticAlignmentSchema = SourceSemanticAlignmentObjectSchema.superRefine((alignment, context) => {
-  if (new TextEncoder().encode(JSON.stringify(alignment)).length > SOURCE_SEMANTIC_MAX_BYTES) {
-    context.addIssue({ code: "custom", message: "source semantic alignment exceeds its byte bound" });
+export const SourceSemanticCorrespondenceSchema = SourceSemanticCorrespondenceObjectSchema.superRefine((semantic_correspondence, context) => {
+  if (new TextEncoder().encode(JSON.stringify(semantic_correspondence)).length > SOURCE_SEMANTIC_MAX_BYTES) {
+    context.addIssue({ code: "custom", message: "source semantic correspondence exceeds its byte bound" });
   }
 }).readonly();
 
 export type SourceSemanticQueryEndpoint = z.infer<typeof SourceSemanticQueryEndpointSchema>;
 export type SourceSemanticSourceEndpoint = z.infer<typeof SourceSemanticSourceEndpointSchema>;
+export type SourceSemanticEndpointCorrespondence = z.infer<typeof SourceSemanticEndpointCorrespondenceSchema>;
 export type SourceSemanticCorrespondence = z.infer<typeof SourceSemanticCorrespondenceSchema>;
-export type SourceSemanticAlignmentProducerBody = z.infer<typeof SourceSemanticAlignmentProducerBodySchema>;
-export type SourceSemanticAlignment = z.infer<typeof SourceSemanticAlignmentSchema>;

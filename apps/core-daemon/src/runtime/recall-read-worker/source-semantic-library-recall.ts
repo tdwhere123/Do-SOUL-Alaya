@@ -1,12 +1,12 @@
 import {
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, canonicalJson, indexEntryCacheKey,
-  type Continuation, type IndexEntry, type InformationIndex, type SourceSemanticAlignment,
+  type Continuation, type IndexEntry, type InformationIndex, type SourceSemanticCorrespondence,
   type SourceSemanticCoverage, type SourceSemanticHandleDescriptor, type SourceSemanticLibraryDiscovery,
   type SourceSemanticLibraryProof, type SourceSemanticWorkerResult, type SourceSemanticWorkerWork, type RequestBudget, type SourceSemanticQuery, type SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
 import {
-  CoreError, OFFSET_CURSOR, admitSourceSemanticAlignment, admitSourceSemanticQuery,
+  CoreError, OFFSET_CURSOR, admitSourceSemanticCorrespondence, admitSourceSemanticQuery,
   assembleSourceSemanticLibraryIndex, continuationCapabilityMatches, executeSourceSemanticInterpretation,
   fieldContractSha256, issuedContinuationTampered, preparedDeliveryId, proofEntriesFromBranch, encodeSourceSemanticLibraryResponse,
   proofForLibraryEntry, sealIssuedContinuation, slotQualifiersFor, SOURCE_SEMANTIC_LIBRARY_ORDER,
@@ -22,7 +22,7 @@ import { issueSemanticLease, readSemanticLease, sourceSemanticLifetimeNow, sourc
 
 const LIBRARY_PREVIEW_CHARS = 4_096;
 
-/** Provider-free library recall: one query/scope, independent C, canonical occupancy delivery. */
+/** Provider-free library recall: one query/scope, independent conditional computation, canonical occupancy delivery. */
 export function runSourceSemanticLibraryRecall(
   runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget
@@ -42,13 +42,16 @@ export function runSourceSemanticLibraryRecall(
   payload = { ...payload, as_of: continuationLease?.as_of ?? payload.as_of };
   const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, { ...payload, as_of: currentClock }, request.query_handle, authorized, "query");
   if (lease !== undefined && (request.original_query !== undefined && request.original_query !== lease.original_query
-    || request.q !== undefined && canonicalJson(request.q) !== canonicalJson(lease.q))) {
+    || request.query_semantics !== undefined && canonicalJson(request.query_semantics) !== canonicalJson(lease.query_semantics))) {
     throw new CoreError("VALIDATION", "query handle cannot be retargeted", { details: { admission: "bound" } });
   }
-  const original = lease?.original_query ?? request.original_query, q = lease?.q ?? request.q;
-  if (original === undefined || q === undefined) throw new CoreError("VALIDATION", "recall lacks its prepared Q");
-  if (lease !== undefined) meter.retain(q, "leased query admission");
-  const admission = admitSourceSemanticQuery(q, original);
+  const original = lease?.original_query ?? request.original_query;
+  const querySemantics = lease?.query_semantics ?? request.query_semantics;
+  if (original === undefined || querySemantics === undefined) {
+    throw new CoreError("VALIDATION", "recall lacks its prepared query semantics");
+  }
+  if (lease !== undefined) meter.retain(querySemantics, "leased query semantics admission");
+  const admission = admitSourceSemanticQuery(querySemantics, original);
   if (admission.kind !== "admitted") {
     throw new CoreError("VALIDATION", admission.kind === "unsupported" ? "unsupported_producer" : "malformed_query");
   }
@@ -70,14 +73,14 @@ function discoverLibraryDescriptors(runtime: RecallReadWorkerRuntime, payload: S
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, sources: ReturnType<typeof listEligibleSemanticSources>) {
   const current = new Map(sources.sources.map((row) => [row.source_id, row]));
   const descriptors: SourceSemanticHandleDescriptor[] = [];
-  let after: string | null = null, hPages = 0, hOpen = false, hTruncated = false;
+  let after: string | null = null, hPages = 0, hOpen = false, interpretationTruncated = false;
   while (hPages < 32) {
     let page: ReturnType<typeof discover>;
     try {
       page = discover(runtime, payload, authorized, meter, after, undefined, false);
     } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      hOpen = true; hTruncated = true; break;
+      hOpen = true; interpretationTruncated = true; break;
     }
     hPages += 1;
     descriptors.push(...page.candidates.filter((row) => {
@@ -85,12 +88,12 @@ function discoverLibraryDescriptors(runtime: RecallReadWorkerRuntime, payload: S
       return source !== undefined && source.source_version === row.source_version && source.content_digest === row.content_digest;
     }));
     hOpen = hOpen || page.open;
-    hTruncated = page.truncated;
+    interpretationTruncated = page.truncated;
     if (!page.truncated && !page.open) break;
     if (page.cursor === after || page.cursor === null) { hOpen = true; break; }
     after = page.cursor;
   }
-  return { descriptors, hPages, hOpen, hTruncated };
+  return { descriptors, hPages, hOpen, interpretationTruncated };
 }
 
 function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
@@ -98,8 +101,8 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
   sources: ReturnType<typeof listEligibleSemanticSources>, descriptors: readonly SourceSemanticHandleDescriptor[],
   request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, query: SourceSemanticQuery, original: string) {
   const current = new Map(sources.sources.map((row) => [row.source_id, row]));
-  let hTruncated = false;
-  const alignments = alignmentsByH(request.alignments ?? []);
+  let interpretationTruncated = false;
+  const semantic_correspondences = semanticCorrespondencesByInterpretation(request.semantic_correspondences ?? []);
   const proofGroups: { entries: ReturnType<typeof proofEntriesFromBranch>["entries"];
     explanations: ReturnType<typeof proofEntriesFromBranch>["explanations"] }[] = [];
   const proofs: SourceSemanticLibraryProof[] = [];
@@ -111,9 +114,9 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
     if (currentSource === undefined) continue;
     if (descriptor.source_version !== currentSource.source_version
       || descriptor.content_digest !== currentSource.content_digest) continue;
-    const prepared = alignments.get(descriptor.interpretation_id) ?? [];
+    const prepared = semantic_correspondences.get(descriptor.interpretation_id) ?? [];
     if (prepared.length === 0) continue;
-    for (const alignment of prepared) {
+    for (const semantic_correspondence of prepared) {
       if (pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP) break;
       pairs += 1;
       if (!examined.includes(descriptor.interpretation_id)) examined.push(descriptor.interpretation_id);
@@ -121,20 +124,20 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
         const checked = loadVerified(runtime, payload.workspace_id, descriptor.interpretation_id, authorized, meter);
         const remaining = { ...request.budget, ...meter.remaining() };
         if (remaining.work_units < remaining.finalization_reserve + remaining.min_envelope) {
-          computeOpen = true; hTruncated = true; break;
+          computeOpen = true; interpretationTruncated = true; break;
         }
-        const aligned = admitSourceSemanticAlignment({
-          alignment, h: checked.bound.interpretation, q: query, original_query: original
+        const aligned = admitSourceSemanticCorrespondence({
+          semantic_correspondence, source_interpretation: checked.bound.interpretation, query_semantics: query, original_query: original
         });
         if (aligned.kind !== "admitted") continue;
         const executed = executeSourceSemanticInterpretation({
           request: {
-            contract: "source-interpretation-reasoning-v3", accepts_unreviewed_conditional_results: true,
-            h_id: aligned.interpretation_id, q_id: aligned.query_id, a_id: aligned.alignment_id,
+            contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+            source_interpretation_id: aligned.interpretation_id, query_semantics_id: aligned.query_id, semantic_correspondence_id: aligned.semantic_correspondence_id,
             original_query: original, budget: remaining, output_byte_limit: request.output_byte_limit
           },
-          h: checked.bound, q: query, a: alignment, original_query: original,
-          workspaceId: payload.workspace_id, scope: checked.stored.record.scope_class ?? "project",
+          source_interpretation: checked.bound, query_semantics: query, semantic_correspondence: semantic_correspondence, original_query: original,
+          workspaceId: payload.workspace_id, scope: checked.stored.record.scope_class!,
           authorizedScopes: authorized, asOf: payload.as_of, sourceValidity: checked.stored.record,
           source_target: checked.bound.source_target
         });
@@ -149,8 +152,8 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
         const scoped = scopeSourceSemanticLibraryBranch(executed.index, executed.result);
         const group = proofEntriesFromBranch(scoped.index, scoped.result);
         if (group.entries.length === 0) continue;
-        const proof = { ...scoped.result, original_query: original, interpretation: aligned.interpretation,
-          query: aligned.query, alignment: aligned.alignment, context: aligned.context };
+        const proof = { ...scoped.result, original_query: original, source_record: checked.stored.record, interpretation: aligned.interpretation,
+          query: aligned.query, semantic_correspondence: aligned.semantic_correspondence, context: aligned.context };
         meter.retain([group, proof], "library branch retention");
         proofGroups.push(group);
         proofs.push(proof);
@@ -166,9 +169,9 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
         throw error;
       }
     }
-    if (pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP) { hTruncated = true; break; }
+    if (pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP) { interpretationTruncated = true; break; }
   }
-  return { proofGroups, proofs, examined, provedRoots, pairs, computeOpen, hTruncated };
+  return { proofGroups, proofs, examined, provedRoots, pairs, computeOpen, interpretationTruncated };
 }
 
 function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
@@ -179,14 +182,14 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   issued: Continuation | undefined): SourceSemanticWorkerResult {
   const { descriptors, hPages, hOpen } = discovered;
   const { proofGroups, proofs, examined, provedRoots, pairs, computeOpen } = branches;
-  const hTruncated = discovered.hTruncated || branches.hTruncated;
+  const interpretationTruncated = discovered.interpretationTruncated || branches.interpretationTruncated;
   const interpretationId = `sha256:${fieldContractSha256(canonicalJson({
-    kind: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, query: original, q_id: queryIdentity, scopes: authorized
+    kind: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, query: original, query_semantics_id: queryIdentity, scopes: authorized
   }))}`;
   const queryId = sourceSemanticLibraryQueryIdentity(original);
   const snapshotId = `sha256:${fieldContractSha256(canonicalJson({
     workspace: payload.workspace_id, as_of: payload.as_of, scopes: authorized, revision: sourceSemanticRevision(runtime), requestIdentity,
-    sources: sources.sources.map((row) => row.identity), alignments: request.alignments ?? []
+    sources: sources.sources.map((row) => row.identity), semantic_correspondences: request.semantic_correspondences ?? []
   }))}`;
   const sourceEntries = sources.sources.flatMap((record) => {
     const entry = sourceSemanticLibrarySourceEntry({
@@ -197,7 +200,7 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
     if (entry.target.kind !== "source_evidence") return [];
     return provedRoots.has(sourceGoldRootIdentity(entry.target)) ? [] : [entry];
   });
-  const openResiduals = sources.open || sources.truncated || hOpen || hTruncated || computeOpen
+  const openResiduals = sources.open || sources.truncated || hOpen || interpretationTruncated || computeOpen
     || pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP;
   const offset = libraryPageOffset(request.continuation, issued, queryId, snapshotId, interpretationId);
   const requestDigest = fieldContractSha256(canonicalJson({
@@ -221,20 +224,20 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   const deliveredProofs = assembled.index.entries.flatMap((entry) => {
     const proof = proofForLibraryEntry(entry, proofs);
     return proof === undefined ? [] : [proof];
-  }).filter((proof, index, rows) => rows.findIndex((row) => row.a_id === proof.a_id && row.h_id === proof.h_id) === index);
+  }).filter((proof, index, rows) => rows.findIndex((row) => row.semantic_correspondence_id === proof.semantic_correspondence_id && row.source_interpretation_id === proof.source_interpretation_id) === index);
   const coverage = {
     discovery: openResiduals ? "truncated" as const : "complete" as const,
-    h: descriptors.length === 0 ? "unexercised" as const : "open" as const,
-    q: query.gaps.length === 0 ? "complete" as const : "open" as const,
-    a: examined.length === 0 ? "unexercised" as const : "open" as const,
-    computation: computeOpen ? "open" as const : deliveredProofs.length > 0 ? "complete" as const : "open" as const,
+    source_interpretation: descriptors.length === 0 ? "unexercised" as const : "open" as const,
+    query_semantics: query.gaps.length === 0 ? "complete" as const : "open" as const,
+    semantic_correspondence: examined.length === 0 ? "unexercised" as const : "open" as const,
+    conditional_computation: computeOpen ? "open" as const : deliveredProofs.length > 0 ? "complete" as const : "open" as const,
     payload: previewed.truncated ? "truncated" as const : "complete" as const
   };
   const discovery = {
-    eligible_source_count: sources.sources.length, visited_source_pages: sources.pages, visited_h_pages: hPages,
-    visited_h_descriptors: descriptors.length,
+    eligible_source_count: sources.sources.length, visited_source_pages: sources.pages, visited_source_interpretation_pages: hPages,
+    visited_source_interpretation_descriptors: descriptors.length,
     candidate_prefix: descriptors.slice(0, 64).map((row) => row.interpretation_id),
-    examined_h_ids: examined, unexamined_h_count: Math.max(0, descriptors.length - examined.length),
+    examined_source_interpretation_ids: examined, unexamined_source_interpretation_count: Math.max(0, descriptors.length - examined.length),
     omitted_duplicate_bindings: assembled.omitted_duplicate_bindings,
     examination_cap: SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
     open_residuals: openResiduals, truncated: openResiduals
@@ -274,7 +277,7 @@ function finalizeLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSe
   let limited = libraryRecallResult({
     index: demotedIndex, requestDigest, budget: request.budget,
     discovery: { ...discovery, truncated: true, open_residuals: true },
-    coverage: { ...coverage, payload: "truncated", computation: "open" }, work: workOf(meter),
+    coverage: { ...coverage, payload: "truncated", conditional_computation: "open" }, work: workOf(meter),
     proofs: [], previews: demotedPreviews
   });
   if (limited.kind === "recall" && Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(limited))) > request.output_byte_limit) {
@@ -329,7 +332,7 @@ function libraryRecallResult(input: Readonly<{
 }>): SourceSemanticWorkerResult {
   const index = input.index;
   return SourceSemanticWorkerResultSchema.parse({
-    kind: "recall", request_budget: input.budget, delivery_id: preparedDeliveryId(input.requestDigest, index), protocol_version: 1,
+    kind: "recall", request_budget: input.budget, delivery_id: preparedDeliveryId(input.requestDigest, index), protocol_version: 2,
     total_count: index.entries.length, index, page_purpose: "membership", discovery: input.discovery,
     order: SOURCE_SEMANTIC_LIBRARY_ORDER, slot_qualifiers: slotQualifiersFor(index, input.proofs),
     ...(input.proofs.length === 0 ? {} : { proofs: input.proofs }),
@@ -338,16 +341,16 @@ function libraryRecallResult(input: Readonly<{
   });
 }
 
-function alignmentsByH(rows: readonly SourceSemanticAlignment[]): Map<string, SourceSemanticAlignment[]> {
-  const mapped = new Map<string, SourceSemanticAlignment[]>();
+function semanticCorrespondencesByInterpretation(rows: readonly SourceSemanticCorrespondence[]): Map<string, SourceSemanticCorrespondence[]> {
+  const mapped = new Map<string, SourceSemanticCorrespondence[]>();
   const seen = new Set<string>();
   for (const row of rows) {
     const identity = canonicalJson(row);
     if (seen.has(identity)) continue;
     seen.add(identity);
-    const list = mapped.get(row.h_id) ?? [];
+    const list = mapped.get(row.source_interpretation_id) ?? [];
     list.push(row);
-    mapped.set(row.h_id, list);
+    mapped.set(row.source_interpretation_id, list);
   }
   return mapped;
 }

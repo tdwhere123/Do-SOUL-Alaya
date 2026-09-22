@@ -2,12 +2,12 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import {
-  admitSourceSemanticAlignment, admitSourceSemanticQuery, refuseRecallCampaignLiveExtraction
+  admitSourceSemanticCorrespondence, admitSourceSemanticQuery, refuseRecallCampaignLiveExtraction
 } from "@do-soul/alaya-core";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import {
-  proposeAlignmentSemantics, proposeQuerySemantics,
-  type SourceSemanticAlignmentRequest, type SourceSemanticQueryRequest
+  proposeCorrespondenceSemantics, proposeQuerySemantics,
+  type SourceSemanticCorrespondenceRequest, type SourceSemanticQueryRequest
 } from "@do-soul/alaya-soul";
 import { createGeminiHttpExtractor, readGeminiFailureResponse } from "../compile-seed/http/gemini-http.js";
 import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../compile-seed/http/gemini-http.js";
@@ -425,10 +425,10 @@ function receiveLine(line: SemanticProposalLine, rawJson: string) {
     }
     return received;
   }
-  const request = line.request as SourceSemanticAlignmentRequest;
-  const received = proposeAlignmentSemantics({
+  const request = line.request as SourceSemanticCorrespondenceRequest;
+  const received = proposeCorrespondenceSemantics({
     original_query: request.original_query,
-    admitted_q: request.admitted_q, h_descriptors: request.h_descriptors,
+    admitted_query_semantics: request.admitted_query_semantics, source_interpretation_descriptors: request.source_interpretation_descriptors,
     producer_id: request.producer_capability.producer_id,
     producer_version: request.producer_capability.producer_version,
     resource_limits: request.resource_limits
@@ -474,11 +474,11 @@ function isCoreAdmittedProposal(
       line.original_query
     ).kind === "admitted";
   }
-  const request = line.request as SourceSemanticAlignmentRequest;
-  return admitSourceSemanticAlignment({
-    alignment: "alignment" in received ? received.alignment : undefined,
-    h: request.h_descriptors[0]?.interpretation,
-    q: request.admitted_q,
+  const request = line.request as SourceSemanticCorrespondenceRequest;
+  return admitSourceSemanticCorrespondence({
+    semantic_correspondence: "semantic_correspondence" in received ? received.semantic_correspondence : undefined,
+    source_interpretation: request.source_interpretation_descriptors[0]?.interpretation,
+    query_semantics: request.admitted_query_semantics,
     original_query: line.original_query
   }).kind === "admitted";
 }

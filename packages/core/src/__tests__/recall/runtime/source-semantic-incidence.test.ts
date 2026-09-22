@@ -1,15 +1,15 @@
 import { expect, it } from "vitest";
-import { sourceSemanticQueryIdentity, type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticAlignment } from "@do-soul/alaya-protocol";
+import { sourceSemanticQueryIdentity, type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticCorrespondence } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 as sha } from "../../../shared/field-hash.js";
 import { source, query, align, run, event, ORIGINAL } from "./source-semantic-proof-fixture.js";
-import { admitSourceSemanticAlignment } from "../../../recall/conditional-field/query/source-semantic-alignment-admission.js";
+import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-field/query/source-semantic-correspondence-admission.js";
 
 function resultObjects(h: SourceSemanticInterpretation, q: SourceSemanticQuery, a = align(h, q)) {
   const result = run(h, q, a);
   expect(result.outcome.status).toBe("interpreted");
   return [...new Set(result.answers!.map((answer) => answer.returned.tools?.node_id))].sort();
 }
-function parentMapping(a: SourceSemanticAlignment, queryFrame: string, sourceFrame: string): SourceSemanticAlignment {
+function parentMapping(a: SourceSemanticCorrespondence, queryFrame: string, sourceFrame: string): SourceSemanticCorrespondence {
   return { ...a, correspondences: [...a.correspondences, { relation: "contextual_equivalence", query_endpoint: { kind: "predicate", alternative: 0, frame: queryFrame },
     source_endpoint: { kind: "frame", frame: sourceFrame }, query_support: { kind: "query_text", excerpt: "use" }, source_semantic_support: [] }] };
 }
@@ -60,8 +60,8 @@ it.each(["assertion", "question", "directive", "unresolved", "embedding", "opera
     expect(result.outcome.status).toBe("interpreted");
     expect(result.answers?.map((answer) => answer.returned.tools?.node_id)).toEqual(kind === "assertion" ? [] : ["rX"]);
     if (kind !== "assertion") {
-      expect(result.consumed_leaves).toContainEqual({ leaf_kind: "h_context", occurrence: "fAlice" });
-      expect(result.consumed_leaves).not.toContainEqual({ leaf_kind: "h_assertion_permission", occurrence: "fAlice" });
+      expect(result.consumed_leaves).toContainEqual({ leaf_kind: "source_interpretation_context", occurrence: "fAlice" });
+      expect(result.consumed_leaves).not.toContainEqual({ leaf_kind: "source_interpretation_assertion_permission", occurrence: "fAlice" });
     }
   });
 function nestedQ(outer: "not" | "reported", inner: "not" | "reported"): SourceSemanticQuery {
@@ -98,7 +98,7 @@ it("rejects a correspondence placed outside its applicable source context", () =
   const h = nestedH("not", "reported"), q = nestedQ("not", "reported"), a = align(h, q);
   const bad = { ...a, correspondences: a.correspondences.map((row) => row.source_endpoint.kind === "frame" && row.source_endpoint.frame === "fAlice"
     ? { ...row, applicable_context: "fBob" } : row) };
-  expect(admitSourceSemanticAlignment({ h, q, alignment: bad, original_query: ORIGINAL }).kind).toBe("invalid");
+  expect(admitSourceSemanticCorrespondence({ source_interpretation: h, query_semantics: q, semantic_correspondence: bad, original_query: ORIGINAL }).kind).toBe("invalid");
   const good = { ...a, correspondences: a.correspondences.map((row) => row.source_endpoint.kind === "frame" && row.source_endpoint.frame === "fAlice"
     ? { ...row, applicable_context: "inner" } : row) };
   expect(resultObjects(h, q, good)).toEqual(["rX"]);
@@ -110,6 +110,6 @@ it("a multi-frame incidence cycle is evaluated finitely as unsatisfied, not recu
     context_obligations: [{ frame: "qUse", kind: "explicit_embedded_structure", incidence: { kind: "embedding", other_frame: "qOther" } },
       { frame: "qOther", kind: "explicit_embedded_structure", incidence: { kind: "embedding", other_frame: "qUse" } }] }] };
   const a = parentMapping(align(h, q), "qOther", "fBob");
-  expect(a.q_id).toBe(sourceSemanticQueryIdentity(q, sha));
+  expect(a.query_semantics_id).toBe(sourceSemanticQueryIdentity(q, sha));
   expect(resultObjects(h, q, a)).toEqual([]);
 });

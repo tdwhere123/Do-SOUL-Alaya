@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import {
-  admitSourceSemanticAlignment, admitSourceSemanticQuery,
+  admitSourceSemanticCorrespondence, admitSourceSemanticQuery,
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
 } from "@do-soul/alaya-core";
 import {
@@ -12,7 +12,7 @@ import {
   SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity
 } from "@do-soul/alaya-protocol";
 import {
-  proposeAlignmentSemantics, type SourceSemanticAlignmentRequest
+  proposeCorrespondenceSemantics, type SourceSemanticCorrespondenceRequest
 } from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import {
@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 function tempRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "proposal-alignment-fill-"));
+  const root = mkdtempSync(join(tmpdir(), "proposal-semantic_correspondence-fill-"));
   roots.push(root);
   return root;
 }
@@ -132,30 +132,30 @@ function interpretation() {
 function alignmentWorkset() {
   const h = interpretation();
   return parseSemanticProposalWorkset({
-    contract: "source-semantic-proposal-workset-v1",
-    kind: "alignment", model: MODEL, request_profile: PROFILE,
+    contract: "source-semantic-proposal-workset-v2",
+    kind: "semantic_correspondence", model: MODEL, request_profile: PROFILE,
     items: [{
       original_query: ORIGINAL,
-      admitted_q: admittedQuery(),
-      h_descriptors: [{
-        h_id: sourceSemanticInterpretationIdentity(h, sha256),
+      admitted_query_semantics: admittedQuery(),
+      source_interpretation_descriptors: [{
+        source_interpretation_id: sourceSemanticInterpretationIdentity(h, sha256),
         interpretation: h
       }]
     }]
   });
 }
 
-function selectionBody(request: SourceSemanticAlignmentRequest, excerpt: string): string {
+function selectionBody(request: SourceSemanticCorrespondenceRequest, excerpt: string): string {
   const predicate = request.catalog?.query_endpoints.find((row) => row.kind === "predicate");
   const frame = request.catalog?.source_endpoints.find((row) => row.kind === "frame");
   if (predicate === undefined || frame === undefined) {
-    throw new Error("alignment catalog missing predicate or frame");
+    throw new Error("semantic_correspondence catalog missing predicate or frame");
   }
   return JSON.stringify({
-    contract: "source-semantic-alignment-response-v3",
+    contract: "source-semantic-correspondence-response-v3",
     outcome: { status: "interpreted", gaps: [] },
-    alignment: {
-      contract: "source-semantic-alignment-selection-v1", h: "h1",
+    semantic_correspondence: {
+      contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1",
       selections: [{
         query: predicate.handle, source: frame.handle, query_excerpt: excerpt,
         source_semantic_support: [{ kind: "lexical", mentions: ["mSent"] }]
@@ -164,29 +164,29 @@ function selectionBody(request: SourceSemanticAlignmentRequest, excerpt: string)
   });
 }
 
-it("rejects an alignment workset whose original question differs from the admitted query digest", () => {
+it("rejects an semantic_correspondence workset whose original question differs from the admitted query digest", () => {
   const workset = alignmentWorkset();
   expect(() => materializeSemanticProposalLines({ ...workset, items: [{
     ...(workset.items[0] as Record<string, unknown>), original_query: "Another original question?"
-  }] }, 128)).toThrow(/Q does not bind the original query/u);
+  }] }, 128)).toThrow(/does not bind the original query/u);
 });
 
-async function fillAlignment(excerpt: string) {
+async function fillCorrespondence(excerpt: string) {
   const cacheRoot = join(tempRoot(), "cache");
   const prepared = alignmentWorkset();
   const line = materializeSemanticProposalLines(prepared, 128)[0]!;
-  const request = line.request as SourceSemanticAlignmentRequest;
+  const request = line.request as SourceSemanticCorrespondenceRequest;
   const body = selectionBody(request, excerpt);
-  const received = proposeAlignmentSemantics({ original_query: request.original_query,
-    admitted_q: request.admitted_q,
-    h_descriptors: request.h_descriptors,
+  const received = proposeCorrespondenceSemantics({ original_query: request.original_query,
+    admitted_query_semantics: request.admitted_query_semantics,
+    source_interpretation_descriptors: request.source_interpretation_descriptors,
     producer_id: request.producer_capability.producer_id,
     producer_version: request.producer_capability.producer_version
   }, { rawJson: body });
-  const core = admitSourceSemanticAlignment({
-    alignment: received.alignment,
-    h: request.h_descriptors[0]!.interpretation,
-    q: request.admitted_q,
+  const core = admitSourceSemanticCorrespondence({
+    semantic_correspondence: received.semantic_correspondence,
+    source_interpretation: request.source_interpretation_descriptors[0]!.interpretation,
+    query_semantics: request.admitted_query_semantics,
     original_query: ORIGINAL
   });
   const authority = pinSemanticProposalAuthority({
@@ -200,14 +200,14 @@ async function fillAlignment(excerpt: string) {
   return { cacheRoot, prepared, authority, first, result, key: authority.keys[0]!, received, core };
 }
 
-it("admits an alignment shard only after Core admission", async () => {
+it("admits an semantic_correspondence shard only after Core admission", async () => {
   expect(admitSourceSemanticQuery(admittedQuery(), ORIGINAL).kind).toBe("admitted");
   const { cacheRoot, prepared, authority, first, result, key, received, core } =
-    await fillAlignment("sent");
+    await fillCorrespondence("sent");
   expect(received.outcome.status).toBe("interpreted");
   expect(core.kind).toBe("admitted");
   const shard = inspectSemanticProposalShard(cacheRoot, key, {
-    kind: "alignment", model: MODEL, request_profile: PROFILE
+    kind: "semantic_correspondence", model: MODEL, request_profile: PROFILE
   });
   expect(first.calls).toHaveLength(1);
   expect(result.newly_admitted).toBe(1);
@@ -224,13 +224,13 @@ it("admits an alignment shard only after Core admission", async () => {
   expect(replayed.newly_admitted).toBe(0);
 });
 
-it("retains a Core-invalid interpreted alignment as non-executable cache", async () => {
+it("retains a Core-invalid interpreted semantic_correspondence as non-executable cache", async () => {
   const { cacheRoot, prepared, authority, first, result, key, received, core } =
-    await fillAlignment("invented support");
+    await fillCorrespondence("invented support");
   expect(received.outcome.status).toBe("interpreted");
   expect(core.kind).toBe("invalid");
   const shard = inspectSemanticProposalShard(cacheRoot, key, {
-    kind: "alignment", model: MODEL, request_profile: PROFILE
+    kind: "semantic_correspondence", model: MODEL, request_profile: PROFILE
   });
   expect(first.calls).toHaveLength(1);
   expect(result.newly_admitted).toBe(0);

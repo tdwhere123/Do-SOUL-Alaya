@@ -8,7 +8,7 @@ import { chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } 
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../semantic-proposal/workset.js";
 import { LongMemEvalSemanticConfigSchema, LongMemEvalSemanticFreezeSchema, loadFrozenLongMemEvalDataset } from "./contract.js";
 
-/** Freezes original dataset identities and context before any Q outputs; never dispatches a provider. */
+/** Freezes original dataset identities and context before any query-semantics outputs; never dispatches a provider. */
 export async function freezeLongMemEvalSemanticRun(value: unknown, root: string) {
   const config = LongMemEvalSemanticConfigSchema.parse(value);
   if (new Set(config.question_ids).size !== config.question_ids.length) throw new Error("development question IDs repeat");
@@ -50,7 +50,7 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
           session_id, session_index, round_index, source_observed_at, roles }) => ({ source_id, source_version,
           content_digest, corpus_digest, session_id, session_index, round_index, source_observed_at, roles })) });
     }
-    const query_workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v1", kind: "query",
+    const query_workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v2", kind: "query",
       model: config.model, request_profile: config.request_profile, items: selected.map((row) => ({
         original_query: row.question, approved_fixed_context: {
           context_id: `longmemeval_s:${row.question_id}:${config.dataset_sha256}`,
@@ -58,9 +58,9 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
         }
       })) });
     const lines = materializeSemanticProposalLines(query_workset, config.max_output_tokens);
-    const frozen = LongMemEvalSemanticFreezeSchema.parse({ contract: "longmemeval-semantic-development-v1", config,
+    const frozen = LongMemEvalSemanticFreezeSchema.parse({ contract: "longmemeval-semantic-development-v2", config,
       implementation_revision: readCurrentExtractionAuthorityRevision(), metric: "session-bearing-source-round-mixed-any-at-5",
-      order_policy: "native_canonical_source_root_order", mechanism: "source_only_h_a_not_exercised",
+      order_policy: "native_canonical_source_root_order", mechanism: "source_only_interpretation_and_correspondence_not_exercised",
       exposure: config.stage === "formal" ? "formal_with_recorded_development_exposure" : "development_exposed",
       inventory, selected: selected.map((row, index) => ({ ...row, query_key: lines[index]!.key })), query_workset });
     writeChainArtifact(join(root, "freeze.json"), frozen);

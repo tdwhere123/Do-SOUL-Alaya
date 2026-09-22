@@ -1,45 +1,45 @@
-import type { SourceSemanticAlignment, SourceSemanticConsumedLeaf as Leaf, SourceSemanticInterpretation,
+import type { SourceSemanticCorrespondence, SourceSemanticConsumedLeaf as Leaf, SourceSemanticInterpretation,
   SourceSemanticQuery, SourceSemanticQueryAlternative } from "@do-soul/alaya-protocol";
 
 /** Independent semantics for one finite assignment. No compiler, normalizer or engine imports. */
-export function semanticAssignmentProofs(h: SourceSemanticInterpretation, q: SourceSemanticQuery, a: SourceSemanticAlignment,
+export function semanticAssignmentProofs(h: SourceSemanticInterpretation, q: SourceSemanticQuery, a: SourceSemanticCorrespondence,
   branch: SourceSemanticQueryAlternative, alt: number, bindings: Readonly<Record<string, string>>): readonly Leaf[][] {
   const mandatory: Leaf[] = [], choices: Leaf[][][] = [];
   const nodes = new Map([...h.frames, ...h.operators].map((row) => [row.id, row]));
   for (const variable of q.variables) {
     const id = bindings[variable.id];
     if (id === undefined) continue;
-    mandatory.push({ leaf_kind: "h_sort", occurrence: id, value: variable.sort });
+    mandatory.push({ leaf_kind: "source_interpretation_sort", occurrence: id, value: variable.sort });
     if (variable.reference === undefined) continue;
     const options = a.correspondences.flatMap((row, index) => row.query_endpoint.kind === "referent"
       && row.query_endpoint.variable === variable.id && row.source_endpoint.kind === "referent" && row.source_endpoint.referent === id
-      ? [[{ leaf_kind: "a_referent" as const, occurrence: id, correspondence_index: index }]] : []);
+      ? [[{ leaf_kind: "semantic_correspondence_referent" as const, occurrence: id, correspondence_index: index }]] : []);
     if (options.length === 0) return [];
     choices.push(options);
   }
   for (const frame of branch.frames) {
     const id = bindings[frame.variable]!, node = nodes.get(id);
     if (node === undefined) return [];
-    mandatory.push({ leaf_kind: "h_presence", occurrence: id });
+    mandatory.push({ leaf_kind: "source_interpretation_presence", occurrence: id });
     if (frame.operator !== undefined) {
       if (!("operator" in node) || node.operator !== frame.operator) return [];
-      mandatory.push({ leaf_kind: "h_operator", occurrence: id, value: node.operator });
+      mandatory.push({ leaf_kind: "source_interpretation_operator", occurrence: id, value: node.operator });
     } else {
       if ("operator" in node) return [];
       const options = a.correspondences.flatMap((row, index) => row.query_endpoint.kind === "predicate"
         && row.query_endpoint.alternative === alt && row.query_endpoint.frame === frame.id && row.source_endpoint.kind === "frame"
-        && row.source_endpoint.frame === id ? [[{ leaf_kind: "a_predicate" as const, occurrence: id, correspondence_index: index }]] : []);
+        && row.source_endpoint.frame === id ? [[{ leaf_kind: "semantic_correspondence_predicate" as const, occurrence: id, correspondence_index: index }]] : []);
       if (options.length === 0) return [];
       choices.push(options);
     }
     if (frame.source_act !== undefined) {
       if (node.context_owner.kind !== "source_act" || node.context_owner.source_act !== frame.source_act) return [];
-      mandatory.push({ leaf_kind: "h_source_act", occurrence: id, value: frame.source_act });
+      mandatory.push({ leaf_kind: "source_interpretation_source_act", occurrence: id, value: frame.source_act });
     }
     for (const obligation of branch.context_obligations.filter((row) => row.frame === frame.id)) {
       if (obligation.kind === "asserted_at_source") {
         if (!h.asserted_at_scope.includes(id)) return [];
-        mandatory.push({ leaf_kind: "h_assertion_permission", occurrence: id });
+        mandatory.push({ leaf_kind: "source_interpretation_assertion_permission", occurrence: id });
       } else if (obligation.kind === "explicit_embedded_structure") {
         const owner = node.context_owner;
         if (owner.kind === "source_act") return [];
@@ -48,7 +48,7 @@ export function semanticAssignmentProofs(h: SourceSemanticInterpretation, q: Sou
         choices.push(options.map((leaf) => [leaf]));
       } else {
         if (h.asserted_at_scope.includes(id)) return [];
-        mandatory.push({ leaf_kind: "h_context", occurrence: id });
+        mandatory.push({ leaf_kind: "source_interpretation_context", occurrence: id });
       }
       const edge = obligation.incidence;
       if (edge !== undefined) {
@@ -62,7 +62,7 @@ export function semanticAssignmentProofs(h: SourceSemanticInterpretation, q: Sou
       const target = bindings[role.target_variable]!;
       if ("operator" in node) {
         if (node.operator !== "reported" || node.reporter !== target || role.id !== "reporter") return [];
-        mandatory.push({ leaf_kind: "h_content", occurrence: target, parent: node.id, relation_kind: "operator_operand", role: "reporter" });
+        mandatory.push({ leaf_kind: "source_interpretation_content", occurrence: target, parent: node.id, relation_kind: "operator_operand", role: "reporter" });
         continue;
       }
       const options = a.correspondences.flatMap((row, index): Leaf[][] => {
@@ -70,8 +70,8 @@ export function semanticAssignmentProofs(h: SourceSemanticInterpretation, q: Sou
           || row.query_endpoint.slot !== role.id || row.source_endpoint.kind !== "slot" || row.source_endpoint.frame !== id) return [];
         const slot = row.source_endpoint.slot;
         if (!node.bindings.some((binding) => binding.slot_id === slot && binding.target.kind === "node" && binding.target.id === target)) return [];
-        return [[{ leaf_kind: "a_slot", occurrence: id, slot_id: slot, correspondence_index: index },
-          { leaf_kind: "h_binding", occurrence: id, slot_id: slot, target }]];
+        return [[{ leaf_kind: "semantic_correspondence_slot", occurrence: id, slot_id: slot, correspondence_index: index },
+          { leaf_kind: "source_interpretation_binding", occurrence: id, slot_id: slot, target }]];
       });
       if (options.length === 0) return [];
       choices.push(options);
@@ -88,7 +88,7 @@ export function semanticAssignmentProofs(h: SourceSemanticInterpretation, q: Sou
 function contentLeaves(h: SourceSemanticInterpretation, parent: string, child: string): Leaf[] {
   const nested = [...h.frames, ...h.operators].find((row) => row.id === child), out: Leaf[] = [];
   if (nested?.context_owner.kind === "embedding" && nested.context_owner.parent_frame === parent) {
-    out.push({ leaf_kind: "h_content", occurrence: child, parent, relation_kind: "embedding", role: "content" });
+    out.push({ leaf_kind: "source_interpretation_content", occurrence: child, parent, relation_kind: "embedding", role: "content" });
   }
   const operator = h.operators.find((row) => row.id === parent);
   if (operator === undefined) return out;
@@ -96,7 +96,7 @@ function contentLeaves(h: SourceSemanticInterpretation, parent: string, child: s
     ? [["antecedent", operator.antecedent], ["consequent", operator.consequent]]
     : operator.operator === "opaque" ? operator.operands.map((id) => ["content", id])
     : [["content", operator.content], ...(operator.operator === "reported" && operator.reporter !== undefined ? [["reporter", operator.reporter] as const] : [])];
-  for (const [role, id] of roles) if (id === child) out.push({ leaf_kind: "h_content", occurrence: child, parent, relation_kind: "operator_operand", role });
+  for (const [role, id] of roles) if (id === child) out.push({ leaf_kind: "source_interpretation_content", occurrence: child, parent, relation_kind: "operator_operand", role });
   return out;
 }
 export function semanticLeafKey(leaf: Leaf): string {

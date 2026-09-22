@@ -276,7 +276,7 @@ it("keeps promise embedding visitable without granting send assertion", () => {
   expect(result.interpretation.frames[1]?.additional_support).toEqual([{ kind: "dominating", via_id: "fPromise" }]);
 });
 
-it("rejects a domination cycle as invalid H and admits an ordinary binding cycle", () => {
+it("rejects a domination cycle as an invalid source interpretation and admits an ordinary binding cycle", () => {
   const text = "sent";
   const catalog = catalogFor(text);
   const cyclic = run({
@@ -368,7 +368,7 @@ it("lets alpha-renamed handles hash differently and agree under an explicit mapp
   );
 });
 
-it("fails resource and byte bounds as resource_exhausted, not empty H", () => {
+it("fails resource and byte bounds as resource_exhausted, not an empty source interpretation", () => {
   const text = "sent";
   const catalog = catalogFor(text);
   const budgeted = run(draft({ mentions: [mention("mSent", "a1s0", "a1s0")] }), catalog, {
@@ -386,7 +386,7 @@ it("fails resource and byte bounds as resource_exhausted, not empty H", () => {
   expect(oversized).not.toHaveProperty("interpretation");
 });
 
-it("rejects missing, reversed, and cross-assertion references as invalid H", () => {
+it("rejects missing, reversed, and cross-assertion references as an invalid source interpretation", () => {
   const catalog = buildSourceReferenceCatalog(sha("generation"), [
     { assertion_id: 1, text: "one two" }, { assertion_id: 2, text: "two" }
   ], sha);

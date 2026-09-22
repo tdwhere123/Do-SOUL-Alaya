@@ -7,12 +7,12 @@ import {
   buildSourceReferenceCatalog, canonicalProductIdentityOfEntry, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_PUBLISHED_CONTRACT, sourceReferenceResolver,
   type SourceEvidenceTarget,
-  type SourceReferenceCatalog, type SourceSemanticAlignment, type SourceSemanticQuery,
+  type SourceReferenceCatalog, type SourceSemanticCorrespondence, type SourceSemanticQuery,
   type SourceSemanticWorkerResult, type SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
 import {
   admitSourceSemanticQuery, createAuditedSourceAdmission, createSourceSemanticInterpretationPublication,
-  EvidenceService, encodeSourceSemanticLibraryResponse, fieldContractSha256, preparedDeliveryId, SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
+  EvidenceService, encodeSourceSemanticLibraryResponse, fieldContractSha256, preparedDeliveryId, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, sourceGoldRootIdentity
 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
@@ -115,14 +115,14 @@ function queryOf(): SourceSemanticQuery {
   };
 }
 
-function alignmentOf(hId: string, q: SourceSemanticQuery): SourceSemanticAlignment {
+function alignmentOf(hId: string, q: SourceSemanticQuery): SourceSemanticCorrespondence {
   const admitted = admitSourceSemanticQuery(q, ORIGINAL);
   if (admitted.kind !== "admitted") throw new Error("query must admit");
   return {
-    contract: "source-semantic-alignment-v2",
-    h_id: hId, q_id: admitted.query_id,
-    producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-    producer_version: "1", contract_version: "source-semantic-alignment-v2",
+    contract: "source-semantic-correspondence-v3",
+    source_interpretation_id: hId, query_semantics_id: admitted.query_id,
+    producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
+    producer_version: "1", contract_version: "source-semantic-correspondence-v3",
     correspondences: [
       { relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
         source_endpoint: { kind: "referent", referent: "rAlice" }, query_support: { kind: "query_text", excerpt: "Alice" },
@@ -198,16 +198,16 @@ async function call<K extends SourceSemanticWorkerRequest["kind"]>(execute: Exec
   return result as Extract<SourceSemanticWorkerResult, { kind: K }>;
 }
 
-function recallRequest(alignments: readonly SourceSemanticAlignment[]): Extract<SourceSemanticWorkerRequest, { kind: "recall" }> {
+function recallRequest(semantic_correspondences: readonly SourceSemanticCorrespondence[]): Extract<SourceSemanticWorkerRequest, { kind: "recall" }> {
   return {
-    kind: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL, q: queryOf(),
-    alignments, budget: BUDGET, output_byte_limit: 1_000_000
+    kind: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL, query_semantics: queryOf(),
+    semantic_correspondences, budget: BUDGET, output_byte_limit: 1_000_000
   };
 }
 
-it("discovers a relevant interpretation after the first descriptor page and keeps a source without H", async () => {
+it("discovers a relevant interpretation after the first descriptor page and keeps a source without a source interpretation", async () => {
   await withLibrary(async ({ allIds, execute, filename }) => {
-    const prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q: queryOf(), budget: BUDGET });
+    const prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
     expect(prepared.kind).toBe("prepare_query");
     if (prepared.kind !== "prepare_query") throw new Error("query preparation expected");
     expect(prepared.candidates.length).toBe(16);
@@ -217,10 +217,10 @@ it("discovers a relevant interpretation after the first descriptor page and keep
     const recalled = await call(execute, recallRequest([alignmentOf(gold!, queryOf())]));
     expect(recalled.kind).toBe("recall");
     if (recalled.kind !== "recall") throw new Error("library recall expected");
-    expect(recalled.discovery.visited_h_pages).toBeGreaterThanOrEqual(2);
-    expect(recalled.discovery.visited_h_descriptors).toBeGreaterThan(16);
-    expect(recalled.discovery.examined_h_ids).toEqual([gold]);
-    expect(recalled.discovery.unexamined_h_count).toBeGreaterThan(0);
+    expect(recalled.discovery.visited_source_interpretation_pages).toBeGreaterThanOrEqual(2);
+    expect(recalled.discovery.visited_source_interpretation_descriptors).toBeGreaterThan(16);
+    expect(recalled.discovery.examined_source_interpretation_ids).toEqual([gold]);
+    expect(recalled.discovery.unexamined_source_interpretation_count).toBeGreaterThan(0);
     expect(recalled.discovery.eligible_source_count).toBeGreaterThanOrEqual(2);
     expect(recalled.order.enumeration_policy).toBe("canonical");
     expect(recalled.order.occupancy).toBe("source_gold_root_identity");
@@ -231,8 +231,8 @@ it("discovers a relevant interpretation after the first descriptor page and keep
     expect(search.results.some((row) => row.content_preview?.includes("Bob stays silent.")
       && row.object_kind === "source_evidence")).toBe(true);
     expect(search.results.some((row) => row.object_kind === "memory_entry")).toBe(false);
-    expect(recalled.slot_qualifiers.some((row) => row.evidence_kind === "semantic_proof" && row.h_id === gold)).toBe(true);
-    const proofIndex = recalled.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof" && row.h_id === gold)!.index;
+    expect(recalled.slot_qualifiers.some((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === gold)).toBe(true);
+    const proofIndex = recalled.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === gold)!.index;
     expect(search.results[proofIndex]?.object_kind).toBe("semantic_proof");
     const page = recordSourceSemanticLibraryFirstExposure(recalled);
     expect(page.initial?.slots[proofIndex]?.object_kind).toBe("semantic_proof");
@@ -308,9 +308,9 @@ it("examines aligned handles without hydrating every published descriptor", asyn
     );
     expect(recalled.kind).toBe("recall");
     if (recalled.kind !== "recall") throw new Error("library recall expected");
-    expect(recalled.discovery.visited_h_descriptors).toBe(20);
-    expect(recalled.discovery.visited_h_pages).toBeGreaterThanOrEqual(2);
-    expect(recalled.discovery.examined_h_ids).toEqual([published.bound.interpretation_id]);
+    expect(recalled.discovery.visited_source_interpretation_descriptors).toBe(20);
+    expect(recalled.discovery.visited_source_interpretation_pages).toBeGreaterThanOrEqual(2);
+    expect(recalled.discovery.examined_source_interpretation_ids).toEqual([published.bound.interpretation_id]);
     expect(hydrate).toHaveBeenCalledTimes(1);
     const executeBranch = Core.executeSourceSemanticInterpretation;
     const partial = vi.spyOn(Core, "executeSourceSemanticInterpretation").mockImplementation((input) => {
@@ -324,7 +324,7 @@ it("examines aligned handles without hydrating every published descriptor", asyn
       }, ["project"], new SourceSemanticReadBudget(BUDGET));
       if (incomplete.kind !== "recall") throw new Error("library recall expected");
       expect(incomplete.proofs?.[0]?.answers?.length).toBeGreaterThan(0);
-      expect(incomplete.coverage.computation).toBe("open");
+      expect(incomplete.coverage.conditional_computation).toBe("open");
       expect(incomplete.discovery.open_residuals).toBe(true);
     } finally { partial.mockRestore(); }
   } finally {
@@ -336,7 +336,7 @@ it("examines aligned handles without hydrating every published descriptor", asyn
 it("drops a conditional proof when A is absent and still returns the original source", async () => {
   await withLibrary(async ({ execute }) => {
     const withProof = await call(execute, recallRequest([alignmentOf(
-      (await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q: queryOf(), budget: BUDGET })).candidates[0]!.interpretation_id,
+      (await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET })).candidates[0]!.interpretation_id,
       queryOf()
     )]));
     const without = await call(execute, recallRequest([]));
@@ -345,27 +345,27 @@ it("drops a conditional proof when A is absent and still returns the original so
     if (withProof.kind !== "recall" || without.kind !== "recall") throw new Error("library recall expected");
     expect(withProof.slot_qualifiers.some((row) => row.evidence_kind === "semantic_proof")).toBe(true);
     expect(without.slot_qualifiers.some((row) => row.evidence_kind === "semantic_proof")).toBe(false);
-    expect(without.discovery.examined_h_ids).toEqual([]);
+    expect(without.discovery.examined_source_interpretation_ids).toEqual([]);
     const search = soulSearchFromLibraryRecall(without);
     expect(search.results.some((row) => row.content_preview?.includes("Alice uses tools."))).toBe(true);
     expect(search.results.some((row) => row.content_preview?.includes("Bob stays silent."))).toBe(true);
   }, 3);
 });
 
-it("keeps excluded H identities out of public discovery diagnostics", async () => {
+it("keeps excluded source interpretation identities out of public discovery diagnostics", async () => {
   await withLibrary(async ({ execute, filename, allIds }) => {
     const { database } = await createRecallRealStorage(() => undefined, filename);
     database.connection.prepare("UPDATE source_records SET scope_class = 'global_core' WHERE source_id = 'artifact-1'").run();
     database.close(); closeCachedDatabase(filename);
     const recalled = await call(execute, recallRequest([alignmentOf(allIds[0]!, queryOf())]));
     expect(recalled.discovery).toMatchObject({ eligible_source_count: 1, candidate_prefix: [],
-      visited_h_descriptors: 0, unexamined_h_count: 0, examined_h_ids: [] });
+      visited_source_interpretation_descriptors: 0, unexamined_source_interpretation_count: 0, examined_source_interpretation_ids: [] });
     expect(recalled.proofs).toBeUndefined();
     expect(soulSearchFromLibraryRecall(recalled).results[0]?.content_preview).toContain("Bob stays silent.");
   }, 1);
 });
 
-it("scores mixed-kind retrieval and proof-conditioned Any@K from one published H", async () => {
+it("scores mixed-kind retrieval and proof-conditioned Any@K from one published source interpretation", async () => {
   await withLibrary(async ({ allIds, execute, sourceTarget }) => {
     const gold = sourceGoldUnitFromPublishedRoot(sourceTarget);
     expect(gold.root_id).toBe(sourceTarget.root_id);
@@ -396,8 +396,8 @@ it("scores mixed-kind retrieval and proof-conditioned Any@K from one published H
       { ...withA, proofs: withA.proofs?.map((row) => ({ ...row, outcome: { status: "invalid" as const, reason: "rejected" } })) },
       { ...withA, proofs: withA.proofs?.map((row) => ({ ...row, evidence_leaves: row.evidence_leaves?.slice(1) })) },
       { ...withA, proofs: withA.proofs?.map((row) => ({ ...row, consumed_leaves: [] })) },
-      { ...withA, proofs: withA.proofs?.map((row) => ({ ...row, context: { ...row.context, a_id: changedDigest } })) },
-      { ...withA, slot_qualifiers: withA.slot_qualifiers.map((row) => row.evidence_kind === "semantic_proof" ? { ...row, c_id: changedDigest } : row) },
+      { ...withA, proofs: withA.proofs?.map((row) => ({ ...row, context: { ...row.context, semantic_correspondence_id: changedDigest } })) },
+      { ...withA, slot_qualifiers: withA.slot_qualifiers.map((row) => row.evidence_kind === "semantic_proof" ? { ...row, conditional_computation_id: changedDigest } : row) },
       { ...withA, index: { ...withA.index, query_id: changedDigest } },
       { ...withA, index: { ...withA.index, entries: withA.index.entries.map((entry) => entry.interpretation_node === undefined ? entry
         : { ...entry, target: { ...sourceTarget, source_version: "2", content_digest: changedDigest } }) },
@@ -497,14 +497,14 @@ it("prepares multi-sentence sources with packing units instead of one whole-body
 
 it("binds delivery_id to the delivered first-exposure membership", async () => {
   await withLibrary(async ({ allIds, execute }) => {
-    const alignments = [alignmentOf(allIds[0]!, queryOf())];
-    const full = await call(execute, { ...recallRequest(alignments), output_byte_limit: 1_000_000 });
+    const semantic_correspondences = [alignmentOf(allIds[0]!, queryOf())];
+    const full = await call(execute, { ...recallRequest(semantic_correspondences), output_byte_limit: 1_000_000 });
     expect(full.kind).toBe("recall");
     if (full.kind !== "recall") throw new Error("library recall expected");
     let limited: typeof full | undefined;
     for (const limit of [1024, 2048, 4096, 8192, 16384]) {
       try {
-        const result = await call(execute, { ...recallRequest(alignments), output_byte_limit: limit });
+        const result = await call(execute, { ...recallRequest(semantic_correspondences), output_byte_limit: limit });
         if (result.kind === "recall" && result.proofs === undefined) { limited = result; break; }
       } catch { /* output_byte_limit below the demoted envelope */ }
     }
@@ -528,7 +528,7 @@ it("expires preparation by elapsed lifetime while retaining a fixed interpretati
     const context = { workspaceId: WS, runId: RUN, agentTarget: "codex", sessionId: "fixed-clock" };
     const prepared = await handler({ operation: "prepare_source", source_id: "artifact-1", budget: BUDGET }, context);
     if (prepared.operation !== "prepare_source" || prepared.source_handle === undefined) throw new Error("preparation missing");
-    const request = { operation: "prepare_query" as const, original_query: ORIGINAL, q: queryOf(),
+    const request = { operation: "prepare_query" as const, original_query: ORIGINAL, query_semantics: queryOf(),
       source_handle: prepared.source_handle, budget: BUDGET };
     now = "2026-09-21T00:01:00.000Z";
     expect((await handler(request, context)).operation).toBe("prepare_query");

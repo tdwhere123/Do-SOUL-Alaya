@@ -19,10 +19,10 @@ export const SemanticChainConfigSchema = z.object({
   implementation_revision: z.string().refine(isAuthorityRevision), interpretation_clock: z.string().datetime(),
   workspace_id: z.string().min(1), run_id: z.string().min(1),
   query_workset: SemanticProposalWorksetSchema.refine((value) => value.kind === "query", "query workset required"),
-  query_cache_root: z.string().min(1), alignment_cache_root: z.string().min(1),
+  query_cache_root: z.string().min(1), correspondence_cache_root: z.string().min(1),
   max_output_tokens: z.number().int().min(1).max(65536),
   discovery_page_cap: z.number().int().min(1).max(64),
-  alignment_pair_cap: z.number().int().min(0).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP),
+  correspondence_pair_cap: z.number().int().min(0).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP),
   budget: RequestBudgetSchema, authorized_scopes: AuthorizedScopesAdmissionSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000)
 }).strict();
@@ -31,16 +31,16 @@ export type SemanticChainConfig = z.infer<typeof SemanticChainConfigSchema>;
 const QueryBase = { query_key: Digest, original_query: z.string(), raw_digest: Digest.nullable() };
 export const SemanticChainQuerySchema = z.discriminatedUnion("status", [
   z.object({ ...QueryBase, status: z.literal("blocked"), reason: z.string() }).strict(),
-  z.object({ ...QueryBase, status: z.literal("ready"), q: SourceSemanticQuerySchema,
-    descriptors: z.array(SourceSemanticHandleDescriptorSchema), selected_h_ids: z.array(z.string()),
+  z.object({ ...QueryBase, status: z.literal("ready"), query_semantics: SourceSemanticQuerySchema,
+    descriptors: z.array(SourceSemanticHandleDescriptorSchema), selected_source_interpretation_ids: z.array(z.string()),
     discovery_pages: z.number().int().nonnegative(), discovery_open: z.boolean(),
-    unvisited_h_count: z.null(), discovery_truncated: z.boolean()
+    unvisited_source_interpretation_count: z.null(), discovery_truncated: z.boolean()
   }).strict()
 ]);
 export const SemanticChainPlanSchema = z.object({
-  contract: z.literal("source-semantic-chain-plan-v1"), input_identity: Digest,
+  contract: z.literal("source-semantic-chain-plan-v2"), input_identity: Digest,
   config: SemanticChainConfigSchema, queries: z.array(SemanticChainQuerySchema),
-  alignment_workset: SemanticProposalWorksetSchema.nullable()
+  correspondence_workset: SemanticProposalWorksetSchema.nullable()
 }).strict();
 export type SemanticChainPlan = z.infer<typeof SemanticChainPlanSchema>;
 export const chainIdentity = (value: unknown): string => fieldContractSha256(canonicalJson(value));

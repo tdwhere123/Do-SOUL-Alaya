@@ -277,7 +277,6 @@ export {
   SourceSemanticQueryIncidenceSchema,
   SourceSemanticContextObligationSchema,
   SourceSemanticQueryAlternativeSchema,
-  SourceSemanticQueryProducerBodySchema,
   SourceSemanticQueryEvaluationSchema,
   SourceSemanticQuerySchema,
   SourceSemanticQueryGapSchema,
@@ -288,7 +287,6 @@ export {
   type SourceSemanticQueryIncidence,
   type SourceSemanticContextObligation,
   type SourceSemanticQueryAlternative,
-  type SourceSemanticQueryProducerBody,
   type SourceSemanticQuery
 } from "./semantic-query.js";
 export {
@@ -303,37 +301,35 @@ export {
   type SourceSemanticQueryMeaningEnvelope
 } from "./semantic-query-meaning.js";
 export {
-  SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
-  SOURCE_SEMANTIC_ALIGNMENT_RELATION,
-  SOURCE_SEMANTIC_ALIGNMENT_DESCRIPTOR_HANDLE,
+  SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_RELATION,
+  SOURCE_SEMANTIC_CORRESPONDENCE_DESCRIPTOR_HANDLE,
   SourceSemanticQueryEndpointSchema,
   SourceSemanticSourceEndpointSchema,
+  SourceSemanticEndpointCorrespondenceSchema,
   SourceSemanticCorrespondenceSchema,
-  SourceSemanticAlignmentProducerBodySchema,
-  SourceSemanticAlignmentSchema,
   type SourceSemanticQueryEndpoint,
   type SourceSemanticSourceEndpoint,
-  type SourceSemanticCorrespondence,
-  type SourceSemanticAlignmentProducerBody,
-  type SourceSemanticAlignment
-} from "./semantic-alignment.js";
+  type SourceSemanticEndpointCorrespondence,
+  type SourceSemanticCorrespondence
+} from "./semantic-correspondence.js";
 export {
-  SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
   SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE,
   SOURCE_SEMANTIC_SOURCE_ENDPOINT_HANDLE,
   SourceSemanticQueryCatalogEntrySchema,
   SourceSemanticSourceCatalogEntrySchema,
-  SourceSemanticAlignmentEndpointCatalogSchema,
-  SourceSemanticAlignmentSelectionSchema,
-  buildSourceSemanticAlignmentEndpointCatalog,
-  materializeSourceSemanticAlignmentSelection,
+  SourceSemanticCorrespondenceEndpointCatalogSchema,
+  SourceSemanticCorrespondenceSelectionSchema,
+  buildSourceSemanticCorrespondenceEndpointCatalog,
+  materializeSourceSemanticCorrespondenceSelection,
   type SourceSemanticQueryCatalogEntry,
   type SourceSemanticSourceCatalogEntry,
-  type SourceSemanticAlignmentEndpointCatalog,
-  type SourceSemanticAlignmentSelection,
-  type SourceSemanticAlignmentDescriptor,
-  type SourceSemanticAlignmentSelectionEnvelope
-} from "./semantic-alignment-selection.js";
+  type SourceSemanticCorrespondenceEndpointCatalog,
+  type SourceSemanticCorrespondenceSelection,
+  type SourceSemanticCorrespondenceDescriptor,
+  type SourceSemanticCorrespondenceSelectionEnvelope
+} from "./semantic-correspondence-selection.js";
 export {
   SOURCE_SEMANTIC_CONTEXT_CONTRACT,
   SourceSemanticEvaluationContextSchema,

@@ -1,10 +1,10 @@
 import { expect } from "vitest";
 import { oracleSourceSemanticJoin, decodeEngineBindings, oracleBindingsMatchEngine, oracleProofsMatchEngine } from "./source-semantic-relational-oracle.js";
 import { SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION, sourceSemanticInterpretationIdentity,
-  sourceSemanticQueryIdentity, type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticAlignment } from "@do-soul/alaya-protocol";
+  sourceSemanticQueryIdentity, type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticCorrespondence } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 as sha } from "../../../shared/field-hash.js";
 import { SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID as QP } from "../../../recall/conditional-field/query/source-semantic-query-producer-registry.js";
-import { SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID as AP } from "../../../recall/conditional-field/query/source-semantic-alignment-producer-registry.js";
+import { SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID as AP } from "../../../recall/conditional-field/query/source-semantic-correspondence-producer-registry.js";
 import { reasonSourceSemanticInterpretation } from "../../../recall/runtime/source-semantic-reasoning.js";
 
 export const ORIGINAL = "which tools does Alice use?";
@@ -49,8 +49,8 @@ export function query(original = ORIGINAL, fixed = true): SourceSemanticQuery {
         { id: "theme", role_reading: "theme", target_variable: "tools", support: { kind: "query_text", excerpt: "tools" } }] }],
       context_obligations: [{ frame: "qUse", kind: "asserted_at_source" }] }], return_variables: ["tools"], gaps: [] };
 }
-export function align(h: SourceSemanticInterpretation, q: SourceSemanticQuery, fixed = true): SourceSemanticAlignment {
-  const correspondences: SourceSemanticAlignment["correspondences"][number][] = [];
+export function align(h: SourceSemanticInterpretation, q: SourceSemanticQuery, fixed = true): SourceSemanticCorrespondence {
+  const correspondences: SourceSemanticCorrespondence["correspondences"][number][] = [];
   for (const frame of h.frames) {
     correspondences.push({ relation: "contextual_equivalence", query_endpoint: { kind: "predicate", alternative: 0, frame: "qUse" },
       source_endpoint: { kind: "frame", frame: frame.id }, query_support: { kind: "query_text", excerpt: "use" }, source_semantic_support: [{ kind: "lexical", mentions: ["muses"] }] });
@@ -61,14 +61,16 @@ export function align(h: SourceSemanticInterpretation, q: SourceSemanticQuery, f
   if (fixed) correspondences.push({ relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
     source_endpoint: { kind: "referent", referent: "rAlice" }, query_support: { kind: "query_text", excerpt: "Alice" },
     source_semantic_support: [{ kind: "lexical", mentions: ["mAlice"] }] });
-  return { contract: "source-semantic-alignment-v2", h_id: sourceSemanticInterpretationIdentity(h, sha), q_id: sourceSemanticQueryIdentity(q, sha),
-    producer_id: AP, producer_version: "1", contract_version: "source-semantic-alignment-v2", correspondences };
+  return { contract: "source-semantic-correspondence-v3", source_interpretation_id: sourceSemanticInterpretationIdentity(h, sha), query_semantics_id: sourceSemanticQueryIdentity(q, sha),
+    producer_id: AP, producer_version: "1", contract_version: "source-semantic-correspondence-v3", correspondences };
 }
-export function run(h: SourceSemanticInterpretation, q: SourceSemanticQuery, a: SourceSemanticAlignment, original = ORIGINAL,
+export function run(h: SourceSemanticInterpretation, q: SourceSemanticQuery, a: SourceSemanticCorrespondence, original = ORIGINAL,
   budget = BUDGET, output = 1000000) {
-  const result = reasonSourceSemanticInterpretation({ h, q, a, workspaceId: "ws", scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
-    request: { contract: "source-interpretation-reasoning-v3", accepts_unreviewed_conditional_results: true,
-      h_id: a.h_id, q_id: a.q_id, a_id: alignmentId(a), original_query: original, budget, output_byte_limit: output } });
+  const result = reasonSourceSemanticInterpretation({
+    source_interpretation: h, query_semantics: q, semantic_correspondence: a,
+    workspaceId: "ws", scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
+    request: { contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+      source_interpretation_id: a.source_interpretation_id, query_semantics_id: a.query_semantics_id, semantic_correspondence_id: alignmentId(a), original_query: original, budget, output_byte_limit: output } });
   if (result.outcome.status === "interpreted") {
     const oracle = oracleSourceSemanticJoin(h, q, a);
     expect(oracleBindingsMatchEngine(oracle, decodeEngineBindings(result), q.variables.map((row) => row.id))).toBe(true);
@@ -76,5 +78,5 @@ export function run(h: SourceSemanticInterpretation, q: SourceSemanticQuery, a: 
   }
   return result;
 }
-import { sourceSemanticAlignmentIdentity } from "@do-soul/alaya-protocol";
-function alignmentId(a: SourceSemanticAlignment) { return sourceSemanticAlignmentIdentity(a, sha); }
+import { sourceSemanticCorrespondenceIdentity } from "@do-soul/alaya-protocol";
+function alignmentId(a: SourceSemanticCorrespondence) { return sourceSemanticCorrespondenceIdentity(a, sha); }

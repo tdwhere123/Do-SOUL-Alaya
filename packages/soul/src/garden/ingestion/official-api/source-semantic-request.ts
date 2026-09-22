@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
-  SourceSemanticQuerySchema, SourceSemanticQueryProducerBodySchema, SourceSemanticRequestEnvelopeSchema, SourceSemanticResponseEnvelopeSchema,
+  SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema, SourceSemanticResponseEnvelopeSchema,
   SourceSemanticProposalSchema, SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
   SourceSemanticContentProposalSchema, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
   SourceSemanticExpressionProposalSchema, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
@@ -13,13 +13,13 @@ import {
   SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT, SourceSemanticSelectionGenerationSchema,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
-  SourceSemanticAlignmentProducerBodySchema, SourceSemanticQueryGapSchema,
-  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-  SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT,
-  SourceSemanticQueryMeaningGenerationSchema, SourceSemanticAlignmentSelectionSchema,
-  buildSourceReferenceCatalog, buildSourceSemanticAlignmentEndpointCatalog, canonicalJson,
+  SourceSemanticQueryGapSchema,
+
+
+  SourceSemanticQueryMeaningGenerationSchema, SourceSemanticCorrespondenceSelectionSchema,
+  buildSourceReferenceCatalog, buildSourceSemanticCorrespondenceEndpointCatalog, canonicalJson,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery,
-  type SourceSemanticAlignmentEndpointCatalog
+  type SourceSemanticCorrespondenceEndpointCatalog
 } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, indexSourceSemanticUnits, selectSourceSemanticUnits } from "./source-semantic-units.js";
 import { sourceSemanticQueryExamples } from "./source-semantic-query-examples.js";
@@ -31,14 +31,10 @@ import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canon
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-selection-guidance.js";
 
-export const SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT = "source-semantic-query-request-v2" as const;
-export const SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT = "source-semantic-query-response-v2" as const;
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v3" as const;
 export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v3" as const;
-export const SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT = "source-semantic-alignment-request-v2" as const;
-export const SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT = "source-semantic-alignment-response-v2" as const;
-export const SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT = "source-semantic-alignment-request-v4" as const;
-export const SOURCE_SEMANTIC_ALIGNMENT_SELECTION_RESPONSE_CONTRACT = "source-semantic-alignment-response-v3" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT = "source-semantic-correspondence-request-v4" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v3" as const;
 
 const FORBIDDEN_PROPOSAL_KEYS = [
   "answers", "answer", "ranking", "seeds", "seed", "programs", "program",
@@ -127,19 +123,19 @@ const ApprovedContextSchema = z.object({
   context_id: BoundedIdSchema, notes: z.string().min(1).max(1024).optional()
 }).strict().readonly();
 
-const SourceSemanticHDescriptorSchema = z.object({
-  h_id: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+const SourceInterpretationDescriptorSchema = z.object({
+  source_interpretation_id: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
   interpretation: SourceSemanticInterpretationSchema
 }).strict().superRefine((descriptor, context) => {
-  if (sourceSemanticInterpretationIdentity(descriptor.interpretation, semanticSha256) !== descriptor.h_id) {
-    context.addIssue({ code: "custom", message: "alignment descriptor identity differs from its interpretation" });
+  if (sourceSemanticInterpretationIdentity(descriptor.interpretation, semanticSha256) !== descriptor.source_interpretation_id) {
+    context.addIssue({ code: "custom", message: "semantic_correspondence descriptor identity differs from its interpretation" });
   }
 }).readonly();
 
 type SourceSemanticResourceLimits = z.infer<typeof SourceSemanticResourceLimitsSchema>;
 type SourceSemanticOpenRequestBody = z.infer<typeof SourceSemanticOpenRequestBodySchema>;
 type SourceSemanticApprovedContext = z.infer<typeof ApprovedContextSchema>;
-export type SourceSemanticHDescriptor = z.infer<typeof SourceSemanticHDescriptorSchema>;
+export type SourceInterpretationDescriptor = z.infer<typeof SourceInterpretationDescriptorSchema>;
 
 export type SourceSemanticRequest = Readonly<{
   schema_version: typeof SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION;
@@ -168,21 +164,19 @@ export type SourceSemanticQueryProposalInput = Readonly<{
   producer_id: string;
   producer_version: string;
   resource_limits?: Partial<SourceSemanticResourceLimits>;
-  query_syntax?: typeof SOURCE_SEMANTIC_QUERY_CONTRACT | typeof SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT;
 }>;
 
-export type SourceSemanticAlignmentProposalInput = Readonly<{
+export type SourceSemanticCorrespondenceProposalInput = Readonly<{
   original_query: string;
-  admitted_q: SourceSemanticQuery;
-  h_descriptors: readonly SourceSemanticHDescriptor[];
+  admitted_query_semantics: SourceSemanticQuery;
+  source_interpretation_descriptors: readonly SourceInterpretationDescriptor[];
   producer_id: string;
   producer_version: string;
   resource_limits?: Partial<SourceSemanticResourceLimits>;
-  alignment_syntax?: typeof SOURCE_SEMANTIC_ALIGNMENT_CONTRACT | typeof SOURCE_SEMANTIC_ALIGNMENT_SELECTION_CONTRACT;
 }>;
 
 export type SourceSemanticQueryRequest = Readonly<{
-  contract: typeof SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT | typeof SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT;
+  contract: typeof SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT;
   k_version: typeof SOURCE_SEMANTIC_K_VERSION;
   original_query: string;
   original_query_digest: string;
@@ -191,15 +185,15 @@ export type SourceSemanticQueryRequest = Readonly<{
   resource_limits: SourceSemanticResourceLimits;
 }>;
 
-export type SourceSemanticAlignmentRequest = Readonly<{
+export type SourceSemanticCorrespondenceRequest = Readonly<{
   original_query: string;
-  contract: typeof SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT | typeof SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT;
+  contract: typeof SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT;
   k_version: typeof SOURCE_SEMANTIC_K_VERSION;
-  admitted_q: SourceSemanticQuery;
-  h_descriptors: readonly SourceSemanticHDescriptor[];
+  admitted_query_semantics: SourceSemanticQuery;
+  source_interpretation_descriptors: readonly SourceInterpretationDescriptor[];
   producer_capability: z.infer<typeof ProducerCapability>;
   resource_limits: SourceSemanticResourceLimits;
-  catalog?: SourceSemanticAlignmentEndpointCatalog;
+  catalog: SourceSemanticCorrespondenceEndpointCatalog;
 }>;
 
 export function semanticSha256(text: string): string {
@@ -292,9 +286,8 @@ export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryPropos
   rejectForbiddenProposalInput(input);
   const original_query = input.original_query;
   const original_query_digest = originalQueryDigest(original_query);
-  const meaning = input.query_syntax !== SOURCE_SEMANTIC_QUERY_CONTRACT;
   return {
-    contract: meaning ? SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT : SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT,
+    contract: SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     original_query,
     original_query_digest,
@@ -305,30 +298,27 @@ export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryPropos
   };
 }
 
-export function buildSourceSemanticAlignmentRequest(
-  input: SourceSemanticAlignmentProposalInput
-): SourceSemanticAlignmentRequest {
+export function buildSourceSemanticCorrespondenceRequest(
+  input: SourceSemanticCorrespondenceProposalInput
+): SourceSemanticCorrespondenceRequest {
   rejectForbiddenProposalInput(input);
-  const admitted_q = SourceSemanticQuerySchema.parse(input.admitted_q);
-  if (admitted_q.original_query_digest !== originalQueryDigest(input.original_query)) {
-    throw new AlayaError("VALIDATION", "alignment request Q does not bind the original query");
+  const admitted_query_semantics = SourceSemanticQuerySchema.parse(input.admitted_query_semantics);
+  if (admitted_query_semantics.original_query_digest !== originalQueryDigest(input.original_query)) {
+    throw new AlayaError("VALIDATION", "semantic_correspondence request does not bind the original query");
   }
-  const h_descriptors = z.array(SourceSemanticHDescriptorSchema).min(1).max(64).parse(input.h_descriptors);
-  if (Buffer.byteLength(JSON.stringify(h_descriptors)) > 1_000_000) throw new AlayaError("VALIDATION", "alignment descriptors exceed input budget");
-  const selection = input.alignment_syntax !== SOURCE_SEMANTIC_ALIGNMENT_CONTRACT;
+  const source_interpretation_descriptors = z.array(SourceInterpretationDescriptorSchema).min(1).max(64).parse(input.source_interpretation_descriptors);
+  if (Buffer.byteLength(JSON.stringify(source_interpretation_descriptors)) > 1_000_000) throw new AlayaError("VALIDATION", "semantic_correspondence descriptors exceed input budget");
   return {
-    contract: selection ? SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT : SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT,
+    contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
-    admitted_q,
+    admitted_query_semantics,
     original_query: input.original_query,
-    h_descriptors,
+    source_interpretation_descriptors,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
-    ...(selection ? {
-      catalog: buildSourceSemanticAlignmentEndpointCatalog(admitted_q, h_descriptors.map((row, index) => ({
-        h: `h${index + 1}`, interpretation: row.interpretation
+    catalog: buildSourceSemanticCorrespondenceEndpointCatalog(admitted_query_semantics, source_interpretation_descriptors.map((row, index) => ({
+        source_interpretation_handle: `source${index + 1}`, interpretation: row.interpretation
       })))
-    } : {})
   };
 }
 
@@ -359,7 +349,7 @@ export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest
   });
 }
 
-const QueryAlignmentGenerationOutcomeSchema = z.discriminatedUnion("status", [
+const QueryCorrespondenceGenerationOutcomeSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("interpreted"),
     gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly().optional()
@@ -367,7 +357,7 @@ const QueryAlignmentGenerationOutcomeSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("abstained") }).strict().readonly()
 ]);
 
-const AlignmentGenerationOutcomeSchema = z.discriminatedUnion("status", [
+const CorrespondenceGenerationOutcomeSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("interpreted") }).strict().readonly(),
   z.object({ status: z.literal("abstained") }).strict().readonly()
 ]);
@@ -382,39 +372,21 @@ function producerResponseJsonSchema(schema: z.ZodType, reused?: "ref"): object {
   });
 }
 
-/** Generation envelope for Q. Syntax follows the request contract; never inferred from body fields. */
-export function sourceSemanticQueryResponseJsonSchema(
-  request?: Pick<SourceSemanticQueryRequest, "contract">
-): object {
-  if (request?.contract === SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT) {
-    return producerResponseJsonSchema(z.object({
-      contract: z.literal(SOURCE_SEMANTIC_QUERY_RESPONSE_CONTRACT),
-      outcome: QueryAlignmentGenerationOutcomeSchema,
-      query: SourceSemanticQueryProducerBodySchema.optional()
-    }).strict().readonly());
-  }
+/** Generation envelope for query semantics. Syntax follows the request contract; never inferred from body fields. */
+export function sourceSemanticQueryResponseJsonSchema(): object {
   return producerResponseJsonSchema(z.object({
     contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT),
-    outcome: QueryAlignmentGenerationOutcomeSchema,
+    outcome: QueryCorrespondenceGenerationOutcomeSchema,
     query: SourceSemanticQueryMeaningGenerationSchema.optional()
   }).strict().readonly(), "ref");
 }
 
-/** Generation envelope for A. Syntax follows the request contract; never inferred from body fields. */
-export function sourceSemanticAlignmentResponseJsonSchema(
-  request?: Pick<SourceSemanticAlignmentRequest, "contract">
-): object {
-  if (request?.contract === SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT) {
-    return producerResponseJsonSchema(z.object({
-      contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_RESPONSE_CONTRACT),
-      outcome: AlignmentGenerationOutcomeSchema,
-      alignment: SourceSemanticAlignmentProducerBodySchema.optional()
-    }).strict().readonly());
-  }
+/** Current catalog-selection generation envelope for semantic correspondence. */
+export function sourceSemanticCorrespondenceResponseJsonSchema(): object {
   return producerResponseJsonSchema(z.object({
-    contract: z.literal(SOURCE_SEMANTIC_ALIGNMENT_SELECTION_RESPONSE_CONTRACT),
-    outcome: AlignmentGenerationOutcomeSchema,
-    alignment: SourceSemanticAlignmentSelectionSchema.optional()
+    contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT),
+    outcome: CorrespondenceGenerationOutcomeSchema,
+    semantic_correspondence: SourceSemanticCorrespondenceSelectionSchema.optional()
   }).strict().readonly());
 }
 
@@ -493,16 +465,6 @@ export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): stri
     ? CONTENT_SOURCE_SEMANTIC_SYSTEM_PROMPT : LEGACY_SOURCE_SEMANTIC_SYSTEM_PROMPT;
 }
 
-export const SOURCE_SEMANTIC_QUERY_GRAPH_SYSTEM_PROMPT = [
-  "Propose query interpretation for the original query only, using source-semantic-query-v2 body fields.",
-  "Return variables, frames, role requirements, context obligations, finite alternatives, and located gaps.",
-  "Do not emit answers, ranking, seeds, QueryProgram, programs, verdicts, or source answer IDs.",
-  "Bind meaning to the original query text. Approved fixed context is given; do not invent H or A.",
-  'Optional domains are {id,support:{kind:"query_text",excerpt}}. Universal evaluation is {kind:"forall",domain,binder,local_variables}; binders occur in the body and cannot be returned. entailed_at_source requests inference; asserted_at_source requests a literal assertion. Counterexample alternatives use purpose:"counterexample" and explicit negated-body incidence.',
-  'Comparison evaluation is {kind:"comparison",domain,operation:"lt"|"le"|"eq"|"ge"|"gt"|"minimum"|"maximum",left,right?,strict,metric,unit,context,scope:"asserted"|"preserve"}. Comparison alternatives have empty frames/context_obligations. Pairwise strict is true only for lt/gt; extrema omit right and explicitly choose strictness. Return only operand variables.',
-  "Query.gaps is the authoritative gap list. If outcome.gaps is omitted, the host echoes it; disagreement remains invalid. Retain partial meaning and located gaps in the query body."
-].join(" ");
-
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   "Propose query meaning for the original query only, using source-semantic-query-meaning-v1.",
   "Return nested meaning nodes. Do not write a flat variable/frame/sort graph, hashes, reciprocal incidence, answers, ranking, seeds, QueryProgram, programs, verdicts, or source answer IDs.",
@@ -513,47 +475,28 @@ export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   "source_act is retrieval intent, not query punctuation. Ordinary factual questions omit it. Use source_act=question only when the sought source itself asked or directed. Did X happen seeks asserted or entailed X, not a source question.",
   "possible(X) is a context node whose statement operand carries participants. Promise, report, and hypothetical stay distinct from observed fact. not X is not X; conditional operands keep their declared roles.",
   "Question words locate a free target; they are not an entity named who. A name that happens to be Who is a named constraint. Keep true ambiguous-reference gaps; do not invent a unique entity.",
-  "Bind meaning to the original query text. Approved fixed context is given; do not invent H or A.",
+  "Bind meaning to the original query text. Approved fixed context is given; do not invent a source interpretation or a semantic correspondence.",
   'Optional domains are {key,excerpt}. Universal evaluation is {kind:"forall",domain,binder,local_variables}; binders occur in the body and cannot be returned. entailed_at_source requests inference; asserted_at_source requests a literal assertion. Counterexample alternatives use purpose:"counterexample".',
   "Preserve all/every as universal evaluation over the query-supported domain and its bound participant, never as one named entity containing an entire quantified phrase. Domain excerpts retain the requested population restriction; do not invent a closed census. Preserve already, still and completion/aspect distinctions in the supported predicate meaning or a located gap; a broad topic word does not preserve those qualifications.",
   'Comparison evaluation is {kind:"comparison",domain,operation:"lt"|"le"|"eq"|"ge"|"gt"|"minimum"|"maximum",left,right?,strict,metric,unit,context,scope:"asserted"|"preserve"} with no nested meaning. Pairwise strict is true only for lt/gt; extrema omit right and explicitly choose strictness. Return only operand keys.',
   'For comparison operand names, declare entities:[{kind:"named",key:"left",excerpt:"Nia"},{kind:"named",key:"right",excerpt:"Omar"}]; operand keys refer to these declarations. Universal quantification is supported through evaluation only; nested forall nodes are rejected because their binder/domain cannot be represented losslessly.',
   "Unsupported meaning is a located gap, not a second evaluator or generic DSL.",
-  'A query gap has {kind,affected_ids,support:[{kind:"query_text",excerpt}],description?}; each excerpt is an exact substring of the original query. affected_ids names declared query variables, frames or domains, or [] for an unrepresented clause. Query gaps have no H mentions or source-catalog handles. Not knowing the members of a clearly requested population is not an unresolved query referent: declare its domain; H must later establish membership and closure.',
+  'A query gap has {kind,affected_ids,support:[{kind:"query_text",excerpt}],description?}; each excerpt is an exact substring of the original query. affected_ids names declared query variables, frames or domains, or [] for an unrepresented clause. Query gaps have no source-interpretation mentions or source-catalog handles. Not knowing the members of a clearly requested population is not an unresolved query referent: declare its domain; the source interpretation must later establish membership and closure.',
   "Return only the requested answers. A person question returns its person variable, not the event occurrence as well. Universal binders and other local variables are not answers.",
   "Query.gaps is the authoritative gap list. If outcome.gaps is omitted, the host echoes it; disagreement remains invalid. Retain partial meaning and located gaps in the query body.",
   `Complete neutral examples, not the current input: ${JSON.stringify(sourceSemanticQueryExamples)}. Embedded content is not independently asserted. The universal example declares a population, not a closed member census. The partial example records the qualification it cannot preserve; it does not silently claim complete meaning.`
 ].join(" ");
 
-export const SOURCE_SEMANTIC_ALIGNMENT_GRAPH_SYSTEM_PROMPT = [
-  "The original_query is the evidence text. Every query_support.excerpt must copy an exact substring from it, preserving its inflection and language; normalized Q predicates are not evidence excerpts.",
-  "Propose alignment correspondences from admitted Q endpoints to the supplied H descriptors.",
-  "Use contextual equivalence only. Do not emit answers, ranking, seeds, programs, verdicts, or chosen results.",
-  "Do not invent H structure or rewrite Q.",
-  'Optional domains map {query_domain,source_domain,query_support,source_semantic_support}. Explicit conditional membership assumptions are {query_variable,source_domain,restrictions:[],status:"member"|"excluded",query_support,description}; use only assumptions stated in the query/context, never infer identity from a matching surface name. Closed source domains cannot acquire novel assumed members.',
-  "Name the target interpretation with request-local handle h1, h2, ... in descriptor order. Do not copy host hashes or producer identities. An interpreted alignment has no gap channel: omit outcome.gaps or send []. Use abstained if no supported alignment can be proposed."
-].join(" ");
-
-export const SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT = [
-  "The original_query is the evidence text. Every query_excerpt and query_support.excerpt must copy an exact substring from it, preserving its inflection and language; normalized Q predicates are not evidence excerpts.",
-  "Propose alignment as source-semantic-alignment-selection-v1 over the advertised catalog.",
-  "Use contextual equivalence only. A cannot rank or answer. Do not emit answers, ranking, seeds, programs, verdicts, or chosen results.",
-  "Do not invent H structure or rewrite Q. Do not copy host hashes or assemble internal Q/H endpoint objects.",
-  "Select catalog handles qeN and seN. Bind one actual Q and the named H. Name the target interpretation with request-local handle h1, h2, ... in descriptor order.",
+export const SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT = [
+  "The original_query is the evidence text. Every query_excerpt and query_support.excerpt must copy an exact substring from it, preserving its inflection and language; normalized query-semantics predicates are not evidence excerpts.",
+  "Propose semantic_correspondence as source-semantic-correspondence-selection-v2 over the advertised catalog.",
+  "Use contextual equivalence only. Semantic correspondence cannot rank or answer. Do not emit answers, ranking, seeds, programs, verdicts, or chosen results.",
+  "Do not invent source-interpretation structure or rewrite query semantics. Do not copy host hashes or assemble internal query-semantics or source-interpretation endpoint objects.",
+  "Select catalog handles qeN and seN. Bind one actual query semantics and the named source interpretation. Name the target interpretation with request-local handle source1, source2, ... in descriptor order.",
   // Set-valued answers need the predicate plus each returned-variable slot on the same frame; a predicate row alone compiles to none.
   "A set-valued query that returns more than one free variable, or that asks which X which Y, must emit a selection group for each matching asserted frame in the advertised catalog. Each group MUST contain the matching predicate AND a slot binding for every returned variable on that same source frame. A predicate-only group is incomplete and must not be handed in as a group. Do not collapse those frames onto the first hit. The host does not complete omitted selections.",
   "An endpoint pair must express the same contextual meaning, not merely related topics or similar entity types. A named query target keeps its actual meaning: do not map an unrelated product or topic to it. A free answer variable is not the requester or a named source participant merely because both denote people. If no supported pair exists, use abstained or an empty selections array; partial overlap must not invent missing equivalences.",
   'Optional domains map {query_domain,source_domain,query_support,source_semantic_support}. Explicit conditional membership assumptions are {query_variable,source_domain,restrictions:[],status:"member"|"excluded",query_support,description}; use only assumptions stated in the query/context, never infer identity from a matching surface name. Closed source domains cannot acquire novel assumed members.',
-  "Domain identifiers are exact admitted_q.domains[].id and the selected H interpretation.domains[].id. A frame, entity, statement, endpoint handle or conceptual category is not a domain identifier. If H has no declared domains, omit domains and membership_assumptions or return empty arrays. Ordinary free-answer questions do not require inventing finite-domain membership. The source must already supply any domain you reference.",
-  "An interpreted alignment has no gap channel: omit outcome.gaps or send []. Use abstained if no supported alignment can be proposed."
+  "Domain identifiers are exact admitted_query_semantics.domains[].id and the selected source interpretation's domains[].id. A frame, entity, statement, endpoint handle or conceptual category is not a domain identifier. If the source interpretation has no declared domains, omit domains and membership_assumptions or return empty arrays. Ordinary free-answer questions do not require inventing finite-domain membership. The source must already supply any domain you reference.",
+  "An interpreted semantic_correspondence has no gap channel: omit outcome.gaps or send []. Use abstained if no supported semantic_correspondence can be proposed."
 ].join(" ");
-
-export function sourceSemanticQuerySystemPrompt(request: SourceSemanticQueryRequest): string {
-  return request.contract === SOURCE_SEMANTIC_QUERY_REQUEST_CONTRACT
-    ? SOURCE_SEMANTIC_QUERY_GRAPH_SYSTEM_PROMPT : SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT;
-}
-
-export function sourceSemanticAlignmentSystemPrompt(request: SourceSemanticAlignmentRequest): string {
-  return request.contract === SOURCE_SEMANTIC_ALIGNMENT_REQUEST_CONTRACT
-    ? SOURCE_SEMANTIC_ALIGNMENT_GRAPH_SYSTEM_PROMPT : SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT;
-}

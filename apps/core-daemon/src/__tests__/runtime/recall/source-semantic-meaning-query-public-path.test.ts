@@ -1,3 +1,4 @@
+import { receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,14 +6,14 @@ import { expect, it } from "vitest";
 import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
-  SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
+  SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT
 } from "@do-soul/alaya-protocol";
 import {
   createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
-  fieldContractSha256, SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID
+  fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID
 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
-import { proposeAlignmentSemantics, proposeQuerySemantics, proposeSourceSemantics } from "@do-soul/alaya-soul";
+import { proposeCorrespondenceSemantics, proposeQuerySemantics, proposeSourceSemantics } from "@do-soul/alaya-soul";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
@@ -65,20 +66,20 @@ function segment(catalog: SourceReferenceCatalog, text: string): string {
 
 function mention(h: SourceSemanticInterpretation, text: string) {
   const row = h.mentions.find((item) => item.text === text);
-  if (row === undefined) throw new Error(`H lacks ${text}`);
+  if (row === undefined) throw new Error(`source interpretation lacks ${text}`);
   return row;
 }
 
 function frameOf(h: SourceSemanticInterpretation, reading: string) {
   const row = h.frames.find((item) => item.predicate_support.reading === reading);
-  if (row === undefined) throw new Error(`H lacks frame ${reading}`);
+  if (row === undefined) throw new Error(`source interpretation lacks frame ${reading}`);
   return row;
 }
 
 function referentOf(h: SourceSemanticInterpretation, text: string) {
   const id = mention(h, text).id;
   const row = h.referents.find((item) => item.mentions.includes(id));
-  if (row === undefined) throw new Error(`H lacks referent for ${text}`);
+  if (row === undefined) throw new Error(`source interpretation lacks referent for ${text}`);
   return row;
 }
 
@@ -137,7 +138,7 @@ function receiveFrozenMeaningQ() {
     producer_version: "1"
   }, { rawJson: FROZEN_MEANING_RAW });
   if (received.outcome.status !== "interpreted" || received.query === undefined) {
-    throw new Error(`meaning Q receive failed: ${JSON.stringify(received.outcome)}`);
+    throw new Error(`query semantics receive failed: ${JSON.stringify(received.outcome)}`);
   }
   return { request: received.request, query: received.query };
 }
@@ -153,16 +154,7 @@ function receiveLatheA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, 
     || operateAgent === undefined || operateTheme === undefined) {
     throw new Error("compiled operate slots required");
   }
-  const received = proposeAlignmentSemantics({
-    original_query: ORIGINAL, admitted_q: q,
-    h_descriptors: [{ h_id: hId, interpretation: h }],
-    producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1",
-    alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
-  }, {
-    rawJson: JSON.stringify({
-      contract: "source-semantic-alignment-response-v2",
-      outcome: { status: "interpreted", gaps: [] },
-      alignment: { correspondences: [
+  const received = receiveAuthoredCorrespondence({ original_query: ORIGINAL, admitted_query_semantics: q, source_interpretation_descriptors: [{ source_interpretation_id: hId, interpretation: h }], producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, { correspondences: [
         { relation: "contextual_equivalence",
           query_endpoint: { kind: "referent", variable: "lathe" },
           source_endpoint: { kind: "referent", referent: referentOf(h, "lathe").id },
@@ -183,20 +175,18 @@ function receiveLatheA(q: SourceSemanticQuery, h: SourceSemanticInterpretation, 
           source_endpoint: { kind: "slot", frame: operate.id, slot: operateTheme.id },
           query_support: { kind: "query_text", excerpt: "lathe" },
           source_semantic_support: [{ kind: "lexical", mentions: [mention(h, "lathe").id] }] }
-      ] }
-    })
-  });
-  if (received.alignment === undefined) {
+      ] }, { status: "interpreted", gaps: [] });
+  if (received.semantic_correspondence === undefined) {
     throw new Error(`A receive failed: ${JSON.stringify(received.outcome)}`);
   }
-  return received.alignment;
+  return received.semantic_correspondence;
 }
 
 /**
  * Handbook (`docs/handbook/recall.md`): `soul.interpretation` `recall` is the
- * opt-in typed H/Q/A library path. Ordinary `soul.recall` is not that surface.
+ * opt-in typed source interpretation, query semantics, and semantic correspondence library path. Ordinary `soul.recall` is not that surface.
  */
-it("recalls a model-admitted meaning Q through SQLite reopen, worker, and public interpretation", async () => {
+it("recalls a model-admitted query semantics through SQLite reopen, worker, and public interpretation", async () => {
   const receivedQ = receiveFrozenMeaningQ();
   expect(receivedQ.request.contract).toBe("source-semantic-query-request-v3");
   expect(receivedQ.query.alternatives[0]?.frames.some((row) => row.operator === "possible")).toBe(true);
@@ -236,7 +226,7 @@ it("recalls a model-admitted meaning Q through SQLite reopen, worker, and public
         })
       });
       if (receivedH.draft === undefined || receivedH.interpretation === undefined) {
-        throw new Error(`H receive failed: ${JSON.stringify(receivedH.outcome)}`);
+        throw new Error(`source-interpretation receive failed: ${JSON.stringify(receivedH.outcome)}`);
       }
       const published = await interpret(session.handler, {
         operation: "propose", source_handle: prepared.source_handle, draft: receivedH.draft,
@@ -257,16 +247,16 @@ it("recalls a model-admitted meaning Q through SQLite reopen, worker, and public
       const admitted = receiveFrozenMeaningQ();
       expect(admitted.request.contract).toBe("source-semantic-query-request-v3");
       const qAfter = admitted.query;
-      const alignment = receiveLatheA(qAfter, h, hId);
+      const semantic_correspondence = receiveLatheA(qAfter, h, hId);
       const recalled = await interpret(reopened.handler, {
         operation: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
-        q: qAfter, alignments: [alignment], budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
+        query_semantics: qAfter, semantic_correspondences: [semantic_correspondence], budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
       }, reopened.context);
       if (recalled.operation !== "recall") throw new Error(`recall expected: ${JSON.stringify(recalled)}`);
       expect(recalled.provider_attempts).toBe(0);
-      const proofSlot = recalled.slot_qualifiers?.find((row) => row.evidence_kind === "semantic_proof" && row.h_id === hId);
+      const proofSlot = recalled.slot_qualifiers?.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === hId);
       expect(proofSlot).toBeDefined();
-      expect(recalled.proofs?.some((row) => row.h_id === hId && (row.answers?.length ?? 0) > 0)).toBe(true);
+      expect(recalled.proofs?.some((row) => row.source_interpretation_id === hId && (row.answers?.length ?? 0) > 0)).toBe(true);
       expect(recalled.results?.[proofSlot!.index]?.object_kind).toBe("semantic_proof");
       expect(recalled.delivery_id).toEqual(expect.any(String));
     } finally {

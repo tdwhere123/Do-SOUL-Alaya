@@ -8,7 +8,7 @@ import { parseBindingContext, type BindingContextStore } from "../conditional-fi
 import type { SourceSemanticPremisePopulation } from "./source-semantic-premises.js";
 import type { SourceSemanticExecutionPlan, SourceSemanticProofBranch } from "../conditional-field/query/compile-source-semantic-finite.js";
 
-/** Project actual engine environments, never reconstruct bindings from H/A or a leaf bag. */
+/** Project actual engine environments, never reconstruct bindings from source interpretation and semantic correspondence or a leaf bag. */
 export function deliverSourceSemanticProof(input: Readonly<{
   index: InformationIndex;
   query: SourceSemanticQuery;
@@ -39,7 +39,7 @@ export function deliverSourceSemanticProof(input: Readonly<{
     const compiledBranch = input.execution?.branches[branchIndex];
     const alternative = compiledBranch?.alternative ?? branchIndex;
     const branch = query.alternatives[alternative];
-    if (branch === undefined) throw new CoreError("OBLIGATION_VIOLATION", "accepting alternative is not in Q");
+    if (branch === undefined) throw new CoreError("OBLIGATION_VIOLATION", "accepting alternative is not in query semantics");
     if (compiledBranch !== undefined) observed.push({ branch: { ...compiledBranch,
       ...(compiledBranch.candidate_variable === undefined ? {} : {
         candidate: coordinates.get(env.get(compiledBranch.candidate_variable) ?? "")?.node_id

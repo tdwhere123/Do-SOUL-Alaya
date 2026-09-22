@@ -4,13 +4,13 @@ import { z } from "zod";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY, type SemanticProposalKind, type SemanticProposalLine } from "./workset.js";
 
-export const SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT = "source-semantic-proposal-authority-v1" as const;
+export const SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT = "source-semantic-proposal-authority-v2" as const;
 const MILLION = 1_000_000;
 
 const AuthoritySchema = z.object({
   contract: z.literal(SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT),
   action: z.literal("fill"),
-  kind: z.enum(["query", "alignment"]),
+  kind: z.enum(["query", "semantic_correspondence"]),
   model: z.string().min(1),
   request_profile: z.string().min(1),
   generated_at: z.string().min(1),
@@ -35,8 +35,8 @@ const AuthoritySchema = z.object({
 export type SemanticProposalAuthority = z.infer<typeof AuthoritySchema>;
 
 const PreflightSchema = z.object({
-  contract: z.literal("source-semantic-proposal-preflight-v1"),
-  kind: z.enum(["query", "alignment"]),
+  contract: z.literal("source-semantic-proposal-preflight-v2"),
+  kind: z.enum(["query", "semantic_correspondence"]),
   model: z.string().min(1),
   request_profile: z.string().min(1),
   provider_calls: z.literal(0),
@@ -64,7 +64,7 @@ export function buildSemanticProposalPreflight(input: Readonly<{
   const missingLines = input.lines.filter((line) => !input.cachedKeys.has(line.key));
   const maxInput = missingLines.reduce((max, line) => Math.max(max, line.inputByteUpper), 0);
   return {
-    contract: "source-semantic-proposal-preflight-v1",
+    contract: "source-semantic-proposal-preflight-v2",
     kind: input.kind, model: input.model, request_profile: input.request_profile,
     provider_calls: 0, missing: missingLines.length,
     maximum_attempts: missingLines.length * SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY,

@@ -8,8 +8,8 @@ import {
   SourceSemanticQuerySchema, SOURCE_SEMANTIC_QUERY_CONTRACT, type SourceSemanticQuery
 } from "../recall/conditional-field/semantic-query.js";
 import {
-  SourceSemanticAlignmentSchema, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT, type SourceSemanticAlignment
-} from "../recall/conditional-field/semantic-alignment.js";
+  SourceSemanticCorrespondenceSchema, SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT, type SourceSemanticCorrespondence
+} from "../recall/conditional-field/semantic-correspondence.js";
 import {
   SourceSemanticEvaluationContextSchema, SOURCE_SEMANTIC_CONTEXT_CONTRACT,
   type SourceSemanticEvaluationContext
@@ -59,12 +59,12 @@ export function sourceSemanticQueryPreimage(query: SourceSemanticQuery) {
   };
 }
 
-export function sourceSemanticAlignmentPreimage(alignment: SourceSemanticAlignment) {
-  const value = SourceSemanticAlignmentSchema.parse(alignment);
+export function sourceSemanticCorrespondencePreimage(semantic_correspondence: SourceSemanticCorrespondence) {
+  const value = SourceSemanticCorrespondenceSchema.parse(semantic_correspondence);
   return {
-    contract: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
-    h_id: value.h_id,
-    q_id: value.q_id,
+    contract: SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
+    source_interpretation_id: value.source_interpretation_id,
+    query_semantics_id: value.query_semantics_id,
     producer_id: value.producer_id,
     producer_version: value.producer_version,
     contract_version: value.contract_version,
@@ -77,9 +77,9 @@ export function sourceSemanticContextPreimage(context: SourceSemanticEvaluationC
   const value = SourceSemanticEvaluationContextSchema.parse(context);
   return {
     contract: SOURCE_SEMANTIC_CONTEXT_CONTRACT,
-    h_id: value.h_id,
-    q_id: value.q_id,
-    a_id: value.a_id,
+    source_interpretation_id: value.source_interpretation_id,
+    query_semantics_id: value.query_semantics_id,
+    semantic_correspondence_id: value.semantic_correspondence_id,
     k_version: value.k_version,
     lowering_version: value.lowering_version
   };
@@ -99,10 +99,10 @@ export function sourceSemanticQueryIdentity(query: SourceSemanticQuery, sha256: 
   return digest(sourceSemanticQueryPreimage(query), sha256);
 }
 
-export function sourceSemanticAlignmentIdentity(
-  alignment: SourceSemanticAlignment, sha256: FieldContractSha256
+export function sourceSemanticCorrespondenceIdentity(
+  semantic_correspondence: SourceSemanticCorrespondence, sha256: FieldContractSha256
 ): string {
-  return digest(sourceSemanticAlignmentPreimage(alignment), sha256);
+  return digest(sourceSemanticCorrespondencePreimage(semantic_correspondence), sha256);
 }
 
 export function sourceSemanticContextIdentity(

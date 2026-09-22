@@ -1,5 +1,5 @@
 import {
-  SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_LIBRARY_H_PAGE,
+  SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
   SourceSemanticHandleDescriptorSchema, SourceSemanticPublishedInterpretationSchema, SourceSemanticResourceExhausted,
   type SourceSemanticCoverage, type SourceSemanticHandleDescriptor
 } from "@do-soul/alaya-protocol";
@@ -12,8 +12,8 @@ import { sourceSemanticReadStores, SourceSemanticReadBudget } from "../field/sou
 
 export type SourceSemanticWorkerPayload = WorkerOperationPayload<"conditionalField.sourceSemantics">;
 export const IDLE: SourceSemanticCoverage = {
-  discovery: "unexercised", h: "unexercised", q: "unexercised", a: "unexercised",
-  computation: "unexercised", payload: "complete"
+  discovery: "unexercised", source_interpretation: "unexercised", query_semantics: "unexercised",
+  semantic_correspondence: "unexercised", conditional_computation: "unexercised", payload: "complete"
 };
 
 /** prepare_query verifies bodies it returns. Library recall pages handle identity only. */
@@ -21,11 +21,11 @@ export function discover(runtime: RecallReadWorkerRuntime, payload: SourceSemant
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, after: string | null, sourceId?: string,
   verify = true) {
   const page = new SqliteSourceHintReader(runtime.database.connection).pageBoundInterpretations({
-    workspaceId: payload.workspace_id, limit: SOURCE_SEMANTIC_LIBRARY_H_PAGE, nativeLimit: Math.min(32, meter.work), afterCursor: after,
+    workspaceId: payload.workspace_id, limit: SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE, nativeLimit: Math.min(32, meter.work), afterCursor: after,
     nativeByteLimit: Math.min(meter.bytes, 1_000_000), maxGistBytes: 1_000_000, activeOnly: true,
     matches: (gist) => { try {
       const contract = JSON.parse(gist)?.contract;
-      return contract === SOURCE_SEMANTIC_PUBLISHED_CONTRACT || contract === "published-source-interpretation-v3";
+      return contract === SOURCE_SEMANTIC_PUBLISHED_CONTRACT;
     } catch { return false; } }
   });
   try {
@@ -63,9 +63,9 @@ export function discover(runtime: RecallReadWorkerRuntime, payload: SourceSemant
   return { candidates, open, cursor, truncated: stopped || page.truncated };
 }
 
-function verifiedHandle(runtime: RecallReadWorkerRuntime, workspace: string, hId: string,
+function verifiedHandle(runtime: RecallReadWorkerRuntime, workspace: string, interpretationId: string,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget): SourceSemanticHandleDescriptor {
-  const checked = loadVerified(runtime, workspace, hId, authorized, meter);
+  const checked = loadVerified(runtime, workspace, interpretationId, authorized, meter);
   const h = checked.bound.interpretation;
   return {
     interpretation_id: checked.bound.interpretation_id, source_id: h.source.source_id, source_version: h.source.source_version,
@@ -94,11 +94,11 @@ function publishedHandleIdentity(gist: string): { descriptor: SourceSemanticHand
   } catch { return null; }
 }
 
-export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, hId: string,
+export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, interpretationId: string,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget) {
   meter.reserve(1, 16);
   const capsule = new SqliteSourceHintReader(runtime.database.connection).readBoundInterpretation(
-    workspace, semanticInterpretationEvidenceId(hId, fieldContractSha256), meter.bytes);
+    workspace, semanticInterpretationEvidenceId(interpretationId, fieldContractSha256), meter.bytes);
   meter.read(capsule.nativeVisits, capsule.bytesRead);
   if (capsule.status !== "complete" || capsule.gist === null) {
     throw new CoreError("CONFLICT", `source semantic interpretation read is ${capsule.status}`, { details: { admission: "unavailable", unavailable: capsule.status } });
@@ -110,13 +110,11 @@ export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string
   }
   const parsed = SourceSemanticPublishedInterpretationSchema.safeParse(raw);
   if (!parsed.success) {
-    const contract = typeof raw === "object" && raw !== null && "contract" in raw ? raw.contract : undefined;
-    throw new CoreError("VALIDATION", contract === "published-source-interpretation-v3"
-      ? "stored interpretation requires explicit preparation under the current structural contract" : "stored interpretation is malformed",
-    { details: { admission: "invalid", reason: contract === "published-source-interpretation-v3" ? "unsupported_structural_contract" : "malformed_interpretation" } });
+    throw new CoreError("VALIDATION", "stored interpretation is malformed",
+      { details: { admission: "invalid", reason: "malformed_interpretation" } });
   }
   const bound = parsed.data;
-  if (bound.interpretation_id !== hId) throw new CoreError("VALIDATION", "interpretation identity mismatch");
+  if (bound.interpretation_id !== interpretationId) throw new CoreError("VALIDATION", "interpretation identity mismatch");
   const stores = sourceSemanticReadStores(runtime.database, workspace, bound.interpretation.source.source_id, meter, authorized);
   meter.retain(bound, "interpretation verification");
   return verifyPublishedSourceSemanticInterpretation({ stores, sha256: fieldContractSha256, meter }, bound, workspace);

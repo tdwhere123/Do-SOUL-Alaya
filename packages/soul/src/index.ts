@@ -304,16 +304,15 @@ export { buildOfficialApiSourcePacketRequest, parseOfficialApiSourcePacketReques
 export { receiveOfficialApiSourcePacket, completeEmptyOfficialApiSourcePacket, MAX_OFFICIAL_API_SOURCE_PACKET_RESPONSE_BYTES } from "./garden/ingestion/official-api/source-packet-receive.js";
 export { collectSourceSemanticUnitPacks, indexSourceSemanticUnits, sourceSemanticTransportUnits } from "./garden/ingestion/official-api/source-semantic-units.js";
 export {
-  SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, SOURCE_SEMANTIC_ALIGNMENT_SYSTEM_PROMPT,
+  SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT,
   SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
-  SOURCE_SEMANTIC_ALIGNMENT_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_SELECTION_RESPONSE_CONTRACT,
-  sourceSemanticQuerySystemPrompt, sourceSemanticAlignmentSystemPrompt,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
   sourceSemanticSystemPrompt, buildSourceSemanticRequest, buildSourceSemanticQueryRequest,
-  buildSourceSemanticAlignmentRequest, parseSourceSemanticRequest, sourceSemanticResponseJsonSchema,
-  sourceSemanticQueryResponseJsonSchema, sourceSemanticAlignmentResponseJsonSchema,
+  buildSourceSemanticCorrespondenceRequest, parseSourceSemanticRequest, sourceSemanticResponseJsonSchema,
+  sourceSemanticQueryResponseJsonSchema, sourceSemanticCorrespondenceResponseJsonSchema,
   type SourceSemanticRequest, type SourceSemanticProposalInput, type SourceSemanticQueryProposalInput,
-  type SourceSemanticAlignmentProposalInput, type SourceSemanticHDescriptor, type SourceSemanticQueryRequest,
-  type SourceSemanticAlignmentRequest
+  type SourceSemanticCorrespondenceProposalInput, type SourceInterpretationDescriptor, type SourceSemanticQueryRequest,
+  type SourceSemanticCorrespondenceRequest
 } from "./garden/ingestion/official-api/source-semantic-request.js";
 export {
   SourceSemanticRevisionSchema, prepareSourceSemanticRevision, sourceSemanticBaseRequestDigest,
@@ -321,12 +320,12 @@ export {
 } from "./garden/ingestion/official-api/source-semantic-revision.js";
 export {
   receiveSourceSemantics, completeEmptySourceSemantics, proposeSourceSemantics,
-  proposeQuerySemantics, proposeAlignmentSemantics,
+  proposeQuerySemantics, proposeCorrespondenceSemantics,
   MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, type SourceSemanticProposalResult,
-  type SourceSemanticQueryProposalResult, type SourceSemanticAlignmentProposalResult
+  type SourceSemanticQueryProposalResult, type SourceSemanticCorrespondenceProposalResult
 } from "./garden/ingestion/official-api/source-semantic-receive.js";
 export {
-  prepareSourceSemanticLibrary, sourceSemanticLibraryAlignmentCacheKey,
+  prepareSourceSemanticLibrary, sourceSemanticLibraryCorrespondenceCacheKey,
   type SourceSemanticLibraryPrepareInput, type SourceSemanticLibraryPrepareResult,
   type SourceSemanticLibraryProduceResult, type SourceSemanticLibraryPrepareOutcome,
   type SourceSemanticLibraryPrepareCacheEntry, type SourceSemanticLibraryPrepareStatus

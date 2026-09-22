@@ -1,3 +1,4 @@
+import { authoredQuerySemantics, receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -9,14 +10,14 @@ import { expect, it } from "vitest";
 import {
   buildSourceReferenceCatalog, hashLabeledIdentity, sourceReferenceResolver, canonicalJson,
   SourceSemanticPublishedInterpretationSchema, sourceSemanticInterpretationIdentity,
-  type SourceReferenceCatalog, type SourceSemanticAlignment, type SourceSemanticQuery,
+  type SourceReferenceCatalog, type SourceSemanticCorrespondence, type SourceSemanticQuery,
   type SourceSemanticWorkerRequest,
-  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT
 } from "@do-soul/alaya-protocol";
-import { proposeAlignmentSemantics, proposeQuerySemantics } from "@do-soul/alaya-soul";
+import { proposeCorrespondenceSemantics, proposeQuerySemantics } from "@do-soul/alaya-soul";
 import {
   admitSourceSemanticQuery, createAuditedSourceAdmission, createSourceSemanticInterpretationPublication,
-  EvidenceService, fieldContractSha256, SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
+  EvidenceService, fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, semanticInterpretationEvidenceId
 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteFieldEraseBarrierRepo }
@@ -42,7 +43,7 @@ const BUDGET = {
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10
 };
 
-const ALICE_CORRESPONDENCES: import("@do-soul/alaya-protocol").SourceSemanticAlignment["correspondences"] = [
+const ALICE_CORRESPONDENCES: import("@do-soul/alaya-protocol").SourceSemanticCorrespondence["correspondences"] = [
   { relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
     source_endpoint: { kind: "referent", referent: "rAlice" }, query_support: { kind: "query_text", excerpt: "Alice" }, source_semantic_support: [{ kind: "lexical", mentions: ["mAlice"] }] },
   { relation: "contextual_equivalence", query_endpoint: { kind: "slot", alternative: 0, frame: "qUse", slot: "agent" },
@@ -113,14 +114,14 @@ function queryOf(): SourceSemanticQuery {
   };
 }
 
-function alignmentOf(hId: string, q: SourceSemanticQuery): SourceSemanticAlignment {
+function alignmentOf(hId: string, q: SourceSemanticQuery): SourceSemanticCorrespondence {
   const admitted = admitSourceSemanticQuery(q, ORIGINAL);
   if (admitted.kind !== "admitted") throw new Error("query must admit");
   return {
-    contract: "source-semantic-alignment-v2",
-    h_id: hId, q_id: admitted.query_id,
-    producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-    producer_version: "1", contract_version: "source-semantic-alignment-v2",
+    contract: "source-semantic-correspondence-v3",
+    source_interpretation_id: hId, query_semantics_id: admitted.query_id,
+    producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
+    producer_version: "1", contract_version: "source-semantic-correspondence-v3",
     correspondences: [
       ...ALICE_CORRESPONDENCES,
       {
@@ -252,15 +253,15 @@ it("keeps durable legacy interpretation bytes and identity while failing closed 
     await repo.create({ ...capsule, object_id: evidenceId, gist: oldBytes });
     database.close(); closeCachedDatabase(filename);
     expect((await call(execute, { kind: "prepare_source", source_id: "artifact-1", budget: BUDGET })).kind).toBe("prepare_source");
-    const discovered = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q: queryOf(), budget: BUDGET });
+    const discovered = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
     expect(discovered.kind).toBe("prepare_query");
     if (discovered.kind !== "prepare_query") throw new Error("query preparation expected");
     expect(discovered.candidates.some((row) => row.interpretation_id === legacyId)).toBe(false);
-    expect(discovered.coverage.discovery).toBe("truncated");
+    expect(discovered.coverage.discovery).toBe("complete");
     await expect(call(execute, { kind: "reason", accepts_unreviewed_conditional_results: true,
-      h_id: legacyId, q: queryOf(), a: alignmentOf(legacyId, queryOf()), original_query: ORIGINAL,
+      source_interpretation_id: legacyId, query_semantics: queryOf(), semantic_correspondence: alignmentOf(legacyId, queryOf()), original_query: ORIGINAL,
       budget: BUDGET, output_byte_limit: 1000000 })).rejects.toMatchObject({ code: "VALIDATION",
-      details: expect.objectContaining({ reason: "unsupported_structural_contract" }) });
+      details: expect.objectContaining({ reason: "malformed_interpretation" }) });
     const reopened = await createRecallRealStorage(() => undefined, filename);
     expect((await new SqliteEvidenceCapsuleRepo(reopened.database).findById(evidenceId))?.gist).toBe(oldBytes);
     reopened.database.close(); closeCachedDatabase(filename);
@@ -286,15 +287,15 @@ it("keeps discovery open and returns typed validation for persisted interpretati
     await repo.create({ ...capsule, object_id: evidenceId, gist: retainedBytes });
     database.close(); closeCachedDatabase(filename);
 
-    const prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q: queryOf(), budget: BUDGET });
+    const prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
     if (prepared.kind !== "prepare_query") throw new Error("query preparation expected");
     expect(prepared.candidates.map((row) => row.interpretation_id)).toContain(hId);
     expect(prepared.candidates.map((row) => row.interpretation_id)).not.toContain(corruptedId);
     expect(prepared.coverage.discovery).toBe("truncated");
-    expect(prepared.coverage.h).toBe("open");
+    expect(prepared.coverage.source_interpretation).toBe("open");
 
     const reason = { kind: "reason" as const, accepts_unreviewed_conditional_results: true as const,
-      h_id: corruptedId, q: queryOf(), a: alignmentOf(corruptedId, queryOf()), original_query: ORIGINAL,
+      source_interpretation_id: corruptedId, query_semantics: queryOf(), semantic_correspondence: alignmentOf(corruptedId, queryOf()), original_query: ORIGINAL,
       budget: BUDGET, output_byte_limit: 1000000 };
     await expect(call(execute, reason)).rejects.toMatchObject({ name: "CoreError", code: "VALIDATION",
       message: expect.stringContaining("accounting gaps"), details: {
@@ -309,36 +310,36 @@ it("keeps discovery open and returns typed validation for persisted interpretati
   });
 });
 
-it("prepares, reasons, and reopens durable H through a real worker fork", async () => {
+it("prepares, reasons, and reopens a durable source interpretation through a real worker fork", async () => {
   await withPublished(async ({ hId, execute }) => {
     const q = queryOf();
     const preparedSource = await call(execute, { kind: "prepare_source", source_id: "artifact-1", budget: BUDGET });
     if (preparedSource.kind !== "prepare_source") throw new Error("expected source handle");
     const preparedQuery = await call(execute, {
-      kind: "prepare_query", original_query: ORIGINAL, q, budget: BUDGET,
+      kind: "prepare_query", original_query: ORIGINAL, query_semantics: q, budget: BUDGET,
       source_handle: preparedSource.source_handle
     });
     if (preparedQuery.kind !== "prepare_query") throw new Error("expected query handle");
     expect(preparedQuery.candidates.some((row) => row.interpretation_id === hId)).toBe(true);
     const reasoned = await call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,
-      query_handle: preparedQuery.query_handle, a: alignmentOf(hId, q),
+      query_handle: preparedQuery.query_handle, semantic_correspondence: alignmentOf(hId, q),
       budget: BUDGET, output_byte_limit: 1000000
     });
     if (reasoned.kind !== "reason") throw new Error("expected reason");
     expect(reasoned.result.outcome.status).toBe("interpreted");
     expect(reasoned.result.semantic_status).toBe("unreviewed");
     expect(reasoned.result.world_claim).toBe("unknown");
-    expect(reasoned.result.c_id).toBeTruthy();
+    expect(reasoned.result.conditional_computation_id).toBeTruthy();
     expect(reasoned.result.consumed_leaves.length).toBeGreaterThan(0);
     expect(reasoned.interpretation).toBeDefined();
-    expect(reasoned.alignment).toBeDefined();
+    expect(reasoned.semantic_correspondence).toBeDefined();
     expect(reasoned.work.native_work).toBeGreaterThan(0);
     expect(reasoned.work.rss_bytes).toBeGreaterThan(0);
     expect("continuation" in reasoned).toBe(false);
     const retry = await call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,
-      query_handle: preparedQuery.query_handle, a: alignmentOf(hId, q),
+      query_handle: preparedQuery.query_handle, semantic_correspondence: alignmentOf(hId, q),
       budget: BUDGET, output_byte_limit: 1000000
     });
     if (retry.kind !== "reason") throw new Error("expected retry");
@@ -346,14 +347,14 @@ it("prepares, reasons, and reopens durable H through a real worker fork", async 
     expect("continuation" in retry).toBe(false);
     const clipped = await call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,
-      h_id: hId, q, a: alignmentOf(hId, q), original_query: ORIGINAL,
+      source_interpretation_id: hId, query_semantics: q, semantic_correspondence: alignmentOf(hId, q), original_query: ORIGINAL,
       budget: BUDGET, output_byte_limit: 1024
     });
     if (clipped.kind !== "reason") throw new Error("expected clipped");
     expect(clipped.result.outcome.status).toBe("truncated");
     expect(clipped.result.consumed_leaves).toEqual([]);
     expect(clipped.interpretation).toBeUndefined();
-    expect(clipped.alignment).toBeUndefined();
+    expect(clipped.semantic_correspondence).toBeUndefined();
     expect(clipped.result.semantic_status).toBe("unreviewed");
     expect(clipped.result.world_claim).toBe("unknown");
     expect(Buffer.byteLength(JSON.stringify(clipped))).toBeLessThanOrEqual(1024);
@@ -385,13 +386,13 @@ it("invalidates expired handles and does not recover them after worker loss", as
       { expires_at: CLOCK });
     if (prepared.kind !== "prepare_source") throw new Error("expected source handle");
     await expect(call(execute, {
-      kind: "prepare_query", original_query: ORIGINAL, q: queryOf(), budget: BUDGET,
+      kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET,
       source_handle: prepared.source_handle
     })).rejects.toThrow(/expired/u);
     const q = queryOf();
     const oneshot = await call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,
-      h_id: hId, q, a: alignmentOf(hId, q), original_query: ORIGINAL,
+      source_interpretation_id: hId, query_semantics: q, semantic_correspondence: alignmentOf(hId, q), original_query: ORIGINAL,
       budget: BUDGET, output_byte_limit: 1000000
     });
     if (oneshot.kind !== "reason") throw new Error("expected oneshot");
@@ -406,17 +407,17 @@ it("invalidates expired handles and does not recover them after worker loss", as
       await reopened.ready();
       const next = (input: Parameters<Execute>[0]) => reopened.sourceSemanticsPort!.execute(input);
       await expect(call(next, {
-        kind: "prepare_query", original_query: ORIGINAL, q, budget: BUDGET,
+        kind: "prepare_query", original_query: ORIGINAL, query_semantics: q, budget: BUDGET,
         source_handle: live.source_handle
       })).rejects.toThrow();
       const durable = await call(next, {
         kind: "reason", accepts_unreviewed_conditional_results: true,
-        h_id: hId, q, a: alignmentOf(hId, q), original_query: ORIGINAL,
+        source_interpretation_id: hId, query_semantics: q, semantic_correspondence: alignmentOf(hId, q), original_query: ORIGINAL,
         budget: BUDGET, output_byte_limit: 1000000
       });
-      if (durable.kind !== "reason") throw new Error("expected durable H");
+      if (durable.kind !== "reason") throw new Error("expected a durable source interpretation");
       expect(durable.result.outcome.status).toBe("interpreted");
-      expect(durable.result.h_id).toBe(hId);
+      expect(durable.result.source_interpretation_id).toBe(hId);
     } finally { await reopened.close(); }
   });
 }, 30000);
@@ -426,7 +427,7 @@ it.each(["erased", "superseded"] as const)("refuses %s source state after reopen
     const q = queryOf();
     await expect(call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,
-      h_id: hId, q, a: alignmentOf(hId, q), original_query: ORIGINAL,
+      source_interpretation_id: hId, query_semantics: q, semantic_correspondence: alignmentOf(hId, q), original_query: ORIGINAL,
       budget: BUDGET, output_byte_limit: 1000000
     })).rejects.toThrow();
   }, { state });
@@ -437,7 +438,7 @@ it("does not let a cache hit bypass erasure in the worker snapshot", async () =>
     const q = queryOf();
     const first = await call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,
-      h_id: hId, q, a: alignmentOf(hId, q), original_query: ORIGINAL,
+      source_interpretation_id: hId, query_semantics: q, semantic_correspondence: alignmentOf(hId, q), original_query: ORIGINAL,
       budget: BUDGET, output_byte_limit: 1000000
     });
     if (first.kind !== "reason") throw new Error("expected first reason");
@@ -456,19 +457,19 @@ it("does not let a cache hit bypass erasure in the worker snapshot", async () =>
     database.close();
     await expect(call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,
-      h_id: hId, q, a: alignmentOf(hId, q), original_query: ORIGINAL,
+      source_interpretation_id: hId, query_semantics: q, semantic_correspondence: alignmentOf(hId, q), original_query: ORIGINAL,
       budget: BUDGET, output_byte_limit: 1000000
     })).rejects.toThrow();
   });
 }, 30000);
 
-it("paginates current interpretations including a large H and exposes the semantic body needed by A", async () => {
+it("paginates current interpretations including a large source interpretation and exposes the semantic body needed by semantic correspondence", async () => {
   await withPublished(async ({ allIds, execute }) => {
     const q = queryOf(), seen = new Set<string>();
     let continuation: string | undefined;
     let count = 0;
     do {
-      const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q, budget: BUDGET,
+      const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: q, budget: BUDGET,
         ...(continuation === undefined ? {} : { continuation_handle: continuation }) });
       expect(page.kind).toBe("prepare_query");
       if (page.kind !== "prepare_query") throw new Error("expected query page");
@@ -489,37 +490,37 @@ it("paginates current interpretations including a large H and exposes the semant
 
 it("does not disclose unauthorized or obsolete descriptors", async () => {
   await withPublished(async ({ execute }) => {
-    const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q: queryOf(), budget: BUDGET });
+    const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
     if (page.kind !== "prepare_query") throw new Error("expected query page");
     expect(page.candidates).toEqual([]);
   }, { scope: "global_core" });
   await withPublished(async ({ execute }) => {
-    const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q: queryOf(), budget: BUDGET });
+    const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
     if (page.kind !== "prepare_query") throw new Error("expected query page");
     expect(page.candidates).toEqual([]);
   }, { state: "superseded" });
 });
 
-it("binds query handles to Q, candidates and permissions and keeps one-shot discovery unexercised", async () => {
+it("binds query handles to query semantics, candidates and permissions and keeps one-shot discovery unexercised", async () => {
   await withPublished(async ({ hId, execute }) => {
     const q = queryOf(), a = alignmentOf(hId, q);
-    const prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, q, budget: BUDGET }, { principal: "owner" });
+    const prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: q, budget: BUDGET }, { principal: "owner" });
     if (prepared.kind !== "prepare_query" || prepared.query_handle === undefined) throw new Error("expected query lease");
     const request = { kind: "reason" as const, accepts_unreviewed_conditional_results: true as const,
-      query_handle: prepared.query_handle, a, budget: BUDGET, output_byte_limit: 1000000 };
-    await expect(call(execute, { ...request, q: { ...q, gaps: [{ kind: "comparison", affected_ids: [],
+      query_handle: prepared.query_handle, semantic_correspondence: a, budget: BUDGET, output_byte_limit: 1000000 };
+    await expect(call(execute, { ...request, query_semantics: { ...q, gaps: [{ kind: "comparison", affected_ids: [],
       support: [{ kind: "query_text", excerpt: "tools" }] }] } }, { principal: "owner" })).rejects.toThrow(/retargeted/);
-    await expect(call(execute, { ...request, h_id: `sha256:${"f".repeat(64)}` }, { principal: "owner" })).rejects.toThrow(/candidates/);
+    await expect(call(execute, { ...request, source_interpretation_id: `sha256:${"f".repeat(64)}` }, { principal: "owner" })).rejects.toThrow(/candidates/);
     await expect(call(execute, request, { principal: "owner", authorized_scopes: { mode: "unrestricted" } })).rejects.toThrow(/scope admission/);
     await expect(call(execute, request, { principal: "other" })).rejects.toThrow(/principal/);
     const leased = await call(execute, request, { principal: "owner" });
     const direct = await call(execute, { kind: "reason", accepts_unreviewed_conditional_results: true,
-      h_id: hId, q, a, original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1000000 }, { principal: "owner" });
+      source_interpretation_id: hId, query_semantics: q, semantic_correspondence: a, original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1000000 }, { principal: "owner" });
     if (leased.kind !== "reason" || direct.kind !== "reason") throw new Error("expected reason");
-    expect(leased.result.c_id).toBe(direct.result.c_id);
+    expect(leased.result.conditional_computation_id).toBe(direct.result.conditional_computation_id);
     expect(leased.coverage.discovery).toBe("complete");
     expect(direct.coverage.discovery).toBe("unexercised");
-    expect(leased.coverage.h).toBe("open"); expect(leased.coverage.a).toBe("open");
+    expect(leased.coverage.source_interpretation).toBe("open"); expect(leased.coverage.semantic_correspondence).toBe("open");
     expect(leased.result.answers).toEqual(direct.result.answers);
     expect(direct.work.logical_work).toBeGreaterThan(direct.work.native_work);
   });
@@ -532,7 +533,7 @@ it("retains typed domain errors and measured work across the real worker boundar
   });
 });
 
-it("reports a failed alignment as invalid instead of charging a default Core budget", async () => {
+it("reports a failed semantic_correspondence as invalid instead of charging a default Core budget", async () => {
   await withPublished(async ({ hId, execute }) => {
     const q = queryOf();
     const a = alignmentOf(hId, q);
@@ -541,60 +542,37 @@ it("reports a failed alignment as invalid instead of charging a default Core bud
     })) };
     const result = await call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,
-      h_id: hId, q, a: forged, original_query: ORIGINAL,
+      source_interpretation_id: hId, query_semantics: q, semantic_correspondence: forged, original_query: ORIGINAL,
       budget: { ...BUDGET, work_units: 4000, memory_bytes: 200000 }, output_byte_limit: 1000000
     });
     if (result.kind !== "reason") throw new Error("expected reason");
-    expect(result.result.outcome).toEqual({ status: "invalid", reason: "malformed_alignment" });
-    expect(result.coverage.computation).toBe("unexercised");
+    expect(result.result.outcome).toEqual({ status: "invalid", reason: "malformed_correspondence" });
+    expect(result.coverage.conditional_computation).toBe("unexercised");
   });
 });
 
-it("reasons through the worker on receiver-produced query and alignment bodies", async () => {
+it("reasons through the worker on receiver-produced query and semantic_correspondence bodies", async () => {
   await withPublished(async ({ hId, execute }) => {
     const qCanonical = queryOf();
-    const receivedQ = proposeQuerySemantics({
-      original_query: ORIGINAL,
-      producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
-      producer_version: "1",
-      query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT,
-    }, {
-      rawJson: JSON.stringify({
-        contract: "source-semantic-query-response-v2",
-        outcome: { status: "interpreted" },
-        query: {
+    const receivedQ = authoredQuerySemantics({ original_query: ORIGINAL, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" }, {
           variables: qCanonical.variables,
           alternatives: qCanonical.alternatives,
           return_variables: qCanonical.return_variables,
           gaps: qCanonical.gaps
-        }
-      })
-    });
+        });
     expect(receivedQ.outcome.status).toBe("interpreted");
     expect(receivedQ.query).toEqual(qCanonical);
     const prepared = await call(execute, {
-      kind: "prepare_query", original_query: ORIGINAL, q: receivedQ.query, budget: BUDGET
+      kind: "prepare_query", original_query: ORIGINAL, query_semantics: receivedQ.query, budget: BUDGET
     });
     if (prepared.kind !== "prepare_query") throw new Error("expected query page");
     const candidate = prepared.candidates.find((row) => row.interpretation_id === hId);
     if (candidate?.interpretation === undefined) throw new Error("published interpretation missing from descriptors");
-    const receivedA = proposeAlignmentSemantics({ original_query: ORIGINAL,
-      admitted_q: receivedQ.query!,
-      h_descriptors: [{ h_id: candidate.interpretation_id, interpretation: candidate.interpretation }],
-      producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-      producer_version: "1",
-      alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT,
-    }, {
-      rawJson: JSON.stringify({
-        contract: "source-semantic-alignment-response-v2",
-        outcome: { status: "interpreted", gaps: [] },
-        alignment: { correspondences: alignmentOf(hId, receivedQ.query!).correspondences }
-      })
-    });
-    expect(receivedA.alignment?.h_id).toBe(hId);
+    const receivedA = receiveAuthoredCorrespondence({ original_query: ORIGINAL, admitted_query_semantics: receivedQ.query!, source_interpretation_descriptors: [{ source_interpretation_id: candidate.interpretation_id, interpretation: candidate.interpretation }], producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, { correspondences: alignmentOf(hId, receivedQ.query!).correspondences }, { status: "interpreted", gaps: [] });
+    expect(receivedA.semantic_correspondence?.source_interpretation_id).toBe(hId);
     const result = await call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,
-      query_handle: prepared.query_handle, a: receivedA.alignment,
+      query_handle: prepared.query_handle, semantic_correspondence: receivedA.semantic_correspondence,
       budget: BUDGET, output_byte_limit: 1000000
     });
     if (result.kind !== "reason") throw new Error("expected reason");
@@ -608,7 +586,7 @@ it("delivers qualified answers through the actual CLI executable with no provide
   await withPublished(async ({ hId, filename, client }) => {
     await client.close();
     const q = queryOf(), args = { operation: "reason", accepts_unreviewed_conditional_results: true,
-      h_id: hId, q, a: alignmentOf(hId, q), original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1000000 };
+      source_interpretation_id: hId, query_semantics: q, semantic_correspondence: alignmentOf(hId, q), original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1000000 };
     const root = dirname(filename), binary = fileURLToPath(new URL("../../../../../../bin/alaya.mjs", import.meta.url));
     const output = await promisify(execFile)(process.execPath, [binary, "tools", "call", "soul.interpretation", JSON.stringify(args),
       "--workspace", WS, "--run", RUN, "--agent", "codex", "--json"], {
@@ -618,6 +596,6 @@ it("delivers qualified answers through the actual CLI executable with no provide
     const parsed = JSON.parse(output.stdout);
     expect(parsed).toMatchObject({ result: { outcome: { status: "interpreted" }, world_claim: "unknown", semantic_status: "unreviewed" }, provider_attempts: 0 });
     expect(parsed.result.answers[0].returned.tools.node_id).toBe("rTools");
-    expect(parsed.interpretation).toBeDefined(); expect(parsed.alignment).toBeDefined();
+    expect(parsed.interpretation).toBeDefined(); expect(parsed.semantic_correspondence).toBeDefined();
   });
 }, 45000);

@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SourceSemanticQueryMeaningBodySchema, SourceSemanticQueryMeaningGenerationSchema,
-  SourceSemanticQueryProducerBodySchema, SourceSemanticQuerySchema,
+  SourceSemanticQuerySchema,
   materializeSourceSemanticQueryMeaning
 } from "../../../recall/conditional-field/index.js";
 
@@ -214,7 +214,6 @@ it("does not treat a legacy producer graph as meaning syntax or repair its sorts
     return_variables: ["who"],
     gaps: []
   };
-  expect(SourceSemanticQueryProducerBodySchema.parse(legacy).variables[1]?.sort).toBe("entity");
   expect(SourceSemanticQueryMeaningBodySchema.safeParse(legacy).success).toBe(false);
   expect(SourceSemanticQuerySchema.safeParse({
     contract: SOURCE_SEMANTIC_QUERY_CONTRACT, original_query_digest: digest,

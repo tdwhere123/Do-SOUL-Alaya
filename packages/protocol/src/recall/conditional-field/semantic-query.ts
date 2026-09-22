@@ -16,7 +16,7 @@ const Handle = SourceSemanticHandleSchema;
 const QueryTextSupportSchema = z.object({ kind: z.literal("query_text"),
   excerpt: z.string().min(1).max(1024) }).strict().readonly();
 
-/** Query evidence belongs to the original question, never to an H mention catalog. */
+/** Query evidence belongs to the original question, never to a source-interpretation mention catalog. */
 export const SourceSemanticQueryGapSchema = z.object({
   kind: z.enum(SOURCE_SEMANTIC_GAP_KINDS),
   affected_ids: z.array(Handle).max(64).readonly(),
@@ -90,15 +90,6 @@ const SourceSemanticQueryObjectSchema = z.object({
   }).strict().readonly()).max(64).readonly().optional(),
   evaluation: SourceSemanticQueryEvaluationSchema.optional()
 }).strict();
-
-/** Producer body omits host envelope identities; the receiver materializes those from the request. */
-export const SourceSemanticQueryProducerBodySchema = SourceSemanticQueryObjectSchema.omit({
-  contract: true,
-  original_query_digest: true,
-  producer_id: true,
-  producer_version: true,
-  contract_version: true
-}).strict().readonly();
 
 export const SourceSemanticQuerySchema = SourceSemanticQueryObjectSchema.superRefine((query, context) => {
   const problem = (message: string) => context.addIssue({ code: "custom", message });
@@ -260,5 +251,4 @@ export type SourceSemanticQueryFrame = z.infer<typeof SourceSemanticQueryFrameSc
 export type SourceSemanticQueryIncidence = z.infer<typeof SourceSemanticQueryIncidenceSchema>;
 export type SourceSemanticContextObligation = z.infer<typeof SourceSemanticContextObligationSchema>;
 export type SourceSemanticQueryAlternative = z.infer<typeof SourceSemanticQueryAlternativeSchema>;
-export type SourceSemanticQueryProducerBody = z.infer<typeof SourceSemanticQueryProducerBodySchema>;
 export type SourceSemanticQuery = z.infer<typeof SourceSemanticQuerySchema>;

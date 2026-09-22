@@ -46,8 +46,8 @@ export async function prepareLongMemEvalSemanticRun(root: string) {
         implementation_revision: frozen.implementation_revision, interpretation_clock: selected.interpretation_clock,
         workspace_id: publication.workspace_id, run_id: publication.run_id,
         query_workset: { ...frozen.query_workset, items: [frozen.query_workset.items[index]] },
-        query_cache_root: frozen.config.query_cache_root, alignment_cache_root: join(directory, "alignment-cache"),
-        max_output_tokens: frozen.config.max_output_tokens, discovery_page_cap: 1, alignment_pair_cap: 0,
+        query_cache_root: frozen.config.query_cache_root, correspondence_cache_root: join(directory, "semantic_correspondence-cache"),
+        max_output_tokens: frozen.config.max_output_tokens, discovery_page_cap: 1, correspondence_pair_cap: 0,
         budget: frozen.config.budget, output_byte_limit: frozen.config.output_byte_limit,
         authorized_scopes: { mode: "named", scopes: ["project"] } }, chainRoot);
       rows.push({ question_id: selected.question_id, status: "prepared", chain_root: chainRoot,

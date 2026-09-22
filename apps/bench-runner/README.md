@@ -94,7 +94,7 @@ formation; source preparation does not satisfy those enhancement prerequisites.
 
 After `pnpm build`, `node apps/bench-runner/dist/runs/semantic-chain/launch.js`
 provides `associate`, `prepare`, `replay`, and `measure`. These operations make
-no provider calls. Query and alignment extraction still uses the existing
+no provider calls. Query-semantics and semantic-correspondence extraction still uses the existing
 `semantic-proposal-fill` preparation, authority, attempt ledger, and interactive
 SSE execution; the chain does not dispatch Batch or authorize extraction.
 
@@ -121,7 +121,7 @@ publication decisions, not historical source-origin or completion witnesses.
 Historical templates incompatible with the current request owner fail closed.
 
 `intervene` verifies the frozen snapshot and retained native proof identities, then
-runs a new offline Core compilation. Its bounded H/A withdrawal arms all start
+runs a new offline Core compilation. Its bounded source-interpretation and semantic-correspondence withdrawal arms all start
 from that execution's same observed state and reuse the normal projection/delivery
 owners. It retains the original derivation graph, leaf origins, before/after proof
 results and answer differences. This is not the original MCP process's in-memory
@@ -132,7 +132,7 @@ existing `without_alignments` replay remains a separate recompilation control.
 For a bounded LongMemEval-S source-only development baseline, use the maintained
 entry below. Its [configuration](src/runs/longmemeval-semantic/contract.ts) requires
 the original dataset directory, pinned metadata directory, SHA-256 and question
-count, 1–50 development question IDs, model/profile, Q cache root, recorded timestamp,
+count, 1–50 development question IDs, model/profile, query-semantics cache root, recorded timestamp,
 producer commit, native budget and output limits. It never rewrites a dataset or
 dispatches a provider. `freeze` emits `query-workset.json` for the separately
 authorized existing semantic-proposal fill lane. Original question text is retained;
@@ -146,8 +146,8 @@ node apps/bench-runner/dist/runs/longmemeval-semantic/launch.js measure --root R
 ```
 
 Each selected question gets its complete original haystack in an isolated source
-snapshot, with original session/round identities and dataset revision. H is absent
-and A is not attempted; results use native canonical source-root order. Q failures
+snapshot, with original session/round identities and dataset revision. Source interpretation is absent
+and semantic correspondence is not attempted; results use native canonical source-root order. Query-semantics failures
 remain unknown in the selected answerable denominator. Gold is read only by
 `measure`, which maps that question's answer session IDs to published source rounds
 and invokes the existing immutable first-exposure measurement. Abstention uses the
@@ -164,20 +164,20 @@ including omission of abstention rows. Formal reports record prior exposure per
 question and decide the strict target from confirmed-hit/unknown bounds; they do
 not label reused development questions as a holdout. Development remains the
 default and cannot issue a formal target decision. Per-row diagnostics retain
-query failures, source/H/A discovery, native work/memory, payload coverage and
+query failures, source, source-interpretation, and semantic-correspondence discovery, native work/memory, payload coverage and
 measured native call latency when available.
 
 The [chain configuration schema](src/runs/semantic-chain/contract.ts) requires
 the frozen snapshot path/digest, current extraction-authority implementation
 revision, fixed ISO interpretation clock, workspace/run, exact query workset,
-Q/A cache roots, output cap, discovery page cap, alignment pair cap, native
+query-semantics and semantic-correspondence cache roots, output cap, discovery page cap, correspondence pair cap, native
 request budget, authorized scopes, and output byte limit. Preparation preserves
-every question, blocks non-executable Q, and writes an alignment workset only
-from actual paged native discovery. Unvisited H count remains unknown; visited
-but unselected H remains unattempted. Gold is unavailable to preparation.
+every question, blocks non-executable query semantics, and writes an semantic-correspondence workset only
+from actual paged native discovery. Unvisited source-interpretation count remains unknown; visited
+but unselected source interpretation remains unattempted. Gold is unavailable to preparation.
 
-Stages are immutable and bind snapshot, implementation, Q/H/A, and fixed
-context. Resume rebuilds a missing identical alignment workset; run the existing
+Stages are immutable and bind snapshot, implementation, query semantics, source interpretation, semantic correspondence, and fixed
+context. Resume rebuilds a missing identical semantic-correspondence workset; run the existing
 proposal preparation command to inspect current cache state before any paid
 fill. A changed input requires a new preparation root or replay identity.
 Replay records native first exposure through the existing measurement owner.
@@ -187,7 +187,7 @@ its working database for diagnosis; it is not automatically replayable.
 Gold input is an array of `{ "query_key": "...", "source_units": [...] }`,
 with exactly one row for every prepared question, including blocked questions.
 Missing gold is not an empty gold set. `--arm without_alignments` executes a
-separate native control with the same snapshot, Q, clock, budget, and scopes;
+separate native control with the same snapshot, query semantics, clock, budget, and scopes;
 it is not a fixed compiled-context leaf intervention. Successful authored
 fixtures do not establish actual-model extraction quality or full campaign
 closure, stale-lease, erasure, or all control-arm coverage.

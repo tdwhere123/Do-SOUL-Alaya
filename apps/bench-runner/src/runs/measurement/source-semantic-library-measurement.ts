@@ -1,17 +1,20 @@
 import { z } from "zod";
 import {
-  RequestBudgetSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
+  SourceRecordIdentitySchema, type SourceRecordIdentity, RequestBudgetSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SourceSemanticLibrarySlotQualifierSchema, SourceSemanticWorkerResultSchema, SoulInterpretationResponseSchema,
   sameRecallTarget, canonicalJson, InformationIndexSchema, SourceSemanticLibraryProofSchema, type SourceSemanticLibraryProof, type InformationIndex, type RequestBudget, type SourceSemanticLibraryOrder,
   type SourceSemanticLibrarySlotQualifier
 } from "@do-soul/alaya-protocol";
-import { deliveredSourceSemanticLibraryProof } from "@do-soul/alaya-core";
+import { deliveredSourceSemanticLibraryProof, fieldContractSha256 } from "@do-soul/alaya-core";
 import {
   ExposureSlotSchema, FirstExposurePageSchema, firstExposureMismatch, exposureSlots, type FirstExposurePage
 } from "./first-exposure-session.js";
 import {
-  MixedKindFirstExposureMetricSchema, ProofConditionedFirstExposureMetricSchema, SourceGoldUnitSchema,
-  scoreMixedKindFirstExposure, scoreProofConditionedFirstExposure, type SourceGoldUnit
+  MixedKindFirstExposureMetricSchema, ProofConditionedFirstExposureMetricSchema,
+  SOURCE_BEARING_UNION_FIRST_EXPOSURE_CONTRACT,
+  SourceGoldUnitSchema, scoreMixedKindFirstExposure, scoreProofConditionedFirstExposure,
+  scoreSourceBearingUnionFirstExposure, sourceTargetJoinsGold,
+  type FirstExposureSlot, type SourceBearingUnionFirstExposureMetric, type SourceGoldUnit, type UnionProofAdmission
 } from "./source-gold-join.js";
 import { soulSearchFromLibraryRecall } from "./source-semantic-library-recall.js";
 
@@ -31,6 +34,7 @@ const ValidatedMeasurement = z.object({
   effective_page_budget: z.literal(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET),
   delivered_index: InformationIndexSchema,
   delivered_proofs: z.array(SourceSemanticLibraryProofSchema).readonly(),
+  source_records: z.array(SourceRecordIdentitySchema).readonly().optional(),
   identity: z.object({
     query_id: z.string(), snapshot_id: z.string(), interpretation_id: z.string().min(1),
     as_of: z.string().min(1), result_version: z.string()
@@ -42,16 +46,23 @@ const ValidatedMeasurement = z.object({
   provider_calls: z.literal(0),
   metrics: z.object({
     mixed_kind_first_exposure: MixedKindFirstExposureMetricSchema,
-    proof_conditioned_first_exposure: ProofConditionedFirstExposureMetricSchema
+    proof_conditioned_first_exposure: ProofConditionedFirstExposureMetricSchema,
   }).strict().readonly()
 }).strict().readonly().superRefine((value, context) => {
   const proofRanks = proofRanksFromLibrary(value.first_exposure_slots, value.delivered_index,
-    value.slot_qualifiers, value.delivered_proofs);
+    value.slot_qualifiers, value.delivered_proofs, value.source_records ?? []);
   const mixed = scoreMixedKindFirstExposure(value.first_exposure_slots, value.source_gold_units);
   const proof = proofMetric(value.first_exposure_slots, value.source_gold_units, proofRanks);
   const slotsMatch = JSON.stringify(value.first_exposure_slots)
     === JSON.stringify(value.first_exposure_page.initial?.slots ?? []);
-  if (!slotsMatch
+  const { result_version, ...identity } = value.identity;
+  const nativeIdentity = { query_id: value.delivered_index.query_id, snapshot_id: value.delivered_index.snapshot_id,
+    interpretation_id: value.delivered_index.interpretation_id, as_of: value.delivered_index.as_of };
+  if (canonicalJson(identity) !== canonicalJson(nativeIdentity)
+    || result_version !== value.delivered_index.result_version
+    || firstExposureMismatch(value.first_exposure_page, identity, value.first_exposure_slots, value.first_exposure_page.delivery_id)
+    || value.first_exposure_page.request_continuation !== null
+    || !slotsMatch
     || JSON.stringify(mixed) !== JSON.stringify(value.metrics.mixed_kind_first_exposure)
     || JSON.stringify(proof) !== JSON.stringify(value.metrics.proof_conditioned_first_exposure)) {
     context.addIssue({ code: "custom", message: "library measurement slot join is inconsistent" });
@@ -70,6 +81,8 @@ export interface SourceSemanticLibraryMeasurementInput {
   readonly firstExposurePage: FirstExposurePage;
   readonly requestBudget: RequestBudget;
   readonly goldSourceUnits: readonly SourceGoldUnit[];
+  /** Current native snapshot records, supplied by the measurement owner independently of proof claims. */
+  readonly sourceRecords?: readonly SourceRecordIdentity[];
 }
 
 interface LibraryRecall {
@@ -98,6 +111,7 @@ export function measureSourceSemanticLibraryResponse(
     schema_version: 1, status: "validated", contract: SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT,
     request: { budget: admitted.budget }, identity: admitted.identity,
     effective_page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, delivered_index: admitted.index, delivered_proofs: admitted.proofs,
+    ...(input.sourceRecords === undefined ? {} : { source_records: input.sourceRecords }),
     first_exposure_page: admitted.exposure, first_exposure_slots: admitted.slots,
     slot_qualifiers: admitted.qualifiers, source_gold_units: gold.data, provider_calls: 0,
     metrics: { mixed_kind_first_exposure: mixed, proof_conditioned_first_exposure: proof }
@@ -151,7 +165,7 @@ function admitLibraryMeasurement(
     query_id: index.query_id, snapshot_id: index.snapshot_id,
     interpretation_id: index.interpretation_id, as_of: index.as_of
   }, slots, search.delivery_id)) return invalid("missing_first_exposure");
-  const proofRanks = proofRanksFromLibrary(slots, index, recalled.slot_qualifiers, recalled.proofs ?? []);
+  const proofRanks = proofRanksFromLibrary(slots, index, recalled.slot_qualifiers, recalled.proofs ?? [], input.sourceRecords ?? []);
   return {
     status: "admitted", budget: budget.data, index, proofs: recalled.proofs ?? [], exposure: exposure.data, slots, qualifiers: recalled.slot_qualifiers,
     proofRanks, identity: {
@@ -194,7 +208,8 @@ function looksLikeLibraryRecall(raw: Record<string, unknown>): boolean {
 function proofRanksFromLibrary(
   slots: readonly z.infer<typeof ExposureSlotSchema>[],
   index: InformationIndex,
-  qualifiers: readonly SourceSemanticLibrarySlotQualifier[], proofs: readonly SourceSemanticLibraryProof[]
+  qualifiers: readonly SourceSemanticLibrarySlotQualifier[], proofs: readonly SourceSemanticLibraryProof[],
+  sourceRecords: readonly SourceRecordIdentity[]
 ): ReadonlySet<number> | null {
   if (qualifiers.length !== index.entries.length) return null;
   const ranks = new Set<number>();
@@ -208,11 +223,36 @@ function proofRanksFromLibrary(
     const fromKind = slot.object_kind === "semantic_proof";
     if (fromEntry !== fromQualifier || fromQualifier !== fromKind) return null;
     if (fromQualifier) {
-      if (deliveredSourceSemanticLibraryProof(index, entry, qualifier, proofs) === undefined) return null;
+      if (deliveredSourceSemanticLibraryProof(index, entry, qualifier, proofs,
+        sourceRecords.find((record) => entry.target.kind === "source_evidence" && record.identity === entry.target.root_id
+          && record.workspace_id === entry.target.workspace_id)) === undefined) return null;
       ranks.add(slot.rank);
     }
   }
   return ranks;
+}
+
+export function sourceSemanticLibraryProofAdmission(
+  slots: readonly z.infer<typeof ExposureSlotSchema>[], index: InformationIndex,
+  qualifiers: readonly SourceSemanticLibrarySlotQualifier[], proofs: readonly SourceSemanticLibraryProof[],
+  gold: readonly SourceGoldUnit[], sourceRecords: readonly SourceRecordIdentity[]
+): UnionProofAdmission {
+  const validatedRanks = new Set<number>();
+  const unverifiedGoldRanks = new Set<number>();
+  for (const slot of slots) {
+    if (slot.object_kind !== "semantic_proof") continue;
+    const entry = index.entries[slot.index_entry_offset];
+    const qualifier = qualifiers.find((row) => row.index === slot.index_entry_offset);
+    const delivered = entry !== undefined && qualifier !== undefined && qualifier.index === slot.index_entry_offset
+      && sameRecallTarget(slot.target, entry.target) && qualifier.evidence_kind === "semantic_proof"
+      && entry.interpretation_node !== undefined && entry.explanation_ids.length > 0
+      && deliveredSourceSemanticLibraryProof(index, entry, qualifier, proofs,
+        sourceRecords.find((record) => entry.target.kind === "source_evidence" && record.identity === entry.target.root_id
+          && record.workspace_id === entry.target.workspace_id)) !== undefined;
+    if (delivered) validatedRanks.add(slot.rank);
+    else if (gold.some((unit) => sourceTargetJoinsGold(slot, unit))) unverifiedGoldRanks.add(slot.rank);
+  }
+  return { validatedRanks, unverifiedGoldRanks };
 }
 
 function proofMetric(slots: readonly z.infer<typeof ExposureSlotSchema>[], gold: readonly SourceGoldUnit[],

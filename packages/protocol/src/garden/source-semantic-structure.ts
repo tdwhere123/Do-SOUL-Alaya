@@ -80,7 +80,7 @@ export function sourceSemanticContextContains(
   return false;
 }
 
-/** Reserved local coordinates of the H slot occurrences; model handles cannot use this namespace. */
+/** Reserved local coordinates of the source-interpretation slot occurrences; model handles cannot use this namespace. */
 export function sourceSemanticSlotNodeId(frameIndex: number, slotIndex: number): string {
   return `@slot:${frameIndex}:${slotIndex}`;
 }

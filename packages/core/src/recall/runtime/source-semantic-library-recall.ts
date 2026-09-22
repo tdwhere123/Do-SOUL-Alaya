@@ -11,8 +11,9 @@ import {
 import { sortIndexEntries } from "./index-continuation.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 
-export function sourceSemanticLibraryQueryIdentity(originalQuery: string): string {
-  return `sha256:${fieldContractSha256(canonicalJson({ kind: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, query: originalQuery }))}`;
+/** Offline evidence binds its recorded result contract; live requests use the current version. */
+export function sourceSemanticLibraryQueryIdentity(originalQuery: string, resultVersion: string = SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION): string {
+  return `sha256:${fieldContractSha256(canonicalJson({ kind: resultVersion, query: originalQuery }))}`;
 }
 
 export const SOURCE_SEMANTIC_LIBRARY_ORDER: SourceSemanticLibraryOrder = {
@@ -54,7 +55,7 @@ export function proofEntriesFromBranch(
 
 /** Namespace every branch's proof graph before merging; answer roots and index roots move together. */
 export function scopeSourceSemanticLibraryBranch(index: InformationIndex, result: SourceSemanticReasoningResult) {
-  const id = (value: string) => `sha256:${fieldContractSha256(canonicalJson({ context: result.c_id, derivation: value }))}`;
+  const id = (value: string) => `sha256:${fieldContractSha256(canonicalJson({ context: result.conditional_computation_id, derivation: value }))}`;
   const rows = (values: readonly Derivation[] | undefined) => values?.map((row) => ({
     ...row, derivation_id: id(row.derivation_id), children: row.children.map(id)
   }));
@@ -212,8 +213,8 @@ export function proofForLibraryEntry<T extends SourceSemanticReasoningResult>(
   entry: IndexEntry, proofs: readonly T[]
 ): T | undefined {
   if (entry.interpretation_node === undefined || entry.explanation_ids.length === 0) return undefined;
-  return proofs.find((row) => row.h_id === entry.interpretation_node!.packet_id
-    && row.c_id === entry.hypothesis_id
+  return proofs.find((row) => row.source_interpretation_id === entry.interpretation_node!.packet_id
+    && row.conditional_computation_id === entry.hypothesis_id
     && (row.answers ?? []).some((answer) => answer.binding_id === entry.output_binding
       && canonicalJson(answer.explanation_ids) === canonicalJson(entry.explanation_ids)));
 }
@@ -226,10 +227,10 @@ export function slotQualifiersFor(
     if (proof === undefined) return { index: offset, evidence_kind: "source_evidence" as const };
     return {
       index: offset, evidence_kind: "semantic_proof" as const,
-      ...(proof.h_id === undefined ? {} : { h_id: proof.h_id }),
-      ...(proof.q_id === undefined ? {} : { q_id: proof.q_id }),
-      ...(proof.a_id === undefined ? {} : { a_id: proof.a_id }),
-      ...(proof.c_id === undefined ? {} : { c_id: proof.c_id })
+      ...(proof.source_interpretation_id === undefined ? {} : { source_interpretation_id: proof.source_interpretation_id }),
+      ...(proof.query_semantics_id === undefined ? {} : { query_semantics_id: proof.query_semantics_id }),
+      ...(proof.semantic_correspondence_id === undefined ? {} : { semantic_correspondence_id: proof.semantic_correspondence_id }),
+      ...(proof.conditional_computation_id === undefined ? {} : { conditional_computation_id: proof.conditional_computation_id })
     };
   });
 }

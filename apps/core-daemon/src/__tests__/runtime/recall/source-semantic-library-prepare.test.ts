@@ -1,20 +1,21 @@
+import { authoredQuerySemantics, correspondenceSelectionJson } from "./source-semantic-producer-fixture.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import {
-  SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
+  sourceSemanticInterpretationIdentity, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
-  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT
 } from "@do-soul/alaya-protocol";
 import {
   createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
-  fieldContractSha256, SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
+  fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
 import {
   prepareSourceSemanticLibrary, proposeQuerySemantics, proposeSourceSemantics,
-  sourceSemanticLibraryAlignmentCacheKey
+  sourceSemanticLibraryCorrespondenceCacheKey
 } from "@do-soul/alaya-soul";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
@@ -81,13 +82,7 @@ function receiveH(source: string, sourceId: string, raw: object) {
 }
 
 function receiveQ(original: string): SourceSemanticQuery {
-  const received = proposeQuerySemantics({
-    original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1",
-    query_syntax: SOURCE_SEMANTIC_QUERY_CONTRACT,
-  }, {
-    rawJson: JSON.stringify({
-      contract: "source-semantic-query-response-v2", outcome: { status: "interpreted" },
-      query: {
+  const received = authoredQuerySemantics({ original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" }, {
         variables: [
           { id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } },
           { id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }
@@ -104,9 +99,7 @@ function receiveQ(original: string): SourceSemanticQuery {
         }],
         return_variables: ["tools"],
         gaps: []
-      }
-    })
-  });
+      });
   if (received.outcome.status !== "interpreted" || received.query === undefined) {
     throw new Error(`query receive failed: ${JSON.stringify(received.outcome)}`);
   }
@@ -115,26 +108,26 @@ function receiveQ(original: string): SourceSemanticQuery {
 
 function mention(h: SourceSemanticInterpretation, text: string) {
   const row = h.mentions.find((item) => item.text === text);
-  if (row === undefined) throw new Error(`H lacks mention ${text}: ${h.mentions.map((item) => item.text).join(",")}`);
+  if (row === undefined) throw new Error(`source interpretation lacks mention ${text}: ${h.mentions.map((item) => item.text).join(",")}`);
   return row;
 }
 
 function frameOf(h: SourceSemanticInterpretation, reading: string) {
   const row = h.frames.find((item) => item.predicate_support.reading === reading);
-  if (row === undefined) throw new Error(`H lacks frame ${reading}`);
+  if (row === undefined) throw new Error(`source interpretation lacks frame ${reading}`);
   return row;
 }
 
 function slotOf(h: SourceSemanticInterpretation, reading: string, role: string) {
   const row = frameOf(h, reading).slots.find((item) => item.role_reading === role);
-  if (row === undefined) throw new Error(`H lacks ${role} on ${reading}`);
+  if (row === undefined) throw new Error(`source interpretation lacks ${role} on ${reading}`);
   return row;
 }
 
 function referentOf(h: SourceSemanticInterpretation, text: string) {
   const id = mention(h, text).id;
   const row = h.referents.find((item) => item.mentions.includes(id));
-  if (row === undefined) throw new Error(`H lacks referent for ${text}`);
+  if (row === undefined) throw new Error(`source interpretation lacks referent for ${text}`);
   return row;
 }
 
@@ -144,13 +137,12 @@ function isGoldH(h: SourceSemanticInterpretation): boolean {
     && h.mentions.some((row) => row.text === "tools");
 }
 
-function goldAlignmentJson(h: SourceSemanticInterpretation): string {
+function goldCorrespondenceJson(h: SourceSemanticInterpretation): string {
   const actor = mention(h, "Alice"), tools = mention(h, "tools"), uses = mention(h, "uses");
   const frame = frameOf(h, "use");
-  return JSON.stringify({
-    contract: "source-semantic-alignment-response-v2",
-    outcome: { status: "interpreted", gaps: [] },
-    alignment: {
+  return correspondenceSelectionJson({ original_query: ORIGINAL, admitted_query_semantics: receiveQ(ORIGINAL),
+    source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(h, fieldContractSha256), interpretation: h }],
+    producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, {
       correspondences: [
         { relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
           source_endpoint: { kind: "referent", referent: referentOf(h, "Alice").id },
@@ -169,7 +161,6 @@ function goldAlignmentJson(h: SourceSemanticInterpretation): string {
           query_support: { kind: "query_text", excerpt: "tools" },
           source_semantic_support: [{ kind: "lexical", mentions: [tools.id] }] }
       ]
-    }
   });
 }
 
@@ -243,7 +234,7 @@ async function proposeDraft(handler: Handler, context: Context, sourceHandle: st
   return output.published;
 }
 
-it("prepares bounded A from discovered H and recalls only harness alignments", async () => {
+it("prepares bounded semantic correspondences from discovered source interpretation and recalls only harness semantic_correspondences", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-library-prepare-"));
   const filename = join(directory, "alaya.db");
   try {
@@ -262,12 +253,12 @@ it("prepares bounded A from discovered H and recalls only harness alignments", a
         ])).draft);
       const q = receiveQ(ORIGINAL);
       const discovered = await callInterpretation(session.handler, {
-        operation: "prepare_query", original_query: ORIGINAL, q, budget: BUDGET, authorized_scopes: SCOPES
+        operation: "prepare_query", original_query: ORIGINAL, query_semantics: q, budget: BUDGET, authorized_scopes: SCOPES
       }, session.context);
       if (discovered.operation !== "prepare_query") throw new Error("prepare_query expected");
       const descriptors = discovered.candidates.flatMap((row) => {
         if (row.interpretation === undefined) return [];
-        return [{ h_id: row.interpretation_id, interpretation: row.interpretation }];
+        return [{ source_interpretation_id: row.interpretation_id, interpretation: row.interpretation }];
       });
       expect(descriptors.length).toBeGreaterThan(1);
       expect(descriptors.some((row) => isGoldH(row.interpretation))).toBe(true);
@@ -277,59 +268,59 @@ it("prepares bounded A from discovered H and recalls only harness alignments", a
         let produceCalls = 0;
         const produce = (descriptor: (typeof descriptors)[number]) => {
           produceCalls += 1;
-          if (isGoldH(descriptor.interpretation)) return { rawJson: goldAlignmentJson(descriptor.interpretation) };
-          return { status: "no_alignment" as const };
+          if (isGoldH(descriptor.interpretation)) return { rawJson: goldCorrespondenceJson(descriptor.interpretation) };
+          return { status: "no_correspondence" as const };
         };
         const prepared = prepareSourceSemanticLibrary({
-          original_query: ORIGINAL, admitted_q: q, h_descriptors: descriptors, produce,
-          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1", alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
+          original_query: ORIGINAL, admitted_query_semantics: q, source_interpretation_descriptors: descriptors, produce,
+          producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1"
         });
         expect(fetch).not.toHaveBeenCalled();
         expect(produceCalls).toBe(descriptors.length);
         expect(prepared.outcomes).toHaveLength(descriptors.length);
         expect(prepared.outcomes.some((row) => row.status === "interpreted")).toBe(true);
-        expect(prepared.outcomes.some((row) => row.status === "no_alignment")).toBe(true);
-        expect(prepared.alignments).toHaveLength(1);
+        expect(prepared.outcomes.some((row) => row.status === "no_correspondence")).toBe(true);
+        expect(prepared.semantic_correspondences).toHaveLength(1);
         const failureKinds = ["abstained", "truncated", "resource_exhausted", "invalid"] as const;
         for (const status of failureKinds) {
-          const rawJson = JSON.stringify({ contract: "source-semantic-alignment-response-v2",
+          const rawJson = JSON.stringify({ contract: "source-semantic-correspondence-response-v3",
             outcome: status === "invalid" ? { status, reason: "rejected" } : { status } });
-          const result = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_q: q,
-            h_descriptors: descriptors, produce: () => ({ rawJson }),
-            producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1", alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT });
+          const result = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_query_semantics: q,
+            source_interpretation_descriptors: descriptors, produce: () => ({ rawJson }),
+            producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" });
           expect(result.outcomes).toHaveLength(descriptors.length);
-          expect(result.outcomes[0]).toMatchObject({ status: status === "abstained" ? "no_alignment" : status === "invalid" ? "invalid" : "failed",
+          expect(result.outcomes[0]).toMatchObject({ status: status === "abstained" ? "no_correspondence" : status === "invalid" ? "invalid" : "failed",
             outcome: { status }, rawJson });
         }
         let attempts = 0;
-        const thrown = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_q: q,
-          h_descriptors: descriptors, produce: () => { attempts += 1; throw new Error("transport down"); }, cap: 1,
-          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1", alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT });
+        const thrown = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_query_semantics: q,
+          source_interpretation_descriptors: descriptors, produce: () => { attempts += 1; throw new Error("transport down"); }, cap: 1,
+          producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" });
         expect(attempts).toBe(1);
         expect(thrown.outcomes[0]).toMatchObject({ status: "failed", outcome: { status: "transport_failure" } });
         expect(thrown.outcomes.slice(1).every((row) => row.status === "unattempted")).toBe(true);
-        const forbidden = vi.fn(() => ({ status: "no_alignment" as const }));
+        const forbidden = vi.fn(() => ({ status: "no_correspondence" as const }));
         for (const cap of [NaN, Infinity, -1, 1.5]) expect(() => prepareSourceSemanticLibrary({
-          original_query: ORIGINAL, admitted_q: q, h_descriptors: descriptors, produce: forbidden, cap,
-          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1", alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
+          original_query: ORIGINAL, admitted_query_semantics: q, source_interpretation_descriptors: descriptors, produce: forbidden, cap,
+          producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1"
         })).toThrow(/cap/u);
-        expect(() => prepareSourceSemanticLibrary({ original_query: "different", admitted_q: q,
-          h_descriptors: descriptors, produce: forbidden, producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
+        expect(() => prepareSourceSemanticLibrary({ original_query: "different", admitted_query_semantics: q,
+          source_interpretation_descriptors: descriptors, produce: forbidden, producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
           producer_version: "1" })).toThrow(/original query/u);
         expect(forbidden).not.toHaveBeenCalled();
         const interpreted = prepared.outcomes.find((row) => row.status === "interpreted");
-        expect(interpreted?.h_id).toBe(prepared.alignments[0]?.h_id);
-        expect(prepared.cache[sourceSemanticLibraryAlignmentCacheKey(
-          prepared.alignments[0]!.q_id, prepared.alignments[0]!.h_id
-        )]?.rawJson).toBe(goldAlignmentJson(descriptors.find((row) => row.h_id === interpreted?.h_id)!.interpretation));
+        expect(interpreted?.source_interpretation_id).toBe(prepared.semantic_correspondences[0]?.source_interpretation_id);
+        expect(prepared.cache[sourceSemanticLibraryCorrespondenceCacheKey(
+          prepared.semantic_correspondences[0]!.query_semantics_id, prepared.semantic_correspondences[0]!.source_interpretation_id
+        )]?.rawJson).toBe(goldCorrespondenceJson(descriptors.find((row) => row.source_interpretation_id === interpreted?.source_interpretation_id)!.interpretation));
         for (const outcome of prepared.outcomes) {
           if (outcome.status === "interpreted") continue;
-          expect(prepared.cache[sourceSemanticLibraryAlignmentCacheKey(prepared.alignments[0]!.q_id, outcome.h_id)])
+          expect(prepared.cache[sourceSemanticLibraryCorrespondenceCacheKey(prepared.semantic_correspondences[0]!.query_semantics_id, outcome.source_interpretation_id)])
             .toBeUndefined();
         }
         const capped = prepareSourceSemanticLibrary({
-          original_query: ORIGINAL, admitted_q: q, h_descriptors: descriptors, produce, cap: 1,
-          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, producer_version: "1", alignment_syntax: SOURCE_SEMANTIC_ALIGNMENT_CONTRACT
+          original_query: ORIGINAL, admitted_query_semantics: q, source_interpretation_descriptors: descriptors, produce, cap: 1,
+          producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1"
         });
         expect(capped.outcomes[0]?.status).not.toBe("unattempted");
         expect(capped.outcomes.slice(1).every((row) => row.status === "unattempted")).toBe(true);
@@ -338,14 +329,14 @@ it("prepares bounded A from discovered H and recalls only harness alignments", a
           workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES,
           request: {
             kind: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
-            q, alignments: prepared.alignments, budget: BUDGET, output_byte_limit: 1_000_000
+            query_semantics: q, semantic_correspondences: prepared.semantic_correspondences, budget: BUDGET, output_byte_limit: 1_000_000
           }
         });
         if (recalled.kind !== "recall") throw new Error("library recall expected");
-        expect(recalled.discovery.examined_h_ids).toEqual(prepared.alignments.map((row) => row.h_id));
-        expect(recalled.discovery.unexamined_h_count).toBeGreaterThan(0);
+        expect(recalled.discovery.examined_source_interpretation_ids).toEqual(prepared.semantic_correspondences.map((row) => row.source_interpretation_id));
+        expect(recalled.discovery.unexamined_source_interpretation_count).toBeGreaterThan(0);
         expect(recalled.slot_qualifiers.some((row) => row.evidence_kind === "semantic_proof"
-          && row.h_id === prepared.alignments[0]?.h_id)).toBe(true);
+          && row.source_interpretation_id === prepared.semantic_correspondences[0]?.source_interpretation_id)).toBe(true);
       } finally {
         fetch.mockRestore();
       }

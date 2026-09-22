@@ -1,4 +1,4 @@
-import type { SourceSemanticAlignment, SourceSemanticConsumedLeaf, SourceSemanticInterpretation,
+import type { SourceSemanticCorrespondence, SourceSemanticConsumedLeaf, SourceSemanticInterpretation,
   SourceSemanticQuery, SourceSemanticReasoningResult } from "@do-soul/alaya-protocol";
 import { semanticAssignmentProofs, semanticLeafKey } from "./source-semantic-oracle-obligations.js";
 
@@ -7,7 +7,7 @@ export type SourceSemanticOracleResult = Readonly<{ assignments: readonly Source
 export const leafKey = semanticLeafKey;
 
 /** Enumerates typed assignments independently of production compilation, paths and normalizers. */
-export function oracleSourceSemanticJoin(h: SourceSemanticInterpretation, q: SourceSemanticQuery, a: SourceSemanticAlignment): SourceSemanticOracleResult {
+export function oracleSourceSemanticJoin(h: SourceSemanticInterpretation, q: SourceSemanticQuery, a: SourceSemanticCorrespondence): SourceSemanticOracleResult {
   const assignments: SourceSemanticOracleAssignment[] = [];
   for (const [alt, branch] of q.alternatives.entries()) {
     const used = new Set(branch.frames.flatMap((row) => [row.variable, ...row.role_requirements.map((role) => role.target_variable)]));
@@ -28,7 +28,7 @@ function* cartesian(groups: readonly (readonly string[])[], prefix: string[] = [
   if (prefix.length === groups.length) { yield prefix; return; }
   for (const value of groups[prefix.length]!) yield* cartesian(groups, [...prefix, value]);
 }
-/** The public result, not H/A, supplies every decoded binding. */
+/** The public result, not source interpretation and semantic correspondence, supplies every decoded binding. */
 export function decodeEngineBindings(result: SourceSemanticReasoningResult): readonly Readonly<Record<string, string>>[] {
   if (result.answers === undefined) throw new Error("reason result did not expose actual engine bindings");
   return result.answers.map((answer) => Object.fromEntries(Object.entries(answer.bindings).map(([key, coordinate]) => [key, coordinate.node_id])));

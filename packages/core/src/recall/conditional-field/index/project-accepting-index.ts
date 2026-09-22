@@ -206,7 +206,7 @@ function admitSelectedInterpretation(input: AcceptingProjectionInput): Accepting
   const semantic = input.selected_semantics;
   const bound = input.selected_interpretation;
   if ((semantic === undefined) === (bound === undefined)) throw new CoreError("VALIDATION", "select exactly one interpretation domain");
-  const packetId = semantic?.context.h_id ?? bound!.packet_id;
+  const packetId = semantic?.context.source_interpretation_id ?? bound!.packet_id;
   const hypothesisId = semantic === undefined ? bound!.hypothesis_id : sourceSemanticContextIdentity(semantic.context, fieldContractSha256);
   const target = semantic?.source_target ?? bound!.source_target;
   const ids = semantic === undefined

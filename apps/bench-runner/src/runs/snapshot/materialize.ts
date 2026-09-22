@@ -53,7 +53,7 @@ export { deriveSnapshotAttribution } from "./attribution.js";
  *
  * A seeded-DB snapshot lets the recall feedback loop (recall-eval) skip BOTH
  * the slow LLM extraction (Layer 1, already frozen in the extraction cache)
- * AND the per-question materialization (Layer 2, ~18k DB row writes/Q). The
+ * AND the per-question materialization (Layer 2, ~18k DB row writes per question). The
  * snapshot is a checkpointed copy of the bench daemon's seeded `alaya.db`,
  * paired with:
  *   - a sidecar JSON (the per-question scoring sidecar the seed loop built in

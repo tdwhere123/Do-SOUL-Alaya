@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION,
-  SourceSemanticAlignmentSchema, sourceSemanticAlignmentIdentity, sourceSemanticContextIdentity,
+  SourceSemanticCorrespondenceSchema, sourceSemanticCorrespondenceIdentity, sourceSemanticContextIdentity,
   sourceSemanticInterpretationIdentity,
-  type SourceSemanticCorrespondence, type SourceSemanticInterpretation, type SourceSemanticQuery,
+  type SourceSemanticEndpointCorrespondence, type SourceSemanticInterpretation, type SourceSemanticQuery,
   type SourceSemanticQueryFrame, type SourceSemanticQueryVariable
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../../../shared/field-hash.js";
@@ -11,12 +11,12 @@ import { digestOriginalQuery } from "../../../../recall/conditional-field/query/
 import { admitSourceSemanticQuery } from "../../../../recall/conditional-field/query/source-semantic-query-admission.js";
 import { SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "../../../../recall/conditional-field/query/source-semantic-query-producer-registry.js";
 import {
-  admitSourceSemanticAlignment, SOURCE_SEMANTIC_LOWERING_VERSION
-} from "../../../../recall/conditional-field/query/source-semantic-alignment-admission.js";
+  admitSourceSemanticCorrespondence, SOURCE_SEMANTIC_LOWERING_VERSION
+} from "../../../../recall/conditional-field/query/source-semantic-correspondence-admission.js";
 import {
-  SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, SOURCE_SEMANTIC_ALIGNMENT_SOUL_PRODUCER_ID,
-  SourceSemanticAlignmentProducerRegistry, sourceSemanticAlignmentProducerRecord
-} from "../../../../recall/conditional-field/query/source-semantic-alignment-producer-registry.js";
+  SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID,
+  SourceSemanticCorrespondenceProducerRegistry, sourceSemanticCorrespondenceProducerRecord
+} from "../../../../recall/conditional-field/query/source-semantic-correspondence-producer-registry.js";
 
 const ORIGINAL = "which parcel was sent and inspected?";
 const FOREIGN = `sha256:${"b".repeat(64)}`;
@@ -118,7 +118,7 @@ function mixedInterpretation(sourceId = "src", sourceVersion = "1"): SourceSeman
 
 function correspondence(
   query: SourceSemanticQueryEndpointDraft, source: SourceSemanticSourceEndpointDraft, excerpt: string, mentionId: string
-): SourceSemanticCorrespondence {
+): SourceSemanticEndpointCorrespondence {
   return {
     relation: "contextual_equivalence",
     query_endpoint: query,
@@ -128,8 +128,8 @@ function correspondence(
   };
 }
 
-type SourceSemanticQueryEndpointDraft = SourceSemanticCorrespondence["query_endpoint"];
-type SourceSemanticSourceEndpointDraft = SourceSemanticCorrespondence["source_endpoint"];
+type SourceSemanticQueryEndpointDraft = SourceSemanticEndpointCorrespondence["query_endpoint"];
+type SourceSemanticSourceEndpointDraft = SourceSemanticEndpointCorrespondence["source_endpoint"];
 
 const SEND_PRED = correspondence(
   { kind: "predicate", alternative: 0, frame: "qSend" },
@@ -149,26 +149,26 @@ const INSPECT_OBJECT = correspondence(
 );
 
 function alignmentBody(
-  hId: string, qId: string, correspondences: SourceSemanticCorrespondence[],
+  hId: string, qId: string, correspondences: SourceSemanticEndpointCorrespondence[],
   extra: { readonly producer_id?: string; readonly producer_version?: string } = {}
 ) {
   return {
-    contract: "source-semantic-alignment-v2" as const,
-    h_id: hId, q_id: qId,
-    producer_id: extra.producer_id ?? SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
+    contract: "source-semantic-correspondence-v3" as const,
+    source_interpretation_id: hId, query_semantics_id: qId,
+    producer_id: extra.producer_id ?? SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
     producer_version: extra.producer_version ?? "1",
-    contract_version: "source-semantic-alignment-v2",
+    contract_version: "source-semantic-correspondence-v3",
     correspondences
   };
 }
 
 function admitPair(
-  correspondences: SourceSemanticCorrespondence[],
+  correspondences: SourceSemanticEndpointCorrespondence[],
   extra: {
     readonly h?: SourceSemanticInterpretation;
     readonly q?: SourceSemanticQuery;
     readonly original_query?: string;
-    readonly alignment?: Record<string, unknown>;
+    readonly semantic_correspondence?: Record<string, unknown>;
   } = {}
 ) {
   const h = extra.h ?? mixedInterpretation();
@@ -180,26 +180,26 @@ function admitPair(
       h,
       q,
       hId: sourceSemanticInterpretationIdentity(h, fieldContractSha256),
-      admission: admitSourceSemanticAlignment({
-        alignment: extra.alignment ?? alignmentBody(
+      admission: admitSourceSemanticCorrespondence({
+        semantic_correspondence: extra.semantic_correspondence ?? alignmentBody(
           sourceSemanticInterpretationIdentity(h, fieldContractSha256), FOREIGN, correspondences
         ),
-        h, q, original_query: extra.original_query ?? ORIGINAL
+        source_interpretation: h, query_semantics: q, original_query: extra.original_query ?? ORIGINAL
       })
     };
   }
   const hId = sourceSemanticInterpretationIdentity(h, fieldContractSha256);
-  const alignment = extra.alignment ?? alignmentBody(hId, queryAdmission.query_id, correspondences);
+  const semantic_correspondence = extra.semantic_correspondence ?? alignmentBody(hId, queryAdmission.query_id, correspondences);
   return {
     queryAdmission, h, q, hId,
-    admission: admitSourceSemanticAlignment({
-      alignment, h, q, original_query: extra.original_query ?? ORIGINAL
+    admission: admitSourceSemanticCorrespondence({
+      semantic_correspondence, source_interpretation: h, query_semantics: q, original_query: extra.original_query ?? ORIGINAL
     })
   };
 }
 
-describe("source semantic alignment admission", () => {
-  it("admits mixed A as two incomplete C values, and one complete A as one C", () => {
+describe("source semantic semantic_correspondence admission", () => {
+  it("admits mixed semantic correspondence as two incomplete conditional computations values, and one complete semantic correspondence as one conditional computation", () => {
     const sendOnly = admitPair([SEND_PRED, SEND_OBJECT]);
     const inspectOnly = admitPair([INSPECT_PRED, INSPECT_OBJECT]);
     const both = admitPair([SEND_PRED, SEND_OBJECT, INSPECT_PRED, INSPECT_OBJECT]);
@@ -211,7 +211,7 @@ describe("source semantic alignment admission", () => {
     expect(sendOnly.admission.context_id).not.toBe(inspectOnly.admission.context_id);
     expect(sendOnly.admission.context_id).not.toBe(both.admission.context_id);
     expect(inspectOnly.admission.context_id).not.toBe(both.admission.context_id);
-    expect(sendOnly.admission.alignment_id).not.toBe(inspectOnly.admission.alignment_id);
+    expect(sendOnly.admission.semantic_correspondence_id).not.toBe(inspectOnly.admission.semantic_correspondence_id);
     const sendOccurrences = sendOnly.admission.leaves.map((leaf) => leaf.occurrence);
     const inspectOccurrences = inspectOnly.admission.leaves.map((leaf) => leaf.occurrence);
     expect(sendOccurrences).toEqual(["fSend", "fSend"]);
@@ -222,22 +222,22 @@ describe("source semantic alignment admission", () => {
       "fSend", "fSend", "fInspect", "fInspect"
     ]);
     expect(both.admission.leaves.map((leaf) => leaf.correspondence_index)).toEqual([0, 1, 2, 3]);
-    expect(both.admission.leaves.every((leaf) => leaf.leaf_kind === "a_predicate" || leaf.leaf_kind === "a_slot"))
+    expect(both.admission.leaves.every((leaf) => leaf.leaf_kind === "semantic_correspondence_predicate" || leaf.leaf_kind === "semantic_correspondence_slot"))
       .toBe(true);
-    expect(JSON.stringify(both.admission.leaves)).not.toMatch(/h_presence|h_binding|h_assertion/u);
+    expect(JSON.stringify(both.admission.leaves)).not.toMatch(/source_interpretation_presence|source_interpretation_binding|h_assertion/u);
     expect(both.admission.context).toEqual({
-      contract: "source-semantic-context-v2",
-      h_id: both.admission.interpretation_id,
-      q_id: both.admission.query_id,
-      a_id: both.admission.alignment_id,
+      contract: "source-semantic-context-v3",
+      source_interpretation_id: both.admission.interpretation_id,
+      query_semantics_id: both.admission.query_id,
+      semantic_correspondence_id: both.admission.semantic_correspondence_id,
       k_version: SOURCE_SEMANTIC_K_VERSION,
       lowering_version: SOURCE_SEMANTIC_LOWERING_VERSION
     });
     expect(both.admission.context_id)
       .toBe(sourceSemanticContextIdentity(both.admission.context, fieldContractSha256));
-    expect(both.admission.alignment_id)
-      .toBe(sourceSemanticAlignmentIdentity(both.admission.alignment, fieldContractSha256));
-    expect(JSON.stringify(both.admission.alignment)).not.toContain(both.admission.context_id);
+    expect(both.admission.semantic_correspondence_id)
+      .toBe(sourceSemanticCorrespondenceIdentity(both.admission.semantic_correspondence, fieldContractSha256));
+    expect(JSON.stringify(both.admission.semantic_correspondence)).not.toContain(both.admission.context_id);
   });
 
   it("does not unify the same slot label on two frames", () => {
@@ -249,7 +249,7 @@ describe("source semantic alignment admission", () => {
     expect(admission.kind).toBe("admitted");
     if (admission.kind !== "admitted") return;
     expect(admission.leaves).toEqual([{
-      leaf_kind: "a_slot", correspondence_index: 0, occurrence: "fSend", slot_id: "slot1"
+      leaf_kind: "semantic_correspondence_slot", correspondence_index: 0, occurrence: "fSend", slot_id: "slot1"
     }]);
     expect(admission.leaves.some((leaf) => leaf.occurrence === "fInspect" && leaf.slot_id === "slot1")).toBe(false);
     const inspectSlot1 = correspondence(
@@ -261,11 +261,11 @@ describe("source semantic alignment admission", () => {
     if (other.kind !== "admitted") return;
     expect(other.context_id).not.toBe(admission.context_id);
     expect(other.leaves).toEqual([{
-      leaf_kind: "a_slot", correspondence_index: 0, occurrence: "fInspect", slot_id: "slot1"
+      leaf_kind: "semantic_correspondence_slot", correspondence_index: 0, occurrence: "fInspect", slot_id: "slot1"
     }]);
   });
 
-  it("rejects foreign H id, Q id, source, and version", () => {
+  it("rejects foreign source interpretation id, query-semantics id, source, and version", () => {
     const h = mixedInterpretation();
     const q = sendAndInspectQuery();
     const queryAdmission = admitSourceSemanticQuery(q, ORIGINAL);
@@ -273,19 +273,19 @@ describe("source semantic alignment admission", () => {
     if (queryAdmission.kind !== "admitted") return;
     const hId = sourceSemanticInterpretationIdentity(h, fieldContractSha256);
     const base = alignmentBody(hId, queryAdmission.query_id, [SEND_PRED]);
-    expect(admitSourceSemanticAlignment({
-      alignment: { ...base, h_id: FOREIGN }, h, q, original_query: ORIGINAL
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: { ...base, source_interpretation_id: FOREIGN }, source_interpretation: h, query_semantics: q, original_query: ORIGINAL
     }).kind).toBe("invalid");
-    expect(admitSourceSemanticAlignment({
-      alignment: { ...base, q_id: FOREIGN }, h, q, original_query: ORIGINAL
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: { ...base, query_semantics_id: FOREIGN }, source_interpretation: h, query_semantics: q, original_query: ORIGINAL
     }).kind).toBe("invalid");
     const foreignSource = mixedInterpretation("other-src", "1");
-    expect(admitSourceSemanticAlignment({
-      alignment: base, h: foreignSource, q, original_query: ORIGINAL
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: base, source_interpretation: foreignSource, query_semantics: q, original_query: ORIGINAL
     }).kind).toBe("invalid");
     const foreignVersion = mixedInterpretation("src", "2");
-    expect(admitSourceSemanticAlignment({
-      alignment: base, h: foreignVersion, q, original_query: ORIGINAL
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: base, source_interpretation: foreignVersion, query_semantics: q, original_query: ORIGINAL
     }).kind).toBe("invalid");
     expect(sourceSemanticInterpretationIdentity(foreignSource, fieldContractSha256)).not.toBe(hId);
     expect(sourceSemanticInterpretationIdentity(foreignVersion, fieldContractSha256)).not.toBe(hId);
@@ -301,7 +301,7 @@ describe("source semantic alignment admission", () => {
     expect(both.leaves).toHaveLength(4);
     expect(sendOnly.leaves.map((leaf) => leaf.correspondence_index)).toEqual([0, 1]);
     expect(sendOnly.leaves.some((leaf) => leaf.occurrence === "fInspect")).toBe(false);
-    expect(both.leaves.some((leaf) => leaf.leaf_kind === "a_predicate" && leaf.occurrence === "fInspect")).toBe(true);
+    expect(both.leaves.some((leaf) => leaf.leaf_kind === "semantic_correspondence_predicate" && leaf.occurrence === "fInspect")).toBe(true);
   });
 
   it("rejects send⇒transfer and extra relation kinds by schema or admission", () => {
@@ -319,23 +319,23 @@ describe("source semantic alignment admission", () => {
       ...alignmentBody(hId, queryAdmission.query_id, [SEND_PRED]),
       correspondences: [{ ...SEND_PRED, relation: "send⇒transfer" }]
     };
-    expect(SourceSemanticAlignmentSchema.safeParse(
-      alignmentBody(hId, queryAdmission.query_id, [entailment as unknown as SourceSemanticCorrespondence])
+    expect(SourceSemanticCorrespondenceSchema.safeParse(
+      alignmentBody(hId, queryAdmission.query_id, [entailment as unknown as SourceSemanticEndpointCorrespondence])
     ).success).toBe(false);
-    expect(SourceSemanticAlignmentSchema.safeParse(arrow).success).toBe(false);
-    expect(admitSourceSemanticAlignment({
-      alignment: alignmentBody(hId, queryAdmission.query_id, [
-        { ...SEND_PRED, relation: "entailment" } as unknown as SourceSemanticCorrespondence
+    expect(SourceSemanticCorrespondenceSchema.safeParse(arrow).success).toBe(false);
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: alignmentBody(hId, queryAdmission.query_id, [
+        { ...SEND_PRED, relation: "entailment" } as unknown as SourceSemanticEndpointCorrespondence
       ]),
-      h, q, original_query: ORIGINAL
+      source_interpretation: h, query_semantics: q, original_query: ORIGINAL
     }).kind).toBe("invalid");
-    expect(admitSourceSemanticAlignment({
-      alignment: { ...alignmentBody(hId, queryAdmission.query_id, [SEND_PRED]), direction: "forward" },
-      h, q, original_query: ORIGINAL
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: { ...alignmentBody(hId, queryAdmission.query_id, [SEND_PRED]), direction: "forward" },
+      source_interpretation: h, query_semantics: q, original_query: ORIGINAL
     }).kind).toBe("invalid");
   });
 
-  it("rejects Q rewritten by A, answer ids, program, seed, rank, milligrades, and return bindings", () => {
+  it("rejects query semantics rewritten by semantic correspondence, answer ids, program, seed, rank, milligrades, and return bindings", () => {
     const h = mixedInterpretation();
     const q = sendAndInspectQuery();
     const queryAdmission = admitSourceSemanticQuery(q, ORIGINAL);
@@ -357,21 +357,21 @@ describe("source semantic alignment admission", () => {
       { ...base, original_query_digest: digestOriginalQuery(ORIGINAL) }
     ];
     for (const forged of forgeries) {
-      expect(SourceSemanticAlignmentSchema.safeParse(forged).success).toBe(false);
-      expect(admitSourceSemanticAlignment({
-        alignment: forged, h, q, original_query: ORIGINAL
+      expect(SourceSemanticCorrespondenceSchema.safeParse(forged).success).toBe(false);
+      expect(admitSourceSemanticCorrespondence({
+        semantic_correspondence: forged, source_interpretation: h, query_semantics: q, original_query: ORIGINAL
       }).kind).toBe("invalid");
     }
-    expect(admitSourceSemanticAlignment({
-      alignment: { ...base, q_id: sourceSemanticInterpretationIdentity(h, fieldContractSha256) },
-      h, q, original_query: ORIGINAL
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: { ...base, query_semantics_id: sourceSemanticInterpretationIdentity(h, fieldContractSha256) },
+      source_interpretation: h, query_semantics: q, original_query: ORIGINAL
     }).kind).toBe("invalid");
-    expect(admitSourceSemanticAlignment({
-      alignment: base, h, q, original_query: "a different original query"
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: base, source_interpretation: h, query_semantics: q, original_query: "a different original query"
     }).kind).toBe("invalid");
   });
 
-  it("rejects unknown endpoints, kind mismatch, and support that is not on this H", () => {
+  it("rejects unknown endpoints, kind mismatch, and support that is not on this source interpretation", () => {
     const missingFrame = admitPair([
       correspondence(
         { kind: "predicate", alternative: 0, frame: "qMissing" },
@@ -396,7 +396,7 @@ describe("source semantic alignment admission", () => {
     expect(foreignContext.kind).toBe("invalid");
   });
 
-  it("rejects an unregistered or capability-less A producer and does not treat missing A as Q", () => {
+  it("rejects an unregistered or capability-less semantic-correspondence producer and does not treat missing semantic correspondence as query semantics", () => {
     const h = mixedInterpretation();
     const q = sendAndInspectQuery();
     const queryAdmission = admitSourceSemanticQuery(q, ORIGINAL);
@@ -404,30 +404,30 @@ describe("source semantic alignment admission", () => {
     if (queryAdmission.kind !== "admitted") return;
     const hId = sourceSemanticInterpretationIdentity(h, fieldContractSha256);
     const forged = alignmentBody(hId, queryAdmission.query_id, [SEND_PRED], {
-      producer_id: "forged.alignment.v1"
+      producer_id: "forged.semantic_correspondence.v1"
     });
-    expect(admitSourceSemanticAlignment({ alignment: forged, h, q, original_query: ORIGINAL }).kind)
+    expect(admitSourceSemanticCorrespondence({ semantic_correspondence: forged, source_interpretation: h, query_semantics: q, original_query: ORIGINAL }).kind)
       .toBe("unsupported");
-    const empty = new SourceSemanticAlignmentProducerRegistry([]);
-    expect(admitSourceSemanticAlignment({
-      alignment: alignmentBody(hId, queryAdmission.query_id, [SEND_PRED]),
-      h, q, original_query: ORIGINAL, registry: empty
+    const empty = new SourceSemanticCorrespondenceProducerRegistry([]);
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: alignmentBody(hId, queryAdmission.query_id, [SEND_PRED]),
+      source_interpretation: h, query_semantics: q, original_query: ORIGINAL, registry: empty
     }).kind).toBe("unsupported");
-    const registry = new SourceSemanticAlignmentProducerRegistry([
-      sourceSemanticAlignmentProducerRecord(SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, { capabilities: [] })
+    const registry = new SourceSemanticCorrespondenceProducerRegistry([
+      sourceSemanticCorrespondenceProducerRecord(SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, { capabilities: [] })
     ]);
-    expect(admitSourceSemanticAlignment({
-      alignment: alignmentBody(hId, queryAdmission.query_id, [SEND_PRED]),
-      h, q, original_query: ORIGINAL, registry
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: alignmentBody(hId, queryAdmission.query_id, [SEND_PRED]),
+      source_interpretation: h, query_semantics: q, original_query: ORIGINAL, registry
     }).kind).toBe("unsupported");
-    expect(admitSourceSemanticAlignment({
-      alignment: alignmentBody(hId, queryAdmission.query_id, [SEND_PRED], {
-        producer_id: SOURCE_SEMANTIC_ALIGNMENT_SOUL_PRODUCER_ID
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: alignmentBody(hId, queryAdmission.query_id, [SEND_PRED], {
+        producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID
       }),
-      h, q, original_query: ORIGINAL
+      source_interpretation: h, query_semantics: q, original_query: ORIGINAL
     }).kind).toBe("admitted");
-    expect(admitSourceSemanticAlignment({
-      alignment: undefined, h, q, original_query: ORIGINAL
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: undefined, source_interpretation: h, query_semantics: q, original_query: ORIGINAL
     }).kind).toBe("absent");
   });
 });

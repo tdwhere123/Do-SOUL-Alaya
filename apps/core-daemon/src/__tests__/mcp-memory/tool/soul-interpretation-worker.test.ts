@@ -9,7 +9,7 @@ import {
 import {
   admitSourceSemanticQuery, createAuditedSourceAdmission,
   createSourceSemanticInterpretationPublication, EvidenceService, fieldContractSha256,
-  SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
+  SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
 } from "@do-soul/alaya-core";
 import {
   closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo
@@ -44,7 +44,7 @@ const BUDGET = {
   min_envelope: 10
 };
 
-const ALICE_CORRESPONDENCES: import("@do-soul/alaya-protocol").SourceSemanticAlignment["correspondences"] = [
+const ALICE_CORRESPONDENCES: import("@do-soul/alaya-protocol").SourceSemanticCorrespondence["correspondences"] = [
   { relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
     source_endpoint: { kind: "referent", referent: "rAlice" }, query_support: { kind: "query_text", excerpt: "Alice" }, source_semantic_support: [{ kind: "lexical", mentions: ["mAlice"] }] },
   { relation: "contextual_equivalence", query_endpoint: { kind: "slot", alternative: 0, frame: "qUse", slot: "agent" },
@@ -213,12 +213,12 @@ function agentQuery(): SourceSemanticQuery {
   };
 }
 
-function themeAlignment(hId: string, qId: string) {
+function themeCorrespondence(hId: string, qId: string) {
   return {
-    contract: "source-semantic-alignment-v2" as const,
-    h_id: hId, q_id: qId,
-    producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-    producer_version: "1", contract_version: "source-semantic-alignment-v2",
+    contract: "source-semantic-correspondence-v3" as const,
+    source_interpretation_id: hId, query_semantics_id: qId,
+    producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
+    producer_version: "1", contract_version: "source-semantic-correspondence-v3",
     correspondences: [
       ...ALICE_CORRESPONDENCES,
       {
@@ -328,7 +328,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
     if (!proposed.ok) throw new Error("propose must succeed");
     expect(proposed.output.provider_attempts).toBe(0);
     if (proposed.output.operation !== "propose" || proposed.output.published === undefined) {
-      throw new Error("propose must publish H");
+      throw new Error("propose must publish the source interpretation");
     }
     const hId = proposed.output.published.interpretation_id;
     expect(publishDb.connection.prepare("SELECT count(*) AS n FROM memory_entries").get()).toEqual({ n: 0 });
@@ -351,7 +351,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       await reopened.ready();
       const q = queryOf();
       const prepareQueryArgs = SoulInterpretationRequestSchema.parse({
-        operation: "prepare_query", original_query: ORIGINAL, q, budget: BUDGET
+        operation: "prepare_query", original_query: ORIGINAL, query_semantics: q, budget: BUDGET
       });
       const preparedQuery = await callInterpretation(freshHandler, {
         toolName: "soul.interpretation", arguments: prepareQueryArgs, context
@@ -366,10 +366,10 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       const admitted = admitSourceSemanticQuery(q, ORIGINAL);
       if (admitted.kind !== "admitted") throw new Error("query must admit");
       const a = {
-        contract: "source-semantic-alignment-v2" as const,
-        h_id: hId, q_id: admitted.query_id,
-        producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-        producer_version: "1", contract_version: "source-semantic-alignment-v2",
+        contract: "source-semantic-correspondence-v3" as const,
+        source_interpretation_id: hId, query_semantics_id: admitted.query_id,
+        producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
+        producer_version: "1", contract_version: "source-semantic-correspondence-v3",
         correspondences: [
       ...ALICE_CORRESPONDENCES,
           {
@@ -392,7 +392,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
         operation: "reason",
         accepts_unreviewed_conditional_results: true,
         query_handle: preparedQuery.output.query_handle,
-        a, budget: BUDGET, output_byte_limit: 1000000
+        semantic_correspondence: a, budget: BUDGET, output_byte_limit: 1000000
       });
       const direct = await callInterpretation(freshHandler, {
         toolName: "soul.interpretation", arguments: reasonArgs, context
@@ -419,16 +419,16 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       expect(direct.output.result.outcome.status).toBe("interpreted");
       expect(direct.output.result.world_claim).toBe("unknown");
       expect(direct.output.result.semantic_status).toBe("unreviewed");
-      expect(direct.output.result.h_id).toBe(hId);
-      expect(direct.output.coverage.computation).toBe("complete");
+      expect(direct.output.result.source_interpretation_id).toBe(hId);
+      expect(direct.output.coverage.conditional_computation).toBe("complete");
       expect(direct.output.coverage.discovery).not.toBe("unexercised");
       const interpretation = direct.output.interpretation;
-      const alignment = direct.output.alignment;
-      expect(alignment).toBeDefined();
-      if (alignment === undefined) throw new Error("reason must return A");
+      const semantic_correspondence = direct.output.semantic_correspondence;
+      expect(semantic_correspondence).toBeDefined();
+      if (semantic_correspondence === undefined) throw new Error("reason must return A");
       expect(interpretation).toBeDefined();
-      if (interpretation === undefined) throw new Error("reason must return H");
-      const oracle = oracleSourceSemanticJoin(interpretation, q, alignment);
+      if (interpretation === undefined) throw new Error("reason must return the source interpretation");
+      const oracle = oracleSourceSemanticJoin(interpretation, q, semantic_correspondence);
       const decoded = decodeEngineBindings(direct.output.result);
       expect(oracleBindingsMatchEngine(oracle, decoded, ["tools", "fUse"])).toBe(true);
       expect(oracleNecessaryLeavesHeld(oracle, direct.output.result.consumed_leaves)).toBe(true);
@@ -452,7 +452,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
   }
 }, 30000);
 
-it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independent agent proof", async () => {
+it("publishes a legal ablated source interpretation, rebinds semantic correspondence, and keeps the unbound-theme-independent agent proof", async () => {
   const directory = await mkdtemp(join(tmpdir(), "soul-interpretation-ablate-"));
   const filename = join(directory, "memory.sqlite");
   const { database } = await createRecallRealStorage(() => undefined, filename);
@@ -519,7 +519,7 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
     });
     expect(first.ok).toBe(true);
     if (!first.ok || first.output.operation !== "propose" || first.output.published === undefined) {
-      throw new Error("first propose must publish H");
+      throw new Error("first propose must publish the source interpretation");
     }
     const hId1 = first.output.published.interpretation_id;
     expect(first.output.published.interpretation.frames[0]?.slots.some((row) => row.id === "theme")).toBe(true);
@@ -530,17 +530,17 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
-        h_id: hId1, q, a: themeAlignment(hId1, admitted.query_id), original_query: ORIGINAL,
+        source_interpretation_id: hId1, query_semantics: q, semantic_correspondence: themeCorrespondence(hId1, admitted.query_id), original_query: ORIGINAL,
         budget: BUDGET, output_byte_limit: 1000000
       }),
       context
     });
     expect(before.ok).toBe(true);
     if (!before.ok || before.output.operation !== "reason" || before.output.result === undefined) {
-      throw new Error("reason on published H must succeed");
+      throw new Error("reason on the published source interpretation must succeed");
     }
     expect(before.output.result.outcome.status).toBe("interpreted");
-    expect(before.output.result.consumed_leaves.some((row) => row.leaf_kind === "h_binding" && row.slot_id === "theme")).toBe(true);
+    expect(before.output.result.consumed_leaves.some((row) => row.leaf_kind === "source_interpretation_binding" && row.slot_id === "theme")).toBe(true);
     const ablated = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
@@ -552,7 +552,7 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
     });
     expect(ablated.ok).toBe(true);
     if (!ablated.ok || ablated.output.operation !== "propose" || ablated.output.published === undefined) {
-      throw new Error("ablated propose must publish a new H");
+      throw new Error("ablated propose must publish a new source interpretation");
     }
     const hId2 = ablated.output.published.interpretation_id;
     expect(hId2).not.toBe(hId1);
@@ -562,7 +562,7 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
-        h_id: hId2, q, a: themeAlignment(hId1, admitted.query_id), original_query: ORIGINAL,
+        source_interpretation_id: hId2, query_semantics: q, semantic_correspondence: themeCorrespondence(hId1, admitted.query_id), original_query: ORIGINAL,
         budget: BUDGET, output_byte_limit: 1000000
       }),
       context
@@ -571,12 +571,12 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
     if (!stale.ok || stale.output.operation !== "reason" || stale.output.result === undefined) {
       throw new Error("stale A must return a reason result");
     }
-    expect(stale.output.result.outcome).toEqual({ status: "invalid", reason: "malformed_alignment" });
+    expect(stale.output.result.outcome).toEqual({ status: "invalid", reason: "malformed_correspondence" });
     const rebound = await callInterpretation(handler, {
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
-        h_id: hId2, q, a: themeAlignment(hId2, admitted.query_id), original_query: ORIGINAL,
+        source_interpretation_id: hId2, query_semantics: q, semantic_correspondence: themeCorrespondence(hId2, admitted.query_id), original_query: ORIGINAL,
         budget: BUDGET, output_byte_limit: 1000000
       }),
       context
@@ -593,12 +593,12 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
       toolName: "soul.interpretation",
       arguments: SoulInterpretationRequestSchema.parse({
         operation: "reason", accepts_unreviewed_conditional_results: true,
-        h_id: hId2, q: who,
-        a: {
-          contract: "source-semantic-alignment-v2",
-          h_id: hId2, q_id: admittedWho.query_id,
-          producer_id: SOURCE_SEMANTIC_ALIGNMENT_CORE_PRODUCER_ID,
-          producer_version: "1", contract_version: "source-semantic-alignment-v2",
+        source_interpretation_id: hId2, query_semantics: who,
+        semantic_correspondence: {
+          contract: "source-semantic-correspondence-v3",
+          source_interpretation_id: hId2, query_semantics_id: admittedWho.query_id,
+          producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
+          producer_version: "1", contract_version: "source-semantic-correspondence-v3",
           correspondences: [
             {
               relation: "contextual_equivalence",
@@ -622,11 +622,11 @@ it("publishes a legal ablated H, rebinds A, and keeps the unbound-theme-independ
     });
     expect(remaining.ok).toBe(true);
     if (!remaining.ok || remaining.output.operation !== "reason" || remaining.output.result === undefined) {
-      throw new Error("agent proof on ablated H must succeed");
+      throw new Error("agent proof on the ablated source interpretation must succeed");
     }
     expect(remaining.output.result.outcome.status).toBe("interpreted");
-    expect(remaining.output.result.consumed_leaves.some((row) => row.leaf_kind === "h_binding" && row.slot_id === "agent")).toBe(true);
-    expect(remaining.output.result.h_id).toBe(hId2);
+    expect(remaining.output.result.consumed_leaves.some((row) => row.leaf_kind === "source_interpretation_binding" && row.slot_id === "agent")).toBe(true);
+    expect(remaining.output.result.source_interpretation_id).toBe(hId2);
     expect(remaining.output.provider_attempts).toBe(0);
   } finally {
     try { publishDb.close(); } catch { /* closed */ }
