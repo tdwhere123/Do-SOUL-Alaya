@@ -209,7 +209,7 @@ describe("complete-source census and publication", () => {
       preflightPath, join(f.root, "associations.json"));
     expect(associations.publicationAssociations).toEqual([]);
     expect(associations.sources).toEqual(expected.map(({ source_id }) => ({
-      source_id, source_version: census.dataset_sha256, status: "unbound"
+      source_id, source_version: census.dataset_sha256, status: "unbound", reason: "missing_current_artifact"
     })));
     const report = await publishSourceSemanticSnapshot({ snapshotPath: join(f.root, "occurrences.sqlite"),
       dataDirRoot: join(f.root, "seed"), recordedAt: CLOCK, producerCommit: "a".repeat(40), populations: [population] });

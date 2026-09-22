@@ -98,26 +98,34 @@ export function extractionArtifactRequests(turn: Pick<LongMemEvalExtractionTurn,
   }>[] {
   assertExclusiveExtractionGeneration({ sourceInterpretationProfile: profile, openSemantics, sourcePacking: packing });
   if (openSemantics !== undefined) {
-    const sourceCorpus = buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages ?? []);
-    return collectSourceSemanticUnitPacks(sourceCorpus, packing).map((source) => {
-      const proposal = {
-        sourceCorpus,
-        ...(source.source_scope === undefined ? {} : { sourceScope: source.source_scope }),
-        assertionIds: source.source_assertions.map((row) => row.assertion_id),
-        source_id: "unbound", source_version: "unbound",
-        producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
-        producer_version: SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
-      };
-      const base = buildSourceSemanticRequest(proposal);
-      const revision = openSemantics.revisions?.find((row) => row.base_request_sha256 === sourceSemanticBaseRequestDigest(base));
-      const semantic = revision === undefined ? base : buildSourceSemanticRequest({ ...proposal, revision });
-      return { source, semantic, userPrompt: JSON.stringify(semantic) };
-    });
+    return sourceSemanticArtifactRequests(buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages ?? []), packing, openSemantics);
   }
   return collectOfficialApiExtractionCoverage(turn.turnContent, turn.turnMessages ?? [], packing).requests.map((source) => {
     if (profile === undefined) return { source, userPrompt: stringifyOfficialApiExtractionRequest(source) };
     const packet = buildOfficialApiSourcePacketRequest(buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages ?? []),
       source.source_assertions.map((row) => row.assertion_id), profile);
     return { source, packet, userPrompt: JSON.stringify(packet) };
+  });
+}
+
+/** Shared request construction for extraction turns and canonical source census records. */
+export function sourceSemanticArtifactRequests(sourceCorpus: string, packing: ExtractionSourcePacking | undefined,
+  openSemantics: ExtractionOpenSemanticsGeneration): readonly Readonly<{
+    source: ReturnType<typeof collectSourceSemanticUnitPacks>[number]; semantic: SourceSemanticRequest; userPrompt: string;
+  }>[] {
+  const generation = parseExtractionOpenSemanticsGeneration(openSemantics);
+  return collectSourceSemanticUnitPacks(sourceCorpus, packing).map((source) => {
+    const proposal = {
+      sourceCorpus,
+      ...(source.source_scope === undefined ? {} : { sourceScope: source.source_scope }),
+      assertionIds: source.source_assertions.map((row) => row.assertion_id),
+      source_id: "unbound", source_version: "unbound",
+      producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
+      producer_version: SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
+    };
+    const base = buildSourceSemanticRequest(proposal);
+    const revision = generation.revisions?.find((row) => row.base_request_sha256 === sourceSemanticBaseRequestDigest(base));
+    const semantic = revision === undefined ? base : buildSourceSemanticRequest({ ...proposal, revision });
+    return { source, semantic, userPrompt: JSON.stringify(semantic) };
   });
 }

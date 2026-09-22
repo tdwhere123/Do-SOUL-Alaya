@@ -5,6 +5,8 @@ import { interveneSemanticChain } from "./intervene.js";
 import { prepareSourcePublicationAssociations } from "../snapshot/source-records/prepare-associations.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
+import { SourceRecordsDatasetSchema } from "../snapshot/source-records/contract.js";
+import { parseExtractionOpenSemanticsGeneration } from "../extraction/request-artifact.js";
 
 /** Offline orchestration. Paid query semantics and semantic correspondence uses the existing semantic-proposal-fill entry and its explicit authority. */
 export async function runSemanticChainLauncher(args: readonly string[]): Promise<number> {
@@ -29,7 +31,10 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
       Number(flags.get("--leaf-trials") ?? "32"));
     else if (operation === "associate") {
       const population = z.object({ name: z.string(), dataDir: z.string(), pinnedMetaRoot: z.string(),
-        cacheRoot: z.string(), model: z.string(), requestProfile: z.string().refine(isExtractionRequestProfile)
+        cacheRoot: z.string(), model: z.string(), requestProfile: z.string().refine(isExtractionRequestProfile),
+        questionWindow: z.object({ offset: SourceRecordsDatasetSchema.shape.offset,
+          limit: SourceRecordsDatasetSchema.shape.limit }).strict().optional(),
+        openSemantics: z.unknown().transform(parseExtractionOpenSemanticsGeneration).optional()
       }).strict().parse(json(required("--config")));
       if (!isExtractionRequestProfile(population.requestProfile)) throw new Error("unsupported extraction request profile");
       result = await prepareSourcePublicationAssociations({ ...population, requestProfile: population.requestProfile },
