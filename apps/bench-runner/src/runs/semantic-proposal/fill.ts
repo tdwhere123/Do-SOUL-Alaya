@@ -55,8 +55,12 @@ export function prepareSemanticProposal(
   const lines = materializeSemanticProposalLines(workset, maxOutputTokens);
   const cachedKeys = new Set<string>();
   for (const line of lines) {
-    const existing = readSemanticProposalAttemptState(cacheRoot, line.key, lookupOf(workset, line, maxOutputTokens)).shard;
+    const state = readSemanticProposalAttemptState(cacheRoot, line.key, lookupOf(workset, line, maxOutputTokens));
+    const existing = state.shard;
     if (existing !== undefined) {
+      if (state.status !== "settled") {
+        throw new Error(`semantic proposal ${line.key} requires fill recovery with its existing authority before preflight`);
+      }
       replayCachedProposalShard(line, existing);
       cachedKeys.add(line.key);
     }

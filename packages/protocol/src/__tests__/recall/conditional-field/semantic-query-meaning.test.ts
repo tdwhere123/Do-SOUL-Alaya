@@ -168,6 +168,37 @@ it("separates a named entity called Who from a free target and retains an ambigu
   expect(query.gaps[0]?.kind).toBe("unresolved_referent");
 });
 
+it.each(["free", "named"] as const)("rejects conflicting entity declarations after an initial %s across every declaration boundary", (kind) => {
+  const declaration = (value: "free" | "named") => ({ kind: value, key: "person", excerpt: value === "free" ? "Who" : "Mira" });
+  const first = declaration(kind), second = declaration(kind === "free" ? "named" : "free");
+  const argument = (target: object) => ({ role: "person", target });
+  const bodies = [
+    meaning(statement("tell", [argument(first), { role: "recipient", target: second }]), { return: ["person"] }),
+    meaning(statement("tell", [argument(second)]), { entities: [first], return: ["person"] }),
+    { ...meaning(statement("tell", [argument(first)])), return: ["person"], requested_operation: operation,
+      alternatives: [{ conditions: [statement("tell", [argument(first)])],
+        evidence_inputs: [{ conditions: [statement("leave", [argument(second)])] }] }] }
+  ];
+  for (const body of bodies) {
+    expect(() => materializeSourceSemanticQueryMeaning(body, envelope)).toThrow(/entity declaration kind conflicts/u);
+  }
+});
+
+it.each(["free", "named"] as const)("preserves %s redeclarations and explicit references across answer and evidence inputs", (kind) => {
+  const declaration = { kind, key: "person", excerpt: kind === "free" ? "Who" : "Mira" };
+  const query = materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+    entities: [declaration], return: ["person"], gaps: [], requested_operation: operation,
+    alternatives: [{ conditions: [statement("tell", [{ role: "person", target: declaration }])],
+      evidence_inputs: [{ conditions: [statement("leave", [
+        { role: "person", target: { kind: "reference", key: "person" } }
+      ]), statement("arrive", [{ role: "person", target: declaration }])] }] }] }, envelope);
+  expect(query.variables.find(variable => variable.id === "person")).toEqual({ id: "person", sort: "entity",
+    ...(kind === "named" ? { reference: { kind: "query_text", excerpt: "Mira" } } : {}) });
+  expect(query.return_variables).toEqual(["person"]);
+  expect(query.alternatives[0]!.frames.map(frame => frame.role_requirements[0]!.target_variable)).toEqual(["person", "person", "person"]);
+  expect(query.alternatives[0]!.evidence_inputs).toEqual([{ frames: ["leave", "arrive"] }]);
+});
+
 it("reuses a shared entity and can return a proposition without forcing an entity conversion", () => {
   const query = compiled(statement("pack", [
     { role: "theme", target: { kind: "free", key: "parcel" }, excerpt: "parcel" }

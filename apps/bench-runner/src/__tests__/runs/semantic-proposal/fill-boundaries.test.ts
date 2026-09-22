@@ -62,6 +62,9 @@ it.each([JSON.stringify({ contract: "source-semantic-query-response-v5", outcome
     expect(readSemanticProposalResults(prepared, cacheRoot, 128)[0]?.status)
       .toBe(rawJson === "{}" ? "invalid" : "abstained");
     writeFileSync(ledgerPath, reserved);
+    expect(() => prepareSemanticProposal(prepared, cacheRoot, 128))
+      .toThrow(/requires fill recovery with its existing authority before preflight/u);
+    expect(readFileSync(ledgerPath, "utf8")).toBe(reserved);
     for (let replay = 0; replay < 2; replay++) {
       await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: { ...config(), apiKey: null } });
       const settled = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot();
@@ -347,7 +350,10 @@ it.each([
     expect(result.terminal_failures).toBe(1);
     for (const wire of wires) {
       expect(wire.url).toBe("/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse");
-      expect(wire.body).not.toHaveProperty("generationConfig.responseJsonSchema");
+      expect(wire.body).toHaveProperty("generationConfig.responseJsonSchema", expect.objectContaining({
+        type: "object", required: expect.arrayContaining(["contract", "outcome"]),
+        properties: expect.objectContaining({ contract: { type: "string", enum: ["source-semantic-query-response-v5"] } })
+      }));
       expect(wire.body).toMatchObject({ generationConfig: { responseMimeType: "application/json" },
         systemInstruction: { parts: [expect.anything(), { text: expect.stringContaining("source-semantic-query-meaning-v3") }] } });
     }

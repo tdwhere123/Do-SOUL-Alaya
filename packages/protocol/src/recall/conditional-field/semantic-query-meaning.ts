@@ -236,6 +236,7 @@ function preflight(value: unknown): void {
 class QueryMeaningCompiler {
   private readonly sorts = new Map<string, "entity" | "proposition" | "context">();
   private readonly named = new Map<string, string>();
+  private readonly entityKinds = new Map<string, "free" | "named">();
   private readonly entitySupport = new Map<string, Set<string>>();
   private readonly returned = new Set<string>();
   private readonly frames = new Map<string, { variable: string; operator?: QueryMeaning["kind"] }>();
@@ -364,6 +365,11 @@ class QueryMeaningCompiler {
 
   private collectTarget(target: EntityTargetValue, path: Path, argumentExcerpt?: string): void {
     if (target.kind === "reference") return;
+    const declaredKind = this.entityKinds.get(target.key);
+    if (declaredKind !== undefined && declaredKind !== target.kind) {
+      fail(path, "entity declaration kind conflicts with an earlier declaration");
+    }
+    this.entityKinds.set(target.key, target.kind);
     this.declareEntityKey(target.key, path);
     const excerpt = target.excerpt ?? argumentExcerpt;
     if (excerpt !== undefined) {

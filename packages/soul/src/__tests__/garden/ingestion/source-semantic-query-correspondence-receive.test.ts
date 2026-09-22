@@ -123,6 +123,38 @@ function canonicalQuery(original: string, body: object) {
 }
 
 describe("query meaning receive and semantic_correspondence selection", () => {
+  it.each(["free", "named"] as const)("rejects contradictory entity kinds in %s-first order without replacing a free answer", first => {
+    const input = { original_query: "Who told Mira that Lee might leave?",
+      producer_id: "alaya.source.semantic.query.soul.v1", producer_version: "1" };
+    const response = (recipient: string) => {
+      const args = [
+        { role: "teller", target: { kind: "free", key: "teller", excerpt: "Who" } },
+        { role: "recipient", target: { kind: "named", key: recipient, excerpt: "Mira" } }
+      ];
+      return { contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },
+        query: { contract: "source-semantic-query-meaning-v3", return: ["teller"], gaps: [],
+          alternatives: [{ conditions: [{ kind: "statement", key: "tell", predicate: "tell",
+            arguments: first === "named" ? args.reverse() : args,
+            content: { kind: "possible", key: "possibility", content: { kind: "statement", key: "leave", predicate: "leave",
+              arguments: [{ role: "agent", target: { kind: "named", key: "lee", excerpt: "Lee" } }] } }
+          }] }] } };
+    };
+    const rejected = proposeQuerySemantics(input, { rawJson: JSON.stringify(response("teller")) });
+    expect(rejected.outcome).toMatchObject({ status: "invalid", reason: "malformed_response",
+      diagnostics: [{ message: "entity declaration kind conflicts with an earlier declaration" }] });
+    expect(rejected.query).toBeUndefined();
+    const faithful = proposeQuerySemantics(input, { rawJson: JSON.stringify(response("mira")) });
+    expect(faithful.outcome).toEqual({ status: "interpreted", gaps: [] });
+    expect(faithful.query?.return_variables).toEqual(["teller"]);
+    expect(faithful.query?.variables.find(variable => variable.id === "teller")).toEqual({ id: "teller", sort: "entity" });
+    expect(faithful.query?.variables.find(variable => variable.id === "mira")?.reference?.excerpt).toBe("Mira");
+    expect(faithful.query?.alternatives[0]?.context_obligations).toEqual([
+      { frame: "tell", kind: "asserted_at_source" },
+      { frame: "possibility", kind: "explicit_embedded_structure", incidence: { kind: "embedding", other_frame: "tell", role: "content" } },
+      { frame: "leave", kind: "explicit_embedded_structure", incidence: { kind: "operator_operand", other_frame: "possibility", role: "content" } }
+    ]);
+  });
+
   it.each(["person", "Who", "speaker", "local73"])("receives a supported free reporter with arbitrary handle %s", key => {
     const received = proposeQuerySemantics({ original_query: "Who reported that Lee left?", producer_id: "query-producer", producer_version: "1" }, {
       rawJson: JSON.stringify({ contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },

@@ -121,9 +121,18 @@ export function proposalRecoveryCases(input: {
       const f = fixture(); f.ledger.reserveAttemptOrdinal(f.line.key); f.raw(1, input.body(f.line));
       const reserved = readFileSync(f.ledgerPath, "utf8");
       await f.fill(); writeFileSync(f.ledgerPath, reserved);
+      const rawPath = providerRawAttemptPath(f.cacheRoot, f.line.key, 1);
+      const shardPath = semanticProposalShardPath(f.cacheRoot, f.line.key);
+      const rawBytes = readFileSync(rawPath, "utf8"), shardBytes = readFileSync(shardPath, "utf8");
       expect(f.read().status).toBe("pending"); expect(f.chain().received).toBeUndefined();
+      expect(() => prepareSemanticProposal(f.workset, f.cacheRoot, 128))
+        .toThrow(/requires fill recovery with its existing authority before preflight/u);
       expect(readFileSync(f.ledgerPath, "utf8")).toBe(reserved);
+      expect(readFileSync(rawPath, "utf8")).toBe(rawBytes);
+      expect(readFileSync(shardPath, "utf8")).toBe(shardBytes);
       expect(await f.fill()).toMatchObject({ interpreted: 1, unknown: 0, pending: 0 });
+      expect(prepareSemanticProposal(f.workset, f.cacheRoot, 128))
+        .toMatchObject({ missing: 0, maximum_attempts: 0, keys: [], provider_calls: 0 });
       const settled = inspectExtractionAttemptLedger({ cacheRoot: f.cacheRoot,
         lineageDigest: f.authority.attempt_lineage_digest,
         cacheIdentity: { model: f.workset.model, requestProfile: input.config().requestProfile } })!;

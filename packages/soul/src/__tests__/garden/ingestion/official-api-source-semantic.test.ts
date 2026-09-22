@@ -6,6 +6,7 @@ import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "
 import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/official-api/source-packet-request.js";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
+  SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, semanticSha256,
   sourceSemanticResponseJsonSchema, parseSourceSemanticRequest, sourceSemanticSystemPrompt
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
@@ -350,7 +351,7 @@ describe("query and semantic_correspondence proposal entry points", () => {
         expect(prepared.raw_response_id).toBeUndefined();
         expect(prepared.request).not.toHaveProperty("system_prompt");
       }
-      expect(preparedQuery.system_prompt).toContain("Query.gaps is the authoritative gap list");
+      expect(preparedQuery.system_prompt).toBe(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT);
       expect(preparedCorrespondence.system_prompt).toContain("request-local handle source1, source2");
       for (const valid of [false, true]) {
         const querySemantics = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
