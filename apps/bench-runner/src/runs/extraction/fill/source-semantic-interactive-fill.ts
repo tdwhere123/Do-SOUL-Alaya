@@ -26,11 +26,10 @@ import { batchDigest } from "./batch/plan.js";
 import { encodeGeminiGenerateContent, isCompleteGeminiFinish, isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import {
   bindProviderRawAttempt, listProviderRawAttempts, readProviderRawAttempt, requestEnvelopeDigest,
-  writeProviderRawAttempt, retainedFailureOutcome, type ProviderRawAttempt
+  writeProviderRawAttempt, retainedFailureOutcome, assertProviderRawReservation, type ProviderRawAttempt
 } from "./provider-raw-attempt.js";
 import { assertExtractionFillComplete } from "./fill-completion.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
-import { assertExtractionAttemptReservation } from "../authority/attempt-ledger.js";
 import {
   attemptInputByteUpperBound,
   assertAttemptInputWithinReceiptLimit,
@@ -161,7 +160,7 @@ function importInteractiveFromRaw(
     requestProfile: input.prepared.config.requestProfile,
     requestDigest: requestEnvelopeDigest(line.userPrompt)
   });
-  assertExtractionAttemptReservation(input.authority!.snapshot(), line.key, raw.attempt_ordinal);
+  assertProviderRawReservation(raw, input.authority!.snapshot());
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
     input.authority!.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);
@@ -235,14 +234,14 @@ async function dispatchInteractiveLine(
     });
     return importInteractiveFromRaw(input, line, sourceCorpus, raw);
   }
-  writeProviderRawAttempt({
+  const raw = writeProviderRawAttempt({
     root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",
     model: input.prepared.config.model, requestProfile: input.prepared.config.requestProfile,
     requestDigest: requestEnvelopeDigest(line.userPrompt), decodedText: extracted.rawJson,
     finishReason: extracted.responseMetadata?.finishReason ?? null,
     ...(extracted.usage === undefined ? {} : { usage: extracted.usage })
   });
-  return importInteractiveLine(input, line, sourceCorpus, extracted, attemptOrdinal);
+  return importInteractiveFromRaw(input, line, sourceCorpus, raw);
 }
 
 function isCompletedNonRetryableResponse(

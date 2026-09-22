@@ -466,9 +466,17 @@ it("does not let a cache hit bypass erasure in the worker snapshot", async () =>
 it("paginates current interpretations including a large source interpretation and exposes the semantic body needed by semantic correspondence", async () => {
   await withPublished(async ({ allIds, execute }) => {
     const querySemantics = queryOf(), seen = new Set<string>();
-    const limited = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: querySemantics, budget: BUDGET });
-    expect(limited.kind === "prepare_query" && limited.access?.unvisited_interpretations).toBe(true);
-    expect(limited.coverage.discovery).toBe("truncated");
+    const firstPage = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: querySemantics, budget: BUDGET });
+    if (firstPage.kind !== "prepare_query") throw new Error("expected query page");
+    expect(firstPage.access?.observed_interpretation_count).toBe(allIds.length);
+    expect(firstPage.access?.unvisited_interpretations).toBe(false);
+    expect(firstPage.access?.stopping_reasons).toEqual([]);
+    expect(firstPage.candidates.length).toBeGreaterThan(0);
+    expect(firstPage.candidates.length).toBeLessThan(allIds.length);
+    expect(firstPage.access?.trace.omitted_interpretation_count).toBe(allIds.length - firstPage.candidates.length);
+    expect(firstPage.continuation_handle).toBeDefined();
+    expect(firstPage.coverage.discovery).toBe("truncated");
+    expect(firstPage.work.logical_work).toBeLessThanOrEqual(BUDGET.work_units);
     const observationBudget = { ...BUDGET, work_units: 1_000_000 };
     let continuation: string | undefined;
     let count = 0;

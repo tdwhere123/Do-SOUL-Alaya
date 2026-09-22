@@ -7,6 +7,7 @@ import {
   readBoundedCanonicalUtf8Artifact
 } from "../cache-audit/bounded-artifact-reader.js";
 import { writeBytesExclusiveDurable } from "./manifest/durable-exclusive-publication.js";
+import { assertExtractionAttemptReservation, type ExtractionAttemptLedgerSnapshot } from "../authority/attempt-ledger.js";
 import { BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES, BENCH_TERMINAL_RETRY_CLASSIFICATIONS,
   type BenchTransportFailureAttempt, type BenchTerminalRetryClassification } from "../../compile-seed/compile-seed-types.js";
 
@@ -109,6 +110,25 @@ export function bindProviderRawAttempt(
     );
   }
   return raw;
+}
+
+export function assertProviderRawReservation(
+  raw: ProviderRawAttempt, ledger: ExtractionAttemptLedgerSnapshot | undefined
+): void {
+  assertExtractionAttemptReservation(ledger, raw.cache_key, raw.attempt_ordinal);
+  const failure = ledger?.transportFailures.find(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
+  const settled = ledger?.settledAttempts.some(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
+  // Source admission records a completed but rejected response with its raw digest.
+  // It is not a failed HTTP response and must remain replayable as quarantine.
+  const sourceRejection = raw.kind === "source_semantic" && raw.transport_failure === undefined &&
+    failure?.kind === "response_schema_error" && failure.phase === "response_schema" &&
+    failure.httpStatus === null && failure.fingerprint === raw.decoded_text_digest;
+  if (failure !== undefined && !sourceRejection && (raw.transport_failure === undefined ||
+      failure.kind !== raw.transport_failure.kind || failure.phase !== raw.transport_failure.phase ||
+      failure.httpStatus !== raw.transport_failure.httpStatus || failure.fingerprint !== raw.transport_failure.fingerprint) ||
+      settled && failure === undefined && raw.transport_failure !== undefined) {
+    throw new ProviderRawAttemptIdentityError("provider raw differs from its settled transport outcome");
+  }
 }
 
 export function readProviderRawAttempt(

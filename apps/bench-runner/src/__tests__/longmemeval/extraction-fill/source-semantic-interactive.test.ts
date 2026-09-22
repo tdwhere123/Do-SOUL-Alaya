@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
@@ -8,7 +8,7 @@ import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
-import { listProviderRawAttempts, providerRawAttemptPath } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { listProviderRawAttempts, providerRawAttemptPath, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import type { LongMemEvalExpansionCapability } from "../../../datasets/longmemeval/promotion/expansion/expansion-capability.js";
@@ -173,11 +173,17 @@ it("fills complete-source open semantics through interactive generateContent wit
 
 it("quarantines an interactive generateContent line through the same source-semantic receiver as Batch", async () => {
   const fixture = await setupInteractive("unknown_alias");
-  expect(await runCli([
+  const args = [
     "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
     "--extraction-cache-root", cacheRoot, "--extraction-open-semantics",
     "--extraction-source-packing", "complete-source", "--extraction-authority", fixture.receiptPath
-  ])).toBe(0);
+  ];
+  expect(await runCli(args)).toBe(0);
+  const calls = fixture.fetchMock.mock.calls.length;
+  const retained = fixture.keys.flatMap(key => listProviderRawAttempts(cacheRoot, key));
+  expect(await runCli(args)).toBe(0);
+  expect(fixture.fetchMock).toHaveBeenCalledTimes(calls);
+  expect(fixture.keys.flatMap(key => listProviderRawAttempts(cacheRoot, key))).toEqual(retained);
   for (const key of fixture.keys) {
     const inspected = inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE);
     expect(inspected.status).not.toBe("hit");
@@ -186,6 +192,39 @@ it("quarantines an interactive generateContent line through the same source-sema
     });
   }
   expect(existsSync(join(cacheRoot, "gemini-batch-plan.json"))).toBe(false);
+}, 60000);
+
+it.each(["transport", "admission"] as const)("rejects raw contradicting settled %s failure before source publication", async failure => {
+  const fixture = await setupInteractive("unknown_alias");
+  if (failure === "transport") fixture.fetchMock.mockImplementation(async () =>
+    Response.json({ error: { message: "fixture server failure" } }, { status: 500 }));
+  const args = [
+    "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
+    "--extraction-cache-root", cacheRoot, "--extraction-open-semantics", "--concurrency", "1",
+    "--extraction-source-packing", "complete-source", "--extraction-authority", fixture.receiptPath
+  ];
+  expect(await runCli(args)).toBe(0);
+  const raw = fixture.keys.flatMap(key => listProviderRawAttempts(cacheRoot, key))
+    .sort((left, right) => left.attempt_ordinal - right.attempt_ordinal)[0]!;
+  const ledgerPath = join(cacheRoot, readdirSync(cacheRoot).find(name => name.startsWith("extraction-attempt-ledger"))!);
+  const ledgerBefore = readFileSync(ledgerPath, "utf8");
+  expect(JSON.parse(ledgerBefore).transport_failures).toContainEqual(expect.objectContaining({
+    attempt_ordinal: raw.attempt_ordinal, kind: failure === "transport" ? "http_error" : "response_schema_error"
+  }));
+  const prompt = JSON.parse(String(fixture.fetchMock.mock.calls[0]![1]!.body)).contents[0].parts[0].text as string;
+  const rawPath = providerRawAttemptPath(cacheRoot, raw.cache_key, raw.attempt_ordinal);
+  unlinkSync(rawPath);
+  writeProviderRawAttempt({ root: cacheRoot, cacheKey: raw.cache_key, attemptOrdinal: raw.attempt_ordinal,
+    kind: "source_semantic", model: MODEL, requestProfile: REQUEST_PROFILE, requestDigest: raw.request_digest,
+    decodedText: authoredResponse(prompt), finishReason: "STOP" });
+  const replacement = readFileSync(rawPath, "utf8");
+  fixture.fetchMock.mockClear();
+  expect(await runCli(args)).toBe(2);
+  expect(fixture.fetchMock).not.toHaveBeenCalled();
+  expect(inspectCachedSourceSemantic(cacheRoot, raw.cache_key, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
+  expect(existsSync(cacheFilePath(cacheRoot, raw.cache_key))).toBe(false);
+  expect(readFileSync(ledgerPath, "utf8")).toBe(ledgerBefore);
+  expect(readFileSync(rawPath, "utf8")).toBe(replacement);
 }, 60000);
 
 it("retains raw and refuses an executable cache entry when generateContent omits finishReason", async () => {

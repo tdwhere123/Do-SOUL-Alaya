@@ -1169,3 +1169,10 @@ no raw is `unknown`, retained but unsettled output is `pending`, and neither is
 unattempted or a terminal failure. Completed incomplete output, rejected output,
 transport failure, abstention, and interpreted output remain distinct. Missing
 usage is accounting uncertainty and does not make completed output unknown.
+
+Source Interpretation interactive recovery and both proposal producers share the
+raw/reservation outcome check before publication. Retained output cannot
+contradict an already settled transport failure. Source admission rejection of
+a completed response is bound to that response's digest and remains replayable
+as quarantine; it does not imply a failed HTTP response. Live source output uses
+the same retained-raw path as recovery.

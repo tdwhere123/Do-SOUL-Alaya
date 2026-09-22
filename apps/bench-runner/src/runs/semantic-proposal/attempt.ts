@@ -1,4 +1,4 @@
-import { assertExtractionAttemptReservation, inspectExtractionAttemptLedger,
+import { inspectExtractionAttemptLedger,
   listExtractionAttemptLedgerRecords, openExtractionAttemptLedger,
   type ExtractionAttemptLedgerSnapshot } from "../extraction/authority/attempt-ledger.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
@@ -7,7 +7,7 @@ import { inspectSemanticProposalShard, hasAdmittedProposalOutcome, SemanticPropo
   type SemanticProposalLookup, type SemanticProposalShard } from "./artifact.js";
 import type { SemanticProposalAuthority } from "./authority.js";
 import type { SemanticProposalKind } from "./workset.js";
-import { readProviderRawAttempt, bindProviderRawAttempt, listProviderRawAttempts,
+import { readProviderRawAttempt, bindProviderRawAttempt, assertProviderRawReservation, listProviderRawAttempts,
   type ProviderRawAttempt } from "../extraction/fill/provider-raw-attempt.js";
 
 export function readSemanticProposalAttemptState(
@@ -53,15 +53,7 @@ export function assertProposalRawReservation(
   bindProviderRawAttempt(raw, { cacheKey, kind: expected.kind, model: expected.model,
     requestProfile: expected.request_profile, requestDigest: expected.request_digest ?? raw.request_digest,
     attemptLineageDigest: expected.attempt_lineage_digest });
-  assertExtractionAttemptReservation(ledger, cacheKey, raw.attempt_ordinal);
-  const failure = ledger?.transportFailures.find(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
-  const settled = ledger?.settledAttempts.some(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
-  if (failure !== undefined && (raw.transport_failure === undefined ||
-      failure.kind !== raw.transport_failure.kind || failure.phase !== raw.transport_failure.phase ||
-      failure.httpStatus !== raw.transport_failure.httpStatus || failure.fingerprint !== raw.transport_failure.fingerprint) ||
-      settled && failure === undefined && raw.transport_failure !== undefined) {
-    throw new SemanticProposalIdentityError("provider raw differs from its settled transport outcome");
-  }
+  assertProviderRawReservation(raw, ledger);
 }
 
 function assertProposalShardRaw(shard: SemanticProposalShard, raw: ProviderRawAttempt): void {
