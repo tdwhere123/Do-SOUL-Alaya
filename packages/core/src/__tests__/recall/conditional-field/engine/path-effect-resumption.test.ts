@@ -25,6 +25,55 @@ function setup(program: QueryProgram) {
 }
 
 describe("bounded path effect continuation", () => {
+  it("finishes sparse endpoint matching within a bounded cursor allowance", () => {
+    const { interpretation, state } = setup(relation("p")), programState = state.seen_identities.at(0)!.program_state;
+    const liveStates = Array.from({ length: 64 }, (_, i) => productKey(`node-${i}`, "h0", "unbound", programState));
+    const rows = Array.from({ length: 64 }, (_, i) => ({ ...row("p", "target", `edge-${i}`),
+      sourceObjectId: i === 63 ? "node-63" : `unmatched-${i}` }));
+    const cursor = createAdjacencyEffectCursor(rows, { interpretation, asOf: AS_OF, liveStates, overlay: {},
+      sourceFacts: new Map([["target", { object_id: "target", source_revision: "rev" }]]) });
+    const completed = cursor.advance(0, 500, 1_000_000);
+    expect(completed.status).toBe("complete");
+    expect(completed.work).toBeLessThanOrEqual(500);
+    expect(completed.effects.flatMap(effect => effect.transition === undefined ? [] : [
+      [effect.transition.instance_id, productSubjectId(effect.transition.from), productSubjectId(effect.transition.to)]
+    ])).toEqual([["edge-63", "node-63", "target"]]);
+  });
+
+  it("keeps row order and the eligible state suffix when several hypotheses share an exact endpoint", () => {
+    const { interpretation, state } = setup(relation("p")), initial = state.seen_identities.at(0)!;
+    const liveStates = [initial, { ...initial, hypothesis_id: "later-a" },
+      { ...initial, hypothesis_id: "b", target: { ...initial.target, object_id: "b" } },
+      { ...initial, hypothesis_id: "last-a" }];
+    const rows = [{ ...row("p", "d", "b-row"), sourceObjectId: "b" }, row("p", "c", "a-row")];
+    const effects = adjacencyEffectsForRows(rows, { interpretation, asOf: AS_OF, liveStates, liveStateOffset: 1,
+      sourceFacts: new Map(["c", "d"].map(object_id => [object_id, { object_id, source_revision: "rev" }])), overlay: {} });
+    expect(effects.flatMap(effect => effect.transition === undefined ? [] : [
+      [effect.transition.instance_id, effect.transition.from.hypothesis_id, productSubjectId(effect.transition.to)]
+    ])).toEqual([["b-row", "b", "d"], ["a-row", "later-a", "c"], ["a-row", "last-a", "c"]]);
+  });
+
+  it("retains a refused endpoint-index allocation and resumes it without re-reading the state", () => {
+    const { interpretation, state } = setup(relation("p"));
+    let visits = 0;
+    const liveStates = new Proxy([state.seen_identities.at(0)!], {
+      get(target, key, receiver) { if (key === "0") visits += 1; return Reflect.get(target, key, receiver); }
+    });
+    const cursor = createAdjacencyEffectCursor([row("p", "b", "edge")], { interpretation, asOf: AS_OF, liveStates, overlay: {},
+      sourceFacts: new Map([["b", { object_id: "b", source_revision: "rev" }]]) });
+    const admitted = cursor.advance(0, 2, 1_000_000);
+    expect(visits).toBe(0);
+    const refused = cursor.advance(0, 1, admitted.retained_bytes);
+    expect(refused.status).toBe("memory_exhausted");
+    expect(visits).toBe(1);
+    const waiting = cursor.advance(0, 1, admitted.retained_bytes);
+    expect(waiting.work).toBe(0);
+    expect(visits).toBe(1);
+    const complete = cursor.advance(0, 10000, 1_000_000);
+    expect(complete.status).toBe("complete");
+    expect(complete.effects.flatMap(effect => effect.transition === undefined ? [] : [productSubjectId(effect.transition.to)])).toEqual(["b"]);
+  });
+
   it.each(["seed", "facet"])("re-fires an already observed row after a later %s changes its semantic input", (delta) => {
     const { interpretation, state } = setup(relation("p"));
     let nativeRows = 0;

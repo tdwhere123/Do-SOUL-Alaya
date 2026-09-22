@@ -94,16 +94,27 @@ describe("execution-owned binding recovery", () => {
         validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00Z" }
       };
     });
-    const owner = new BindingContextStore(53_000);
-    const cursor = createAdjacencyEffectCursor(rows, { interpretation, asOf: "2026-09-10T00:00:00Z",
-      liveStates: seedProgramStates(query.program).map((state) => productKey("a", "h0", "x=a", state)),
-      sourceFacts: new Map(["a", ...rows.map((row) => row.targetObjectId)].map((object_id) => [object_id, { object_id, source_revision: "rev" }])),
-      overlay: { p: { applicable: true, milligrades: 1000 } }, bindingContexts: owner }, 53_000)!;
-    const failed = cursor.advance(0, 100_000, 53_000);
+    const attempt = (memory: number) => {
+      const cursor = createAdjacencyEffectCursor(rows, { interpretation, asOf: "2026-09-10T00:00:00Z",
+        liveStates: seedProgramStates(query.program).map((state) => productKey("a", "h0", "x=a", state)),
+        sourceFacts: new Map(["a", ...rows.map((row) => row.targetObjectId)].map((object_id) => [object_id, { object_id, source_revision: "rev" }])),
+        overlay: { p: { applicable: true, milligrades: 1000 } }, bindingContexts: new BindingContextStore(memory) }, memory)!;
+      const failed = cursor.advance(0, 100_000, memory);
+      const restarted = cursor.advance(0, 0, memory), cached = cursor.advance(0, 15, memory);
+      return { cursor, failed, restarted, cached };
+    };
+    // Find the binding-allocation boundary; preceding cursor scratch can change
+    // without changing the retained-prefix recovery obligation.
+    let selected: ReturnType<typeof attempt> | undefined;
+    for (let memory = 51_000; memory <= 55_000; memory += 64) {
+      const candidate = attempt(memory);
+      if (candidate.failed.status === "memory_exhausted" && candidate.failed.effects.length === 0
+        && candidate.cached.effects.length === 15) { selected = candidate; break; }
+    }
+    if (selected === undefined) throw new Error("expected native binding failure after fifteen cached effects");
+    const { cursor, failed, restarted, cached } = selected;
     expect(failed.status).toBe("memory_exhausted");
     expect(failed.effects).toEqual([]);
-    const restarted = cursor.advance(0, 0, 53_000);
-    const cached = cursor.advance(0, 15, 53_000);
     expect(cached.effects).toHaveLength(15);
     const payloadBytes = cached.effects.reduce((sum, effect) => sum + 512
       + Buffer.byteLength(JSON.stringify({ transition: effect.transition, derivation: effect.derivation, facet: effect.facet }), "utf8"), 0);

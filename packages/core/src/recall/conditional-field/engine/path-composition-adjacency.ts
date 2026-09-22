@@ -132,11 +132,18 @@ export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input:
 function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput): PathComputation<void> {
   const runtime = runtimeProgram(input.interpretation.program);
   if (runtime === "empty" || runtime === "epsilon") return;
-  yield { kind: "work", retained_bytes: 1024 + Buffer.byteLength(JSON.stringify(runtime), "utf8") * 8 };
+  yield { kind: "work", retained_bytes: 1152 + Buffer.byteLength(JSON.stringify(runtime), "utf8") * 8 };
   const automaton = compileProgramAutomaton(runtime);
+  const statesByEndpoint = new Map<string, ProductStateKey[]>();
   for (let index = input.liveStateOffset ?? 0; index < input.liveStates.length; index += 1) {
     yield { kind: "work", retained_bytes: 64 };
     const from = input.liveStates.at(index)!;
+    const endpoint = productEndpointId(from), bucket = statesByEndpoint.get(endpoint);
+    // The cursor admits index storage before retaining references. Buckets keep
+    // the immutable input order, including all hypotheses sharing an endpoint.
+    yield { kind: "work", retained_bytes: bucket === undefined ? 128 + 2 * endpoint.length : 16 };
+    if (bucket === undefined) statesByEndpoint.set(endpoint, [from]);
+    else bucket.push(from);
     for (const advance of automaton.hyperedgeAdvances) {
       if (advance.from !== from.program_state) continue;
       for (const step of hyperedgeEffectSteps(rows, advance.hyperedge, {
@@ -153,10 +160,9 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
   for (const row of rows) {
     if (row.validity === undefined) continue;
     if (inactiveResolution(row.resolutionKind)) continue;
-    for (let index = input.liveStateOffset ?? 0; index < input.liveStates.length; index += 1) {
+    yield { kind: "work" };
+    for (const from of statesByEndpoint.get(row.sourceObjectId) ?? []) {
       yield { kind: "work" };
-      const from = input.liveStates.at(index)!;
-      if (productEndpointId(from) !== row.sourceObjectId) continue;
       yield* effectsForLiveRow(automaton, row, from, {
         query_id: input.interpretation.query_id,
         overlay: input.overlay,
