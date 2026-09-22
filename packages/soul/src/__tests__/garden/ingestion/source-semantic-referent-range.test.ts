@@ -7,13 +7,10 @@ function source(sourceCorpus: string, assertionIds: number[]) {
   const input = { sourceCorpus, assertionIds, source_id: "referent-ranges", source_version: "1",
     producer_id: "authored", producer_version: "1" };
   const request = buildSourceSemanticRequest(input);
-  const segment = (text: string, assertion = 1) => request.source_catalog.assertions
-    .find(row => row.assertion_id === assertion)!.segments.find(row => row.text === text)!.id;
-  const range = (first: string, last: string, assertion = 1) => ({
-    first: segment(first, assertion), last: segment(last, assertion)
-  });
+  const segment = (text: string, assertion_id = 1) => ({ assertion_id, text });
+  const range = (first: string, last: string, assertion_id = 1) => ({ assertion_id, text: `${first} ${last}` });
   const receive = (content: object) => {
-    const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v5", outcome: { status: "interpreted" }, content });
+    const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v6", outcome: { status: "interpreted" }, content });
     const result = receiveSourceSemantics(rawJson, request, input);
     expect(result.rawJson).toBe(rawJson);
     return result;
@@ -73,9 +70,9 @@ describe("source referent ranges through native receive", () => {
   });
 
   it.each([
-    { first: "a1s2", last: "a1s0" },
-    { first: "a1s0", last: "a2s0" },
-    { first: "a1s0", last: "a1s999" }
+    { assertion_id: 1, text: "Chen Amir" },
+    { assertion_id: 2, text: "Amir" },
+    { assertion_id: 1, text: "Am" }
   ])("rejects an invalid reporter range without repairing retained raw: %j", reporter => {
     const fixture = source("Amir Chen reported that Jo left.", [1]);
     const received = fixture.receive({ roots: [{ act: "assertion", expression: {

@@ -32,12 +32,12 @@ function question(id: string, themes: string[]) {
 
 function response(userPrompt: string) {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
-  const segments = request.source_catalog.assertions[0]!.segments;
-  const theme = segments.find(row => row.text === "alpha" || row.text === "beta")!;
-  return JSON.stringify({ contract: "source-semantic-proposal-v5", outcome: { status: "interpreted" }, content: {
+  const assertion = request.source_request.source_assertions[0]!;
+  const theme = assertion.text.includes("alpha") ? "alpha" : "beta";
+  return JSON.stringify({ contract: "source-semantic-proposal-v6", outcome: { status: "interpreted" }, content: {
     roots: [{ act: "assertion", expression: { kind: "statement",
-      predicate: { kind: "explicit", reading: "complete", support: segments.find(row => row.text === "completed")!.id },
-      arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [theme.id] } }] } }]
+      predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
+      arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [{ assertion_id: assertion.assertion_id, text: theme }] } }] } }]
   } });
 }
 

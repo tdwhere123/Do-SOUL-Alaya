@@ -6,22 +6,24 @@ import {
 import {
   SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT, materializeSourceSemanticCompactProposal
 } from "./source-semantic-compact-proposal.js";
-import { SourceSemanticOutcomeSchema, type SourceSemanticResponseEnvelope } from "./source-semantic-interpretation.js";
+import { SourceSemanticOutcomeSchema, SourceSemanticNoPropositionOutcomeSchema, type SourceSemanticResponseEnvelope } from "./source-semantic-interpretation.js";
+import { locateSourceTextSelection, SourceAssertionIdSchema, SourceOccurrenceSchema } from "../evidence/source-selection.js";
+import { sourceReferenceResolver, sourceReferencePreparationCost, type SourceReferenceCatalog } from "../evidence/source-reference.js";
+import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "./source-semantic-resources.js";
 
-export const SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT = "source-semantic-proposal-v5" as const;
-export const SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT = "host-owned-selection-schema-v1" as const;
+export const SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT = "source-semantic-proposal-v6" as const;
+export const SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT = "host-owned-selection-schema-v2" as const;
 export const SOURCE_SEMANTIC_SELECTION_GENERATION_DEPTH = SOURCE_SEMANTIC_MAX_DEPTH;
 export const SOURCE_SEMANTIC_SELECTION_FEATURES = ["nested_expression", "quantified", "measurement"] as const;
 /** Canonical coalesced spans retained after meaning-preserving merge; not a silent clip. */
 export const SOURCE_SEMANTIC_SELECTION_SUPPORT_BOUND = 8 as const;
-/** Producer list bound before coalescing contiguous scalars into spans. */
+/** Producer list bound before coalescing adjacent support into spans. */
 export const SOURCE_SEMANTIC_SELECTION_SUPPORT_LIST_BOUND = 64 as const;
 
 const Key = z.string().min(1).max(64);
-const SegmentId = z.string().regex(/^a[1-9][0-9]*s[0-9]+$/u).max(48);
-const RangeAnchor = z.object({ first: SegmentId, last: SegmentId }).strict().readonly();
-const SupportAtom = z.union([SegmentId, RangeAnchor]);
+const SupportAtom = z.object({ assertion_id: SourceAssertionIdSchema,
+  text: z.string().min(1).max(65536), occurrence: SourceOccurrenceSchema.optional() }).strict().readonly();
 const SupportList = z.array(SupportAtom).min(1).max(SOURCE_SEMANTIC_SELECTION_SUPPORT_LIST_BOUND).readonly();
 const Support = z.union([SupportAtom, SupportList]);
 const ReferentKind = z.enum(["grouped", "unresolved", "unexpressed", "ambiguous"]);
@@ -43,7 +45,7 @@ type SurfaceAtom = string | { readonly first: string; readonly last: string };
 type Derived = Readonly<{ assertion_id: number; first: string; last: string; firstOrd: number; lastOrd: number }>;
 
 function targetShape(expression?: z.ZodType<ExpressionValue>): z.ZodType<TargetValue> {
-  const leaves = [SegmentId, RangeAnchor, Entity, Occurrence, ContentReference,
+  const leaves = [SupportAtom, Entity, Occurrence, ContentReference,
     z.object({ kind: z.literal("bound_variable"), quantifier: Key }).strict().readonly(),
     z.object({ kind: z.literal("unresolved") }).strict().readonly()] as const;
   return expression === undefined ? z.union(leaves) : z.union([...leaves, expression]);
@@ -56,7 +58,7 @@ function expressionShape(target: z.ZodType<TargetValue>, operand: z.ZodType<Oper
     }).strict().readonly(),
     z.object({ kind: z.literal("not"), ...OperatorFields, content: operand }).strict().readonly(),
     z.object({ kind: z.literal("possible"), ...OperatorFields, content: operand }).strict().readonly(),
-    z.object({ kind: z.literal("reported"), ...OperatorFields, content: operand, reporter: z.union([SegmentId, RangeAnchor, Entity]).optional() }).strict().readonly(),
+    z.object({ kind: z.literal("reported"), ...OperatorFields, content: operand, reporter: z.union([SupportAtom, Entity]).optional() }).strict().readonly(),
     z.object({ kind: z.literal("conditional"), ...OperatorFields, antecedent: operand, consequent: operand }).strict().readonly(),
     z.object({ kind: z.literal("opaque"), ...OperatorFields, operands: z.array(operand).min(1).max(8).readonly() }).strict().readonly(),
     z.object({ kind: z.literal("forall"), key: Key, domain: Key, restriction: operand.nullable(), content: operand,
@@ -68,14 +70,14 @@ const Target: z.ZodType<TargetValue> = z.lazy(() => targetShape(Expression));
 const Operand: z.ZodType<OperandValue> = z.lazy(() => z.union([ContentReference, Expression]));
 const Domain = z.object({
   key: Key, context: Key.nullable(), support: Support,
-  members: z.array(z.object({ referent: z.union([SegmentId, RangeAnchor, Entity]), evidence: Key, restrictions: z.array(
+  members: z.array(z.object({ referent: z.union([SupportAtom, Entity]), evidence: Key, restrictions: z.array(
     z.object({ restriction: Key, evidence: Key }).strict().readonly()).max(16).readonly() }).strict().readonly()).max(64).readonly(),
-  exclusions: z.array(z.object({ referent: z.union([SegmentId, RangeAnchor, Entity]), evidence: Key }).strict().readonly()).max(64).readonly(),
+  exclusions: z.array(z.object({ referent: z.union([SupportAtom, Entity]), evidence: Key }).strict().readonly()).max(64).readonly(),
   closure: z.discriminatedUnion("kind", [z.object({ kind: z.literal("open") }).strict().readonly(),
     z.object({ kind: z.literal("closed"), evidence: Key }).strict().readonly()])
 }).strict().readonly();
 const Measurement = z.object({
-  key: Key, subject: z.union([SegmentId, RangeAnchor, Entity]), owner: Key, population: Key,
+  key: Key, subject: z.union([SupportAtom, Entity]), owner: Key, population: Key,
   metric: SourceSemanticReadingSchema, unit: SourceSemanticReadingSchema, context: SourceSemanticReadingSchema,
   value: SourceSemanticDecimalSchema, support: Support
 }).strict().readonly();
@@ -91,7 +93,9 @@ function contentShape(expression: z.ZodType<ExpressionValue>) {
 }
 const Content = contentShape(Expression);
 const Outcome = z.discriminatedUnion("status", [z.object({ status: z.literal("interpreted") }).strict().readonly(),
-  ...SourceSemanticOutcomeSchema.options.filter(option => option.unwrap().shape.status.value !== "interpreted")]);
+  SourceSemanticNoPropositionOutcomeSchema.unwrap().extend({
+    context_support: z.array(SupportAtom).min(1).max(8).readonly() }).strict().readonly(),
+  ...SourceSemanticOutcomeSchema.options.filter(option => !["interpreted", "no_executable_proposition"].includes(option.unwrap().shape.status.value))]);
 const SelectionProposal = z.object({
   contract: z.literal(SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT),
   outcome: Outcome, content: Content.optional()
@@ -101,11 +105,10 @@ type ContentValue = z.infer<typeof Content>;
 /** Recursive decoder guidance. Unfolded compact-v4 remains too large for structured decode; this schema is the complete local contract. */
 export const SourceSemanticSelectionGenerationSchema = SelectionProposal;
 
+/** Syntax validation does not bind selections; materialization requires the trusted request catalog. */
 export const SourceSemanticSelectionProposalSchema = z.preprocess((value, context) => {
-  const meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 });
   try {
-    materializeSourceSemanticSelectionProposal(value, meter);
-    meter.retain(value, "selection schema output validation");
+    preflight(value, new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 }));
     return value;
   } catch (error) {
     if (!(error instanceof z.ZodError)) throw error;
@@ -115,15 +118,21 @@ export const SourceSemanticSelectionProposalSchema = z.preprocess((value, contex
 }, SelectionProposal);
 
 export function materializeSourceSemanticSelectionProposal(value: unknown,
+  binding: Readonly<{ catalog: SourceReferenceCatalog; sha256: FieldContractSha256 }>,
   meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 })): SourceSemanticResponseEnvelope {
   preflight(value, meter);
   const proposal = SelectionProposal.parse(value);
   if ((proposal.outcome.status === "interpreted") !== (proposal.content !== undefined)) {
     invalid(["content"], "outcome_content_mismatch", "", "Interpreted outcome requires content; other outcomes must not carry content.");
   }
+  const lowerer = proposal.content !== undefined || proposal.outcome.status === "no_executable_proposition"
+    ? new SelectionLowerer(binding, meter) : undefined;
+  const outcome = proposal.outcome.status === "no_executable_proposition"
+    ? { ...proposal.outcome, context_support: proposal.outcome.context_support.map((row, index) =>
+      lowerer!.dispositionSupport(row, ["outcome", "context_support", index])) } : proposal.outcome;
   const compact = {
-    contract: SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT, outcome: proposal.outcome,
-    ...(proposal.content === undefined ? {} : { content: new SelectionLowerer(meter).lower(proposal.content) })
+    contract: SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT, outcome,
+    ...(proposal.content === undefined ? {} : { content: lowerer!.lower(proposal.content) })
   };
   meter.retain(compact, "selection compact lowering");
   return materializeSourceSemanticCompactProposal(compact, meter);
@@ -152,7 +161,24 @@ function preflight(value: unknown, meter: SourceSemanticResourceLedger): void {
 }
 
 class SelectionLowerer {
-  constructor(private readonly meter: SourceSemanticResourceLedger) {}
+  private readonly resolver: ReturnType<typeof sourceReferenceResolver>;
+  private readonly assertions: Map<number, string>;
+  private readonly ordinals = new Map<string, number>();
+  constructor(binding: Readonly<{ catalog: SourceReferenceCatalog; sha256: FieldContractSha256 }>,
+    private readonly meter: SourceSemanticResourceLedger) {
+    const assertions = binding.catalog.assertions.map(row => ({ assertion_id: row.assertion_id,
+      text: row.segments.map(segment => segment.text).join("") }));
+    const cost = sourceReferencePreparationCost(assertions);
+    meter.charge(cost.work_units, cost.memory_bytes, "selection source reference preparation");
+    this.resolver = sourceReferenceResolver(binding.catalog, binding.sha256);
+    this.assertions = new Map(assertions.map(row => [row.assertion_id, row.text]));
+    for (const row of binding.catalog.assertions) row.segments.forEach((segment, index) => this.ordinals.set(segment.id, index));
+  }
+
+  dispositionSupport(value: unknown, path: Path) {
+    const { assertion_id, first, last } = this.derive(value, path);
+    return { kind: "source_reference" as const, assertion_id, source_ref: { first, last } };
+  }
 
   lower(content: ContentValue) {
     return {
@@ -217,7 +243,7 @@ class SelectionLowerer {
   }
 
   private target(value: unknown, path: Path): unknown {
-    if (isAnchor(value)) return value;
+    if (isSelection(value)) return this.referent(value, path);
     const record = asRecord(value, path);
     if (record.kind === "occurrence") return { kind: "reference", key: record.key };
     if (record.kind === "unresolved" || record.kind === "content_reference" || record.kind === "bound_variable") return record;
@@ -228,8 +254,7 @@ class SelectionLowerer {
   }
 
   private referent(value: unknown, path: Path): unknown {
-    if (typeof value === "string") return value;
-    if (isAnchor(value)) return { kind: "entity", mentions: this.support(value, path, 64) };
+    if (isSelection(value)) return { kind: "entity", mentions: this.support(value, path, 64) };
     const record = asRecord(value, path);
     if (record.kind !== "entity" && record.kind !== undefined) {
       invalid(path, "invalid_semantic_value", String(record.kind), "Expected an entity or source selection.");
@@ -277,29 +302,21 @@ class SelectionLowerer {
   }
 
   private derive(value: unknown, path: Path): Derived {
-    if (typeof value === "string") {
-      const parsed = parseSegment(value);
-      if (parsed === undefined) invalid(path, "invalid_source_anchor", value, "Selection support must be a catalog segment id.");
-      return { assertion_id: parsed.assertion, first: value, last: value, firstOrd: parsed.ordinal, lastOrd: parsed.ordinal };
-    }
-    const record = asRecord(value, path);
-    if (typeof record.first !== "string" || typeof record.last !== "string" || record.assertion_id !== undefined) {
-      invalid(path, "invalid_source_anchor", "", "Selection support must be a catalog segment or a span.");
-    }
-    const first = parseSegment(record.first), last = parseSegment(record.last);
-    if (first === undefined || last === undefined || first.assertion !== last.assertion || first.ordinal > last.ordinal) {
-      invalid(path, "invalid_source_anchor", record.first, "Selection spans must stay inside one assertion in order.");
-    }
-    return { assertion_id: first.assertion, first: record.first, last: record.last, firstOrd: first.ordinal, lastOrd: last.ordinal };
+    const selection = SupportAtom.parse(value);
+    const text = this.assertions.get(selection.assertion_id);
+    if (text === undefined) invalid(path, "unknown_source_assertion", String(selection.assertion_id), "Selection requires a supplied assertion.");
+    this.meter.charge(text.length + selection.text.length, 128, "exact source selection");
+    const located = locateSourceTextSelection(text, selection);
+    if ("reason" in located) invalid(path, `source_selection_${located.reason}`, selection.text, "Exact source selection must identify one occurrence within its assertion.");
+    let reference;
+    try { reference = this.resolver.referenceForSpan(selection.assertion_id, located.span); }
+    catch { invalid(path, "unsupported_source_boundary", selection.text, "Selection must preserve the source catalog's ASCII word and Unicode scalar boundaries."); }
+    return { assertion_id: selection.assertion_id, ...reference,
+      firstOrd: this.ordinals.get(reference.first)!, lastOrd: this.ordinals.get(reference.last)! };
   }
 }
 
 const EXPRESSION_KINDS = new Set(["statement", "not", "possible", "reported", "conditional", "forall", "opaque"]);
-
-function parseSegment(value: string): { assertion: number; ordinal: number } | undefined {
-  const match = /^a([1-9][0-9]*)s([0-9]+)$/u.exec(value);
-  return match === null ? undefined : { assertion: Number(match[1]), ordinal: Number(match[2]) };
-}
 
 function coalesce(atoms: readonly Derived[]): Derived[] {
   const unique: Derived[] = [];
@@ -328,12 +345,9 @@ function surface(value: Derived): SurfaceAtom {
   return value.first === value.last ? value.first : { first: value.first, last: value.last };
 }
 
-function isAnchor(value: unknown): boolean {
-  if (typeof value === "string") return true;
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return typeof record.first === "string" && typeof record.last === "string" && record.kind === undefined && record.key === undefined
-    && record.assertion_id === undefined;
+function isSelection(value: unknown): boolean {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && "assertion_id" in value && "text" in value;
 }
 
 function asRecord(value: unknown, path: Path): Record<string, unknown> {

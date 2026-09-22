@@ -754,12 +754,12 @@ or equal names. Incomplete execution phases remain resource-exhausted/partial.
 Archive-only source-evidence protocol 1/library v1 retains its recorded identities,
 page and order through the offline admission owner.
 
-New source-interpretation extraction uses the producer-only `source-semantic-proposal-v5` contract
-with `host-owned-selection-schema-v1` at canonical domination depth 16. Optional
+New source-interpretation extraction uses the producer-only `source-semantic-proposal-v6` contract
+with `host-owned-selection-schema-v2` at canonical domination depth 16. Optional
 quantified and measurement fields remain in that recorded projection; omit empty
 tables when the source does not support them. The producer owns predicate/role
 readings, co-reference, semantic scope, speech acts, domain membership/closure
-and measurement context. Compact catalog anchors and inline mentions are enough
+and measurement context. Exact text selections and inline mentions are enough
 for an unreused local referent. A compact source-proposal alias is required only for
 co-reference, an occurrence reference, same-parent reuse, or a quantifier
 binding. Source-label equality is not identity. Nested expressions remain the
@@ -784,8 +784,14 @@ archives retain native request/response replay with their original prompt. Their
 normalizer-v3 manifests remain ineligible for current cache reuse; replay does
 not upgrade or publish an old interpretation.
 
-Current selection requests bind `host-owned-selection-schema-v1`. Their source
-support uses catalog selections with host expansion into the existing compiler.
+Current selection requests bind `host-owned-selection-schema-v2`. Every selection
+names an assertion ID and exact text; repeated text requires an explicit zero-based
+occurrence. The shared text locator and catalog boundary resolver reject absent,
+ambiguous, out-of-range and word-internal selections. Discontinuous lists retain
+their existing bounds. The request carries the original source digest and units;
+the catalog remains host-owned and is reconstructed by the existing owner. The
+selection compiler lowers into the unchanged compact/expression compiler. There
+is no v5 compatibility or fallback selection syntax.
 Recorded compact expression v4 requests bind `host-owned-expression-schema-v1`. Protocol
 derives each generation schema from its corresponding shapes, with shared acyclic
 definitions spanning the canonical domination-depth limit. Recorded v3 requests
@@ -794,18 +800,23 @@ schema for structured generation; reference validation and semantic admission
 still run locally after host expansion into the unchanged compiler. Decoder
 acceptance does not prove semantic fidelity or source coverage.
 Recorded requests without this marker keep their original recursive schema.
-Gemini decoding guidance has its own provider projection. Current recursive
-source proposal v5 and query response v5 schemas derive an acyclic structural
-constraint from that same authority, widening the first recursive back edge to
-its JSON types. Deeper expressions remain permitted; their fields and semantic
-refinements still require the complete schema instruction and local admission.
-The projection enforces conservative byte and expanded-node bounds and falls
-back to JSON mode when it cannot safely fit. Historical recursive contracts keep
-their JSON-mode path; existing acyclic keys and wire bytes remain unchanged.
-New structural cache material binds the complete schema, actual decoder schema
-and exact guidance together. A recorded request remains bound to its original
+Gemini decoding guidance has its own provider projection. Recursive schemas use
+JSON mode with complete schema guidance and strict local admission; no partial
+recursive grammar is transmitted. Safe acyclic schemas retain structured decoding
+and conservative byte/expanded-node bounds. Cache material binds the complete
+schema and actual instruction-only encoding. A recorded request remains bound to its original
 candidate and wire identity. Provider acceptance and syntactic constraints do
 not certify language fidelity, coverage or operation execution.
+
+Query producer meaning v4 (request/response v6) resolves role references to a
+unique declared entity, proposition or context without adding embedding or
+changing a root's truth obligation. Proposition/context role references require
+an explicit original-query excerpt. Reporter positions remain entity-only.
+`required_evidence_act: {act, excerpt}` constrains the speech act of sought
+evidence, not the current question's mood; its exact excerpt must occur in the
+original query. It maps to the unchanged canonical `source_act`. No word-based
+classifier adds or removes this constraint. Structural checks do not prove that
+the producer chose faithful meaning, complete attachments or requested operations.
 
 SOUL can prepare an explicit `source-semantic-revision-v1` input from retained
 JSON. The additive `source-semantic-revision-v2` records caller-observed complete

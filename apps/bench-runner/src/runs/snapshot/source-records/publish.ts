@@ -4,6 +4,7 @@ import {
   createSourceSemanticInterpretationPublication, deriveAddressableSpanViews, EvidenceService,
   fieldContractSha256, type FieldFormationStores
 } from "@do-soul/alaya-core";
+import { sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { IsoDatetimeStringSchema, SOURCE_SEMANTIC_PACKET_CONTRACT } from "@do-soul/alaya-protocol";
 import {
   closeCachedDatabase, initDatabase, sourceRecordFromRow, SqliteEvidenceCapsuleRepo, SqliteEventLogRepo,
@@ -234,7 +235,7 @@ async function publishOneSource(
   try {
     const published = await publishAdmittedSourceSemanticInterpretation({
       publication, workspaceId, runId, artifactKey: source.source_id, source: source.content_bytes,
-      catalog: request.source_catalog, producer_id: request.source_request.producer_capability.producer_id,
+      catalog: sourceSemanticRequestCatalog(request), producer_id: request.source_request.producer_capability.producer_id,
       producer_version: request.source_request.producer_capability.producer_version,
       contract_version: SOURCE_SEMANTIC_PACKET_CONTRACT,
       ...(interpretation === undefined ? { draft } : { interpretation }),
@@ -293,7 +294,7 @@ function indexRetainedSemantics(
         for (const binding of matched) {
           const source = sources.get(binding.source_id)!;
           const valid = native.status === "hit" &&
-            native.admitted.request.source_catalog.source_digest === source.corpus_digest &&
+            sourceSemanticRequestCatalog(native.admitted.request).source_digest === source.corpus_digest &&
             native.requestDigest === binding.request_digest;
           const existing = joined.get(source.source_id);
           if (existing !== undefined && (existing.status !== "hit" || existing.key !== key)) {

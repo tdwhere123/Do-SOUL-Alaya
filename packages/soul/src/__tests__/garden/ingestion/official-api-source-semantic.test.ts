@@ -8,7 +8,7 @@ import {
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
   SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, semanticSha256,
-  sourceSemanticResponseJsonSchema, parseSourceSemanticRequest, sourceSemanticSystemPrompt
+  sourceSemanticResponseJsonSchema, sourceSemanticRequestCatalog, parseSourceSemanticRequest, sourceSemanticSystemPrompt
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import {
   MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeCorrespondenceSemantics, proposeQuerySemantics,
@@ -26,7 +26,7 @@ const TEXT = "The archivist accessioned folio F into bay B.";
 // Archived graph proposals remain replayable; current content compilation has its own suite.
 function buildSourceSemanticRequest(input: Parameters<typeof buildCurrentSourceSemanticRequest>[0]) {
   const current = buildCurrentSourceSemanticRequest(input);
-  return parseSourceSemanticRequest({ ...current, source_request: {
+  return parseSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
     ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v1"
   } });
 }
@@ -47,7 +47,7 @@ function sourceInput(text = TEXT) {
 }
 
 function segment(request: ReturnType<typeof buildSourceSemanticRequest>, text: string, nth = 0) {
-  const hits = request.source_catalog.assertions[0]!.segments.filter((row) => row.text === text);
+  const hits = sourceSemanticRequestCatalog(request).assertions[0]!.segments.filter((row) => row.text === text);
   return hits[nth]!;
 }
 
@@ -172,7 +172,7 @@ describe("historical graph proposals and source-independent query producers", ()
     expect(request.source_request.normalizer_version).toBe("source-semantic-normalizer-v5");
     expect(request.source_request.producer_capability.proposes).toBe("draft_semantics");
     expect(request.source_request.resource_limits.output_byte_limit).toBe(1024 * 1024);
-    expect(request.source_catalog.assertions.length).toBe(1);
+    expect(sourceSemanticRequestCatalog(request).assertions.length).toBe(1);
     expect(JSON.stringify(request)).not.toMatch(/profile_id/u);
     expect(() => parseOfficialApiSourcePacketRequest(request)).toThrow();
     expect(SOURCE_SEMANTIC_SYSTEM_PROMPT).toMatch(/Do not emit host hashes/u);
@@ -192,9 +192,9 @@ describe("historical graph proposals and source-independent query producers", ()
       kind: "explicit", reading: "accession", mentions: ["mAccessioned"]
     });
     expect(received.interpretation?.frames[0]?.slots.map((row) => row.role_reading)).toEqual(["agent", "folio", "bay"]);
-    const references = sourceReferenceResolver(request.source_catalog, semanticSha256);
+    const references = sourceReferenceResolver(sourceSemanticRequestCatalog(request), semanticSha256);
     const mention = received.interpretation!.mentions.find((row) => row.id === "mAccessioned")!;
-    expect(references.resolve(request.source_catalog.catalog_id, mention.assertion_id, mention.source_ref).text)
+    expect(references.resolve(sourceSemanticRequestCatalog(request).catalog_id, mention.assertion_id, mention.source_ref).text)
       .toBe("accessioned");
     expect(received.raw_response_id).toMatch(/^sha256:/u);
     const withProfileInput = { ...input, profile: PROFILE };
@@ -355,9 +355,9 @@ describe("query and semantic_correspondence proposal entry points", () => {
       expect(preparedCorrespondence.system_prompt).toContain("request-local handle source1, source2");
       for (const valid of [false, true]) {
         const querySemantics = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
-          contract: "source-semantic-query-response-v5", outcome: { status: "interpreted", gaps: [] },
+          contract: "source-semantic-query-response-v6", outcome: { status: "interpreted", gaps: [] },
           query: {
-            contract: "source-semantic-query-meaning-v3",
+            contract: "source-semantic-query-meaning-v4",
             alternatives: [{ conditions: [{
               kind: "statement", key: "accession", predicate: "accession",
               arguments: [
@@ -389,8 +389,8 @@ describe("query and semantic_correspondence proposal entry points", () => {
       support: [{ kind: "query_text", excerpt: "bay B" }] }];
     const received = proposeQuerySemantics({ original_query: "which folio was accessioned into bay B?",
       producer_id: "query-producer", producer_version: "1" }, { rawJson: JSON.stringify({
-      contract: "source-semantic-query-response-v5", outcome: { status: "interpreted", gaps },
-      query: { contract: "source-semantic-query-meaning-v3", alternatives: [{ conditions: [{
+      contract: "source-semantic-query-response-v6", outcome: { status: "interpreted", gaps },
+      query: { contract: "source-semantic-query-meaning-v4", alternatives: [{ conditions: [{
         kind: "statement", key: "accession", predicate: "accession", arguments: [
           { role: "object", target: { kind: "free", key: "folio" }, excerpt: "folio" },
           { role: "bay", target: { kind: "named", key: "bay", excerpt: "bay B" }, excerpt: "bay B" }
@@ -426,10 +426,10 @@ describe("query and semantic_correspondence proposal entry points", () => {
       producer_id: "query-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-query-response-v5",
+        contract: "source-semantic-query-response-v6",
         outcome: { status: "interpreted", gaps: [] },
         query: {
-          contract: "source-semantic-query-meaning-v3",
+          contract: "source-semantic-query-meaning-v4",
           alternatives: [{ conditions: [{
             kind: "statement", key: "accession", predicate: "accession",
             arguments: [
@@ -498,7 +498,7 @@ describe("query and semantic_correspondence proposal entry points", () => {
 
 it("retains a located no-proposition disposition without confusing it with abstention", () => {
   const input = sourceInput("Thank you very much for the detailed response and helpful explanation."), request = buildSourceSemanticRequest(input);
-  const row = request.source_catalog.assertions[0]!;
+  const row = sourceSemanticRequestCatalog(request).assertions[0]!;
   const disposition = { status: "no_executable_proposition", description: "Acknowledgement without an executable proposition",
     context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
       source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }] };

@@ -21,7 +21,7 @@ import {
   SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   buildSourceSemanticCorrespondenceRequest, buildSourceSemanticQueryRequest, buildSourceSemanticRequest,
-  parseSourceSemanticRequest, semanticSha256, rejectForbiddenProposalInput,
+  parseSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, rejectForbiddenProposalInput,
   type SourceSemanticCorrespondenceProposalInput, type SourceSemanticCorrespondenceRequest,
   type SourceInterpretationDescriptor, type SourceSemanticProposalInput, type SourceSemanticQueryProposalInput,
   type SourceSemanticQueryRequest, type SourceSemanticRequest
@@ -120,7 +120,7 @@ export function receiveSourceSemantics(
   try {
     envelope = request.source_request.proposal_contract === undefined
       ? SourceSemanticResponseEnvelopeSchema.safeParse(parsed.value)
-      : selection ? { success: true, data: materializeSourceSemanticSelectionProposal(parsed.value, meter) }
+      : selection ? { success: true, data: materializeSourceSemanticSelectionProposal(parsed.value, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 }, meter) }
       : compact ? { success: true, data: materializeSourceSemanticCompactProposal(parsed.value, meter) }
       : expression ? { success: true, data: materializeSourceSemanticExpressionProposal(parsed.value, meter) }
       : meter !== undefined ? { success: true, data: materializeSourceSemanticContentProposal(parsed.value, meter) }
@@ -137,7 +137,7 @@ export function receiveSourceSemantics(
     return { ...attempt, outcome: { status: "invalid", reason: "host_only_outcome" } };
   }
   if (outcome.status === "no_executable_proposition") {
-    try { return { ...attempt, outcome: verifySourceSemanticDisposition(outcome, request.source_catalog, semanticSha256) }; }
+    try { return { ...attempt, outcome: verifySourceSemanticDisposition(outcome, sourceSemanticRequestCatalog(request), semanticSha256) }; }
     catch { return { ...attempt, outcome: { status: "invalid", reason: "unbound_disposition_support" } }; }
   }
   if (outcome.status !== "interpreted" || draft === undefined) return { ...attempt, outcome };
@@ -263,7 +263,7 @@ function admitInterpretedDraft(
 ): SourceSemanticProposalResult {
   const limits = request.source_request.resource_limits;
   const normalized = normalizeSourceSemantics({
-    draft, catalog: request.source_catalog, sha256: semanticSha256,
+    draft, catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256,
     source: {
       source_id: input.source_id, source_version: input.source_version,
       content_digest: `sha256:${semanticSha256(input.sourceCorpus)}`,
@@ -292,12 +292,12 @@ function bindSource(request: SourceSemanticRequest, input: SourceSemanticProposa
   const expected = request.source_request.source_unit_contract === undefined
     ? historicalSourceBinding(input.sourceCorpus, ids)
     : buildSourceSemanticRequest({ ...input, assertionIds: ids, sourceScope: request.source_request.source_scope });
-  if (canonicalJson(expected.source_catalog) !== canonicalJson(request.source_catalog) ||
+  if (canonicalJson("schema_version" in expected ? sourceSemanticRequestCatalog(expected) : expected.source_catalog) !== canonicalJson(sourceSemanticRequestCatalog(request)) ||
     canonicalJson(expected.source_request.source_assertions) !== canonicalJson(request.source_request.source_assertions) ||
     request.source_request.assertion_locations !== undefined && canonicalJson(expected.source_request.assertion_locations) !== canonicalJson(request.source_request.assertion_locations)) {
     throw new AlayaError("CONFLICT", "source semantic assertion locations differ from the source owner");
   }
-  if (semanticSha256(input.sourceCorpus) !== request.source_catalog.source_digest) {
+  if (semanticSha256(input.sourceCorpus) !== sourceSemanticRequestCatalog(request).source_digest) {
     throw new AlayaError("CONFLICT", "source semantic source generation mismatch");
   }
 }
@@ -340,6 +340,7 @@ function materializeQuery(body: unknown, request: SourceSemanticQueryRequest): S
   const record = asRecord(body);
   rejectForbiddenProposalInput(record);
   const envelope = {
+    original_query: request.original_query,
     original_query_digest: request.original_query_digest,
     producer_id: request.producer_capability.producer_id,
     producer_version: request.producer_capability.producer_version

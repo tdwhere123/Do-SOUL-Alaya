@@ -41,13 +41,13 @@ const SCOPES = { mode: "named" as const, scopes: ["project"] };
 type Handler = ReturnType<typeof createMcpMemoryToolHandler>;
 type Context = { workspaceId: string; runId: string; agentTarget: string; sessionId: string };
 
-function segment(catalog: SourceReferenceCatalog, text: string, assertionId = 1): string {
+function quote(catalog: SourceReferenceCatalog, text: string, assertionId = 1) {
   const assertion = catalog.assertions.find((row) => row.assertion_id === assertionId);
   const row = assertion?.segments.find((part) => part.text === text);
   if (row === undefined) {
     throw new Error(`catalog lacks ${text}: ${JSON.stringify(assertion?.segments.map((part) => part.text))}`);
   }
-  return row.id;
+  return { assertion_id: assertionId, text: row.text };
 }
 
 function compactStatement(
@@ -55,15 +55,15 @@ function compactStatement(
   roles: readonly { role: string; text: string }[]
 ) {
   return {
-    contract: "source-semantic-proposal-v5" as const,
+    contract: "source-semantic-proposal-v6" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{
         act: "assertion" as const,
         expression: {
           kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: predicate, support: segment(catalog, at) },
-          arguments: roles.map((row) => ({ role: row.role, target: segment(catalog, row.text) }))
+          predicate: { kind: "explicit" as const, reading: predicate, support: quote(catalog, at) },
+          arguments: roles.map((row) => ({ role: row.role, target: quote(catalog, row.text) }))
         }
       }]
     }

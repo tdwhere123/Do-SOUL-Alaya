@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  materializeSourceSemanticQueryMeaning, sourceReferenceResolver,
+  materializeSourceSemanticQueryMeaning, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
   type SourceSemanticCorrespondence, type SourceSemanticInterpretation, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
@@ -22,14 +22,13 @@ function interpretReport(includeReportDate = true): SourceSemanticInterpretation
   const input = { sourceCorpus: SOURCE, assertionIds: [1], sourceScope: "complete-source" as const,
     source_id: "dated-report", source_version: "1", producer_id: "authored-control", producer_version: "1" };
   const request = buildSourceSemanticRequest(input);
-  const resolver = sourceReferenceResolver(request.source_catalog, fieldContractSha256);
   const select = (text: string) => {
     const start = SOURCE.indexOf(text);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(SOURCE.indexOf(text, start + 1)).toBe(-1);
-    return resolver.referenceForSpan(1, [start, start + text.length]);
+    return { assertion_id: 1, text };
   };
-  const proposal = { contract: "source-semantic-proposal-v5", outcome: { status: "interpreted" }, content: {
+  const proposal = { contract: "source-semantic-proposal-v6", outcome: { status: "interpreted" }, content: {
     roots: [{ act: "assertion", expression: {
       kind: "statement", predicate: { kind: "explicit", reading: "report", support: select("reported") },
       arguments: [
@@ -78,8 +77,8 @@ function reportQuery(constraints: Constraints = {}) {
 
 function meaningQuery(original: string, conditions: object[], returned: string[]): SourceSemanticQuery {
   const semantics = materializeSourceSemanticQueryMeaning({
-    contract: "source-semantic-query-meaning-v3", alternatives: [{ conditions }], return: returned, gaps: []
-  }, { original_query_digest: digestOriginalQuery(original),
+    contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions }], return: returned, gaps: []
+  }, { original_query: original, original_query_digest: digestOriginalQuery(original),
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" });
   expect(admitSourceSemanticQuery(semantics, original).kind).toBe("admitted");
   return semantics;

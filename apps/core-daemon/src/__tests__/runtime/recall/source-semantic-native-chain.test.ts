@@ -17,7 +17,7 @@ import {
 import {
   closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteFieldEraseBarrierRepo
 } from "@do-soul/alaya-storage";
-import { proposeCorrespondenceSemantics, proposeQuerySemantics, proposeSourceSemantics } from "@do-soul/alaya-soul";
+import { proposeCorrespondenceSemantics, proposeQuerySemantics, proposeSourceSemantics, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
@@ -65,23 +65,28 @@ function segment(catalog: SourceReferenceCatalog, text: string, assertionId = 1)
   return row.id;
 }
 
+function quote(catalog: SourceReferenceCatalog, text: string, assertionId = 1) {
+  segment(catalog, text, assertionId);
+  return { assertion_id: assertionId, text };
+}
+
 function compactUse(catalog: SourceReferenceCatalog, extra: { gap?: boolean } = {}) {
   return {
-    contract: "source-semantic-proposal-v5" as const,
+    contract: "source-semantic-proposal-v6" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{
         act: "assertion" as const,
         expression: {
           kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: "use", support: segment(catalog, "uses") },
+          predicate: { kind: "explicit" as const, reading: "use", support: quote(catalog, "uses") },
           arguments: [
-            { role: "agent", target: segment(catalog, "Alice") },
-            { role: "theme", target: segment(catalog, "tools") }
+            { role: "agent", target: quote(catalog, "Alice") },
+            { role: "theme", target: quote(catalog, "tools") }
           ]
         }
       }],
-      ...(extra.gap === true ? { gaps: [{ kind: "universal_quantification" as const, support: segment(catalog, "Alice"),
+      ...(extra.gap === true ? { gaps: [{ kind: "universal_quantification" as const, support: quote(catalog, "Alice"),
         description: "Nested universal binders remain unsupported." }] } : {})
     }
   };
@@ -89,22 +94,22 @@ function compactUse(catalog: SourceReferenceCatalog, extra: { gap?: boolean } = 
 
 function compactPromise(catalog: SourceReferenceCatalog) {
   return {
-    contract: "source-semantic-proposal-v5" as const,
+    contract: "source-semantic-proposal-v6" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{
         act: "assertion" as const,
         expression: {
           kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: "promise", support: segment(catalog, "promised") },
+          predicate: { kind: "explicit" as const, reading: "promise", support: quote(catalog, "promised") },
           arguments: [
-            { role: "promisor", target: segment(catalog, "Alice") },
-            { role: "content", support: segment(catalog, "send"), target: {
+            { role: "promisor", target: quote(catalog, "Alice") },
+            { role: "content", support: quote(catalog, "send"), target: {
               kind: "statement" as const,
-              predicate: { kind: "explicit" as const, reading: "send", support: segment(catalog, "send") },
+              predicate: { kind: "explicit" as const, reading: "send", support: quote(catalog, "send") },
               arguments: [
-                { role: "agent", target: segment(catalog, "Alice") },
-                { role: "theme", target: segment(catalog, "tools") }
+                { role: "agent", target: quote(catalog, "Alice") },
+                { role: "theme", target: quote(catalog, "tools") }
               ]
             } }
           ]
@@ -379,7 +384,7 @@ it("preserves compact source interpretation and receiver query semantics and sem
       const rawInterpretation = compactUse(prepared.catalog);
       const rawBytes = Buffer.byteLength(JSON.stringify(rawInterpretation));
       const receivedInterpretation = receiveInterpretation(ALICE, "artifact-alice", rawInterpretation);
-      expect(receivedInterpretation.request.source_catalog.catalog_id).toBe(prepared.catalog.catalog_id);
+      expect(sourceSemanticRequestCatalog(receivedInterpretation.request).catalog_id).toBe(prepared.catalog.catalog_id);
       expect(receivedInterpretation.interpretation.source.source_id).toBe("artifact-alice");
       const published = await proposeDraft(session.handler, session.context, prepared.source_handle, receivedInterpretation.draft, "p1");
       expect(published.interpretation_id).toBeDefined();
@@ -644,15 +649,15 @@ it("drops only dependent proof when a necessary source interpretation binding is
       const other = await prepareSource(session.handler, session.context, "artifact-other");
       const full = receiveInterpretation(ALICE, "artifact-alice", compactUse(alice.catalog));
       const otherInterpretation = receiveInterpretation(OTHER, "artifact-other", {
-        contract: "source-semantic-proposal-v5",
+        contract: "source-semantic-proposal-v6",
         outcome: { status: "interpreted" },
         content: {
           roots: [{
             act: "assertion",
             expression: {
               kind: "statement",
-              predicate: { kind: "explicit", reading: "stay", support: segment(other.catalog, "stays") },
-              arguments: [{ role: "agent", target: segment(other.catalog, "Alice") }]
+              predicate: { kind: "explicit", reading: "stay", support: quote(other.catalog, "stays") },
+              arguments: [{ role: "agent", target: quote(other.catalog, "Alice") }]
             }
           }]
         }

@@ -5,7 +5,7 @@ import {
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import {
   buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, semanticSha256,
-  parseSourceSemanticRequest, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT
+  parseSourceSemanticRequest, sourceSemanticRequestCatalog, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import {
   proposeCorrespondenceSemantics, proposeQuerySemantics, receiveSourceSemantics
@@ -27,7 +27,7 @@ function sourceInput(text = TEXT) {
 function graphRequest(input: ReturnType<typeof sourceInput>) {
   const current = buildCurrentSourceSemanticRequest(input);
   return parseSourceSemanticRequest({
-    ...current,
+    ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current),
     source_request: {
       ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v1"
     }
@@ -35,7 +35,7 @@ function graphRequest(input: ReturnType<typeof sourceInput>) {
 }
 
 function segment(request: ReturnType<typeof graphRequest>, text: string) {
-  return request.source_catalog.assertions[0]!.segments.find((row) => row.text === text)!;
+  return sourceSemanticRequestCatalog(request).assertions[0]!.segments.find((row) => row.text === text)!;
 }
 
 function accessionDraft(request: ReturnType<typeof graphRequest>) {
@@ -131,8 +131,8 @@ describe("query meaning receive and semantic_correspondence selection", () => {
         { role: "teller", target: { kind: "free", key: "teller", excerpt: "Who" } },
         { role: "recipient", target: { kind: "named", key: recipient, excerpt: "Mira" } }
       ];
-      return { contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },
-        query: { contract: "source-semantic-query-meaning-v3", return: ["teller"], gaps: [],
+      return { contract: "source-semantic-query-response-v6", outcome: { status: "interpreted" },
+        query: { contract: "source-semantic-query-meaning-v4", return: ["teller"], gaps: [],
           alternatives: [{ conditions: [{ kind: "statement", key: "tell", predicate: "tell",
             arguments: first === "named" ? args.reverse() : args,
             content: { kind: "possible", key: "possibility", content: { kind: "statement", key: "leave", predicate: "leave",
@@ -157,14 +157,14 @@ describe("query meaning receive and semantic_correspondence selection", () => {
 
   it.each(["person", "Who", "speaker", "local73"])("receives a supported free reporter with arbitrary handle %s", key => {
     const received = proposeQuerySemantics({ original_query: "Who reported that Lee left?", producer_id: "query-producer", producer_version: "1" }, {
-      rawJson: JSON.stringify({ contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },
-        query: { contract: "source-semantic-query-meaning-v3", return: [key], gaps: [], entities: [{ kind: "free", key, excerpt: "Who" }],
+      rawJson: JSON.stringify({ contract: "source-semantic-query-response-v6", outcome: { status: "interpreted" },
+        query: { contract: "source-semantic-query-meaning-v4", return: [key], gaps: [], entities: [{ kind: "free", key, excerpt: "Who" }],
           alternatives: [{ conditions: [{ kind: "reported", key: "report", reporter: { kind: "reference", key },
             content: { kind: "statement", key: "leave", predicate: "left", arguments: [
               { role: "agent", target: { kind: "named", key: "lee", excerpt: "Lee" } }
             ] } }] }] } })
     });
-    expect(received.request.contract).toBe("source-semantic-query-request-v5");
+    expect(received.request.contract).toBe("source-semantic-query-request-v6");
     expect(received.outcome.status).toBe("interpreted");
     expect(received.query?.alternatives[0]?.frames[0]?.role_requirements).toEqual([
       { id: "reporter", role_reading: "reporter", target_variable: key, support: { kind: "query_text", excerpt: "Who" } }
@@ -176,7 +176,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     const results = sourceSemanticQueryExamples.map((example) => proposeQuerySemantics({
       original_query: example.original_query, producer_id: "query-producer", producer_version: "1"
     }, { rawJson: JSON.stringify(example.response) }));
-    expect(results.map((result) => result.outcome.status)).toEqual(["interpreted", "interpreted", "interpreted", "interpreted"]);
+    expect(results.map((result) => result.outcome.status)).toEqual(sourceSemanticQueryExamples.map(() => "interpreted"));
     const nested = results[0]!.query!;
     expect(nested.return_variables).toEqual(["person"]);
     expect(nested.alternatives[0]!.context_obligations).toEqual([
@@ -202,6 +202,41 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     ]);
     expect(alternative.frames.map((frame) => frame.role_requirements.map((role) => role.target_variable)))
       .toEqual([["amber", "blue", "tray", "ratio"], ["amber", "tray", "amber_count"], ["blue", "tray", "blue_count"]]);
+    const occurrence = results[4]!.query!;
+    expect(occurrence.variables.map(row => row.sort)).toEqual(["proposition", "proposition", "proposition"]);
+    expect(occurrence.alternatives[0]!.context_obligations).toEqual([
+      { frame: "before", kind: "asserted_at_source" }, { frame: "ring", kind: "asserted_at_source" },
+      { frame: "flash", kind: "asserted_at_source" }
+    ]);
+    expect(occurrence.alternatives[0]!.frames[0]!.role_requirements.map(row => row.target_variable)).toEqual(["ring", "flash"]);
+    expect(results[5]!.query!.alternatives[0]!.frames[0]!.source_act).toBe("question");
+    expect(results[6]!.query!.alternatives[0]!.frames[0]!.source_act).toBe("directive");
+    expect(occurrence.alternatives[0]!.frames.every(row => row.source_act === undefined)).toBe(true);
+  });
+
+  it("binds required evidence act support to the current original query and rejects replaced producer syntax", () => {
+    const example = sourceSemanticQueryExamples[5];
+    const received = (query: object, original_query: string = example.original_query, contract = "source-semantic-query-response-v6") =>
+      proposeQuerySemantics({ original_query, producer_id: "query-producer", producer_version: "1" }, {
+        rawJson: JSON.stringify({ contract, outcome: { status: "interpreted" }, query })
+      });
+    const body = (constraint: object) => ({ ...example.response.query,
+      alternatives: [{ conditions: [{ kind: "statement", key: "polish", predicate: "polish", arguments: [], ...constraint }] }] });
+    const invalidBodies = [
+      { ...example.response.query, contract: "source-semantic-query-meaning-v3" },
+      body({ source_act: "question" }),
+      body({ required_evidence_act: { act: "question" } }),
+      body({ required_evidence_act: { act: "question", excerpt: "" } }),
+      body({ required_evidence_act: { act: "question", excerpt: "invented" } })
+    ];
+    for (const query of invalidBodies) {
+      const result = received(query);
+      expect(result.outcome.status).toBe("invalid");
+      expect(result.query).toBeUndefined();
+    }
+    expect(received(example.response.query, "Was the lens polished?").outcome.status).toBe("invalid");
+    expect(received(example.response.query, example.original_query, "source-semantic-query-response-v5").outcome.status).toBe("invalid");
+    expect(received(example.response.query).outcome.status).toBe("interpreted");
   });
 
   it("rejects legacy source-interpretation mention support instead of claiming that it locates a query gap", () => {
@@ -219,10 +254,10 @@ describe("query meaning receive and semantic_correspondence selection", () => {
       original_query: "Who sent the sample to Mira?", producer_id: "query-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-query-response-v5",
+        contract: "source-semantic-query-response-v6",
         outcome: { status: "interpreted" },
         query: {
-          contract: "source-semantic-query-meaning-v3",
+          contract: "source-semantic-query-meaning-v4",
           alternatives: [{ conditions: [{
             kind: "statement", key: "send", predicate: "send",
             arguments: [
@@ -240,8 +275,8 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     expect(meaning.query?.variables.find((row) => row.id === "sender")?.reference).toBeUndefined();
     expect(meaning.query?.variables.find((row) => row.id === "mira")?.reference?.excerpt).toBe("Mira");
     expect(meaning.query?.alternatives[0]?.frames[0]?.source_act).toBeUndefined();
-    expect(meaning.system_prompt).toContain("source-semantic-query-meaning-v3");
-    expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("source_act is retrieval intent");
+    expect(meaning.system_prompt).toContain("source-semantic-query-meaning-v4");
+    expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("required_evidence_act");
 
   });
 
@@ -289,7 +324,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
         query: existentialBody()
       })
     });
-    expect(query.request.contract).toBe("source-semantic-query-request-v5");
+    expect(query.request.contract).toBe("source-semantic-query-request-v6");
     expect(query.outcome.status).toBe("invalid");
     expect(query.query).toBeUndefined();
 

@@ -4,7 +4,7 @@ import { collectSourceSemanticUnitPacks, indexSourceSemanticUnits, sourceSemanti
 import { buildSourceSemanticRequest } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import { completeEmptySourceSemantics, receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { buildSourceReferenceCatalog } from "@do-soul/alaya-protocol";
-import { semanticSha256, parseSourceSemanticRequest } from "../../../garden/ingestion/official-api/source-semantic-request.js";
+import { semanticSha256, sourceSemanticRequestCatalog, parseSourceSemanticRequest } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 
 const producer = { source_id: "source", source_version: "1", producer_id: "test", producer_version: "1" };
 
@@ -13,7 +13,7 @@ describe("source semantic unit coverage", () => {
     const input = { ...producer, sourceCorpus: "", assertionIds: [] };
     const current = buildSourceSemanticRequest(input);
     const { source_unit_contract: _units, proposal_contract: _proposal, generation_schema_contract: _generation, ...body } = current.source_request;
-    const historical = parseSourceSemanticRequest({ ...current, source_request: {
+    const historical = parseSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...body, normalizer_version: "source-semantic-normalizer-v3"
     } });
     const result = completeEmptySourceSemantics(historical, input);
@@ -73,7 +73,7 @@ describe("source semantic unit coverage", () => {
     const row = indexed[0]!;
     const { source_unit_contract: _contract, generation_schema_contract: _generation, ...body } = current.source_request;
     const source_assertions = [{ assertion_id: row.assertion_id, text: row.text }];
-    const legacy = parseSourceSemanticRequest({ ...current,
+    const legacy = parseSourceSemanticRequest({ ...current, source_digest: undefined,
       source_catalog: buildSourceReferenceCatalog(semanticSha256(sourceCorpus), source_assertions, semanticSha256),
       source_request: { ...body, proposal_contract: "source-semantic-proposal-v1", source_assertions, assertion_locations: [{ assertion_id: 1,
         source_utf8_span: [Buffer.byteLength(sourceCorpus.slice(0, row.start)), Buffer.byteLength(sourceCorpus.slice(0, row.end))] }] }

@@ -70,7 +70,7 @@ describe("source semantic query meaning admission", () => {
       return: ["sender"],
       gaps: []
     }, {
-      original_query_digest: digestOriginalQuery(ORIGINAL),
+      original_query: ORIGINAL, original_query_digest: digestOriginalQuery(ORIGINAL),
       producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
       producer_version: "1"
     });
@@ -113,6 +113,6 @@ function reportedQuery(original: string, reporter: object, extra: object = {}) {
     alternatives: [{ conditions: [{ kind: "reported", key: "report", reporter,
       content: { kind: "statement", key: "leave", predicate: "left", arguments: [
         { role: "agent", target: { kind: "named", key: "lee", excerpt: "Lee" } }
-      ] } }] }], ...extra }, { original_query_digest: digestOriginalQuery(original),
+      ] } }] }], ...extra }, { original_query: original, original_query_digest: digestOriginalQuery(original),
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" });
 }

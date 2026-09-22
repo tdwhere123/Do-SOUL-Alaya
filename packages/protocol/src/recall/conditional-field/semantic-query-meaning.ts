@@ -10,13 +10,15 @@ import {
   type SourceSemanticQueryFrame, type SourceSemanticQueryRoleRequirement, type SourceSemanticQueryVariable
 } from "./semantic-query.js";
 
-export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v3" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v4" as const;
 export const SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH = Math.min(8, SOURCE_SEMANTIC_MAX_DEPTH);
 
 const Key = SourceSemanticHandleSchema;
 const Reading = SourceSemanticReadingSchema;
 const Obligation = z.enum(["asserted_at_source", "entailed_at_source", "unresolved"]);
-const SourceAct = z.enum(["question", "directive"]);
+const RequiredEvidenceAct = z.object({
+  act: z.enum(["question", "directive"]), excerpt: z.string().min(1).max(1024)
+}).strict().readonly();
 
 const FreeTarget = z.object({
   kind: z.literal("free"), key: Key, excerpt: z.string().min(1).max(1024).optional(), return: z.boolean().optional()
@@ -35,7 +37,7 @@ type Path = readonly (string | number)[];
 type EntityTargetValue = z.infer<typeof EntityTarget>;
 type RoleArgumentValue = z.infer<typeof RoleArgument>;
 type ObligationKind = z.infer<typeof Obligation>;
-type SourceActKind = z.infer<typeof SourceAct>;
+type RequiredEvidenceActValue = z.infer<typeof RequiredEvidenceAct>;
 
 export type QueryMeaning =
   | QueryStatementMeaning
@@ -53,7 +55,7 @@ export type QueryStatementMeaning = Readonly<{
   readonly arguments: readonly RoleArgumentValue[];
   readonly content?: QueryMeaning;
   readonly obligation?: ObligationKind;
-  readonly source_act?: SourceActKind;
+  readonly required_evidence_act?: RequiredEvidenceActValue;
   readonly return?: boolean;
 }>;
 export type QueryNotMeaning = Readonly<{
@@ -61,14 +63,14 @@ export type QueryNotMeaning = Readonly<{
   readonly key?: string;
   readonly content: QueryMeaning;
   readonly obligation?: ObligationKind;
-  readonly source_act?: SourceActKind;
+  readonly required_evidence_act?: RequiredEvidenceActValue;
 }>;
 export type QueryPossibleMeaning = Readonly<{
   readonly kind: "possible";
   readonly key?: string;
   readonly content: QueryMeaning;
   readonly obligation?: ObligationKind;
-  readonly source_act?: SourceActKind;
+  readonly required_evidence_act?: RequiredEvidenceActValue;
 }>;
 export type QueryReportedMeaning = Readonly<{
   readonly kind: "reported";
@@ -76,7 +78,7 @@ export type QueryReportedMeaning = Readonly<{
   readonly content: QueryMeaning;
   readonly reporter?: EntityTargetValue;
   readonly obligation?: ObligationKind;
-  readonly source_act?: SourceActKind;
+  readonly required_evidence_act?: RequiredEvidenceActValue;
 }>;
 export type QueryConditionalMeaning = Readonly<{
   readonly kind: "conditional";
@@ -84,14 +86,14 @@ export type QueryConditionalMeaning = Readonly<{
   readonly antecedent: QueryMeaning;
   readonly consequent: QueryMeaning;
   readonly obligation?: ObligationKind;
-  readonly source_act?: SourceActKind;
+  readonly required_evidence_act?: RequiredEvidenceActValue;
 }>;
 export type QueryOpaqueMeaning = Readonly<{
   readonly kind: "opaque";
   readonly key?: string;
   readonly operands: readonly QueryMeaning[];
   readonly obligation?: ObligationKind;
-  readonly source_act?: SourceActKind;
+  readonly required_evidence_act?: RequiredEvidenceActValue;
 }>;
 export type QueryOccurrenceMeaning = Readonly<{ kind: "occurrence"; readonly key: string }>;
 
@@ -100,27 +102,27 @@ function meaningShape(operand: z.ZodType<QueryMeaning>): z.ZodType<QueryMeaning>
     z.object({
       kind: z.literal("statement"), key: Key.optional(), predicate: Reading,
       arguments: z.array(RoleArgument).max(8).readonly(), content: operand.optional(),
-      obligation: Obligation.optional(), source_act: SourceAct.optional(), return: z.boolean().optional()
+      obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional(), return: z.boolean().optional()
     }).strict().readonly(),
     z.object({
       kind: z.literal("not"), key: Key.optional(), content: operand,
-      obligation: Obligation.optional(), source_act: SourceAct.optional()
+      obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
       kind: z.literal("possible"), key: Key.optional(), content: operand,
-      obligation: Obligation.optional(), source_act: SourceAct.optional()
+      obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
       kind: z.literal("reported"), key: Key.optional(), content: operand, reporter: EntityTarget.optional(),
-      obligation: Obligation.optional(), source_act: SourceAct.optional()
+      obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
       kind: z.literal("conditional"), key: Key.optional(), antecedent: operand, consequent: operand,
-      obligation: Obligation.optional(), source_act: SourceAct.optional()
+      obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
       kind: z.literal("opaque"), key: Key.optional(), operands: z.array(operand).min(1).max(8).readonly(),
-      obligation: Obligation.optional(), source_act: SourceAct.optional()
+      obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     Occurrence
   ]);
@@ -173,6 +175,7 @@ export const SourceSemanticQueryMeaningBodySchema = z.object({
 export type SourceSemanticQueryMeaningBody = z.infer<typeof SourceSemanticQueryMeaningBodySchema>;
 
 export type SourceSemanticQueryMeaningEnvelope = Readonly<{
+  readonly original_query: string;
   readonly original_query_digest: string;
   readonly producer_id: string;
   readonly producer_version: string;
@@ -183,8 +186,11 @@ export function materializeSourceSemanticQueryMeaning(
   body: unknown, envelope: SourceSemanticQueryMeaningEnvelope
 ): SourceSemanticQuery {
   preflight(body);
+  if (typeof envelope.original_query !== "string" || envelope.original_query.length === 0) {
+    fail(["original_query"], "query meaning requires original query text");
+  }
   const parsed = SourceSemanticQueryMeaningBodySchema.parse(body);
-  const compiled = new QueryMeaningCompiler().compile(parsed);
+  const compiled = new QueryMeaningCompiler(envelope.original_query).compile(parsed);
   return SourceSemanticQuerySchema.parse({
     contract: SOURCE_SEMANTIC_QUERY_CONTRACT,
     original_query_digest: envelope.original_query_digest,
@@ -244,7 +250,10 @@ class QueryMeaningCompiler {
   private readonly counters = new Map<string, number>();
   private readonly compiling = new Set<string>();
   private readonly anonymousOccurrenceAliases = new Set<string>();
+  private readonly occurrenceDeclarations = new Map<string, number>();
   private evidence = false;
+
+  constructor(private readonly originalQuery: string) {}
 
   compile(body: SourceSemanticQueryMeaningBody): {
     variables: SourceSemanticQueryVariable[];
@@ -434,12 +443,15 @@ class QueryMeaningCompiler {
       : meaning.kind === "reported" && meaning.reporter !== undefined
         ? [this.reporterRole(meaning.reporter, [...path, "reporter"], roleIds)]
         : [];
+    if (meaning.required_evidence_act !== undefined && !this.originalQuery.includes(meaning.required_evidence_act.excerpt)) {
+      fail([...path, "required_evidence_act", "excerpt"], "required evidence act excerpt is absent from the original query");
+    }
     frames.push({
       id: frameId, variable,
       predicate_reading: meaning.kind === "statement" ? meaning.predicate : meaning.kind,
       ...(operator === undefined ? {} : { operator }),
       role_requirements: roles,
-      ...(meaning.source_act === undefined ? {} : { source_act: meaning.source_act })
+      ...(meaning.required_evidence_act === undefined ? {} : { source_act: meaning.required_evidence_act.act })
     });
     if (parent === undefined) {
       obligations.push({ frame: frameId, kind: meaning.obligation ?? "asserted_at_source" });
@@ -487,7 +499,16 @@ class QueryMeaningCompiler {
   private role(
     argument: RoleArgumentValue, path: Path, used: Set<string>
   ): SourceSemanticQueryRoleRequirement {
-    const target = this.entityId(argument.target, [...path, "target"]);
+    const target = argument.target.key;
+    const sort = this.sorts.get(target);
+    if (sort === undefined) fail([...path, "target"], "undeclared local reference");
+    if (sort !== "entity") {
+      if (argument.target.kind !== "reference" || this.occurrenceDeclarations.get(target) !== 1) {
+        fail([...path, "target"], "role reference requires a unique occurrence declaration");
+      }
+      if (argument.excerpt === undefined) fail(path, "occurrence role requires explicit query text support");
+      if (!this.originalQuery.includes(argument.excerpt)) fail([...path, "excerpt"], "role excerpt is absent from the original query");
+    }
     const declared = this.entitySupport.get(target);
     const excerpt = argument.excerpt
       ?? (argument.target.kind === "reference" ? undefined : argument.target.excerpt)
@@ -504,6 +525,7 @@ class QueryMeaningCompiler {
   private reporterRole(
     target: EntityTargetValue, path: Path, used: Set<string>
   ): SourceSemanticQueryRoleRequirement {
+    this.entityId(target, path);
     return this.role({ role: "reporter", target }, path, used);
   }
 
@@ -538,6 +560,7 @@ class QueryMeaningCompiler {
   private declareOccurrence(key: string | undefined, sort: "proposition" | "context", path: Path): void {
     if (key === undefined || this.anonymousOccurrenceAliases.has(key)) return;
     this.declare(key, sort, path);
+    this.occurrenceDeclarations.set(key, (this.occurrenceDeclarations.get(key) ?? 0) + 1);
   }
 
   private declareEntityKey(key: string, path: Path): void {

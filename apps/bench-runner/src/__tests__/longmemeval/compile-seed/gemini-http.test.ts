@@ -136,7 +136,9 @@ describe("native Gemini interactive extraction", () => {
     const current = soul.buildSourceSemanticRequest(source);
     const { generation_schema_contract: _generation, ...source_request } = current.source_request;
     const request = soul.parseSourceSemanticRequest(generation === "bounded" ? current : {
-      ...current, source_request: { ...source_request, proposal_contract: "source-semantic-proposal-v3" }
+      schema_version: current.schema_version, interpretation_contract: current.interpretation_contract,
+      source_catalog: soul.sourceSemanticRequestCatalog(current),
+      source_request: { ...source_request, proposal_contract: "source-semantic-proposal-v3" }
     });
     const systemPrompt = soul.sourceSemanticSystemPrompt(request);
     const raw = systemPrompt.split("Example response:\n")[1]!;

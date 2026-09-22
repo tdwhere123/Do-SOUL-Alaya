@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SOURCE_SEMANTIC_SYSTEM_PROMPT, buildSourceSemanticRequest, parseSourceSemanticRequest,
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT, buildSourceSemanticRequest, sourceSemanticRequestCatalog, parseSourceSemanticRequest,
   sourceSemanticResponseJsonSchema, sourceSemanticSystemPrompt } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import { proposeSourceSemantics, receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as CONTENT_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-content-guidance.js";
@@ -13,13 +13,31 @@ const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor mi
 const raw = SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
 
 describe("source-bound nested semantic expressions", () => {
+  it("keeps the catalog host-owned and rejects obsolete or contradictory request bindings", () => {
+    const current = buildSourceSemanticRequest(input);
+    const wire = JSON.parse(JSON.stringify(current));
+    expect(wire.source_digest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(wire).not.toHaveProperty("source_catalog");
+    expect(wire.source_request.source_assertions.map((row: { text: string }) => row.text))
+      .toEqual(["Mira promised to lend the atlas.", "Every visitor might read it."]);
+    expect(sourceSemanticRequestCatalog(current)).toBe(sourceSemanticRequestCatalog(current));
+    expect(sourceSemanticRequestCatalog(parseSourceSemanticRequest(wire))).toEqual(sourceSemanticRequestCatalog(current));
+    expect(() => parseSourceSemanticRequest({ ...wire, source_catalog: sourceSemanticRequestCatalog(current) })).toThrow();
+    expect(() => parseSourceSemanticRequest({ ...wire, source_digest: undefined })).toThrow();
+    expect(() => parseSourceSemanticRequest({ ...wire, source_request: {
+      ...wire.source_request, proposal_contract: "source-semantic-proposal-v5", generation_schema_contract: "host-owned-selection-schema-v1"
+    } })).toThrow();
+    const forged = parseSourceSemanticRequest({ ...wire, source_digest: "0".repeat(64) });
+    expect(() => receiveSourceSemantics(raw, forged, input)).toThrow(/source owner|generation/u);
+  });
+
   it.each(["can", "may", "might"])("preserves %s scope without promoting its nested event to an asserted fact", (modal) => {
     const source = { ...input, sourceCorpus: `Rin ${modal} inspect crates.`, assertionIds: [1] };
     const request = buildSourceSemanticRequest(source);
-    const select = (text: string) => request.source_catalog.assertions[0]!.segments.find((row) => row.text === text)!.id;
+    const select = (text: string) => ({ assertion_id: 1, text });
     const event = { kind: "statement", predicate: { kind: "explicit", reading: "inspect", support: select("inspect") },
       arguments: [{ role: "inspector", target: select("Rin") }, { role: "item", target: select("crates") }] };
-    const proposal = { contract: "source-semantic-proposal-v5", outcome: { status: "interpreted" }, content: {
+    const proposal = { contract: "source-semantic-proposal-v6", outcome: { status: "interpreted" }, content: {
       roots: [{ act: "assertion", expression: { kind: "possible", support: select(modal), content: event } }]
     } };
     const rawJson = JSON.stringify(proposal);
@@ -60,10 +78,10 @@ describe("source-bound nested semantic expressions", () => {
 
   it("selects schema and exact prompt from each recorded producer contract", () => {
     const current = buildSourceSemanticRequest(input);
-    const historical = parseSourceSemanticRequest({ ...current, source_request: {
+    const historical = parseSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v2"
     } });
-    expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v5");
+    expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v6");
     expect(sourceSemanticSystemPrompt(current)).toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
     expect(sourceSemanticSystemPrompt(historical)).toBe(CONTENT_PROMPT);
     expect(JSON.stringify(sourceSemanticResponseJsonSchema(current))).toContain('"roots"');
@@ -83,12 +101,12 @@ describe("source-bound nested semantic expressions", () => {
   it("pins host-owned generation separately while replaying historical nested requests unchanged", () => {
     const current = buildSourceSemanticRequest(input);
     const { generation_schema_contract: _generation, ...body } = current.source_request;
-    expect(current.source_request.generation_schema_contract).toBe("host-owned-selection-schema-v1");
+    expect(current.source_request.generation_schema_contract).toBe("host-owned-selection-schema-v2");
     expect(() => parseSourceSemanticRequest({ ...current, source_request: body })).toThrow(/host-owned selection schema/u);
-    const historical = parseSourceSemanticRequest({ ...current, source_request: {
+    const historical = parseSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...body, proposal_contract: "source-semantic-proposal-v3"
     } });
-    const bounded = parseSourceSemanticRequest({ ...current, source_request: {
+    const bounded = parseSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...body, proposal_contract: "source-semantic-proposal-v3", generation_schema_contract: "bounded-expression-schema-v1"
     } });
     expect(historical.source_request).not.toHaveProperty("generation_schema_contract");
@@ -126,11 +144,11 @@ describe("source-bound nested semantic expressions", () => {
 
   it("binds selection producer contract, prompt and schema in request identity and shrinks ordinary prompt bytes", () => {
     const current = buildSourceSemanticRequest(input);
-    const nested = parseSourceSemanticRequest({ ...current, source_request: {
+    const nested = parseSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...current.source_request, proposal_contract: "source-semantic-proposal-v3",
       generation_schema_contract: "bounded-expression-schema-v1"
     } });
-    const compact = parseSourceSemanticRequest({ ...current, source_request: {
+    const compact = parseSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...current.source_request, proposal_contract: "source-semantic-proposal-v4",
       generation_schema_contract: "host-owned-expression-schema-v1"
     } });

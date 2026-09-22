@@ -16,7 +16,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v5",
+      "contract": "source-semantic-proposal-v6",
       "outcome": {
         "status": "interpreted"
       },
@@ -30,8 +30,8 @@
                 "kind": "explicit",
                 "reading": "event held on date",
                 "support": {
-                  "first": "a1s11",
-                  "last": "a1s13"
+                  "assertion_id": 1,
+                  "text": "held on"
                 }
               },
               "arguments": [
@@ -42,16 +42,16 @@
                     "key": "forum",
                     "mentions": [
                       {
-                        "first": "a1s6",
-                        "last": "a1s8"
+                        "assertion_id": 1,
+                        "text": "Delta Forum"
                       },
                       {
-                        "first": "a3s8",
-                        "last": "a3s10"
+                        "assertion_id": 3,
+                        "text": "this event"
                       },
                       {
-                        "first": "a5s26",
-                        "last": "a5s28"
+                        "assertion_id": 5,
+                        "text": "this event"
                       }
                     ]
                   }
@@ -63,8 +63,8 @@
                     "key": "event-date",
                     "mentions": [
                       {
-                        "first": "a1s15",
-                        "last": "a1s19"
+                        "assertion_id": 1,
+                        "text": "2026-05-10"
                       }
                     ]
                   }
@@ -81,12 +81,12 @@
                 "reading": "exact count of different invited speakers who actually spoke at event",
                 "support": [
                   {
-                    "first": "a2s0",
-                    "last": "a2s6"
+                    "assertion_id": 2,
+                    "text": "Exactly four different invited"
                   },
                   {
-                    "first": "a3s0",
-                    "last": "a3s10"
+                    "assertion_id": 3,
+                    "text": "speakers actually spoke at this event"
                   }
                 ]
               },
@@ -94,8 +94,8 @@
                 {
                   "role": "count",
                   "target": {
-                    "first": "a2s2",
-                    "last": "a2s2"
+                    "assertion_id": 2,
+                    "text": "four"
                   }
                 },
                 {
@@ -104,12 +104,12 @@
                     "kind": "entity",
                     "mentions": [
                       {
-                        "first": "a2s4",
-                        "last": "a2s6"
+                        "assertion_id": 2,
+                        "text": "different invited"
                       },
                       {
-                        "first": "a3s0",
-                        "last": "a3s0"
+                        "assertion_id": 3,
+                        "text": "speakers"
                       }
                     ]
                   }
@@ -117,8 +117,8 @@
                 {
                   "role": "actual participation",
                   "target": {
-                    "first": "a3s2",
-                    "last": "a3s4"
+                    "assertion_id": 3,
+                    "text": "actually spoke"
                   }
                 },
                 {
@@ -128,16 +128,16 @@
                     "key": "forum",
                     "mentions": [
                       {
-                        "first": "a1s6",
-                        "last": "a1s8"
+                        "assertion_id": 1,
+                        "text": "Delta Forum"
                       },
                       {
-                        "first": "a3s8",
-                        "last": "a3s10"
+                        "assertion_id": 3,
+                        "text": "this event"
                       },
                       {
-                        "first": "a5s26",
-                        "last": "a5s28"
+                        "assertion_id": 5,
+                        "text": "this event"
                       }
                     ]
                   }
@@ -149,8 +149,8 @@
                     "key": "event-date",
                     "mentions": [
                       {
-                        "first": "a1s15",
-                        "last": "a1s19"
+                        "assertion_id": 1,
+                        "text": "2026-05-10"
                       }
                     ]
                   }
@@ -163,8 +163,8 @@
             "expression": {
               "kind": "not",
               "support": {
-                "first": "a4s4",
-                "last": "a4s6"
+                "assertion_id": 4,
+                "text": "does not"
               },
               "content": {
                 "kind": "statement",
@@ -172,23 +172,23 @@
                   "kind": "explicit",
                   "reading": "report lists speaker names",
                   "support": {
-                    "first": "a4s8",
-                    "last": "a4s12"
+                    "assertion_id": 4,
+                    "text": "list their names"
                   }
                 },
                 "arguments": [
                   {
                     "role": "report",
                     "target": {
-                      "first": "a4s0",
-                      "last": "a4s2"
+                      "assertion_id": 4,
+                      "text": "This report"
                     }
                   },
                   {
                     "role": "names",
                     "target": {
-                      "first": "a4s10",
-                      "last": "a4s12"
+                      "assertion_id": 4,
+                      "text": "their names"
                     }
                   }
                 ]
@@ -203,23 +203,23 @@
                 "kind": "explicit",
                 "reading": "count of other invited people who did not speak at event",
                 "support": {
-                  "first": "a5s0",
-                  "last": "a5s28"
+                  "assertion_id": 5,
+                  "text": "Six other people had been invited to speak but did not speak at this event"
                 }
               },
               "arguments": [
                 {
                   "role": "count",
                   "target": {
-                    "first": "a5s0",
-                    "last": "a5s0"
+                    "assertion_id": 5,
+                    "text": "Six"
                   }
                 },
                 {
                   "role": "population",
                   "target": {
-                    "first": "a5s2",
-                    "last": "a5s22"
+                    "assertion_id": 5,
+                    "text": "other people had been invited to speak but did not speak"
                   }
                 },
                 {
@@ -229,16 +229,16 @@
                     "key": "forum",
                     "mentions": [
                       {
-                        "first": "a1s6",
-                        "last": "a1s8"
+                        "assertion_id": 1,
+                        "text": "Delta Forum"
                       },
                       {
-                        "first": "a3s8",
-                        "last": "a3s10"
+                        "assertion_id": 3,
+                        "text": "this event"
                       },
                       {
-                        "first": "a5s26",
-                        "last": "a5s28"
+                        "assertion_id": 5,
+                        "text": "this event"
                       }
                     ]
                   }
@@ -250,8 +250,8 @@
                     "key": "event-date",
                     "mentions": [
                       {
-                        "first": "a1s15",
-                        "last": "a1s19"
+                        "assertion_id": 1,
+                        "text": "2026-05-10"
                       }
                     ]
                   }
@@ -286,7 +286,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v5",
+      "contract": "source-semantic-proposal-v6",
       "outcome": {
         "status": "interpreted"
       },
@@ -300,8 +300,8 @@
                 "kind": "explicit",
                 "reading": "event held on date",
                 "support": {
-                  "first": "a1s10",
-                  "last": "a1s10"
+                  "assertion_id": 1,
+                  "text": "on"
                 }
               },
               "arguments": [
@@ -312,8 +312,8 @@
                     "key": "forum",
                     "mentions": [
                       {
-                        "first": "a1s6",
-                        "last": "a1s8"
+                        "assertion_id": 1,
+                        "text": "Delta Forum"
                       }
                     ]
                   }
@@ -325,8 +325,8 @@
                     "key": "event-date",
                     "mentions": [
                       {
-                        "first": "a1s12",
-                        "last": "a1s16"
+                        "assertion_id": 1,
+                        "text": "2026-05-10"
                       }
                     ]
                   }
@@ -343,12 +343,12 @@
                 "reading": "notebook contains only personally witnessed sessions",
                 "support": [
                   {
-                    "first": "a2s4",
-                    "last": "a2s6"
+                    "assertion_id": 2,
+                    "text": "contains only"
                   },
                   {
-                    "first": "a3s0",
-                    "last": "a3s6"
+                    "assertion_id": 3,
+                    "text": "sessions I personally witnessed"
                   }
                 ]
               },
@@ -360,12 +360,12 @@
                     "key": "notebook",
                     "mentions": [
                       {
-                        "first": "a1s0",
-                        "last": "a1s2"
+                        "assertion_id": 1,
+                        "text": "Witness notebook"
                       },
                       {
-                        "first": "a2s0",
-                        "last": "a2s2"
+                        "assertion_id": 2,
+                        "text": "This notebook"
                       }
                     ]
                   }
@@ -378,8 +378,8 @@
             "expression": {
               "kind": "not",
               "support": {
-                "first": "a3s12",
-                "last": "a3s22"
+                "assertion_id": 3,
+                "text": "not a complete list of speakers"
               },
               "content": {
                 "kind": "statement",
@@ -387,8 +387,8 @@
                   "kind": "explicit",
                   "reading": "notebook is complete list of speakers",
                   "support": {
-                    "first": "a3s14",
-                    "last": "a3s22"
+                    "assertion_id": 3,
+                    "text": "a complete list of speakers"
                   }
                 },
                 "arguments": [
@@ -399,12 +399,12 @@
                       "key": "notebook",
                       "mentions": [
                         {
-                          "first": "a1s0",
-                          "last": "a1s2"
+                          "assertion_id": 1,
+                          "text": "Witness notebook"
                         },
                         {
-                          "first": "a2s0",
-                          "last": "a2s2"
+                          "assertion_id": 2,
+                          "text": "This notebook"
                         }
                       ]
                     }
@@ -416,8 +416,8 @@
                       "key": "forum",
                       "mentions": [
                         {
-                          "first": "a1s6",
-                          "last": "a1s8"
+                          "assertion_id": 1,
+                          "text": "Delta Forum"
                         }
                       ]
                     }
@@ -429,8 +429,8 @@
                       "key": "event-date",
                       "mentions": [
                         {
-                          "first": "a1s12",
-                          "last": "a1s16"
+                          "assertion_id": 1,
+                          "text": "2026-05-10"
                         }
                       ]
                     }
@@ -447,8 +447,8 @@
                 "kind": "explicit",
                 "reading": "speaker has badge",
                 "support": {
-                  "first": "a4s5",
-                  "last": "a4s7"
+                  "assertion_id": 4,
+                  "text": "speaker badge"
                 }
               },
               "arguments": [
@@ -459,12 +459,12 @@
                     "key": "badge-A-17",
                     "mentions": [
                       {
-                        "first": "a4s0",
-                        "last": "a4s2"
+                        "assertion_id": 4,
+                        "text": "Amir Chen"
                       },
                       {
-                        "first": "a7s7",
-                        "last": "a7s21"
+                        "assertion_id": 7,
+                        "text": "the same Amir Chen with badge A-17"
                       }
                     ]
                   }
@@ -472,8 +472,8 @@
                 {
                   "role": "badge",
                   "target": {
-                    "first": "a4s9",
-                    "last": "a4s11"
+                    "assertion_id": 4,
+                    "text": "A-17"
                   }
                 }
               ]
@@ -487,8 +487,8 @@
                 "kind": "explicit",
                 "reading": "speaker has badge",
                 "support": {
-                  "first": "a5s16",
-                  "last": "a5s18"
+                  "assertion_id": 5,
+                  "text": "speaker badge"
                 }
               },
               "arguments": [
@@ -499,8 +499,8 @@
                     "key": "badge-B-92",
                     "mentions": [
                       {
-                        "first": "a5s11",
-                        "last": "a5s13"
+                        "assertion_id": 5,
+                        "text": "Amir Chen"
                       }
                     ]
                   }
@@ -508,8 +508,8 @@
                 {
                   "role": "badge",
                   "target": {
-                    "first": "a5s20",
-                    "last": "a5s22"
+                    "assertion_id": 5,
+                    "text": "B-92"
                   }
                 }
               ]
@@ -523,8 +523,8 @@
                 "kind": "explicit",
                 "reading": "is a different person from",
                 "support": {
-                  "first": "a5s0",
-                  "last": "a5s4"
+                  "assertion_id": 5,
+                  "text": "A different person"
                 }
               },
               "arguments": [
@@ -535,8 +535,8 @@
                     "key": "badge-B-92",
                     "mentions": [
                       {
-                        "first": "a5s11",
-                        "last": "a5s13"
+                        "assertion_id": 5,
+                        "text": "Amir Chen"
                       }
                     ]
                   }
@@ -548,12 +548,12 @@
                     "key": "badge-A-17",
                     "mentions": [
                       {
-                        "first": "a4s0",
-                        "last": "a4s2"
+                        "assertion_id": 4,
+                        "text": "Amir Chen"
                       },
                       {
-                        "first": "a7s7",
-                        "last": "a7s21"
+                        "assertion_id": 7,
+                        "text": "the same Amir Chen with badge A-17"
                       }
                     ]
                   }
@@ -569,8 +569,8 @@
                 "kind": "explicit",
                 "reading": "was invited speaker",
                 "support": {
-                  "first": "a4s14",
-                  "last": "a4s20"
+                  "assertion_id": 4,
+                  "text": "was an invited speaker"
                 }
               },
               "arguments": [
@@ -581,12 +581,12 @@
                     "key": "badge-A-17",
                     "mentions": [
                       {
-                        "first": "a4s0",
-                        "last": "a4s2"
+                        "assertion_id": 4,
+                        "text": "Amir Chen"
                       },
                       {
-                        "first": "a7s7",
-                        "last": "a7s21"
+                        "assertion_id": 7,
+                        "text": "the same Amir Chen with badge A-17"
                       }
                     ]
                   }
@@ -598,8 +598,8 @@
                     "key": "forum",
                     "mentions": [
                       {
-                        "first": "a1s6",
-                        "last": "a1s8"
+                        "assertion_id": 1,
+                        "text": "Delta Forum"
                       }
                     ]
                   }
@@ -611,8 +611,8 @@
                     "key": "event-date",
                     "mentions": [
                       {
-                        "first": "a1s12",
-                        "last": "a1s16"
+                        "assertion_id": 1,
+                        "text": "2026-05-10"
                       }
                     ]
                   }
@@ -629,12 +629,12 @@
                 "reading": "was invited speaker",
                 "support": [
                   {
-                    "first": "a5s25",
-                    "last": "a5s29"
+                    "assertion_id": 5,
+                    "text": "was an invited"
                   },
                   {
-                    "first": "a6s0",
-                    "last": "a6s0"
+                    "assertion_id": 6,
+                    "text": "speaker"
                   }
                 ]
               },
@@ -646,8 +646,8 @@
                     "key": "badge-B-92",
                     "mentions": [
                       {
-                        "first": "a5s11",
-                        "last": "a5s13"
+                        "assertion_id": 5,
+                        "text": "Amir Chen"
                       }
                     ]
                   }
@@ -659,8 +659,8 @@
                     "key": "forum",
                     "mentions": [
                       {
-                        "first": "a1s6",
-                        "last": "a1s8"
+                        "assertion_id": 1,
+                        "text": "Delta Forum"
                       }
                     ]
                   }
@@ -672,8 +672,8 @@
                     "key": "event-date",
                     "mentions": [
                       {
-                        "first": "a1s12",
-                        "last": "a1s16"
+                        "assertion_id": 1,
+                        "text": "2026-05-10"
                       }
                     ]
                   }
@@ -690,8 +690,8 @@
                 "kind": "explicit",
                 "reading": "actually spoke",
                 "support": {
-                  "first": "a4s24",
-                  "last": "a4s30"
+                  "assertion_id": 4,
+                  "text": "spoke at 09:00"
                 }
               },
               "arguments": [
@@ -702,12 +702,12 @@
                     "key": "badge-A-17",
                     "mentions": [
                       {
-                        "first": "a4s0",
-                        "last": "a4s2"
+                        "assertion_id": 4,
+                        "text": "Amir Chen"
                       },
                       {
-                        "first": "a7s7",
-                        "last": "a7s21"
+                        "assertion_id": 7,
+                        "text": "the same Amir Chen with badge A-17"
                       }
                     ]
                   }
@@ -719,8 +719,8 @@
                     "key": "forum",
                     "mentions": [
                       {
-                        "first": "a1s6",
-                        "last": "a1s8"
+                        "assertion_id": 1,
+                        "text": "Delta Forum"
                       }
                     ]
                   }
@@ -732,8 +732,8 @@
                     "key": "event-date",
                     "mentions": [
                       {
-                        "first": "a1s12",
-                        "last": "a1s16"
+                        "assertion_id": 1,
+                        "text": "2026-05-10"
                       }
                     ]
                   }
@@ -741,8 +741,8 @@
                 {
                   "role": "time",
                   "target": {
-                    "first": "a4s28",
-                    "last": "a4s30"
+                    "assertion_id": 4,
+                    "text": "09:00"
                   }
                 }
               ]
@@ -757,8 +757,8 @@
                 "kind": "explicit",
                 "reading": "actually spoke",
                 "support": {
-                  "first": "a6s4",
-                  "last": "a6s10"
+                  "assertion_id": 6,
+                  "text": "spoke at 10:00"
                 }
               },
               "arguments": [
@@ -769,8 +769,8 @@
                     "key": "badge-B-92",
                     "mentions": [
                       {
-                        "first": "a5s11",
-                        "last": "a5s13"
+                        "assertion_id": 5,
+                        "text": "Amir Chen"
                       }
                     ]
                   }
@@ -782,8 +782,8 @@
                     "key": "forum",
                     "mentions": [
                       {
-                        "first": "a1s6",
-                        "last": "a1s8"
+                        "assertion_id": 1,
+                        "text": "Delta Forum"
                       }
                     ]
                   }
@@ -795,8 +795,8 @@
                     "key": "event-date",
                     "mentions": [
                       {
-                        "first": "a1s12",
-                        "last": "a1s16"
+                        "assertion_id": 1,
+                        "text": "2026-05-10"
                       }
                     ]
                   }
@@ -804,8 +804,8 @@
                 {
                   "role": "time",
                   "target": {
-                    "first": "a6s8",
-                    "last": "a6s10"
+                    "assertion_id": 6,
+                    "text": "10:00"
                   }
                 }
               ]
@@ -821,12 +821,12 @@
                 "reading": "actually spoke",
                 "support": [
                   {
-                    "first": "a7s23",
-                    "last": "a7s23"
+                    "assertion_id": 7,
+                    "text": "spoke"
                   },
                   {
-                    "first": "a8s0",
-                    "last": "a8s0"
+                    "assertion_id": 8,
+                    "text": "again"
                   }
                 ]
               },
@@ -838,12 +838,12 @@
                     "key": "badge-A-17",
                     "mentions": [
                       {
-                        "first": "a4s0",
-                        "last": "a4s2"
+                        "assertion_id": 4,
+                        "text": "Amir Chen"
                       },
                       {
-                        "first": "a7s7",
-                        "last": "a7s21"
+                        "assertion_id": 7,
+                        "text": "the same Amir Chen with badge A-17"
                       }
                     ]
                   }
@@ -855,8 +855,8 @@
                     "key": "forum",
                     "mentions": [
                       {
-                        "first": "a1s6",
-                        "last": "a1s8"
+                        "assertion_id": 1,
+                        "text": "Delta Forum"
                       }
                     ]
                   }
@@ -868,8 +868,8 @@
                     "key": "event-date",
                     "mentions": [
                       {
-                        "first": "a1s12",
-                        "last": "a1s16"
+                        "assertion_id": 1,
+                        "text": "2026-05-10"
                       }
                     ]
                   }
@@ -877,8 +877,8 @@
                 {
                   "role": "time",
                   "target": {
-                    "first": "a7s2",
-                    "last": "a7s4"
+                    "assertion_id": 7,
+                    "text": "14:00"
                   }
                 }
               ]
@@ -892,8 +892,8 @@
                 "kind": "explicit",
                 "reading": "person has badge",
                 "support": {
-                  "first": "a9s3",
-                  "last": "a9s3"
+                  "assertion_id": 9,
+                  "text": "badge"
                 }
               },
               "arguments": [
@@ -904,8 +904,8 @@
                     "key": "badge-C-11",
                     "mentions": [
                       {
-                        "first": "a9s0",
-                        "last": "a9s0"
+                        "assertion_id": 9,
+                        "text": "Noor"
                       }
                     ]
                   }
@@ -913,8 +913,8 @@
                 {
                   "role": "badge",
                   "target": {
-                    "first": "a9s5",
-                    "last": "a9s7"
+                    "assertion_id": 9,
+                    "text": "C-11"
                   }
                 }
               ]
@@ -928,8 +928,8 @@
                 "kind": "explicit",
                 "reading": "attended",
                 "support": {
-                  "first": "a9s10",
-                  "last": "a9s10"
+                  "assertion_id": 9,
+                  "text": "attended"
                 }
               },
               "arguments": [
@@ -940,8 +940,8 @@
                     "key": "badge-C-11",
                     "mentions": [
                       {
-                        "first": "a9s0",
-                        "last": "a9s0"
+                        "assertion_id": 9,
+                        "text": "Noor"
                       }
                     ]
                   }
@@ -953,8 +953,8 @@
                     "key": "forum",
                     "mentions": [
                       {
-                        "first": "a1s6",
-                        "last": "a1s8"
+                        "assertion_id": 1,
+                        "text": "Delta Forum"
                       }
                     ]
                   }
@@ -966,8 +966,8 @@
                     "key": "event-date",
                     "mentions": [
                       {
-                        "first": "a1s12",
-                        "last": "a1s16"
+                        "assertion_id": 1,
+                        "text": "2026-05-10"
                       }
                     ]
                   }
@@ -980,8 +980,8 @@
             "expression": {
               "kind": "not",
               "support": {
-                "first": "a9s14",
-                "last": "a9s16"
+                "assertion_id": 9,
+                "text": "did not"
               },
               "content": {
                 "kind": "statement",
@@ -989,8 +989,8 @@
                   "kind": "explicit",
                   "reading": "actually spoke",
                   "support": {
-                    "first": "a9s18",
-                    "last": "a9s18"
+                    "assertion_id": 9,
+                    "text": "speak"
                   }
                 },
                 "arguments": [
@@ -1001,8 +1001,8 @@
                       "key": "badge-C-11",
                       "mentions": [
                         {
-                          "first": "a9s0",
-                          "last": "a9s0"
+                          "assertion_id": 9,
+                          "text": "Noor"
                         }
                       ]
                     }
@@ -1014,8 +1014,8 @@
                       "key": "forum",
                       "mentions": [
                         {
-                          "first": "a1s6",
-                          "last": "a1s8"
+                          "assertion_id": 1,
+                          "text": "Delta Forum"
                         }
                       ]
                     }
@@ -1027,8 +1027,8 @@
                       "key": "event-date",
                       "mentions": [
                         {
-                          "first": "a1s12",
-                          "last": "a1s16"
+                          "assertion_id": 1,
+                          "text": "2026-05-10"
                         }
                       ]
                     }
@@ -1045,8 +1045,8 @@
                 "kind": "explicit",
                 "reading": "person has badge",
                 "support": {
-                  "first": "a11s3",
-                  "last": "a11s3"
+                  "assertion_id": 11,
+                  "text": "badge"
                 }
               },
               "arguments": [
@@ -1057,12 +1057,14 @@
                     "key": "badge-D-08",
                     "mentions": [
                       {
-                        "first": "a11s0",
-                        "last": "a11s0"
+                        "assertion_id": 11,
+                        "text": "Sol",
+                        "occurrence": 0
                       },
                       {
-                        "first": "a11s27",
-                        "last": "a11s27"
+                        "assertion_id": 11,
+                        "text": "Sol",
+                        "occurrence": 1
                       }
                     ]
                   }
@@ -1070,8 +1072,8 @@
                 {
                   "role": "badge",
                   "target": {
-                    "first": "a11s5",
-                    "last": "a11s7"
+                    "assertion_id": 11,
+                    "text": "D-08"
                   }
                 }
               ]
@@ -1082,24 +1084,24 @@
             "expression": {
               "kind": "reported",
               "support": {
-                "first": "a10s0",
-                "last": "a10s6"
+                "assertion_id": 10,
+                "text": "An announcement said that"
               },
               "reporter": {
                 "kind": "entity",
                 "key": "announcement",
                 "mentions": [
                   {
-                    "first": "a10s0",
-                    "last": "a10s2"
+                    "assertion_id": 10,
+                    "text": "An announcement"
                   }
                 ]
               },
               "content": {
                 "kind": "possible",
                 "support": {
-                  "first": "a11s10",
-                  "last": "a11s10"
+                  "assertion_id": 11,
+                  "text": "might"
                 },
                 "content": {
                   "kind": "statement",
@@ -1107,8 +1109,8 @@
                     "kind": "explicit",
                     "reading": "actually spoke",
                     "support": {
-                      "first": "a11s12",
-                      "last": "a11s12"
+                      "assertion_id": 11,
+                      "text": "speak"
                     }
                   },
                   "arguments": [
@@ -1119,12 +1121,14 @@
                         "key": "badge-D-08",
                         "mentions": [
                           {
-                            "first": "a11s0",
-                            "last": "a11s0"
+                            "assertion_id": 11,
+                            "text": "Sol",
+                            "occurrence": 0
                           },
                           {
-                            "first": "a11s27",
-                            "last": "a11s27"
+                            "assertion_id": 11,
+                            "text": "Sol",
+                            "occurrence": 1
                           }
                         ]
                       }
@@ -1136,8 +1140,8 @@
                         "key": "forum",
                         "mentions": [
                           {
-                            "first": "a1s6",
-                            "last": "a1s8"
+                            "assertion_id": 1,
+                            "text": "Delta Forum"
                           }
                         ]
                       }
@@ -1149,8 +1153,8 @@
                         "key": "event-date",
                         "mentions": [
                           {
-                            "first": "a1s12",
-                            "last": "a1s16"
+                            "assertion_id": 1,
+                            "text": "2026-05-10"
                           }
                         ]
                       }
@@ -1165,8 +1169,8 @@
             "expression": {
               "kind": "not",
               "support": {
-                "first": "a11s19",
-                "last": "a11s23"
+                "assertion_id": 11,
+                "text": "no actual speech"
               },
               "content": {
                 "kind": "statement",
@@ -1174,8 +1178,8 @@
                   "kind": "explicit",
                   "reading": "witness recorded actual speech",
                   "support": {
-                    "first": "a11s17",
-                    "last": "a11s27"
+                    "assertion_id": 11,
+                    "text": "recorded no actual speech by Sol"
                   }
                 },
                 "arguments": [
@@ -1186,12 +1190,14 @@
                       "key": "badge-D-08",
                       "mentions": [
                         {
-                          "first": "a11s0",
-                          "last": "a11s0"
+                          "assertion_id": 11,
+                          "text": "Sol",
+                          "occurrence": 0
                         },
                         {
-                          "first": "a11s27",
-                          "last": "a11s27"
+                          "assertion_id": 11,
+                          "text": "Sol",
+                          "occurrence": 1
                         }
                       ]
                     }
@@ -1203,12 +1209,12 @@
                       "key": "notebook",
                       "mentions": [
                         {
-                          "first": "a1s0",
-                          "last": "a1s2"
+                          "assertion_id": 1,
+                          "text": "Witness notebook"
                         },
                         {
-                          "first": "a2s0",
-                          "last": "a2s2"
+                          "assertion_id": 2,
+                          "text": "This notebook"
                         }
                       ]
                     }
@@ -1220,8 +1226,8 @@
                       "key": "forum",
                       "mentions": [
                         {
-                          "first": "a1s6",
-                          "last": "a1s8"
+                          "assertion_id": 1,
+                          "text": "Delta Forum"
                         }
                       ]
                     }
@@ -1233,8 +1239,8 @@
                       "key": "event-date",
                       "mentions": [
                         {
-                          "first": "a1s12",
-                          "last": "a1s16"
+                          "assertion_id": 1,
+                          "text": "2026-05-10"
                         }
                       ]
                     }
@@ -1265,7 +1271,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v5",
+      "contract": "source-semantic-proposal-v6",
       "outcome": {
         "status": "interpreted"
       },
@@ -1279,8 +1285,8 @@
                 "kind": "explicit",
                 "reading": "employee has badge",
                 "support": {
-                  "first": "a2s9",
-                  "last": "a2s9"
+                  "assertion_id": 2,
+                  "text": "badge"
                 }
               },
               "arguments": [
@@ -1291,16 +1297,18 @@
                     "key": "employee",
                     "mentions": [
                       {
-                        "first": "a2s4",
-                        "last": "a2s6"
+                        "assertion_id": 2,
+                        "text": "Rana Sethi"
                       },
                       {
-                        "first": "a3s8",
-                        "last": "a3s8"
+                        "assertion_id": 3,
+                        "text": "her",
+                        "occurrence": 0
                       },
                       {
-                        "first": "a3s18",
-                        "last": "a3s18"
+                        "assertion_id": 3,
+                        "text": "her",
+                        "occurrence": 1
                       }
                     ]
                   }
@@ -1308,8 +1316,8 @@
                 {
                   "role": "badge",
                   "target": {
-                    "first": "a2s11",
-                    "last": "a2s13"
+                    "assertion_id": 2,
+                    "text": "L-19"
                   }
                 },
                 {
@@ -1319,16 +1327,16 @@
                     "key": "employer",
                     "mentions": [
                       {
-                        "first": "a1s0",
-                        "last": "a1s2"
+                        "assertion_id": 1,
+                        "text": "Larch Studio"
                       },
                       {
-                        "first": "a3s12",
-                        "last": "a3s14"
+                        "assertion_id": 3,
+                        "text": "Larch Studio"
                       },
                       {
-                        "first": "a3s22",
-                        "last": "a3s22"
+                        "assertion_id": 3,
+                        "text": "there"
                       }
                     ]
                   }
@@ -1345,12 +1353,12 @@
                 "reading": "exact elapsed interval from joining employer to promotion there in calendar scope",
                 "support": [
                   {
-                    "first": "a3s2",
-                    "last": "a3s22"
+                    "assertion_id": 3,
+                    "text": "elapsed interval between her joining Larch Studio and her promotion there"
                   },
                   {
-                    "first": "a4s8",
-                    "last": "a4s14"
+                    "assertion_id": 4,
+                    "text": "exactly twelve UTC days"
                   }
                 ]
               },
@@ -1362,16 +1370,18 @@
                     "key": "employee",
                     "mentions": [
                       {
-                        "first": "a2s4",
-                        "last": "a2s6"
+                        "assertion_id": 2,
+                        "text": "Rana Sethi"
                       },
                       {
-                        "first": "a3s8",
-                        "last": "a3s8"
+                        "assertion_id": 3,
+                        "text": "her",
+                        "occurrence": 0
                       },
                       {
-                        "first": "a3s18",
-                        "last": "a3s18"
+                        "assertion_id": 3,
+                        "text": "her",
+                        "occurrence": 1
                       }
                     ]
                   }
@@ -1383,16 +1393,16 @@
                     "key": "employer",
                     "mentions": [
                       {
-                        "first": "a1s0",
-                        "last": "a1s2"
+                        "assertion_id": 1,
+                        "text": "Larch Studio"
                       },
                       {
-                        "first": "a3s12",
-                        "last": "a3s14"
+                        "assertion_id": 3,
+                        "text": "Larch Studio"
                       },
                       {
-                        "first": "a3s22",
-                        "last": "a3s22"
+                        "assertion_id": 3,
+                        "text": "there"
                       }
                     ]
                   }
@@ -1400,36 +1410,36 @@
                 {
                   "role": "elapsed value",
                   "target": {
-                    "first": "a4s10",
-                    "last": "a4s10"
+                    "assertion_id": 4,
+                    "text": "twelve"
                   }
                 },
                 {
                   "role": "unit",
                   "target": {
-                    "first": "a4s12",
-                    "last": "a4s14"
+                    "assertion_id": 4,
+                    "text": "UTC days"
                   }
                 },
                 {
                   "role": "from event",
                   "target": {
-                    "first": "a3s10",
-                    "last": "a3s14"
+                    "assertion_id": 3,
+                    "text": "joining Larch Studio"
                   }
                 },
                 {
                   "role": "to event",
                   "target": {
-                    "first": "a3s20",
-                    "last": "a3s22"
+                    "assertion_id": 3,
+                    "text": "promotion there"
                   }
                 },
                 {
                   "role": "calendar scope",
                   "target": {
-                    "first": "a4s2",
-                    "last": "a4s4"
+                    "assertion_id": 4,
+                    "text": "June 2026"
                   }
                 }
               ]
@@ -1440,8 +1450,8 @@
             "expression": {
               "kind": "not",
               "support": {
-                "first": "a5s10",
-                "last": "a5s10"
+                "assertion_id": 5,
+                "text": "not"
               },
               "content": {
                 "kind": "statement",
@@ -1449,23 +1459,23 @@
                   "kind": "explicit",
                   "reading": "summary records event dates",
                   "support": {
-                    "first": "a5s12",
-                    "last": "a5s12"
+                    "assertion_id": 5,
+                    "text": "recorded"
                   }
                 },
                 "arguments": [
                   {
                     "role": "dates",
                     "target": {
-                      "first": "a5s0",
-                      "last": "a5s6"
+                      "assertion_id": 5,
+                      "text": "The two event dates"
                     }
                   },
                   {
                     "role": "record",
                     "target": {
-                      "first": "a6s2",
-                      "last": "a6s4"
+                      "assertion_id": 6,
+                      "text": "this summary"
                     }
                   }
                 ]
@@ -1492,7 +1502,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v5",
+      "contract": "source-semantic-proposal-v6",
       "outcome": {
         "status": "interpreted"
       },
@@ -1506,8 +1516,8 @@
                 "kind": "explicit",
                 "reading": "employee has badge in this note",
                 "support": {
-                  "first": "a2s5",
-                  "last": "a2s7"
+                  "assertion_id": 2,
+                  "text": "employee badge"
                 }
               },
               "arguments": [
@@ -1518,8 +1528,8 @@
                     "key": "employee",
                     "mentions": [
                       {
-                        "first": "a2s0",
-                        "last": "a2s2"
+                        "assertion_id": 2,
+                        "text": "Rana Sethi"
                       }
                     ]
                   }
@@ -1527,8 +1537,8 @@
                 {
                   "role": "badge",
                   "target": {
-                    "first": "a2s9",
-                    "last": "a2s11"
+                    "assertion_id": 2,
+                    "text": "L-19"
                   }
                 },
                 {
@@ -1538,12 +1548,12 @@
                     "key": "employer",
                     "mentions": [
                       {
-                        "first": "a1s0",
-                        "last": "a1s2"
+                        "assertion_id": 1,
+                        "text": "Larch Studio"
                       },
                       {
-                        "first": "a3s0",
-                        "last": "a3s2"
+                        "assertion_id": 3,
+                        "text": "Larch Studio"
                       }
                     ]
                   }
@@ -1555,16 +1565,16 @@
                     "key": "note",
                     "mentions": [
                       {
-                        "first": "a1s4",
-                        "last": "a1s6"
+                        "assertion_id": 1,
+                        "text": "joining note"
                       },
                       {
-                        "first": "a2s15",
-                        "last": "a2s17"
+                        "assertion_id": 2,
+                        "text": "this note"
                       },
                       {
-                        "first": "a4s0",
-                        "last": "a4s2"
+                        "assertion_id": 4,
+                        "text": "This note"
                       }
                     ]
                   }
@@ -1581,8 +1591,8 @@
                 "kind": "explicit",
                 "reading": "joined employer at timestamp",
                 "support": {
-                  "first": "a2s20",
-                  "last": "a2s20"
+                  "assertion_id": 2,
+                  "text": "joined"
                 }
               },
               "arguments": [
@@ -1593,8 +1603,8 @@
                     "key": "employee",
                     "mentions": [
                       {
-                        "first": "a2s0",
-                        "last": "a2s2"
+                        "assertion_id": 2,
+                        "text": "Rana Sethi"
                       }
                     ]
                   }
@@ -1606,12 +1616,12 @@
                     "key": "employer",
                     "mentions": [
                       {
-                        "first": "a1s0",
-                        "last": "a1s2"
+                        "assertion_id": 1,
+                        "text": "Larch Studio"
                       },
                       {
-                        "first": "a3s0",
-                        "last": "a3s2"
+                        "assertion_id": 3,
+                        "text": "Larch Studio"
                       }
                     ]
                   }
@@ -1619,8 +1629,8 @@
                 {
                   "role": "timestamp",
                   "target": {
-                    "first": "a3s6",
-                    "last": "a3s16"
+                    "assertion_id": 3,
+                    "text": "2026-06-01 00:00 UTC"
                   }
                 }
               ]
@@ -1631,8 +1641,8 @@
             "expression": {
               "kind": "not",
               "support": {
-                "first": "a4s4",
-                "last": "a4s6"
+                "assertion_id": 4,
+                "text": "records no"
               },
               "content": {
                 "kind": "statement",
@@ -1640,8 +1650,8 @@
                   "kind": "explicit",
                   "reading": "note records event",
                   "support": {
-                    "first": "a4s4",
-                    "last": "a4s4"
+                    "assertion_id": 4,
+                    "text": "records"
                   }
                 },
                 "arguments": [
@@ -1652,16 +1662,16 @@
                       "key": "note",
                       "mentions": [
                         {
-                          "first": "a1s4",
-                          "last": "a1s6"
+                          "assertion_id": 1,
+                          "text": "joining note"
                         },
                         {
-                          "first": "a2s15",
-                          "last": "a2s17"
+                          "assertion_id": 2,
+                          "text": "this note"
                         },
                         {
-                          "first": "a4s0",
-                          "last": "a4s2"
+                          "assertion_id": 4,
+                          "text": "This note"
                         }
                       ]
                     }
@@ -1669,8 +1679,8 @@
                   {
                     "role": "event type",
                     "target": {
-                      "first": "a4s8",
-                      "last": "a4s10"
+                      "assertion_id": 4,
+                      "text": "promotion event"
                     }
                   }
                 ]
@@ -1698,7 +1708,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v5",
+      "contract": "source-semantic-proposal-v6",
       "outcome": {
         "status": "interpreted"
       },
@@ -1712,8 +1722,8 @@
                 "kind": "explicit",
                 "reading": "employee has badge in this note",
                 "support": {
-                  "first": "a2s5",
-                  "last": "a2s7"
+                  "assertion_id": 2,
+                  "text": "employee badge"
                 }
               },
               "arguments": [
@@ -1724,8 +1734,8 @@
                     "key": "employee",
                     "mentions": [
                       {
-                        "first": "a2s0",
-                        "last": "a2s2"
+                        "assertion_id": 2,
+                        "text": "Rana Sethi"
                       }
                     ]
                   }
@@ -1733,8 +1743,8 @@
                 {
                   "role": "badge",
                   "target": {
-                    "first": "a2s9",
-                    "last": "a2s11"
+                    "assertion_id": 2,
+                    "text": "L-19"
                   }
                 },
                 {
@@ -1744,12 +1754,12 @@
                     "key": "employer",
                     "mentions": [
                       {
-                        "first": "a1s0",
-                        "last": "a1s2"
+                        "assertion_id": 1,
+                        "text": "Larch Studio"
                       },
                       {
-                        "first": "a3s4",
-                        "last": "a3s6"
+                        "assertion_id": 3,
+                        "text": "Larch Studio"
                       }
                     ]
                   }
@@ -1761,16 +1771,16 @@
                     "key": "note",
                     "mentions": [
                       {
-                        "first": "a1s4",
-                        "last": "a1s6"
+                        "assertion_id": 1,
+                        "text": "promotion note"
                       },
                       {
-                        "first": "a2s15",
-                        "last": "a2s17"
+                        "assertion_id": 2,
+                        "text": "this note"
                       },
                       {
-                        "first": "a4s0",
-                        "last": "a4s2"
+                        "assertion_id": 4,
+                        "text": "This note"
                       }
                     ]
                   }
@@ -1788,12 +1798,12 @@
                 "reading": "was promoted at employer at timestamp",
                 "support": [
                   {
-                    "first": "a2s20",
-                    "last": "a2s20"
+                    "assertion_id": 2,
+                    "text": "was"
                   },
                   {
-                    "first": "a3s0",
-                    "last": "a3s0"
+                    "assertion_id": 3,
+                    "text": "promoted"
                   }
                 ]
               },
@@ -1805,8 +1815,8 @@
                     "key": "employee",
                     "mentions": [
                       {
-                        "first": "a2s0",
-                        "last": "a2s2"
+                        "assertion_id": 2,
+                        "text": "Rana Sethi"
                       }
                     ]
                   }
@@ -1818,12 +1828,12 @@
                     "key": "employer",
                     "mentions": [
                       {
-                        "first": "a1s0",
-                        "last": "a1s2"
+                        "assertion_id": 1,
+                        "text": "Larch Studio"
                       },
                       {
-                        "first": "a3s4",
-                        "last": "a3s6"
+                        "assertion_id": 3,
+                        "text": "Larch Studio"
                       }
                     ]
                   }
@@ -1831,8 +1841,8 @@
                 {
                   "role": "timestamp",
                   "target": {
-                    "first": "a3s10",
-                    "last": "a3s20"
+                    "assertion_id": 3,
+                    "text": "2026-06-13 00:00 UTC"
                   }
                 }
               ]
@@ -1843,8 +1853,8 @@
             "expression": {
               "kind": "not",
               "support": {
-                "first": "a4s4",
-                "last": "a4s6"
+                "assertion_id": 4,
+                "text": "records no"
               },
               "content": {
                 "kind": "statement",
@@ -1852,8 +1862,8 @@
                   "kind": "explicit",
                   "reading": "note records event",
                   "support": {
-                    "first": "a4s4",
-                    "last": "a4s4"
+                    "assertion_id": 4,
+                    "text": "records"
                   }
                 },
                 "arguments": [
@@ -1864,16 +1874,16 @@
                       "key": "note",
                       "mentions": [
                         {
-                          "first": "a1s4",
-                          "last": "a1s6"
+                          "assertion_id": 1,
+                          "text": "promotion note"
                         },
                         {
-                          "first": "a2s15",
-                          "last": "a2s17"
+                          "assertion_id": 2,
+                          "text": "this note"
                         },
                         {
-                          "first": "a4s0",
-                          "last": "a4s2"
+                          "assertion_id": 4,
+                          "text": "This note"
                         }
                       ]
                     }
@@ -1884,12 +1894,12 @@
                       "kind": "entity",
                       "mentions": [
                         {
-                          "first": "a4s8",
-                          "last": "a4s8"
+                          "assertion_id": 4,
+                          "text": "joining"
                         },
                         {
-                          "first": "a5s0",
-                          "last": "a5s0"
+                          "assertion_id": 5,
+                          "text": "event"
                         }
                       ]
                     }

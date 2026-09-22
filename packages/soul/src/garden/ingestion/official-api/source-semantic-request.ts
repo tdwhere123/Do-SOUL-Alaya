@@ -16,7 +16,7 @@ import {
   SourceSemanticQueryGapSchema,
 
 
-  SourceSemanticQueryMeaningBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceSelectionSchema,
+  SourceSemanticQueryMeaningBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceSelectionSchema,
   buildSourceReferenceCatalog, buildSourceSemanticCorrespondenceEndpointCatalog, canonicalJson,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery,
   type SourceSemanticCorrespondenceEndpointCatalog
@@ -31,8 +31,8 @@ import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canon
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-selection-guidance.js";
 
-export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v5" as const;
-export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v5" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v6" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v6" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT = "source-semantic-correspondence-request-v4" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v3" as const;
 
@@ -141,9 +141,9 @@ export type SourceSemanticRequest = Readonly<{
   schema_version: typeof SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION;
   interpretation_contract: typeof SOURCE_SEMANTIC_PACKET_CONTRACT;
   source_request: SourceSemanticOpenRequestBody;
-  source_catalog: SourceReferenceCatalog;
   profile?: SourceInterpretationProfile;
-}>;
+}> & (Readonly<{ source_digest: string; source_catalog?: never }>
+  | Readonly<{ source_catalog: SourceReferenceCatalog; source_digest?: never }>);
 
 export type SourceSemanticProposalInput = Readonly<{
   sourceCorpus: string;
@@ -220,6 +220,8 @@ function producerCapability(producer_id: string, producer_version: string) {
   return ProducerCapability.parse({ producer_id, producer_version, proposes: "draft_semantics" });
 }
 
+const requestCatalogs = new WeakMap<SourceSemanticRequest, SourceReferenceCatalog>();
+
 export function parseSourceSemanticRequest(value: unknown): SourceSemanticRequest {
   if (Buffer.byteLength(JSON.stringify(value) ?? "", "utf8") > 1_000_000) {
     throw new AlayaError("VALIDATION", "source semantic request exceeds its byte bound");
@@ -229,16 +231,31 @@ export function parseSourceSemanticRequest(value: unknown): SourceSemanticReques
   if (new Set(source_request.source_assertions.map((row) => row.assertion_id)).size !== source_request.source_assertions.length) {
     throw new AlayaError("VALIDATION", "source semantic request has duplicate assertion identities");
   }
-  const catalog = buildSourceReferenceCatalog(parsed.source_catalog.source_digest, source_request.source_assertions, semanticSha256);
-  if (canonicalJson(catalog) !== canonicalJson(parsed.source_catalog)) {
-    throw new AlayaError("CONFLICT", "source semantic request catalog mismatch");
+  const selection = source_request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT;
+  if (selection ? parsed.source_digest === undefined || parsed.source_catalog !== undefined
+    : parsed.source_catalog === undefined || parsed.source_digest !== undefined) {
+    throw new AlayaError("VALIDATION", "source semantic request source binding differs from its proposal contract");
   }
-  const request = { ...parsed, source_request } as SourceSemanticRequest;
+  const request = Object.freeze({ ...parsed, source_request }) as SourceSemanticRequest;
+  requestCatalogs.set(request, sourceSemanticRequestCatalog(request));
   if (source_request.revision !== undefined) validateSourceSemanticRevision(request, source_request.revision);
   if (Buffer.byteLength(JSON.stringify(request), "utf8") > 1_000_000) {
     throw new AlayaError("VALIDATION", "source semantic request exceeds its byte bound");
   }
   return request;
+}
+
+/** Catalog identity and segmentation remain owned by the shared source-reference builder. */
+export function sourceSemanticRequestCatalog(request: SourceSemanticRequest): SourceReferenceCatalog {
+  const retained = requestCatalogs.get(request);
+  if (retained !== undefined) return retained;
+  const digest = request.source_digest ?? request.source_catalog?.source_digest;
+  if (digest === undefined) throw new AlayaError("VALIDATION", "source semantic request requires a source digest");
+  const catalog = buildSourceReferenceCatalog(digest, request.source_request.source_assertions, semanticSha256);
+  if (request.source_catalog !== undefined && canonicalJson(catalog) !== canonicalJson(request.source_catalog)) {
+    throw new AlayaError("CONFLICT", "source semantic request catalog mismatch");
+  }
+  return catalog;
 }
 
 export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): SourceSemanticRequest {
@@ -267,7 +284,7 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
     schema_version: SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION,
     interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
     source_request,
-    source_catalog: buildSourceReferenceCatalog(semanticSha256(input.sourceCorpus), source_request.source_assertions, semanticSha256),
+    source_digest: semanticSha256(input.sourceCorpus),
     ...(input.profile !== undefined ? { profile: input.profile } : {})
   });
   return input.revision === undefined ? request : parseSourceSemanticRequest({ ...request,
@@ -466,14 +483,14 @@ export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): stri
 }
 
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
-  "Propose query meaning for the original query only, using source-semantic-query-meaning-v3.",
+  `Propose query meaning for the original query only, using ${SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT}.`,
   "Describe meaning, not answers or execution. The host builds IDs, sorts, incidence and evidence branches; do not emit graphs, hashes, programs, execution statistics, ranking or verdicts. Omit optional statement/operator keys unless referenced elsewhere. Entity keys express identity; unknown answer values are free targets, not unresolved meaning.",
   "First preserve the qualified answer being asked for in each alternative's conditions. Conditions are a conjunction; content means an embedded event, never an unrelated condition or a modifier. Put dates, places and other ordinary qualifications in the arguments of the event they qualify. Keep participants, population, time and units on the answer even when inputs also carry them.",
   "For a requested calculation or other operation, also retain requested_operation:{reading,support:{kind:query_text,excerpt}} and independently useful evidence_inputs:[{conditions:[...]}]. Each input describes the needed value and its qualifications using free targets. Representing the operation and retrieving its inputs do not require executing it. Do not omit these because arithmetic is unsupported, or turn all inputs into one answer conjunction. A source can state the answer directly without its inputs. If no faithful answer relation is expressible, conditions:[] is allowed with the operation and inputs; those inputs still do not complete the answer.",
   `A nesting path may contain at most ${SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH + 1} statement/operator nodes. Deeper meaning must remain a located gap; never silently truncate its scope.`,
-  'Use statement:{predicate,arguments,content?} and operators with explicit operands. An argument target is free, named or reference, never an embedded event; content holds that event and preserves its participants. Reuse a keyed occurrence with {kind:"occurrence",key}. possible, not, reported and conditional preserve their scope; a promise, report or hypothetical does not assert its embedded event.',
-  'Local keys are arbitrary identifiers, never text evidence. Declare named/free entities inline or in the optional entities table, not both; reuse them with {kind:"reference",key}. Named targets need one exact query excerpt. Free targets can supply excerpt themselves or at their argument, including a free reported.reporter. References inherit unambiguous declared support. Keep true ambiguity as a gap; do not infer identity from a key or invent source content.',
-  "source_act is retrieval intent, not query punctuation. Omit it for ordinary factual questions; select question/directive only when seeking that source act. Factual questions seek source assertions or entailments, not unconditional world truth. Return requested targets only; do not additionally return containing events or operation inputs. A question word locates a free target; a name is a named constraint.",
+  'Use statement:{predicate,arguments,content?} and operators with explicit operands. An argument target is free, named or a reference to a declared entity, statement or operator. A role reference does not embed its target or change its truth obligation. Use content for embedded meaning and retain its participants. Reuse a keyed occurrence with {kind:"occurrence",key}. possible, not, reported and conditional preserve their scope; a promise, report or hypothetical does not assert its embedded event.',
+  'Local keys are arbitrary identifiers, never text evidence. Declare named/free entities inline or in the optional entities table, not both; reuse them with {kind:"reference",key}. Named targets need one exact query excerpt. Free targets can supply excerpt themselves or at their argument, including a free reported.reporter. Entity references inherit unambiguous declared support. References to statements/operators require the argument’s own exact query excerpt; reporter targets must remain entities. Keep true ambiguity as a gap; do not infer identity from a key or invent source content.',
+  "required_evidence_act:{act,excerpt} constrains the speech act of sought evidence. Omit it for ordinary factual questions; select act question/directive only when the original query explicitly seeks that source act, with an exact excerpt supporting the constraint. Factual questions seek source assertions or entailments, not unconditional world truth. Return requested targets only; do not additionally return containing events or operation inputs. A question word locates a free target; a name is a named constraint.",
   'Optional domains are {key,excerpt}. Universal evaluation is {kind:"forall",domain,binder,local_variables}; binders occur in the body and cannot be returned. entailed_at_source requests inference; asserted_at_source requests a literal assertion. Counterexample alternatives use purpose:"counterexample".',
   "Preserve universal population restrictions as domains and evaluation, not named entities or an invented census. Unknown domain members do not make the query referent unresolved. Nested universals remain unsupported. Preserve completion/aspect and other qualifications in meaning or a located gap; a broader predicate alone is insufficient.",
   'Comparison evaluation is {kind:"comparison",domain,operation:"lt"|"le"|"eq"|"ge"|"gt"|"minimum"|"maximum",left,right?,strict,metric,unit,context,scope:"asserted"|"preserve"} with no nested meaning. Pairwise strict is true only for lt/gt; extrema omit right and explicitly choose strictness. Return only operand keys.',

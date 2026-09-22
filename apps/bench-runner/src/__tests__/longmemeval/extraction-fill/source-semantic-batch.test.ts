@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, prepareSourceSemanticRevision } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, sourceSemanticRequestCatalog, prepareSourceSemanticRevision } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
@@ -32,18 +32,18 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias" | "duplicate_gap_channel" | "partial" = "semantic") {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
   const assertion = request.source_request.source_assertions.find((row) => row.text.includes("completed"))!;
-  const catalog = request.source_catalog.assertions.find((row) => row.assertion_id === assertion.assertion_id)!;
+  const catalog = sourceSemanticRequestCatalog(request).assertions.find((row) => row.assertion_id === assertion.assertion_id)!;
   const segment = (text: string) => catalog.segments.find((row) => row.text === text)!;
   const anchor = (text: string) => ({
     assertion_id: assertion.assertion_id, source_ref: { first: segment(text).id, last: segment(text).id }
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const contract = request.source_request.proposal_contract ?? "source-semantic-proposal-v3";
-  const envelope = contract === "source-semantic-proposal-v5" ? {
+  const envelope = contract === "source-semantic-proposal-v6" ? {
     contract, outcome: { status: "interpreted" }, content: {
       roots: [{ act: "assertion", expression: {
-        kind: "statement", predicate: { kind: "explicit", reading: "complete", support: segment("completed").id },
-        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [segment(theme).id] } }]
+        kind: "statement", predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
+        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [{ assertion_id: assertion.assertion_id, text: theme }] } }]
       } }]
     }
   } : contract === "source-semantic-proposal-v4" ? {
@@ -66,13 +66,13 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   };
   const editable = JSON.parse(JSON.stringify(envelope));
   if (mode === "unknown_alias") {
-    editable.content.roots[0].expression.arguments[0].target = contract === "source-semantic-proposal-v5"
+    editable.content.roots[0].expression.arguments[0].target = contract === "source-semantic-proposal-v6"
       ? { kind: "occurrence", key: segment(theme).id }
       : { kind: "reference", key: segment(theme).id };
   }
   if (mode === "duplicate_gap_channel" || mode === "partial") {
-    const gaps = contract === "source-semantic-proposal-v5"
-      ? [{ kind: "unresolved_referent", affected: ["r0"], support: segment(theme).id }]
+    const gaps = contract === "source-semantic-proposal-v6"
+      ? [{ kind: "unresolved_referent", affected: ["r0"], support: { assertion_id: assertion.assertion_id, text: theme } }]
       : [{ kind: "unresolved_referent", affected: ["r0"], evidence: [anchor(theme)] }];
     if (mode === "partial") editable.content.gaps = gaps;
     else editable.outcome.gaps = gaps;
@@ -389,11 +389,10 @@ it("enforces the 32 MiB shard bound and the 1 MiB envelope before reservation or
 }, 60000);
 
 function dispositionResponse(userPrompt: string): string {
-  const request = parseSourceSemanticRequest(JSON.parse(userPrompt)), row = request.source_catalog.assertions[0]!;
-  return JSON.stringify({ contract: request.source_request.proposal_contract ?? "source-semantic-proposal-v3", outcome: {
+  const request = parseSourceSemanticRequest(JSON.parse(userPrompt)), row = request.source_request.source_assertions[0]!;
+  return JSON.stringify({ contract: request.source_request.proposal_contract, outcome: {
     status: "no_executable_proposition", description: "Unreviewed producer disposition",
-    context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
-      source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }]
+    context_support: [{ assertion_id: row.assertion_id, text: row.text }]
   } });
 }
 it("imports and reopens a legal no-proposition disposition without changing it to abstention", async () => {

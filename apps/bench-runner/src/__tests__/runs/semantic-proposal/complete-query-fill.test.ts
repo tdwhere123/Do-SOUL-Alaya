@@ -69,10 +69,10 @@ function extractor(raws: string[], extra: { finish?: string | null; usage?: bool
 
 function meaningBody(themeExcerpt: string): string {
   return JSON.stringify({
-    contract: "source-semantic-query-response-v5",
+    contract: "source-semantic-query-response-v6",
     outcome: { status: "interpreted" },
     query: {
-      contract: "source-semantic-query-meaning-v3",
+      contract: "source-semantic-query-meaning-v4",
       alternatives: [{ conditions: [{
         kind: "statement", key: "send", predicate: "send",
         arguments: [

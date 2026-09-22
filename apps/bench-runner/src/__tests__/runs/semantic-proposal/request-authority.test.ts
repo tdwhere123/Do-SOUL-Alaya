@@ -16,7 +16,7 @@ import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artif
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 
 const model = "gemini-3.1-flash-lite", requestProfile = "gemini-3.1-minimal-v1" as const;
-const rawJson = JSON.stringify({ contract: "source-semantic-query-response-v5", outcome: { status: "abstained" } });
+const rawJson = JSON.stringify({ contract: "source-semantic-query-response-v6", outcome: { status: "abstained" } });
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })));
 function root() { const value = mkdtempSync(join(tmpdir(), "proposal-request-authority-")); roots.push(value); return value; }

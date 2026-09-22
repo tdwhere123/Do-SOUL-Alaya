@@ -9,20 +9,100 @@ import {
 import { sourceSemanticQueryIdentity } from "../../../garden/source-semantic-identity.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
-const envelope = { original_query_digest: digest, producer_id: "qp", producer_version: "1" };
+const identity = { original_query_digest: digest, producer_id: "qp", producer_version: "1" };
+const envelope = { ...identity, original_query: "Who sent the sample to Mira?" };
 const operation = { reading: "identify the requested participants", support: { kind: "query_text", excerpt: "Who" } };
 
 const meaning = (node: object, extra: object = {}) => ({
   contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [node] }], gaps: [], ...extra
 });
 
-function compiled(node: object, extra: object = {}) {
-  return materializeSourceSemanticQueryMeaning(meaning(node, extra), envelope);
+function compiled(node: object, extra: object = {}, original = envelope.original_query) {
+  return materializeSourceSemanticQueryMeaning(meaning(node, extra), { ...envelope, original_query: original });
 }
 
 function statement(predicate: string, args: object[], extra: object = {}) {
   return { kind: "statement", key: predicate, predicate, arguments: args, ...extra };
 }
+
+const occurrenceMeaning = (target = "ring", excerpt: string | null = "ringing") => ({
+  contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [], return: [],
+  alternatives: [{ conditions: [statement("before", [
+    { role: "earlier", target: { kind: "reference", key: target }, ...(excerpt === null ? {} : { excerpt }) },
+    { role: "later", target: { kind: "reference", key: "flash" }, excerpt: "flashing" }
+  ]), statement("ring", []), statement("flash", [])] }]
+});
+const occurrenceEnvelope = { ...identity, original_query: "Did ringing precede flashing?" };
+
+it("resolves forward role references to declared propositions without creating entities or embedding", () => {
+  const query = materializeSourceSemanticQueryMeaning(occurrenceMeaning(), occurrenceEnvelope);
+  expect(query.variables).toEqual([
+    { id: "before", sort: "proposition" }, { id: "ring", sort: "proposition" }, { id: "flash", sort: "proposition" }
+  ]);
+  expect(query.alternatives[0]!.frames[0]!.role_requirements).toEqual([
+    { id: "earlier", role_reading: "earlier", target_variable: "ring", support: { kind: "query_text", excerpt: "ringing" } },
+    { id: "later", role_reading: "later", target_variable: "flash", support: { kind: "query_text", excerpt: "flashing" } }
+  ]);
+  expect(query.alternatives[0]!.context_obligations).toEqual([
+    { frame: "before", kind: "asserted_at_source" }, { frame: "ring", kind: "asserted_at_source" },
+    { frame: "flash", kind: "asserted_at_source" }
+  ]);
+});
+
+it("keeps a referenced context and its nested occurrence in their declared scope", () => {
+  const query = materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [], alternatives: [{ conditions: [statement("discuss", [
+    { role: "topic", target: { kind: "reference", key: "possibility" }, excerpt: "possible ringing" },
+    { role: "event", target: { kind: "reference", key: "ring" }, excerpt: "ringing" }
+  ]), { kind: "possible", key: "possibility", content: statement("ring", []) }] }] },
+  { ...identity, original_query: "Was possible ringing discussed?" });
+  expect(query.variables).toEqual([
+    { id: "discuss", sort: "proposition" }, { id: "possibility", sort: "context" }, { id: "ring", sort: "proposition" }
+  ]);
+  expect(query.alternatives[0]!.context_obligations).toEqual([
+    { frame: "discuss", kind: "asserted_at_source" }, { frame: "possibility", kind: "asserted_at_source" },
+    { frame: "ring", kind: "explicit_embedded_structure",
+      incidence: { kind: "operator_operand", other_frame: "possibility", role: "content" } }
+  ]);
+});
+
+it("rejects unknown, unsupported and conflicting occurrence role references", () => {
+  expect(() => materializeSourceSemanticQueryMeaning(occurrenceMeaning("missing"), occurrenceEnvelope)).toThrow(/undeclared local reference/u);
+  expect(() => materializeSourceSemanticQueryMeaning(occurrenceMeaning("ring", null), occurrenceEnvelope)).toThrow(/requires explicit query text support/u);
+  expect(() => materializeSourceSemanticQueryMeaning(occurrenceMeaning("ring", "invented"), occurrenceEnvelope)).toThrow(/absent from the original query/u);
+  expect(() => materializeSourceSemanticQueryMeaning({ ...occurrenceMeaning(),
+    entities: [{ kind: "named", key: "ring", excerpt: "ringing" }] }, occurrenceEnvelope)).toThrow(/cannot share one variable/u);
+  expect(() => materializeSourceSemanticQueryMeaning({ ...occurrenceMeaning(), alternatives: [
+    ...occurrenceMeaning().alternatives, { conditions: [statement("ring", [])] }
+  ] }, occurrenceEnvelope)).toThrow(/requires a unique occurrence declaration/u);
+  expect(() => compiled({ kind: "reported", reporter: { kind: "reference", key: "ring" },
+    content: statement("ring", []) }, {}, "Who reported ringing?")).toThrow(/undeclared local reference/u);
+});
+
+it.each(["question", "directive"] as const)("checks original support before lowering a required evidence %s", act => {
+  const original = `Which ${act} concerned ringing?`;
+  const query = compiled(statement("ring", [], { required_evidence_act: { act, excerpt: act } }), {}, original);
+  expect(query.alternatives[0]!.frames[0]!.source_act).toBe(act);
+  expect(query.gaps).toEqual([]);
+  expect(query.alternatives[0]!.frames[0]!.role_requirements).toEqual([]);
+  for (const excerpt of ["", "absent support"]) {
+    expect(() => compiled(statement("ring", [], { required_evidence_act: { act, excerpt } }), {}, original)).toThrow();
+  }
+});
+
+it("requires current original text and rejects old meaning or unsupported source-act syntax", () => {
+  const body = meaning(statement("ring", []));
+  expect(() => materializeSourceSemanticQueryMeaning(body, identity as typeof envelope)).toThrow(/requires original query text/u);
+  expect(() => materializeSourceSemanticQueryMeaning({ ...body, contract: "source-semantic-query-meaning-v3" }, occurrenceEnvelope)).toThrow();
+  expect(() => compiled(statement("ring", [], { source_act: "question" }), {}, occurrenceEnvelope.original_query)).toThrow();
+  expect(() => compiled(statement("ring", [], { required_evidence_act: { act: "question" } }), {}, occurrenceEnvelope.original_query)).toThrow();
+});
+
+it("does not classify question wording or silently clear an explicitly supported evidence-act choice", () => {
+  const ordinary = compiled(statement("ring", []), {}, "Did ringing occur?");
+  const authored = compiled(statement("ring", [], { required_evidence_act: { act: "question", excerpt: "Did" } }), {}, "Did ringing occur?");
+  expect(ordinary.alternatives[0]!.frames[0]!.source_act).toBeUndefined();
+  expect(authored.alternatives[0]!.frames[0]!.source_act).toBe("question");
+});
 
 it("represents independent conjuncts with a shared participant without inventing embedding", () => {
   const query = materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
@@ -101,8 +181,8 @@ it("marks requested question content and leaves a factual polar question without
   ], {
     content: statement("open", [
       { role: "theme", target: { kind: "named", key: "vault", excerpt: "vault" }, excerpt: "vault" }
-    ], { source_act: "question" })
-  }));
+    ], { required_evidence_act: { act: "question", excerpt: "asked whether" } })
+  }), {}, "Who asked whether the vault was open?");
   expect(asked.alternatives[0]?.frames.find((row) => row.id === "ask")?.source_act).toBeUndefined();
   expect(asked.alternatives[0]?.frames.find((row) => row.id === "open")?.source_act).toBe("question");
   expect(asked.alternatives[0]?.context_obligations.find((row) => row.frame === "open")).toMatchObject({
@@ -392,7 +472,7 @@ it("preserves an accepted query's complete graph and existing identity material"
       arguments: [{ role: "agent", target: { kind: "reference", key: "person" }, excerpt: "Who" }] } }
   }), { return: ["person"] });
   const expected = SourceSemanticQuerySchema.parse({
-    contract: SOURCE_SEMANTIC_QUERY_CONTRACT, ...envelope, contract_version: SOURCE_SEMANTIC_QUERY_CONTRACT,
+    contract: SOURCE_SEMANTIC_QUERY_CONTRACT, ...identity, contract_version: SOURCE_SEMANTIC_QUERY_CONTRACT,
     variables: [{ id: "send", sort: "proposition" }, { id: "person", sort: "entity" },
       { id: "c1", sort: "context" }, { id: "s1", sort: "proposition" }],
     alternatives: [{ frames: [

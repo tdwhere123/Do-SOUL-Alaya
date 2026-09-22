@@ -158,7 +158,8 @@ export const SourceSemanticRequestEnvelopeSchema = z.object({
   schema_version: z.literal(SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION),
   interpretation_contract: z.literal(SOURCE_SEMANTIC_PACKET_CONTRACT),
   source_request: z.unknown(),
-  source_catalog: SourceReferenceCatalogSchema,
+  source_catalog: SourceReferenceCatalogSchema.optional(),
+  source_digest: Sha256HexSchema.optional(),
   profile: SourceInterpretationProfileSchema.optional()
 }).strict().readonly();
 

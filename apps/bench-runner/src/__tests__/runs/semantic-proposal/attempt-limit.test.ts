@@ -166,7 +166,7 @@ it.each(["unresolved", "settled"] as const)(
     const prepared = { ...workset, items: [workset.items[0]] }, { cacheRoot, authority } = fixture(prepared, 2);
     const line = materializeSemanticProposalLines(prepared, 128)[0]!;
     const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
-    const completed = JSON.stringify({ contract: "source-semantic-query-response-v5", outcome: { status: "abstained" } });
+    const completed = JSON.stringify({ contract: "source-semantic-query-response-v6", outcome: { status: "abstained" } });
     for (const text of ["{", completed]) {
       const ordinal = ledger.reserveAttemptOrdinal(line.key);
       writeProviderRawAttempt({ root: cacheRoot, cacheKey: line.key, attemptOrdinal: ordinal, kind: "query", model,

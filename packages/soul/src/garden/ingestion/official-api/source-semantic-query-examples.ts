@@ -1,11 +1,13 @@
+import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT } from "@do-soul/alaya-protocol";
+
 /** Complete neutral producer examples; their admission and incidence are tested. */
 export const sourceSemanticQueryExamples = [
   {
     original_query: "Who was asked to polish the lens?",
     response: {
-      contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },
+      contract: "source-semantic-query-response-v6", outcome: { status: "interpreted" },
       query: {
-        contract: "source-semantic-query-meaning-v3", gaps: [], return: ["person"],
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [], return: ["person"],
         alternatives: [{ conditions: [{
           kind: "statement", key: "request", predicate: "ask",
           arguments: [{ role: "recipient", target: { kind: "free", key: "person" }, excerpt: "Who" }],
@@ -23,9 +25,9 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Is every registered sensor calibrated?",
     response: {
-      contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },
+      contract: "source-semantic-query-response-v6", outcome: { status: "interpreted" },
       query: {
-        contract: "source-semantic-query-meaning-v3", gaps: [], return: [],
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [], return: [],
         domains: [{ key: "sensors", excerpt: "every registered sensor" }],
         evaluation: { kind: "forall", domain: "sensors", binder: "sensor", local_variables: ["sensor", "calibration"] },
         alternatives: [{ conditions: [{
@@ -38,9 +40,9 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Who has already arrived?",
     response: {
-      contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },
+      contract: "source-semantic-query-response-v6", outcome: { status: "interpreted" },
       query: {
-        contract: "source-semantic-query-meaning-v3", return: ["person"],
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, return: ["person"],
         alternatives: [{ conditions: [{
           kind: "statement", key: "arrival", predicate: "arrive",
           arguments: [{ role: "agent", target: { kind: "free", key: "person" }, excerpt: "Who" }]
@@ -54,9 +56,9 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "What is the ratio of amber beads to blue beads in tray T?",
     response: {
-      contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },
+      contract: "source-semantic-query-response-v6", outcome: { status: "interpreted" },
       query: {
-        contract: "source-semantic-query-meaning-v3", gaps: [], return: ["ratio"],
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [], return: ["ratio"],
         requested_operation: { reading: "Divide the amber bead count by the blue bead count in tray T.",
           support: { kind: "query_text", excerpt: "ratio of amber beads to blue beads in tray T" } },
         entities: [
@@ -84,6 +86,49 @@ export const sourceSemanticQueryExamples = [
             ] }] }
           ]
         }]
+      }
+    }
+  },
+  {
+    original_query: "Did ringing precede flashing?",
+    response: {
+      contract: "source-semantic-query-response-v6", outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [], return: [],
+        alternatives: [{ conditions: [
+          { kind: "statement", key: "before", predicate: "precede", arguments: [
+            { role: "earlier", target: { kind: "reference", key: "ring" }, excerpt: "ringing" },
+            { role: "later", target: { kind: "reference", key: "flash" }, excerpt: "flashing" }
+          ] },
+          { kind: "statement", key: "ring", predicate: "ring", arguments: [] },
+          { kind: "statement", key: "flash", predicate: "flash", arguments: [] }
+        ] }]
+      }
+    }
+  },
+  {
+    original_query: "Which question asked whether the lens was polished?",
+    response: {
+      contract: "source-semantic-query-response-v6", outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [], return: ["polish"],
+        alternatives: [{ conditions: [{ kind: "statement", key: "polish", predicate: "polish",
+          required_evidence_act: { act: "question", excerpt: "question asked whether" },
+          arguments: [{ role: "theme", target: { kind: "named", key: "lens", excerpt: "the lens" } }]
+        }] }]
+      }
+    }
+  },
+  {
+    original_query: "Which directive required polishing the lens?",
+    response: {
+      contract: "source-semantic-query-response-v6", outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [], return: ["polish"],
+        alternatives: [{ conditions: [{ kind: "statement", key: "polish", predicate: "polish",
+          required_evidence_act: { act: "directive", excerpt: "directive required" },
+          arguments: [{ role: "theme", target: { kind: "named", key: "lens", excerpt: "the lens" } }]
+        }] }]
       }
     }
   }

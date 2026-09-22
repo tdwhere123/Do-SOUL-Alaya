@@ -2,12 +2,10 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import { SourceSemanticSelectionGenerationSchema, SourceSemanticQueryMeaningBodySchema,
-  SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, buildSourceSemanticRequest,
   buildSourceSemanticQueryRequest, officialApiExtractionResponseSchemaPreimage, parseSourceSemanticRequest,
-  receiveSourceSemantics, sourceSemanticQueryResponseJsonSchema, sourceSemanticSystemPrompt,
+  receiveSourceSemantics, sourceSemanticQueryResponseJsonSchema, sourceSemanticSystemPrompt, sourceSemanticRequestCatalog,
   sourceSemanticCorrespondenceResponseJsonSchema, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
@@ -20,7 +18,7 @@ import { createGeminiHttpExtractor } from "../../../runs/compile-seed/http/gemin
 const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor might read it.", assertionIds: [1, 2],
   source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
 
-describe("Gemini recursive decoding schema projection", () => {
+describe("Gemini complete generation schema guidance", () => {
   it.each([SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT])(
     "keeps compact but exponentially expanded %s envelopes in JSON mode", (contract) => {
     const definitions: Record<string, object> = { leaf: { type: "string" } };
@@ -88,7 +86,9 @@ describe("Gemini recursive decoding schema projection", () => {
   it("replays historical recursive decoding bytes and cache identity while preserving acyclic identities", () => {
     const current = buildSourceSemanticRequest(input);
     const { generation_schema_contract: _generation, ...source_request } = current.source_request;
-    const request = JSON.stringify({ ...current, source_request: {
+    const request = JSON.stringify({ schema_version: current.schema_version,
+      interpretation_contract: current.interpretation_contract,
+      source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...source_request, proposal_contract: "source-semantic-proposal-v3"
     } });
     const source = officialApiExtractionResponseSchemaPreimage(request);
@@ -113,7 +113,8 @@ describe("Gemini recursive decoding schema projection", () => {
   it("does not put the compact expression schema on the structured decoder wire", () => {
     const current = buildSourceSemanticRequest(input);
     const compactRequest = parseSourceSemanticRequest({
-      ...current, source_request: {
+      schema_version: current.schema_version, interpretation_contract: current.interpretation_contract,
+      source_catalog: sourceSemanticRequestCatalog(current), source_request: {
         ...current.source_request, proposal_contract: "source-semantic-proposal-v4",
         generation_schema_contract: "host-owned-expression-schema-v1"
       }
@@ -138,22 +139,23 @@ describe("Gemini recursive decoding schema projection", () => {
       .toBe(createHash("sha256").update([...fields, material].join("\0")).digest("hex"));
   });
 
-  it("binds a new selection request identity and reports truthful generation projection", () => {
+  it("binds source selection request identity to complete guidance in JSON mode", () => {
     const live = buildSourceSemanticRequest(input);
-    expect(live.source_request.proposal_contract).toBe("source-semantic-proposal-v5");
+    expect(live.source_request.proposal_contract).toBe(SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT);
     const request = JSON.stringify(live);
     const source = officialApiExtractionResponseSchemaPreimage(request);
-    expect(source).toContain("source-semantic-proposal-v5");
+    expect(source).toContain(SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT);
     expect(source).not.toContain("source-semantic-proposal-v4");
     const projected = projectGeminiGenerationSchema(JSON.parse(source));
     expect(projected.recursive).toBe(true);
-    expect(projected.schema).toBeDefined();
+    expect(projected.schema).toBeUndefined();
     expect(projected.instruction).toBeDefined();
     const body = encodeGeminiGenerateContent({ userPrompt: request, systemPrompt: SOURCE_SEMANTIC_SYSTEM_PROMPT },
       { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1", maxOutputTokens: 32768 });
     const material = geminiGenerationSchemaCacheMaterial(source);
     const compactCurrent = parseSourceSemanticRequest({
-      ...live, source_request: {
+      schema_version: live.schema_version, interpretation_contract: live.interpretation_contract,
+      source_catalog: sourceSemanticRequestCatalog(live), source_request: {
         ...live.source_request, proposal_contract: "source-semantic-proposal-v4",
         generation_schema_contract: "host-owned-expression-schema-v1"
       }
@@ -161,15 +163,12 @@ describe("Gemini recursive decoding schema projection", () => {
     const compactSource = officialApiExtractionResponseSchemaPreimage(JSON.stringify(compactCurrent));
     expect(Buffer.byteLength(source)).toBeLessThan(Buffer.byteLength(compactSource));
     expect(body).toMatchObject({ generationConfig: { responseMimeType: "application/json" } });
-    expect(body).toHaveProperty("generationConfig.responseJsonSchema", projected.schema);
-    expect(JSON.parse(material)).toMatchObject({ contract: "gemini-structural-generation-schema-v1",
-      source_schema: JSON.parse(source), response_schema: projected.schema, instruction: projected.instruction });
-    const historicalMaterial = JSON.stringify({ contract: "gemini-recursive-generation-schema-v3",
+    expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
+    expect(JSON.parse(material)).toMatchObject({ contract: "gemini-recursive-generation-schema-v3",
       source_schema: JSON.parse(source), response_schema: null, instruction: projected.instruction });
     const fields = ["gemini-3.1-flash-lite", "gemini-3.1-low-v1", SOURCE_SEMANTIC_SYSTEM_PROMPT, request];
     const key = computeCacheKey(fields[0]!, "gemini-3.1-low-v1", fields[2]!, request);
     expect(key).toBe(createHash("sha256").update([...fields, material].join("\0")).digest("hex"));
-    expect(key).not.toBe(createHash("sha256").update([...fields, historicalMaterial].join("\0")).digest("hex"));
     expect(body).toMatchObject({ systemInstruction: { parts: [{ text: SOURCE_SEMANTIC_SYSTEM_PROMPT }, { text: projected.instruction }] } });
   });
 
@@ -208,12 +207,12 @@ describe("Gemini recursive decoding schema projection", () => {
     const encoded = JSON.stringify(body);
     expect(encoded).toContain("complete response envelope including its contract, outcome and body");
     expect(encoded).not.toContain("source-semantic-proposal-v4");
-    expect(encoded).not.toContain("source-semantic-proposal-v5");
+    expect(encoded).not.toContain(SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT);
     expect(encoded).toContain("application/json");
     const projected = projectGeminiGenerationSchema(schema);
     expect(projected.recursive).toBe(true);
-    expect(body).toHaveProperty("generationConfig.responseJsonSchema", projected.schema);
-    expect(projected.schema).toBeDefined();
+    expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
+    expect(projected.schema).toBeUndefined();
     expect(projected.instruction).toContain(JSON.stringify(schema));
     const oldStructuredKey = createHash("sha256").update([
       "gemini-3.1-flash-lite", "gemini-3.1-minimal-v1", SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
@@ -223,109 +222,20 @@ describe("Gemini recursive decoding schema projection", () => {
       SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema, 4096, "http://127.0.0.1:9")).not.toBe(oldStructuredKey);
   });
 
-  it("derives bounded acyclic constraints from the current complete Source and Query schemas", () => {
+  it("retains complete source and query schemas without a weaker recursive decoder", () => {
     const source = JSON.parse(officialApiExtractionResponseSchemaPreimage(JSON.stringify(buildSourceSemanticRequest(input))));
     for (const schema of [source, sourceSemanticQueryResponseJsonSchema()]) {
       const before = structuredClone(schema);
       const projected = projectGeminiGenerationSchema(schema);
       expect(projected.recursive).toBe(true);
-      expect(projected.schema).toBeDefined();
-      expect(Buffer.byteLength(JSON.stringify(projected.schema))).toBeLessThanOrEqual(16 * 1024);
-      expect(countGeminiEnvelopeExpandedNodes(projected.schema!)).toBeLessThanOrEqual(1024);
-      expect(projectGeminiGenerationSchema(projected.schema!).recursive).toBe(false);
+      expect(projected.schema).toBeUndefined();
       expect(projected.instruction).toContain(JSON.stringify(before));
       expect(schema).toEqual(before);
       expect(projectGeminiGenerationSchema(schema)).toEqual(projected);
     }
   });
 
-  it("keeps legal deep source expressions while leaving recursive field validation to local admission", () => {
-    const schema = JSON.parse(officialApiExtractionResponseSchemaPreimage(JSON.stringify(buildSourceSemanticRequest(input))));
-    const decoder = z.fromJSONSchema(projectGeminiGenerationSchema(schema).schema as z.core.JSONSchema.JSONSchema);
-    const statement = { kind: "statement", predicate: { kind: "explicit", reading: "lend", support: "a1s0" },
-      arguments: [{ role: "theme", target: "a1s1" }] };
-    const envelope = (expression: unknown) => ({ contract: SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
-      outcome: { status: "interpreted" }, content: { roots: [{ act: "assertion", expression }] } });
-    let expression: unknown = statement;
-    for (let depth = 0; depth < 6; depth += 1) expression = { kind: "not", support: "a1s0", content: expression };
-    expect(SourceSemanticSelectionGenerationSchema.safeParse(envelope(expression)).success).toBe(true);
-    expect(decoder.safeParse(envelope(expression)).success).toBe(true);
-    const missingTarget = { ...statement, arguments: [{ role: "theme" }] };
-    expect(decoder.safeParse(envelope(missingTarget)).success).toBe(false);
-    const nestedMissingTarget = envelope({ kind: "not", support: "a1s0", content: missingTarget });
-    expect(decoder.safeParse(nestedMissingTarget).success).toBe(true);
-    expect(SourceSemanticSelectionGenerationSchema.safeParse(nestedMissingTarget).success).toBe(false);
-  });
-
-  it("keeps deep query meaning and does not claim complete validation at a widened operand", () => {
-    const schema = projectGeminiGenerationSchema(sourceSemanticQueryResponseJsonSchema()).schema as z.core.JSONSchema.JSONSchema;
-    const decoder = z.fromJSONSchema(schema);
-    let meaning: unknown = { kind: "statement", predicate: "lend",
-      arguments: [{ role: "theme", target: { kind: "free", key: "theme" } }] };
-    for (let depth = 0; depth < 6; depth += 1) meaning = { kind: "not", content: meaning };
-    const query = { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-      alternatives: [{ conditions: [meaning] }], return: ["theme"], gaps: [] };
-    const envelope = { contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "interpreted" }, query };
-    expect(SourceSemanticQueryMeaningBodySchema.safeParse(query).success).toBe(true);
-    expect(decoder.safeParse(envelope).success).toBe(true);
-    const malformed = { ...query, alternatives: [{ conditions: [{ kind: "not", content: {} }] }] };
-    expect(decoder.safeParse({ ...envelope, query: malformed }).success).toBe(true);
-    expect(SourceSemanticQueryMeaningBodySchema.safeParse(malformed).success).toBe(false);
-    const emptyEvidence = { ...query, requested_operation: { reading: "count", support: { kind: "query_text", excerpt: "count" } },
-      alternatives: [{ conditions: [], evidence_inputs: [{ conditions: [] }] }] };
-    // Zod's JSON Schema importer ignores ref siblings; inspect the actual constraint independently.
-    const definition = (node: z.core.JSONSchema.JSONSchema | boolean): z.core.JSONSchema.JSONSchema => {
-      if (typeof node === "boolean") throw new Error("expected a query object schema");
-      return (node.$ref === undefined ? node : schema.$defs![node.$ref.slice("#/$defs/".length)]) as z.core.JSONSchema.JSONSchema;
-    };
-    const queryDefinition = definition(schema.properties!.query!);
-    const alternative = definition(definition(queryDefinition.properties!.alternatives!).items as z.core.JSONSchema.JSONSchema);
-    const evidence = definition(definition(alternative.properties!.evidence_inputs!).items as z.core.JSONSchema.JSONSchema);
-    expect(evidence.properties!.conditions).toMatchObject({ $ref: expect.any(String), minItems: 1 });
-    expect(SourceSemanticQueryMeaningBodySchema.safeParse(emptyEvidence).success).toBe(false);
-  });
-
-  it("widens exclusive branches without excluding legal objects that overlap a recursive type boundary", () => {
-    const branch = (kind: string) => ({ type: "object", properties: { kind: { enum: [kind] } }, required: ["kind"] });
-    const schema = { type: "object", properties: { contract: { enum: [SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT] },
-      body: { $ref: "#/$defs/node" } }, required: ["contract", "body"], $defs: { node: { oneOf: [branch("leaf"), {
-        type: "object", properties: { kind: { enum: ["wrapper"] },
-          child: { oneOf: [{ $ref: "#/$defs/node" }, branch("reference")] } }, required: ["kind", "child"]
-      }] } } };
-    const value = { contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
-      body: { kind: "wrapper", child: { kind: "reference" } } };
-    expect(z.fromJSONSchema(schema as z.core.JSONSchema.JSONSchema).safeParse(value).success).toBe(true);
-    expect(z.fromJSONSchema(projectGeminiGenerationSchema(schema).schema as z.core.JSONSchema.JSONSchema).safeParse(value).success).toBe(true);
-  });
-
-  it.each(["bytes", "expansion"])("keeps current recursive Source decoding in JSON mode when %s exceeds its bound", (limit) => {
-    const schema = JSON.parse(officialApiExtractionResponseSchemaPreimage(JSON.stringify(buildSourceSemanticRequest(input))));
-    if (limit === "bytes") schema.description = "Full source interpretation. ".repeat(1024);
-    else {
-      schema.$defs.widthLeaf = { type: "string" };
-      let reference = "#/$defs/widthLeaf";
-      for (let depth = 0; depth < 11; depth += 1) {
-        schema.$defs[`width${depth}`] = { type: "object", properties: { left: { $ref: reference }, right: { $ref: reference } } };
-        reference = `#/$defs/width${depth}`;
-      }
-      schema.properties.wide = { $ref: reference };
-      expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThan(16 * 1024);
-    }
-    const projected = projectGeminiGenerationSchema(schema);
-    expect(projected.recursive).toBe(true);
-    expect(projected.schema).toBeUndefined();
-    expect(projected.instruction).toContain(JSON.stringify(schema));
-    expect(JSON.parse(geminiGenerationSchemaCacheMaterial(JSON.stringify(schema))).response_schema).toBeNull();
-  });
-
-  it("does not weaken negated schemas into a narrower recursive decoding contract", () => {
-    const schema = JSON.parse(officialApiExtractionResponseSchemaPreimage(JSON.stringify(buildSourceSemanticRequest(input))));
-    schema.properties.guard = { not: { type: "object" } };
-    expect(projectGeminiGenerationSchema(schema).recursive).toBe(true);
-    expect(projectGeminiGenerationSchema(schema).schema).toBeUndefined();
-  });
-
-  it("sends the shared projected schema and complete guidance through an actual local SSE socket", async () => {
+  it("sends complete recursive guidance without a partial schema through an actual local SSE socket", async () => {
     const wires: { url: string | undefined; body: unknown }[] = [];
     const raw = JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "abstained" } });
     const server = createServer((request, response) => {
@@ -353,7 +263,9 @@ describe("Gemini recursive decoding schema projection", () => {
       expect(wires).toHaveLength(1);
       expect(wires[0]?.url).toBe("/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse");
       const material = JSON.parse(geminiGenerationSchemaCacheMaterial(JSON.stringify(schema)));
-      expect(wires[0]?.body).toMatchObject({ generationConfig: { responseJsonSchema: material.response_schema },
+      expect(material.response_schema).toBeNull();
+      expect(wires[0]?.body).not.toHaveProperty("generationConfig.responseJsonSchema");
+      expect(wires[0]?.body).toMatchObject({ generationConfig: { responseMimeType: "application/json" },
         systemInstruction: { parts: [{ text: line.systemPrompt }, { text: material.instruction }] } });
       expect(wires[0]?.body).toEqual(encodeGeminiGenerateContent(line, { ...config, maxOutputTokens: 4096,
         includeThoughts: true, responseJsonSchema: schema }));

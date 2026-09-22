@@ -65,19 +65,24 @@ function segment(catalog: SourceReferenceCatalog, text: string, assertionId = 1)
   return row.id;
 }
 
+function quote(catalog: SourceReferenceCatalog, text: string, assertionId = 1) {
+  segment(catalog, text, assertionId);
+  return { assertion_id: assertionId, text };
+}
+
 function compactUse(catalog: SourceReferenceCatalog, assertionId = 1) {
   return {
-    contract: "source-semantic-proposal-v5" as const,
+    contract: "source-semantic-proposal-v6" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{
         act: "assertion" as const,
         expression: {
           kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: "use", support: segment(catalog, "uses", assertionId) },
+          predicate: { kind: "explicit" as const, reading: "use", support: quote(catalog, "uses", assertionId) },
           arguments: [
-            { role: "agent", target: segment(catalog, "Alice", assertionId) },
-            { role: "theme", target: segment(catalog, "tools", assertionId) }
+            { role: "agent", target: quote(catalog, "Alice", assertionId) },
+            { role: "theme", target: quote(catalog, "tools", assertionId) }
           ]
         }
       }]

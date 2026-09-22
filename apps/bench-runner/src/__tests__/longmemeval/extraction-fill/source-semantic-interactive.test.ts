@@ -1,7 +1,7 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
 import * as geminiHttp from "../../../runs/compile-seed/http/gemini-http.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
@@ -28,18 +28,18 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias" = "semantic") {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
   const assertion = request.source_request.source_assertions.find((row) => row.text.includes("completed"))!;
-  const catalog = request.source_catalog.assertions.find((row) => row.assertion_id === assertion.assertion_id)!;
+  const catalog = sourceSemanticRequestCatalog(request).assertions.find((row) => row.assertion_id === assertion.assertion_id)!;
   const segment = (text: string) => catalog.segments.find((row) => row.text === text)!;
   const anchor = (text: string) => ({
     assertion_id: assertion.assertion_id, source_ref: { first: segment(text).id, last: segment(text).id }
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const contract = request.source_request.proposal_contract ?? "source-semantic-proposal-v3";
-  const envelope = contract === "source-semantic-proposal-v5" ? {
+  const envelope = contract === "source-semantic-proposal-v6" ? {
     contract, outcome: { status: "interpreted" }, content: {
       roots: [{ act: "assertion", expression: {
-        kind: "statement", predicate: { kind: "explicit", reading: "complete", support: segment("completed").id },
-        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [segment(theme).id] } }]
+        kind: "statement", predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
+        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [{ assertion_id: assertion.assertion_id, text: theme }] } }]
       } }]
     }
   } : contract === "source-semantic-proposal-v4" ? {
@@ -135,7 +135,7 @@ it("fills complete-source open semantics through interactive generateContent wit
   const publicationAssociations = census.records.map((source) => {
     const key = fixture.keys.find((candidate) => {
       const cachedInterpretation = inspectCachedSourceSemantic(cacheRoot, candidate, MODEL, REQUEST_PROFILE);
-      return cachedInterpretation.status === "hit" && cachedInterpretation.admitted.request.source_catalog.source_digest === source.corpus_digest;
+      return cachedInterpretation.status === "hit" && sourceSemanticRequestCatalog(cachedInterpretation.admitted.request).source_digest === source.corpus_digest;
     })!;
     const cachedInterpretation = inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE);
     if (cachedInterpretation.status !== "hit") throw new Error("fixture source interpretation missing");

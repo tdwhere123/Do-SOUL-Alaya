@@ -34,12 +34,12 @@ const BUDGET = {
 };
 const SCOPES = { mode: "named" as const, scopes: ["project"] };
 
-/** Frozen contract-repair meaning raw. This is not a host-authored graph body. */
+/** Contract-migrated meaning fixture for the model response receiver. */
 const FROZEN_MEANING_RAW = JSON.stringify({
-  contract: "source-semantic-query-response-v5",
+  contract: "source-semantic-query-response-v6",
   outcome: { status: "interpreted", gaps: [] },
   query: {
-    contract: "source-semantic-query-meaning-v3",
+    contract: "source-semantic-query-meaning-v4",
     alternatives: [{ conditions: [{
       kind: "possible", key: "q1",
       content: {
@@ -59,10 +59,10 @@ const FROZEN_MEANING_RAW = JSON.stringify({
 type Handler = ReturnType<typeof createMcpMemoryToolHandler>;
 type Context = { workspaceId: string; runId: string; agentTarget: string; sessionId: string };
 
-function segment(catalog: SourceReferenceCatalog, text: string): string {
+function quote(catalog: SourceReferenceCatalog, text: string) {
   const row = catalog.assertions[0]?.segments.find((part) => part.text === text);
   if (row === undefined) throw new Error(`catalog lacks ${text}`);
-  return row.id;
+  return { assertion_id: catalog.assertions[0]!.assertion_id, text: row.text };
 }
 
 function mention(sourceInterpretation: SourceSemanticInterpretation, text: string) {
@@ -187,9 +187,9 @@ function receiveLatheCorrespondence(querySemantics: SourceSemanticQuery, sourceI
  * Handbook (`docs/handbook/recall.md`): `soul.interpretation` `recall` is the
  * opt-in typed source interpretation, query semantics, and semantic correspondence library path. Ordinary `soul.recall` is not that surface.
  */
-it("recalls a model-admitted query semantics through SQLite reopen, worker, and public interpretation", async () => {
+it("recalls admitted query meaning through SQLite reopen, worker, and public interpretation", async () => {
   const receivedQuerySemantics = receiveFrozenQuerySemantics();
-  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v5");
+  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v6");
   expect(receivedQuerySemantics.query.alternatives[0]?.frames.some((row) => row.operator === "possible")).toBe(true);
 
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-meaning-public-"));
@@ -212,15 +212,15 @@ it("recalls a model-admitted query semantics through SQLite reopen, worker, and 
         producer_id: "test-author", producer_version: "p1"
       }, {
         rawJson: JSON.stringify({
-          contract: "source-semantic-proposal-v5", outcome: { status: "interpreted" },
+          contract: "source-semantic-proposal-v6", outcome: { status: "interpreted" },
           content: { roots: [{ act: "assertion", expression: {
-            kind: "possible", support: segment(catalog, "can"),
+            kind: "possible", support: quote(catalog, "can"),
             content: {
               kind: "statement",
-              predicate: { kind: "explicit", reading: "operate", support: segment(catalog, "operate") },
+              predicate: { kind: "explicit", reading: "operate", support: quote(catalog, "operate") },
               arguments: [
-                { role: "agent", target: segment(catalog, "Ada") },
-                { role: "theme", target: segment(catalog, "lathe") }
+                { role: "agent", target: quote(catalog, "Ada") },
+                { role: "theme", target: quote(catalog, "lathe") }
               ]
             }
           } }] }
@@ -246,7 +246,7 @@ it("recalls a model-admitted query semantics through SQLite reopen, worker, and 
     const reopened = await openSession(filename);
     try {
       const admitted = receiveFrozenQuerySemantics();
-      expect(admitted.request.contract).toBe("source-semantic-query-request-v5");
+      expect(admitted.request.contract).toBe("source-semantic-query-request-v6");
       const querySemanticsAfter = admitted.query;
       const semantic_correspondence = receiveLatheCorrespondence(querySemanticsAfter, sourceInterpretation, sourceInterpretationId);
       const recalled = await interpret(reopened.handler, {

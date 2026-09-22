@@ -1,3 +1,4 @@
+import { sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { join } from "node:path";
 import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposure-session.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -33,7 +34,7 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
   const retained = cacheRoots.flatMap((cache) => listRetainedSourceSemanticKeys(cache).map((key) => ({ key,
     result: inspectCachedSourceSemantic(cache, key, model, profile) })));
   const associations = census.records.filter((source) => ["q0", "q1"].includes(source.question_id)).map((source) => {
-    const cached = retained.find(({ result }) => result.status === "hit" && result.admitted.request.source_catalog.source_digest === source.corpus_digest)!;
+    const cached = retained.find(({ result }) => result.status === "hit" && sourceSemanticRequestCatalog(result.admitted.request).source_digest === source.corpus_digest)!;
     if (cached.result.status !== "hit") throw new Error("authored source interpretation required");
     return { source_id: source.source_id, source_version: source.source_version, generation_key: cached.key, request_digest: cached.result.requestDigest };
   });
