@@ -7,6 +7,8 @@ import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { CoreError } from "../../shared/errors.js";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "../query/recall-query-probes.js";
 
+const UNKNOWN_SIGNAL: SourceSemanticAccessSignal = { source_text_score: null, interpretation_reading_score: 0 };
+
 export function sourceSemanticAccessInputIdentity(input: Readonly<{
   original_query: string; query_semantics?: SourceSemanticQuery; source_id?: string;
   budget: RequestBudget; policy: SourceSemanticAccessPolicy;
@@ -43,18 +45,19 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
     return scoreQueryEvidenceContent(text, probes);
   };
   type Scored = { readonly identity: string; readonly signal: SourceSemanticAccessSignal };
-  const compare = (a: Scored, b: Scored): number => {
+  const compare = (aIdentity: string, aSignal: SourceSemanticAccessSignal,
+    bIdentity: string, bSignal: SourceSemanticAccessSignal): number => {
     if (policy === "query-conditioned-v1") {
-      const raw = (b.signal.source_text_score ?? 0) - (a.signal.source_text_score ?? 0);
+      const raw = (bSignal.source_text_score ?? 0) - (aSignal.source_text_score ?? 0);
       if (raw !== 0) return raw;
-      const reading = b.signal.interpretation_reading_score - a.signal.interpretation_reading_score;
+      const reading = bSignal.interpretation_reading_score - aSignal.interpretation_reading_score;
       if (reading !== 0) return reading;
     }
-    return a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0;
+    return aIdentity < bIdentity ? -1 : aIdentity > bIdentity ? 1 : 0;
   };
-  const order = <T extends Scored>(rows: readonly T[], ledger: SourceSemanticResourceLedger): T[] => {
+  const order = <T>(rows: readonly T[], ledger: SourceSemanticResourceLedger, compareRows: (a: T, b: T) => number): T[] => {
     ledger.charge(rows.length * Math.ceil(Math.log2(rows.length + 1)), rows.length * 16, "access ordering");
-    return [...rows].sort(compare);
+    return [...rows].sort(compareRows);
   };
   return {
     sourceCost: (length: number) => cost(length, originalProbes),
@@ -74,7 +77,8 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
       }
       return best;
     },
-    order,
+    order: <T extends Scored>(rows: readonly T[], ledger: SourceSemanticResourceLedger): T[] =>
+      order(rows, ledger, (a, b) => compare(a.identity, a.signal, b.identity, b.signal)),
     schedule: <T extends { readonly identity: string; readonly source_hash: string | null }>(rows: readonly T[],
       sources: readonly { readonly digest: string; readonly signal: SourceSemanticAccessSignal }[],
       ledger: SourceSemanticResourceLedger): T[] => {
@@ -84,14 +88,14 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
       for (const source of sources) {
         ledger.charge(1, source.digest.length * 2 + 48, "access source hint association");
         const prior = signals.get(source.digest);
-        if (prior === undefined || compare({ identity: "", signal: source.signal }, { identity: "", signal: prior }) < 0) {
+        if (prior === undefined || compare("", source.signal, "", prior) < 0) {
           signals.set(source.digest, source.signal);
         }
       }
-      const hinted = rows.map((row) => ({ ...row, signal: signals.get(row.source_hash ?? "")
-        ?? { source_text_score: null, interpretation_reading_score: 0 } }));
-      ledger.retain(hinted, "access header hints");
-      const priority = order(hinted, ledger), seen = new Set<string>(), scheduled: T[] = [];
+      // Headers are already retained by observation; ordering only copies their references.
+      const priority = order(rows, ledger, (a, b) => compare(a.identity, signals.get(a.source_hash ?? "") ?? UNKNOWN_SIGNAL,
+        b.identity, signals.get(b.source_hash ?? "") ?? UNKNOWN_SIGNAL));
+      const seen = new Set<string>(), scheduled: T[] = [];
       // A hash only schedules work. Alternating cursor exploration keeps wrong/missing
       // hashes and reading-only matches reachable without granting the hint authority.
       for (let index = 0; index < rows.length; index++) for (const row of [priority[index]!, rows[index]!]) {
