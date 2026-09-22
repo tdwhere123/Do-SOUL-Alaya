@@ -18,6 +18,7 @@ export const SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET = 10 as const;
 export const SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX = 5 as const;
 export const SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE = 16 as const;
 export const SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION = "source-semantic-library-v2" as const;
+export const SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION = 2 as const;
 export const SOURCE_SEMANTIC_LIBRARY_OCCUPANCY = "source_gold_root_identity" as const;
 export const SOURCE_SEMANTIC_LIBRARY_TIE_POLICY = "canonical_identity" as const;
 
@@ -167,6 +168,26 @@ export const SourceSemanticLibraryProofSchema = SourceSemanticReasoningResultSch
 }).strict().readonly();
 export type SourceSemanticLibraryProof = z.infer<typeof SourceSemanticLibraryProofSchema>;
 
+/** Current native library delivery; generic InformationIndex contracts remain independent. */
+export const SourceSemanticLibraryDeliverySchema = z.object({
+  delivery_id: BoundedIdSchema,
+  protocol_version: z.literal(SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION),
+  total_count: NonNegativeIntSchema,
+  index: InformationIndexSchema.unwrap().extend({
+    result_version: z.literal(SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION),
+    representation: InformationIndexSchema.unwrap().shape.representation.unwrap().extend({
+      page_budget: z.literal(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET)
+    }).readonly(),
+    page_purpose: z.literal("membership")
+  }).readonly(),
+  page_purpose: z.literal("membership"),
+  discovery: SourceSemanticLibraryDiscoverySchema,
+  order: SourceSemanticLibraryOrderSchema,
+  slot_qualifiers: z.array(SourceSemanticLibrarySlotQualifierSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly(),
+  proofs: z.array(SourceSemanticLibraryProofSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly().optional(),
+  request_budget: RequestBudgetSchema.optional()
+}).strict();
+
 export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("validate_source"), source_id: BoundedIdSchema, source_version: BoundedIdSchema,
@@ -203,16 +224,7 @@ export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
   }).strict().readonly(),
   z.object({
     kind: z.literal("recall"),
-    delivery_id: BoundedIdSchema,
-    protocol_version: z.literal(2),
-    total_count: NonNegativeIntSchema,
-    index: InformationIndexSchema,
-    page_purpose: z.literal("membership"),
-    discovery: SourceSemanticLibraryDiscoverySchema,
-    order: SourceSemanticLibraryOrderSchema,
-    slot_qualifiers: z.array(SourceSemanticLibrarySlotQualifierSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly(),
-    proofs: z.array(SourceSemanticLibraryProofSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly().optional(),
-    request_budget: RequestBudgetSchema.optional(),
+    ...SourceSemanticLibraryDeliverySchema.shape,
     previews: z.record(z.string().min(1).max(16384), z.string().max(65536)).optional(),
     ...CoverageWork
   }).strict().readonly()

@@ -8,11 +8,20 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 7.0.0, engine gateway 1.0.0
+## Unreleased — protocol 8.0.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
 
-These major versions record the breaking opt-in interpretation surface migration:
+Protocol 8.0.0 additionally requires complete current library deliveries to identify
+protocol 2 and library v2, membership purpose and the ten-slot page budget. Worker
+and public schemas derive these fields from one delivery contract. Outcome-only
+recall responses carry no partial delivery fields. This public narrowing is a
+major change; library wire versions and query identities are unchanged. Gateway
+1.0.0 is unchanged because tool names and descriptions did not change. Historical
+source-only v1 comparison has an explicit offline readmission entry that retains
+its original result, query and first-exposure identity; current readers reject it.
+
+Protocol 7.0.0 and Gateway 1.0.0 recorded the breaking opt-in interpretation migration:
 public H/Q/A/C fields and obsolete producer exports are replaced by their current
 responsibility names and envelope contracts below. This authorized replacement
 does not retain deprecated aliases or dual readers; consumers must migrate

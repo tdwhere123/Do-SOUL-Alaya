@@ -14,17 +14,13 @@ import {
   SourceSemanticPublishedInterpretationSchema,
   SourceSemanticReasoningResultSchema
 } from "../garden/source-semantic-interpretation.js";
-import { InformationIndexSchema } from "../recall/conditional-field/index-view.js";
 import { MemorySearchResultSchema } from "./mcp-memory-search-types.js";
 import {
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
   SourceSemanticCoverageSchema,
   SourceSemanticHandleDescriptorSchema,
-  SourceSemanticLibraryDiscoverySchema,
-  SourceSemanticLibraryOrderSchema,
-  SourceSemanticLibraryProofSchema,
-  SourceSemanticLibrarySlotQualifierSchema,
+  SourceSemanticLibraryDeliverySchema,
   SourceSemanticWorkerWorkSchema
 } from "../garden/source-semantic-worker.js";
 
@@ -144,22 +140,27 @@ export const SoulInterpretationReasonResponseSchema = z.object({
   ...CoverageWork
 }).strict().readonly();
 
-const SoulInterpretationRecallResponseSchema = z.object({
+export const SoulInterpretationRecallDeliverySchema = SourceSemanticLibraryDeliverySchema.extend({
   operation: z.literal("recall"),
-  delivery_id: BoundedIdSchema.optional(),
-  protocol_version: z.literal(2).optional(),
-  results: z.array(MemorySearchResultSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly().optional(),
-  total_count: z.number().int().nonnegative().optional(),
-  index: InformationIndexSchema.optional(),
-  page_purpose: z.literal("membership").optional(),
-  discovery: SourceSemanticLibraryDiscoverySchema.optional(),
-  order: SourceSemanticLibraryOrderSchema.optional(),
-  slot_qualifiers: z.array(SourceSemanticLibrarySlotQualifierSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly().optional(),
-  proofs: z.array(SourceSemanticLibraryProofSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly().optional(),
-  request_budget: RequestBudgetSchema.optional(),
+  results: z.array(MemorySearchResultSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly(),
   outcome: SourceSemanticOutcomeSchema.optional(),
   ...CoverageWork
-}).strict().readonly();
+}).strict();
+
+const SoulInterpretationRecallResponseSchema = z.object({
+  ...SoulInterpretationRecallDeliverySchema.partial().shape,
+  operation: z.literal("recall"),
+  ...CoverageWork
+}).strict().superRefine((response, ctx) => {
+  const hasDelivery = Object.hasOwn(response, "results") || Object.keys(SourceSemanticLibraryDeliverySchema.shape)
+    .some((key) => Object.hasOwn(response, key));
+  if (!hasDelivery) {
+    if (response.outcome === undefined) ctx.addIssue({ code: "custom", message: "recall requires a complete delivery or an outcome" });
+    return;
+  }
+  const delivery = SoulInterpretationRecallDeliverySchema.safeParse(response);
+  if (!delivery.success) for (const issue of delivery.error.issues) ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
+}).readonly();
 
 export const SoulInterpretationResponseSchema = z.discriminatedUnion("operation", [
   SoulInterpretationPrepareSourceResponseSchema,

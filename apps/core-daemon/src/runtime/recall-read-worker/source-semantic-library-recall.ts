@@ -1,5 +1,6 @@
 import {
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
+  SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SourceSemanticLibraryDeliverySchema,
   SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, canonicalJson, indexEntryCacheKey,
   type Continuation, type IndexEntry, type InformationIndex, type SourceSemanticCorrespondence,
   type SourceSemanticCoverage, type SourceSemanticHandleDescriptor, type SourceSemanticLibraryDiscovery,
@@ -259,7 +260,8 @@ function finalizeLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSe
   });
   const finish = (result: SourceSemanticWorkerResult): SourceSemanticWorkerResult => {
     if (result.kind !== "recall") throw new CoreError("VALIDATION", "library result kind mismatch");
-    const index = issueLibraryIndex(runtime, payload, authorized, meter, result.index, requestIdentity);
+    const index = SourceSemanticLibraryDeliverySchema.shape.index.parse(
+      issueLibraryIndex(runtime, payload, authorized, meter, result.index, requestIdentity));
     meter.retain(encodeSourceSemanticLibraryResponse({ ...result, index }), "library public serialization");
     const final = { ...result, index, work: workOf(meter) };
     if (Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(final))) > request.output_byte_limit) {
@@ -332,7 +334,7 @@ function libraryRecallResult(input: Readonly<{
 }>): SourceSemanticWorkerResult {
   const index = input.index;
   return SourceSemanticWorkerResultSchema.parse({
-    kind: "recall", request_budget: input.budget, delivery_id: preparedDeliveryId(input.requestDigest, index), protocol_version: 2,
+    kind: "recall", request_budget: input.budget, delivery_id: preparedDeliveryId(input.requestDigest, index), protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
     total_count: index.entries.length, index, page_purpose: "membership", discovery: input.discovery,
     order: SOURCE_SEMANTIC_LIBRARY_ORDER, slot_qualifiers: slotQualifiersFor(index, input.proofs),
     ...(input.proofs.length === 0 ? {} : { proofs: input.proofs }),

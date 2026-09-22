@@ -714,7 +714,7 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent
 query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 7.0.0 uses `source-interpretation-v4`, `source-semantic-query-v2`,
+Garden v1. Protocol 8.0.0 uses `source-interpretation-v4`, `source-semantic-query-v2`,
 `source-semantic-correspondence-v3`, response envelope v5, reasoning v4, cache v3,
 library v2, public/worker recall protocol 2, and `source-semantic-k-v3`,
 `source-semantic-normalizer-v4` and `source-semantic-lowering-v5`. Each complete
@@ -909,7 +909,14 @@ The separately named source-bearing union metric scores the same initial occupie
 slots across source evidence and validated semantic proofs. The entire delivered
 slot sequence must bind to the native index before either source or proof
 scoring: count, order, kinds and product coordinates must match the native delivery
-owner. An inconsistent page is invalid, distinct from a consistent slot whose proof
+owner. Protocol owns the complete delivery identity: protocol 2, library v2,
+membership purpose and the ten-slot page budget. Worker and public readers derive
+from it; a public outcome-only response contains no partial delivery fields and
+is unavailable for measurement. Unknown/obsolete delivery versions are invalid.
+Explicit offline source-only v1 readmission retains the original index, query and
+first-exposure identities while deriving all other delivery checks from that same
+contract; it is never a fallback in the current reader.
+An inconsistent page is invalid, distinct from a consistent slot whose proof
 remains unverified. A proof must also bind its
 source record to the independently verified native snapshot publication, including
 root, workspace, version, digest and known scope; a self-consistent copied proof

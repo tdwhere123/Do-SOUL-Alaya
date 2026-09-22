@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   SourceRecordIdentitySchema, type SourceRecordIdentity, RequestBudgetSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SourceSemanticLibrarySlotQualifierSchema, SourceSemanticWorkerResultSchema, SoulInterpretationResponseSchema,
+  SoulInterpretationRecallDeliverySchema,
   canonicalJson, InformationIndexSchema, SourceSemanticLibraryProofSchema, type SourceSemanticLibraryProof, type InformationIndex, type RequestBudget, type SourceSemanticLibraryOrder,
   type SourceSemanticLibrarySlotQualifier
 } from "@do-soul/alaya-protocol";
@@ -113,7 +114,12 @@ interface LibraryRecall {
 export function measureSourceSemanticLibraryResponse(
   input: SourceSemanticLibraryMeasurementInput
 ): SourceSemanticLibraryEvaluation {
-  const admitted = admitLibraryMeasurement(input);
+  return measureLibraryDelivery(input, isRecord(input.recallResult) ? parseLibraryRecall(input.recallResult) : null);
+}
+
+function measureLibraryDelivery(input: SourceSemanticLibraryMeasurementInput,
+  recalled: LibraryRecall | "invalid" | null): SourceSemanticLibraryEvaluation {
+  const admitted = admitLibraryMeasurement(input, recalled);
   if (admitted === null || admitted.status === "invalid") return unavailableEvaluation(admitted);
   const gold = SourceGoldUnitSchema.array().readonly().safeParse(input.goldSourceUnits);
   const records = SourceRecordIdentitySchema.array().readonly().safeParse(input.sourceRecords ?? []);
@@ -140,6 +146,29 @@ export function measureSourceSemanticLibraryResponse(
 /** Archive shape is not admission. Bind its recorded source subset to independent publication records, then evaluate once. */
 export function readmitSourceSemanticLibraryMeasurement(rawMeasurement: unknown,
   input: SourceSemanticLibraryMeasurementInput): SourceSemanticLibraryEvaluation {
+  return readmitLibraryDelivery(rawMeasurement, input, isRecord(input.recallResult) ? parseLibraryRecall(input.recallResult) : null);
+}
+
+// Offline source-only v1 evidence retains its original index/query/exposure identities.
+// All other fields and complete-delivery requirements derive from the current Protocol owner.
+const HistoricalSourceOnlyDeliverySchema = SoulInterpretationRecallDeliverySchema.extend({
+  protocol_version: z.literal(1),
+  index: SoulInterpretationRecallDeliverySchema.shape.index.unwrap().extend({
+    result_version: z.literal("source-semantic-library-v1")
+  }).readonly()
+}).refine((delivery) => (delivery.proofs?.length ?? 0) === 0
+  && delivery.slot_qualifiers.every((slot) => slot.evidence_kind === "source_evidence"),
+  "historical comparison requires source-only delivery");
+
+/** Explicit archive entry only; the native reader never falls back to a historical contract. */
+export function readmitHistoricalSourceOnlyLibraryMeasurement(rawMeasurement: unknown,
+  input: SourceSemanticLibraryMeasurementInput): SourceSemanticLibraryEvaluation {
+  const recalled = HistoricalSourceOnlyDeliverySchema.safeParse(input.recallResult);
+  return readmitLibraryDelivery(rawMeasurement, input, recalled.success ? recalled.data : "invalid");
+}
+
+function readmitLibraryDelivery(rawMeasurement: unknown, input: SourceSemanticLibraryMeasurementInput,
+  recalled: LibraryRecall | "invalid" | null): SourceSemanticLibraryEvaluation {
   const stored = MeasurementRecordSchema.safeParse(rawMeasurement);
   if (!stored.success || stored.data.status !== "validated" || recordInconsistency(stored.data) !== undefined
     || (stored.data.source_records ?? []).some((record) => !(input.sourceRecords ?? []).some((trusted) =>
@@ -147,8 +176,8 @@ export function readmitSourceSemanticLibraryMeasurement(rawMeasurement: unknown,
     return unavailableEvaluation(invalid("invalid_response"));
   }
   const { sourceRecords: _records, ...nativeInput } = input;
-  const evaluated = measureSourceSemanticLibraryResponse({ ...nativeInput,
-    ...(stored.data.source_records === undefined ? {} : { sourceRecords: stored.data.source_records }) });
+  const evaluated = measureLibraryDelivery({ ...nativeInput,
+    ...(stored.data.source_records === undefined ? {} : { sourceRecords: stored.data.source_records }) }, recalled);
   return canonicalJson(evaluated.measurement) === canonicalJson(stored.data) ? evaluated
     : unavailableEvaluation(invalid("invalid_response"), evaluated.evaluator_usage);
 }
@@ -159,7 +188,7 @@ function unavailableEvaluation(measurement: SourceSemanticLibraryMeasurement | n
 }
 
 function admitLibraryMeasurement(
-  input: SourceSemanticLibraryMeasurementInput
+  input: SourceSemanticLibraryMeasurementInput, recalled: LibraryRecall | "invalid" | null
 ): {
   readonly status: "admitted";
   readonly budget: RequestBudget;
@@ -175,15 +204,10 @@ function admitLibraryMeasurement(
   if (!isRecord(input.recallResult)) return null;
   const zeroCall = zeroCallReason(input.recallResult);
   if (zeroCall !== null) return invalid(zeroCall);
-  const recalled = parseLibraryRecall(input.recallResult);
   if (recalled === null) return null;
   if (recalled === "invalid") return invalid("invalid_response");
   const budget = RequestBudgetSchema.safeParse(input.requestBudget);
   if (!budget.success) return invalid("missing_request_budget");
-  if (recalled.order.page_budget !== SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET
-    || recalled.index.representation.page_budget !== SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET) {
-    return invalid("request_budget_mismatch");
-  }
   if (recalled.request_budget === undefined) return invalid("missing_request_budget");
   if (canonicalJson(recalled.request_budget) !== canonicalJson(budget.data)) return invalid("request_budget_mismatch");
   const index = recalled.index;
@@ -227,6 +251,7 @@ function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecall | "inva
   const mcp = SoulInterpretationResponseSchema.safeParse(raw);
   if (mcp.success) {
     if (mcp.data.operation !== "recall") return null;
+    if (mcp.data.index === undefined) return null; // Protocol admitted an outcome-only response, not an empty delivery.
     if (mcp.data.index === undefined || mcp.data.order === undefined || mcp.data.results === undefined || mcp.data.total_count === undefined
       || mcp.data.slot_qualifiers === undefined || mcp.data.delivery_id === undefined) {
       return looksLikeLibraryRecall(raw) ? "invalid" : null;

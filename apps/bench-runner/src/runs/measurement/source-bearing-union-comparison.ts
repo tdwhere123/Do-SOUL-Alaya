@@ -7,7 +7,8 @@ import { LongMemEvalSemanticFreezeSchema, assertLongMemEvalSemanticRows,
   type LongMemEvalSemanticFreeze } from "../longmemeval-semantic/contract.js";
 import { LongMemEvalPreparedSchema, LongMemEvalReplaySchema, LongMemEvalPublicationSchema,
   LongMemEvalSourceOnlyResponseSchema } from "../longmemeval-semantic/execute.js";
-import { readmitSourceSemanticLibraryMeasurement, type SourceSemanticLibraryEvaluatorUsage } from "./source-semantic-library-measurement.js";
+import { readmitSourceSemanticLibraryMeasurement, readmitHistoricalSourceOnlyLibraryMeasurement,
+  type SourceSemanticLibraryEvaluatorUsage } from "./source-semantic-library-measurement.js";
 import { SOURCE_BEARING_UNION_FIRST_EXPOSURE_CONTRACT, SourceGoldUnitSchema } from "./source-gold-join.js";
 import { FirstExposurePageSchema } from "./first-exposure-session.js";
 
@@ -166,7 +167,8 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
       && source.source_version === unit.source_version && source.content_digest === unit.content_digest))) {
     throw new Error("stored measurement differs from native first exposure or gold publication");
   }
-  const evaluated = readmitSourceSemanticLibraryMeasurement(chainRow.measurement, { recallResult: archivedSourceResponse(response),
+  const readmit = response.protocol_version === 1 ? readmitHistoricalSourceOnlyLibraryMeasurement : readmitSourceSemanticLibraryMeasurement;
+  const evaluated = readmit(chainRow.measurement, { recallResult: archivedSourceResponse(response),
     firstExposurePage: FirstExposurePageSchema.parse(replayRow.first_exposure), requestBudget: frozen.config.budget,
     goldSourceUnits: sourceGoldUnits });
   const measured = evaluated.measurement, union = evaluated.sourceBearingUnion;
@@ -182,14 +184,9 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
     union.any_at_5.status, mixed), evaluator_usage: evaluated.evaluator_usage };
 }
 
-/** Archive-only field migration; the current native admission still owns every validity rule. */
+/** Archive-only field migration preserves the recorded version tuple for explicit historical admission. */
 function archivedSourceResponse(response: Record<string, unknown>): Record<string, unknown> {
   if (response.protocol_version !== 1) return response;
-  if (response.operation !== "recall" || record(response.index).result_version !== "source-semantic-library-v1"
-    || records(response.proofs ?? []).length !== 0
-    || records(response.slot_qualifiers).some((slot) => slot.evidence_kind !== "source_evidence")) {
-    throw new Error("unsupported historical response");
-  }
   const rename = (value: unknown, fields: Readonly<Record<string, string>>) => {
     const result = { ...record(value) };
     for (const [oldName, name] of Object.entries(fields)) {
@@ -199,7 +196,7 @@ function archivedSourceResponse(response: Record<string, unknown>): Record<strin
     }
     return result;
   };
-  return { ...response, protocol_version: 2,
+  return { ...response,
     coverage: rename(response.coverage, { h: "source_interpretation", q: "query_semantics", a: "semantic_correspondence", computation: "conditional_computation" }),
     discovery: rename(response.discovery, { visited_h_pages: "visited_source_interpretation_pages",
       visited_h_descriptors: "visited_source_interpretation_descriptors", examined_h_ids: "examined_source_interpretation_ids",

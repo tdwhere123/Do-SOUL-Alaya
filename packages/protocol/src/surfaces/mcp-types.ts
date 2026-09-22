@@ -61,6 +61,7 @@ export {
   SOUL_INTERPRETATION_TOOL_NAME,
   SoulInterpretationRequestSchema,
   SoulInterpretationResponseSchema,
+  SoulInterpretationRecallDeliverySchema,
   SoulInterpretationPrepareSourceRequestSchema,
   SoulInterpretationProposeRequestSchema,
   SoulInterpretationPrepareQueryRequestSchema,

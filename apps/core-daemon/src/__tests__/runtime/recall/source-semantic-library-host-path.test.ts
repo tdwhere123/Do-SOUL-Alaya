@@ -294,52 +294,56 @@ function mcpRecall(payload: unknown): RecallOut {
   return body.output;
 }
 
-it("measures a published source through public recall and first exposure with one verification per proof slot", async () => {
-  await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session) => {
+it("measures a published source through reopened public recall and first exposure with one verification per proof slot", async () => {
+  await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session, filename) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
       receiveInterpretation(ALICE, "artifact-alice", compactUse(prepared.catalog)).draft, "p1");
-    const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
-    const semantic_correspondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id).semantic_correspondence;
-    const publicResult = await callAlayaMcpMemoryTool(
-      { memoryToolHandler: session.handler, contextProvider: () => session.context }, "soul.interpretation",
-      SoulInterpretationRequestSchema.parse({ operation: "recall", accepts_unreviewed_conditional_results: true,
-        original_query: ORIGINAL, query_semantics: semantics, semantic_correspondences: [semantic_correspondence],
-        budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES })
-    );
-    const withCorrespondence = mcpRecall(publicResult.structuredContent);
-    if (withCorrespondence.index === undefined || withCorrespondence.slot_qualifiers === undefined) throw new Error("native slots expected");
-    const withoutCorrespondence = await workerRecall(session, semantics, []);
-    const proofSlot = withCorrespondence.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === published.interpretation_id);
-    const proofEntry = proofSlot === undefined ? undefined : withCorrespondence.index.entries[proofSlot.index];
-    const fallback = withoutCorrespondence.index.entries.find((entry) => entry.target.kind === "source_evidence"
-      && entry.target.root_id === published.source_target.root_id);
-    expect(published.source_target.root_id).not.toBe("artifact-alice");
-    expect(proofEntry?.target.kind).toBe("source_evidence");
-    if (proofEntry?.target.kind !== "source_evidence" || fallback?.target.kind !== "source_evidence") {
-      throw new Error("both slots must be source evidence");
-    }
-    expect(sourceGoldRootIdentity(proofEntry.target)).toBe(sourceGoldRootIdentity(fallback.target));
-    const provedTarget = proofEntry.target;
-    const occupied = withCorrespondence.index.entries.filter((entry) => entry.target.kind === "source_evidence"
-      && sourceGoldRootIdentity(entry.target) === sourceGoldRootIdentity(provedTarget));
-    expect(occupied).toHaveLength(1);
-    const current = listEligibleSemanticSources(session.database, WS, new SourceSemanticReadBudget(BUDGET), ["project"]);
-    expect(current).toMatchObject({ open: false, truncated: false });
-    const input = { recallResult: withCorrespondence, firstExposurePage: recordSourceSemanticLibraryFirstExposure(withCorrespondence),
-      requestBudget: BUDGET, goldSourceUnits: [sourceGoldUnitFromPublishedRoot(published.source_target)], sourceRecords: current.sources };
-    const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
-    const evaluated = measureSourceSemanticLibraryResponse(input);
-    const proofSlots = withCorrespondence.slot_qualifiers.filter((row) => row.evidence_kind === "semantic_proof").length;
-    expect(proofSlots).toBeGreaterThan(0);
-    expect(verify).toHaveBeenCalledTimes(proofSlots);
-    expect(evaluated.measurement?.status).toBe("validated");
-    expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("hit");
-    expect(evaluated.evaluator_usage).toMatchObject({ proof_slots_checked: proofSlots });
-    expect(evaluated.evaluator_usage.work_units).toBeGreaterThan(0);
-    verify.mockClear();
-    expect(readmitSourceSemanticLibraryMeasurement(evaluated.measurement, input)).toEqual(evaluated);
-    expect(verify).toHaveBeenCalledTimes(proofSlots);
+    await closeSession(session, filename);
+    const reopened = await openSession(filename);
+    try {
+      const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
+      const semantic_correspondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id).semantic_correspondence;
+      const publicResult = await callAlayaMcpMemoryTool(
+        { memoryToolHandler: reopened.handler, contextProvider: () => reopened.context }, "soul.interpretation",
+        SoulInterpretationRequestSchema.parse({ operation: "recall", accepts_unreviewed_conditional_results: true,
+          original_query: ORIGINAL, query_semantics: semantics, semantic_correspondences: [semantic_correspondence],
+          budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES })
+      );
+      const withCorrespondence = mcpRecall(publicResult.structuredContent);
+      if (withCorrespondence.index === undefined || withCorrespondence.slot_qualifiers === undefined) throw new Error("native slots expected");
+      const withoutCorrespondence = await workerRecall(reopened, semantics, []);
+      const proofSlot = withCorrespondence.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === published.interpretation_id);
+      const proofEntry = proofSlot === undefined ? undefined : withCorrespondence.index.entries[proofSlot.index];
+      const fallback = withoutCorrespondence.index.entries.find((entry) => entry.target.kind === "source_evidence"
+        && entry.target.root_id === published.source_target.root_id);
+      expect(published.source_target.root_id).not.toBe("artifact-alice");
+      expect(proofEntry?.target.kind).toBe("source_evidence");
+      if (proofEntry?.target.kind !== "source_evidence" || fallback?.target.kind !== "source_evidence") {
+        throw new Error("both slots must be source evidence");
+      }
+      expect(sourceGoldRootIdentity(proofEntry.target)).toBe(sourceGoldRootIdentity(fallback.target));
+      const provedTarget = proofEntry.target;
+      const occupied = withCorrespondence.index.entries.filter((entry) => entry.target.kind === "source_evidence"
+        && sourceGoldRootIdentity(entry.target) === sourceGoldRootIdentity(provedTarget));
+      expect(occupied).toHaveLength(1);
+      const current = listEligibleSemanticSources(reopened.database, WS, new SourceSemanticReadBudget(BUDGET), ["project"]);
+      expect(current).toMatchObject({ open: false, truncated: false });
+      const input = { recallResult: withCorrespondence, firstExposurePage: recordSourceSemanticLibraryFirstExposure(withCorrespondence),
+        requestBudget: BUDGET, goldSourceUnits: [sourceGoldUnitFromPublishedRoot(published.source_target)], sourceRecords: current.sources };
+      const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
+      const evaluated = measureSourceSemanticLibraryResponse(input);
+      const proofSlots = withCorrespondence.slot_qualifiers.filter((row) => row.evidence_kind === "semantic_proof").length;
+      expect(proofSlots).toBeGreaterThan(0);
+      expect(verify).toHaveBeenCalledTimes(proofSlots);
+      expect(evaluated.measurement?.status).toBe("validated");
+      expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("hit");
+      expect(evaluated.evaluator_usage).toMatchObject({ proof_slots_checked: proofSlots });
+      expect(evaluated.evaluator_usage.work_units).toBeGreaterThan(0);
+      verify.mockClear();
+      expect(readmitSourceSemanticLibraryMeasurement(evaluated.measurement, input)).toEqual(evaluated);
+      expect(verify).toHaveBeenCalledTimes(proofSlots);
+    } finally { await closeSession(reopened, filename); }
   });
 }, 60000);
 

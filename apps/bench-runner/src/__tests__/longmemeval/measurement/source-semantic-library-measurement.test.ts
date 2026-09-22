@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SourceSemanticWorkerResultSchema } from "@do-soul/alaya-protocol";
 import { encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
 import * as core from "@do-soul/alaya-core";
 import { REQUEST, GOLD, GOLD_TARGET, sourceOnly, proofEntry, assemble, workerRecall, nativeProofResponseFixture } from "./source-semantic-library-measurement-fixture.js";
 import { measureConditionalFieldResponse } from "../../../runs/measurement/conditional-field-measurement.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
 import {
-  measureSourceSemanticLibraryResponse, readmitSourceSemanticLibraryMeasurement
+  measureSourceSemanticLibraryResponse, readmitSourceSemanticLibraryMeasurement, readmitHistoricalSourceOnlyLibraryMeasurement
 } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import {
   PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT,
@@ -24,6 +24,50 @@ function measureOf(result: ReturnType<typeof workerRecall>) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("source semantic library measurement", () => {
+  it.each(["unknown_result_version", "old_result_version", "absent_protocol_version"])("rejects %s before source-only scoring", (mutation) => {
+    const response = structuredClone(encodeSourceSemanticLibraryResponse(workerRecall(assemble([sourceOnly("gold")], []))));
+    if (response.operation !== "recall" || response.index === undefined) throw new Error("native delivery expected");
+    if (mutation === "absent_protocol_version") Reflect.deleteProperty(response, "protocol_version");
+    else Object.assign(response.index, { result_version: mutation === "old_result_version" ? "source-semantic-library-v1" : "not-a-native-library-result" });
+    expect(measureSourceSemanticLibraryResponse({ recallResult: response,
+      firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: REQUEST, goldSourceUnits: [GOLD] }))
+      .toMatchObject({ measurement: { status: "invalid", reason: "invalid_response" }, sourceBearingUnion: null,
+        evaluator_usage: { proof_slots_checked: 0, work_units: 0, logical_memory_bytes: 0 } });
+  });
+
+  it("keeps legitimate outcome-only recall unavailable and rejects partial delivery", () => {
+    const response = encodeSourceSemanticLibraryResponse(workerRecall(assemble([sourceOnly("gold")], [])));
+    if (response.operation !== "recall") throw new Error("native delivery expected");
+    const outcome = { operation: "recall", outcome: { status: "preparation_required", missing: "query_semantics" },
+      coverage: response.coverage, work: response.work, provider_attempts: 0 };
+    const input = { recallResult: outcome, firstExposurePage: recordSourceSemanticLibraryFirstExposure(response),
+      requestBudget: REQUEST, goldSourceUnits: [GOLD] };
+    expect(measureSourceSemanticLibraryResponse(input)).toMatchObject({ measurement: null, sourceBearingUnion: null });
+    expect(measureSourceSemanticLibraryResponse({ ...input, recallResult: { ...outcome, results: [] } }))
+      .toMatchObject({ measurement: { status: "invalid" }, sourceBearingUnion: null });
+  });
+
+  it("admits only the explicit historical source-only tuple while preserving its recorded identity and score", () => {
+    const response = structuredClone(encodeSourceSemanticLibraryResponse(workerRecall(assemble([sourceOnly("gold")], []))));
+    if (response.operation !== "recall") throw new Error("native delivery expected");
+    const input = { recallResult: response, firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: REQUEST, goldSourceUnits: [GOLD] };
+    const evaluated = measureSourceSemanticLibraryResponse(input);
+    if (response.operation !== "recall" || response.index === undefined || evaluated.measurement?.status !== "validated") throw new Error("native delivery expected");
+    const stored = structuredClone(evaluated.measurement);
+    Object.assign(response, { protocol_version: 1 });
+    Object.assign(response.index, { result_version: "source-semantic-library-v1" });
+    Object.assign(stored.delivered_index, { result_version: "source-semantic-library-v1" });
+    Object.assign(stored.identity, { result_version: "source-semantic-library-v1" });
+    const before = JSON.stringify({ response, stored });
+    expect(readmitSourceSemanticLibraryMeasurement(stored, input).measurement?.status).toBe("invalid");
+    const historical = readmitHistoricalSourceOnlyLibraryMeasurement(stored, input);
+    expect(historical.measurement).toEqual(stored);
+    expect(historical.sourceBearingUnion?.any_at_5.status).toBe("hit");
+    expect(JSON.stringify({ response, stored })).toBe(before);
+    Object.assign(response.index, { result_version: "unknown" });
+    expect(readmitHistoricalSourceOnlyLibraryMeasurement(stored, input).measurement?.status).toBe("invalid");
+  });
+
   it.each([false, true])("verifies each actual proof slot once and retains a later valid hit (unverified first=%s)", (unverifiedFirst) => {
     const { response, record, gold } = nativeProofResponseFixture(unverifiedFirst);
     const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
@@ -208,7 +252,7 @@ describe("source semantic library measurement", () => {
       .not.toBe("validated");
   });
 
-  it("fails closed when the index page_budget is not the library page", () => {
+  it("rejects a non-library index page budget at the shared delivery boundary", () => {
     const recalled = workerRecall(assemble([sourceOnly("gold")], []));
     const disagreed = {
       ...recalled,
@@ -217,11 +261,12 @@ describe("source semantic library measurement", () => {
         representation: { ...recalled.index.representation, page_budget: REQUEST.page_budget }
       }
     };
+    expect(SourceSemanticWorkerResultSchema.safeParse(disagreed).success).toBe(false);
     expect(measureSourceSemanticLibraryResponse({
       recallResult: disagreed,
       firstExposurePage: recordSourceSemanticLibraryFirstExposure(recalled),
       requestBudget: REQUEST,
       goldSourceUnits: [GOLD]
-    }).measurement).toEqual({ schema_version: 1, status: "invalid", reason: "request_budget_mismatch" });
+    }).measurement).toEqual({ schema_version: 1, status: "invalid", reason: "invalid_response" });
   });
 });
