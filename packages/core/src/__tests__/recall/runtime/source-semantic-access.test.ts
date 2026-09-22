@@ -38,6 +38,23 @@ it("interleaves a late source hint with cursor exploration without dropping unkn
   expect(canonical.schedule(rows, meter)).toEqual(rows);
 });
 
+it("charges lexical query navigation and interleaves nominees with ordinary cursor exploration", () => {
+  const meter = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
+  const policy = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", meter);
+  const before = meter.spentWork;
+  expect(policy.navigationQuery(meter)).toBe("orchid");
+  expect(meter.spentWork).toBeGreaterThan(before);
+  expect(() => policy.navigationQuery(new SourceSemanticResourceLedger({ work_units: 0, memory_bytes: 1000 })))
+    .toThrow(SourceSemanticResourceExhausted);
+  const rows = [{ identity: "a", source_hash: null }, { identity: "b", source_hash: "observed" },
+    { identity: "y", source_hash: null, query_hint: true as const }, { identity: "z", source_hash: null, query_hint: true as const }];
+  policy.associateSourceHint("observed", { source_text_score: 1, interpretation_reading_score: 0 }, meter);
+  expect(policy.schedule(rows, meter).map(row => row.identity)).toEqual(["y", "a", "z", "b"]);
+  const canonical = createSourceSemanticAccessPolicy("orchid", undefined, "canonical-v1", meter);
+  expect(canonical.navigationQuery(meter)).toBeNull();
+  expect(canonical.schedule(rows, meter)).toEqual(rows);
+});
+
 it("retains incrementally observed best shared hints and reading ties across schedules", () => {
   const meter = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
   const policy = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", meter);

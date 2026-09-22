@@ -953,20 +953,33 @@ metered observations. Both order the whole observed pool before descriptor pages
 or native correspondence opportunities. Scores are lexical access signals; role
 and modality foils may tie or outrank a relevant interpretation without acquiring
 assertion authority. A source without an interpretation remains a raw candidate.
-There is no query seek across unvisited sources or interpretation pages.
+Before interpretation verification, the query-conditioned policy nominates up
+to 16 inspected capsule candidates across the existing Porter/trigram FTS lanes.
+Quoted original-query tokens use resumable ascending native rowid seeks and
+bounded capsule metadata point reads, without BM25, body reads or a SQL sorter.
+The exact signed-64-bit cursors bind workspace and query. Empty seeks and all
+metadata/filter attempts count against the same observation ledger, including
+inactive or cross-workspace matches. Native work counts logical indexed
+operations and returned bytes, not SQLite posting comparisons, physical I/O or
+CPU. SQL failures remain unavailable. No new index or model field is involved.
 
 Access progressively interleaves source-text observation, bounded header pages
 through the existing capsule cursor index, and whole interpretation verification
 within one observation envelope. Inactive header rows are charged as well. Each
 new source observation contributes its digest hint once to the request-local Core
 policy; duplicate digests retain the best signal under the same comparison owner.
-Within the observed header prefix, the query-conditioned policy alternates
-source-text hint priority with cursor exploration, deduplicating capsule
-identities. A capsule source hash only hints at scheduling; missing or wrong
+Within the observed headers, the query-conditioned policy alternates lexical
+nomination/source-text hint priority with cursor exploration, deduplicating
+capsule identities. A capsule source hash only hints at scheduling; missing or wrong
 hashes and reading-only matches remain reachable. The canonical control verifies
 in cursor order. Each scheduled body is loaded and decoded once by the
 verification owner, which checks its derived capsule identity and authoritative
-current source, version, scope and location. Before freezing the whole observed
+current source, version, scope and location. Verification may discover a current
+source beyond the bounded census; its verified record and already-read complete
+body join the observation, avoiding a second raw-source read. Unvisited census
+residuals stay open. Lexical nominations do not establish semantic correspondence;
+sources without a matching stored lexical signal still depend on ordinary
+source/header exploration. Before freezing the whole observed
 pool, interpretation source scores reconcile against the final source observations
 by verified record identity. Descriptor delivery independently rechecks currentness.
 Unverified headers remain an open residual; only verified interpretations enter

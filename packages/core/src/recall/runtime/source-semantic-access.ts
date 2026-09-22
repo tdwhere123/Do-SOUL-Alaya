@@ -27,8 +27,10 @@ export function authorizeSemanticScope(scope: string | null | undefined, authori
 /** One local access policy for raw sources and verified interpretations. It does not establish correspondence. */
 export function createSourceSemanticAccessPolicy(original: string, query: SourceSemanticQuery | undefined,
   policy: SourceSemanticAccessPolicy, meter: SourceSemanticResourceLedger) {
+  const chargeQueryFeatures = (text: string, ledger: SourceSemanticResourceLedger): void =>
+    ledger.charge(64 * (text.length + 1), 128 * (text.length + 1), "access query features");
   const compile = (text: string): Readonly<RecallQueryProbes> => {
-    meter.charge(64 * (text.length + 1), 128 * (text.length + 1), "access query features");
+    chargeQueryFeatures(text, meter);
     return compileRecallQueryProbes(text);
   };
   const originalProbes = compile(original);
@@ -61,6 +63,11 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
   };
   const sourceHints = new Map<string, SourceSemanticAccessSignal>();
   return {
+    navigationQuery: (ledger: SourceSemanticResourceLedger): string | null => {
+      if (policy === "canonical-v1") return null;
+      chargeQueryFeatures(original, ledger);
+      return original;
+    },
     sourceCost: (length: number) => cost(length, originalProbes),
     source: (text: string, ledger: SourceSemanticResourceLedger): SourceSemanticAccessSignal => ({
       source_text_score: score(text, originalProbes, ledger), interpretation_reading_score: 0
@@ -86,16 +93,17 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
       const prior = sourceHints.get(digest);
       if (prior === undefined || compare("", signal, "", prior) < 0) sourceHints.set(digest, signal);
     },
-    schedule: <T extends { readonly identity: string; readonly source_hash: string | null }>(rows: readonly T[],
+    schedule: <T extends { readonly identity: string; readonly source_hash: string | null; readonly query_hint?: true }>(rows: readonly T[],
       ledger: SourceSemanticResourceLedger): T[] => {
       ledger.charge(rows.length, rows.length * 8, "access verification schedule");
       if (policy === "canonical-v1") return [...rows];
       // Headers are already retained by observation; ordering only copies their references.
-      const priority = order(rows, ledger, (a, b) => compare(a.identity, sourceHints.get(a.source_hash ?? "") ?? UNKNOWN_SIGNAL,
-        b.identity, sourceHints.get(b.source_hash ?? "") ?? UNKNOWN_SIGNAL));
+      const priority = order(rows, ledger, (a, b) => Number(b.query_hint === true) - Number(a.query_hint === true)
+        || compare(a.identity, sourceHints.get(a.source_hash ?? "") ?? UNKNOWN_SIGNAL,
+          b.identity, sourceHints.get(b.source_hash ?? "") ?? UNKNOWN_SIGNAL));
       const seen = new Set<string>(), scheduled: T[] = [];
-      // A hash only schedules work. Alternating cursor exploration keeps wrong/missing
-      // hashes and reading-only matches reachable without granting the hint authority.
+      // Lexical nominations and hashes only schedule work. Cursor exploration keeps
+      // unmatched sources and reading-only matches reachable without granting proof.
       for (let index = 0; index < rows.length; index++) for (const row of [priority[index]!, rows[index]!]) {
         ledger.charge(1, 16, "access schedule deduplication");
         if (seen.has(row.identity)) continue;

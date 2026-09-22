@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { closeCachedDatabase } from "@do-soul/alaya-storage";
+import { closeCachedDatabase, SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
 import { encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
 import { createSourceSemanticInterpretationHandler } from "../../../mcp-memory/tool/interpretation-handler.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
@@ -55,6 +55,36 @@ it("interleaves actual source, header and verification work before freezing reco
     } finally {
       reserveSpy.mockRestore(); chargeSpy.mockRestore(); database.close(); closeCachedDatabase(filename);
     }
+  });
+});
+
+it("verifies a lexical nominee beyond an unavailable census row and reuses its complete source observation", async () => {
+  await withAccessLibrary([{ id: "a", text: "Granite walls." },
+    { id: "z", text: "Orchid irrigation.", reading: orchid }], async ({ filename, execute }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    database.connection.prepare("UPDATE source_records SET operator_id=? WHERE source_id='a'").run("x".repeat(9000));
+    const read = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
+    try {
+      const meter = new SourceSemanticReadBudget(ACCESS_BUDGET);
+      const pool = database.connection.transaction(() => observeSourceSemanticAccess({ database } as RecallReadWorkerRuntime,
+        { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] }, request: prepare(orchid) },
+        ["project"], meter, orchid, accessQuery(orchid), "query-conditioned-v1", ACCESS_BUDGET))();
+      expect(pool.sources.map(record => record.source_id)).toEqual(["z"]);
+      expect(pool.descriptors.map(row => row.source_id)).toEqual(["z"]);
+      expect(pool.access.source_candidates).toEqual([expect.objectContaining({ source_id: "z", complete: true,
+        read_bytes: Buffer.byteLength("User: Orchid irrigation."), body_bytes: Buffer.byteLength("User: Orchid irrigation.") })]);
+      expect(pool.access).toMatchObject({ unvisited_sources: true, stopping_reasons: ["unavailable"] });
+      expect(read.mock.calls.filter(([, identity]) => identity === pool.sources[0]!.identity)).toHaveLength(1);
+    } finally { read.mockRestore(); database.close(); closeCachedDatabase(filename); }
+    const prepared = await accessCall(execute, prepare(orchid));
+    expect(prepared.candidates.map(row => row.source_id)).toEqual(["z"]);
+    expect(prepared.access?.source_candidates).toEqual([expect.objectContaining({ source_id: "z", complete: true })]);
+    expect(prepared.access?.unvisited_sources).toBe(true);
+    expect(prepared.coverage.semantic_correspondence).toBe("unexercised");
+    const recalled = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
+      query_handle: prepared.query_handle!, semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
+    expect(recalled.discovery.access?.pool_id).toBe(prepared.access?.pool_id);
+    expect(recalled.proofs ?? []).toHaveLength(0);
   });
 });
 
