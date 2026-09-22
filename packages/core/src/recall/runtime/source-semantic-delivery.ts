@@ -1,7 +1,8 @@
 import {
   interpretationNodeIdentity, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   type InformationIndex, type SourceSemanticQuery, type SourceSemanticBindingResult,
-  type SourceSemanticConsumedLeaf, type InterpretationNodeCoordinate, type SourceSemanticEvaluationReport
+  type SourceSemanticConsumedLeaf, type InterpretationNodeCoordinate, type SourceSemanticEvaluationReport,
+  type SourceSemanticReasoningResult
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import { parseBindingContext, type BindingContextStore } from "../conditional-field/engine/binding-environment.js";
@@ -116,7 +117,8 @@ function evaluationReport(query: SourceSemanticQuery, execution: SourceSemanticE
 export function closedProof(
   roots: readonly string[],
   rows: ReadonlyMap<string, NonNullable<InformationIndex["explanations"]>[number]>,
-  meter: SourceSemanticResourceLedger
+  meter: SourceSemanticResourceLedger,
+  visit?: (row: NonNullable<InformationIndex["explanations"]>[number]) => void
 ): boolean {
   const done = new Set<string>(), visiting = new Set<string>();
   const stack = roots.map((id) => ({ id, exit: false }));
@@ -128,8 +130,39 @@ export function closedProof(
     if (visiting.has(item.id)) return false;
     const row = rows.get(item.id);
     if (row === undefined) return false;
+    visit?.(row);
     visiting.add(item.id); stack.push({ id: item.id, exit: true });
     for (const child of row.children) stack.push({ id: child, exit: false });
   }
   return true;
+}
+
+/** Only the execution owner calls this with its actual projected proof and origins. */
+export function sourceSemanticProofDependencies(result: Pick<SourceSemanticReasoningResult,
+  "binding_results" | "derivations" | "evidence_leaves" | "derived_nodes">, meter: SourceSemanticResourceLedger): readonly string[] {
+  const leaves = new Map(result.evidence_leaves?.map(row => [row.observation_id, row.leaf]));
+  const derived = new Map(result.derived_nodes?.map(row => [row.node_id, row]));
+  const dependencies = new Set<string>();
+  const add = (id: string | undefined): void => {
+    if (id === undefined) return;
+    meter.charge(1, 32, "proof source dependency");
+    const node = derived.get(id);
+    if (node?.kind === "query_entity") return; // Original-query literals are not source coordinates.
+    if (node?.kind === "instantiation") { add(node.template); add(node.quantifier); add(node.member); return; }
+    if (node?.kind === "instance_slot") { add(node.instance); return; }
+    if (node?.kind === "comparison") { add(node.left); add(node.right); return; }
+    dependencies.add(id);
+  };
+  const rows = new Map(result.derivations?.map(row => [row.derivation_id, row]));
+  const roots = (result.binding_results ?? []).flatMap(row => row.explanation_ids);
+  const closed = closedProof(roots, rows, meter, row => {
+    for (const observation of row.observation_ids) {
+      const leaf = leaves.get(observation);
+      if (leaf === undefined) continue;
+      for (const field of ["occurrence", "parent", "target", "domain", "member", "quantifier", "measurement", "other_measurement"] as const) add(leaf[field]);
+      for (const context of leaf.context_path ?? []) add(context);
+    }
+  });
+  if (!closed) throw new CoreError("OBLIGATION_VIOLATION", "execution support has an open proof closure");
+  return [...dependencies].sort();
 }

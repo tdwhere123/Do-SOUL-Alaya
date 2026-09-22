@@ -46,7 +46,7 @@ it("occupies one first-five slot per source root and keeps a source without a so
     && entry.target.root_id === "failed" && entry.interpretation_node === undefined
     && entry.explanation_ids.length === 0)).toBe(true);
   expect(assembled.index.page_purpose).toBe("membership");
-  expect(assembled.index.entries.length).toBeLessThanOrEqual(10);
+  expect(assembled.index.entries.length).toBeLessThanOrEqual(5);
 });
 
 it("pages occupied membership after the first page budget", () => {
@@ -55,9 +55,9 @@ it("pages occupied membership after the first page budget", () => {
     query_id: "library-query", snapshot_id: SNAPSHOT, interpretation_id: "library-interpretation",
     as_of: CLOCK, proof_groups: [], source_entries: sources, truncated: false, open_residuals: false
   });
-  expect(first.index.entries).toHaveLength(10);
+  expect(first.index.entries).toHaveLength(5);
   expect(first.index.continuation).not.toBeNull();
-  expect(first.index.continuation?.cursor).toBe("offset-10");
+  expect(first.index.continuation?.cursor).toBe("offset-5");
   expect(first.index.completeness.logical_index).toBe("partial");
   const second = assembleSourceSemanticLibraryIndex({
     query_id: "library-query", snapshot_id: SNAPSHOT, interpretation_id: "library-interpretation",

@@ -940,9 +940,14 @@ Observation leaves capacity for descriptor/lease or library finalization; an
 unread body tail or budget-limited pool remains open. These are conservative
 logical charges, not a wall-clock guarantee or an RSS bound.
 Compatible source interpretation, query semantics, and semantic correspondence compile independently through the existing field; there is no
-cross-interpretation join. Delivery uses canonical `sortIndexEntries` with source-root occupancy
-(`source_gold_root_identity`) and a membership page of at most 10. Equal grades
-use canonical identity ties; this is not learned relevance. Proof-bearing slots
+cross-interpretation join. Native delivery selects at most five source roots
+(`source_gold_root_identity`) after reserving their complete support packages.
+It prefers a qualified direct answer, then uncovered original-query evidence inputs,
+then additional qualified local witnesses with unknown cross-source identity, and
+finally raw sources in the native access order. A bounded one-root exchange repairs
+overlapping greedy coverage when the complete replacement page fits. This is not a
+global optimum or a distinct-person count. Canonical order remains a diagnostic
+control and tie-break. Proof-bearing slots
 keep source-interpretation, query-semantics, semantic-correspondence, and conditional-computation closure. Delivery and first-exposure `object_kind` is
 `semantic_proof` on those slots and `source_evidence` on a source excerpt
 without a closed proof. Mixed Any@K joins only `object_kind: source_evidence`;
@@ -957,8 +962,8 @@ The separately named source-bearing union metric scores the same initial occupie
 slots across source evidence and validated semantic proofs. The entire delivered
 slot sequence must bind to the native index before either source or proof
 scoring: count, order, kinds and product coordinates must match the native delivery
-owner. Protocol owns the complete delivery identity: protocol 2, library v2,
-membership purpose and the ten-slot page budget. Worker and public readers derive
+owner. Protocol owns the complete delivery identity: protocol 4, library v4,
+membership purpose and the five-slot page budget. Worker and public readers derive
 from it; a public outcome-only response contains no partial delivery fields and
 is unavailable for measurement. Unknown/obsolete delivery versions are invalid.
 Explicit offline source-only v1 readmission retains the original index, query and
@@ -1039,10 +1044,16 @@ they cannot establish a complete census or resurrect an older revision.
 Source-interpretation candidate diagnostics include only
 authorized current sources. Library continuation leases bind the first clock,
 request budget, caller/session, scope and database revision; changing any bound
-input requires a fresh request. Proof demotion preserves occupied positions.
+input requires a fresh request. The lease freezes selected pages, complete witness
+packages and source windows; continuation neither re-executes nor re-selects them.
+The public request uses the same versioned continuation schema. Exhaustion while
+planning later pages preserves reserved slots and leaves the unplanned remainder
+open; it does not promise a cursor over every observed source.
+An unfit proof package can yield a lawful source-only candidate before selection.
+Later encoding cannot demote a selected proof or clip its necessary support.
 Public payload coverage and index payload completeness both report shortened
-or unavailable previews. Library preview allocation reserves each occupied slot
-before redistributing unused allowance, using the existing default Recall token
+or unavailable previews. Raw-source preview allocation reserves each potential occupied slot,
+using the existing default Recall token
 estimator rather than a UTF-16 character count. Estimates are not measured model
 tokens; the complete encoded response still obeys the independent hard UTF-8 byte
 limit. Truncation preserves complete source characters. A hydrated empty source
@@ -1058,10 +1069,16 @@ is relative to that admitted interpretation; an omitted language qualifier
 remains a fidelity issue. Unknown dependencies, missing locations, display limits
 and processing exhaustion stay distinct. Missing locations permit a complete
 retained-source fallback only within the same display and resource limits;
-window availability does not imply the original source is complete. This helper
-is not yet connected to native selection or the public preview encoder.
+window availability does not imply the original source is complete. This owner
+feeds native package selection and the public encoder. Dependencies come from
+the executed binding closures and observation origins, never returned-value text
+or the consumed-leaf summary. All delivered bindings for a root share one contiguous
+window covering their represented dependencies. Delivery spans leave the original
+execution target and proof identities intact; verification compares complete root
+identity and checks that the span contains the same required locations. It does
+not independently certify source text absent from the evaluator's trusted inputs.
 
-Measurement retains requested budget separately from the fixed ten-slot
+Measurement retains requested budget separately from the fixed five-slot
 page policy and requires the delivered source-interpretation, query-semantics, semantic-correspondence, and conditional-computation package and closed proof graph for
 proof-conditioned scoring; source retrieval remains independently scoreable.
 

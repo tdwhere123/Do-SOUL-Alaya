@@ -1,5 +1,5 @@
 import {
-  canonicalJson, sameRecallTarget, sourceSemanticContextIdentity, SourceSemanticResourceLedger,
+  canonicalJson, sameRecallTarget, sourceEvidenceRootTarget, sourceSemanticContextIdentity, SourceSemanticResourceLedger,
   SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, SOURCE_SEMANTIC_REASONING_CONTRACT,
   type InformationIndex, type IndexEntry, type SourceSemanticLibraryProof,
   type SourceRecordIdentity, type SourceSemanticLibrarySlotQualifier, type RequestBudget
@@ -9,6 +9,7 @@ import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { proofForLibraryEntry, scopeSourceSemanticLibraryBranch, sourceSemanticLibraryQueryIdentity, sourceGoldRootIdentity } from "./source-semantic-library-recall.js";
 import { executeSourceSemanticInterpretation, SOURCE_SEMANTIC_REASONING_BUDGET } from "./source-semantic-reasoning.js";
 import { projectSourceSemanticQuerySupport } from "./source-semantic-query-support.js";
+import { sourceSemanticSupportExtent } from "../../memory/evidence-create/source-semantic-support-window.js";
 
 /** Reproduce the actual accepting witness; missing proof means unverified, including exhaustion. Usage is this verification's logical cost. */
 export function deliveredSourceSemanticLibraryProof(
@@ -24,7 +25,8 @@ export function deliveredSourceSemanticLibraryProof(
   try {
     const representative = proofForLibraryEntry(entry, proofs);
     if (representative !== undefined && entry.target.kind === "source_evidence" && qualifier.evidence_kind === "semantic_proof"
-      && representative.source_target !== undefined && sameRecallTarget(representative.source_target, entry.target)
+      && representative.source_target !== undefined
+      && sameRecallTarget(sourceEvidenceRootTarget(representative.source_target), sourceEvidenceRootTarget(entry.target))
       && qualifier.source_interpretation_id === representative.source_interpretation_id
       && qualifier.query_semantics_id === representative.query_semantics_id
       && qualifier.semantic_correspondence_id === representative.semantic_correspondence_id
@@ -75,6 +77,14 @@ function verifyDeliveredProof(index: InformationIndex, entry: IndexEntry, proof:
   if (usage !== undefined) meter.charge(usage.work_units, usage.memory_bytes, "proof execution witness");
   if (executed.index === null || executed.result.conditional_computation_id !== proof.conditional_computation_id
     || sourceSemanticContextIdentity(proof.context, fieldContractSha256) !== proof.conditional_computation_id) return undefined;
+  if (entry.target.kind === "source_evidence" && entry.target.span !== undefined) {
+    const span = entry.target.span;
+    const required = sourceSemanticSupportExtent(proof.interpretation, executed.source_dependencies ?? [], meter);
+    if (span.retained_extent !== "body") return undefined;
+    if (required.status === "located") {
+      if (span.content_start > required.start || span.content_end < required.end) return undefined;
+    } else if (required.reason !== "location_missing" || !span.content_complete || span.content_start !== 0) return undefined;
+  }
   const expected = index.result_version === SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION
     ? scopeSourceSemanticLibraryBranch(executed.index, executed.result)
     : index.result_version === SOURCE_SEMANTIC_REASONING_CONTRACT ? { ...executed, index: executed.index } : undefined;

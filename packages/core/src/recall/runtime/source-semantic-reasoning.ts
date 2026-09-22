@@ -17,6 +17,7 @@ import { compileSourceSemanticPremises, sourceSemanticReaders } from "./source-s
 import { planSourceSemanticBranches } from "./source-semantic-branch-plan.js";
 import { traceSourceSemanticWithdrawals, type SourceSemanticWithdrawalTrace } from "./source-semantic-withdrawal.js";
 import { projectSourceSemanticState, type SourceSemanticResultBody as ResultBody } from "./source-semantic-projection.js";
+import { sourceSemanticProofDependencies } from "./source-semantic-delivery.js";
 
 export const SOURCE_SEMANTIC_REASONING_BUDGET = { schema_version: 1 as const, work_units: 200000, memory_bytes: 20000000,
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 };
@@ -35,6 +36,8 @@ export type ReasonSourceSemanticInterpretationInput = Readonly<{
 type Prepared = Readonly<{ body: ResultBody; index: InformationIndex | null; withdrawal_trace?: SourceSemanticWithdrawalTrace }>;
 export type SourceSemanticInterpretationExecution = Readonly<{
   result: SourceSemanticReasoningResult; index: InformationIndex | null;
+  /** Source coordinates from actual selected binding closures, for native support hydration only. */
+  source_dependencies?: readonly string[];
   withdrawal_trace?: SourceSemanticWithdrawalTrace;
 }>;
 
@@ -51,6 +54,7 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
   let body: ResultBody;
   let index: InformationIndex | null = null;
   let withdrawalTrace: SourceSemanticWithdrawalTrace | undefined;
+  let sourceDependencies: readonly string[] | undefined;
   if (input.withdrawal_trial_limit !== undefined && (!Number.isInteger(input.withdrawal_trial_limit)
     || input.withdrawal_trial_limit < 1 || input.withdrawal_trial_limit > 64)) throw new CoreError("VALIDATION", "withdrawal trial limit must be 1..64");
   try {
@@ -66,6 +70,7 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
       const prepared = reasonPrepared(input, original, request, meter);
       body = prepared.body; index = prepared.index;
       withdrawalTrace = prepared.withdrawal_trace;
+      if ((body.binding_results?.length ?? 0) > 0) sourceDependencies = sourceSemanticProofDependencies(body, meter);
     }
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
@@ -74,6 +79,7 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
   const result = finish({ ...body, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } }, request?.output_byte_limit);
   return { result, index: result.outcome.status === "truncated"
     || result.outcome.status === "resource_exhausted" && result.binding_results === undefined ? null : index,
+    ...(result.binding_results === undefined || sourceDependencies === undefined ? {} : { source_dependencies: sourceDependencies }),
     ...(withdrawalTrace === undefined ? {} : { withdrawal_trace: withdrawalTrace }) };
 }
 

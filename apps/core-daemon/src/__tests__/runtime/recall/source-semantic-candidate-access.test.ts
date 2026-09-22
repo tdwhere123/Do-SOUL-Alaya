@@ -149,7 +149,7 @@ it("pages all 512 observed source traces without rereading or overflowing the pu
     const publicBytes = Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(recalled)));
     expect(publicBytes).toBeLessThanOrEqual(request.output_byte_limit);
     expect(recalled.discovery.access?.source_candidates.length).toBeLessThanOrEqual(10);
-    expect(recalled.discovery.access?.trace).toMatchObject({ kind: "library_selection", omitted_source_count: 502 });
+    expect(recalled.discovery.access?.trace).toMatchObject({ kind: "library_selection", omitted_source_count: 507 });
     const seen = new Set(prepared.access!.source_candidates.map((row) => row.record_id));
     let cursor = prepared.continuation_handle, sourceOffset = 16;
     while (cursor !== undefined) {

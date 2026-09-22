@@ -19,12 +19,19 @@ export function sourceSemanticLibraryQueryIdentity(originalQuery: string, result
 }
 
 export const SOURCE_SEMANTIC_LIBRARY_ORDER: SourceSemanticLibraryOrder = {
-  enumeration_policy: "canonical",
+  enumeration_policy: "evidence_support",
   tie_policy: SOURCE_SEMANTIC_LIBRARY_TIE_POLICY,
   occupancy: SOURCE_SEMANTIC_LIBRARY_OCCUPANCY,
   occupancy_prefix: SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX,
   page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET
 };
+export const SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS = 2_000;
+
+/** Raw fallback reserves a fair root share; semantic support may use any remaining space atomically. */
+export function sourceSemanticLibraryRawPreview(text: string, occupiedRoots: number): string {
+  return previewWithinTokens(text, Math.floor(SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS
+    / Math.max(1, Math.min(occupiedRoots, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET))), makeTokenEstimator());
+}
 
 /** Gold-join occupancy key. Omits evidence_object_id, hypothesis, binding, and interpretation node. */
 export function sourceGoldRootIdentity(target: SourceEvidenceTarget): string {
@@ -77,6 +84,10 @@ export function assembleSourceSemanticLibraryIndex(input: Readonly<{
   source_entries: readonly IndexEntry[];
   truncated: boolean; open_residuals: boolean;
   offset?: number; expires_at?: string; authorized_scopes?: readonly string[] | null;
+  /** Native selector's frozen root order. Canonical order is only an offline control. */
+  root_order?: readonly string[];
+  selected_entries?: readonly IndexEntry[];
+  more_roots?: boolean; emitted_offset?: number;
 }>): { index: InformationIndex; omitted_duplicate_bindings: number; occupied: readonly IndexEntry[] } {
   const merged = mergeProofGroups(input.proof_groups);
   const byRoot = new Map<string, IndexEntry[]>();
@@ -94,18 +105,24 @@ export function assembleSourceSemanticLibraryIndex(input: Readonly<{
   for (const rows of byRoot.values()) {
     const ranked = sortIndexEntries(rows, "canonical");
     const proof = ranked.find((row) => row.interpretation_node !== undefined && row.explanation_ids.length > 0);
-    preferred.push(proof ?? ranked[0]!);
+    const selected = input.selected_entries?.find(entry => entry.target.kind === "source_evidence"
+      && rows[0]!.target.kind === "source_evidence" && sourceGoldRootIdentity(entry.target) === sourceGoldRootIdentity(rows[0]!.target));
+    preferred.push(selected ?? proof ?? ranked[0]!);
     omitted += ranked.length - 1;
   }
-  const occupied = sortIndexEntries(preferred, "canonical");
+  const positions = new Map(input.root_order?.map((root, position) => [root, position]));
+  const occupied = sortIndexEntries(preferred, "canonical").sort((left, right) => {
+    if (input.root_order === undefined || left.target.kind !== "source_evidence" || right.target.kind !== "source_evidence") return 0;
+    return (positions.get(sourceGoldRootIdentity(left.target)) ?? Infinity) - (positions.get(sourceGoldRootIdentity(right.target)) ?? Infinity);
+  });
   const offset = Math.max(0, input.offset ?? 0);
   const page = occupied.slice(offset, offset + SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET);
-  const occupancyRemaining = occupied.length > offset + page.length;
+  const occupancyRemaining = input.more_roots ?? occupied.length > offset + page.length;
   const remaining = occupancyRemaining || input.open_residuals || input.truncated;
   const pageRoots = new Set(page.flatMap(entry => entry.target.kind === "source_evidence" ? [sourceGoldRootIdentity(entry.target)] : []));
   const witnesses = merged.entries.filter(entry => entry.target.kind === "source_evidence" && pageRoots.has(sourceGoldRootIdentity(entry.target)));
   const explanations = reachableExplanations(merged.explanations, witnesses);
-  const nextOffset = offset + page.length;
+  const nextOffset = (input.emitted_offset ?? offset) + page.length;
   return {
     omitted_duplicate_bindings: omitted,
     occupied,
@@ -148,7 +165,6 @@ function libraryOccupancyContinuation(input: Readonly<{
     expires_at: input.expires_at ?? input.as_of,
     cursor: `offset-${String(nextOffset)}`,
     interpretation_id: input.interpretation_id, interpretation_clock: input.as_of,
-    enumeration_policy: "canonical",
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes })
   };
 }
@@ -156,7 +172,8 @@ function libraryOccupancyContinuation(input: Readonly<{
 export function encodeSourceSemanticLibraryResults(
   index: InformationIndex,
   previews: ReadonlyMap<string, string> = new Map(),
-  maxTotalTokens = 2_000
+  maxTotalTokens = SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS,
+  atomic = false
 ): MemorySearchResult[] {
   const encoded: MemorySearchResult[] = [];
   const estimator = makeTokenEstimator();
@@ -172,11 +189,12 @@ export function encodeSourceSemanticLibraryResults(
     const score = entry.association_milligrades / MILLIGRADE_TOP;
     const objectId = indexMemoryObjectId(entry);
     const payload = payloads[offset]!;
-    const prefix = payload.available ? previewWithinTokens(payload.text, allowances[offset]!, estimator) : "";
+    // Proof support is atomic. The selector must reserve it before choosing the root.
+    const proof = entry.interpretation_node !== undefined && entry.explanation_ids.length > 0;
+    const prefix = payload.available ? atomic || proof ? payload.text : previewWithinTokens(payload.text, allowances[offset]!, estimator) : "";
     const content = prefix.length === 0 ? "[payload omitted]" : prefix;
     const tokenEstimate = estimator.estimate(content);
     usedTokens += tokenEstimate;
-    const proof = entry.interpretation_node !== undefined && entry.explanation_ids.length > 0;
     encoded.push({
       ...(objectId === undefined ? {} : { object_id: objectId }),
       object_kind: indexEntryObjectKind(entry),
@@ -199,7 +217,9 @@ export function encodeSourceSemanticLibraryResults(
         max_total_tokens: maxTotalTokens,
         remaining_entries: Math.max(0, index.representation.page_budget - encoded.length - 1),
         remaining_tokens: Math.max(0, maxTotalTokens - usedTokens),
-        within_budget: payload.available && content === payload.text && tokenEstimate <= allowances[offset]!
+        within_budget: payload.available && content === payload.text && (atomic
+          ? payloads.reduce((sum, row) => sum + estimator.estimate(row.text), 0) <= maxTotalTokens
+          : tokenEstimate <= (proof ? maxTotalTokens : allowances[offset]!))
       }
     });
   }
@@ -241,7 +261,7 @@ export function encodeSourceSemanticLibraryResponse(
   result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>
 ): SoulInterpretationResponse {
   const { kind: _kind, previews, coverage, ...rest } = result;
-  const results = encodeSourceSemanticLibraryResults(result.index, new Map(Object.entries(previews ?? {})));
+  const results = encodeSourceSemanticLibraryResults(result.index, new Map(Object.entries(previews ?? {})), SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS, true);
   const omitted = results.some((row) => !row.budget_state.within_budget);
   const incomplete = omitted || coverage.payload !== "complete";
   return SoulInterpretationResponseSchema.parse({ operation: "recall", ...rest, results,

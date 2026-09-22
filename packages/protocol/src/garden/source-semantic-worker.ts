@@ -13,15 +13,22 @@ import {
   SourceSemanticInterpretationSchema, SourceSemanticOutcomeSchema, SourceSemanticReasoningResultSchema
 } from "./source-semantic-interpretation.js";
 
-/** Frozen first-baseline library delivery. Canonical identity order; occupancy is source-root, not a source-interpretation label. */
+/** Native evidence selection occupies roots and reserves their complete support packages. */
 export const SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP = 32 as const;
-export const SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET = 10 as const;
+export const SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET = 5 as const;
 export const SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX = 5 as const;
 export const SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE = 16 as const;
-export const SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION = "source-semantic-library-v3" as const;
-export const SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION = 3 as const;
+export const SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION = "source-semantic-library-v4" as const;
+export const SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION = 4 as const;
 export const SOURCE_SEMANTIC_LIBRARY_OCCUPANCY = "source_gold_root_identity" as const;
 export const SOURCE_SEMANTIC_LIBRARY_TIE_POLICY = "canonical_identity" as const;
+
+// Generic enumeration policies describe the ordinary field route. Library order
+// is carried by its versioned order contract and frozen membership lease instead.
+export const SourceSemanticLibraryContinuationSchema = ContinuationSchema.unwrap().extend({
+  result_version: z.literal(SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION),
+  enumeration_policy: z.never().optional()
+}).readonly();
 
 export const SOURCE_SEMANTIC_COVERAGE_STATES = [
   "complete", "open", "truncated", "unexercised"
@@ -107,7 +114,7 @@ const RecallRequestSchema = z.object({
   semantic_correspondences: z.array(SourceSemanticCorrespondenceSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   budget: RequestBudgetSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000),
-  continuation: ContinuationSchema.optional()
+  continuation: SourceSemanticLibraryContinuationSchema.optional()
 }).strict().superRefine((request, context) => {
   const leased = request.query_handle !== undefined;
   const oneshot = request.query_semantics !== undefined && request.original_query !== undefined;
@@ -141,7 +148,7 @@ export const SourceSemanticLibraryDiscoverySchema = z.object({
 }).strict().readonly();
 
 export const SourceSemanticLibraryOrderSchema = z.object({
-  enumeration_policy: z.literal("canonical"),
+  enumeration_policy: z.literal("evidence_support"),
   tie_policy: z.literal(SOURCE_SEMANTIC_LIBRARY_TIE_POLICY),
   occupancy: z.literal(SOURCE_SEMANTIC_LIBRARY_OCCUPANCY),
   occupancy_prefix: z.literal(SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX),
@@ -167,7 +174,9 @@ export const SourceSemanticLibrarySlotQualifierSchema = z.object({
   conditional_computation_id: Sha256DigestSchema.optional(),
   witnesses: z.array(z.object({ conditional_computation_id: Sha256DigestSchema, binding_id: BoundedIdSchema })
     .strict().readonly()).min(1).max(1000).readonly().optional(),
-  support: SourceSemanticQuerySupportSchema.optional()
+  support: SourceSemanticQuerySupportSchema.optional(),
+  payload_support: z.enum(["available", "not_applicable", "no_dependencies", "unknown_dependency", "location_missing", "display_budget", "resource_budget", "envelope_budget"]).optional(),
+  selection_basis: z.enum(["direct_answer", "new_input", "additional_witness", "source_access"]).optional()
 }).strict().superRefine((value, context) => {
   if (value.evidence_kind === "semantic_proof" && (value.witnesses === undefined
     || value.source_interpretation_id === undefined || value.query_semantics_id === undefined
@@ -202,6 +211,7 @@ export const SourceSemanticLibraryDeliverySchema = z.object({
   total_count: NonNegativeIntSchema,
   index: InformationIndexSchema.unwrap().extend({
     result_version: z.literal(SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION),
+    continuation: SourceSemanticLibraryContinuationSchema.nullable(),
     representation: InformationIndexSchema.unwrap().shape.representation.unwrap().extend({
       page_budget: z.literal(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET)
     }).readonly(),

@@ -4,6 +4,7 @@ import { CoreError } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
+import type { LibraryDeliveryPlan } from "./source-semantic-library-delivery.js";
 
 export type SourceSemanticLease = Readonly<{
   kind: "source" | "query" | "page" | "library";
@@ -15,6 +16,7 @@ export type SourceSemanticLease = Readonly<{
   candidates?: readonly string[];
   access_pool?: SourceSemanticAccessPool; access_offset?: number; access_source_offset?: number; truncated?: boolean;
   continuation?: Continuation; request_identity?: string;
+  library_plan?: LibraryDeliveryPlan;
 }>;
 type Clock = Readonly<{ as_of: string; lifetime_now?: string }>;
 type Caller = Clock & Readonly<{ workspace_id: string; principal?: string }>;

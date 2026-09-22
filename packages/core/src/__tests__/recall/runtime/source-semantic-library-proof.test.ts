@@ -38,6 +38,18 @@ it("rejects an occupied entry rebound to another evidence object within the same
   expect(deliveredSourceSemanticLibraryProof(index, rebound, qualifier, [proof], record).verified_proofs).toEqual([]);
 });
 
+it("retains the executed proof root identity when delivery adds a source window", () => {
+  const { record, proof, index, entry, qualifier, target } = deliveredProofFixture({ library: true });
+  const delivered = { ...entry, target: { ...target, span: { content_start: 0, content_end: 24,
+    retained_extent: "body" as const, content_complete: true, original_complete: false } } };
+  expect(proof.source_target?.span).toBeUndefined();
+  expect(deliveredSourceSemanticLibraryProof(index, delivered, qualifier, [proof], record).proof).toBe(proof);
+  expect(deliveredSourceSemanticLibraryProof(index, { ...delivered, target: { ...delivered.target,
+    evidence_object_id: "other-object" } }, qualifier, [proof], record).proof).toBeUndefined();
+  expect(deliveredSourceSemanticLibraryProof(index, { ...delivered, target: { ...delivered.target,
+    span: { ...delivered.target.span, content_complete: false } } }, qualifier, [proof], record).proof).toBeUndefined();
+});
+
 it.each([false, true])("binds delivered coordinates and alternatives to the execution witness (library namespace=%s)", (library) => {
   const { record, proof, index, entry, qualifier } = deliveredProofFixture({ library });
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [proof], record).proof).toBe(proof);

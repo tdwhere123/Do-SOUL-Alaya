@@ -234,7 +234,7 @@ it("discovers a relevant interpretation after the first descriptor page and keep
       original_query: undefined, query_semantics: undefined, query_handle: prepared.query_handle });
     expect(leased.discovery.access?.pool_id).toEqual(prepared.access?.pool_id);
     expect(leased.slot_qualifiers.some((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === gold)).toBe(true);
-    expect(recalled.order.enumeration_policy).toBe("canonical");
+    expect(recalled.order.enumeration_policy).toBe("evidence_support");
     expect(recalled.order.occupancy).toBe("source_gold_root_identity");
     const search = soulSearchFromLibraryRecall(recalled);
     const roots = search.results.slice(0, 5).map((row) => row.target.kind === "source_evidence"
@@ -478,8 +478,11 @@ it.each([2001, 70000])("reports the actual UTF-8 preview extent for a %i-charact
     expect(publicResult.coverage.payload).toBe(length > 4096 ? "truncated" : "complete");
     expect(publicResult.index?.completeness.payload).toBe(length > 4096 ? "partial" : "complete");
     expect(publicResult.results?.[0]?.content_preview).toBe(long.slice(0, 4096));
-    await expect(call((input) => client.sourceSemanticsPort!.execute(input), { ...recallRequest([]), output_byte_limit: 4096 }))
-      .rejects.toThrow(/output budget cannot retain interpretation qualifiers/u);
+    const unavailable = await call((input) => client.sourceSemanticsPort!.execute(input), { ...recallRequest([]), output_byte_limit: 4096 });
+    expect(unavailable.index.entries).toEqual([]);
+    expect(unavailable.coverage.payload).toBe("truncated");
+    expect(unavailable.discovery.open_residuals).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(unavailable)))).toBeLessThanOrEqual(4096);
     const capped = await call((input) => client.sourceSemanticsPort!.execute(input), { ...recallRequest([]), output_byte_limit: 8192 });
     expect(Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(capped)))).toBeLessThanOrEqual(8192);
     const preview = Object.values(recalled.previews ?? {})[0] ?? "";
@@ -530,7 +533,7 @@ it("binds delivery_id to the delivered first-exposure membership", async () => {
       try {
         const result = await call(execute, { ...recallRequest(semantic_correspondences), output_byte_limit: limit });
         if (result.kind === "recall" && result.proofs === undefined) { limited = result; break; }
-      } catch { /* output_byte_limit below the demoted envelope */ }
+      } catch { /* output_byte_limit below the minimum complete envelope */ }
     }
     if (limited === undefined) {
       const shortened = { ...full.index, entries: full.index.entries.slice(0, Math.max(0, full.index.entries.length - 1)) };
@@ -585,8 +588,9 @@ it("pages library occupancy without duplicating first-page product identities", 
     const first = await call(execute, recallRequest([]));
     expect(first.kind).toBe("recall");
     if (first.kind !== "recall") throw new Error("library recall expected");
-    expect(first.index.entries).toHaveLength(10);
+    expect(first.index.entries).toHaveLength(5);
     expect(first.index.continuation).not.toBeNull();
+    expect(first.index.continuation?.enumeration_policy).toBeUndefined();
     const second = await execute({ workspace_id: WS, as_of: "2026-09-18T00:00:00.001Z",
       authorized_scopes: { mode: "named", scopes: ["project"] },
       request: { ...recallRequest([]), continuation: first.index.continuation! } });
@@ -614,7 +618,7 @@ it("pages library occupancy without duplicating first-page product identities", 
     const nextRequest = { ...publicRequest, continuation: publicFirst.index.continuation };
     const publicNext = await handler(nextRequest, context);
     if (publicNext.operation !== "recall") throw new Error("public recall missing");
-    expect(publicNext.index?.entries).toHaveLength(2);
+    expect(publicNext.index?.entries).toHaveLength(5);
     await expect(handler(nextRequest, { ...context, agentTarget: "other" })).rejects.toThrow(/principal/u);
     await expect(handler({ ...nextRequest, budget: { ...BUDGET, work_units: BUDGET.work_units - 1 } }, context)).rejects.toThrow(/changed/u);
     await expect(handler({ ...nextRequest, authorized_scopes: { mode: "named", scopes: ["global_core"] } }, context)).rejects.toThrow(/scope/u);

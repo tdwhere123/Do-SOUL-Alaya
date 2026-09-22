@@ -12,6 +12,14 @@ below as the live ranking recipe.
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
 
+Native semantic library delivery advances to result v4 / protocol 4 under the
+pending Protocol 9.0.0 release. Five root slots select complete support packages
+from actual conditional-computation bindings, with bounded demand-coverage exchange
+and raw-source fallback. Exact source windows preserve represented dependencies;
+the same encoder enforces token and full-envelope byte limits before selection.
+Existing leases freeze pages and reservations. Historical source-only archives
+retain their original identities and page policies.
+
 Semantic proposal preflight and authority v3 bind a configurable per-key attempt
 ceiling of one or two (default two). Execution, durable raw recovery and cost
 estimates use that same limit; no generation or cache identity changes.
@@ -31,8 +39,8 @@ window preparation, reusing the accounting and structural reference owners.
 Core preserves represented governing context and exact assertion intervals,
 with explicit missing-location and budget outcomes. This additive utility is
 included in the pending Protocol 9.0.0 release; MCP, EventLog and config schemas
-are unchanged. Native selection and public preview encoding are not yet wired
-to these windows.
+were unchanged in that utility change; native delivery now consumes these windows
+under the versioned library contract above.
 
 Library previews share the existing Recall token estimator and reserve display
 space for every occupied root before distributing the remaining allowance.

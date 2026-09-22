@@ -1,32 +1,31 @@
 import {
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
-  SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SourceSemanticLibraryDeliverySchema,
-  SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, canonicalJson, indexEntryCacheKey,
-  type Continuation, type IndexEntry, type InformationIndex, type SourceSemanticCorrespondence,
-  type SourceSemanticCoverage, type SourceSemanticHandleDescriptor, type SourceSemanticLibraryDiscovery,
-  type SourceSemanticLibraryProof, type SourceSemanticWorkerResult, type SourceSemanticWorkerWork, type RequestBudget, type SourceSemanticQuery, type SourceSemanticWorkerRequest
+  SourceSemanticResourceExhausted, canonicalJson,
+  type SourceSemanticCorrespondence, type SourceSemanticHandleDescriptor,
+  type SourceSemanticLibraryProof, type SourceSemanticWorkerResult, type SourceSemanticQuery, type SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
 import {
   CoreError, OFFSET_CURSOR, admitSourceSemanticCorrespondence, admitSourceSemanticQuery,
-  assembleSourceSemanticLibraryIndex, continuationCapabilityMatches, executeSourceSemanticInterpretation,
-  fieldContractSha256, hydrateUtf8Chunk, issuedContinuationTampered, preparedDeliveryId, proofEntriesFromBranch, encodeSourceSemanticLibraryResponse,
-  sealIssuedContinuation, slotQualifiersFor, SOURCE_SEMANTIC_LIBRARY_ORDER,
-  sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry, sourceSemanticLibraryQueryIdentity, scopeSourceSemanticLibraryBranch
+  continuationCapabilityMatches, executeSourceSemanticInterpretation,
+  fieldContractSha256, proofEntriesFromBranch,
+  sourceSemanticLibrarySourceEntry, sourceSemanticLibraryQueryIdentity, scopeSourceSemanticLibraryBranch, sourceGoldRootIdentity
 } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
-import { admissionOf, loadVerified, workOf } from "./source-semantic-discovery.js";
-import { accessInputIdentity, observeSourceSemanticAccess, libraryAccessReceipt, type SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
+import { admissionOf, loadVerified } from "./source-semantic-discovery.js";
+import { accessInputIdentity, observeSourceSemanticAccess, type SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
 import {
-  listEligibleSemanticSources, sourceSemanticReadStores, SourceSemanticReadBudget
+  listEligibleSemanticSources, SourceSemanticReadBudget
 } from "../field/source-semantic-read-stores.js";
-import { issueSemanticLease, readSemanticLease, sourceSemanticLifetimeNow, sourceSemanticRevision } from "./source-semantic-leases.js";
+import { readSemanticLease, sourceSemanticLifetimeNow, sourceSemanticRevision } from "./source-semantic-leases.js";
 
-const LIBRARY_PREVIEW_BYTES = 4_096;
+import { prepareLibraryPackages, type LibraryExecutedSupport } from "./source-semantic-library-packages.js";
+import { prepareLibraryDelivery, deliverFrozenLibraryPage } from "./source-semantic-library-delivery.js";
+
 type LibraryDiscovery = Readonly<{ descriptors: readonly SourceSemanticHandleDescriptor[];
   interpretationPages: number; interpretationOpen: boolean; interpretationTruncated: boolean; pool: SourceSemanticAccessPool }>;
 
-/** Provider-free library recall: one query/scope, independent conditional computation, canonical occupancy delivery. */
+/** Provider-free library recall: one query/scope, independent conditional computation, bounded evidence delivery. */
 export function runSourceSemanticLibraryRecall(
   runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget
@@ -42,8 +41,13 @@ export function runSourceSemanticLibraryRecall(
     || canonicalJson(continuationLease.continuation) !== canonicalJson(request.continuation))) {
     throw new CoreError("VALIDATION", "library continuation request changed");
   }
+  if (continuationLease !== undefined) {
+    const plan = continuationLease.library_plan;
+    const offset = OFFSET_CURSOR.exec(request.continuation!.cursor);
+    if (plan === undefined || offset === null) throw new CoreError("VALIDATION", "library continuation has no frozen membership");
+    return deliverFrozenLibraryPage(runtime, payload, meter, request, plan, Number(offset[1]));
+  }
   const currentClock = payload.as_of;
-  payload = { ...payload, as_of: continuationLease?.as_of ?? payload.as_of };
   const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, { ...payload, as_of: currentClock }, request.query_handle, authorized, "query");
   if (lease !== undefined && (request.original_query !== undefined && request.original_query !== lease.original_query
     || request.query_semantics !== undefined && canonicalJson(request.query_semantics) !== canonicalJson(lease.query_semantics))) {
@@ -64,7 +68,7 @@ export function runSourceSemanticLibraryRecall(
     work_units: Math.max(0, meter.work - Math.min(request.budget.finalization_reserve, Math.floor(meter.work / 4))),
     memory_bytes: meter.bytes - Math.min(Math.floor(meter.bytes / 4), request.output_byte_limit * 8 + 65536)
   });
-  const boundPool = continuationLease?.access_pool ?? lease?.access_pool;
+  const boundPool = lease?.access_pool;
   const policy = request.access_policy ?? boundPool?.access.policy ?? "query-conditioned-v1";
   const inputId = accessInputIdentity(original, admission.query, request.budget, policy, lease?.source_id);
   if (boundPool !== undefined && boundPool.access.input_id !== inputId) {
@@ -81,7 +85,7 @@ export function runSourceSemanticLibraryRecall(
     discovered.descriptors, request, admission.query, original);
   meter.absorb(exploration);
   return deliverLibraryPage(runtime, payload, authorized, meter, request, admission.query_id, admission.query,
-    sources, discovered, branches, original, requestIdentity, continuationLease?.continuation);
+    sources, discovered, branches, original, requestIdentity);
 }
 
 function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
@@ -94,7 +98,7 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
     explanations: ReturnType<typeof proofEntriesFromBranch>["explanations"] }[] = [];
   const proofs: SourceSemanticLibraryProof[] = [];
   const examined: string[] = [];
-  const provedRoots = new Set<string>();
+  const supports: LibraryExecutedSupport[] = [];
   let pairs = 0, computeOpen = false;
   for (const descriptor of descriptors) {
     const prepared = semantic_correspondences.get(descriptor.interpretation_id) ?? [];
@@ -140,9 +144,7 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
         meter.retain([group, proof], "library branch retention");
         proofGroups.push(group);
         proofs.push(proof);
-        for (const entry of group.entries) {
-          if (entry.target.kind === "source_evidence") provedRoots.add(sourceGoldRootIdentity(entry.target));
-        }
+        supports.push({ proof, group, source: checked.stored.content_bytes, dependencies: executed.source_dependencies ?? [] });
       } catch (error) {
         if (error instanceof SourceSemanticResourceExhausted) { computeOpen = true; break; }
         if (error instanceof CoreError) {
@@ -154,179 +156,71 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
     }
     if (pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP) { interpretationTruncated = true; break; }
   }
-  return { proofGroups, proofs, examined, provedRoots, pairs, computeOpen, interpretationTruncated };
+  return { proofGroups, proofs, examined, supports, pairs, computeOpen, interpretationTruncated };
 }
 
 function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
   request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, queryIdentity: string, query: SourceSemanticQuery,
   sources: Pick<ReturnType<typeof listEligibleSemanticSources>, "sources" | "pages" | "open" | "truncated">, discovered: LibraryDiscovery,
-  branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string,
-  issued: Continuation | undefined): SourceSemanticWorkerResult {
+  branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string): SourceSemanticWorkerResult {
   const { descriptors, interpretationPages, interpretationOpen } = discovered;
-  const { proofGroups, proofs, examined, provedRoots, pairs, computeOpen } = branches;
+  const { proofGroups, examined, pairs, computeOpen } = branches;
   const interpretationTruncated = discovered.interpretationTruncated || branches.interpretationTruncated;
   const interpretationId = `sha256:${fieldContractSha256(canonicalJson({
     kind: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, query: original, query_semantics_id: queryIdentity, scopes: authorized
   }))}`;
-  const queryId = sourceSemanticLibraryQueryIdentity(original);
   const snapshotId = `sha256:${fieldContractSha256(canonicalJson({
     workspace: payload.workspace_id, as_of: payload.as_of, scopes: authorized, revision: sourceSemanticRevision(runtime), requestIdentity,
     sources: sources.sources.map((row) => row.identity), access_pool: discovered.pool.access.pool_id,
     semantic_correspondences: request.semantic_correspondences ?? []
   }))}`;
-  const sourceEntries = sources.sources.flatMap((record) => {
-    const entry = sourceSemanticLibrarySourceEntry({
-      workspaceId: payload.workspace_id, root_id: record.identity, source_version: record.source_version,
-      content_digest: record.content_digest, evidence_object_id: record.evidence_object_id,
-      hypothesis_id: interpretationId
-    });
-    if (entry.target.kind !== "source_evidence") return [];
-    return provedRoots.has(sourceGoldRootIdentity(entry.target)) ? [] : [entry];
-  });
+  const sourceEntries = sources.sources.map(record => sourceSemanticLibrarySourceEntry({
+    workspaceId: payload.workspace_id, root_id: record.identity, source_version: record.source_version,
+    content_digest: record.content_digest, evidence_object_id: record.evidence_object_id, hypothesis_id: interpretationId
+  }));
+  // Interpretation discovery can verify a current root beyond the bounded source
+  // catalog prefix. Its actually executed support remains an eligible candidate.
+  const sourceRoots = new Set(sourceEntries.map(entry => entry.target.kind === "source_evidence" ? sourceGoldRootIdentity(entry.target) : ""));
+  for (const { proof } of branches.supports) {
+    const target = proof.source_target;
+    if (target === undefined || sourceRoots.has(sourceGoldRootIdentity(target))) continue;
+    sourceRoots.add(sourceGoldRootIdentity(target));
+    sourceEntries.push(sourceSemanticLibrarySourceEntry({ workspaceId: target.workspace_id, root_id: target.root_id,
+      source_version: target.source_version, content_digest: target.content_digest, evidence_object_id: target.evidence_object_id,
+      hypothesis_id: interpretationId }));
+  }
   const openResiduals = sources.open || sources.truncated || interpretationOpen || interpretationTruncated || computeOpen
     || pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP;
-  const offset = libraryPageOffset(request.continuation, issued, queryId, snapshotId, interpretationId);
-  const requestDigest = fieldContractSha256(canonicalJson({
-    budget: request.budget, output_byte_limit: request.output_byte_limit,
-    cursor: request.continuation?.cursor ?? null
-  }));
-  const paging = {
-    offset, expires_at: issued?.expires_at ?? new Date(Date.parse(sourceSemanticLifetimeNow(payload)) + 5 * 60_000).toISOString(),
-    authorized_scopes: authorized
-  };
-  const assembled = assembleSourceSemanticLibraryIndex({
-    query_id: queryId, snapshot_id: snapshotId, interpretation_id: interpretationId, as_of: payload.as_of,
-    proof_groups: proofGroups, source_entries: sourceEntries, truncated: openResiduals, open_residuals: openResiduals,
-    ...paging
-  });
-  meter.retain(assembled, "library index assembly");
-  const previewBudget = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
-  const previewed = previewsFor(runtime, payload, authorized, previewBudget, assembled.index);
-  meter.absorb(previewBudget);
-  const previews = previewed.previews;
-  const deliveredRoots = new Set(assembled.index.entries.flatMap(entry => entry.target.kind === "source_evidence"
-    ? [sourceGoldRootIdentity(entry.target)] : []));
-  const deliveredProofs = proofs.filter(proof => proof.source_target !== undefined
-    && deliveredRoots.has(sourceGoldRootIdentity(proof.source_target)))
-    .filter((proof, index, rows) => rows.findIndex(row => row.conditional_computation_id === proof.conditional_computation_id) === index);
-  const coverage = {
-    discovery: openResiduals ? "truncated" as const : "complete" as const,
-    source_interpretation: descriptors.length === 0 ? "unexercised" as const : "open" as const,
-    query_semantics: query.gaps.length === 0 ? "complete" as const : "open" as const,
-    semantic_correspondence: examined.length === 0 ? "unexercised" as const : "open" as const,
-    conditional_computation: computeOpen ? "open" as const : deliveredProofs.length > 0 ? "complete" as const : "open" as const,
-    payload: previewed.truncated ? "truncated" as const : "complete" as const
-  };
-  const discovery = {
-    access: libraryAccessReceipt(discovered.pool, examined, assembled.index.entries.flatMap((entry) =>
-      entry.target.kind === "source_evidence" ? [entry.target.root_id] : []), meter),
-    eligible_source_count: sources.sources.length, visited_source_pages: sources.pages, visited_source_interpretation_pages: interpretationPages,
-    visited_source_interpretation_descriptors: descriptors.length,
-    candidate_prefix: descriptors.slice(0, 64).map((row) => row.interpretation_id),
-    examined_source_interpretation_ids: examined, unexamined_source_interpretation_count: Math.max(0, descriptors.length - examined.length),
-    omitted_duplicate_bindings: assembled.omitted_duplicate_bindings,
-    examination_cap: SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
-    open_residuals: openResiduals, truncated: openResiduals
-  };
-  return finalizeLibraryPage(runtime, payload, authorized, meter, request, assembled.index,
-    previews, requestDigest, discovery, coverage, deliveredProofs, interpretationId, requestIdentity, discovered.pool);
-}
-
-function finalizeLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
-  request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, index: InformationIndex,
-  previews: Map<string, string>, requestDigest: string, discovery: SourceSemanticLibraryDiscovery,
-  coverage: SourceSemanticCoverage, deliveredProofs: readonly SourceSemanticLibraryProof[],
-  interpretationId: string, requestIdentity: string, accessPool: SourceSemanticAccessPool): SourceSemanticWorkerResult {
-  const previewRecord = Object.fromEntries(previews);
-  const full = libraryRecallResult({
-    index: index, requestDigest, discovery, coverage, work: workOf(meter), budget: request.budget,
-    proofs: deliveredProofs, previews: previewRecord
-  });
-  const finish = (result: SourceSemanticWorkerResult): SourceSemanticWorkerResult => {
-    if (result.kind !== "recall") throw new CoreError("VALIDATION", "library result kind mismatch");
-    const index = SourceSemanticLibraryDeliverySchema.shape.index.parse(
-      issueLibraryIndex(runtime, payload, authorized, meter, result.index, requestIdentity, accessPool));
-    meter.retain(encodeSourceSemanticLibraryResponse({ ...result, index }), "library public serialization");
-    const final = { ...result, index, work: workOf(meter) };
-    if (Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(final))) > request.output_byte_limit) {
-      throw new CoreError("VALIDATION", "output budget cannot retain interpretation qualifiers");
+  const hydration = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 3), memory_bytes: Math.floor(meter.bytes / 3) });
+  const prepared = prepareLibraryPackages(runtime, payload, authorized, hydration, sourceEntries, branches.supports);
+  meter.absorb(hydration);
+  const selection = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
+  const plan = prepareLibraryDelivery({
+    query_id: sourceSemanticLibraryQueryIdentity(original), snapshot_id: snapshotId, interpretation_id: interpretationId,
+    as_of: payload.as_of, authorized, request_identity: requestIdentity, pool: discovered.pool,
+    expires_at: new Date(Date.parse(sourceSemanticLifetimeNow(payload)) + 5 * 60_000).toISOString(),
+    coverage: {
+      discovery: openResiduals ? "truncated" : "complete",
+      source_interpretation: descriptors.length === 0 ? "unexercised" : "open",
+      query_semantics: query.gaps.length === 0 ? "complete" : "open",
+      semantic_correspondence: examined.length === 0 ? "unexercised" : "open",
+      conditional_computation: computeOpen ? "open" : "complete", payload: prepared.incomplete ? "truncated" : "complete"
+    },
+    discovery: {
+      eligible_source_count: sourceEntries.length, visited_source_pages: sources.pages, visited_source_interpretation_pages: interpretationPages,
+      visited_source_interpretation_descriptors: descriptors.length,
+      candidate_prefix: descriptors.slice(0, 64).map(row => row.interpretation_id), examined_source_interpretation_ids: examined,
+      unexamined_source_interpretation_count: Math.max(0, descriptors.length - examined.length),
+      omitted_duplicate_bindings: proofGroups.reduce((sum, group) => sum + group.entries.length, 0)
+        - new Set(proofGroups.flatMap(group => group.entries.flatMap(entry => entry.target.kind === "source_evidence"
+          ? [sourceGoldRootIdentity(entry.target)] : []))).size,
+      examination_cap: SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
+      open_residuals: openResiduals || prepared.incomplete, truncated: openResiduals || prepared.incomplete
     }
-    return final;
-  };
-  if (full.kind === "recall" && Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(full))) <= request.output_byte_limit) return finish(full);
-  // Preserve the occupied page and its offset; removing a proof cannot reorder previously exposed roots.
-  const demotedIndex = { ...index, entries: sourceOnlyOccupancy(index.entries, payload.workspace_id, interpretationId),
-    explanations: [], completeness: { ...index.completeness, payload: "partial" as const,
-      explanation_coverage: "not_applicable" as const } };
-  const demotedPreviews = Object.fromEntries(demotedIndex.entries.map((entry, offset) =>
-    [indexEntryCacheKey(entry), previews.get(indexEntryCacheKey(index.entries[offset]!)) ?? "[payload omitted]"]));
-  let limited = libraryRecallResult({
-    index: demotedIndex, requestDigest, budget: request.budget,
-    discovery: { ...discovery, truncated: true, open_residuals: true },
-    coverage: { ...coverage, payload: "truncated", conditional_computation: "open" }, work: workOf(meter),
-    proofs: [], previews: demotedPreviews
-  });
-  if (limited.kind === "recall" && Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(limited))) > request.output_byte_limit) {
-    limited = { ...limited, previews: {} };
-  }
-  return finish(limited);
-}
-
-function libraryPageOffset(
-  continuation: Continuation | undefined, issued: Continuation | undefined, queryId: string, snapshotId: string, interpretationId: string
-): number {
-  if (continuation === undefined) return 0;
-  if (issued === undefined || issuedContinuationTampered(continuation, issued)
-    || continuation.query_id !== queryId || continuation.snapshot_id !== snapshotId
-    || continuation.interpretation_id !== interpretationId) {
-    throw new CoreError("VALIDATION", "library continuation is invalid");
-  }
-  const matched = OFFSET_CURSOR.exec(continuation.cursor);
-  if (matched === null) throw new CoreError("VALIDATION", "library continuation is invalid");
-  return Number(matched[1]);
-}
-
-function issueLibraryIndex(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget, index: InformationIndex,
-  requestIdentity: string, accessPool: SourceSemanticAccessPool): InformationIndex {
-  if (index.continuation === null) return index;
-  const sealed = sealIssuedContinuation(index.continuation);
-  issueSemanticLease(runtime, { kind: "library", workspace_id: payload.workspace_id,
-    lifetime_now: sourceSemanticLifetimeNow(payload),
-    principal: payload.principal ?? "", as_of: payload.as_of, authorized, expires_at: sealed.expires_at,
-    revision: sourceSemanticRevision(runtime), continuation: sealed, request_identity: requestIdentity, access_pool: accessPool }, meter, sealed.continuation_id);
-  return { ...index, continuation: sealed };
-}
-
-function sourceOnlyOccupancy(
-  occupied: readonly IndexEntry[], workspaceId: string, hypothesisId: string
-): IndexEntry[] {
-  return occupied.flatMap((entry) => {
-    if (entry.target.kind !== "source_evidence") return [];
-    return [sourceSemanticLibrarySourceEntry({
-      workspaceId, root_id: entry.target.root_id, source_version: entry.target.source_version,
-      content_digest: entry.target.content_digest, evidence_object_id: entry.target.evidence_object_id,
-      hypothesis_id: hypothesisId
-    })];
-  });
-}
-
-function libraryRecallResult(input: Readonly<{
-  index: InformationIndex; requestDigest: string; discovery: SourceSemanticLibraryDiscovery;
-  coverage: SourceSemanticCoverage; work: SourceSemanticWorkerWork;
-  proofs: readonly SourceSemanticLibraryProof[]; budget: RequestBudget; previews: Readonly<Record<string, string>>;
-}>): SourceSemanticWorkerResult {
-  const index = input.index;
-  return SourceSemanticWorkerResultSchema.parse({
-    kind: "recall", request_budget: input.budget, delivery_id: preparedDeliveryId(input.requestDigest, index), protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
-    total_count: index.entries.length, index, page_purpose: "membership", discovery: input.discovery,
-    order: SOURCE_SEMANTIC_LIBRARY_ORDER, slot_qualifiers: slotQualifiersFor(index, input.proofs),
-    ...(input.proofs.length === 0 ? {} : { proofs: input.proofs }),
-    ...(Object.keys(input.previews).length === 0 ? {} : { previews: input.previews }),
-    coverage: input.coverage, work: input.work
-  });
+  }, prepared.packages, request, selection);
+  meter.absorb(selection);
+  return deliverFrozenLibraryPage(runtime, payload, meter, request, plan, 0);
 }
 
 function semanticCorrespondencesByInterpretation(rows: readonly SourceSemanticCorrespondence[]): Map<string, SourceSemanticCorrespondence[]> {
@@ -341,38 +235,4 @@ function semanticCorrespondencesByInterpretation(rows: readonly SourceSemanticCo
     mapped.set(row.source_interpretation_id, list);
   }
   return mapped;
-}
-
-function previewsFor(
-  runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload, authorized: readonly string[] | null,
-  meter: SourceSemanticReadBudget, index: ReturnType<typeof assembleSourceSemanticLibraryIndex>["index"]
-): { previews: Map<string, string>; truncated: boolean } {
-  const previews = new Map<string, string>();
-  let truncated = false;
-  for (const entry of index.entries) {
-    if (entry.target.kind !== "source_evidence") continue;
-    try {
-      const stored = sourceSemanticReadStores(
-        runtime.database, payload.workspace_id, entry.target.root_id, meter, authorized
-      ).getStoredRecord(payload.workspace_id, entry.target.root_id);
-      if (stored === null) { truncated = true; continue; }
-      if (stored.record.identity !== entry.target.root_id
-        || stored.record.source_version !== entry.target.source_version
-        || stored.record.content_digest !== entry.target.content_digest) {
-        truncated = true; continue;
-      }
-      if (stored.content_bytes.length === 0) {
-        previews.set(indexEntryCacheKey(entry), "[empty source]");
-        continue;
-      }
-      const chunk = hydrateUtf8Chunk(stored.content_bytes, { byteLimit: LIBRARY_PREVIEW_BYTES });
-      if (chunk.status !== "chunk") { truncated = true; continue; }
-      truncated ||= !chunk.complete;
-      previews.set(indexEntryCacheKey(entry), chunk.text);
-    } catch (error) {
-      if (!(error instanceof CoreError) && !(error instanceof SourceSemanticResourceExhausted)) throw error;
-      truncated = true;
-    }
-  }
-  return { previews, truncated };
 }

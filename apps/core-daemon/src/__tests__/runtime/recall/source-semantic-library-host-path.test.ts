@@ -64,7 +64,7 @@ function segment(catalog: SourceReferenceCatalog, text: string, assertionId = 1)
   return row.id;
 }
 
-function compactUse(catalog: SourceReferenceCatalog) {
+function compactUse(catalog: SourceReferenceCatalog, assertionId = 1) {
   return {
     contract: "source-semantic-proposal-v5" as const,
     outcome: { status: "interpreted" as const },
@@ -73,10 +73,10 @@ function compactUse(catalog: SourceReferenceCatalog) {
         act: "assertion" as const,
         expression: {
           kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: "use", support: segment(catalog, "uses") },
+          predicate: { kind: "explicit" as const, reading: "use", support: segment(catalog, "uses", assertionId) },
           arguments: [
-            { role: "agent", target: segment(catalog, "Alice") },
-            { role: "theme", target: segment(catalog, "tools") }
+            { role: "agent", target: segment(catalog, "Alice", assertionId) },
+            { role: "theme", target: segment(catalog, "tools", assertionId) }
           ]
         }
       }]
@@ -294,11 +294,15 @@ function mcpRecall(payload: unknown): RecallOut {
   return body.output;
 }
 
-it("measures a published source through reopened public recall and first exposure with one verification per proof slot", async () => {
-  await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session, filename) => {
+it.each([0, 5000])("measures a published source through reopened public recall and first exposure with one verification per proof slot (prefix %i)", async (prefixBytes) => {
+  const prefix = prefixBytes === 0 ? "" : `${"x".repeat(prefixBytes)}.\n`;
+  const source = prefix + ALICE;
+  const assertionId = prefixBytes === 0 ? 1 : 2;
+  const distractors = prefixBytes === 0 ? [] : Array.from({ length: 12 }, (_, index) => ({ id: `weather-${index}`, content: `Weather entry ${index}.` }));
+  await withHost([{ id: "artifact-alice", content: source }, { id: "artifact-silent", content: SILENT }, ...distractors], async (session, filename) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
-      receiveInterpretation(ALICE, "artifact-alice", compactUse(prepared.catalog)).draft, "p1");
+      receiveInterpretation(source, "artifact-alice", compactUse(prepared.catalog, assertionId), [assertionId]).draft, "p1");
     await closeSession(session, filename);
     const reopened = await openSession(filename);
     try {
@@ -323,6 +327,19 @@ it("measures a published source through reopened public recall and first exposur
         throw new Error("both slots must be source evidence");
       }
       expect(sourceGoldRootIdentity(proofEntry.target)).toBe(sourceGoldRootIdentity(fallback.target));
+      expect(withCorrespondence.index.entries.length).toBeLessThanOrEqual(5);
+      expect(withCorrespondence.results?.[proofSlot!.index]?.content_preview).toBe(ALICE);
+      expect(proofEntry.target.span).toMatchObject({ content_start: Buffer.byteLength(prefix), content_end: Buffer.byteLength(source) });
+      expect(withCorrespondence.proofs?.every(proof => proof.source_target?.span === undefined)).toBe(true);
+      expect(proofSlot).toMatchObject({ index: 0, payload_support: "available", selection_basis: "direct_answer" });
+      expect(Buffer.byteLength(JSON.stringify(withCorrespondence))).toBeLessThanOrEqual(1_000_000);
+      if (prefixBytes > 0) {
+        // The unchanged bounded policy keeps the exact proof support even when
+        // later packages cannot be reserved. It does not promise all pool pages.
+        expect(withCorrespondence.index.continuation).toBeNull();
+        expect(withCorrespondence.discovery).toMatchObject({ open_residuals: true, truncated: true });
+        expect(withCorrespondence.coverage.payload).toBe("truncated");
+      }
       const provedTarget = proofEntry.target;
       const occupied = withCorrespondence.index.entries.filter((entry) => entry.target.kind === "source_evidence"
         && sourceGoldRootIdentity(entry.target) === sourceGoldRootIdentity(provedTarget));
@@ -340,12 +357,45 @@ it("measures a published source through reopened public recall and first exposur
       expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("hit");
       expect(evaluated.evaluator_usage).toMatchObject({ proof_slots_checked: proofSlots });
       expect(evaluated.evaluator_usage.work_units).toBeGreaterThan(0);
+      const forged = structuredClone(withCorrespondence);
+      const forgedEntry = forged.index!.entries[proofSlot!.index]!;
+      if (forgedEntry.target.kind !== "source_evidence") throw new Error("source target expected");
+      Object.assign(forgedEntry.target, { span: { ...forgedEntry.target.span!, content_end: Buffer.byteLength(prefix) + 1 } });
+      expect(core.deliveredSourceSemanticLibraryProof(forged.index!, forgedEntry, proofSlot!, forged.proofs!,
+        current.sources.find(row => row.identity === published.source_target.root_id), BUDGET).proof).toBeUndefined();
       verify.mockClear();
       expect(readmitSourceSemanticLibraryMeasurement(evaluated.measurement, input)).toEqual(evaluated);
       expect(verify).toHaveBeenCalledTimes(proofSlots);
     } finally { await closeSession(reopened, filename); }
   });
 }, 60000);
+
+it("delivers frozen five-source pages through the public MCP request without rereading", async () => {
+  const sources = Array.from({ length: 12 }, (_, index) => ({ id: `raw-${index}`, content: `Weather entry ${index}.` }));
+  await withHost(sources, async session => {
+    const request = { operation: "recall" as const, accepts_unreviewed_conditional_results: true as const,
+      original_query: ORIGINAL, query_semantics: receiveQuerySemantics(ORIGINAL, existentialBody()).query,
+      semantic_correspondences: [], budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES };
+    const call = async (continuation?: NonNullable<NonNullable<RecallOut["index"]>["continuation"]>) => {
+      const result = await callAlayaMcpMemoryTool(
+        { memoryToolHandler: session.handler, contextProvider: () => session.context }, "soul.interpretation",
+        SoulInterpretationRequestSchema.parse({ ...request, ...(continuation === undefined ? {} : { continuation }) }));
+      return mcpRecall(result.structuredContent);
+    };
+    const first = await call();
+    expect(first.results).toHaveLength(5);
+    if (first.index?.continuation == null) throw new Error("frozen second page expected");
+    const next = await call(first.index.continuation);
+    expect(next.results).toHaveLength(5);
+    expect(next.work.native_work).toBe(0);
+    expect(next.work.native_bytes).toBe(0);
+    expect(next.index?.as_of).toBe(first.index.as_of);
+    expect(next.index?.entries.some(entry => first.index!.entries.some(prior => prior.target.kind === "source_evidence"
+      && entry.target.kind === "source_evidence" && prior.target.root_id === entry.target.root_id))).toBe(false);
+    expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThanOrEqual(request.output_byte_limit);
+    expect(Buffer.byteLength(JSON.stringify(next))).toBeLessThanOrEqual(request.output_byte_limit);
+  });
+});
 
 it("retains both semantic correspondence witnesses within one occupied source when their input order swaps", async () => {
   await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session) => {
@@ -469,18 +519,16 @@ it("does not claim complete public MCP payload after preview omission or shorten
     );
     const publicRecall = mcpRecall(mcp.structuredContent);
     const publicRows = publicRecall.results ?? [];
-    expect(publicRows).toHaveLength(7);
+    expect(publicRows).toHaveLength(5);
     expect(publicRows.every((row) => row.content_preview !== "[payload omitted]")).toBe(true);
-    expect(publicRows.some((row) => row.content_preview === SILENT && row.budget_state.within_budget)).toBe(true);
+    expect(publicRows.every((row) => row.budget_state.within_budget)).toBe(true);
     expect(publicRows.reduce((total, row) => total + row.budget_state.token_estimate, 0)).toBeLessThanOrEqual(2000);
     expect(Buffer.byteLength(JSON.stringify(publicRecall))).toBeLessThanOrEqual(1_000_000);
-    const altered = publicRows.some((row, offset) => {
-      const entry = publicRecall.index?.entries[offset];
-      const stored = entry === undefined ? undefined : worker.previews?.[indexEntryCacheKey(entry)];
-      return row.content_preview === "[payload omitted]" || row.budget_state.within_budget === false
-        || stored !== undefined && row.content_preview.length < stored.length;
-    });
-    expect(altered).toBe(true);
+    expect(publicRows.every((row, offset) => {
+      const entry = publicRecall.index!.entries[offset]!;
+      return entry.target.kind === "source_evidence" && entry.target.span?.content_end === Buffer.byteLength(row.content_preview)
+        && row.content_preview === worker.previews?.[indexEntryCacheKey(entry)];
+    })).toBe(true);
     expect(publicRecall.coverage.payload).not.toBe("complete");
   });
 }, 60000);

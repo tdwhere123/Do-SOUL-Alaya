@@ -10,7 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   admitSourceSemanticQuery, createAuditedSourceAdmission,
-  createSourceSemanticInterpretationPublication, EvidenceService, fieldContractSha256,
+  createSourceSemanticInterpretationPublication, EvidenceService, encodeSourceSemanticLibraryResponse, fieldContractSha256,
   SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
   sourceGoldRootIdentity
 } from "@do-soul/alaya-core";
@@ -420,7 +420,7 @@ it("preserves compact source interpretation and receiver query semantics and sem
         expect(recalled.provider_attempts).toBe(0);
         expect((mcp.structuredContent as { output: { operation: string } }).output.operation).toBe("recall");
         expect(recalled.discovery?.eligible_source_count).toBeGreaterThanOrEqual(2);
-        expect(recalled.order?.enumeration_policy).toBe("canonical");
+        expect(recalled.order?.enumeration_policy).toBe("evidence_support");
         expect(recalled.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === interpretationId)).toBe(true);
         const proof = recalled.proofs?.find((row) => row.source_interpretation_id === interpretationId);
         expect(proof?.consumed_leaves.some((row) => row.leaf_kind === "source_interpretation_binding")).toBe(true);
@@ -693,7 +693,7 @@ it("drops only dependent proof when a necessary source interpretation binding is
   }
 }, 60000);
 
-it("keeps a failed source available, records nested-binder gaps, and truncates honestly under a payload cap", async () => {
+it("keeps failed sources available and reserves or paginates complete packages under a payload cap", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-native-degrade-"));
   const filename = join(directory, "alaya.db");
   try {
@@ -731,7 +731,14 @@ it("keeps a failed source available, records nested-binder gaps, and truncates h
         });
         expect(workerLimited.kind).toBe("recall");
         if (workerLimited.kind !== "recall") throw new Error("limited worker recall expected");
-        expect(workerLimited.coverage.payload === "truncated" || workerLimited.coverage.conditional_computation === "open").toBe(true);
+        // An atomic fitting package may move the other source onto a frozen next
+        // page; full delivered support need not be labelled truncated in that case.
+        expect(workerLimited.coverage.payload === "truncated" || workerLimited.coverage.conditional_computation === "open"
+          || workerLimited.index.continuation !== null).toBe(true);
+        expect(Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(workerLimited))))
+          .toBeLessThanOrEqual(Math.max(1024, workerBytes - 1));
+        expect(workerLimited.slot_qualifiers.filter(row => row.evidence_kind === "semantic_proof")
+          .every(row => row.payload_support === "available")).toBe(true);
         expect(soulSearchFromLibraryRecall(workerLimited).results.some((row) => row.object_kind === "memory_entry")).toBe(false);
         expect(full.provider_attempts).toBe(0);
       } finally {

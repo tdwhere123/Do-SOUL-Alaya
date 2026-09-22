@@ -22,6 +22,7 @@ import {
   SourceSemanticCoverageSchema,
   SourceSemanticHandleDescriptorSchema,
   SourceSemanticLibraryDeliverySchema,
+  SourceSemanticLibraryContinuationSchema,
   SourceSemanticWorkerWorkSchema
 } from "../garden/source-semantic-worker.js";
 
@@ -89,6 +90,7 @@ const SoulInterpretationRecallRequestSchema = z.object({
   semantic_correspondences: z.array(SourceSemanticCorrespondenceSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   budget: RequestBudgetSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000),
+  continuation: SourceSemanticLibraryContinuationSchema.optional(),
   authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
 }).strict().readonly();
 

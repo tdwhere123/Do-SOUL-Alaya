@@ -4,7 +4,9 @@ import { SourceInterpretationReasoningResultSchema } from "../../garden/source-i
 import { InformationIndexSchema } from "../../recall/conditional-field/index-view.js";
 import { SoulInterpretationResponseSchema } from "../../surfaces/mcp-interpretation-types.js";
 import {
-  SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema
+  SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
+  SourceSemanticLibraryContinuationSchema,
+  SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET
 } from "../../garden/source-semantic-worker.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
@@ -38,7 +40,7 @@ it("admits prepare and one-shot reason without a continuation token", () => {
     budget, output_byte_limit: 1024,
     continuation: {
       schema_version: 1, continuation_id: "page-10", query_id: "q1", snapshot_id: digest,
-      result_version: "source-semantic-library-v3", expires_at: "2099-01-01T00:00:00.000Z",
+      result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, expires_at: "2099-01-01T00:00:00.000Z",
       cursor: "offset-10"
     }
   }).kind).toBe("recall");
@@ -62,27 +64,27 @@ it("admits prepare and one-shot reason without a continuation token", () => {
 });
 
 function libraryDelivery() {
-  return { delivery_id: "delivery", protocol_version: 3, total_count: 0,
-    index: { schema_version: 1, query_id: "library-query", snapshot_id: digest, result_version: "source-semantic-library-v3",
+  return { delivery_id: "delivery", protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, total_count: 0,
+    index: { schema_version: 1, query_id: "library-query", snapshot_id: digest, result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
       entries: [], completeness: { schema_version: 1, logical_index: "complete", observed_coverage: "complete",
         transport: "complete", payload: "complete", representation: "complete" }, continuation: null,
-      representation: { schema_version: 1, policy: "construct_index_then_page_then_payload", page_budget: 10, identity_tie_break: "serialization" },
+      representation: { schema_version: 1, policy: "construct_index_then_page_then_payload", page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, identity_tie_break: "serialization" },
       page_purpose: "membership" },
     page_purpose: "membership", discovery: { eligible_source_count: 0, visited_source_pages: 1, visited_source_interpretation_pages: 1,
       visited_source_interpretation_descriptors: 0, candidate_prefix: [], examined_source_interpretation_ids: [],
       unexamined_source_interpretation_count: 0, omitted_duplicate_bindings: 0, examination_cap: 32, open_residuals: false, truncated: false },
-    order: { enumeration_policy: "canonical", tie_policy: "canonical_identity", occupancy: "source_gold_root_identity", occupancy_prefix: 5, page_budget: 10 },
+    order: { enumeration_policy: "evidence_support", tie_policy: "canonical_identity", occupancy: "source_gold_root_identity", occupancy_prefix: 5, page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET },
     slot_qualifiers: [], coverage, work };
 }
 
 it("shares current delivery version, membership and page budget admission between worker and public surfaces", () => {
   const delivery = libraryDelivery();
-  const accepts = (value: ReturnType<typeof libraryDelivery>) => [
-    SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...value }).success,
-    SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [], provider_attempts: 0, ...value }).success
+  const accepts = (value: unknown) => [
+    SourceSemanticWorkerResultSchema.safeParse(Object.assign({ kind: "recall" }, value)).success,
+    SoulInterpretationResponseSchema.safeParse(Object.assign({ operation: "recall", results: [], provider_attempts: 0 }, value)).success
   ];
   expect(accepts(delivery)).toEqual([true, true]);
-  for (const version of ["source-semantic-library-v1", "not-a-native-library-result"]) {
+  for (const version of ["source-semantic-library-v1", "source-semantic-library-v3", "not-a-native-library-result"]) {
     const index = { ...delivery.index, result_version: version };
     expect(InformationIndexSchema.safeParse(index).success).toBe(true);
     expect(accepts({ ...delivery, index })).toEqual([false, false]);
@@ -108,4 +110,12 @@ it("rejects every missing mandatory delivery field and partial deliveries disgui
   for (const partial of [{ protocol_version: 3 }, { results: [] }, { request_budget: budget }, { proofs: [] }]) {
     expect(SoulInterpretationResponseSchema.safeParse({ ...outcome, ...partial }).success).toBe(false);
   }
+});
+
+it("binds library continuations to their current frozen delivery contract without claiming canonical enumeration", () => {
+  const cursor = { schema_version: 1, continuation_id: "page-5", query_id: "query", snapshot_id: digest,
+    result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, expires_at: "2099-01-01T00:00:00.000Z", cursor: "offset-5" };
+  expect(SourceSemanticLibraryContinuationSchema.safeParse(cursor).success).toBe(true);
+  expect(SourceSemanticLibraryContinuationSchema.safeParse({ ...cursor, enumeration_policy: "canonical" }).success).toBe(false);
+  expect(SourceSemanticLibraryContinuationSchema.safeParse({ ...cursor, result_version: "source-semantic-library-v3" }).success).toBe(false);
 });

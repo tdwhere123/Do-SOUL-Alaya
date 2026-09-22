@@ -212,8 +212,10 @@ export { reasonSourceInterpretation } from "./recall/runtime/source-interpretati
 export { reasonSourceSemanticInterpretation, executeSourceSemanticInterpretation } from "./recall/runtime/source-semantic-reasoning.js";
 export { deliveredSourceSemanticLibraryProof } from "./recall/runtime/source-semantic-library-proof.js";
 export { projectSourceSemanticQuerySupport } from "./recall/runtime/source-semantic-query-support.js";
+export { sourceSemanticSupportWindow } from "./memory/evidence-create/source-semantic-support-window.js";
+export { selectSourceSemanticLibraryPage, type SourceSemanticLibraryPackage } from "./recall/runtime/source-semantic-library-selection.js";
 export {
   SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResults,
   proofEntriesFromBranch, proofForLibraryEntry, slotQualifiersFor, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry,
-  encodeSourceSemanticLibraryResponse, sourceSemanticLibraryQueryIdentity, scopeSourceSemanticLibraryBranch
+  encodeSourceSemanticLibraryResponse, sourceSemanticLibraryQueryIdentity, scopeSourceSemanticLibraryBranch, sourceSemanticLibraryRawPreview
 } from "./recall/runtime/source-semantic-library-recall.js";

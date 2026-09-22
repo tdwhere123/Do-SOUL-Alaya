@@ -42,8 +42,24 @@ export function sourceSemanticSupportWindow(input: Readonly<{
 }
 
 function locateWindow(input: Parameters<typeof sourceSemanticSupportWindow>[0]): SupportWindow | SupportUnavailable {
-  const { source, interpretation, meter } = input;
-  const required = sourceSemanticEvidenceClosure(interpretation, input.dependency_ids, meter);
+  const { source, meter } = input;
+  const extent = sourceSemanticSupportExtent(input.interpretation, input.dependency_ids, meter);
+  if (extent.status === "unavailable" && extent.reason !== "location_missing") return extent;
+  meter.charge(source.length, 0, "source support byte extent");
+  const sourceBytes = Buffer.byteLength(source, "utf8");
+  if (extent.status === "unavailable") {
+    if (sourceBytes === 0 || sourceBytes > input.max_bytes) return extent;
+    return { ...extract(input, 0, sourceBytes, sourceBytes), kind: "whole_source", fallback_reason: "location_missing" };
+  }
+  if (extent.end - extent.start > input.max_bytes) return { status: "unavailable", reason: "display_budget" };
+  return { ...extract(input, extent.start, extent.end, sourceBytes), kind: "support_window" };
+}
+
+/** Shared location plan for actual hydration and verification of a delivered span. No source text or meaning is inferred. */
+export function sourceSemanticSupportExtent(interpretation: SourceSemanticInterpretation, dependencyIds: readonly string[],
+  meter: SourceSemanticResourceLedger): Readonly<{ status: "located"; start: number; end: number }> | SupportUnavailable {
+  if (dependencyIds.length === 0) return { status: "unavailable", reason: "no_dependencies" };
+  const required = sourceSemanticEvidenceClosure(interpretation, dependencyIds, meter);
   const nodes = new Map([
     ...interpretation.mentions, ...interpretation.referents, ...interpretation.frames,
     ...interpretation.operators, ...(interpretation.domains ?? []), ...(interpretation.measurements ?? [])
@@ -67,14 +83,8 @@ function locateWindow(input: Parameters<typeof sourceSemanticSupportWindow>[0]):
     if (span === undefined) { missing = true; continue; }
     start = Math.min(start, span[0]); end = Math.max(end, span[1]);
   }
-  meter.charge(source.length, 0, "source support byte extent");
-  const sourceBytes = Buffer.byteLength(source, "utf8");
-  if (missing || assertions.size === 0) {
-    if (sourceBytes === 0 || sourceBytes > input.max_bytes) return { status: "unavailable", reason: "location_missing" };
-    return { ...extract(input, 0, sourceBytes, sourceBytes), kind: "whole_source", fallback_reason: "location_missing" };
-  }
-  if (end - start > input.max_bytes) return { status: "unavailable", reason: "display_budget" };
-  return { ...extract(input, start, end, sourceBytes), kind: "support_window" };
+  return missing || assertions.size === 0 ? { status: "unavailable", reason: "location_missing" }
+    : { status: "located", start, end };
 }
 
 function extract(input: Parameters<typeof sourceSemanticSupportWindow>[0], start: number, end: number, sourceBytes: number) {
