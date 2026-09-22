@@ -12,7 +12,6 @@ import { geminiGenerationSchemaCacheMaterial } from "../extraction/fill/batch/ge
 import { attemptInputByteUpperBound } from "../extraction/authority/receipt-limits.js";
 
 export const SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v2" as const;
-export const SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY = 2;
 export const SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT = 4096;
 
 const QueryItemSchema = z.object({

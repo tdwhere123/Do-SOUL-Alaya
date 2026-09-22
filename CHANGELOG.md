@@ -12,6 +12,10 @@ below as the live ranking recipe.
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
 
+Semantic proposal preflight and authority v3 bind a configurable per-key attempt
+ceiling of one or two (default two). Execution, durable raw recovery and cost
+estimates use that same limit; no generation or cache identity changes.
+
 Protocol 9.0.0 removes the separate finite query generation schema and depth
 export. SOUL generation and admission share the recursive meaning grammar,
 which excludes unsupported nested universal binders while retaining top-level

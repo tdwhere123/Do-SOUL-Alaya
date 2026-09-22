@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod";
 import { canonicalJson } from "@do-soul/alaya-protocol";
-import { SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY, type SemanticProposalKind, type SemanticProposalLine } from "./workset.js";
+import type { SemanticProposalKind, SemanticProposalLine } from "./workset.js";
 
-export const SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT = "source-semantic-proposal-authority-v2" as const;
+export const SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT = "source-semantic-proposal-authority-v3" as const;
+export const DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY = 2;
 const MILLION = 1_000_000;
+const AttemptsPerKeySchema = z.number().int().min(1).max(DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY);
 
 const AuthoritySchema = z.object({
   contract: z.literal(SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT),
@@ -17,6 +19,7 @@ const AuthoritySchema = z.object({
   identity_digest: z.string().regex(/^[0-9a-f]{64}$/u),
   limits: z.object({
     starting_missing: z.number().int().nonnegative(),
+    maximum_attempts_per_key: AttemptsPerKeySchema,
     maximum_attempts: z.number().int().nonnegative(),
     successful_shard_ceiling: z.number().int().nonnegative(),
     max_concurrency: z.literal(1),
@@ -35,12 +38,13 @@ const AuthoritySchema = z.object({
 export type SemanticProposalAuthority = z.infer<typeof AuthoritySchema>;
 
 const PreflightSchema = z.object({
-  contract: z.literal("source-semantic-proposal-preflight-v2"),
+  contract: z.literal("source-semantic-proposal-preflight-v3"),
   kind: z.enum(["query", "semantic_correspondence"]),
   model: z.string().min(1),
   request_profile: z.string().min(1),
   provider_calls: z.literal(0),
   missing: z.number().int().nonnegative(),
+  maximum_attempts_per_key: AttemptsPerKeySchema,
   maximum_attempts: z.number().int().nonnegative(),
   max_output_tokens: z.number().int().positive(),
   maximum_input_tokens_per_attempt: z.number().int().nonnegative(),
@@ -58,16 +62,19 @@ export function buildSemanticProposalPreflight(input: Readonly<{
   model: string;
   request_profile: string;
   maxOutputTokens: number;
+  maxAttemptsPerKey?: number;
   lines: readonly SemanticProposalLine[];
   cachedKeys: ReadonlySet<string>;
 }>): SemanticProposalPreflight {
   const missingLines = input.lines.filter((line) => !input.cachedKeys.has(line.key));
+  const attemptsPerKey = AttemptsPerKeySchema.parse(input.maxAttemptsPerKey ?? DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY);
   const maxInput = missingLines.reduce((max, line) => Math.max(max, line.inputByteUpper), 0);
   return {
-    contract: "source-semantic-proposal-preflight-v2",
+    contract: "source-semantic-proposal-preflight-v3",
     kind: input.kind, model: input.model, request_profile: input.request_profile,
     provider_calls: 0, missing: missingLines.length,
-    maximum_attempts: missingLines.length * SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY,
+    maximum_attempts_per_key: attemptsPerKey,
+    maximum_attempts: missingLines.length * attemptsPerKey,
     max_output_tokens: input.maxOutputTokens,
     maximum_input_tokens_per_attempt: maxInput,
     keys: missingLines.map((line) => line.key)
@@ -90,6 +97,7 @@ export function pinSemanticProposalAuthority(input: Readonly<{
     generated_at: new Date().toISOString(),
     limits: {
       starting_missing: input.preflight.missing,
+      maximum_attempts_per_key: input.preflight.maximum_attempts_per_key,
       maximum_attempts: input.preflight.maximum_attempts,
       successful_shard_ceiling: input.preflight.missing,
       max_concurrency: 1 as const,
@@ -120,6 +128,7 @@ export function estimatedUpperUsd(
 }
 
 export function verifySemanticProposalAuthority(authority: SemanticProposalAuthority): SemanticProposalAuthority {
+  authority = AuthoritySchema.parse(authority);
   const { identity_digest, ...body } = authority;
   const digest = createHash("sha256").update(canonicalJson(body)).digest("hex");
   if (digest !== identity_digest) {
@@ -132,7 +141,7 @@ export function verifySemanticProposalAuthority(authority: SemanticProposalAutho
       authority.limits.successful_shard_ceiling !== authority.keys.length) {
     throw new Error("semantic proposal authority key/cap relationship is invalid");
   }
-  if (authority.limits.maximum_attempts !== authority.keys.length * SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY) {
+  if (authority.limits.maximum_attempts !== authority.keys.length * authority.limits.maximum_attempts_per_key) {
     throw new Error("semantic proposal authority maximum_attempts does not bind its keys");
   }
   const estimated = estimatedUpperUsd({

@@ -23,7 +23,7 @@ import {
 import { readLiveTransportFailure } from "../extraction/cache/cache-live-delegate.js";
 import { buildExtractionTransportProvenance } from "../extraction/transport-route.js";
 import {
-  SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY, type SemanticProposalLine, type SemanticProposalWorkset,
+  type SemanticProposalLine, type SemanticProposalWorkset,
   materializeSemanticProposalLines
 } from "./workset.js";
 import {
@@ -51,7 +51,7 @@ export function classifyProposalOutcome(
 }
 
 export function prepareSemanticProposal(
-  workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number
+  workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number, maxAttemptsPerKey?: number
 ) {
   const lines = materializeSemanticProposalLines(workset, maxOutputTokens);
   const cachedKeys = new Set<string>();
@@ -64,7 +64,7 @@ export function prepareSemanticProposal(
   }
   return buildSemanticProposalPreflight({
     kind: workset.kind, model: workset.model, request_profile: workset.request_profile,
-    maxOutputTokens, lines, cachedKeys
+    maxOutputTokens, maxAttemptsPerKey, lines, cachedKeys
   });
 }
 
@@ -80,6 +80,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
 }>> {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifySemanticProposalAuthority(input.authority);
+  input = { ...input, authority };
   if (authority.kind !== input.workset.kind || authority.model !== input.workset.model ||
       authority.request_profile !== input.workset.request_profile) {
     throw new Error("semantic proposal authority does not bind this workset");
@@ -204,7 +205,8 @@ async function fillLine(
     return { classified: replayed.classified, admitted: replayed.admitted, attempts: replayed.attempts };
   }
   let used = replayed.attempts;
-  while (used < SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY) {
+  const attemptLimit = input.authority.limits.maximum_attempts_per_key;
+  while (used < attemptLimit) {
     const remainingGlobal = remainingProposalSlots(ledger);
     if (remainingGlobal <= 0) {
       return { classified: "retryable", admitted: false, attempts: used };
@@ -214,7 +216,7 @@ async function fillLine(
     }
     const ordinal = ledger.reserveAttemptOrdinal(line.key);
     used += 1;
-    const lastAttempt = used >= SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY || remainingGlobal <= 1;
+    const lastAttempt = used >= attemptLimit || remainingGlobal <= 1;
     let extracted: Awaited<ReturnType<typeof extractor.extract>>;
     try {
       extracted = await extractor.extract({
@@ -274,6 +276,7 @@ function replayExistingProposalRaws(
   ledger: ProposalLedger
 ): ProposalReplayProgress {
   let used = 0;
+  const attemptLimit = input.authority.limits.maximum_attempts_per_key;
   const processed = new Set<number>();
   const snapshot = ledger.snapshot();
   const raws = listProviderRawAttempts(input.cacheRoot, line.key);
@@ -293,9 +296,9 @@ function replayExistingProposalRaws(
     processed.add(pending.attemptOrdinal);
     if (raw === undefined) return { done: true, classified: "incomplete", admitted: false, attempts: used };
     const settled = replayPersistedProposalRaw(
-      input, line, ledger, raw, used >= SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY
+      input, line, ledger, raw, used >= attemptLimit
     );
-    if (settled.classified !== "retryable" || used >= SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY) {
+    if (settled.classified !== "retryable" || used >= attemptLimit) {
       return { done: true, classified: settled.classified, admitted: settled.admitted, attempts: used };
     }
   }
@@ -305,9 +308,9 @@ function replayExistingProposalRaws(
     used += 1;
     processed.add(raw.attempt_ordinal);
     const settled = replayPersistedProposalRaw(
-      input, line, ledger, raw, used >= SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY
+      input, line, ledger, raw, used >= attemptLimit
     );
-    if (settled.classified !== "retryable" || used >= SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY) {
+    if (settled.classified !== "retryable" || used >= attemptLimit) {
       return { done: true, classified: settled.classified, admitted: settled.admitted, attempts: used };
     }
   }

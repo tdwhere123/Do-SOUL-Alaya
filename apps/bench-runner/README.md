@@ -97,6 +97,11 @@ provides `associate`, `prepare`, `replay`, `intervene`, and `measure`. These ope
 no provider calls. Query-semantics and semantic-correspondence extraction still uses the existing
 `semantic-proposal-fill` preparation, authority, attempt ledger, and interactive
 SSE execution; the chain does not dispatch Batch or authorize extraction.
+Preparation accepts `--max-attempts-per-key 1` for a single-attempt window; the
+default remains two. Preflight and authority v3 bind that per-key limit, total
+attempts and price. Fill and recovery consume the same authority, so a failed
+first key cannot borrow another key's single opportunity. This does not change
+generation/cache identity or authorize reopening a stopped window.
 
 ```bash
 node apps/bench-runner/dist/runs/semantic-chain/launch.js associate \

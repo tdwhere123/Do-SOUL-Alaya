@@ -4,7 +4,7 @@ import { resolveSecretRef } from "@do-soul/alaya";
 import { parseSemanticProposalWorkset, SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT } from "../../runs/semantic-proposal/workset.js";
 import {
   parseSemanticProposalPreflight, pinSemanticProposalAuthority, readSemanticProposalAuthority,
-  writeJsonExclusive
+  writeJsonExclusive, DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY
 } from "../../runs/semantic-proposal/authority.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../runs/semantic-proposal/fill.js";
 import type { CompileSeedExtractionConfig } from "../../runs/compile-seed/compile-seed-types.js";
@@ -23,7 +23,8 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
     const cacheRoot = required(args, "--cache-root");
     const maxOutputTokens = integerFlag(args, "--max-output-tokens", SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT);
     if (action === "prepare") {
-      const preflight = prepareSemanticProposal(workset, cacheRoot, maxOutputTokens);
+      const preflight = prepareSemanticProposal(workset, cacheRoot, maxOutputTokens,
+        integerFlag(args, "--max-attempts-per-key", DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY));
       writeJsonExclusive(required(args, "--preflight-out"), preflight);
       process.stdout.write(`${JSON.stringify(preflight)}\n`);
       return 0;
@@ -41,6 +42,7 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
       process.stdout.write(`${JSON.stringify({
         estimated_upper_usd: authority.price.estimated_upper_usd,
         starting_missing: authority.limits.starting_missing,
+        maximum_attempts_per_key: authority.limits.maximum_attempts_per_key,
         maximum_attempts: authority.limits.maximum_attempts
       })}\n`);
       return 0;
