@@ -16,7 +16,7 @@ import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-propos
 import { prepareSemanticChain, discoverSemanticChainQuery } from "../../../runs/semantic-chain/prepare.js";
 import { replaySemanticChain, measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { interveneSemanticChain } from "../../../runs/semantic-chain/intervene.js";
-import { readChainArtifact, writeChainArtifact, withSemanticChainDaemon, type SemanticChainPlan } from "../../../runs/semantic-chain/contract.js";
+import { chainIdentity, readChainArtifact, writeChainArtifact, withSemanticChainDaemon, type SemanticChainPlan } from "../../../runs/semantic-chain/contract.js";
 import { SemanticChainConfigSchema } from "../../../runs/semantic-chain/contract.js";
 import { assertPerQueryOpportunity } from "./native-semantic-arm.test-support.js";
 import { assertSemanticChainArchiveAdmission } from "./semantic-chain-archive-admission.test-support.js";
@@ -211,6 +211,99 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   await assertSemanticChainArchiveAdmission({ root, plan, replayPath: proofReplay.path, gold, queryRawJson });
   await assertInterruptedExposure(root, proofReplay.path, ready.query_key);
   await assertPerQueryOpportunity(SemanticChainConfigSchema.parse(config), cacheRoot);
+  for (const sharedFrame of [true, false]) {
+    await assertEvidenceInputWithdrawal(cacheRoot, SemanticChainConfigSchema.parse(config), oneQuery, sharedFrame);
+  }
+}
+
+async function assertEvidenceInputWithdrawal(cacheRoot: string, config: SemanticChainPlan["config"],
+  workset: SemanticChainPlan["config"]["query_workset"], sharedFrame: boolean): Promise<void> {
+  const fixture = sharedFrame ? "shared-frame" : "distinct-frames";
+  const queryCache = join(cacheRoot, `${fixture}-queries`);
+  const correspondenceCache = join(cacheRoot, `${fixture}-correspondences`);
+  const root = join(cacheRoot, `${fixture}-chain`);
+  const evidence_inputs = sharedFrame ? [
+    { conditions: [{ kind: "occurrence", key: "answer" }] },
+    { conditions: [{ kind: "occurrence", key: "answer" }] }
+  ] : [
+    { conditions: [{ kind: "statement", key: "first", predicate: "complete",
+      arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }] }] },
+    { conditions: [{ kind: "statement", key: "second", predicate: "complete",
+      arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }] }] }
+  ];
+  const queryRawJson = JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
+    query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+      requested_operation: { reading: "What was completed?", support: { kind: "query_text", excerpt: "What was completed?" } },
+      alternatives: [{ conditions: [{ kind: "statement", key: "answer", predicate: "complete",
+        arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }] }], evidence_inputs }],
+      return: ["theme"], gaps: [] } });
+  const queryAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, queryCache, config.max_output_tokens),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  const queryFill = await executeSemanticProposalFill({ workset, cacheRoot: queryCache, authority: queryAuthority,
+    config: { providerUrl: "http://127.0.0.1:9", model: workset.model, requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" },
+    extractor: { extract: async () => ({ rawJson: queryRawJson, responseMetadata: { finishReason: "STOP" },
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
+  expect(queryFill.newly_admitted).toBe(1);
+  const plan = await prepareSemanticChain({ ...config, query_cache_root: queryCache, correspondence_cache_root: correspondenceCache }, root);
+  const ready = plan.queries[0];
+  if (ready?.status !== "ready") throw new Error("two evidence inputs must admit as a ready query");
+  const correspondenceWorkset = plan.correspondence_workset;
+  if (correspondenceWorkset === null) throw new Error("two evidence inputs need a selected source");
+  const request = materializeSemanticProposalLines(correspondenceWorkset, config.max_output_tokens)[0]!.request as SourceSemanticCorrespondenceRequest;
+  const interpretation = request.source_interpretation_descriptors[0]!.interpretation;
+  const frame = request.catalog!.source_endpoints.find((row) => row.kind === "frame")!;
+  const slot = request.catalog!.source_endpoints.find((row) => row.kind === "slot")!;
+  const support = interpretation.frames[0]!.predicate_support;
+  const selections = [
+    ...request.catalog!.query_endpoints.filter((endpoint) => endpoint.kind === "predicate").map((endpoint) => ({
+      query: endpoint.handle, source: frame.handle, query_excerpt: "completed",
+      source_semantic_support: support.kind === "explicit" ? [{ kind: "lexical" as const, mentions: support.mentions }] : []
+    })),
+    ...request.catalog!.query_endpoints.filter((endpoint) => endpoint.kind === "slot").map((endpoint) => ({
+      query: endpoint.handle, source: slot.handle, query_excerpt: "What",
+      source_semantic_support: interpretation.frames[0]!.slots[0]!.support
+    }))
+  ];
+  const correspondenceAuthority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(correspondenceWorkset, correspondenceCache, config.max_output_tokens),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  const correspondenceFill = await executeSemanticProposalFill({ workset: correspondenceWorkset,
+    cacheRoot: correspondenceCache, authority: correspondenceAuthority,
+    config: { providerUrl: "http://127.0.0.1:9", model: correspondenceWorkset.model,
+      requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" }, extractor: { extract: async () => ({
+        rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+          outcome: { status: "interpreted" }, semantic_correspondence: {
+            contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, source_interpretation_handle: "source1", selections } }),
+        responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+      }) } });
+  expect(correspondenceFill.newly_admitted).toBe(1);
+  const replay = await replaySemanticChain(root);
+  const replayPayload = readChainArtifact(replay.path) as { plan_identity: string; rows: { response?: unknown }[] };
+  const response = SoulInterpretationResponseSchema.parse(replayPayload.rows[0]?.response);
+  if (response.operation !== "recall") throw new Error("native two-input recall required");
+  const evidence = response.proofs?.[0]?.binding_results?.filter((row) => row.kind === "evidence") ?? [];
+  expect(evidence.map((row) => row.kind === "evidence" ? row.input : null)).toEqual([0, 1]);
+  expect(evidence[0]?.returned).toEqual(evidence[1]?.returned);
+  if (sharedFrame) expect(evidence[0]?.bindings).toEqual(evidence[1]?.bindings);
+  else expect(evidence[0]?.bindings).not.toEqual(evidence[1]?.bindings);
+  const intervention = interveneSemanticChain(root, replay.path, 32);
+  const diagnostic = readChainArtifact(intervention.path) as { contract: string; rows: { status: string;
+    effects: { leaf_kind: string; removed_answers: string[] | null; preserved_answers: string[] | null }[] }[] };
+  expect(diagnostic.contract).toBe("source-semantic-chain-withdrawal-v3");
+  expect(diagnostic.rows[0]?.status).toBe("diagnosed");
+  const lost = (keys: string[] | null, input: number) => keys?.some((key) => {
+    const target = JSON.parse(key) as { kind?: string; input?: number };
+    return target.kind === "evidence" && target.input === input;
+  });
+  expect(diagnostic.rows[0]?.effects.some((arm) => arm.leaf_kind === "semantic_correspondence_predicate"
+    && lost(arm.removed_answers, 0)
+    && (sharedFrame ? lost(arm.removed_answers, 1) : lost(arm.preserved_answers, 1)))).toBe(true);
+  if (!sharedFrame) {
+    const oldIdentity = chainIdentity({ plan: replayPayload.plan_identity, replay: chainIdentity(replayPayload), leafTrials: 31 });
+    const oldPath = join(root, `withdrawal-${oldIdentity}.json`);
+    writeChainArtifact(oldPath, { contract: "source-semantic-chain-withdrawal-v2", identity: oldIdentity, rows: [{ status: "stale" }] });
+    expect(interveneSemanticChain(root, replay.path, 31).path).not.toBe(oldPath);
+  }
 }
 
 async function assertReplayPreparationPool(plan: SemanticChainPlan, root: string): Promise<void> {

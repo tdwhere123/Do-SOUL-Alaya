@@ -12,6 +12,8 @@ import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { readSemanticChainCorrespondences } from "./inputs.js";
 import { admitSemanticChainReplay } from "./replay.js";
 
+const WITHDRAWAL_CONTRACT = "source-semantic-chain-withdrawal-v3" as const;
+
 /** A new offline execution, with all withdrawal arms sharing its original compiled state. */
 export function interveneSemanticChain(root: string, replayPath: string, leafTrials = 32) {
   if (!Number.isInteger(leafTrials) || leafTrials < 1 || leafTrials > 64) throw new Error("leaf trials must be 1..64");
@@ -19,7 +21,8 @@ export function interveneSemanticChain(root: string, replayPath: string, leafTri
   if (replay.arm !== "retained") throw new Error("withdrawal requires the retained replay arm");
   const { semantic_correspondences, identity: currentReplayIdentity } = readSemanticChainCorrespondences(plan, "retained");
   if (currentReplayIdentity !== replay.identity) throw new Error("retained native semantic-correspondence state changed");
-  const identity = chainIdentity({ plan: replay.plan_identity, replay: chainIdentity(replay), leafTrials });
+  const identity = chainIdentity({ contract: WITHDRAWAL_CONTRACT,
+    plan: replay.plan_identity, replay: chainIdentity(replay), leafTrials });
   const path = join(root, `withdrawal-${identity}.json`);
   const prior = readChainArtifact(path);
   if (prior !== undefined) return { path, result: prior };
@@ -81,7 +84,7 @@ export function interveneSemanticChain(root: string, replayPath: string, leafTri
       }
     }
   } finally { closeCachedDatabase(filename); }
-  const result = { contract: "source-semantic-chain-withdrawal-v2", identity,
+  const result = { contract: WITHDRAWAL_CONTRACT, identity,
     execution_origin: "new_offline_compilation_with_same_state_arms", provider_calls: 0,
     plan_identity: replay.plan_identity, replay_identity: replay.identity, leaf_trials: leafTrials, rows };
   if (Buffer.byteLength(JSON.stringify(result)) > 32 * 1024 * 1024) {
@@ -93,6 +96,9 @@ export function interveneSemanticChain(root: string, replayPath: string, leafTri
 }
 
 function answerKeys(result: SourceSemanticReasoningResult): string[] {
-  return [...new Set((result.binding_results ?? []).map((row) => canonicalJson({ alternative: row.alternative,
+  // Witness changes stay in the full trace; equal targets with alternate support remain one answer.
+  return [...new Set((result.binding_results ?? []).map((row) => canonicalJson({
+    kind: row.kind, ...(row.kind === "evidence" ? { input: row.input } : {}),
+    alternative: row.alternative, query_complete: row.query_complete,
     returned: row.returned, bindings: row.bindings })))].sort();
 }
