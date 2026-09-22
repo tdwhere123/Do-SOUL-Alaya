@@ -3,7 +3,7 @@ import {
   SourceRecordIdentitySchema, type SourceRecordIdentity, RequestBudgetSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SourceSemanticLibrarySlotQualifierSchema, SourceSemanticWorkerResultSchema, SoulInterpretationResponseSchema,
   SoulInterpretationRecallDeliverySchema,
-  canonicalJson, InformationIndexSchema, MemorySearchResultSchema, SourceSemanticLibraryProofSchema, type SourceSemanticLibraryProof, type InformationIndex, type RequestBudget, type SourceSemanticLibraryOrder,
+  canonicalJson, InformationIndexSchema, ContinuationSchema, MemorySearchResultSchema, SourceSemanticLibraryProofSchema, type SourceSemanticLibraryProof, type InformationIndex, type RequestBudget, type SourceSemanticLibraryOrder,
   type SourceSemanticLibrarySlotQualifier
 } from "@do-soul/alaya-protocol";
 import { deliveredSourceSemanticLibraryProof, encodeSourceSemanticLibraryResults } from "@do-soul/alaya-core";
@@ -160,6 +160,8 @@ const HistoricalSourceOnlyDeliverySchema = SoulInterpretationRecallDeliverySchem
   protocol_version: z.literal(1),
   index: SoulInterpretationRecallDeliverySchema.shape.index.unwrap().extend({
     result_version: z.literal("source-semantic-library-v1"),
+    continuation: ContinuationSchema.unwrap().extend({ result_version: z.literal("source-semantic-library-v1"),
+      enumeration_policy: z.literal("canonical").optional() }).readonly().nullable(),
     representation: InformationIndexSchema.unwrap().shape.representation.unwrap().extend({
       page_budget: z.literal(HISTORICAL_SOURCE_ONLY_PAGE_BUDGET)
     }).readonly()
