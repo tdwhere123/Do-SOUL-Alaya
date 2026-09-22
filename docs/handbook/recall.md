@@ -1190,7 +1190,7 @@ remain provider-free. Authored/native regressions establish engineering
 behavior, not real-model extraction quality or benchmark utility.
 
 Proposal workset v3 freezes the normalized provider endpoint. Preflight/authority
-v4, cache v3 and proposal raw-attempt v1 bind the resolved transport and exact
+v5, cache v3 and proposal raw-attempt v1 bind the resolved transport and exact
 HTTP request, including schema guidance and thinking settings. Fill checks the
 actual config before reserving an attempt. Source-extraction raw-attempt v2 is
 unchanged. Historical proposal bytes are retained, never relabeled or reused as

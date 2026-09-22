@@ -24,7 +24,7 @@ const server = await createServer({
   root: repoRoot,
   configFile: false,
   appType: "custom",
-  server: { middlewareMode: true },
+  server: { middlewareMode: true, watch: null, hmr: false, ws: false },
   resolve: benchProject.resolve
 });
 try {

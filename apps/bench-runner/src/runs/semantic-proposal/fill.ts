@@ -243,7 +243,7 @@ async function fillLine(
     assertSemanticProposalExecutionScope(input.authority.execution_scope, input.cacheRoot, writeLease);
     const ordinal = ledger.reserveAttemptOrdinal(line.key);
     used += 1;
-    const lastAttempt = used >= attemptLimit || remainingGlobal <= 1;
+    const lastAttempt = isFinalReservedProposalAttempt(ledger, line.key, ordinal, attemptLimit);
     let extracted: Awaited<ReturnType<typeof extractor.extract>>;
     try {
       extracted = await extractor.extract({
@@ -293,60 +293,64 @@ function remainingProposalSlots(ledger: ProposalLedger): number {
   return snapshot.maximumAttempts - snapshot.attempts;
 }
 
+function isFinalReservedProposalAttempt(
+  ledger: ProposalLedger, cacheKey: string, ordinal: number, attemptLimit: number
+): boolean {
+  const snapshot = ledger.snapshot();
+  const reserved = proposalReservedOrdinals(snapshot, cacheKey);
+  const laterReservation = [...reserved].some(attemptOrdinal => attemptOrdinal > ordinal);
+  // Exhausted capacity cannot make an older raw supersede a later reserved response.
+  return !laterReservation && (reserved.size >= attemptLimit || snapshot.attempts >= snapshot.maximumAttempts);
+}
+
+function proposalReservedOrdinals(snapshot: ReturnType<ProposalLedger["snapshot"]>, cacheKey: string): ReadonlySet<number> {
+  return new Set([...snapshot.unresolvedAttempts, ...snapshot.settledAttempts, ...snapshot.transportFailures]
+    .filter(attempt => attempt.cacheKey === cacheKey).map(attempt => attempt.attemptOrdinal));
+}
+
 function replayExistingProposalRaws(
   input: Parameters<typeof executeSemanticProposalFill>[0],
   line: SemanticProposalLine,
   ledger: ProposalLedger
 ): ProposalReplayProgress {
-  let used = 0;
   const attemptLimit = input.authority.limits.maximum_attempts_per_key;
   const processed = new Set<number>();
   const snapshot = ledger.snapshot();
+  const used = proposalReservedOrdinals(snapshot, line.key).size;
   const raws = listProviderRawAttempts(input.cacheRoot, line.key);
   const rawOrdinals = new Set(raws.map((item) => item.attempt_ordinal));
   const unresolved = snapshot.unresolvedAttempts.filter((item) => item.cacheKey === line.key);
-  const unresolvedOrdinals = new Set(unresolved.map((item) => item.attemptOrdinal));
   const missingCompleted = snapshot.settledAttempts.filter(attempt => attempt.cacheKey === line.key &&
     !rawOrdinals.has(attempt.attemptOrdinal) && !snapshot.transportFailures.some(failure =>
       failure.attemptOrdinal === attempt.attemptOrdinal));
   if (missingCompleted.length > 0) {
-    const knownOrdinals = new Set([...snapshot.settledAttempts, ...snapshot.unresolvedAttempts, ...snapshot.transportFailures]
-      .filter(attempt => attempt.cacheKey === line.key).map(attempt => attempt.attemptOrdinal));
-    return { done: true, classified: "incomplete", admitted: false, attempts: knownOrdinals.size };
+    return { done: true, classified: "incomplete", admitted: false, attempts: used };
   }
   if (snapshot.pendingKeys.includes(line.key) && raws.length === 0 && unresolved.length === 0 &&
       !snapshot.transportFailures.some(attempt => attempt.cacheKey === line.key)) {
     // Legacy aggregate counts cannot reconstruct a lost exact reservation.
     return { done: true, classified: "pending", admitted: false, attempts: 0 };
   }
-  for (const failure of snapshot.transportFailures) {
-    if (failure.cacheKey !== line.key) continue;
-    if (processed.has(failure.attemptOrdinal) || rawOrdinals.has(failure.attemptOrdinal) ||
-        unresolvedOrdinals.has(failure.attemptOrdinal)) continue;
-    processed.add(failure.attemptOrdinal);
-    used += 1;
-  }
   for (const pending of unresolved) {
     const raw = readProviderRawAttempt(input.cacheRoot, line.key, pending.attemptOrdinal);
-    used += 1;
     processed.add(pending.attemptOrdinal);
     if (raw === undefined) return { done: true, classified: "unknown", admitted: false, attempts: used };
+    const lastAttempt = isFinalReservedProposalAttempt(ledger, line.key, raw.attempt_ordinal, attemptLimit);
     const settled = replayPersistedProposalRaw(
-      input, line, ledger, raw, used >= attemptLimit
+      input, line, ledger, raw, lastAttempt
     );
-    if (settled.classified !== "retryable" || used >= attemptLimit) {
+    if (settled.classified !== "retryable" || lastAttempt) {
       return { done: true, classified: settled.classified, admitted: settled.admitted, attempts: used };
     }
   }
   for (const raw of raws) {
     if (processed.has(raw.attempt_ordinal)) continue;
-    // Count this key's reserved/replayed cardinality, never the global ledger ordinal.
-    used += 1;
     processed.add(raw.attempt_ordinal);
+    const lastAttempt = isFinalReservedProposalAttempt(ledger, line.key, raw.attempt_ordinal, attemptLimit);
     const settled = replayPersistedProposalRaw(
-      input, line, ledger, raw, used >= attemptLimit
+      input, line, ledger, raw, lastAttempt
     );
-    if (settled.classified !== "retryable" || used >= attemptLimit) {
+    if (settled.classified !== "retryable" || lastAttempt) {
       return { done: true, classified: settled.classified, admitted: settled.admitted, attempts: used };
     }
   }
