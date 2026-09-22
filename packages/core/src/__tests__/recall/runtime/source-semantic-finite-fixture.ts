@@ -46,7 +46,7 @@ export function finiteCorrespondence(interpretation: SourceSemanticInterpretatio
 export function reasonFinite(interpretation: SourceSemanticInterpretation, semantics = finiteQuery(), correspondence = finiteCorrespondence(interpretation, semantics)) {
   const boundCorrespondence = { ...correspondence, source_interpretation_id: sourceSemanticInterpretationIdentity(interpretation, sha), query_semantics_id: sourceSemanticQueryIdentity(semantics, sha) };
   return reasonSourceSemanticInterpretation({ source_interpretation: interpretation, query_semantics: semantics, semantic_correspondence: boundCorrespondence, workspaceId: "ws", scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
-    request: { contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+    request: { contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
       source_interpretation_id: boundCorrespondence.source_interpretation_id, query_semantics_id: boundCorrespondence.query_semantics_id, semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(boundCorrespondence, sha), original_query: FINITE_QUERY,
       budget: { schema_version: 1, work_units: 10000000, memory_bytes: 60000000,
         page_budget: 10000, finalization_reserve: 50000, min_envelope: 10 }, output_byte_limit: 1000000 } });

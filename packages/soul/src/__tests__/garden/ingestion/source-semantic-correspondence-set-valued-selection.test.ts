@@ -17,9 +17,9 @@ const role = (id: string, variable: string, excerpt: string) => ({
 
 function setValuedQuery() {
   return SourceSemanticQuerySchema.parse({
-    contract: "source-semantic-query-v2",
+    contract: "source-semantic-query-v3",
     original_query_digest: `sha256:${semanticSha256(SET_VALUED)}`,
-    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v2",
+    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v3",
     variables: [
       { id: "offer_action", sort: "proposition" },
       { id: "brand", sort: "entity" },

@@ -29,7 +29,7 @@ import {
  * engine) owns the actual lowering; this admission only records the version.
  * Distinct lowering versions must not splice into one conditional computation.
  */
-export const SOURCE_SEMANTIC_LOWERING_VERSION = "source-semantic-lowering-v5" as const;
+export const SOURCE_SEMANTIC_LOWERING_VERSION = "source-semantic-lowering-v6" as const;
 
 export type SourceSemanticCorrespondenceAdmissionInput = Readonly<{
   readonly semantic_correspondence: unknown;

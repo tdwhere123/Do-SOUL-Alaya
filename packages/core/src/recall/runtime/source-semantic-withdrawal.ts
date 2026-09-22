@@ -28,7 +28,7 @@ export function traceSourceSemanticWithdrawals(input: Readonly<{
   const selected = Array.from({ length: Math.max(interpretationLeaves.length, correspondenceLeaves.length) }, (_, index) => [interpretationLeaves[index], correspondenceLeaves[index]])
     .flat().filter((row): row is NonNullable<typeof row> => row !== undefined).slice(0, input.limit);
   const roots = new Map((input.baseline.derivations ?? []).map((row) => [row.derivation_id, row]));
-  const dependencies = (input.baseline.answers ?? []).map((answer) => {
+  const dependencies = (input.baseline.binding_results ?? []).map((answer) => {
     const traced = traceDerivationForest({ forest: roots, roots: answer.explanation_ids });
     return { answer, complete: traced.complete,
       leaves: localLeafIds(traced.traversal) };
@@ -39,7 +39,7 @@ export function traceSourceSemanticWithdrawals(input: Readonly<{
       && !row.leaves.has(leaf_id)).map((row) => row.answer);
     return { leaf_id, leaf, result, independent_answer_bindings: independent.map((row) => row.binding_id),
       independent_proofs_preserved: independent.length === 0 || result.outcome.status !== "interpreted" ? null
-        : independent.every((answer) => result.answers?.some((row) => row.binding_id === answer.binding_id
+        : independent.every((answer) => result.binding_results?.some((row) => row.binding_id === answer.binding_id
           && JSON.stringify(row.explanation_ids) === JSON.stringify(answer.explanation_ids))) };
   });
   return { contract: "source-semantic-withdrawal-trace-v1",

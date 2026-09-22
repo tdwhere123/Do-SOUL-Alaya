@@ -70,11 +70,11 @@ function sha256(text: string): string {
 
 function admittedQuery() {
   return {
-    contract: "source-semantic-query-v2" as const,
+    contract: "source-semantic-query-v3" as const,
     original_query_digest: `sha256:${sha256(ORIGINAL)}`,
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v2",
+    contract_version: "source-semantic-query-v3",
     variables: [
       { id: "parcel", sort: "entity" as const },
       { id: "fSend", sort: "proposition" as const }

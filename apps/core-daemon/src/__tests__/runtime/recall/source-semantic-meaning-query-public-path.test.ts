@@ -36,11 +36,11 @@ const SCOPES = { mode: "named" as const, scopes: ["project"] };
 
 /** Frozen contract-repair meaning raw. This is not a host-authored graph body. */
 const FROZEN_MEANING_RAW = JSON.stringify({
-  contract: "source-semantic-query-response-v3",
+  contract: "source-semantic-query-response-v4",
   outcome: { status: "interpreted", gaps: [] },
   query: {
-    contract: "source-semantic-query-meaning-v1",
-    alternatives: [{ meaning: {
+    contract: "source-semantic-query-meaning-v2",
+    alternatives: [{ conditions: [{
       kind: "possible", key: "q1",
       content: {
         kind: "statement", key: "s1", predicate: "operate",
@@ -49,7 +49,8 @@ const FROZEN_MEANING_RAW = JSON.stringify({
           { role: "theme", target: { kind: "named", key: "lathe", excerpt: "lathe" }, excerpt: "lathe" }
         ]
       }
-    } }],
+    }], evidence_inputs: [{ conditions: [{ kind: "occurrence", key: "s1" }] }] }],
+    requested_operation: { reading: "identify the agent of the possible operation", support: { kind: "query_text", excerpt: ORIGINAL } },
     gaps: [], return: ["person"],
     entities: [{ kind: "named", key: "lathe", excerpt: "lathe" }]
   }
@@ -188,7 +189,7 @@ function receiveLatheCorrespondence(querySemantics: SourceSemanticQuery, sourceI
  */
 it("recalls a model-admitted query semantics through SQLite reopen, worker, and public interpretation", async () => {
   const receivedQuerySemantics = receiveFrozenQuerySemantics();
-  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v3");
+  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v4");
   expect(receivedQuerySemantics.query.alternatives[0]?.frames.some((row) => row.operator === "possible")).toBe(true);
 
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-meaning-public-"));
@@ -245,7 +246,7 @@ it("recalls a model-admitted query semantics through SQLite reopen, worker, and 
     const reopened = await openSession(filename);
     try {
       const admitted = receiveFrozenQuerySemantics();
-      expect(admitted.request.contract).toBe("source-semantic-query-request-v3");
+      expect(admitted.request.contract).toBe("source-semantic-query-request-v4");
       const querySemanticsAfter = admitted.query;
       const semantic_correspondence = receiveLatheCorrespondence(querySemanticsAfter, sourceInterpretation, sourceInterpretationId);
       const recalled = await interpret(reopened.handler, {
@@ -256,7 +257,13 @@ it("recalls a model-admitted query semantics through SQLite reopen, worker, and 
       expect(recalled.provider_attempts).toBe(0);
       const proofSlot = recalled.slot_qualifiers?.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === sourceInterpretationId);
       expect(proofSlot).toBeDefined();
-      expect(recalled.proofs?.some((row) => row.source_interpretation_id === sourceInterpretationId && (row.answers?.length ?? 0) > 0)).toBe(true);
+      expect(recalled.proofs?.some((row) => row.source_interpretation_id === sourceInterpretationId && (row.binding_results?.length ?? 0) > 0)).toBe(true);
+      const proof = recalled.proofs!.find(row => row.source_interpretation_id === sourceInterpretationId)!;
+      expect(proof.binding_results?.map(row => row.kind).sort()).toEqual(["answer", "evidence"]);
+      expect(proof.binding_results?.find(row => row.kind === "evidence")?.query_complete).toBe(false);
+      expect(proofSlot!.witnesses).toHaveLength(2);
+      expect(proofSlot!.support).toMatchObject({ answer: "supported", evidence_inputs: [{ alternative: 0, input: 0, status: "supported" }],
+        operation: "not_executed", compatibility: "unknown", distinctness: "unknown" });
       expect(recalled.results?.[proofSlot!.index]?.object_kind).toBe("semantic_proof");
       expect(recalled.delivery_id).toEqual(expect.any(String));
     } finally {

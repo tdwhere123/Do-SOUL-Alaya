@@ -5,11 +5,12 @@ import {
 } from "../../garden/source-semantic-draft.js";
 import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticQueryEvaluationSchema, SourceSemanticQuerySchema, SourceSemanticQueryGapSchema,
+  SourceSemanticRequestedOperationSchema,
   type SourceSemanticContextObligation, type SourceSemanticQuery, type SourceSemanticQueryAlternative,
   type SourceSemanticQueryFrame, type SourceSemanticQueryRoleRequirement, type SourceSemanticQueryVariable
 } from "./semantic-query.js";
 
-export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v1" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v2" as const;
 export const SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH = Math.min(8, SOURCE_SEMANTIC_MAX_DEPTH);
 
 const Key = SourceSemanticHandleSchema;
@@ -126,9 +127,12 @@ function meaningShape(operand: z.ZodType<QueryMeaning>): z.ZodType<QueryMeaning>
 }
 
 const Meaning: z.ZodType<QueryMeaning> = z.lazy(() => meaningShape(Meaning));
+const Conditions = z.array(Meaning).max(16).readonly();
 
 const Alternative = z.object({
-  meaning: Meaning.optional(),
+  conditions: Conditions,
+  evidence_inputs: z.array(z.object({ conditions: Conditions.unwrap().min(1).readonly() })
+    .strict().readonly()).min(1).max(16).readonly().optional(),
   purpose: z.enum(["support", "counterexample"]).optional()
 }).strict().readonly();
 
@@ -136,31 +140,32 @@ const Domain = z.object({
   key: Key, excerpt: z.string().min(1).max(1024)
 }).strict().readonly();
 
-function bodyShape(meaning: z.ZodType<QueryMeaning>) {
-  return z.object({
+export const SourceSemanticQueryMeaningBodySchema = z.object({
     contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT),
-    alternatives: z.array(z.object({
-      meaning: meaning.optional(),
-      purpose: z.enum(["support", "counterexample"]).optional()
-    }).strict().readonly()).min(1).max(16).readonly(),
+    alternatives: z.array(Alternative).min(1).max(16).readonly(),
     gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly(),
     return: z.array(Key).max(64).readonly().optional(),
     domains: z.array(Domain).max(64).readonly().optional(),
     entities: z.array(z.discriminatedUnion("kind", [FreeTarget, NamedTarget])).max(64).readonly().optional(),
-    evaluation: SourceSemanticQueryEvaluationSchema.optional()
-  }).strict().readonly();
-}
-
-export const SourceSemanticQueryMeaningBodySchema = bodyShape(Meaning).superRefine((body, context) => {
+    evaluation: SourceSemanticQueryEvaluationSchema.optional(),
+    requested_operation: SourceSemanticRequestedOperationSchema.optional()
+  }).strict().readonly().superRefine((body, context) => {
   const comparison = body.evaluation?.kind === "comparison";
   for (const [index, alternative] of body.alternatives.entries()) {
-    if (comparison && alternative.meaning !== undefined) {
-      context.addIssue({ code: "custom", path: ["alternatives", index, "meaning"],
+    if (comparison && alternative.conditions.length > 0) {
+      context.addIssue({ code: "custom", path: ["alternatives", index, "conditions"],
         message: "comparison uses typed operand scope; nested meaning is not supported" });
     }
-    if (!comparison && alternative.meaning === undefined) {
-      context.addIssue({ code: "custom", path: ["alternatives", index, "meaning"],
-        message: "query body requires a meaning node" });
+    if (!comparison && alternative.conditions.length === 0 && alternative.evidence_inputs === undefined) {
+      context.addIssue({ code: "custom", path: ["alternatives", index, "conditions"],
+        message: "query body requires answer conditions or evidence inputs" });
+    }
+    if (alternative.evidence_inputs !== undefined && body.requested_operation === undefined) {
+      context.addIssue({ code: "custom", path: ["requested_operation"], message: "evidence inputs require the original requested operation" });
+    }
+    if (alternative.evidence_inputs !== undefined && body.evaluation !== undefined) {
+      context.addIssue({ code: "custom", path: ["alternatives", index, "evidence_inputs"],
+        message: "finite evaluation cannot include independent evidence branches" });
     }
   }
 });
@@ -195,7 +200,8 @@ export function materializeSourceSemanticQueryMeaning(
         id: row.key, support: { kind: "query_text" as const, excerpt: row.excerpt }
       }))
     }),
-    ...(parsed.evaluation === undefined ? {} : { evaluation: parsed.evaluation })
+    ...(parsed.evaluation === undefined ? {} : { evaluation: parsed.evaluation }),
+    ...(parsed.requested_operation === undefined ? {} : { requested_operation: parsed.requested_operation })
   });
 }
 
@@ -235,6 +241,7 @@ class QueryMeaningCompiler {
   private readonly used = new Set<string>();
   private readonly counters = new Map<string, number>();
   private readonly compiling = new Set<string>();
+  private evidence = false;
 
   compile(body: SourceSemanticQueryMeaningBody): {
     variables: SourceSemanticQueryVariable[];
@@ -260,7 +267,11 @@ class QueryMeaningCompiler {
       this.collectTarget(entity, ["entities", index]);
     }
     for (const [index, alternative] of body.alternatives.entries()) {
-      if (alternative.meaning !== undefined) this.collectMeaning(alternative.meaning, ["alternatives", index, "meaning"]);
+      alternative.conditions.forEach((condition, n) => this.collectMeaning(condition, ["alternatives", index, "conditions", n]));
+      this.evidence = true;
+      (alternative.evidence_inputs ?? []).forEach((input, n) => input.conditions.forEach((condition, k) =>
+        this.collectMeaning(condition, ["alternatives", index, "evidence_inputs", n, "conditions", k])));
+      this.evidence = false;
     }
     for (const [index, domain] of (body.domains ?? []).entries()) this.reserve(domain.key, ["domains", index, "key"]);
     if (body.evaluation?.kind === "forall") {
@@ -281,7 +292,7 @@ class QueryMeaningCompiler {
         this.collectTarget(argument.target, [...path, "arguments", index, "target"]);
       }
       if (meaning.content !== undefined) this.collectMeaning(meaning.content, [...path, "content"]);
-      if (meaning.return === true && meaning.key !== undefined) this.returned.add(meaning.key);
+      if (!this.evidence && meaning.return === true && meaning.key !== undefined) this.returned.add(meaning.key);
       return;
     }
     this.declareOccurrence(meaning.key, "context", path);
@@ -310,7 +321,7 @@ class QueryMeaningCompiler {
       }
       this.named.set(target.key, target.excerpt);
     }
-    if (target.return === true) this.returned.add(target.key);
+    if (!this.evidence && target.return === true) this.returned.add(target.key);
   }
 
   private alternative(
@@ -321,9 +332,15 @@ class QueryMeaningCompiler {
     }
     const frames: SourceSemanticQueryFrame[] = [];
     const obligations: SourceSemanticContextObligation[] = [];
-    this.compileMeaning(alternative.meaning!, [...path, "meaning"], frames, obligations, undefined);
+    const answer_frames = alternative.conditions.map((condition, n) =>
+      this.compileMeaning(condition, [...path, "conditions", n], frames, obligations, undefined));
+    this.evidence = true;
+    const evidence_inputs = alternative.evidence_inputs?.map((input, n) => ({ frames: input.conditions.map((condition, k) =>
+      this.compileMeaning(condition, [...path, "evidence_inputs", n, "conditions", k], frames, obligations, undefined)) }));
+    this.evidence = false;
     return {
       frames, context_obligations: obligations,
+      ...(evidence_inputs === undefined ? {} : { answer_frames, evidence_inputs }),
       ...(alternative.purpose === undefined ? {} : { purpose: alternative.purpose })
     };
   }
@@ -343,7 +360,7 @@ class QueryMeaningCompiler {
     if (this.compiling.has(frameId)) fail(path, "cyclic local reference");
     this.compiling.add(frameId);
     const variable = frameId;
-    if (meaning.kind === "statement" && meaning.return === true) this.returned.add(frameId);
+    if (!this.evidence && meaning.kind === "statement" && meaning.return === true) this.returned.add(frameId);
     const operator = meaning.kind === "statement" ? undefined
       : meaning.kind === "opaque" ? "opaque" : meaning.kind === "conditional" ? "conditional"
       : meaning.kind === "reported" ? "reported" : meaning.kind === "possible" ? "possible" : "not";

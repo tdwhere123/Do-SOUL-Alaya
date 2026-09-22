@@ -9,34 +9,10 @@ import { populateSourceSemanticFiniteFacts } from "./source-semantic-finite-fact
 import { CoreError } from "../../shared/errors.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import type { ObserverReaders, RelationObserverRow, SourceObserverRow } from "../conditional-field/observers/observe.js";
+import type { SourceSemanticBranchPlan } from "./source-semantic-branch-plan.js";
 
 export function sourceSemanticRelationKey(...parts: readonly (string | number)[]): string {
-  return JSON.stringify(["source-semantic-relations-v5", ...parts]);
-}
-/** Predicate-aligned source frames for one query alternative, in stable order. */
-export function correspondencePredicateGroups(
-  semantic_correspondence: SourceSemanticCorrespondence | undefined, alternative: number, queryFrame?: string
-): readonly string[] {
-  if (semantic_correspondence === undefined) return [];
-  const frames = new Set<string>();
-  for (const row of semantic_correspondence.correspondences) {
-    const query = row.query_endpoint, source = row.source_endpoint;
-    if (query.kind === "predicate" && source.kind === "frame" && query.alternative === alternative
-      && (queryFrame === undefined || query.frame === queryFrame)) {
-      frames.add(source.frame);
-    }
-  }
-  return [...frames].sort();
-}
-/** Split only when one query predicate is instantiated on several source frames. */
-export function correspondenceGroupPhases(
-  query: SourceSemanticQuery | undefined, semantic_correspondence: SourceSemanticCorrespondence | undefined, alternative: number
-): readonly (string | undefined)[] {
-  const branch = query?.alternatives[alternative];
-  const predicateFrames = branch?.frames.filter((frame) => frame.operator === undefined) ?? [];
-  if (predicateFrames.length !== 1) return [undefined];
-  const frames = correspondencePredicateGroups(semantic_correspondence, alternative, predicateFrames[0]!.id);
-  return frames.length === 0 ? [undefined] : frames;
+  return JSON.stringify(["source-semantic-relations-v6", ...parts]);
 }
 /** Slots stay on the chosen predicate frame; a shared query key searches every aligned frame. */
 export function correspondencePredicateKey(alternative: number, queryFrame: string, groupFrame?: string): string {
@@ -72,6 +48,7 @@ type Input = Readonly<{
   context_id: string; interpretation_id: string; scope: string; source_target: SourceEvidenceTarget;
   meter: SourceSemanticResourceLedger;
   query?: SourceSemanticQuery;
+  branches?: readonly SourceSemanticBranchPlan[];
   sourceValidity?: Readonly<{ valid_from: string | null; valid_to: string | null }>;
 }>;
 
@@ -199,36 +176,39 @@ export function populateBindings(builder: PremiseBuilder, sourceInterpretation: 
 }
 
 function populateCorrespondence(builder: PremiseBuilder, semantic_correspondence: SourceSemanticCorrespondence): void {
-  const grouped = new Map<number, readonly (string | undefined)[]>();
-  const groupFrame = (alternative: number, frame: string): string | undefined => {
-    const frames = grouped.get(alternative) ?? correspondenceGroupPhases(builder.input.query, semantic_correspondence, alternative);
-    if (!grouped.has(alternative)) grouped.set(alternative, frames);
-    return frames.includes(frame) ? frame : undefined;
+  const groups = (alternative: number, queryFrame: string, sourceFrame: string): readonly (string | undefined)[] => {
+    const relevant = builder.input.branches?.filter(branch => branch.alternative === alternative
+      && branch.view.frames.some(frame => frame.id === queryFrame));
+    return relevant === undefined ? [undefined] : [...new Set(relevant.flatMap(branch =>
+      branch.groupQueryFrame !== queryFrame || branch.groupFrame === undefined ? [undefined]
+        : branch.groupFrame === sourceFrame ? [branch.groupFrame] : []))];
   };
   for (const [index, correspondence] of semantic_correspondence.correspondences.entries()) {
     const query = correspondence.query_endpoint, source = correspondence.source_endpoint;
     if (query.kind === "referent" && source.kind === "referent") {
       builder.self(source.referent, ["semantic_correspondence_referent", query.variable], { leaf_kind: "semantic_correspondence_referent", occurrence: source.referent, correspondence_index: index });
     } else if (query.kind === "predicate" && source.kind === "frame") {
-      const group = groupFrame(query.alternative, source.frame);
-      builder.self(source.frame, group === undefined
-        ? ["semantic_correspondence_predicate", query.alternative, query.frame]
-        : ["semantic_correspondence_predicate", query.alternative, query.frame, group],
-        { leaf_kind: "semantic_correspondence_predicate", occurrence: source.frame, correspondence_index: index });
-      for (const [id, template] of builder.aliases) if (template === source.frame) builder.self(id,
-        group === undefined ? ["semantic_correspondence_predicate", query.alternative, query.frame] : ["semantic_correspondence_predicate", query.alternative, query.frame, group],
-        { leaf_kind: "semantic_correspondence_predicate", occurrence: id, correspondence_index: index });
+      for (const group of groups(query.alternative, query.frame, source.frame)) {
+        builder.self(source.frame, group === undefined
+          ? ["semantic_correspondence_predicate", query.alternative, query.frame]
+          : ["semantic_correspondence_predicate", query.alternative, query.frame, group],
+          { leaf_kind: "semantic_correspondence_predicate", occurrence: source.frame, correspondence_index: index });
+        for (const [id, template] of builder.aliases) if (template === source.frame) builder.self(id,
+          group === undefined ? ["semantic_correspondence_predicate", query.alternative, query.frame] : ["semantic_correspondence_predicate", query.alternative, query.frame, group],
+          { leaf_kind: "semantic_correspondence_predicate", occurrence: id, correspondence_index: index });
+      }
     } else if (query.kind === "slot" && source.kind === "slot") {
       const slot = builder.slotNodes.get(JSON.stringify([source.frame, source.slot]))!;
-      const group = groupFrame(query.alternative, source.frame);
-      const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "semantic_correspondence_slot", occurrence: source.frame, slot_id: source.slot, correspondence_index: index };
-      builder.edge(source.frame, slot, correspondenceSlotKey("semantic_correspondence_slot", query.alternative, query.frame, query.slot, group), leaf);
-      builder.edge(slot, source.frame, correspondenceSlotKey("semantic_correspondence_slot_inverse", query.alternative, query.frame, query.slot, group), leaf);
-      for (const [id, template] of builder.aliases) if (template === source.frame) {
-        const derivedSlot = builder.slotNodes.get(JSON.stringify([id, source.slot]))!;
-        const derivedLeaf = { ...leaf, occurrence: id, derived_target: derivedSlot };
-        builder.edge(id, derivedSlot, correspondenceSlotKey("semantic_correspondence_slot", query.alternative, query.frame, query.slot, group), derivedLeaf);
-        builder.edge(derivedSlot, id, correspondenceSlotKey("semantic_correspondence_slot_inverse", query.alternative, query.frame, query.slot, group), derivedLeaf);
+      for (const group of groups(query.alternative, query.frame, source.frame)) {
+        const leaf: SourceSemanticConsumedLeaf = { leaf_kind: "semantic_correspondence_slot", occurrence: source.frame, slot_id: source.slot, correspondence_index: index };
+        builder.edge(source.frame, slot, correspondenceSlotKey("semantic_correspondence_slot", query.alternative, query.frame, query.slot, group), leaf);
+        builder.edge(slot, source.frame, correspondenceSlotKey("semantic_correspondence_slot_inverse", query.alternative, query.frame, query.slot, group), leaf);
+        for (const [id, template] of builder.aliases) if (template === source.frame) {
+          const derivedSlot = builder.slotNodes.get(JSON.stringify([id, source.slot]))!;
+          const derivedLeaf = { ...leaf, occurrence: id, derived_target: derivedSlot };
+          builder.edge(id, derivedSlot, correspondenceSlotKey("semantic_correspondence_slot", query.alternative, query.frame, query.slot, group), derivedLeaf);
+          builder.edge(derivedSlot, id, correspondenceSlotKey("semantic_correspondence_slot_inverse", query.alternative, query.frame, query.slot, group), derivedLeaf);
+        }
       }
     }
   }

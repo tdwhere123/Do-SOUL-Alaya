@@ -280,6 +280,8 @@ export {
   SourceSemanticQueryEvaluationSchema,
   SourceSemanticQuerySchema,
   SourceSemanticQueryGapSchema,
+  SourceSemanticRequestedOperationSchema,
+  SourceSemanticQueryTargetSchema,
   queryAlternativeConnected,
   type SourceSemanticQueryVariable,
   type SourceSemanticQueryRoleRequirement,
@@ -287,8 +289,10 @@ export {
   type SourceSemanticQueryIncidence,
   type SourceSemanticContextObligation,
   type SourceSemanticQueryAlternative,
-  type SourceSemanticQuery
+  type SourceSemanticQuery,
+  type SourceSemanticQueryTarget
 } from "./semantic-query.js";
+export { sourceSemanticQueryBranchViews, type SourceSemanticQueryBranchView } from "./semantic-query-branches.js";
 export {
   SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH,

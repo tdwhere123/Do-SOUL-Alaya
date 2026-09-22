@@ -32,8 +32,8 @@ const interpretation = SourceSemanticInterpretationSchema.parse({
 });
 
 const query = SourceSemanticQuerySchema.parse({
-  contract: "source-semantic-query-v2", original_query_digest: digest,
-  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v2",
+  contract: "source-semantic-query-v3", original_query_digest: digest,
+  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v3",
   variables: [{ id: "parcel", sort: "entity" }, { id: "fSend", sort: "proposition" }],
   alternatives: [{
     frames: [{

@@ -52,11 +52,11 @@ export async function assertNativeSemanticChain(cacheRoot: string): Promise<void
   const fill = await executeSemanticProposalFill({ workset: oneQuery, cacheRoot: queryCache, authority,
     config: { providerUrl: "http://127.0.0.1:9", model: queryWorkset.model,
       requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: "source-semantic-query-response-v3", outcome: { status: "interpreted" },
-        query: { contract: "source-semantic-query-meaning-v1", alternatives: [{ meaning: {
+      rawJson: JSON.stringify({ contract: "source-semantic-query-response-v4", outcome: { status: "interpreted" },
+        query: { contract: "source-semantic-query-meaning-v2", alternatives: [{ conditions: [{
           kind: "statement", key: "complete", predicate: "complete",
           arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
-        } }], return: ["theme"], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
+        }] }], return: ["theme"], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
     }) } });
   expect(fill.newly_admitted).toBe(1);

@@ -714,14 +714,35 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent
 query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 8.0.0 uses `source-interpretation-v4`, `source-semantic-query-v2`,
-`source-semantic-correspondence-v3`, response envelope v5, reasoning v4, cache v3,
-library v2, public/worker recall protocol 2, and `source-semantic-k-v3`,
-`source-semantic-normalizer-v4` and `source-semantic-lowering-v5`. Each complete
+Garden v1. Protocol 9.0.0 uses `source-interpretation-v4`, `source-semantic-query-v3`,
+`source-semantic-correspondence-v3`, response envelope v5, reasoning v5, cache v3,
+library v3, public/worker recall protocol 3, and `source-semantic-k-v3`,
+`source-semantic-normalizer-v5` and `source-semantic-lowering-v6`. Each complete
 source-frame group is a jointly constrained compile alternative; slots must not
 float off that group's predicate frame. An older open source interpretation is not relabeled or silently promoted; recreate its interpretation explicitly.
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
+
+Query meaning v2 uses `conditions` for conjunction and optional
+`evidence_inputs: [{conditions}]` for the facts needed by the original requested
+operation. Query request/response v4 use the same recursive meaning schema as
+local receive admission; depth and byte limits remain local requirements. Nested
+`forall` is rejected; explicit top-level universal evaluation remains supported.
+The host derives original-Q frame views and execution groups. A view retains
+governing context and sibling operands. It never introduces another Q or A identity.
+Direct answer conditions preserve every original restriction even when inputs
+are also declared. An unrepresented answer relation remains explicit.
+
+Reasoning `binding_results` distinguish `answer` from `evidence`; evidence
+always has `query_complete: false`. Both use the same execution, projection and
+proof verifier. Each occupied source root retains all delivered binding witnesses
+and their required explanation forests. `semantic_proof` means verified conditional
+evidence, not necessarily a complete answer. The shared query-support projection
+reports original-answer and per-input coverage. It never performs the requested
+operation, joins identities across sources, or infers distinctness from local IDs
+or equal names. Incomplete execution phases remain resource-exhausted/partial.
+Archive-only source-evidence protocol 1/library v1 retains its recorded identities,
+page and order through the offline admission owner.
 
 New source-interpretation extraction uses the producer-only `source-semantic-proposal-v4` contract
 with `host-owned-expression-schema-v1` at canonical domination depth 16. Optional
@@ -742,7 +763,7 @@ and normalization share one resource ledger. Structural admission and located
 gaps cannot certify language completeness. The canonical source interpretation and response-envelope
 shapes remain unchanged. Recorded v1/v2/v3 proposals select their original
 prompt/schema explicitly for replay. Marker-absent normalizer-v3 requests retain
-an explicit historical replay path; new publication requires normalizer-v4.
+an explicit historical replay path; new publication requires normalizer-v5.
 Request/schema identities distinguish the producer wire. Canonical-envelope
 archives retain native request/response replay with their original prompt. Their
 normalizer-v3 manifests remain ineligible for current cache reuse; replay does

@@ -138,7 +138,7 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
     return SourceSemanticWorkerResultSchema.parse({
       kind: "reason",
       result: {
-        contract: "source-interpretation-reasoning-v4", semantic_status: "unreviewed",
+        contract: "source-interpretation-reasoning-v5", semantic_status: "unreviewed",
         conclusion_scope: "conditional_on_interpretation", world_claim: "unknown",
         outcome: { status: "invalid", reason: admission.kind === "unsupported" ? "unsupported_producer" : "malformed_correspondence" },
         consumed_leaves: []
@@ -149,7 +149,7 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
   }
   const result = reasonSourceSemanticInterpretation({
     request: {
-      contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+      contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
       source_interpretation_id: admission.interpretation_id, query_semantics_id: admission.query_id, semantic_correspondence_id: admission.semantic_correspondence_id,
       original_query: original, budget: { ...request.budget, ...meter.remaining() }, output_byte_limit: request.output_byte_limit
     },

@@ -75,7 +75,7 @@ export function interveneSemanticChain(root: string, replayPath: string, leafTri
           scope: checked.stored.record.scope_class ?? "project", authorizedScopes: scopes,
           asOf: plan.config.interpretation_clock, sourceValidity: checked.stored.record,
           source_target: checked.bound.source_target, withdrawal_trial_limit: leafTrials,
-          request: { contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+          request: { contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
             source_interpretation_id: proof.source_interpretation_id!, query_semantics_id: proof.query_semantics_id!, semantic_correspondence_id: proof.semantic_correspondence_id!, original_query: query.original_query,
             budget: plan.config.budget, output_byte_limit: plan.config.output_byte_limit } });
         const sameContext = ["conditional_computation_id", "source_interpretation_id", "query_semantics_id", "semantic_correspondence_id"] as const;
@@ -106,6 +106,6 @@ export function interveneSemanticChain(root: string, replayPath: string, leafTri
 }
 
 function answerKeys(result: SourceSemanticReasoningResult): string[] {
-  return [...new Set((result.answers ?? []).map((row) => canonicalJson({ alternative: row.alternative,
+  return [...new Set((result.binding_results ?? []).map((row) => canonicalJson({ alternative: row.alternative,
     returned: row.returned, bindings: row.bindings })))].sort();
 }

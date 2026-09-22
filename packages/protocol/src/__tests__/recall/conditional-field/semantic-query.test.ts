@@ -17,8 +17,8 @@ const query = (
     { id: "fPack", sort: "proposition" }, { id: "fInspect", sort: "proposition" }
   ]
 ) => ({
-  contract: "source-semantic-query-v2" as const, original_query_digest: digest,
-  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v2",
+  contract: "source-semantic-query-v3" as const, original_query_digest: digest,
+  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v3",
   variables, alternatives: [{ frames, context_obligations: obligations }] satisfies SourceSemanticQueryAlternative[],
   return_variables: ["parcel"], gaps: []
 });

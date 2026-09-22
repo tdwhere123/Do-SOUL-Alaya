@@ -1,7 +1,7 @@
 import { SourceSemanticResourceLedger, type QueryProgram, type SourceSemanticQuery, type SourceSemanticQueryAlternative,
   type SourceSemanticCorrespondence, type SourceSemanticInterpretation } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../../shared/errors.js";
-import { sourceSemanticRelationKey as key, correspondenceGroupPhases, correspondencePredicateKey, correspondenceSlotKey,
+import { sourceSemanticRelationKey as key, correspondencePredicateKey, correspondenceSlotKey,
   type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
 import { semanticInstanceProof } from "./source-semantic-proof-program.js";
 
@@ -14,22 +14,11 @@ export type SourceSemanticCompilation = Readonly<{
   source_interpretation: SourceSemanticInterpretation; population: SourceSemanticPremisePopulation; semantic_correspondence?: SourceSemanticCorrespondence;
 }>;
 
-export function compileSourceSemanticQueryProgram(query: SourceSemanticQuery, meter: SourceSemanticResourceLedger,
-  finite?: SourceSemanticCompilation): QueryProgram {
-  meter.retain(query, "query compilation");
-  let acceptIndex = 0;
-  const options = query.alternatives.flatMap((alternative, index) => {
-    const frames = correspondenceGroupPhases(query, finite?.semantic_correspondence, index);
-    return frames.map((group) => compileSourceSemanticAlternative(query, alternative, index, meter, finite, false, group, acceptIndex++));
-  });
-  return options.length === 1 ? options[0]! : { schema_version: 1, kind: "alternative", options };
-}
-
 /** One jointly constrained walk; callers observe each group separately so kinds do not union. */
 export function compileSourceSemanticGroupProgram(query: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative,
   alt: number, meter: SourceSemanticResourceLedger, finite: SourceSemanticCompilation | undefined,
-  groupFrame: string | undefined, acceptIndex: number): QueryProgram {
-  return compileSourceSemanticAlternative(query, alternative, alt, meter, finite, false, groupFrame, acceptIndex);
+  groupFrame: string | undefined, acceptIndex: number, groupQueryFrame?: string): QueryProgram {
+  return compileSourceSemanticAlternative(query, alternative, alt, meter, finite, false, groupFrame, acceptIndex, groupQueryFrame);
 }
 
 function rel(predicate: string, from: string, to: string, meter: SourceSemanticResourceLedger): QueryProgram {
@@ -40,8 +29,8 @@ function rel(predicate: string, from: string, to: string, meter: SourceSemanticR
 
 export function compileSourceSemanticAlternative(querySemantics: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative, alt: number,
   meter: SourceSemanticResourceLedger, finite?: SourceSemanticCompilation, omitAccept = false, groupFrame?: string,
-  acceptIndex?: number): QueryProgram {
-  const graph = buildGraph(querySemantics, alternative, alt, meter, groupFrame);
+  acceptIndex?: number, groupQueryFrame?: string): QueryProgram {
+  const graph = buildGraph(querySemantics, alternative, alt, meter, groupFrame, groupQueryFrame);
   const root = alternative.frames[0]!.variable;
   const seed = groupFrame === undefined ? `@seed:${alt}` : `@seed:${alt}:${groupFrame}`;
   const steps = [rel(key("candidate_route"), seed, root, meter)];
@@ -105,7 +94,7 @@ function sequence(steps: readonly QueryProgram[]): QueryProgram {
 }
 
 function buildGraph(query: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative, alt: number,
-  meter: SourceSemanticResourceLedger, groupFrame?: string): Graph {
+  meter: SourceSemanticResourceLedger, groupFrame?: string, groupQueryFrame?: string): Graph {
   const edges: Edge[] = [], properties = new Map<string, string[]>();
   const addKey = (variable: string, predicate: string) => {
     meter.charge(1, 512, "query obligation");
@@ -117,8 +106,9 @@ function buildGraph(query: SourceSemanticQuery, alternative: SourceSemanticQuery
   };
   const used = new Set<string>(), byFrame = new Map(alternative.frames.map((frame) => [frame.id, frame]));
   for (const [fi, frame] of alternative.frames.entries()) {
+    const frameGroup = frame.id === groupQueryFrame ? groupFrame : undefined;
     used.add(frame.variable); add(frame.variable, "source_interpretation_presence");
-    if (frame.operator === undefined) addKey(frame.variable, correspondencePredicateKey(alt, frame.id, groupFrame));
+    if (frame.operator === undefined) addKey(frame.variable, correspondencePredicateKey(alt, frame.id, frameGroup));
     else add(frame.variable, "source_interpretation_operator", frame.operator);
     if (frame.source_act !== undefined) add(frame.variable, "source_act", frame.source_act);
     for (const [ri, role] of frame.role_requirements.entries()) {
@@ -127,8 +117,8 @@ function buildGraph(query: SourceSemanticQuery, alternative: SourceSemanticQuery
         edge(frame.variable, role.target_variable, key("source_interpretation_content", "operator_operand", "reporter"), key("source_interpretation_content_inverse", "operator_operand", "reporter"));
       } else {
         const slot = groupFrame === undefined ? `@slot:${alt}:${fi}:${ri}` : `@slot:${alt}:${fi}:${ri}:${groupFrame}`;
-        edge(frame.variable, slot, correspondenceSlotKey("semantic_correspondence_slot", alt, frame.id, role.id, groupFrame),
-          correspondenceSlotKey("semantic_correspondence_slot_inverse", alt, frame.id, role.id, groupFrame));
+        edge(frame.variable, slot, correspondenceSlotKey("semantic_correspondence_slot", alt, frame.id, role.id, frameGroup),
+          correspondenceSlotKey("semantic_correspondence_slot_inverse", alt, frame.id, role.id, frameGroup));
         edge(slot, role.target_variable, key("source_interpretation_binding"), key("source_interpretation_binding_inv"));
       }
     }

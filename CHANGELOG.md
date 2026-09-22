@@ -40,6 +40,16 @@ Native preview reads use the existing UTF-8 hydration owner with a 4096-byte
 limit. Partial native previews remain partial in both public coverage and index
 completeness; the encoded-response byte limit still applies independently.
 
+Query meaning v2 and canonical query v3 retain conjunctive answer conditions and
+independent evidence inputs in one original query identity. Query request/response
+v4 feed the same bounded recursive grammar. Reasoning v5 delivers discriminated
+answer/evidence bindings through one execution and proof authority; evidence does
+not execute a requested operation or claim original-answer completion. Library
+v3/protocol 3 preserves every delivered witness within one occupied source root,
+verifies siblings, and reports shared answer/input support with unknown cross-source
+compatibility and distinctness. Unfinished phases remain resource-exhausted/partial.
+Archive-only source-evidence v1 identities, pages and order remain unchanged.
+
 Protocol 8.0.0 additionally requires complete current library deliveries to identify
 protocol 2 and library v2, membership purpose and the ten-slot page budget. Worker
 and public schemas derive these fields from one delivery contract. Outcome-only

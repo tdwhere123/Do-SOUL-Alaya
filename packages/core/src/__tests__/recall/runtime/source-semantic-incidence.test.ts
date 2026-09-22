@@ -7,7 +7,7 @@ import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-f
 function resultObjects(interpretation: SourceSemanticInterpretation, semantics: SourceSemanticQuery, correspondence = correspondenceFor(interpretation, semantics)) {
   const result = run(interpretation, semantics, correspondence);
   expect(result.outcome.status).toBe("interpreted");
-  return [...new Set(result.answers!.map((answer) => answer.returned.tools?.node_id))].sort();
+  return [...new Set(result.binding_results!.map((answer) => answer.returned.tools?.node_id))].sort();
 }
 function parentMapping(correspondence: SourceSemanticCorrespondence, queryFrame: string, sourceFrame: string): SourceSemanticCorrespondence {
   return { ...correspondence, correspondences: [...correspondence.correspondences, { relation: "contextual_equivalence", query_endpoint: { kind: "predicate", alternative: 0, frame: queryFrame },
@@ -58,7 +58,7 @@ it.each(["assertion", "question", "directive", "unresolved", "embedding", "opera
     };
     const result = run(interpretation, semantics, correspondenceFor(interpretation, semantics));
     expect(result.outcome.status).toBe("interpreted");
-    expect(result.answers?.map((answer) => answer.returned.tools?.node_id)).toEqual(kind === "assertion" ? [] : ["rX"]);
+    expect(result.binding_results?.map((answer) => answer.returned.tools?.node_id)).toEqual(kind === "assertion" ? [] : ["rX"]);
     if (kind !== "assertion") {
       expect(result.consumed_leaves).toContainEqual({ leaf_kind: "source_interpretation_context", occurrence: "fAlice" });
       expect(result.consumed_leaves).not.toContainEqual({ leaf_kind: "source_interpretation_assertion_permission", occurrence: "fAlice" });

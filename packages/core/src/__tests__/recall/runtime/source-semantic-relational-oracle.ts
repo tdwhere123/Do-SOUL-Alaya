@@ -30,8 +30,8 @@ function* cartesian(groups: readonly (readonly string[])[], prefix: string[] = [
 }
 /** The public result, not source interpretation and semantic correspondence, supplies every decoded binding. */
 export function decodeEngineBindings(result: SourceSemanticReasoningResult): readonly Readonly<Record<string, string>>[] {
-  if (result.answers === undefined) throw new Error("reason result did not expose actual engine bindings");
-  return result.answers.map((answer) => Object.fromEntries(Object.entries(answer.bindings).map(([key, coordinate]) => [key, coordinate.node_id])));
+  if (result.binding_results === undefined) throw new Error("reason result did not expose actual engine bindings");
+  return result.binding_results.map((answer) => Object.fromEntries(Object.entries(answer.bindings).map(([key, coordinate]) => [key, coordinate.node_id])));
 }
 export function assignmentBindings(assignment: SourceSemanticOracleAssignment, variables: readonly string[]): Record<string, string> {
   return Object.fromEntries(variables.filter((key) => assignment.bindings[key] !== undefined).map((key) => [key, assignment.bindings[key]!]));
@@ -61,7 +61,7 @@ export function oracleProofsMatchEngine(oracle: SourceSemanticOracleResult, resu
     }, [local]);
   };
   const bindingKey = (bindings: Readonly<Record<string, string>>) => JSON.stringify(Object.entries(bindings).sort(([a], [b]) => a.localeCompare(b)));
-  for (const answer of result.answers ?? []) {
+  for (const answer of result.binding_results ?? []) {
     const binding = Object.fromEntries(Object.entries(answer.bindings).map(([key, value]) => [key, value.node_id]));
     const expected = oracle.assignments.filter((row) => bindingKey(row.bindings) === bindingKey(binding));
     if (expected.length === 0 || answer.explanation_ids.length === 0) return false;
@@ -69,7 +69,7 @@ export function oracleProofsMatchEngine(oracle: SourceSemanticOracleResult, resu
       if (!expected.some((row) => { const keys = new Set(row.leaves.map(leafKey)); return keys.size === proof.size && [...keys].every((key) => proof.has(key)); })) return false;
     }
   }
-  return oracle.assignments.length !== 0 || (result.answers?.length === 0 && result.consumed_leaves.length === 0);
+  return oracle.assignments.length !== 0 || (result.binding_results?.length === 0 && result.consumed_leaves.length === 0);
 }
 export function oracleNecessaryLeavesHeld(oracle: SourceSemanticOracleResult, engineLeaves: readonly SourceSemanticConsumedLeaf[]): boolean {
   if (oracle.assignments.length === 0) return engineLeaves.length === 0;

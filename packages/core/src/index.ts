@@ -210,6 +210,7 @@ export {
 export { reasonSourceInterpretation } from "./recall/runtime/source-interpretation-reasoning.js";
 export { reasonSourceSemanticInterpretation, executeSourceSemanticInterpretation } from "./recall/runtime/source-semantic-reasoning.js";
 export { deliveredSourceSemanticLibraryProof } from "./recall/runtime/source-semantic-library-proof.js";
+export { projectSourceSemanticQuerySupport } from "./recall/runtime/source-semantic-query-support.js";
 export {
   SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResults,
   proofEntriesFromBranch, proofForLibraryEntry, slotQualifiersFor, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry,

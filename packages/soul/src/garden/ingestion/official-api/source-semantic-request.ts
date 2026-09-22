@@ -31,8 +31,8 @@ import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canon
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-selection-guidance.js";
 
-export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v3" as const;
-export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v3" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v4" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v4" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT = "source-semantic-correspondence-request-v4" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v3" as const;
 
@@ -466,9 +466,12 @@ export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): stri
 }
 
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
-  "Propose query meaning for the original query only, using source-semantic-query-meaning-v1.",
+  "Propose query meaning for the original query only, using source-semantic-query-meaning-v2.",
   "Return nested meaning nodes. Do not write a flat variable/frame/sort graph, hashes, reciprocal incidence, answers, ranking, seeds, QueryProgram, programs, verdicts, or source answer IDs.",
   "Host derives occurrence IDs, sorts, and incidence from declared node kind and nesting. A person and an event cannot share one variable. Free answers may be unknown in value without unresolved meaning.",
+  "Each alternative has conditions: a conjunction of nested meanings, sharing entity references when required. content remains real embedding, never a substitute for independent conditions.",
+  "If the question requests an operation whose inputs are useful evidence, retain requested_operation:{reading,support:{kind:query_text,excerpt}} with an exact original excerpt, and evidence_inputs:[{conditions:[...]}]. Give only the necessary input facts and their qualifications; the host derives branches, bindings and status. Do not supply input IDs, graph, sorts, counts or execution claims. Reuse an existing keyed occurrence with {kind:occurrence,key} when its meaning is shared.",
+  "Answer conditions must preserve every restriction of a directly stated answer, including the requested population, dates and shared participants. A source may directly state the requested amount without stating its inputs. Do not put answer restrictions only in evidence_inputs. If no faithful answer relation is expressible, use conditions:[] with the supported inputs and requested operation; input support never completes that answer or executes the operation.",
   `A nesting path may contain at most ${SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH + 1} statement/operator nodes. Deeper meaning must remain a located gap; never silently truncate its scope.`,
   "Ordinary form: statement with predicate and role arguments; operator with explicit operands; named for a name constraint; free for an answer target; reference only for reuse, coreference, a returned occurrence, or a binder.",
   "A statement's arguments[].target accepts only free, named or reference entities. Put an embedded event in the statement's content field, not in arguments[].target and not in an entity named after the entire event phrase. Preserve the embedded predicate, participants and their shared references. For example, ask(person, content=repair(item)) must not assert that the repair happened.",

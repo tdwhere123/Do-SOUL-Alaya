@@ -1,0 +1,1905 @@
+[
+  {
+    "input": {
+      "source_id": "forum-final",
+      "source_version": "1",
+      "sourceCorpus": "Final report for Delta Forum, held on 2026-05-10. Exactly four different invited\nspeakers actually spoke at this event. This report does not list their names.\nSix other people had been invited to speak but did not speak at this event.",
+      "assertionIds": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "sourceScope": "complete-source",
+      "producer_id": "authored-source-input",
+      "producer_version": "1"
+    },
+    "proposal": {
+      "contract": "source-semantic-proposal-v5",
+      "outcome": {
+        "status": "interpreted"
+      },
+      "content": {
+        "roots": [
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "event held on date",
+                "support": {
+                  "first": "a1s11",
+                  "last": "a1s13"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "event",
+                  "target": {
+                    "kind": "entity",
+                    "key": "forum",
+                    "mentions": [
+                      {
+                        "first": "a1s6",
+                        "last": "a1s8"
+                      },
+                      {
+                        "first": "a3s8",
+                        "last": "a3s10"
+                      },
+                      {
+                        "first": "a5s26",
+                        "last": "a5s28"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "date",
+                  "target": {
+                    "kind": "entity",
+                    "key": "event-date",
+                    "mentions": [
+                      {
+                        "first": "a1s15",
+                        "last": "a1s19"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "exact count of different invited speakers who actually spoke at event",
+                "support": [
+                  {
+                    "first": "a2s0",
+                    "last": "a2s6"
+                  },
+                  {
+                    "first": "a3s0",
+                    "last": "a3s10"
+                  }
+                ]
+              },
+              "arguments": [
+                {
+                  "role": "count",
+                  "target": {
+                    "first": "a2s2",
+                    "last": "a2s2"
+                  }
+                },
+                {
+                  "role": "population",
+                  "target": {
+                    "kind": "entity",
+                    "mentions": [
+                      {
+                        "first": "a2s4",
+                        "last": "a2s6"
+                      },
+                      {
+                        "first": "a3s0",
+                        "last": "a3s0"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "actual participation",
+                  "target": {
+                    "first": "a3s2",
+                    "last": "a3s4"
+                  }
+                },
+                {
+                  "role": "event",
+                  "target": {
+                    "kind": "entity",
+                    "key": "forum",
+                    "mentions": [
+                      {
+                        "first": "a1s6",
+                        "last": "a1s8"
+                      },
+                      {
+                        "first": "a3s8",
+                        "last": "a3s10"
+                      },
+                      {
+                        "first": "a5s26",
+                        "last": "a5s28"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "date",
+                  "target": {
+                    "kind": "entity",
+                    "key": "event-date",
+                    "mentions": [
+                      {
+                        "first": "a1s15",
+                        "last": "a1s19"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "not",
+              "support": {
+                "first": "a4s4",
+                "last": "a4s6"
+              },
+              "content": {
+                "kind": "statement",
+                "predicate": {
+                  "kind": "explicit",
+                  "reading": "report lists speaker names",
+                  "support": {
+                    "first": "a4s8",
+                    "last": "a4s12"
+                  }
+                },
+                "arguments": [
+                  {
+                    "role": "report",
+                    "target": {
+                      "first": "a4s0",
+                      "last": "a4s2"
+                    }
+                  },
+                  {
+                    "role": "names",
+                    "target": {
+                      "first": "a4s10",
+                      "last": "a4s12"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "count of other invited people who did not speak at event",
+                "support": {
+                  "first": "a5s0",
+                  "last": "a5s28"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "count",
+                  "target": {
+                    "first": "a5s0",
+                    "last": "a5s0"
+                  }
+                },
+                {
+                  "role": "population",
+                  "target": {
+                    "first": "a5s2",
+                    "last": "a5s22"
+                  }
+                },
+                {
+                  "role": "event",
+                  "target": {
+                    "kind": "entity",
+                    "key": "forum",
+                    "mentions": [
+                      {
+                        "first": "a1s6",
+                        "last": "a1s8"
+                      },
+                      {
+                        "first": "a3s8",
+                        "last": "a3s10"
+                      },
+                      {
+                        "first": "a5s26",
+                        "last": "a5s28"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "date",
+                  "target": {
+                    "kind": "entity",
+                    "key": "event-date",
+                    "mentions": [
+                      {
+                        "first": "a1s15",
+                        "last": "a1s19"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "input": {
+      "source_id": "forum-notebook",
+      "source_version": "1",
+      "sourceCorpus": "Witness notebook for Delta Forum on 2026-05-10. This notebook contains only\nsessions I personally witnessed and is not a complete list of speakers.\nAmir Chen, speaker badge A-17, was an invited speaker and spoke at 09:00.\nA different person, also named Amir Chen, speaker badge B-92, was an invited\nspeaker and spoke at 10:00. At 14:00, the same Amir Chen with badge A-17 spoke\nagain. Noor, badge C-11, attended but did not speak. An announcement said that\nSol, badge D-08, might speak; I recorded no actual speech by Sol.",
+      "assertionIds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "sourceScope": "complete-source",
+      "producer_id": "authored-source-input",
+      "producer_version": "1"
+    },
+    "proposal": {
+      "contract": "source-semantic-proposal-v5",
+      "outcome": {
+        "status": "interpreted"
+      },
+      "content": {
+        "roots": [
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "event held on date",
+                "support": {
+                  "first": "a1s10",
+                  "last": "a1s10"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "event",
+                  "target": {
+                    "kind": "entity",
+                    "key": "forum",
+                    "mentions": [
+                      {
+                        "first": "a1s6",
+                        "last": "a1s8"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "date",
+                  "target": {
+                    "kind": "entity",
+                    "key": "event-date",
+                    "mentions": [
+                      {
+                        "first": "a1s12",
+                        "last": "a1s16"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "notebook contains only personally witnessed sessions",
+                "support": [
+                  {
+                    "first": "a2s4",
+                    "last": "a2s6"
+                  },
+                  {
+                    "first": "a3s0",
+                    "last": "a3s6"
+                  }
+                ]
+              },
+              "arguments": [
+                {
+                  "role": "notebook",
+                  "target": {
+                    "kind": "entity",
+                    "key": "notebook",
+                    "mentions": [
+                      {
+                        "first": "a1s0",
+                        "last": "a1s2"
+                      },
+                      {
+                        "first": "a2s0",
+                        "last": "a2s2"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "not",
+              "support": {
+                "first": "a3s12",
+                "last": "a3s22"
+              },
+              "content": {
+                "kind": "statement",
+                "predicate": {
+                  "kind": "explicit",
+                  "reading": "notebook is complete list of speakers",
+                  "support": {
+                    "first": "a3s14",
+                    "last": "a3s22"
+                  }
+                },
+                "arguments": [
+                  {
+                    "role": "notebook",
+                    "target": {
+                      "kind": "entity",
+                      "key": "notebook",
+                      "mentions": [
+                        {
+                          "first": "a1s0",
+                          "last": "a1s2"
+                        },
+                        {
+                          "first": "a2s0",
+                          "last": "a2s2"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "role": "event",
+                    "target": {
+                      "kind": "entity",
+                      "key": "forum",
+                      "mentions": [
+                        {
+                          "first": "a1s6",
+                          "last": "a1s8"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "role": "date",
+                    "target": {
+                      "kind": "entity",
+                      "key": "event-date",
+                      "mentions": [
+                        {
+                          "first": "a1s12",
+                          "last": "a1s16"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "speaker has badge",
+                "support": {
+                  "first": "a4s5",
+                  "last": "a4s7"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-A-17",
+                    "mentions": [
+                      {
+                        "first": "a4s0",
+                        "last": "a4s2"
+                      },
+                      {
+                        "first": "a7s7",
+                        "last": "a7s21"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "badge",
+                  "target": {
+                    "first": "a4s9",
+                    "last": "a4s11"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "speaker has badge",
+                "support": {
+                  "first": "a5s16",
+                  "last": "a5s18"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-B-92",
+                    "mentions": [
+                      {
+                        "first": "a5s11",
+                        "last": "a5s13"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "badge",
+                  "target": {
+                    "first": "a5s20",
+                    "last": "a5s22"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "is a different person from",
+                "support": {
+                  "first": "a5s0",
+                  "last": "a5s4"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-B-92",
+                    "mentions": [
+                      {
+                        "first": "a5s11",
+                        "last": "a5s13"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "other person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-A-17",
+                    "mentions": [
+                      {
+                        "first": "a4s0",
+                        "last": "a4s2"
+                      },
+                      {
+                        "first": "a7s7",
+                        "last": "a7s21"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "was invited speaker",
+                "support": {
+                  "first": "a4s14",
+                  "last": "a4s20"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-A-17",
+                    "mentions": [
+                      {
+                        "first": "a4s0",
+                        "last": "a4s2"
+                      },
+                      {
+                        "first": "a7s7",
+                        "last": "a7s21"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "event",
+                  "target": {
+                    "kind": "entity",
+                    "key": "forum",
+                    "mentions": [
+                      {
+                        "first": "a1s6",
+                        "last": "a1s8"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "date",
+                  "target": {
+                    "kind": "entity",
+                    "key": "event-date",
+                    "mentions": [
+                      {
+                        "first": "a1s12",
+                        "last": "a1s16"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "was invited speaker",
+                "support": [
+                  {
+                    "first": "a5s25",
+                    "last": "a5s29"
+                  },
+                  {
+                    "first": "a6s0",
+                    "last": "a6s0"
+                  }
+                ]
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-B-92",
+                    "mentions": [
+                      {
+                        "first": "a5s11",
+                        "last": "a5s13"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "event",
+                  "target": {
+                    "kind": "entity",
+                    "key": "forum",
+                    "mentions": [
+                      {
+                        "first": "a1s6",
+                        "last": "a1s8"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "date",
+                  "target": {
+                    "kind": "entity",
+                    "key": "event-date",
+                    "mentions": [
+                      {
+                        "first": "a1s12",
+                        "last": "a1s16"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "key": "speech-A-17-09",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "actually spoke",
+                "support": {
+                  "first": "a4s24",
+                  "last": "a4s30"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-A-17",
+                    "mentions": [
+                      {
+                        "first": "a4s0",
+                        "last": "a4s2"
+                      },
+                      {
+                        "first": "a7s7",
+                        "last": "a7s21"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "event",
+                  "target": {
+                    "kind": "entity",
+                    "key": "forum",
+                    "mentions": [
+                      {
+                        "first": "a1s6",
+                        "last": "a1s8"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "date",
+                  "target": {
+                    "kind": "entity",
+                    "key": "event-date",
+                    "mentions": [
+                      {
+                        "first": "a1s12",
+                        "last": "a1s16"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "time",
+                  "target": {
+                    "first": "a4s28",
+                    "last": "a4s30"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "key": "speech-B-92-10",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "actually spoke",
+                "support": {
+                  "first": "a6s4",
+                  "last": "a6s10"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-B-92",
+                    "mentions": [
+                      {
+                        "first": "a5s11",
+                        "last": "a5s13"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "event",
+                  "target": {
+                    "kind": "entity",
+                    "key": "forum",
+                    "mentions": [
+                      {
+                        "first": "a1s6",
+                        "last": "a1s8"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "date",
+                  "target": {
+                    "kind": "entity",
+                    "key": "event-date",
+                    "mentions": [
+                      {
+                        "first": "a1s12",
+                        "last": "a1s16"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "time",
+                  "target": {
+                    "first": "a6s8",
+                    "last": "a6s10"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "key": "speech-A-17-14",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "actually spoke",
+                "support": [
+                  {
+                    "first": "a7s23",
+                    "last": "a7s23"
+                  },
+                  {
+                    "first": "a8s0",
+                    "last": "a8s0"
+                  }
+                ]
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-A-17",
+                    "mentions": [
+                      {
+                        "first": "a4s0",
+                        "last": "a4s2"
+                      },
+                      {
+                        "first": "a7s7",
+                        "last": "a7s21"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "event",
+                  "target": {
+                    "kind": "entity",
+                    "key": "forum",
+                    "mentions": [
+                      {
+                        "first": "a1s6",
+                        "last": "a1s8"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "date",
+                  "target": {
+                    "kind": "entity",
+                    "key": "event-date",
+                    "mentions": [
+                      {
+                        "first": "a1s12",
+                        "last": "a1s16"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "time",
+                  "target": {
+                    "first": "a7s2",
+                    "last": "a7s4"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "person has badge",
+                "support": {
+                  "first": "a9s3",
+                  "last": "a9s3"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-C-11",
+                    "mentions": [
+                      {
+                        "first": "a9s0",
+                        "last": "a9s0"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "badge",
+                  "target": {
+                    "first": "a9s5",
+                    "last": "a9s7"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "attended",
+                "support": {
+                  "first": "a9s10",
+                  "last": "a9s10"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-C-11",
+                    "mentions": [
+                      {
+                        "first": "a9s0",
+                        "last": "a9s0"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "event",
+                  "target": {
+                    "kind": "entity",
+                    "key": "forum",
+                    "mentions": [
+                      {
+                        "first": "a1s6",
+                        "last": "a1s8"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "date",
+                  "target": {
+                    "kind": "entity",
+                    "key": "event-date",
+                    "mentions": [
+                      {
+                        "first": "a1s12",
+                        "last": "a1s16"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "not",
+              "support": {
+                "first": "a9s14",
+                "last": "a9s16"
+              },
+              "content": {
+                "kind": "statement",
+                "predicate": {
+                  "kind": "explicit",
+                  "reading": "actually spoke",
+                  "support": {
+                    "first": "a9s18",
+                    "last": "a9s18"
+                  }
+                },
+                "arguments": [
+                  {
+                    "role": "person",
+                    "target": {
+                      "kind": "entity",
+                      "key": "badge-C-11",
+                      "mentions": [
+                        {
+                          "first": "a9s0",
+                          "last": "a9s0"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "role": "event",
+                    "target": {
+                      "kind": "entity",
+                      "key": "forum",
+                      "mentions": [
+                        {
+                          "first": "a1s6",
+                          "last": "a1s8"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "role": "date",
+                    "target": {
+                      "kind": "entity",
+                      "key": "event-date",
+                      "mentions": [
+                        {
+                          "first": "a1s12",
+                          "last": "a1s16"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "person has badge",
+                "support": {
+                  "first": "a11s3",
+                  "last": "a11s3"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "badge-D-08",
+                    "mentions": [
+                      {
+                        "first": "a11s0",
+                        "last": "a11s0"
+                      },
+                      {
+                        "first": "a11s27",
+                        "last": "a11s27"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "badge",
+                  "target": {
+                    "first": "a11s5",
+                    "last": "a11s7"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "reported",
+              "support": {
+                "first": "a10s0",
+                "last": "a10s6"
+              },
+              "reporter": {
+                "kind": "entity",
+                "key": "announcement",
+                "mentions": [
+                  {
+                    "first": "a10s0",
+                    "last": "a10s2"
+                  }
+                ]
+              },
+              "content": {
+                "kind": "possible",
+                "support": {
+                  "first": "a11s10",
+                  "last": "a11s10"
+                },
+                "content": {
+                  "kind": "statement",
+                  "predicate": {
+                    "kind": "explicit",
+                    "reading": "actually spoke",
+                    "support": {
+                      "first": "a11s12",
+                      "last": "a11s12"
+                    }
+                  },
+                  "arguments": [
+                    {
+                      "role": "person",
+                      "target": {
+                        "kind": "entity",
+                        "key": "badge-D-08",
+                        "mentions": [
+                          {
+                            "first": "a11s0",
+                            "last": "a11s0"
+                          },
+                          {
+                            "first": "a11s27",
+                            "last": "a11s27"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "role": "event",
+                      "target": {
+                        "kind": "entity",
+                        "key": "forum",
+                        "mentions": [
+                          {
+                            "first": "a1s6",
+                            "last": "a1s8"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "role": "date",
+                      "target": {
+                        "kind": "entity",
+                        "key": "event-date",
+                        "mentions": [
+                          {
+                            "first": "a1s12",
+                            "last": "a1s16"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "not",
+              "support": {
+                "first": "a11s19",
+                "last": "a11s23"
+              },
+              "content": {
+                "kind": "statement",
+                "predicate": {
+                  "kind": "explicit",
+                  "reading": "witness recorded actual speech",
+                  "support": {
+                    "first": "a11s17",
+                    "last": "a11s27"
+                  }
+                },
+                "arguments": [
+                  {
+                    "role": "person",
+                    "target": {
+                      "kind": "entity",
+                      "key": "badge-D-08",
+                      "mentions": [
+                        {
+                          "first": "a11s0",
+                          "last": "a11s0"
+                        },
+                        {
+                          "first": "a11s27",
+                          "last": "a11s27"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "role": "record",
+                    "target": {
+                      "kind": "entity",
+                      "key": "notebook",
+                      "mentions": [
+                        {
+                          "first": "a1s0",
+                          "last": "a1s2"
+                        },
+                        {
+                          "first": "a2s0",
+                          "last": "a2s2"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "role": "event",
+                    "target": {
+                      "kind": "entity",
+                      "key": "forum",
+                      "mentions": [
+                        {
+                          "first": "a1s6",
+                          "last": "a1s8"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "role": "date",
+                    "target": {
+                      "kind": "entity",
+                      "key": "event-date",
+                      "mentions": [
+                        {
+                          "first": "a1s12",
+                          "last": "a1s16"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "input": {
+      "source_id": "personnel-summary",
+      "source_version": "1",
+      "sourceCorpus": "Larch Studio personnel summary, June 2026. For employee Rana Sethi, badge L-19,\nthe elapsed interval between her joining Larch Studio and her promotion there\nin June 2026 was exactly twelve UTC days. The two event dates are not recorded\nin this summary.",
+      "assertionIds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "sourceScope": "complete-source",
+      "producer_id": "authored-source-input",
+      "producer_version": "1"
+    },
+    "proposal": {
+      "contract": "source-semantic-proposal-v5",
+      "outcome": {
+        "status": "interpreted"
+      },
+      "content": {
+        "roots": [
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "employee has badge",
+                "support": {
+                  "first": "a2s9",
+                  "last": "a2s9"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "person",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employee",
+                    "mentions": [
+                      {
+                        "first": "a2s4",
+                        "last": "a2s6"
+                      },
+                      {
+                        "first": "a3s8",
+                        "last": "a3s8"
+                      },
+                      {
+                        "first": "a3s18",
+                        "last": "a3s18"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "badge",
+                  "target": {
+                    "first": "a2s11",
+                    "last": "a2s13"
+                  }
+                },
+                {
+                  "role": "employer",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employer",
+                    "mentions": [
+                      {
+                        "first": "a1s0",
+                        "last": "a1s2"
+                      },
+                      {
+                        "first": "a3s12",
+                        "last": "a3s14"
+                      },
+                      {
+                        "first": "a3s22",
+                        "last": "a3s22"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "exact elapsed interval from joining employer to promotion there in calendar scope",
+                "support": [
+                  {
+                    "first": "a3s2",
+                    "last": "a3s22"
+                  },
+                  {
+                    "first": "a4s8",
+                    "last": "a4s14"
+                  }
+                ]
+              },
+              "arguments": [
+                {
+                  "role": "employee",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employee",
+                    "mentions": [
+                      {
+                        "first": "a2s4",
+                        "last": "a2s6"
+                      },
+                      {
+                        "first": "a3s8",
+                        "last": "a3s8"
+                      },
+                      {
+                        "first": "a3s18",
+                        "last": "a3s18"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "employer",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employer",
+                    "mentions": [
+                      {
+                        "first": "a1s0",
+                        "last": "a1s2"
+                      },
+                      {
+                        "first": "a3s12",
+                        "last": "a3s14"
+                      },
+                      {
+                        "first": "a3s22",
+                        "last": "a3s22"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "elapsed value",
+                  "target": {
+                    "first": "a4s10",
+                    "last": "a4s10"
+                  }
+                },
+                {
+                  "role": "unit",
+                  "target": {
+                    "first": "a4s12",
+                    "last": "a4s14"
+                  }
+                },
+                {
+                  "role": "from event",
+                  "target": {
+                    "first": "a3s10",
+                    "last": "a3s14"
+                  }
+                },
+                {
+                  "role": "to event",
+                  "target": {
+                    "first": "a3s20",
+                    "last": "a3s22"
+                  }
+                },
+                {
+                  "role": "calendar scope",
+                  "target": {
+                    "first": "a4s2",
+                    "last": "a4s4"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "not",
+              "support": {
+                "first": "a5s10",
+                "last": "a5s10"
+              },
+              "content": {
+                "kind": "statement",
+                "predicate": {
+                  "kind": "explicit",
+                  "reading": "summary records event dates",
+                  "support": {
+                    "first": "a5s12",
+                    "last": "a5s12"
+                  }
+                },
+                "arguments": [
+                  {
+                    "role": "dates",
+                    "target": {
+                      "first": "a5s0",
+                      "last": "a5s6"
+                    }
+                  },
+                  {
+                    "role": "record",
+                    "target": {
+                      "first": "a6s2",
+                      "last": "a6s4"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "input": {
+      "source_id": "joining-note",
+      "source_version": "1",
+      "sourceCorpus": "Larch Studio joining note. Rana Sethi, employee badge L-19 in this note, joined\nLarch Studio at 2026-06-01 00:00 UTC. This note records no promotion event.",
+      "assertionIds": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "sourceScope": "complete-source",
+      "producer_id": "authored-source-input",
+      "producer_version": "1"
+    },
+    "proposal": {
+      "contract": "source-semantic-proposal-v5",
+      "outcome": {
+        "status": "interpreted"
+      },
+      "content": {
+        "roots": [
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "employee has badge in this note",
+                "support": {
+                  "first": "a2s5",
+                  "last": "a2s7"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "employee",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employee",
+                    "mentions": [
+                      {
+                        "first": "a2s0",
+                        "last": "a2s2"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "badge",
+                  "target": {
+                    "first": "a2s9",
+                    "last": "a2s11"
+                  }
+                },
+                {
+                  "role": "employer",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employer",
+                    "mentions": [
+                      {
+                        "first": "a1s0",
+                        "last": "a1s2"
+                      },
+                      {
+                        "first": "a3s0",
+                        "last": "a3s2"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "record",
+                  "target": {
+                    "kind": "entity",
+                    "key": "note",
+                    "mentions": [
+                      {
+                        "first": "a1s4",
+                        "last": "a1s6"
+                      },
+                      {
+                        "first": "a2s15",
+                        "last": "a2s17"
+                      },
+                      {
+                        "first": "a4s0",
+                        "last": "a4s2"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "key": "joining-event",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "joined employer at timestamp",
+                "support": {
+                  "first": "a2s20",
+                  "last": "a2s20"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "employee",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employee",
+                    "mentions": [
+                      {
+                        "first": "a2s0",
+                        "last": "a2s2"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "employer",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employer",
+                    "mentions": [
+                      {
+                        "first": "a1s0",
+                        "last": "a1s2"
+                      },
+                      {
+                        "first": "a3s0",
+                        "last": "a3s2"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "timestamp",
+                  "target": {
+                    "first": "a3s6",
+                    "last": "a3s16"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "not",
+              "support": {
+                "first": "a4s4",
+                "last": "a4s6"
+              },
+              "content": {
+                "kind": "statement",
+                "predicate": {
+                  "kind": "explicit",
+                  "reading": "note records event",
+                  "support": {
+                    "first": "a4s4",
+                    "last": "a4s4"
+                  }
+                },
+                "arguments": [
+                  {
+                    "role": "record",
+                    "target": {
+                      "kind": "entity",
+                      "key": "note",
+                      "mentions": [
+                        {
+                          "first": "a1s4",
+                          "last": "a1s6"
+                        },
+                        {
+                          "first": "a2s15",
+                          "last": "a2s17"
+                        },
+                        {
+                          "first": "a4s0",
+                          "last": "a4s2"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "role": "event type",
+                    "target": {
+                      "first": "a4s8",
+                      "last": "a4s10"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "input": {
+      "source_id": "promotion-note",
+      "source_version": "1",
+      "sourceCorpus": "Larch Studio promotion note. Rana Sethi, employee badge L-19 in this note, was\npromoted at Larch Studio at 2026-06-13 00:00 UTC. This note records no joining\nevent.",
+      "assertionIds": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "sourceScope": "complete-source",
+      "producer_id": "authored-source-input",
+      "producer_version": "1"
+    },
+    "proposal": {
+      "contract": "source-semantic-proposal-v5",
+      "outcome": {
+        "status": "interpreted"
+      },
+      "content": {
+        "roots": [
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "employee has badge in this note",
+                "support": {
+                  "first": "a2s5",
+                  "last": "a2s7"
+                }
+              },
+              "arguments": [
+                {
+                  "role": "employee",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employee",
+                    "mentions": [
+                      {
+                        "first": "a2s0",
+                        "last": "a2s2"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "badge",
+                  "target": {
+                    "first": "a2s9",
+                    "last": "a2s11"
+                  }
+                },
+                {
+                  "role": "employer",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employer",
+                    "mentions": [
+                      {
+                        "first": "a1s0",
+                        "last": "a1s2"
+                      },
+                      {
+                        "first": "a3s4",
+                        "last": "a3s6"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "record",
+                  "target": {
+                    "kind": "entity",
+                    "key": "note",
+                    "mentions": [
+                      {
+                        "first": "a1s4",
+                        "last": "a1s6"
+                      },
+                      {
+                        "first": "a2s15",
+                        "last": "a2s17"
+                      },
+                      {
+                        "first": "a4s0",
+                        "last": "a4s2"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "statement",
+              "key": "promotion-event",
+              "predicate": {
+                "kind": "explicit",
+                "reading": "was promoted at employer at timestamp",
+                "support": [
+                  {
+                    "first": "a2s20",
+                    "last": "a2s20"
+                  },
+                  {
+                    "first": "a3s0",
+                    "last": "a3s0"
+                  }
+                ]
+              },
+              "arguments": [
+                {
+                  "role": "employee",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employee",
+                    "mentions": [
+                      {
+                        "first": "a2s0",
+                        "last": "a2s2"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "employer",
+                  "target": {
+                    "kind": "entity",
+                    "key": "employer",
+                    "mentions": [
+                      {
+                        "first": "a1s0",
+                        "last": "a1s2"
+                      },
+                      {
+                        "first": "a3s4",
+                        "last": "a3s6"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "role": "timestamp",
+                  "target": {
+                    "first": "a3s10",
+                    "last": "a3s20"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "act": "assertion",
+            "expression": {
+              "kind": "not",
+              "support": {
+                "first": "a4s4",
+                "last": "a4s6"
+              },
+              "content": {
+                "kind": "statement",
+                "predicate": {
+                  "kind": "explicit",
+                  "reading": "note records event",
+                  "support": {
+                    "first": "a4s4",
+                    "last": "a4s4"
+                  }
+                },
+                "arguments": [
+                  {
+                    "role": "record",
+                    "target": {
+                      "kind": "entity",
+                      "key": "note",
+                      "mentions": [
+                        {
+                          "first": "a1s4",
+                          "last": "a1s6"
+                        },
+                        {
+                          "first": "a2s15",
+                          "last": "a2s17"
+                        },
+                        {
+                          "first": "a4s0",
+                          "last": "a4s2"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "role": "event type",
+                    "target": {
+                      "kind": "entity",
+                      "mentions": [
+                        {
+                          "first": "a4s8",
+                          "last": "a4s8"
+                        },
+                        {
+                          "first": "a5s0",
+                          "last": "a5s0"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+]

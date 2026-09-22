@@ -1,6 +1,6 @@
 import {
   interpretationNodeIdentity, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
-  type InformationIndex, type SourceSemanticQuery, type SourceSemanticAnswer,
+  type InformationIndex, type SourceSemanticQuery, type SourceSemanticBindingResult,
   type SourceSemanticConsumedLeaf, type InterpretationNodeCoordinate, type SourceSemanticEvaluationReport
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
@@ -24,7 +24,7 @@ export function deliverSourceSemanticProof(input: Readonly<{
   meter.retain(derivations, "proof representation");
   const byId = new Map(derivations.map((row) => [row.derivation_id, row]));
   let proofComplete = true;
-  const answers: SourceSemanticAnswer[] = [];
+  const binding_results: SourceSemanticBindingResult[] = [];
   const observed: { branch: SourceSemanticProofBranch; ids: readonly string[] }[] = [];
   const derivedIds = new Set(population.derivedNodes.filter((row) => row.kind === "query_entity" || row.kind === "instantiation").map((row) => row.node_id));
   for (const entry of index.entries) {
@@ -45,8 +45,9 @@ export function deliverSourceSemanticProof(input: Readonly<{
         candidate: coordinates.get(env.get(compiledBranch.candidate_variable) ?? "")?.node_id
       }) }, ids: entry.explanation_ids });
     if (compiledBranch !== undefined && compiledBranch.purpose !== "support") continue;
-    const used = new Set(query.evaluation === undefined
-      ? branch.frames.flatMap((row) => [row.variable, ...row.role_requirements.map((role) => role.target_variable)]) : query.return_variables);
+    const target = compiledBranch?.plan?.target ?? { kind: "answer" as const };
+    const used = new Set(compiledBranch?.plan?.projectedVariables ?? (query.evaluation === undefined
+      ? branch.frames.flatMap((row) => [row.variable, ...row.role_requirements.map((role) => role.target_variable)]) : query.return_variables));
     const bindings: Record<string, InterpretationNodeCoordinate> = {};
     const returned: Record<string, InterpretationNodeCoordinate> = {};
     for (const variable of used) {
@@ -56,13 +57,14 @@ export function deliverSourceSemanticProof(input: Readonly<{
       }
       bindings[variable] = coordinate;
     }
-    for (const variable of query.return_variables) {
+    for (const variable of compiledBranch?.plan?.returnedVariables ?? query.return_variables) {
       const coordinate = bindings[variable];
       if (coordinate === undefined) throw new CoreError("OBLIGATION_VIOLATION", "return variable is unbound");
       returned[variable] = coordinate;
     }
-    answers.push({ binding_id: entry.output_binding, alternative, bindings, returned,
-      explanation_ids: entry.explanation_ids, query_complete: query.gaps.length === 0 });
+    const common = { binding_id: entry.output_binding, alternative, bindings, returned, explanation_ids: entry.explanation_ids };
+    binding_results.push(target.kind === "answer" ? { ...common, ...target, query_complete: query.gaps.length === 0 }
+      : { ...common, ...target, query_complete: false });
   }
   const consumed = new Set(derivations.flatMap((row) => row.observation_ids));
   const evidence_leaves = [...consumed].flatMap((id) => {
@@ -74,16 +76,16 @@ export function deliverSourceSemanticProof(input: Readonly<{
   for (const row of evidence_leaves) unique.set(JSON.stringify(row.leaf), row.leaf);
   const consumed_leaves = [...unique.values()].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   const usedDerived = new Set([
-    ...answers.flatMap((row) => Object.values(row.bindings).map((node) => node.node_id)),
+    ...binding_results.flatMap((row) => Object.values(row.bindings).map((node) => node.node_id)),
     ...consumed_leaves.flatMap((row) => [row.derived_node, row.derived_parent, row.derived_target, row.member].filter((id): id is string => id !== undefined))
   ]);
   for (const row of population.derivedNodes) if (row.kind === "instantiation" && usedDerived.has(row.node_id)) usedDerived.add(row.member);
   for (const row of population.derivedNodes) if (row.kind === "instance_slot" && usedDerived.has(row.node_id)) usedDerived.add(row.instance);
   const derived_nodes = population.derivedNodes.filter((row) => usedDerived.has(row.node_id));
   if (derived_nodes.length > 4096) throw new SourceSemanticResourceExhausted("derived proof coordinates");
-  const evaluation = evaluationReport(query, input.execution, observed, answers.length);
-  meter.retain([answers, evidence_leaves, consumed_leaves, derived_nodes, evaluation], "proof encoding");
-  return { answers, derivations, evidence_leaves, consumed_leaves, proofComplete, derived_nodes,
+  const evaluation = evaluationReport(query, input.execution, observed, binding_results.length);
+  meter.retain([binding_results, evidence_leaves, consumed_leaves, derived_nodes, evaluation], "proof encoding");
+  return { binding_results, derivations, evidence_leaves, consumed_leaves, proofComplete, derived_nodes,
     ...(evaluation === undefined ? {} : { evaluation }) };
 }
 

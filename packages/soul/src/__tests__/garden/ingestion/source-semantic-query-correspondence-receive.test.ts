@@ -115,9 +115,9 @@ function existentialBody() {
 
 function canonicalQuery(original: string, body: object) {
   return SourceSemanticQuerySchema.parse({
-    contract: "source-semantic-query-v2",
+    contract: "source-semantic-query-v3",
     original_query_digest: `sha256:${semanticSha256(original)}`,
-    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v2",
+    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v3",
     ...body
   });
 }
@@ -159,18 +159,18 @@ describe("query meaning receive and semantic_correspondence selection", () => {
       original_query: "Who sent the sample to Mira?", producer_id: "query-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-query-response-v3",
+        contract: "source-semantic-query-response-v4",
         outcome: { status: "interpreted" },
         query: {
-          contract: "source-semantic-query-meaning-v1",
-          alternatives: [{ meaning: {
+          contract: "source-semantic-query-meaning-v2",
+          alternatives: [{ conditions: [{
             kind: "statement", key: "send", predicate: "send",
             arguments: [
               { role: "sender", target: { kind: "free", key: "sender" }, excerpt: "Who" },
               { role: "theme", target: { kind: "named", key: "sample", excerpt: "sample" }, excerpt: "sample" },
               { role: "recipient", target: { kind: "named", key: "mira", excerpt: "Mira" }, excerpt: "Mira" }
             ]
-          } }],
+          }] }],
           return: ["sender"],
           gaps: []
         }
@@ -180,7 +180,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     expect(meaning.query?.variables.find((row) => row.id === "sender")?.reference).toBeUndefined();
     expect(meaning.query?.variables.find((row) => row.id === "mira")?.reference?.excerpt).toBe("Mira");
     expect(meaning.query?.alternatives[0]?.frames[0]?.source_act).toBeUndefined();
-    expect(meaning.system_prompt).toContain("source-semantic-query-meaning-v1");
+    expect(meaning.system_prompt).toContain("source-semantic-query-meaning-v2");
     expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("source_act is retrieval intent");
 
   });
@@ -229,7 +229,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
         query: existentialBody()
       })
     });
-    expect(query.request.contract).toBe("source-semantic-query-request-v3");
+    expect(query.request.contract).toBe("source-semantic-query-request-v4");
     expect(query.outcome.status).toBe("invalid");
     expect(query.query).toBeUndefined();
 

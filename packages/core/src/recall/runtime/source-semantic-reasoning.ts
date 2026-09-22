@@ -14,6 +14,7 @@ import { compileSourceSemanticExecution, type SourceSemanticExecutionPlan, type 
 import { withdrawDerivationLeaves, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { observeField } from "./conditional-field-observe.js";
 import { compileSourceSemanticPremises, sourceSemanticReaders } from "./source-semantic-premises.js";
+import { planSourceSemanticBranches } from "./source-semantic-branch-plan.js";
 import { traceSourceSemanticWithdrawals, type SourceSemanticWithdrawalTrace } from "./source-semantic-withdrawal.js";
 import { projectSourceSemanticState, type SourceSemanticResultBody as ResultBody } from "./source-semantic-projection.js";
 
@@ -71,7 +72,8 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
     body = { outcome: { status: "resource_exhausted" }, consumed_leaves: [] }; index = null;
   }
   const result = finish({ ...body, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } }, request?.output_byte_limit);
-  return { result, index: result.outcome.status === "truncated" ? null : index,
+  return { result, index: result.outcome.status === "truncated"
+    || result.outcome.status === "resource_exhausted" && result.binding_results === undefined ? null : index,
     ...(withdrawalTrace === undefined ? {} : { withdrawal_trace: withdrawalTrace }) };
 }
 
@@ -102,11 +104,12 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
     || sourceTarget.content_digest !== parsed.data.source.content_digest) return { body: invalid("source_binding_mismatch"), index: null };
   const qualified = { conditional_computation_id: admission.context_id, source_interpretation_id: admission.interpretation_id, query_semantics_id: admission.query_id, semantic_correspondence_id: admission.semantic_correspondence_id,
     source_target: sourceTarget, query_gaps: admission.query.gaps };
+  const branches = planSourceSemanticBranches(admission.query, admission.semantic_correspondence, meter);
   const population = compileSourceSemanticPremises({ interpretation: admission.interpretation, semantic_correspondence: admission.semantic_correspondence,
     context_id: admission.context_id, interpretation_id: admission.interpretation_id, scope: input.scope,
-    source_target: sourceTarget, meter, sourceValidity: input.sourceValidity, query: admission.query });
+    source_target: sourceTarget, meter, sourceValidity: input.sourceValidity, query: admission.query, branches });
   const execution = compileSourceSemanticExecution({ source_interpretation: admission.interpretation, query_semantics: admission.query,
-    semantic_correspondence: admission.semantic_correspondence, population, meter });
+    semantic_correspondence: admission.semantic_correspondence, population, meter, branches });
   const seeds = [...admission.interpretation.entry_roots].sort().map((id) => interpretationNodeIdentity(population.coordinates.get(id)!));
   const snapshot = `sha256:${fieldContractSha256(canonicalJson({ conditional_computation_id: admission.context_id, scopes: input.authorizedScopes, as_of: input.asOf }))}`;
   const remaining = { ...(request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET), ...meter.remaining() };
@@ -170,7 +173,8 @@ function observeCorrespondenceGroups(input: Readonly<{
     if (remaining.work_units < remaining.finalization_reserve + remaining.min_envelope) break;
     const execution = executionForPhase(phase);
     const query = compileConditionalFieldQuery({ source: "typed", snapshot_id: snapshot, budget: remaining,
-      query_id: `sha256:${fieldContractSha256(canonicalJson({ conditional_computation_id: admission.context_id, query: original, group: phase.groupFrame ?? "" }))}`,
+      query_id: `sha256:${fieldContractSha256(canonicalJson({ conditional_computation_id: admission.context_id, query: original,
+        alternative: phase.alternative, target: phase.plan.target, group: phase.groupFrame ?? "" }))}`,
       program: phase.program, interpretation_clock: input.input.asOf,
       hypotheses: [{ schema_version: 1, hypothesis_id: admission.context_id, bindings: [] }],
       view: { ...defaultView(), result_kind_view: "mixed", protocol_version: 1, supported_result_kinds: ["source_evidence", "memory_entry"] },
@@ -192,11 +196,10 @@ function observeCorrespondenceGroups(input: Readonly<{
     const prefix = `g${index}:`;
     return { ...result, body: prefixGroupBody(result.body, prefix), index: prefixGroupIndex(result.index, prefix) };
   });
-  const interpreted = projected.filter((row) => row.body.outcome.status === "interpreted");
-  if (interpreted.length === 0) return { body: { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] }, index: null };
+  const incomplete = runs.length !== input.phases.length || projected.some(row => row.body.outcome.status !== "interpreted");
   const baseline = {
-    body: mergeGroupBodies(qualified, interpreted.map((row) => row.body)),
-    index: mergeGroupIndexes(interpreted.map((row) => row.index).filter((row): row is NonNullable<typeof row> => row !== null))
+    body: mergeGroupBodies(qualified, projected.map((row) => row.body), incomplete),
+    index: mergeGroupIndexes(projected.map((row) => row.index).filter((row): row is NonNullable<typeof row> => row !== null), incomplete)
   };
   if (input.input.withdrawal_trial_limit === undefined) return baseline;
   const withdrawal_trace = traceSourceSemanticWithdrawals({ state: runs[0]!.state, origins: population.origins,
@@ -212,7 +215,7 @@ function observeCorrespondenceGroups(input: Readonly<{
             execution: run.execution, sourceTarget, qualified
           }).body, `g${index}:`);
         });
-        return finish({ ...mergeGroupBodies(qualified, trials.filter((row) => row.outcome.status === "interpreted")),
+        return finish({ ...mergeGroupBodies(qualified, trials, incomplete),
           resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, request?.output_byte_limit);
       } catch (error) {
         if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
@@ -225,7 +228,8 @@ function observeCorrespondenceGroups(input: Readonly<{
 
 function executionForPhase(phase: SourceSemanticGroupPhase): SourceSemanticExecutionPlan {
   const branches = Array.from({ length: phase.acceptIndex + 1 }, (_, index) => ({
-    purpose: "support" as const, alternative: index === phase.acceptIndex ? phase.alternative : 0
+    purpose: "support" as const, alternative: index === phase.acceptIndex ? phase.alternative : 0,
+    ...(index === phase.acceptIndex ? { plan: phase.plan } : {})
   }));
   return { program: phase.program, branches, missingOperands: false };
 }
@@ -234,7 +238,7 @@ function prefixGroupBody(body: ResultBody, prefix: string): ResultBody {
   const rename = (id: string) => `${prefix}${id}`;
   return {
     ...body,
-    answers: (body.answers ?? []).map((row) => ({ ...row, binding_id: rename(row.binding_id), explanation_ids: row.explanation_ids.map(rename) })),
+    binding_results: (body.binding_results ?? []).map((row) => ({ ...row, binding_id: rename(row.binding_id), explanation_ids: row.explanation_ids.map(rename) })),
     derivations: (body.derivations ?? []).map((row) => ({ ...row, derivation_id: rename(row.derivation_id), children: row.children.map(rename) }))
   };
 }
@@ -255,29 +259,44 @@ function prefixGroupIndex(index: InformationIndex | null, prefix: string): Infor
 }
 
 function mergeGroupBodies(qualified: ResultBody extends never ? never : Pick<SourceSemanticReasoningResult, "conditional_computation_id" | "source_interpretation_id" | "query_semantics_id" | "semantic_correspondence_id" | "source_target" | "query_gaps">,
-  bodies: readonly ResultBody[]): ResultBody {
+  bodies: readonly ResultBody[], incomplete = false): ResultBody {
   const first = bodies[0]!;
+  const open = incomplete || bodies.some(row => row.outcome.status !== "interpreted");
   return {
     ...qualified, ...first,
-    answers: bodies.flatMap((row) => row.answers ?? []),
+    binding_results: bodies.flatMap((row) => row.binding_results ?? []),
     derivations: bodies.flatMap((row) => row.derivations ?? []),
     evidence_leaves: bodies.flatMap((row) => row.evidence_leaves ?? []),
     consumed_leaves: bodies.flatMap((row) => row.consumed_leaves ?? []),
-    outcome: { status: "interpreted", gaps: first.outcome.status === "interpreted" ? first.outcome.gaps : [] }
+    derived_nodes: [...new Map(bodies.flatMap(row => row.derived_nodes ?? []).map(row => [row.node_id, row])).values()],
+    ...(open && first.completeness !== undefined ? { completeness: { ...first.completeness, logical_index: "partial" as const,
+      observed_coverage: "open" as const, order_coverage: "partial" as const } } : {}),
+    outcome: open ? { status: "resource_exhausted" }
+      : { status: "interpreted", gaps: first.outcome.status === "interpreted" ? first.outcome.gaps : [] }
   };
 }
 
-function mergeGroupIndexes(indexes: InformationIndex[]): InformationIndex | null {
+function mergeGroupIndexes(indexes: InformationIndex[], incomplete = false): InformationIndex | null {
   const first = indexes[0];
   if (first === undefined) return null;
-  return { ...first, entries: indexes.flatMap((row) => row.entries), explanations: indexes.flatMap((row) => row.explanations ?? []) };
+  return { ...first, entries: indexes.flatMap((row) => row.entries), explanations: indexes.flatMap((row) => row.explanations ?? []),
+    ...(incomplete ? { completeness: { ...first.completeness, logical_index: "partial" as const, observed_coverage: "open" as const,
+      order_coverage: "partial" as const }, order_status: "open" as const } : {}) };
 }
 
 
 function invalid(reason: string): ResultBody { return { outcome: { status: "invalid", reason }, consumed_leaves: [] }; }
 function finish(result: ResultBody, outputLimit = 1_000_000): SourceSemanticReasoningResult {
-  const checked = SourceSemanticReasoningResultSchema.parse({ contract: "source-interpretation-reasoning-v4",
+  const parsed = SourceSemanticReasoningResultSchema.safeParse({ contract: "source-interpretation-reasoning-v5",
     semantic_status: "unreviewed", conclusion_scope: "conditional_on_interpretation", world_claim: "unknown", ...result });
+  if (!parsed.success) {
+    if (parsed.error.issues.some(issue => issue.code !== "too_big")) throw parsed.error;
+    return finish({ outcome: { status: "resource_exhausted" }, consumed_leaves: [],
+      conditional_computation_id: result.conditional_computation_id, source_interpretation_id: result.source_interpretation_id,
+      query_semantics_id: result.query_semantics_id, semantic_correspondence_id: result.semantic_correspondence_id,
+      source_target: result.source_target, query_gaps: result.query_gaps, resource_usage: result.resource_usage }, outputLimit);
+  }
+  const checked = parsed.data;
   if (Buffer.byteLength(JSON.stringify(checked)) <= outputLimit) return checked;
   const limited = SourceSemanticReasoningResultSchema.parse({ contract: checked.contract,
     semantic_status: checked.semantic_status, conclusion_scope: checked.conclusion_scope, world_claim: checked.world_claim,

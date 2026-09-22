@@ -9,7 +9,7 @@ import {
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_GRAPH_SYNTAX,
   SOURCE_SEMANTIC_QUERY_MEANING_SYNTAX, defaultSourceSemanticQueryProducerRegistry
 } from "../../../../recall/conditional-field/query/source-semantic-query-producer-registry.js";
-import { compileSourceSemanticQueryProgram } from "../../../../recall/conditional-field/query/compile-source-semantic-query.js";
+import { compileSourceSemanticGroupProgram } from "../../../../recall/conditional-field/query/compile-source-semantic-query.js";
 
 const ORIGINAL = "Who sent the sample to Mira?";
 
@@ -26,14 +26,14 @@ describe("source semantic query meaning admission", () => {
     const query = materializeSourceSemanticQueryMeaning({
       contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
       alternatives: [{
-        meaning: {
+        conditions: [{
           kind: "statement", key: "send", predicate: "send",
           arguments: [
             { role: "sender", target: { kind: "free", key: "sender" }, excerpt: "Who" },
             { role: "theme", target: { kind: "named", key: "sample", excerpt: "sample" }, excerpt: "sample" },
             { role: "recipient", target: { kind: "named", key: "mira", excerpt: "Mira" }, excerpt: "Mira" }
           ]
-        }
+        }]
       }],
       return: ["sender"],
       gaps: []
@@ -48,9 +48,9 @@ describe("source semantic query meaning admission", () => {
     expect(admission.query.contract).toBe(SOURCE_SEMANTIC_QUERY_CONTRACT);
     expect(admission.query.variables.find((row) => row.id === "sender")?.sort).toBe("entity");
     expect(admission.query.variables.find((row) => row.id === "send")?.sort).toBe("proposition");
-    const program = compileSourceSemanticQueryProgram(admission.query, new SourceSemanticResourceLedger({
+    const program = compileSourceSemanticGroupProgram(admission.query, admission.query.alternatives[0]!, 0, new SourceSemanticResourceLedger({
       work_units: 200000, memory_bytes: 20000000
-    }));
+    }), undefined, undefined, 0);
     expect(program.kind === "sequence" || program.kind === "relation").toBe(true);
   });
 

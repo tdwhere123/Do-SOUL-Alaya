@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { SourceSemanticResourceLedger, interpretationNodeIdentity } from "@do-soul/alaya-protocol";
 import { source, query, correspondenceFor, BUDGET, CLOCK } from "./source-semantic-proof-fixture.js";
 import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-field/query/source-semantic-correspondence-admission.js";
-import { compileSourceSemanticQueryProgram } from "../../../recall/conditional-field/query/compile-source-semantic-query.js";
+import { compileSourceSemanticGroupProgram } from "../../../recall/conditional-field/query/compile-source-semantic-query.js";
 import { compileConditionalFieldQuery } from "../../../recall/conditional-field/query/compile-query.js";
 import { defaultView } from "../../../recall/conditional-field/query/query-admission.js";
 import { compileSourceSemanticPremises, sourceSemanticReaders } from "../../../recall/runtime/source-semantic-premises.js";
@@ -27,7 +27,7 @@ it("records bounded same-compilation source interpretation and semantic correspo
     expect(arm).toBeDefined();
     expect(arm!.result.outcome.status).toBe("interpreted");
     expect(arm!.result.conditional_computation_id).toBe(diagnostic.result.conditional_computation_id);
-    expect(arm!.result.answers?.map((answer) => answer.returned.tools?.node_id)).toEqual(["rY"]);
+    expect(arm!.result.binding_results?.map((answer) => answer.returned.tools?.node_id)).toEqual(["rY"]);
     expect(arm!.independent_answer_bindings).toHaveLength(1);
     expect(arm!.independent_proofs_preserved).toBe(true);
     expect(arm!.result.resource_usage!.work_units).toBeGreaterThanOrEqual(trace.prefix_resource_usage.work_units);
@@ -46,7 +46,7 @@ it("withdraws actual source-interpretation and semantic-correspondence leaves in
     root_id: interpretation.source.source_id, source_version: interpretation.source.source_version, content_digest: interpretation.source.content_digest, evidence_object_id: null };
   const population = compileSourceSemanticPremises({ interpretation: interpretation, semantic_correspondence: correspondence, context_id: admitted.context_id,
     interpretation_id: admitted.interpretation_id, scope: "project", source_target: target, meter });
-  const program = compileSourceSemanticQueryProgram(semantics, meter), snapshot = `sha256:${"a".repeat(64)}`;
+  const program = compileSourceSemanticGroupProgram(semantics, semantics.alternatives[0]!, 0, meter, undefined, undefined, 0), snapshot = `sha256:${"a".repeat(64)}`;
   const compiled = compileConditionalFieldQuery({ source: "typed", snapshot_id: snapshot, budget: BUDGET,
     query_id: admitted.query_id, program, interpretation_clock: CLOCK,
     hypotheses: [{ schema_version: 1, hypothesis_id: admitted.context_id, bindings: [] }],

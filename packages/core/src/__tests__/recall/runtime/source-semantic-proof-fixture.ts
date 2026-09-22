@@ -44,8 +44,8 @@ export function event(id: string, actor: string, object: string): SourceSemantic
     bindings: [{ slot_id: "agent", target: { kind: "node", id: actor }, support: [] }, { slot_id: "theme", target: { kind: "node", id: object }, support: [] }] };
 }
 export function query(original = ORIGINAL, fixed = true): SourceSemanticQuery {
-  return { contract: "source-semantic-query-v2", original_query_digest: `sha256:${sha(original)}`,
-    producer_id: QUERY_PRODUCER, producer_version: "1", contract_version: "source-semantic-query-v2",
+  return { contract: "source-semantic-query-v3", original_query_digest: `sha256:${sha(original)}`,
+    producer_id: QUERY_PRODUCER, producer_version: "1", contract_version: "source-semantic-query-v3",
     variables: [{ id: "actor", sort: "entity", ...(fixed ? { reference: { kind: "query_text" as const, excerpt: "Alice" } } : {}) },
       { id: "tools", sort: "entity" }, { id: "use", sort: "proposition" }],
     alternatives: [{ frames: [{ id: "qUse", variable: "use", predicate_reading: "use",
@@ -73,7 +73,7 @@ export function run(interpretation: SourceSemanticInterpretation, semantics: Sou
   const result = reasonSourceSemanticInterpretation({
     source_interpretation: interpretation, query_semantics: semantics, semantic_correspondence: correspondence,
     workspaceId: "ws", scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
-    request: { contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+    request: { contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
       source_interpretation_id: correspondence.source_interpretation_id, query_semantics_id: correspondence.query_semantics_id, semantic_correspondence_id: correspondenceId(correspondence), original_query: original, budget, output_byte_limit: output } });
   if (result.outcome.status === "interpreted") {
     const oracle = oracleSourceSemanticJoin(interpretation, semantics, correspondence);
@@ -89,10 +89,11 @@ export function deliveredProofFixture(input: { interpretation?: SourceSemanticIn
   correspondence?: SourceSemanticCorrespondence; original?: string; library?: boolean; budget?: RequestBudget; workspaceId?: string } = {}) {
   const interpretation = input.interpretation ?? source(), semantics = input.semantics ?? query();
   const correspondence = input.correspondence ?? correspondenceFor(interpretation, semantics), original = input.original ?? ORIGINAL;
+  const { source_id, source_version, content_digest } = interpretation.source;
   const identity = hashSourceRecordId(interpretation.source, sha);
   const record = SourceRecordIdentitySchema.parse({ ...fieldReceiptContractFields({ identity,
     producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID, consumer: "projection_generation" }), schema_version: 1,
-    workspace_id: input.workspaceId ?? "ws", ...interpretation.source, evidence_object_id: null, recorded_at: CLOCK,
+    workspace_id: input.workspaceId ?? "ws", source_id, source_version, content_digest, evidence_object_id: null, recorded_at: CLOCK,
     event_time: null, valid_from: null, valid_to: null, scope_class: "project", operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID });
   const target = sourceRecallTarget({ workspace_id: record.workspace_id, root_kind: "source_record", root_id: record.identity,
     source_version: record.source_version, content_digest: record.content_digest, evidence_object_id: record.evidence_object_id });
@@ -102,7 +103,7 @@ export function deliveredProofFixture(input: { interpretation?: SourceSemanticIn
   const executed = executeSourceSemanticInterpretation({ source_interpretation: interpretation, query_semantics: semantics,
     semantic_correspondence: correspondence, original_query: original, workspaceId: input.workspaceId ?? "ws", scope: "project",
     authorizedScopes: ["project"], asOf: CLOCK, source_target: target, sourceValidity: record,
-    request: { contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+    request: { contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
       source_interpretation_id: admitted.interpretation_id, query_semantics_id: admitted.query_id,
       semantic_correspondence_id: admitted.semantic_correspondence_id, original_query: original,
       budget: input.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET, output_byte_limit: 1_000_000 } });
@@ -114,6 +115,7 @@ export function deliveredProofFixture(input: { interpretation?: SourceSemanticIn
     ...(input.library ? { result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION } : {}) };
   const qualifiers = slotQualifiersFor(index, [proof]);
   const offset = qualifiers.findIndex((row) => row.evidence_kind === "semantic_proof");
-  if (offset < 0) throw new Error("fixture must deliver a proof slot");
+  if (offset < 0) throw new Error(`fixture must deliver a proof slot: ${JSON.stringify({ outcome: proof.outcome,
+    bindings: proof.binding_results, usage: proof.resource_usage, entries: index.entries.length, completeness: proof.completeness })}`);
   return { record, target, proof, index, entry: index.entries[offset]!, qualifier: qualifiers[offset]! };
 }

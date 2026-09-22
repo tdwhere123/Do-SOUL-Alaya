@@ -10,8 +10,8 @@ import type { SourceSemanticInterpretation } from "../../../garden/source-semant
 const digest = `sha256:${"a".repeat(64)}`;
 
 const query = {
-  contract: "source-semantic-query-v2", original_query_digest: digest,
-  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v2",
+  contract: "source-semantic-query-v3", original_query_digest: digest,
+  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v3",
   variables: [
     { id: "folio", sort: "entity" },
     { id: "bay", sort: "entity", reference: { kind: "query_text", excerpt: "bay B" } },

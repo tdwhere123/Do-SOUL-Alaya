@@ -347,7 +347,7 @@ it("measures a published source through reopened public recall and first exposur
   });
 }, 60000);
 
-it("binds the surviving semantic_correspondence closure when two legal semantic correspondences on one source interpretation swap order", async () => {
+it("retains both semantic correspondence witnesses within one occupied source when their input order swaps", async () => {
   await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
@@ -381,8 +381,20 @@ it("binds the surviving semantic_correspondence closure when two legal semantic 
     expect(ids).toContain(forwardSlot?.semantic_correspondence_id);
     const unselected = ids.find((id) => id !== forwardSlot?.semantic_correspondence_id);
     expect(unselected).toBeDefined();
-    expect((forward.proofs ?? []).some((row) => row.semantic_correspondence_id === unselected)).toBe(false);
-    expect((swapped.proofs ?? []).some((row) => row.semantic_correspondence_id === unselected)).toBe(false);
+    expect((forward.proofs ?? []).some((row) => row.semantic_correspondence_id === unselected)).toBe(true);
+    expect((swapped.proofs ?? []).some((row) => row.semantic_correspondence_id === unselected)).toBe(true);
+    expect(forwardSlot?.witnesses).toHaveLength(2);
+    expect(swappedSlot?.witnesses).toHaveLength(2);
+    for (const proof of forward.proofs ?? []) for (const binding of proof.binding_results ?? []) {
+      expect(binding.explanation_ids.every(id => forward.index.explanations?.some(row => row.derivation_id === id))).toBe(true);
+    }
+    const records = listEligibleSemanticSources(session.database, WS, new SourceSemanticReadBudget(BUDGET), ["project"]);
+    const entry = forward.index.entries[forwardSlot!.index]!, record = records.sources.find(row => row.identity === published.source_target.root_id)!;
+    expect(core.deliveredSourceSemanticLibraryProof(forward.index, entry, forwardSlot!, forward.proofs!, record, BUDGET).verified_proofs).toHaveLength(2);
+    const forged = structuredClone(forward.proofs!);
+    const sibling = forged.find(row => row.semantic_correspondence_id === unselected)!;
+    Object.assign(sibling.binding_results![0]!, { alternative: 999 });
+    expect(core.deliveredSourceSemanticLibraryProof(forward.index, entry, forwardSlot!, forged, record, BUDGET).verified_proofs).toEqual([]);
     expect(forward.index.entries[forwardSlot!.index]?.hypothesis_id).toBe(forwardSlot?.conditional_computation_id);
   });
 }, 60000);

@@ -45,12 +45,15 @@ export function assemble(entries: readonly IndexEntry[], proofs: readonly IndexE
 export function workerRecall(index: InformationIndex) {
   const slot_qualifiers = index.entries.map((entry, offset) => ({
     index: offset,
-    evidence_kind: entry.interpretation_node !== undefined && entry.explanation_ids.length > 0
-      ? "semantic_proof" as const
-      : "source_evidence" as const
+    ...(entry.interpretation_node !== undefined && entry.explanation_ids.length > 0
+      ? { evidence_kind: "semantic_proof" as const, source_interpretation_id: DIGEST, query_semantics_id: DIGEST,
+        semantic_correspondence_id: DIGEST, conditional_computation_id: DIGEST,
+        witnesses: [{ conditional_computation_id: DIGEST, binding_id: entry.output_binding }],
+        support: { answer: "open", evidence_inputs: [], operation: "not_requested", compatibility: "unknown", distinctness: "unknown" } }
+      : { evidence_kind: "source_evidence" as const })
   }));
   const result = SourceSemanticWorkerResultSchema.parse({
-    kind: "recall", request_budget: REQUEST, delivery_id: "delivery", protocol_version: 2, total_count: index.entries.length,
+    kind: "recall", request_budget: REQUEST, delivery_id: "delivery", protocol_version: 3, total_count: index.entries.length,
     index, page_purpose: "membership",
     discovery: {
       eligible_source_count: index.entries.length, visited_source_pages: 1, visited_source_interpretation_pages: 1,

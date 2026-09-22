@@ -10,7 +10,7 @@ import {
   CoreError, OFFSET_CURSOR, admitSourceSemanticCorrespondence, admitSourceSemanticQuery,
   assembleSourceSemanticLibraryIndex, continuationCapabilityMatches, executeSourceSemanticInterpretation,
   fieldContractSha256, hydrateUtf8Chunk, issuedContinuationTampered, preparedDeliveryId, proofEntriesFromBranch, encodeSourceSemanticLibraryResponse,
-  proofForLibraryEntry, sealIssuedContinuation, slotQualifiersFor, SOURCE_SEMANTIC_LIBRARY_ORDER,
+  sealIssuedContinuation, slotQualifiersFor, SOURCE_SEMANTIC_LIBRARY_ORDER,
   sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry, sourceSemanticLibraryQueryIdentity, scopeSourceSemanticLibraryBranch
 } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
@@ -133,7 +133,7 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
         if (aligned.kind !== "admitted") continue;
         const executed = executeSourceSemanticInterpretation({
           request: {
-            contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+            contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
             source_interpretation_id: aligned.interpretation_id, query_semantics_id: aligned.query_id, semantic_correspondence_id: aligned.semantic_correspondence_id,
             original_query: original, budget: remaining, output_byte_limit: request.output_byte_limit
           },
@@ -146,7 +146,7 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
           meter.charge(executed.result.resource_usage.work_units, executed.result.resource_usage.memory_bytes, "library branch");
         }
         if (executed.result.outcome.status === "resource_exhausted") computeOpen = true;
-        if (executed.index === null || (executed.result.answers ?? []).length === 0) {
+        if (executed.index === null || (executed.result.binding_results ?? []).length === 0) {
           if (executed.result.outcome.status === "resource_exhausted") { computeOpen = true; }
           continue;
         }
@@ -222,10 +222,11 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   const previewed = previewsFor(runtime, payload, authorized, previewBudget, assembled.index);
   meter.absorb(previewBudget);
   const previews = previewed.previews;
-  const deliveredProofs = assembled.index.entries.flatMap((entry) => {
-    const proof = proofForLibraryEntry(entry, proofs);
-    return proof === undefined ? [] : [proof];
-  }).filter((proof, index, rows) => rows.findIndex((row) => row.semantic_correspondence_id === proof.semantic_correspondence_id && row.source_interpretation_id === proof.source_interpretation_id) === index);
+  const deliveredRoots = new Set(assembled.index.entries.flatMap(entry => entry.target.kind === "source_evidence"
+    ? [sourceGoldRootIdentity(entry.target)] : []));
+  const deliveredProofs = proofs.filter(proof => proof.source_target !== undefined
+    && deliveredRoots.has(sourceGoldRootIdentity(proof.source_target)))
+    .filter((proof, index, rows) => rows.findIndex(row => row.conditional_computation_id === proof.conditional_computation_id) === index);
   const coverage = {
     discovery: openResiduals ? "truncated" as const : "complete" as const,
     source_interpretation: descriptors.length === 0 ? "unexercised" as const : "open" as const,

@@ -97,7 +97,7 @@ describe("source semantic library measurement", () => {
     const original = measureSourceSemanticLibraryResponse(input);
     if (original.measurement?.status !== "validated") throw new Error("native proof measurement expected");
     const changed = structuredClone(response), stored = structuredClone(original.measurement);
-    const answer = changed.proofs![0]!.answers![0]!;
+    const answer = changed.proofs![0]!.binding_results![0]!;
     Object.assign(answer.bindings.tools!, { node_id: "rY" });
     Object.assign(answer.returned.tools!, { node_id: "rY" });
     Object.assign(stored, { delivered_proofs: changed.proofs });

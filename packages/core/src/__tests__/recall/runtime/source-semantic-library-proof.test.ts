@@ -32,11 +32,17 @@ it.each([null, undefined])("does not promote unknown source scope to project (%s
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [{ ...proof, source_record: unbound }], unbound).proof).toBeUndefined();
 });
 
+it("rejects an occupied entry rebound to another evidence object within the same source root", () => {
+  const { record, proof, index, entry, qualifier, target } = deliveredProofFixture({ library: true });
+  const rebound = { ...entry, target: { ...target, evidence_object_id: "another-evidence-object" } };
+  expect(deliveredSourceSemanticLibraryProof(index, rebound, qualifier, [proof], record).verified_proofs).toEqual([]);
+});
+
 it.each([false, true])("binds delivered coordinates and alternatives to the execution witness (library namespace=%s)", (library) => {
   const { record, proof, index, entry, qualifier } = deliveredProofFixture({ library });
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [proof], record).proof).toBe(proof);
   for (const mutation of ["coordinate", "alternative", "rehashed_binding", "acceptance_marker"] as const) {
-    const forged = structuredClone(proof), answer = forged.answers!.find((row) => row.binding_id === entry.output_binding)!;
+    const forged = structuredClone(proof), answer = forged.binding_results!.find((row) => row.binding_id === entry.output_binding)!;
     let changedEntry = entry;
     if (mutation === "alternative") Object.assign(answer, { alternative: 1 });
     else if (mutation === "coordinate") {
@@ -81,9 +87,9 @@ it("rejects substitution of another admitted alternative while preserving its or
     ...original.correspondences.flatMap((row) => row.query_endpoint.kind === "referent" ? []
       : [{ ...row, query_endpoint: { ...row.query_endpoint, alternative: 1 } }])] };
   const { record, proof, index, entry, qualifier } = deliveredProofFixture({ interpretation, semantics, correspondence, library: true });
-  expect(new Set(proof.answers?.map((answer) => answer.alternative))).toEqual(new Set([0, 1]));
+  expect(new Set(proof.binding_results?.map((answer) => answer.alternative))).toEqual(new Set([0, 1]));
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [proof], record).proof).toBe(proof);
-  const forged = structuredClone(proof), answer = forged.answers!.find((row) => row.binding_id === entry.output_binding)!;
+  const forged = structuredClone(proof), answer = forged.binding_results!.find((row) => row.binding_id === entry.output_binding)!;
   Object.assign(answer, { alternative: answer.alternative === 0 ? 1 : 0 });
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [forged], record).proof).toBeUndefined();
 });
@@ -110,7 +116,7 @@ it.each(["instantiation", "query_entity", "universal", "comparison"] as const)("
   if (kind === "instantiation" || kind === "query_entity") expect(proof.derived_nodes?.some((row) => row.kind === kind)).toBe(true);
   else expect(proof.evaluation?.status).toBe("supported");
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [proof], record, budget).proof).toBe(proof);
-  const forged = structuredClone(proof), answer = forged.answers!.find((row) => row.binding_id === entry.output_binding)!;
+  const forged = structuredClone(proof), answer = forged.binding_results!.find((row) => row.binding_id === entry.output_binding)!;
   Object.assign(answer, { alternative: 999 });
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [forged], record, budget).proof).toBeUndefined();
 }, 15_000);

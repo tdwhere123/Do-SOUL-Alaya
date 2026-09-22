@@ -40,11 +40,11 @@ function queryOf(
   obligations: SourceSemanticQuery["alternatives"][number]["context_obligations"]
 ): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v2",
+    contract: "source-semantic-query-v3",
     original_query_digest: digestOriginalQuery(original),
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v2",
+    contract_version: "source-semantic-query-v3",
     variables, alternatives: [{ frames, context_obligations: obligations }],
     return_variables: ["parcel"], gaps: []
   };
@@ -657,7 +657,7 @@ describe("source semantic query compilation", () => {
       source_interpretation: interpretation, query_semantics: semantics, semantic_correspondence: correspondence, original_query: AND_QUERY, workspaceId: "ws-semantic",
       scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
       request: {
-        contract: "source-interpretation-reasoning-v4",
+        contract: "source-interpretation-reasoning-v5",
         accepts_unreviewed_conditional_results: true,
         source_interpretation_id: admitted.interpretation_id, query_semantics_id: admitted.query_id, semantic_correspondence_id: admitted.semantic_correspondence_id,
         original_query: AND_QUERY,

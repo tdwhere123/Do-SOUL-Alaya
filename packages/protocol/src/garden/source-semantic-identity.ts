@@ -54,7 +54,8 @@ export function sourceSemanticQueryPreimage(query: SourceSemanticQuery) {
       alternatives: value.alternatives,
       return_variables: value.return_variables,
       gaps: value.gaps,
-      domains: value.domains ?? [], evaluation: value.evaluation ?? null
+      domains: value.domains ?? [], evaluation: value.evaluation ?? null,
+      requested_operation: value.requested_operation ?? null
     }
   };
 }

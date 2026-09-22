@@ -3,14 +3,15 @@ import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SourceSemanticQueryMeaningBodySchema,
   SourceSemanticQuerySchema,
-  materializeSourceSemanticQueryMeaning
+  materializeSourceSemanticQueryMeaning, sourceSemanticQueryBranchViews
 } from "../../../recall/conditional-field/index.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
 const envelope = { original_query_digest: digest, producer_id: "qp", producer_version: "1" };
+const operation = { reading: "identify the requested participants", support: { kind: "query_text", excerpt: "Who" } };
 
 const meaning = (node: object, extra: object = {}) => ({
-  contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ meaning: node }], gaps: [], ...extra
+  contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [node] }], gaps: [], ...extra
 });
 
 function compiled(node: object, extra: object = {}) {
@@ -20,6 +21,41 @@ function compiled(node: object, extra: object = {}) {
 function statement(predicate: string, args: object[], extra: object = {}) {
   return { kind: "statement", key: predicate, predicate, arguments: args, ...extra };
 }
+
+it("represents independent conjuncts with a shared participant without inventing embedding", () => {
+  const query = materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+    alternatives: [{ conditions: [statement("invited", [{ role: "person", target: { kind: "free", key: "person" }, excerpt: "Who" }]),
+      statement("spoke", [{ role: "person", target: { kind: "reference", key: "person" }, excerpt: "Who" }])] }], return: ["person"] }, envelope);
+  expect(query.alternatives[0]!.context_obligations).toEqual([
+    { frame: "invited", kind: "asserted_at_source" }, { frame: "spoke", kind: "asserted_at_source" }
+  ]);
+});
+
+it("keeps an evidence occurrence inside its entire conditional scope including the sibling operand", () => {
+  const query = materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+    requested_operation: operation, alternatives: [{ conditions: [{ kind: "conditional", key: "condition",
+      antecedent: statement("invited", []), consequent: statement("spoke", []) }],
+    evidence_inputs: [{ conditions: [{ kind: "occurrence", key: "spoke" }] }] }] }, envelope);
+  const view = sourceSemanticQueryBranchViews(query.alternatives[0]!)[1]!;
+  expect(view.alternative.frames.map(frame => frame.id)).toEqual(["condition", "invited", "spoke"]);
+  expect(view.alternative.context_obligations.filter(row => row.kind === "asserted_at_source").map(row => row.frame)).toEqual(["condition"]);
+  expect(query.alternatives[0]!.evidence_inputs).toEqual([{ frames: ["spoke"] }]);
+});
+
+it("retains an unrepresented original answer while admitting a faithfully stated input", () => {
+  const query = materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+    requested_operation: operation, alternatives: [{ conditions: [], evidence_inputs: [{ conditions: [statement("joined", [])] }] }] }, envelope);
+  expect(query.alternatives[0]!.answer_frames).toEqual([]);
+  expect(query.return_variables).toEqual([]);
+  expect(sourceSemanticQueryBranchViews(query.alternatives[0]!)[0]!.alternative.frames).toEqual([]);
+});
+
+it("rejects finite evaluation with evidence inputs before any branch can be silently discarded", () => {
+  expect(() => materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+    requested_operation: operation, alternatives: [{ conditions: [], evidence_inputs: [{ conditions: [statement("joined", [])] }] }],
+    domains: [{ key: "people", excerpt: "Who" }], evaluation: { kind: "comparison", domain: "people", operation: "minimum",
+      left: "person", strict: false, metric: "age", unit: "years", context: "now", scope: "asserted" } }, envelope)).toThrow(/finite evaluation/u);
+});
 
 it("keeps a free sender distinct from a named recipient and a send proposition", () => {
   const query = compiled(statement("send", [
@@ -158,7 +194,7 @@ it("preserves universal and comparison evaluation on the canonical query", () =>
 
   const comparison = materializeSourceSemanticQueryMeaning({
     contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-    alternatives: [{}],
+    alternatives: [{ conditions: [] }],
     gaps: [],
     domains: [{ key: "people", excerpt: "Alice" }],
     entities: [{ kind: "named", key: "alice", excerpt: "Alice" }, { kind: "named", key: "bob", excerpt: "Bob" }],

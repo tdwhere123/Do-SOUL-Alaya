@@ -38,14 +38,14 @@ it("admits prepare and one-shot reason without a continuation token", () => {
     budget, output_byte_limit: 1024,
     continuation: {
       schema_version: 1, continuation_id: "page-10", query_id: "q1", snapshot_id: digest,
-      result_version: "source-semantic-library-v2", expires_at: "2099-01-01T00:00:00.000Z",
+      result_version: "source-semantic-library-v3", expires_at: "2099-01-01T00:00:00.000Z",
       cursor: "offset-10"
     }
   }).kind).toBe("recall");
   const result = SourceSemanticWorkerResultSchema.parse({
     kind: "reason",
     result: {
-      contract: "source-interpretation-reasoning-v4",
+      contract: "source-interpretation-reasoning-v5",
       outcome: { status: "truncated" }, consumed_leaves: [],
       semantic_status: "unreviewed", conclusion_scope: "conditional_on_interpretation",
       world_claim: "unknown"
@@ -62,8 +62,8 @@ it("admits prepare and one-shot reason without a continuation token", () => {
 });
 
 function libraryDelivery() {
-  return { delivery_id: "delivery", protocol_version: 2, total_count: 0,
-    index: { schema_version: 1, query_id: "library-query", snapshot_id: digest, result_version: "source-semantic-library-v2",
+  return { delivery_id: "delivery", protocol_version: 3, total_count: 0,
+    index: { schema_version: 1, query_id: "library-query", snapshot_id: digest, result_version: "source-semantic-library-v3",
       entries: [], completeness: { schema_version: 1, logical_index: "complete", observed_coverage: "complete",
         transport: "complete", payload: "complete", representation: "complete" }, continuation: null,
       representation: { schema_version: 1, policy: "construct_index_then_page_then_payload", page_budget: 10, identity_tie_break: "serialization" },
@@ -105,7 +105,7 @@ it("rejects every missing mandatory delivery field and partial deliveries disgui
   expect(SoulInterpretationResponseSchema.safeParse({ operation: "recall", ...delivery, provider_attempts: 0 }).success).toBe(false);
   const outcome = { operation: "recall", outcome: { status: "preparation_required", missing: "query_semantics" }, coverage, work, provider_attempts: 0 };
   expect(SoulInterpretationResponseSchema.safeParse(outcome).success).toBe(true);
-  for (const partial of [{ protocol_version: 2 }, { results: [] }, { request_budget: budget }, { proofs: [] }]) {
+  for (const partial of [{ protocol_version: 3 }, { results: [] }, { request_budget: budget }, { proofs: [] }]) {
     expect(SoulInterpretationResponseSchema.safeParse({ ...outcome, ...partial }).success).toBe(false);
   }
 });

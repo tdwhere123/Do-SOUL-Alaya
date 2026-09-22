@@ -31,11 +31,11 @@ function queryDraft(
   extra: { readonly producer_id?: string; readonly producer_version?: string } = {}
 ): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v2",
+    contract: "source-semantic-query-v3",
     original_query_digest: digestOriginalQuery(ORIGINAL),
     producer_id: extra.producer_id ?? SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: extra.producer_version ?? "1",
-    contract_version: "source-semantic-query-v2",
+    contract_version: "source-semantic-query-v3",
     variables,
     alternatives: [{
       frames,

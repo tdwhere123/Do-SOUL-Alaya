@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SourceSemanticDraftSchema, SourceSemanticQuerySchema, sourceSemanticCorrespondenceIdentity,
+import { SourceSemanticDraftSchema, SourceSemanticQuerySchema, sourceSemanticCorrespondenceIdentity, sourceSemanticQueryIdentity, SOURCE_SEMANTIC_QUERY_CONTRACT,
   type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticReasoningResult } from "@do-soul/alaya-protocol";
 import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-field/query/source-semantic-correspondence-admission.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
@@ -10,7 +10,7 @@ import { proofEntriesFromBranch } from "../../../recall/runtime/source-semantic-
 import { source, catalog, query, correspondenceFor, run, ORIGINAL, BUDGET } from "./source-semantic-proof-fixture.js";
 
 function returned(result: SourceSemanticReasoningResult) {
-  return [...new Set((result.answers ?? []).map((row) => JSON.stringify(Object.fromEntries(Object.entries(row.returned).map(([key, value]) => [key, value.node_id])))))].sort();
+  return [...new Set((result.binding_results ?? []).map((row) => JSON.stringify(Object.fromEntries(Object.entries(row.returned).map(([key, value]) => [key, value.node_id])))))].sort();
 }
 function proofLeaves(result: SourceSemanticReasoningResult, roots: readonly string[]) {
   const nodes = new Map((result.derivations ?? []).map((row) => [row.derivation_id, row]));
@@ -50,14 +50,14 @@ describe("source semantic proof obligations", () => {
     expect(result.outcome.status).toBe("interpreted");
     expect(returned(result)).toEqual(['{"tools":"rX"}']);
     expect(correspondence.correspondences.filter((row) => row.query_endpoint.kind === "predicate")).toHaveLength(2);
-    for (const answer of result.answers!) {
+    for (const answer of result.binding_results!) {
       expect(answer.bindings.actor?.node_id).toBe("rAlice");
       const leaves = proofLeaves(result, answer.explanation_ids);
       expect(leaves.some((row) => row.leaf_kind === "semantic_correspondence_referent" && row.occurrence === "rAlice")).toBe(true);
       expect(leaves.some((row) => row.occurrence === "fBob")).toBe(false);
     }
     const absent = { ...correspondence, correspondences: correspondence.correspondences.filter((row) => row.query_endpoint.kind !== "referent") };
-    expect(run(interpretation, semantics, absent).answers).toEqual([]);
+    expect(run(interpretation, semantics, absent).binding_results).toEqual([]);
   });
   it("does not treat predicate-only set-valued correspondences as a completed group of answers", () => {
     const text = "who uses which tools?", interpretation = source();
@@ -68,10 +68,14 @@ describe("source semantic proof obligations", () => {
     };
     const result = run(interpretation, semantics, predicatesOnly, text);
     expect(result.outcome.status).toBe("interpreted");
-    expect(result.answers ?? []).toEqual([]);
+    expect(result.binding_results ?? []).toEqual([]);
   });
   it("compiles five complete groups to five answers without exhausting the existing budget", () => {
     const packet = JSON.parse(readFileSync(fileURLToPath(new URL("./source-semantic-set-valued-catalog-fixture.json", import.meta.url)), "utf8"));
+    // Preserve the retained packet; this current-contract regression rebinds its authored query through the identity owner.
+    packet.query_semantics = SourceSemanticQuerySchema.parse({ ...packet.query_semantics,
+      contract: SOURCE_SEMANTIC_QUERY_CONTRACT, contract_version: SOURCE_SEMANTIC_QUERY_CONTRACT });
+    packet.semantic_correspondence.query_semantics_id = sourceSemanticQueryIdentity(packet.query_semantics, fieldContractSha256);
     expect(packet.semantic_correspondence.correspondences.filter((row: { query_endpoint: { kind: string } }) => row.query_endpoint.kind === "predicate")).toHaveLength(5);
     expect(packet.semantic_correspondence.correspondences.filter((row: { query_endpoint: { kind: string } }) => row.query_endpoint.kind === "slot")).toHaveLength(10);
     const executed = executeSourceSemanticInterpretation({
@@ -79,7 +83,7 @@ describe("source semantic proof obligations", () => {
       workspaceId: "source-semantic-library", scope: "project", authorizedScopes: ["project"],
       asOf: "2026-09-21T10:00:00.000Z",
       request: {
-        contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+        contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
         source_interpretation_id: packet.semantic_correspondence.source_interpretation_id, query_semantics_id: packet.semantic_correspondence.query_semantics_id, semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(packet.semantic_correspondence, fieldContractSha256),
         original_query: packet.original_query, budget: BUDGET, output_byte_limit: 1_000_000
       }
@@ -87,20 +91,20 @@ describe("source semantic proof obligations", () => {
     const result = executed.result;
     expect(result.outcome.status).toBe("interpreted");
     expect(result.outcome.status).not.toBe("resource_exhausted");
-    expect(result.answers).toHaveLength(5);
+    expect(result.binding_results).toHaveLength(5);
     expect(result.resource_usage?.work_units ?? 0).toBeLessThan(BUDGET.work_units);
     expect(executed.index).not.toBeNull();
     const occupancy = proofEntriesFromBranch(executed.index!, result);
     expect(occupancy.entries).toHaveLength(5);
     expect(occupancy.entries.map((row) => row.output_binding).sort())
-      .toEqual((result.answers ?? []).map((row) => row.binding_id).sort());
+      .toEqual((result.binding_results ?? []).map((row) => row.binding_id).sort());
   });
   it("still compiles four complete groups to four answers", () => {
     const text = "who uses which tools?", interpretation = catalog(4);
     const semantics = { ...query(text, false), return_variables: ["actor", "tools"] };
     const result = run(interpretation, semantics, correspondenceFor(interpretation, semantics, false), text);
     expect(result.outcome.status).toBe("interpreted");
-    expect(result.answers).toHaveLength(4);
+    expect(result.binding_results).toHaveLength(4);
     expect(returned(result)).toEqual([
       '{"actor":"rAnn","tools":"rX"}', '{"actor":"rBea","tools":"rY"}',
       '{"actor":"rCam","tools":"rZ"}', '{"actor":"rDot","tools":"rU"}'
@@ -117,7 +121,7 @@ describe("source semantic proof obligations", () => {
     const result = run(interpretation, semantics, incomplete, text);
     expect(result.outcome.status).toBe("interpreted");
     expect(returned(result)).toEqual(['{"tools":"rX"}']);
-    expect(result.answers).toHaveLength(1);
+    expect(result.binding_results).toHaveLength(1);
   });
   it("returns separate real bindings and closed proof forests for two answers", () => {
     const text = "who uses which tools?", interpretation = source(), semantics = query(text, false), correspondence = correspondenceFor(interpretation, semantics, false);
@@ -127,7 +131,7 @@ describe("source semantic proof obligations", () => {
     expect(correspondence.correspondences.filter((row) => row.source_endpoint.kind === "frame").map((row) =>
       row.source_endpoint.kind === "frame" ? row.source_endpoint.frame : undefined
     )).toEqual(["fAlice", "fBob"]);
-    for (const answer of result.answers!) {
+    for (const answer of result.binding_results!) {
       const frame = answer.bindings.use!.node_id;
       const leaves = proofLeaves(result, answer.explanation_ids);
       expect(leaves.filter((leaf) => leaf.leaf_kind === "semantic_correspondence_slot").every((leaf) => leaf.occurrence === frame)).toBe(true);
@@ -141,7 +145,7 @@ describe("source semantic proof obligations", () => {
     const result = run(interpretation, semantics, widened);
     expect(result.outcome.status).toBe("interpreted");
     expect(returned(result)).toEqual(['{"tools":"rAlice"}', '{"tools":"rX"}']);
-    for (const answer of result.answers!) {
+    for (const answer of result.binding_results!) {
       const leaves = proofLeaves(result, answer.explanation_ids);
       const themeSlot = leaves.filter((row) => row.leaf_kind === "semantic_correspondence_slot" && row.correspondence_index !== undefined
         && widened.correspondences[row.correspondence_index]!.query_endpoint.kind === "slot"
@@ -156,7 +160,7 @@ describe("source semantic proof obligations", () => {
       support: [{ kind: "query_text" as const, excerpt: "tools" }], description: "count requirement is not executable" }] };
     const result = run(interpretation, semantics, correspondenceFor(interpretation, semantics));
     expect(result.query_gaps).toEqual(semantics.gaps);
-    expect(result.answers!.every((answer) => answer.query_complete === false)).toBe(true);
+    expect(result.binding_results!.every((answer) => answer.query_complete === false)).toBe(true);
     expect(SourceSemanticQuerySchema.safeParse({ ...original, variables: original.variables.map((row) => row.id === "use" ? { ...row, sort: "entity" } : row) }).success).toBe(false);
     const correspondence = correspondenceFor(interpretation, original);
     expect(admitSourceSemanticCorrespondence({ source_interpretation: interpretation, query_semantics: original, semantic_correspondence: { ...correspondence, correspondences: correspondence.correspondences.map((row) => ({ ...row, query_support: { kind: "query_text", excerpt: "invented support" } })) }, original_query: ORIGINAL }).kind).toBe("invalid");
@@ -165,13 +169,13 @@ describe("source semantic proof obligations", () => {
     const interpretation = wrapped(kind), semantics = operatorQuery(kind), result = run(interpretation, semantics, correspondenceFor(interpretation, semantics));
     expect(result.outcome.status).toBe("interpreted");
     expect(returned(result)).toEqual(['{"tools":"rX"}']);
-    const leaves = proofLeaves(result, result.answers![0]!.explanation_ids);
+    const leaves = proofLeaves(result, result.binding_results![0]!.explanation_ids);
     expect(leaves.some((row) => row.leaf_kind === "source_interpretation_operator" && row.value === kind)).toBe(true);
     expect(leaves.some((row) => row.leaf_kind === "source_interpretation_content" && row.parent === "outer" && row.role === "content")).toBe(true);
     const completed = query();
-    expect(run(interpretation, completed, correspondenceFor(interpretation, completed)).answers).toEqual([]);
+    expect(run(interpretation, completed, correspondenceFor(interpretation, completed)).binding_results).toEqual([]);
     const opposite = operatorQuery(kind === "not" ? "possible" : "not");
-    expect(run(interpretation, opposite, correspondenceFor(interpretation, opposite)).answers).toEqual([]);
+    expect(run(interpretation, opposite, correspondenceFor(interpretation, opposite)).binding_results).toEqual([]);
   });
   it("rejects contradictory source ownership and self-governing queries", () => {
     const interpretation = wrapped("not");
@@ -192,7 +196,7 @@ describe("source semantic proof obligations", () => {
     expect(small.outcome.status).toBe("resource_exhausted");
     const output = run(interpretation, semantics, correspondence, text, BUDGET, 1024);
     expect(output.outcome.status).toBe("truncated");
-    expect(output.answers).toBeUndefined(); expect(output.derivations).toBeUndefined(); expect(output.consumed_leaves).toEqual([]);
+    expect(output.binding_results).toBeUndefined(); expect(output.derivations).toBeUndefined(); expect(output.consumed_leaves).toEqual([]);
     expect(returned(run(interpretation, semantics, correspondence, text, { ...BUDGET, work_units: BUDGET.work_units * 2 }))).toEqual(returned(full));
   });
 });

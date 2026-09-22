@@ -2,12 +2,13 @@ import { z } from "zod";
 import { BoundedIdSchema, BoundedLabelSchema } from "../../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "./common.js";
 import { canonicalJson } from "../selection/capture/canonical-json.js";
+import { sourceSemanticQueryBranchViews } from "./semantic-query-branches.js";
 import {
   SOURCE_SEMANTIC_MAX_BYTES, SOURCE_SEMANTIC_GAP_KINDS, SourceSemanticHandleSchema,
   SourceSemanticReadingSchema
 } from "../../garden/source-semantic-draft.js";
 
-export const SOURCE_SEMANTIC_QUERY_CONTRACT = "source-semantic-query-v2" as const;
+export const SOURCE_SEMANTIC_QUERY_CONTRACT = "source-semantic-query-v3" as const;
 export const SOURCE_SEMANTIC_CONTEXT_OBLIGATION_KINDS = [
   "asserted_at_source", "entailed_at_source", "explicit_embedded_structure", "unresolved"
 ] as const;
@@ -15,6 +16,16 @@ export const SOURCE_SEMANTIC_CONTEXT_OBLIGATION_KINDS = [
 const Handle = SourceSemanticHandleSchema;
 const QueryTextSupportSchema = z.object({ kind: z.literal("query_text"),
   excerpt: z.string().min(1).max(1024) }).strict().readonly();
+
+export const SourceSemanticRequestedOperationSchema = z.object({
+  reading: SourceSemanticReadingSchema,
+  support: QueryTextSupportSchema
+}).strict().readonly();
+
+export const SourceSemanticQueryTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("answer") }).strict().readonly(),
+  z.object({ kind: z.literal("evidence"), input: z.number().int().nonnegative() }).strict().readonly()
+]);
 
 /** Query evidence belongs to the original question, never to a source-interpretation mention catalog. */
 export const SourceSemanticQueryGapSchema = z.object({
@@ -61,7 +72,10 @@ export const SourceSemanticContextObligationSchema = z.object({
 export const SourceSemanticQueryAlternativeSchema = z.object({
   frames: z.array(SourceSemanticQueryFrameSchema).max(256).readonly(),
   context_obligations: z.array(SourceSemanticContextObligationSchema).max(256).readonly(),
-  purpose: z.enum(["support", "counterexample"]).optional()
+  purpose: z.enum(["support", "counterexample"]).optional(),
+  answer_frames: z.array(Handle).max(256).readonly().optional(),
+  evidence_inputs: z.array(z.object({ frames: z.array(Handle).min(1).max(256).readonly() })
+    .strict().readonly()).min(1).max(16).readonly().optional()
 }).strict().readonly();
 
 export const SourceSemanticQueryEvaluationSchema = z.discriminatedUnion("kind", [
@@ -88,7 +102,8 @@ const SourceSemanticQueryObjectSchema = z.object({
   domains: z.array(z.object({ id: Handle,
     support: QueryTextSupportSchema
   }).strict().readonly()).max(64).readonly().optional(),
-  evaluation: SourceSemanticQueryEvaluationSchema.optional()
+  evaluation: SourceSemanticQueryEvaluationSchema.optional(),
+  requested_operation: SourceSemanticRequestedOperationSchema.optional()
 }).strict();
 
 export const SourceSemanticQuerySchema = SourceSemanticQueryObjectSchema.superRefine((query, context) => {
@@ -107,6 +122,12 @@ export const SourceSemanticQuerySchema = SourceSemanticQueryObjectSchema.superRe
   if (domains.size !== (query.domains?.length ?? 0)) problem("duplicate query domains");
   if (query.evaluation !== undefined && !domains.has(query.evaluation.domain)) problem("evaluation requires a declared query domain");
   const evaluation = query.evaluation;
+  if (query.alternatives.some(row => row.evidence_inputs !== undefined) && query.requested_operation === undefined) {
+    problem("evidence inputs require the original requested operation");
+  }
+  if (evaluation !== undefined && query.alternatives.some(row => row.evidence_inputs !== undefined || row.answer_frames !== undefined)) {
+    problem("finite evaluation cannot include independent evidence branches");
+  }
   if (evaluation?.kind === "forall") {
     if (sorts.get(evaluation.binder) !== "entity") problem("universal query requires an entity binder");
     if (new Set(evaluation.local_variables).size !== evaluation.local_variables.length
@@ -134,10 +155,22 @@ export const SourceSemanticQuerySchema = SourceSemanticQueryObjectSchema.superRe
       if (evaluation?.kind !== "forall") problem("counterexample alternative requires a universal query");
       if (!isStructuralCounterexample(query.alternatives, alternative)) problem("counterexample must explicitly negate the same single-frame universal body");
     }
-    refineAlternative(alternative, variables, problem);
-    const used = new Set(alternative.frames.flatMap((row) => [row.variable, ...row.role_requirements.map((role) => role.target_variable)]));
+    refineAlternative(alternative, variables, problem, alternative.evidence_inputs === undefined);
+    const views = sourceSemanticQueryBranchViews(alternative);
+    const frameIds = new Set(alternative.frames.map(frame => frame.id));
+    const references = [...alternative.answer_frames ?? [], ...(alternative.evidence_inputs ?? []).flatMap(row => row.frames)];
+    if (references.some(id => !frameIds.has(id))) problem("unknown query branch frame");
+    if (alternative.evidence_inputs !== undefined && alternative.answer_frames === undefined) problem("evidence inputs require explicit answer frames");
+    if (alternative.evidence_inputs === undefined && alternative.answer_frames !== undefined) problem("answer frame view requires evidence inputs");
+    if (alternative.evidence_inputs !== undefined) {
+      const covered = new Set(views.flatMap(view => view.alternative.frames.map(frame => frame.id)));
+      if (alternative.frames.some(frame => !covered.has(frame.id))) problem("unused query branch frame");
+      for (const view of views) if (!queryAlternativeConnected(view.alternative)) problem("disconnected query branch is invalid");
+    }
+    const answerFrames = views[0]!.alternative.frames;
+    const used = new Set(answerFrames.flatMap((row) => [row.variable, ...row.role_requirements.map((role) => role.target_variable)]));
     if (evaluation?.kind === "forall" && !used.has(evaluation.binder)) problem("universal binder must occur in its body");
-    if (evaluation?.kind !== "comparison" && query.return_variables.some((id) => !used.has(id))) problem("return variable is unbound in an alternative");
+    if (evaluation?.kind !== "comparison" && answerFrames.length > 0 && query.return_variables.some((id) => !used.has(id))) problem("return variable is unbound in an alternative");
     for (const frame of alternative.frames) {
       if (sorts.get(frame.variable) !== (frame.operator === undefined ? "proposition" : "context")) problem("frame variable has wrong sort");
       if (frame.operator !== undefined && frame.role_requirements.some((role) =>
@@ -171,7 +204,8 @@ function isStructuralCounterexample(alternatives: readonly z.infer<typeof Source
 function refineAlternative(
   alternative: z.infer<typeof SourceSemanticQueryAlternativeSchema>,
   variables: ReadonlySet<string>,
-  problem: (message: string) => void
+  problem: (message: string) => void,
+  requireConnected = true
 ): void {
   const frames = alternative.frames.map((row) => row.id);
   if (new Set(frames).size !== frames.length) problem("duplicate handles rejected");
@@ -205,7 +239,7 @@ function refineAlternative(
       problem("operator incidence requires its declared operand type");
     }
   }
-  if (!queryAlternativeConnected(alternative)) problem("disconnected query is invalid");
+  if (requireConnected && !queryAlternativeConnected(alternative)) problem("disconnected query is invalid");
 }
 
 export function queryAlternativeConnected(
@@ -252,3 +286,4 @@ export type SourceSemanticQueryIncidence = z.infer<typeof SourceSemanticQueryInc
 export type SourceSemanticContextObligation = z.infer<typeof SourceSemanticContextObligationSchema>;
 export type SourceSemanticQueryAlternative = z.infer<typeof SourceSemanticQueryAlternativeSchema>;
 export type SourceSemanticQuery = z.infer<typeof SourceSemanticQuerySchema>;
+export type SourceSemanticQueryTarget = z.infer<typeof SourceSemanticQueryTargetSchema>;

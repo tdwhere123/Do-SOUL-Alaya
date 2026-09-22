@@ -82,10 +82,10 @@ describe("complete-source census and publication", () => {
       inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
     const filled = await executeSemanticProposalFill({ workset: frozen.query_workset, cacheRoot: queryCache, authority,
       config: { providerUrl: "http://127.0.0.1:9", model: frozen.config.model, requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" },
-      extractor: { extract: async () => ({ rawJson: JSON.stringify({ contract: "source-semantic-query-response-v3",
-        outcome: { status: "interpreted" }, query: { contract: "source-semantic-query-meaning-v1", alternatives: [{ meaning: {
+      extractor: { extract: async () => ({ rawJson: JSON.stringify({ contract: "source-semantic-query-response-v4",
+        outcome: { status: "interpreted" }, query: { contract: "source-semantic-query-meaning-v2", alternatives: [{ conditions: [{
           kind: "statement", key: "record", predicate: "record", arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
-        } }], return: ["theme"], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
+        }] }], return: ["theme"], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
     expect(filled.newly_admitted).toBe(2);
     const prepared = await prepareLongMemEvalSemanticRun(root);

@@ -42,7 +42,7 @@ it("keeps admitted legacy shards without completion witnesses non-executable", (
   expect(isExecutableProposalShard({ ...shard, finish_reason: "STOP", completion_witness: "finish_reason" })).toBe(true);
 });
 
-it.each([JSON.stringify({ contract: "source-semantic-query-response-v3", outcome: { status: "abstained" } }), "{}"])(
+it.each([JSON.stringify({ contract: "source-semantic-query-response-v4", outcome: { status: "abstained" } }), "{}"])(
   "recovers a published terminal shard before ledger settlement without credentials: %s", async (rawJson) => {
     const cacheRoot = tempRoot();
     const prepared = workset();
@@ -344,7 +344,7 @@ it.each([
       expect(wire.url).toBe("/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse");
       expect(wire.body).not.toHaveProperty("generationConfig.responseJsonSchema");
       expect(wire.body).toMatchObject({ generationConfig: { responseMimeType: "application/json" },
-        systemInstruction: { parts: [expect.anything(), { text: expect.stringContaining("source-semantic-query-meaning-v1") }] } });
+        systemInstruction: { parts: [expect.anything(), { text: expect.stringContaining("source-semantic-query-meaning-v2") }] } });
     }
     expect(readSemanticProposalResults(prepared, cacheRoot, 128)).toMatchObject([
       { status: "transport_failure", shard: { outcome: { status: "transport_failure" } } }

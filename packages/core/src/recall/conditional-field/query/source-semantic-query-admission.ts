@@ -35,6 +35,7 @@ export function admitSourceSemanticQuery(
     return { kind: "invalid" };
   }
   const excerpts = [
+    ...(parsed.data.requested_operation === undefined ? [] : [parsed.data.requested_operation.support.excerpt]),
     ...parsed.data.gaps.flatMap((gap) => gap.support.map((support) => support.excerpt)),
     ...(parsed.data.domains ?? []).map((row) => row.support.excerpt),
     ...parsed.data.variables.flatMap((row) => row.reference === undefined ? [] : [row.reference.excerpt]),

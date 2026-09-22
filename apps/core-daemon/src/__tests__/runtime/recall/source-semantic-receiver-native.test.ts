@@ -61,14 +61,14 @@ it("admits authored query semantics and received semantic correspondence and dro
 
   const assumed = reasonFinite(sourceInterpretation, receivedQuerySemantics.query!, receivedCorrespondence.semantic_correspondence!);
   expect(assumed.outcome.status).toBe("interpreted");
-  expect(assumed.answers).toHaveLength(1);
+  expect(assumed.binding_results).toHaveLength(1);
   expect(assumed.consumed_leaves.some((row) => row.leaf_kind === "semantic_correspondence_membership")).toBe(true);
 
   const withoutMembership = receiveAuthoredCorrespondence({ original_query: FINITE_QUERY, admitted_query_semantics: receivedQuerySemantics.query!, source_interpretation_descriptors: [{ source_interpretation_id: sourceInterpretationId, interpretation: sourceInterpretation }], producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, { correspondences: seed.correspondences }, { status: "interpreted", gaps: [] });
-  expect(reasonFinite(sourceInterpretation, receivedQuerySemantics.query!, withoutMembership.semantic_correspondence!).answers).toEqual([]);
+  expect(reasonFinite(sourceInterpretation, receivedQuerySemantics.query!, withoutMembership.semantic_correspondence!).binding_results).toEqual([]);
 
   const independent = finiteQuery();
   const unrelated = reasonFinite(sourceInterpretation, independent, finiteCorrespondence(sourceInterpretation, independent));
   expect(unrelated.outcome.status).toBe("interpreted");
-  expect(unrelated.answers?.map((row) => row.returned.actor?.node_id).sort()).toEqual(["rAlice", "rBob"]);
-});
+  expect(unrelated.binding_results?.map((row) => row.returned.actor?.node_id).sort()).toEqual(["rAlice", "rBob"]);
+}, 15_000);

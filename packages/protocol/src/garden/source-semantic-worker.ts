@@ -17,8 +17,8 @@ export const SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP = 32 as const;
 export const SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET = 10 as const;
 export const SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX = 5 as const;
 export const SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE = 16 as const;
-export const SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION = "source-semantic-library-v2" as const;
-export const SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION = 2 as const;
+export const SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION = "source-semantic-library-v3" as const;
+export const SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION = 3 as const;
 export const SOURCE_SEMANTIC_LIBRARY_OCCUPANCY = "source_gold_root_identity" as const;
 export const SOURCE_SEMANTIC_LIBRARY_TIE_POLICY = "canonical_identity" as const;
 
@@ -129,6 +129,7 @@ export const SourceSemanticLibraryDiscoverySchema = z.object({
   candidate_prefix: z.array(Sha256DigestSchema).max(64).readonly(),
   examined_source_interpretation_ids: z.array(Sha256DigestSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly(),
   unexamined_source_interpretation_count: NonNegativeIntSchema,
+  /** Entries omitted from root occupancy, not witnesses omitted from the delivered proofs. */
   omitted_duplicate_bindings: NonNegativeIntSchema,
   examination_cap: z.literal(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP),
   open_residuals: z.boolean(),
@@ -143,14 +144,36 @@ export const SourceSemanticLibraryOrderSchema = z.object({
   page_budget: z.literal(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET)
 }).strict().readonly();
 
+export const SourceSemanticQuerySupportSchema = z.object({
+  answer: z.enum(["supported", "open", "unrepresented"]),
+  evidence_inputs: z.array(z.object({ alternative: NonNegativeIntSchema, input: NonNegativeIntSchema,
+    status: z.enum(["supported", "open"]) }).strict().readonly()).max(256).readonly(),
+  operation: z.enum(["not_requested", "not_executed"]),
+  compatibility: z.literal("unknown"),
+  distinctness: z.literal("unknown")
+}).strict().readonly();
+export type SourceSemanticQuerySupport = z.infer<typeof SourceSemanticQuerySupportSchema>;
+
 export const SourceSemanticLibrarySlotQualifierSchema = z.object({
   index: NonNegativeIntSchema,
   evidence_kind: z.enum(["semantic_proof", "source_evidence"]),
   source_interpretation_id: Sha256DigestSchema.optional(),
   query_semantics_id: Sha256DigestSchema.optional(),
   semantic_correspondence_id: Sha256DigestSchema.optional(),
-  conditional_computation_id: Sha256DigestSchema.optional()
-}).strict().readonly();
+  conditional_computation_id: Sha256DigestSchema.optional(),
+  witnesses: z.array(z.object({ conditional_computation_id: Sha256DigestSchema, binding_id: BoundedIdSchema })
+    .strict().readonly()).min(1).max(1000).readonly().optional(),
+  support: SourceSemanticQuerySupportSchema.optional()
+}).strict().superRefine((value, context) => {
+  if (value.evidence_kind === "semantic_proof" && (value.witnesses === undefined
+    || value.source_interpretation_id === undefined || value.query_semantics_id === undefined
+    || value.semantic_correspondence_id === undefined || value.conditional_computation_id === undefined || value.support === undefined)) {
+    context.addIssue({ code: "custom", message: "semantic proof requires identities and every delivered binding witness" });
+  }
+  if (value.evidence_kind === "source_evidence" && (value.witnesses !== undefined || value.support !== undefined)) {
+    context.addIssue({ code: "custom", message: "unproved source cannot declare semantic witnesses" });
+  }
+}).readonly();
 
 const CoverageWork = {
   coverage: SourceSemanticCoverageSchema,
@@ -184,7 +207,7 @@ export const SourceSemanticLibraryDeliverySchema = z.object({
   discovery: SourceSemanticLibraryDiscoverySchema,
   order: SourceSemanticLibraryOrderSchema,
   slot_qualifiers: z.array(SourceSemanticLibrarySlotQualifierSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly(),
-  proofs: z.array(SourceSemanticLibraryProofSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly().optional(),
+  proofs: z.array(SourceSemanticLibraryProofSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   request_budget: RequestBudgetSchema.optional()
 }).strict();
 

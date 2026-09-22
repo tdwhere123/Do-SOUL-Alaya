@@ -148,11 +148,11 @@ it("versions the open envelope, reasoning, and cache without reusing occupied li
   }).success).toBe(false);
   const budget = { schema_version: 1, work_units: 1, memory_bytes: 1, page_budget: 1, finalization_reserve: 0, min_envelope: 0 };
   expect(SourceSemanticReasoningRequestSchema.parse({
-    contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+    contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
     source_interpretation_id: digest, query_semantics_id: digest, semantic_correspondence_id: digest, original_query: "who sent P?", budget, output_byte_limit: 1024
-  }).contract).toBe("source-interpretation-reasoning-v4");
+  }).contract).toBe("source-interpretation-reasoning-v5");
   expect(SourceSemanticReasoningRequestSchema.safeParse({
-    contract: "source-interpretation-reasoning-v4", accepts_unreviewed_conditional_results: true,
+    contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
     source_interpretation_id: digest, query_semantics_id: digest, semantic_correspondence_id: digest, original_query: "who sent P?", budget, output_byte_limit: 1024,
     program: { schema_version: 1, kind: "epsilon" }, seed_nodes: ["fSend"]
   }).success).toBe(false);
@@ -164,7 +164,7 @@ it("versions the open envelope, reasoning, and cache without reusing occupied li
 
 it("does not parse the new result as MemorySearchResult, world fact, or live v1 reasoning", () => {
   const result = SourceSemanticReasoningResultSchema.parse({
-    contract: "source-interpretation-reasoning-v4",
+    contract: "source-interpretation-reasoning-v5",
     outcome: { status: "interpreted", gaps: [] },
     conditional_computation_id: digest, consumed_leaves: [], semantic_status: "unreviewed",
     conclusion_scope: "conditional_on_interpretation", world_claim: "unknown"

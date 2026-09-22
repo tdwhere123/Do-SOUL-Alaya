@@ -26,7 +26,7 @@ export function projectSourceSemanticState(input: Readonly<{
   const beforeProjection = Math.max(0, state.remaining_exploration + state.remaining_reserve);
   let afterProjection = beforeProjection;
   const index = { ...projectAcceptingIndex({ snapshot: state.binding.snapshot, view: query.view, query_id: query.query_id,
-    snapshot_id: snapshot, result_version: "source-interpretation-reasoning-v4",
+    snapshot_id: snapshot, result_version: "source-interpretation-reasoning-v5",
     budget: { ...remaining, work_units: state.remaining_exploration, memory_bytes: state.remaining_memory_bytes },
     binding_contexts: state.binding_contexts,
     selected_semantics: { source_interpretation: admission.interpretation, context: admission.context, source_target: sourceTarget,

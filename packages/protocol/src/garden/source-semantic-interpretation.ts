@@ -12,7 +12,7 @@ import { SourceReferenceCatalogSchema, SourceReferenceSchema, sourceReferenceRes
 import { SourceEvidenceTargetSchema } from "../recall/conditional-field/product-identity.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
 import { Sha256DigestSchema, Sha256HexSchema } from "../recall/conditional-field/common.js";
-import { SourceSemanticQueryGapSchema } from "../recall/conditional-field/semantic-query.js";
+import { SourceSemanticQueryGapSchema, SourceSemanticQueryTargetSchema } from "../recall/conditional-field/semantic-query.js";
 import { SourceInterpretationProfileSchema } from "./source-interpretation-profile.js";
 import {
   SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticDraftSchema,
@@ -22,7 +22,7 @@ import {
 
 export const SOURCE_SEMANTIC_PUBLISHED_CONTRACT = "published-source-interpretation-v4" as const;
 export const SOURCE_SEMANTIC_RESPONSE_CONTRACT = "source-interpretation-response-v5" as const;
-export const SOURCE_SEMANTIC_REASONING_CONTRACT = "source-interpretation-reasoning-v4" as const;
+export const SOURCE_SEMANTIC_REASONING_CONTRACT = "source-interpretation-reasoning-v5" as const;
 export const SOURCE_SEMANTIC_CACHE_CONTRACT = "source-interpretation-cache-v3" as const;
 export const SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION = 5 as const;
 
@@ -259,14 +259,18 @@ export const SourceSemanticEvaluationReportSchema = z.object({
   counterexample_explanation_ids: z.array(BoundedIdSchema).max(1000).readonly()
 }).strict().readonly();
 
-export const SourceSemanticAnswerSchema = z.object({
+const BindingResult = z.object({
   binding_id: BoundedIdSchema,
   alternative: z.number().int().nonnegative(),
   bindings: z.record(SourceSemanticHandleSchema, InterpretationNodeCoordinateSchema),
   returned: z.record(SourceSemanticHandleSchema, InterpretationNodeCoordinateSchema),
-  explanation_ids: z.array(BoundedIdSchema).max(1000).readonly(),
-  query_complete: z.boolean()
-}).strict().readonly();
+  explanation_ids: z.array(BoundedIdSchema).max(1000).readonly()
+}).strict();
+
+export const SourceSemanticBindingResultSchema = z.discriminatedUnion("kind", [
+  BindingResult.merge(SourceSemanticQueryTargetSchema.options[0].unwrap()).extend({ query_complete: z.boolean() }).readonly(),
+  BindingResult.merge(SourceSemanticQueryTargetSchema.options[1].unwrap()).extend({ query_complete: z.literal(false) }).readonly()
+]);
 
 export const SourceSemanticReasoningResultSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_REASONING_CONTRACT),
@@ -276,7 +280,7 @@ export const SourceSemanticReasoningResultSchema = z.object({
   query_semantics_id: Sha256DigestSchema.optional(),
   semantic_correspondence_id: Sha256DigestSchema.optional(),
   consumed_leaves: z.array(SourceSemanticConsumedLeafSchema).max(4096).readonly(),
-  answers: z.array(SourceSemanticAnswerSchema).max(1000).readonly().optional(),
+  binding_results: z.array(SourceSemanticBindingResultSchema).max(1000).readonly().optional(),
   derivations: z.array(DerivationSchema).max(1000).readonly().optional(),
   evidence_leaves: z.array(z.object({ observation_id: BoundedIdSchema, leaf: SourceSemanticConsumedLeafSchema }).strict().readonly()).max(4096).readonly().optional(),
   completeness: CompletenessReportSchema.optional(),
@@ -308,6 +312,6 @@ export type SourceSemanticReasoningRequest = z.infer<typeof SourceSemanticReason
 export type SourceSemanticConsumedLeaf = z.infer<typeof SourceSemanticConsumedLeafSchema>;
 export type SourceSemanticDerivedNode = z.infer<typeof SourceSemanticDerivedNodeSchema>;
 export type SourceSemanticEvaluationReport = z.infer<typeof SourceSemanticEvaluationReportSchema>;
-export type SourceSemanticAnswer = z.infer<typeof SourceSemanticAnswerSchema>;
+export type SourceSemanticBindingResult = z.infer<typeof SourceSemanticBindingResultSchema>;
 export type SourceSemanticReasoningResult = z.infer<typeof SourceSemanticReasoningResultSchema>;
 export type SourceSemanticCache = z.infer<typeof SourceSemanticCacheSchema>;

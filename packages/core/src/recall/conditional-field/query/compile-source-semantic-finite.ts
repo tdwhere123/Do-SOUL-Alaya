@@ -2,15 +2,16 @@ import {
   type QueryProgram, type SourceSemanticQuery, type SourceSemanticCorrespondence, type SourceSemanticInterpretation,
   type SourceSemanticResourceLedger, type SourceSemanticDomain
 } from "@do-soul/alaya-protocol";
-import { sourceSemanticRelationKey as key, correspondenceGroupPhases, type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
+import { sourceSemanticRelationKey as key, type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
+import type { SourceSemanticBranchPlan } from "../../runtime/source-semantic-branch-plan.js";
 import { compileSourceSemanticAlternative, compileSourceSemanticGroupProgram } from "./compile-source-semantic-query.js";
 import { semanticRelation as rel, semanticSequence as sequence, semanticAlternatives as alternatives,
   semanticOwnerProof, emptySemanticProgram } from "./source-semantic-proof-program.js";
 
 export type SourceSemanticProofBranch = Readonly<{ purpose: "support" | "counterexample" | "incomparable" | "empty_domain";
-  alternative: number; candidate?: string; candidate_variable?: string }>;
+  alternative: number; candidate?: string; candidate_variable?: string; plan?: SourceSemanticBranchPlan }>;
 export type SourceSemanticGroupPhase = Readonly<{
-  program: QueryProgram; alternative: number; acceptIndex: number; groupFrame?: string;
+  program: QueryProgram; alternative: number; acceptIndex: number; groupFrame?: string; plan: SourceSemanticBranchPlan;
 }>;
 export type SourceSemanticExecutionPlan = Readonly<{
   program: QueryProgram; branches: readonly SourceSemanticProofBranch[]; domain?: SourceSemanticDomain;
@@ -18,7 +19,7 @@ export type SourceSemanticExecutionPlan = Readonly<{
   groupPhases?: readonly SourceSemanticGroupPhase[];
 }>;
 type Input = Readonly<{ source_interpretation: SourceSemanticInterpretation; query_semantics: SourceSemanticQuery; semantic_correspondence: SourceSemanticCorrespondence;
-  population: SourceSemanticPremisePopulation; meter: SourceSemanticResourceLedger }>;
+  population: SourceSemanticPremisePopulation; meter: SourceSemanticResourceLedger; branches: readonly SourceSemanticBranchPlan[] }>;
 const DOMAIN = "@finite:domain";
 
 /** Expand finite obligations only. Every outcome is still decided by the conditional-field engine. */
@@ -26,19 +27,11 @@ export function compileSourceSemanticExecution(input: Input): SourceSemanticExec
   const { query_semantics: querySemantics, source_interpretation: sourceInterpretation, semantic_correspondence: semanticCorrespondence, meter, population } = input;
   if (querySemantics.evaluation === undefined) {
     const finite = { source_interpretation: sourceInterpretation, population, semantic_correspondence: semanticCorrespondence };
-    let acceptIndex = 0;
-    const groupPhases = querySemantics.alternatives.flatMap((alternative, index) => {
-      const frames = correspondenceGroupPhases(querySemantics, semanticCorrespondence, index);
-      return frames.map((group) => {
-        const phase = {
-          program: compileSourceSemanticGroupProgram(querySemantics, alternative, index, meter, finite, group, acceptIndex),
-          alternative: index, acceptIndex, groupFrame: group
-        };
-        acceptIndex += 1;
-        return phase;
-      });
-    });
-    const branches = groupPhases.map((phase) => ({ purpose: "support" as const, alternative: phase.alternative }));
+    const groupPhases = input.branches.map(plan => ({
+      program: compileSourceSemanticGroupProgram(querySemantics, plan.view, plan.alternative, meter, finite, plan.groupFrame, plan.acceptIndex, plan.groupQueryFrame),
+      alternative: plan.alternative, acceptIndex: plan.acceptIndex, groupFrame: plan.groupFrame, plan
+    }));
+    const branches = groupPhases.map((phase) => ({ purpose: "support" as const, alternative: phase.alternative, plan: phase.plan }));
     return {
       program: groupPhases[0]?.program ?? emptySemanticProgram,
       branches, missingOperands: false, groupPhases
@@ -83,12 +76,12 @@ function compileUniversal(input: Input, domain: SourceSemanticDomain): SourceSem
     const finite = { source_interpretation: input.source_interpretation, population: input.population, semantic_correspondence: input.semantic_correspondence };
     const choices = querySemantics.alternatives.flatMap((alternative, index) => {
       if ((alternative.purpose === "counterexample") !== counterexample) return [];
-      const frames = correspondenceGroupPhases(querySemantics, input.semantic_correspondence, index);
-      return frames.map((group, groupIndex) => {
+      const plans = input.branches.filter(plan => plan.alternative === index);
+      return plans.map((plan, groupIndex) => {
         meter.charge(1, 1024, "finite universal branch");
         const suffix = `:member${memberIndex}:alt${index}:g${groupIndex}`;
         const rename = (name: string) => evaluation.local_variables.includes(name) || name.startsWith("@") ? `${name}${suffix}` : name;
-        const program = compileSourceSemanticAlternative(querySemantics, alternative, index, meter, finite, true, group);
+        const program = compileSourceSemanticAlternative(querySemantics, alternative, index, meter, finite, true, plan.groupFrame, undefined, plan.groupQueryFrame);
         return sequence([memberProof(input, domain, member, rename(evaluation.binder), `${memberIndex}:${index}:${groupIndex}`),
           renameProgram(program, rename, meter),
           rel(key("domain_return", domain.id), rename(alternative.frames[0]!.variable), DOMAIN, meter)]);

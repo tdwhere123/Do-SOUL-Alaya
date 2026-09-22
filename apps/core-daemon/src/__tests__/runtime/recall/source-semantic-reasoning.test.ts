@@ -93,11 +93,11 @@ function usesDraft(catalog: SourceReferenceCatalog, assertion: string) {
 
 function queryOf(): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v2",
+    contract: "source-semantic-query-v3",
     original_query_digest: digestOriginalQuery(ORIGINAL),
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v2",
+    contract_version: "source-semantic-query-v3",
     variables: [{ id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } }, { id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }],
     alternatives: [{
       frames: [{
@@ -521,7 +521,7 @@ it("binds query handles to query semantics, candidates and permissions and keeps
     expect(leased.coverage.discovery).toBe("complete");
     expect(direct.coverage.discovery).toBe("unexercised");
     expect(leased.coverage.source_interpretation).toBe("open"); expect(leased.coverage.semantic_correspondence).toBe("open");
-    expect(leased.result.answers).toEqual(direct.result.answers);
+    expect(leased.result.binding_results).toEqual(direct.result.binding_results);
     expect(direct.work.logical_work).toBeGreaterThan(direct.work.native_work);
   });
 });
@@ -577,7 +577,7 @@ it("reasons through the worker on receiver-produced query and semantic_correspon
     });
     if (result.kind !== "reason") throw new Error("expected reason");
     expect(result.result.outcome.status).toBe("interpreted");
-    expect(result.result.answers?.[0]?.returned.tools?.node_id).toBe("rTools");
+    expect(result.result.binding_results?.[0]?.returned.tools?.node_id).toBe("rTools");
     expect(result.result.world_claim).toBe("unknown");
   });
 });
@@ -595,7 +595,7 @@ it("delivers qualified answers through the actual CLI executable with no provide
     });
     const parsed = JSON.parse(output.stdout);
     expect(parsed).toMatchObject({ result: { outcome: { status: "interpreted" }, world_claim: "unknown", semantic_status: "unreviewed" }, provider_attempts: 0 });
-    expect(parsed.result.answers[0].returned.tools.node_id).toBe("rTools");
+    expect(parsed.result.binding_results[0].returned.tools.node_id).toBe("rTools");
     expect(parsed.interpretation).toBeDefined(); expect(parsed.semantic_correspondence).toBeDefined();
   });
 }, 45000);

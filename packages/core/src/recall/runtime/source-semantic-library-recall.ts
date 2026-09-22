@@ -6,11 +6,12 @@ import {
   indexMemoryObjectId, type Continuation, type Derivation, type IndexEntry, type InformationIndex, type MemorySearchResult,
   type SourceEvidenceTarget, type SourceSemanticLibraryOrder, type SourceSemanticLibrarySlotQualifier,
   SoulInterpretationResponseSchema, type SourceSemanticWorkerResult, type SoulInterpretationResponse,
-  type SourceSemanticReasoningResult
+  type SourceSemanticReasoningResult, type SourceSemanticLibraryProof
 } from "@do-soul/alaya-protocol";
 import { sortIndexEntries } from "./index-continuation.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { makeTokenEstimator } from "./recall-service-port-helpers.js";
+import { projectSourceSemanticQuerySupport } from "./source-semantic-query-support.js";
 
 /** Offline evidence binds its recorded result contract; live requests use the current version. */
 export function sourceSemanticLibraryQueryIdentity(originalQuery: string, resultVersion: string = SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION): string {
@@ -49,7 +50,7 @@ export function sourceSemanticLibrarySourceEntry(input: Readonly<{
 export function proofEntriesFromBranch(
   index: InformationIndex, result: SourceSemanticReasoningResult
 ): { entries: IndexEntry[]; explanations: Derivation[] } {
-  const proved = new Set((result.answers ?? []).map((row) => row.binding_id));
+  const proved = new Set((result.binding_results ?? []).map((row) => row.binding_id));
   const entries = index.entries.filter((entry) => proved.has(entry.output_binding));
   return { entries, explanations: reachableExplanations(index.explanations ?? [], entries) };
 }
@@ -63,7 +64,7 @@ export function scopeSourceSemanticLibraryBranch(index: InformationIndex, result
   return {
     index: { ...index, entries: index.entries.map((entry) => ({ ...entry, explanation_ids: entry.explanation_ids.map(id) })),
       ...(index.explanations === undefined ? {} : { explanations: rows(index.explanations) }) },
-    result: { ...result, answers: result.answers?.map((row) => ({ ...row, explanation_ids: row.explanation_ids.map(id) })),
+    result: { ...result, binding_results: result.binding_results?.map((row) => ({ ...row, explanation_ids: row.explanation_ids.map(id) })),
       derivations: rows(result.derivations), ...(result.evaluation === undefined ? {} : {
         evaluation: { ...result.evaluation, counterexample_explanation_ids: result.evaluation.counterexample_explanation_ids.map(id) }
       }) }
@@ -101,7 +102,9 @@ export function assembleSourceSemanticLibraryIndex(input: Readonly<{
   const page = occupied.slice(offset, offset + SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET);
   const occupancyRemaining = occupied.length > offset + page.length;
   const remaining = occupancyRemaining || input.open_residuals || input.truncated;
-  const explanations = reachableExplanations(merged.explanations, page);
+  const pageRoots = new Set(page.flatMap(entry => entry.target.kind === "source_evidence" ? [sourceGoldRootIdentity(entry.target)] : []));
+  const witnesses = merged.entries.filter(entry => entry.target.kind === "source_evidence" && pageRoots.has(sourceGoldRootIdentity(entry.target)));
+  const explanations = reachableExplanations(merged.explanations, witnesses);
   const nextOffset = offset + page.length;
   return {
     omitted_duplicate_bindings: omitted,
@@ -253,22 +256,27 @@ export function proofForLibraryEntry<T extends SourceSemanticReasoningResult>(
   if (entry.interpretation_node === undefined || entry.explanation_ids.length === 0) return undefined;
   return proofs.find((row) => row.source_interpretation_id === entry.interpretation_node!.packet_id
     && row.conditional_computation_id === entry.hypothesis_id
-    && (row.answers ?? []).some((answer) => answer.binding_id === entry.output_binding
+    && (row.binding_results ?? []).some((answer) => answer.binding_id === entry.output_binding
       && canonicalJson(answer.explanation_ids) === canonicalJson(entry.explanation_ids)));
 }
 
 export function slotQualifiersFor(
-  index: InformationIndex, proofs: readonly SourceSemanticReasoningResult[]
+  index: InformationIndex, proofs: readonly SourceSemanticLibraryProof[]
 ): SourceSemanticLibrarySlotQualifier[] {
   return index.entries.map((entry, offset) => {
     const proof = proofForLibraryEntry(entry, proofs);
     if (proof === undefined) return { index: offset, evidence_kind: "source_evidence" as const };
+    const rootProofs = proofs.filter(row => row.source_target !== undefined && entry.target.kind === "source_evidence"
+      && sourceGoldRootIdentity(row.source_target) === sourceGoldRootIdentity(entry.target));
     return {
       index: offset, evidence_kind: "semantic_proof" as const,
       ...(proof.source_interpretation_id === undefined ? {} : { source_interpretation_id: proof.source_interpretation_id }),
       ...(proof.query_semantics_id === undefined ? {} : { query_semantics_id: proof.query_semantics_id }),
       ...(proof.semantic_correspondence_id === undefined ? {} : { semantic_correspondence_id: proof.semantic_correspondence_id }),
-      ...(proof.conditional_computation_id === undefined ? {} : { conditional_computation_id: proof.conditional_computation_id })
+      ...(proof.conditional_computation_id === undefined ? {} : { conditional_computation_id: proof.conditional_computation_id }),
+      witnesses: rootProofs.flatMap(row => (row.binding_results ?? []).map(binding => ({
+        conditional_computation_id: row.conditional_computation_id!, binding_id: binding.binding_id }))),
+      support: projectSourceSemanticQuerySupport(proof.query, rootProofs.flatMap(row => row.binding_results ?? []))
     };
   });
 }

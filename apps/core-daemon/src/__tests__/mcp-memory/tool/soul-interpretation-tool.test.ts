@@ -95,7 +95,7 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
   return {
     kind: "reason",
     result: {
-      contract: "source-interpretation-reasoning-v4",
+      contract: "source-interpretation-reasoning-v5",
       semantic_status: "unreviewed",
       world_claim: "unknown",
       consumed_leaves: [],

@@ -94,11 +94,11 @@ function usesDraft(catalog: SourceReferenceCatalog, assertion: string) {
 
 function queryOf(): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v2",
+    contract: "source-semantic-query-v3",
     original_query_digest: digestOriginalQuery(ORIGINAL),
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v2",
+    contract_version: "source-semantic-query-v3",
     variables: [{ id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } }, { id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }],
     alternatives: [{
       frames: [{
@@ -330,7 +330,7 @@ it("examines aligned handles without hydrating every published descriptor", asyn
         request: recallRequest([correspondenceOf(published.bound.interpretation_id, queryOf())])
       }, ["project"], new SourceSemanticReadBudget(BUDGET));
       if (incomplete.kind !== "recall") throw new Error("library recall expected");
-      expect(incomplete.proofs?.[0]?.answers?.length).toBeGreaterThan(0);
+      expect(incomplete.proofs?.[0]?.binding_results?.length).toBeGreaterThan(0);
       expect(incomplete.coverage.conditional_computation).toBe("open");
       expect(incomplete.discovery.open_residuals).toBe(true);
     } finally { partial.mockRestore(); }
