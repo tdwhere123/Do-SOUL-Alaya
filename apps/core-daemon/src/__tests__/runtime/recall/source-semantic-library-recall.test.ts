@@ -18,7 +18,7 @@ import {
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
-import { SourceSemanticReadBudget, listEligibleSemanticSources } from "../../../runtime/field/source-semantic-read-stores.js";
+import { SourceSemanticReadBudget, listEligibleSemanticSources, sourceSemanticReadStores } from "../../../runtime/field/source-semantic-read-stores.js";
 import { runSourceSemanticLibraryRecall } from "../../../runtime/recall-read-worker/source-semantic-library-recall.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import { createRecallReadWorkerClient, type RecallReadWorkerClient }
@@ -143,7 +143,7 @@ function correspondenceOf(sourceInterpretationId: string, querySemantics: Source
 async function withLibrary(body: (input: {
   allIds: readonly string[]; execute: Execute; filename: string;
   sourceTarget: SourceEvidenceTarget;
-}) => Promise<void>, count: number) {
+}) => Promise<void>, count: number, obsoleteVersions = 0) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-library-"));
   const filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
@@ -154,6 +154,13 @@ async function withLibrary(body: (input: {
     eventLogRepo, runtimeNotifier, evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => CLOCK
   });
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo, runtimeNotifier, sha256: fieldContractSha256 });
+  for (let index = 0; index < obsoleteVersions; index += 1) {
+    await admission.admit({
+      workspace_id: WS, source_id: "artifact-1", source_version: `obsolete-${index}`, content_bytes: `old ${index}`,
+      evidence_object_id: null, recorded_at: "2026-09-17T00:00Z", event_time: null, valid_from: null, valid_to: null,
+      speaker: "user", scope_class: "project", spans: []
+    }, { workspaceId: WS });
+  }
   await admission.admit({
     workspace_id: WS, source_id: "artifact-1", source_version: "1", content_bytes: SOURCE,
     evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
@@ -631,7 +638,7 @@ it("pages library occupancy without duplicating first-page product identities", 
   }
 });
 
-it("withholds historical-prefix sources when a later supersession is excluded, erased or unavailable", async () => {
+it("retains a current prefix without resurrecting excluded, erased or unavailable supersessions", async () => {
   const { database } = await createRecallRealStorage(() => undefined);
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo: new SqliteEventLogRepo(database),
@@ -644,18 +651,78 @@ it("withholds historical-prefix sources when a later supersession is excluded, e
   const read = () => listEligibleSemanticSources(database, WS, new SourceSemanticReadBudget(BUDGET), ["project"]);
   try {
     for (let i = 0; i < 512; i += 1) await admit(`source-${i}`, "1", CLOCK);
-    const insufficient = new SourceSemanticReadBudget({ work_units: 79, memory_bytes: BUDGET.memory_bytes });
+    const insufficient = new SourceSemanticReadBudget({ work_units: 4, memory_bytes: BUDGET.memory_bytes });
     expect(listEligibleSemanticSources(database, WS, insufficient, ["project"]))
       .toMatchObject({ sources: [], pages: 0, open: true, truncated: true });
     expect(insufficient.nativeWork).toBe(0);
+    const partial = new SourceSemanticReadBudget({ work_units: 79, memory_bytes: BUDGET.memory_bytes });
+    const prefix = listEligibleSemanticSources(database, WS, partial, ["project"]);
+    expect(prefix).toMatchObject({ open: true, truncated: true });
+    expect(prefix.pages).toBeGreaterThan(0);
+    expect(prefix.pages).toBeLessThan(512);
+    expect(prefix.sources).toHaveLength(prefix.pages);
+    expect(partial.nativeWork).toBe(prefix.pages * 5);
+    expect(partial.spentWork).toBeLessThanOrEqual(79);
+    expect(partial.spentWork).toBeGreaterThan(partial.nativeWork);
     await admit("source-0", "2", "2026-09-19T00:00:00.000Z", "global_core");
-    expect(read()).toMatchObject({ sources: [], open: true, truncated: true, pages: 32 });
+    const excluded = read();
+    expect(excluded).toMatchObject({ open: true, truncated: true, pages: 512 });
+    expect(excluded.sources).toHaveLength(511);
+    expect(excluded.sources.some((row) => row.source_id === "source-0")).toBe(false);
     database.connection.prepare("UPDATE source_records SET source_body = NULL WHERE source_version = '2'").run();
-    expect(read()).toMatchObject({ sources: [], open: true, truncated: true });
-    // Bring the newest row inside the bounded scan, but make its retained body unavailable.
+    expect(read().sources).toEqual(excluded.sources);
+    // Unavailable current data keeps the census open without hiding a separately verified source.
     database.connection.prepare("DELETE FROM source_records WHERE source_id NOT IN ('source-0', 'source-1')").run();
     database.connection.prepare("UPDATE source_records SET source_body = 'unavailable' WHERE source_version = '2'").run();
     database.connection.prepare("DELETE FROM retained_source_chunks WHERE source_revision = '2'").run();
-    expect(read()).toMatchObject({ sources: [], open: true });
+    const unavailable = read();
+    expect(unavailable).toMatchObject({ open: true, truncated: false });
+    expect(unavailable.sources.map((row) => row.source_id)).toEqual(["source-1"]);
   } finally { database.close(); }
+});
+
+it("prepares and recalls a current source through the reopened worker after more than 512 obsolete versions", async () => {
+  await withLibrary(async ({ allIds, execute }) => {
+    const prepared = await call(execute, { kind: "prepare_source", source_id: "artifact-1", budget: BUDGET });
+    if (prepared.kind !== "prepare_source") throw new Error("source preparation expected");
+    expect(prepared.source_version).toBe("1");
+    expect(prepared.work.native_work).toBe(10);
+    const recalled = await call(execute, recallRequest(allIds.map((id) => correspondenceOf(id, queryOf()))));
+    if (recalled.kind !== "recall") throw new Error("library recall expected");
+    expect(recalled.discovery.eligible_source_count).toBe(2);
+    expect(recalled.discovery.candidate_prefix).toEqual(allIds);
+    expect(recalled.proofs).toHaveLength(1);
+  }, 1, 520);
+});
+
+it("rechecks the indexed current source after publication awaits an existing evidence read", async () => {
+  await withLibrary(async ({ filename }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const runtimeNotifier = { notifyEntry: async () => undefined };
+    const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
+    const admission = createAuditedSourceAdmission({ stores, eventLogRepo, runtimeNotifier, sha256: fieldContractSha256 });
+    const evidenceService = new EvidenceService({ eventLogRepo, runtimeNotifier,
+      evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => CLOCK });
+    const read = evidenceService.findByIdScoped.bind(evidenceService);
+    vi.spyOn(evidenceService, "findByIdScoped").mockImplementationOnce(async (id, workspace) => {
+      await admission.admit({ workspace_id: WS, source_id: "artifact-1", source_version: "2", content_bytes: SOURCE,
+        evidence_object_id: null, recorded_at: "2026-09-18T00:00:00.00000000001Z", event_time: null,
+        valid_from: null, valid_to: null, speaker: "user", scope_class: "project", spans: [] }, { workspaceId: WS });
+      return read(id, workspace);
+    });
+    const meter = new SourceSemanticReadBudget(BUDGET);
+    const publication = createSourceSemanticInterpretationPublication({
+      stores: sourceSemanticReadStores(database, WS, "artifact-1", meter, ["project"]),
+      evidenceService, sha256: fieldContractSha256
+    });
+    const catalog = catalogFor(ASSERTION);
+    try {
+      await expect(publication.publish({ workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE,
+        catalog, provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
+        producer_version: "p1", contract_version: "source-interpretation-v4" }))
+        .rejects.toThrow(/source binding differs from source record/u);
+      expect(meter.nativeWork).toBeGreaterThanOrEqual(20);
+    } finally { database.close(); closeCachedDatabase(filename); }
+  }, 1);
 });

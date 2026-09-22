@@ -48,32 +48,18 @@ function reasonWithinSnapshot(database: StorageDatabase, payload: Payload) {
 }
 
 function boundedSourceStores(database: StorageDatabase, workspace: string, artifact: string,
-  meter: SourceReadBudget, authorized: readonly string[] | null): Pick<FieldFormationStores, "listRecords" | "getStoredRecord"> {
+  meter: SourceReadBudget, authorized: readonly string[] | null): Pick<FieldFormationStores, "getCurrentRecord" | "getStoredRecord"> {
   const repo = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
-  let records: SourceRecordIdentity[] | undefined;
   const stored = new Map<string, NonNullable<ReturnType<FieldFormationStores["getStoredRecord"]>>>();
   return {
-    listRecords: (workspaceId) => {
-      if (workspaceId !== workspace) throw new CoreError("VALIDATION", "source workspace mismatch");
-      if (records !== undefined) return records;
-      records = [];
-      let afterRecordedAt = "";
-      let afterRecordId = "";
-      while (true) {
-        meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
-        const page = repo.listPageBounded(workspace, { limit: 1, afterRecordedAt, afterRecordId }, 1);
-        meter.charge(5, page.rows.reduce((sum, row) => sum + row.nativeBytes + row.metadataBytes, 0));
-        if (page.unavailable) throw new CoreError("CONFLICT", "source catalog is unavailable");
-        const row = page.rows[0]?.record;
-        if (row == null) {
-          if (page.rows.length !== 0) throw new CoreError("CONFLICT", "source metadata is unavailable");
-          break;
-        }
-        if (row.source_id === artifact) records.push(sourceRecordFromRow(row));
-        afterRecordedAt = row.recorded_at; afterRecordId = row.record_id;
-        if (!page.truncated) break;
-      }
-      return records;
+    getCurrentRecord: (workspaceId, sourceId) => {
+      if (workspaceId !== workspace || sourceId !== artifact) throw new CoreError("VALIDATION", "source binding mismatch");
+      meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
+      const page = repo.findCurrentBounded(workspace, artifact, 1);
+      meter.charge(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
+      if (page === null) return null;
+      if (page.record === null) throw new CoreError("CONFLICT", "source metadata is unavailable");
+      return sourceRecordFromRow(page.record);
     },
     getStoredRecord: (workspaceId, id) => {
       if (workspaceId !== workspace) throw new CoreError("VALIDATION", "source workspace mismatch");

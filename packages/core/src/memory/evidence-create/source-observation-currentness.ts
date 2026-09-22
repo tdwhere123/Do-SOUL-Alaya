@@ -18,19 +18,16 @@ import {
 type BoundPhrase = SourceLocatedInterpretation["candidates"][number]["predicate"];
 
 export function resolveCurrentSource(
-  stores: Pick<FieldFormationStores, "listRecords" | "getStoredRecord">,
+  stores: Pick<FieldFormationStores, "getCurrentRecord" | "getStoredRecord">,
   workspaceId: string,
   located: Pick<SourceLocatedInterpretation, "artifact_key" | "source_corpus_digest">,
   sha256: FieldContractSha256
 ): StoredSourceRecord {
   const expectedDigest = formatFieldContractDigest(located.source_corpus_digest);
-  const records = stores.listRecords(workspaceId).filter(
-    (row) => row.source_id === located.artifact_key
-  );
-  if (records.length === 0) {
+  const current = stores.getCurrentRecord(workspaceId, located.artifact_key);
+  if (current === null) {
     throw new CoreError("VALIDATION", "source is not currently admitted", { details: { admission: "no_eligible_source" } });
   }
-  const current = records.reduce(newerRecord);
   const stored = stores.getStoredRecord(workspaceId, current.identity);
   if (stored === null) {
     throw new CoreError("VALIDATION", "current source body is not available", { details: { admission: "unavailable", unavailable: "source_body" } });
@@ -134,11 +131,12 @@ export async function admitLocatedSpans(
   }, { workspaceId: stored.record.workspace_id });
 }
 
-function newerRecord<T extends { readonly recorded_at: string; readonly identity: string }>(
+export function newerSourceRecord<T extends { readonly recorded_at: string; readonly identity: string }>(
   left: T,
   right: T
 ): T {
   const order = compareUtcInstants(left.recorded_at, right.recorded_at);
+  if (order === undefined) throw new CoreError("OBLIGATION_VIOLATION", "source currentness requires valid UTC instants");
   if (order === 1) return left;
   if (order === -1) return right;
   return left.identity >= right.identity ? left : right;

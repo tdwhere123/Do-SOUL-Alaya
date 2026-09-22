@@ -323,10 +323,13 @@ export function listRetainedSourceSemanticKeys(cacheRoot: string): readonly stri
   return keys.sort();
 }
 
-export function sourceLookupStores(database: ReturnType<typeof initDatabase>): Pick<FieldFormationStores, "listRecords" | "getStoredRecord"> {
+export function sourceLookupStores(database: ReturnType<typeof initDatabase>): Pick<FieldFormationStores, "getCurrentRecord" | "getStoredRecord"> {
   const records = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
   return {
-    listRecords: (workspaceId) => records.listByWorkspace(workspaceId).map(sourceRecordFromRow),
+    getCurrentRecord: (workspaceId, sourceId) => {
+      const row = records.findCurrent(workspaceId, sourceId);
+      return row === null ? null : sourceRecordFromRow(row);
+    },
     getStoredRecord: (workspaceId, recordId) => {
       const row = records.findById(workspaceId, recordId);
       return row?.source_body == null ? null : { record: sourceRecordFromRow(row), content_bytes: row.source_body };

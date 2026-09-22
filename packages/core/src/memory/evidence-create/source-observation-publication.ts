@@ -49,7 +49,7 @@ export type SourceObservationPublication = Readonly<{
 
 /** Read-only verification of a retained publication using the live admission identities. */
 export function verifySourceObservationPublication(input: Readonly<{
-  stores: Pick<FieldFormationStores, "listRecords" | "getStoredRecord">;
+  stores: Pick<FieldFormationStores, "getCurrentRecord" | "getStoredRecord">;
   signal: SourceInterpretationSignal;
   bound: BoundSourceInterpretation;
   sha256: FieldContractSha256;

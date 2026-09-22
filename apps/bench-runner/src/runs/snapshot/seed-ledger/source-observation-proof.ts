@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { BoundSourceInterpretationSchema, SourceInterpretationSignalSchema } from "@do-soul/alaya-protocol";
-import { fieldContractSha256, verifySourceObservationPublication } from "@do-soul/alaya-core";
+import { fieldContractSha256, newerSourceRecord, verifySourceObservationPublication } from "@do-soul/alaya-core";
 import { parseStoredCandidateMemorySignal, sourceRecordFromRow, type FieldSourceRecordRow } from "@do-soul/alaya-storage";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { buildLongMemEvalRoundMessages, pairSessionIntoRounds, type LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
@@ -31,12 +31,16 @@ export function readSourceObservationProof(db: DatabaseSync, evidenceId: string,
       evidence.workspace_id !== question.workspaceId || evidence.run_id !== question.runId) {
     throw new Error("snapshot source observation signal mismatch");
   }
-  const rows = db.prepare("SELECT * FROM source_records WHERE workspace_id = ?")
-    .all(question.workspaceId) as unknown as readonly FieldSourceRecordRow[];
+  const rows = db.prepare("SELECT * FROM source_records WHERE workspace_id = ? AND source_id = ?")
+    .all(question.workspaceId, signal.raw_payload.source_interpretation.artifact_key) as unknown as readonly FieldSourceRecordRow[];
   const stored = rows.map((row) => ({ record: sourceRecordFromRow(row), content_bytes: row.source_body }));
   const verified = verifySourceObservationPublication({ signal, bound, sha256: fieldContractSha256,
     stores: {
-      listRecords: () => stored.map((row) => row.record),
+      getCurrentRecord: (workspace, sourceId) => {
+        const records = stored.map((row) => row.record).filter((record) =>
+          record.workspace_id === workspace && record.source_id === sourceId);
+        return records.length === 0 ? null : records.reduce(newerSourceRecord);
+      },
       getStoredRecord: (_workspace, id) => {
         const row = stored.find((entry) => entry.record.identity === id);
         return row?.content_bytes == null ? null : { record: row.record, content_bytes: row.content_bytes };

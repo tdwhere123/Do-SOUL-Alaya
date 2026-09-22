@@ -32,6 +32,10 @@ export function createSqliteFieldFormationStores(input: Readonly<{
       const row = repos.records.findById(workspaceId, recordId);
       return row === null ? null : sourceRecordFromRow(row);
     },
+    getCurrentRecord: (workspaceId, sourceId) => {
+      const row = repos.records.findCurrent(workspaceId, sourceId);
+      return row === null ? null : sourceRecordFromRow(row);
+    },
     getStoredRecord: (workspaceId, recordId) => {
       const row = repos.records.findById(workspaceId, recordId);
       return row?.source_body == null ? null : Object.freeze({

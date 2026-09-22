@@ -43,6 +43,8 @@ const RECORD_SELECT = `
   FROM source_records
 `;
 
+const CURRENT_RECORD_ORDER = "alaya_utc_order_key(source_records.recorded_at) DESC, source_records.record_id DESC";
+
 // The canonical body is never selected by a Recall read. Even BLOB substr
 // materializes a complete TEXT value inside SQLite before returning its prefix.
 const RECORD_BOUNDED_SELECT = `
@@ -195,6 +197,42 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
 
   public listByWorkspace(workspaceId: string): readonly FieldSourceRecordRow[] {
     return parseRows(this.listStatement.all(workspaceId), fieldSourceRecordParser, "source record");
+  }
+
+  public findCurrent(workspaceId: string, sourceId: string): FieldSourceRecordRow | null {
+    this.database.reopenIfClosed();
+    return parseOptionalRow(this.database.connection.prepare(`${RECORD_SELECT}
+      INDEXED BY idx_source_records_current
+      WHERE source_records.workspace_id = ? AND source_records.source_id = ?
+      ORDER BY ${CURRENT_RECORD_ORDER} LIMIT 1`).get(workspaceId, sourceId),
+    fieldSourceRecordParser, "current source record");
+  }
+
+  public findCurrentBounded(
+    workspaceId: string, sourceId: string, byteLimit = 1, offset = 0
+  ): BoundedSourceRecordRead | null {
+    assertSourceBodyByteLimit(byteLimit);
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("invalid source-root byte offset");
+    this.database.reopenIfClosed();
+    const raw = this.database.connection.prepare(`${RECORD_BOUNDED_SELECT}
+      INDEXED BY idx_source_records_current
+      WHERE source_records.workspace_id = ? AND source_records.source_id = ?
+      ORDER BY ${CURRENT_RECORD_ORDER} LIMIT 1`).get(workspaceId, sourceId);
+    return raw == null ? null : this.readBoundedBody(raw, byteLimit, offset);
+  }
+
+  public findNextCurrentBounded(
+    workspaceId: string, afterSourceId: string | null, byteLimit = 1
+  ): BoundedSourceRecordRead | null {
+    assertSourceBodyByteLimit(byteLimit);
+    this.database.reopenIfClosed();
+    // Each source-id seek skips that source's entire obsolete-version range.
+    const raw = this.database.connection.prepare(`${RECORD_BOUNDED_SELECT}
+      INDEXED BY idx_source_records_current
+      WHERE source_records.workspace_id = ? AND source_records.source_id > ?
+      ORDER BY source_records.source_id ASC, ${CURRENT_RECORD_ORDER} LIMIT 1`)
+      .get(workspaceId, afterSourceId ?? "");
+    return raw == null ? null : this.readBoundedBody(raw, byteLimit, 0);
   }
 
   public listPage(workspaceId: string, options: FieldSourceRecordPageOptions): FieldSourceRecordPage {

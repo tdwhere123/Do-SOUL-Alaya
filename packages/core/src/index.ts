@@ -64,6 +64,7 @@ export {
   retainedSourceSpeaker
 } from "./memory/evidence-create/source-admission.js";
 export { createAuditedSourceAdmission, type AuditedSourceAdmission } from "./memory/evidence-create/audited-source-admission.js";
+export { newerSourceRecord } from "./memory/evidence-create/source-observation-currentness.js";
 export {
   createSourceObservationPublication,
   verifySourceObservationPublication,

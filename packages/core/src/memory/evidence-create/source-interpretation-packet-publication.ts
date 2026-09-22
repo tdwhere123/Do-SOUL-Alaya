@@ -23,7 +23,7 @@ type PacketInput = Readonly<{
   profile: PublishedSourceInterpretationPacket["profile"];
   provenance: PublishedSourceInterpretationPacket["provenance"];
 }>;
-type Owner = Readonly<{ stores: Pick<FieldFormationStores, "listRecords" | "getStoredRecord">; sha256: FieldContractSha256;
+type Owner = Readonly<{ stores: Pick<FieldFormationStores, "getCurrentRecord" | "getStoredRecord">; sha256: FieldContractSha256;
   evidenceService: Pick<EvidenceService, "create" | "findByIdScoped">; meter?: SourceSemanticResourceLedger }>;
 
 /** Publishes a source interpretation as evidence, without forming memory or temporal relation truth. */

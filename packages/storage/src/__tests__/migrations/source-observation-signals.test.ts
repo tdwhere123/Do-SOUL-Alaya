@@ -80,7 +80,7 @@ describe("source observation signal migration", () => {
     expect(database.connection.prepare("SELECT object_id FROM memory_content_fts WHERE memory_content_fts MATCH 'content'").all())
       .toEqual([{ object_id: "old-memory" }]);
     expect(database.connection.pragma("foreign_key_check")).toEqual([]);
-    expect(database.connection.prepare("SELECT max(version) AS version FROM schema_version").get()).toEqual({ version: 17 });
+    expect(database.connection.prepare("SELECT max(version) AS version FROM schema_version").get()).toEqual({ version: 18 });
     // File-backed upgrade-and-reopen exceeds 5s under coverage remap and on NTFS.
   }, process.platform === "win32" ? 180_000 : 60_000);
 });

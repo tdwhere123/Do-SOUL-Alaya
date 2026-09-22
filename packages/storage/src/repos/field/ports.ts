@@ -169,6 +169,7 @@ export type FieldProofEffectRow = Readonly<{
 export interface FieldSourceRecordRepo {
   insert(row: FieldSourceRecordRow): FieldSourceRecordRow;
   findById(workspaceId: string, recordId: string): FieldSourceRecordRow | null;
+  findCurrent(workspaceId: string, sourceId: string): FieldSourceRecordRow | null;
   listByWorkspace(workspaceId: string): readonly FieldSourceRecordRow[];
   listPage(workspaceId: string, options: FieldSourceRecordPageOptions): FieldSourceRecordPage;
   listEvidenceBindings(workspaceId: string): readonly FieldSourceEvidenceBindingRow[];

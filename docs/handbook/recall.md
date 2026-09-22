@@ -946,10 +946,16 @@ rows retain this fresh cost. Historical records without it remain missing, while
 a newly evaluated source-only row has zero proof-verification cost. The frozen
 source-only arm still requires zero published interpretations.
 
-Current-source discovery scans at most 32 pages of 16 historical records. An
-incomplete or unavailable scan cannot establish currentness and emits no source
-identities, with discovery left open/truncated. Indexed current-source enumeration
-is needed before scaling beyond this bound. Source-interpretation candidate diagnostics include only
+Current-source access selects the greatest exact UTC instant, then record identity,
+before checking body retention or authorized scope. Protocol's UTC order key preserves
+minute precision and every admitted fractional digit; SQLite's expression index is
+the mechanical access path over the existing source records, including erased rows.
+Per-source lookups and source-ID keyset seeks skip obsolete versions without a
+second current-source table. Discovery visits at most 512 distinct source IDs using
+one-row indexed pages and retains the independently current, authorized prefix.
+Budget exhaustion, unavailable data and unvisited sources remain open/truncated;
+they cannot establish a complete census or resurrect an older revision.
+Source-interpretation candidate diagnostics include only
 authorized current sources. Library continuation leases bind the first clock,
 request budget, caller/session, scope and database revision; changing any bound
 input requires a fresh request. Proof demotion preserves occupied positions.

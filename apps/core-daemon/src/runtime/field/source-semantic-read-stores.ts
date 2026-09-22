@@ -1,4 +1,4 @@
-import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted, compareUtcInstants, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
 import { CoreError, fieldContractSha256, type FieldFormationStores } from "@do-soul/alaya-core";
 import { RETAINED_SOURCE_READ_RESERVATION, SqliteFieldSourceRecordRepo, sourceRecordFromRow, type StorageDatabase } from "@do-soul/alaya-storage";
 
@@ -16,28 +16,21 @@ export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
 
 /** Each call re-reads current state. In particular, audit callbacks cannot reuse a pre-await source cache. */
 export function sourceSemanticReadStores(database: StorageDatabase, workspace: string, artifact: string,
-  meter: SourceSemanticReadBudget, authorized: readonly string[] | null): Pick<FieldFormationStores, "listRecords" | "getStoredRecord"> {
+  meter: SourceSemanticReadBudget, authorized: readonly string[] | null): Pick<FieldFormationStores, "getCurrentRecord" | "getStoredRecord"> {
   const repo = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
   return {
-    listRecords: (workspaceId) => {
-      if (workspaceId !== workspace) throw new CoreError("VALIDATION", "source workspace mismatch");
-      const records: SourceRecordIdentity[] = [];
-      let afterRecordedAt = "", afterRecordId = "";
-      while (true) {
-        meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
-        const page = repo.listPageBounded(workspace, { limit: 1, afterRecordedAt, afterRecordId }, 1);
-        meter.read(5, page.rows.reduce((sum, row) => sum + row.nativeBytes + row.metadataBytes, 0));
-        if (page.unavailable) throw new CoreError("CONFLICT", "source catalog is unavailable", { details: { admission: "unavailable", unavailable: "catalog" } });
-        const row = page.rows[0]?.record;
-        if (row == null) {
-          if (page.rows.length !== 0) throw new CoreError("CONFLICT", "source metadata is unavailable", { details: { admission: "unavailable", unavailable: "metadata" } });
-          break;
-        }
-        if (row.source_id === artifact) { const record = sourceRecordFromRow(row); meter.retain(record); records.push(record); }
-        afterRecordedAt = row.recorded_at; afterRecordId = row.record_id;
-        if (!page.truncated) break;
-      }
-      return records;
+    getCurrentRecord: (workspaceId, sourceId) => {
+      if (workspaceId !== workspace || sourceId !== artifact) throw new CoreError("VALIDATION", "source binding mismatch");
+      meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
+      const page = repo.findCurrentBounded(workspace, artifact, 1);
+      meter.read(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
+      if (page === null) return null;
+      if (page.record === null) throw new CoreError("CONFLICT", "source metadata is unavailable", {
+        details: { admission: "unavailable", unavailable: "metadata" }
+      });
+      const record = sourceRecordFromRow(page.record);
+      meter.retain(record);
+      return record;
     },
     getStoredRecord: (workspaceId, id) => {
       if (workspaceId !== workspace) throw new CoreError("VALIDATION", "source workspace mismatch");
@@ -68,61 +61,45 @@ export function listEligibleSemanticSources(
   authorized: readonly string[] | null
 ): { sources: SourceRecordIdentity[]; truncated: boolean; open: boolean; pages: number } {
   const repo = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
-  const latest = new Map<string, { record: SourceRecordIdentity; allowed: boolean }>();
-  let afterRecordedAt = "", afterRecordId = "", pages = 0, truncated = false, open = false;
-  while (pages < 32) {
-    try { meter.reserve(16 * 5, 16 * RETAINED_SOURCE_READ_RESERVATION); }
+  const sources: SourceRecordIdentity[] = [];
+  let afterSourceId: string | null = null, pages = 0, truncated = true, open = false;
+  // Every seek skips the preceding source's entire history. The remaining sources stay unvisited.
+  while (pages < 512) {
+    try { meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION); }
     catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
       open = true; truncated = true; break;
     }
-    const page = repo.listPageBounded(workspace, { limit: 16, afterRecordedAt, afterRecordId }, 1);
-    meter.read(Math.max(1, page.rows.length) * 5, page.rows.reduce((sum, row) => sum + row.nativeBytes + row.metadataBytes, 0));
+    const page = repo.findNextCurrentBounded(workspace, afterSourceId, 1);
+    meter.read(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
     pages += 1;
-    if (page.unavailable === true) { open = true; break; }
-    for (const row of page.rows) {
-      if (row.record == null) { open = true; continue; }
-      const record = sourceRecordFromRow(row.record);
-      const deleted = row.record.source_body === null;
-      if (deleted && row.bodyBytes > 0) open = true;
-      let allowed = !deleted;
-      if (allowed) {
-        try { authorizeSemanticScope(record.scope_class, authorized); } catch { allowed = false; }
-      }
-      const prev = latest.get(record.source_id);
-      const order = prev === undefined ? 1 : compareUtcInstants(prev.record.recorded_at, record.recorded_at);
-      if (prev === undefined || order === -1 || order === 0 && prev.record.identity < record.identity) {
-        try { meter.retain(record, "current source catalog"); }
-        catch (error) {
-          if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-          return { sources: [], truncated: true, open: true, pages };
-        }
-        latest.set(record.source_id, { record, allowed });
-      }
+    if (page === null) { truncated = false; break; }
+    if (page.record === null) { open = true; break; }
+    const record = sourceRecordFromRow(page.record);
+    afterSourceId = record.source_id;
+    if (page.record.source_body === null || page.invalidOffset) {
+      if (page.bodyBytes > 0 || page.invalidOffset) open = true;
+      continue;
     }
-    const last = page.rows.at(-1)?.record;
-    if (last == null) { truncated = page.truncated; break; }
-    afterRecordedAt = last.recorded_at; afterRecordId = last.record_id;
-    truncated = page.truncated;
-    if (!page.truncated) break;
+    try { authorizeSemanticScope(record.scope_class, authorized); } catch { continue; }
+    try { meter.retain(record, "current source catalog"); }
+    catch (error) {
+      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+      open = true; break;
+    }
+    sources.push(record);
   }
   if (truncated) open = true;
   return {
-    // A historical prefix cannot establish currentness: later exclusions and erasures supersede it too.
-    sources: (open || truncated ? [] : [...latest.values()]).filter((row) => row.allowed).map((row) => row.record)
-      .sort((left, right) => left.identity.localeCompare(right.identity)),
+    sources: sources.sort((left, right) => left.identity.localeCompare(right.identity)),
     truncated, open, pages
   };
 }
 
-export function currentSemanticSource(stores: Pick<FieldFormationStores, "listRecords" | "getStoredRecord">,
+export function currentSemanticSource(stores: Pick<FieldFormationStores, "getCurrentRecord" | "getStoredRecord">,
   workspace: string, sourceId: string) {
-  const records = stores.listRecords(workspace).filter((row) => row.source_id === sourceId);
-  if (records.length === 0) throw new CoreError("NOT_FOUND", "source is not currently admitted", { details: { admission: "no_eligible_source" } });
-  const current = records.reduce((a, b) => {
-    const order = compareUtcInstants(a.recorded_at, b.recorded_at);
-    return order === -1 || order === 0 && a.identity < b.identity ? b : a;
-  });
+  const current = stores.getCurrentRecord(workspace, sourceId);
+  if (current === null) throw new CoreError("NOT_FOUND", "source is not currently admitted", { details: { admission: "no_eligible_source" } });
   const stored = stores.getStoredRecord(workspace, current.identity);
   if (stored === null) throw new CoreError("CONFLICT", "current source body is not available", { details: { admission: "unavailable", unavailable: "source_body" } });
   return stored;

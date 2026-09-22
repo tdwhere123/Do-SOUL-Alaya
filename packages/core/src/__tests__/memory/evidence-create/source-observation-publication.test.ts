@@ -494,10 +494,13 @@ describe("source observation publication", () => {
     expectNoPublishedObservation(fixture.database);
   });
 
-  it("selects the later UTC instant when recorded_at spellings differ", async () => {
+  it.each([
+    ["2026-09-15T12:00:00.001Z", "2026-09-15T12:00Z"],
+    ["2026-09-15T12:00:00.00000000002Z", "2026-09-15T12:00:00.00000000001Z"]
+  ])("selects the later UTC instant %s over %s", async (newer, older) => {
     const fixture = await openFixture();
-    await admitSource(fixture, SOURCE, "1", "2026-09-15T12:00:00.001Z");
-    await admitSource(fixture, "User: Alice uses apps.", "2", "2026-09-15T12:00Z");
+    await admitSource(fixture, SOURCE, "1", newer);
+    await admitSource(fixture, "User: Alice uses apps.", "2", older);
     const published = await fixture.publication.publish({
       signal: observationSignal(locatedInterpretation()), sourceEventAnchor: null
     });

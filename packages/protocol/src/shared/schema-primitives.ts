@@ -13,15 +13,19 @@ export const IsoDatetimeStringSchema = z.union([
   )
 ]);
 
+/** Exact binary-sortable UTC key; equivalent spellings have the same key. */
+export function utcInstantOrderKey(value: string): string | undefined {
+  if (!IsoDatetimeStringSchema.safeParse(value).success) return undefined;
+  const normalized = MINUTE_PRECISION_UTC.test(value) ? `${value.slice(0, -1)}:00Z` : value;
+  const [whole, fraction = ""] = normalized.slice(0, -1).split(".");
+  // Keep every significant fractional digit. Omitting Z lets shorter fractions
+  // sort before longer ones with the same prefix, without a fixed precision cap.
+  return `${whole}.${fraction.replace(/0+$/u, "")}`;
+}
+
 export function compareUtcInstants(left: string, right: string): number | undefined {
-  if (!IsoDatetimeStringSchema.safeParse(left).success || !IsoDatetimeStringSchema.safeParse(right).success) return undefined;
-  const normalize = (value: string) => MINUTE_PRECISION_UTC.test(value) ? `${value.slice(0, -1)}:00Z` : value;
-  const [leftWhole, leftFraction = ""] = normalize(left).slice(0, -1).split(".");
-  const [rightWhole, rightFraction = ""] = normalize(right).slice(0, -1).split(".");
-  if (leftWhole !== rightWhole) return leftWhole! < rightWhole! ? -1 : 1;
-  // Date.parse discards fractional precision that the public datetime schema permits.
-  const width = Math.max(leftFraction.length, rightFraction.length);
-  const l = leftFraction.padEnd(width, "0"), r = rightFraction.padEnd(width, "0");
+  const l = utcInstantOrderKey(left), r = utcInstantOrderKey(right);
+  if (l === undefined || r === undefined) return undefined;
   return l === r ? 0 : l < r ? -1 : 1;
 }
 

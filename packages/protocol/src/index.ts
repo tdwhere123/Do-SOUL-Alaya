@@ -220,6 +220,7 @@ export {
   BoundedIdSchema,
   BoundedJsonObjectSchema,
   compareUtcInstants,
+  utcInstantOrderKey,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema,

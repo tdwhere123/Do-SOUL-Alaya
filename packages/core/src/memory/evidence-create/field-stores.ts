@@ -7,10 +7,13 @@ import {
   type SourceRecordIdentity
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { newerSourceRecord } from "./source-observation-currentness.js";
 
 export interface FieldFormationStores {
   runAtomic<T>(work: () => T): T;
   getRecord(workspaceId: string, recordId: string): SourceRecordIdentity | null;
+  /** Newest UTC instant, then greatest record identity; choose before body or scope filtering. */
+  getCurrentRecord(workspaceId: string, sourceId: string): SourceRecordIdentity | null;
   getStoredRecord(workspaceId: string, recordId: string): StoredSourceRecord | null;
   putRecord(record: SourceRecordIdentity, contentBytes: string): SourceRecordIdentity;
   getSpan(workspaceId: string, spanId: string): AddressableSourceSpan | null;
@@ -64,6 +67,15 @@ function bindFieldStores(maps: Readonly<{
   return {
     runAtomic: (work) => runInMemoryAtomic(maps, work),
     getRecord: (workspaceId, recordId) => maps.records.get(key(workspaceId, recordId)) ?? null,
+    getCurrentRecord: (workspaceId, sourceId) => {
+      let current: SourceRecordIdentity | null = null;
+      for (const record of maps.records.values()) {
+        if (record.workspace_id === workspaceId && record.source_id === sourceId) {
+          current = current === null ? record : newerSourceRecord(current, record);
+        }
+      }
+      return current;
+    },
     getStoredRecord: (workspaceId, recordId) => storedRecord(maps, workspaceId, recordId),
     putRecord: (record, contentBytes) => putRecordWithBinding(maps, record, contentBytes),
     getSpan: (workspaceId, spanId) => maps.spans.get(key(workspaceId, spanId)) ?? null,
