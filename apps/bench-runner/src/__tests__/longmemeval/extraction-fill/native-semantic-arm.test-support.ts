@@ -2,8 +2,10 @@ import { join } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { expect } from "vitest";
-import { SoulInterpretationResponseSchema } from "@do-soul/alaya-protocol";
-import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
+import { SoulInterpretationResponseSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+  type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { listRetainedSourceSemanticKeys } from "../../../runs/snapshot/source-records/publish.js";
@@ -40,6 +42,7 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 }
   }, root);
   expect(frozen.contract).toBe("longmemeval-native-semantic-v1");
+  expect(frozen).toMatchObject({ native_route: { access_policy: "query-conditioned-v1" } });
   expect(frozen.metric).toBe("source-bearing-union-first-exposure-any-at-k-v1");
   expect(frozen.selected.map((row) => row.source_manifest.length)).toEqual([2, 2, 2]);
   expect(JSON.stringify(frozen)).not.toContain("answer q0");
@@ -54,6 +57,7 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     const publication = readChainArtifact(row.publication_path) as { census_count: number; admitted_count: number; published_count: number };
     expect(publication).toMatchObject({ census_count: 2, admitted_count: 2 });
     const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(row.chain_root, "prepare.json")));
+    expect(plan.config.access_policy).toBe("query-conditioned-v1");
     if (row.question_id === "q2") {
       expect(publication.published_count).toBe(0);
       expect(plan.queries[0]).toMatchObject({ status: "blocked", reason: "cache_invalid" });
@@ -62,6 +66,8 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     expect(publication.published_count).toBeGreaterThan(0);
     expect(LongMemEvalPublicationSchema.safeParse(publication).success).toBe(false);
     expect(plan.queries[0]).toMatchObject({ status: "ready", discovery_open: false });
+    if (plan.queries[0]?.status === "ready") expect(plan.queries[0].discovery_trace.every((page) =>
+      page.access.policy === "query-conditioned-v1")).toBe(true);
   }
   if (prepared.result.contract !== "longmemeval-native-semantic-prepared-v1") throw new Error("native preparation required");
   // One combined workset feeds one existing durable authority across all query opportunities.
@@ -77,6 +83,7 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     expect(response.proofs?.length).toBeGreaterThan(0);
     expect(native.rows[0]!.first_exposure).not.toBeNull();
     expect(response.provider_attempts).toBe(0);
+    expect(response.discovery?.access?.policy).toBe("query-conditioned-v1");
   }
   const measured = await measureLongMemEvalSemanticRun(root, replay.path);
   expect(measured.result).toMatchObject({ contract: "longmemeval-native-semantic-measurement-v1", provider_calls: 0,
@@ -110,18 +117,18 @@ export async function assertPerQueryOpportunity(config: SemanticChainConfig, roo
 }
 
 function authoredQuery() {
-  return JSON.stringify({ contract: "source-semantic-query-response-v3",
-    outcome: { status: "interpreted" }, query: { contract: "source-semantic-query-meaning-v1", alternatives: [{ meaning: {
+  return JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
+    outcome: { status: "interpreted" }, query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
       kind: "statement", key: "complete", predicate: "complete", arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
-    } }], return: ["theme"], gaps: [] } });
+    }] }], return: ["theme"], gaps: [] } });
 }
 
 function authoredCorrespondence(userPrompt: string) {
   const request = JSON.parse(userPrompt) as SourceSemanticCorrespondenceRequest;
   const interpretation = request.source_interpretation_descriptors[0]!.interpretation;
   const support = interpretation.frames[0]!.predicate_support;
-  return JSON.stringify({ contract: "source-semantic-correspondence-response-v3", outcome: { status: "interpreted" },
-    semantic_correspondence: { contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1", selections: [
+  return JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
+    semantic_correspondence: { contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, source_interpretation_handle: "source1", selections: [
       { query: request.catalog!.query_endpoints.find((entry) => entry.kind === "predicate")!.handle,
         source: request.catalog!.source_endpoints.find((entry) => entry.kind === "frame")!.handle, query_excerpt: "completed",
         source_semantic_support: support.kind === "explicit" ? [{ kind: "lexical", mentions: support.mentions }] : [] },

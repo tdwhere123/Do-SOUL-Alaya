@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
-import { SoulMemorySearchRequestSchema, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
+import { SoulMemorySearchRequestSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+  type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import { restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js";
@@ -17,7 +19,7 @@ import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun } from "../
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
-import { chainIdentity } from "../../../runs/semantic-chain/contract.js";
+import { chainIdentity, SemanticChainPlanSchema, readChainArtifact } from "../../../runs/semantic-chain/contract.js";
 
 const roots = new Set<string>();
 const CLOCK = "2026-09-13T00:00:00.000Z";
@@ -82,14 +84,21 @@ describe("complete-source census and publication", () => {
       inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
     const filled = await executeSemanticProposalFill({ workset: frozen.query_workset, cacheRoot: queryCache, authority,
       config: { providerUrl: "http://127.0.0.1:9", model: frozen.config.model, requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" },
-      extractor: { extract: async () => ({ rawJson: JSON.stringify({ contract: "source-semantic-query-response-v4",
-        outcome: { status: "interpreted" }, query: { contract: "source-semantic-query-meaning-v2", alternatives: [{ conditions: [{
+      extractor: { extract: async () => ({ rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
+        outcome: { status: "interpreted" }, query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
           kind: "statement", key: "record", predicate: "record", arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
         }] }], return: ["theme"], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
     expect(filled.newly_admitted).toBe(2);
     const prepared = await prepareLongMemEvalSemanticRun(root);
     expect(prepared.result.rows.every((row) => row.status === "prepared")).toBe(true);
+    for (const row of prepared.result.rows) {
+      if (row.status !== "prepared") throw new Error(row.reason);
+      const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(row.chain_root, "prepare.json")));
+      expect(plan.config.access_policy).toBe("canonical-v1");
+      expect(plan.queries.every((query) => query.status === "ready"
+        && query.discovery_trace.every((page) => page.access.policy === "canonical-v1"))).toBe(true);
+    }
     const replayed = await replayLongMemEvalSemanticRun(root, prepared.path);
     expect(await replayLongMemEvalSemanticRun(root, prepared.path)).toEqual(replayed);
     const measured = await measureLongMemEvalSemanticRun(root, replayed.path);

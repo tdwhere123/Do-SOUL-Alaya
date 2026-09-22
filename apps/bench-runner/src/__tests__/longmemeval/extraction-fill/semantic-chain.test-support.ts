@@ -1,8 +1,10 @@
 import { existsSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
-import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
-import { hashSourceRecordId, SoulInterpretationResponseSchema } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+  type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
+import { hashSourceRecordId, SoulInterpretationResponseSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, SourceSemanticAccessPolicySchema } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { BENCH_DAEMON_DB_FILENAME } from "../../../runs/snapshot/materialize.js";
@@ -17,7 +19,7 @@ import { readChainArtifact, writeChainArtifact } from "../../../runs/semantic-ch
 import { SemanticChainConfigSchema } from "../../../runs/semantic-chain/contract.js";
 import { assertPerQueryOpportunity } from "./native-semantic-arm.test-support.js";
 
-export async function assertNativeSemanticChain(cacheRoot: string): Promise<void> {
+export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySnapshot: { snapshot_path: string; db_sha256: string }): Promise<void> {
   const queryWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v2",
     kind: "query", model: "gemini-2.5-flash-lite", request_profile: "gemini-2.5-nonthinking-v1",
     items: [{ original_query: "What was completed?" }, { original_query: "What else was completed?" }] });
@@ -28,9 +30,11 @@ export async function assertNativeSemanticChain(cacheRoot: string): Promise<void
     workspace_id: "source-semantic-library", run_id: "source-semantic-library-run",
     query_workset: queryWorkset, query_cache_root: queryCache, correspondence_cache_root: correspondenceCache,
     max_output_tokens: 4096, discovery_page_cap: 4, correspondence_pair_cap: 1,
-    budget: { schema_version: 1, work_units: 200000, memory_bytes: 20000000,
+    access_policy: SourceSemanticAccessPolicySchema.enum["canonical-v1"],
+    budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000,
       page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 },
     authorized_scopes: { mode: "unrestricted" }, output_byte_limit: 100000 };
+  expect(SemanticChainConfigSchema.safeParse({ ...config, access_policy: undefined }).success).toBe(false);
   const blockedRoot = join(cacheRoot, "blocked-chain");
   const blocked = await prepareSemanticChain(config, blockedRoot);
   expect(blocked.queries.every((row) => row.status === "blocked")).toBe(true);
@@ -52,8 +56,8 @@ export async function assertNativeSemanticChain(cacheRoot: string): Promise<void
   const fill = await executeSemanticProposalFill({ workset: oneQuery, cacheRoot: queryCache, authority,
     config: { providerUrl: "http://127.0.0.1:9", model: queryWorkset.model,
       requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: "source-semantic-query-response-v4", outcome: { status: "interpreted" },
-        query: { contract: "source-semantic-query-meaning-v2", alternatives: [{ conditions: [{
+      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
+        query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
           kind: "statement", key: "complete", predicate: "complete",
           arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
         }] }], return: ["theme"], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
@@ -61,18 +65,44 @@ export async function assertNativeSemanticChain(cacheRoot: string): Promise<void
     }) } });
   expect(fill.newly_admitted).toBe(1);
   await expect(replaySemanticChain(blockedRoot)).rejects.toThrow(/query-semantics state changed/u);
+  const limited = await prepareSemanticChain({ ...config,
+    budget: { ...config.budget, work_units: 200000, memory_bytes: 20000000 }
+  }, join(cacheRoot, "limited-observation-chain"));
+  expect(limited.queries[0]).toMatchObject({ status: "ready", discovery_open: true,
+    discovery_truncated: true, unvisited_source_interpretation_count: null,
+    discovery_trace: [{ access: { unvisited_interpretations: true, stopping_reasons: ["budget"] } }] });
+  if (limited.queries[0]?.status === "ready") expect(limited.queries[0].descriptors.length).toBeLessThan(18);
   const root = join(cacheRoot, "native-chain");
   const plan = await prepareSemanticChain(config, root);
+  await expect(prepareSemanticChain({ ...config, access_policy: "query-conditioned-v1" }, root)).rejects.toThrow(/preparation inputs changed/u);
   const ready = plan.queries.find((row) => row.status === "ready");
   if (ready?.status !== "ready") throw new Error("query fixture was not admitted");
   expect(ready.descriptors).toHaveLength(18);
   expect(ready.discovery_pages).toBe(2);
+  expect(ready.discovery_trace.every((page) => page.access.policy === "canonical-v1")).toBe(true);
+  expect(new Set(ready.discovery_trace.map((page) => page.access.pool_id)).size).toBe(1);
   expect(ready.selected_source_interpretation_ids).toHaveLength(1);
   expect(plan.correspondence_workset?.items).toHaveLength(1);
   const capped = await prepareSemanticChain({ ...config, discovery_page_cap: 1 }, join(cacheRoot, "capped-chain"));
   expect(capped.queries[0]).toMatchObject({ status: "ready", discovery_pages: 1, discovery_open: true,
-    discovery_truncated: true, unvisited_source_interpretation_count: null });
+    discovery_truncated: true, unvisited_source_interpretation_count: 0 });
   if (capped.queries[0]?.status === "ready") expect(capped.queries[0].descriptors).toHaveLength(16);
+  const traceRoot = join(cacheRoot, "source-trace-chain");
+  const sourceOnly = await prepareSemanticChain({ ...config, snapshot_path: sourceOnlySnapshot.snapshot_path,
+    snapshot_sha256: sourceOnlySnapshot.db_sha256 }, traceRoot);
+  expect(sourceOnly.queries[0]).toMatchObject({ status: "ready", discovery_pages: 1, discovery_open: false,
+    discovery_truncated: false, descriptors: [], unvisited_source_interpretation_count: 0,
+    discovery_trace: [{ access: { observed_source_count: 18, observed_interpretation_count: 0,
+      unvisited_sources: false, unvisited_interpretations: false,
+      trace: { kind: "preparation_page", source_offset: 0, omitted_source_count: 2 } } }] });
+  if (sourceOnly.queries[0]?.status === "ready") expect(sourceOnly.queries[0].discovery_trace[0]?.continuation_handle).not.toBeNull();
+  const sourceReplay = await replaySemanticChain(traceRoot);
+  const sourcePayload = readChainArtifact(sourceReplay.path) as { rows: { response?: unknown }[] };
+  const sourceResponse = SoulInterpretationResponseSchema.parse(sourcePayload.rows[0]?.response);
+  if (sourceResponse.operation !== "recall") throw new Error("source-only recall required");
+  expect(sourceResponse.discovery?.access).toMatchObject({ policy: "canonical-v1", observed_source_count: 18 });
+  expect(sourceResponse.results?.length).toBeGreaterThan(0);
+  expect(sourceResponse.proofs ?? []).toHaveLength(0);
   unlinkSync(join(root, "semantic_correspondence-workset.json"));
   expect(await prepareSemanticChain(config, root)).toEqual(plan);
   expect(existsSync(join(root, "semantic_correspondence-workset.json"))).toBe(true);
@@ -96,8 +126,8 @@ export async function assertNativeSemanticChain(cacheRoot: string): Promise<void
   const aligned = await executeSemanticProposalFill({ workset, cacheRoot: correspondenceCache, authority: correspondenceAuthority,
     config: { providerUrl: "http://127.0.0.1:9", model: workset.model,
       requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: "source-semantic-correspondence-response-v3", outcome: { status: "interpreted" },
-        semantic_correspondence: { contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1", selections: [
+      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
+        semantic_correspondence: { contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, source_interpretation_handle: "source1", selections: [
           { query: predicate.handle, source: frame.handle, query_excerpt: "completed",
             source_semantic_support: support.kind === "explicit" ? [{ kind: "lexical", mentions: support.mentions }] : [] },
           { query: slot.handle, source: sourceSlot.handle, query_excerpt: "What", source_semantic_support: sourceInterpretation.frames[0]!.slots[0]!.support }
@@ -110,6 +140,7 @@ export async function assertNativeSemanticChain(cacheRoot: string): Promise<void
   expect(proof.operation).toBe("recall");
   if (proof.operation !== "recall") throw new Error("wrong native response");
   expect(proof.proofs?.length).toBeGreaterThan(0);
+  expect(proof.discovery?.access?.policy).toBe("canonical-v1");
   expect(proof.index?.as_of).toBe(config.interpretation_clock);
   const selectedSource = ready.descriptors.find((row) => row.interpretation_id === ready.selected_source_interpretation_ids[0])!;
   const measuredRow = measureSemanticChain(root, proofReplay.path, plan.queries.map((row) => ({

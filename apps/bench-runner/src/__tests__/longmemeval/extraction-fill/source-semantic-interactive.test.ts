@@ -161,7 +161,12 @@ it("fills complete-source open semantics through interactive generateContent wit
   expect(report.source_interpretation_binding_complete).toBe(true);
   expect(report.sources.every((source) => source.source_interpretation_binding?.kind === "host_publication_association")).toBe(true);
   const providerCalls = fixture.fetchMock.mock.calls.length;
-  await assertNativeSemanticChain(cacheRoot);
+  const sourceOnly = await publishSourceSemanticSnapshot({
+    snapshotPath: join(cacheRoot, "source-only.sqlite"), dataDirRoot: join(cacheRoot, "source-only-publication"),
+    recordedAt: "2026-09-21T00:00:00.000Z", producerCommit: "a".repeat(40),
+    populations: [{ name: "fixture", dataDir, pinnedMetaRoot, model: MODEL, requestProfile: REQUEST_PROFILE }]
+  });
+  await assertNativeSemanticChain(cacheRoot, sourceOnly);
   await assertNativeLongMemEvalArm(dataDir, pinnedMetaRoot, [cacheRoot, secondCache]);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
 }, 60000);

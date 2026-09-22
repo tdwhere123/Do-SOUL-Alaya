@@ -1,6 +1,7 @@
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { z } from "zod";
+import { SourceSemanticAccessPolicySchema } from "@do-soul/alaya-protocol";
 import { prepareSemanticChain } from "../semantic-chain/prepare.js";
 import { replaySemanticChain } from "../semantic-chain/replay.js";
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../semantic-chain/contract.js";
@@ -137,6 +138,8 @@ function questionChainConfig(frozen: LongMemEvalSemanticFreeze, selected: LongMe
       ? config.correspondence_cache_root : join(directory, "semantic_correspondence-cache"),
     max_output_tokens: config.max_output_tokens, discovery_page_cap: "arm" in config ? config.discovery_page_cap : 1,
     correspondence_pair_cap: "arm" in config ? config.correspondence_pair_cap : 0,
+    access_policy: frozen.contract === "longmemeval-native-semantic-v1" ? frozen.native_route.access_policy
+      : SourceSemanticAccessPolicySchema.enum["canonical-v1"],
     budget: config.budget, output_byte_limit: config.output_byte_limit,
     authorized_scopes: "arm" in config ? config.authorized_scopes : { mode: "named", scopes: ["project"] } };
 }

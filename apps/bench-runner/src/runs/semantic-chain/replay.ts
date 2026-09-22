@@ -63,8 +63,12 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
         const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
           SoulInterpretationRequestSchema.parse({ operation: "recall", original_query: query.original_query, query_semantics: query.query_semantics,
             semantic_correspondences: arm === "retained" ? ready : [], accepts_unreviewed_conditional_results: true,
-            budget: config.budget, output_byte_limit: config.output_byte_limit, authorized_scopes: config.authorized_scopes })));
+            budget: config.budget, output_byte_limit: config.output_byte_limit, authorized_scopes: config.authorized_scopes,
+            access_policy: config.access_policy })));
         if (response.operation !== "recall") throw new Error("native recall returned a different operation");
+        if (response.index !== undefined && response.discovery?.access?.policy !== config.access_policy) {
+          throw new Error("native recall did not bind the frozen access policy");
+        }
         const exposure = response.index === undefined || response.delivery_id === undefined ? null
           : recordSourceSemanticLibraryFirstExposure(response);
         const row = { query_key: query.query_key, status: exposure === null ? "native_unavailable" : "replayed",

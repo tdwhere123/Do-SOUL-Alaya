@@ -6,7 +6,7 @@ import type { BenchDaemonHandle } from "../../harness/daemon.js";
 import { readSemanticChainProposalResults, semanticChainProposalStates } from "./inputs.js";
 import { parseSemanticProposalWorkset, SEMANTIC_PROPOSAL_WORKSET_CONTRACT } from "../semantic-proposal/workset.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
-import { SemanticChainConfigSchema, SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainArtifact,
+import { SemanticChainConfigSchema, SemanticChainPlanSchema, SEMANTIC_CHAIN_PLAN_CONTRACT, chainIdentity, readChainArtifact, writeChainArtifact,
   writeChainJson, assertChainSnapshot, withSemanticChainDaemon, type SemanticChainConfig, type SemanticChainPlan } from "./contract.js";
 
 export async function prepareSemanticChain(value: unknown, root: string): Promise<SemanticChainPlan> {
@@ -49,7 +49,7 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
       contract: SEMANTIC_PROPOSAL_WORKSET_CONTRACT, kind: "semantic_correspondence", model: config.query_workset.model,
       request_profile: config.query_workset.request_profile, items
     });
-    const plan = SemanticChainPlanSchema.parse({ contract: "source-semantic-chain-plan-v3", input_identity: inputIdentity,
+    const plan = SemanticChainPlanSchema.parse({ contract: SEMANTIC_CHAIN_PLAN_CONTRACT, input_identity: inputIdentity,
       config, queries, correspondence_workset: workset });
     writeChainArtifact(path, plan);
     materializeCorrespondenceWorkset(plan, root);
@@ -70,26 +70,40 @@ async function discover(daemon: BenchDaemonHandle, config: SemanticChainConfig, 
   const handles = new Set<string>();
   const trace = [];
   let continuation: string | undefined;
-  let pages = 0, open = false, truncated = false;
+  let pages = 0, open = false, remainingDescriptors = 0;
+  let unvisitedInterpretations = false;
+  let poolId: string | undefined;
   do {
     const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
       SoulInterpretationRequestSchema.parse({ operation: "prepare_query", original_query: original, query_semantics: querySemantics,
-        budget: config.budget, authorized_scopes: config.authorized_scopes,
+        budget: config.budget, authorized_scopes: config.authorized_scopes, access_policy: config.access_policy,
         ...(continuation === undefined ? {} : { continuation_handle: continuation }) })));
     if (response.operation !== "prepare_query") throw new Error("native discovery returned a different operation");
-    trace.push({ coverage: response.coverage, work: response.work, continuation_handle: response.continuation_handle ?? null,
+    const access = response.access;
+    if (access === undefined || access.policy !== config.access_policy || access.trace.kind !== "preparation_page") {
+      throw new Error("native discovery did not bind the frozen access policy");
+    }
+    if ((poolId !== undefined && access.pool_id !== poolId) || access.trace.interpretation_offset !== descriptors.length) {
+      throw new Error("native discovery changed its bound candidate pool or offset");
+    }
+    poolId = access.pool_id;
+    trace.push({ coverage: response.coverage, work: response.work, access, continuation_handle: response.continuation_handle ?? null,
       candidate_ids: response.candidates.map((candidate) => candidate.interpretation_id) });
     pages++;
-    open = response.coverage.discovery !== "complete";
-    truncated ||= response.truncated;
+    open = response.coverage.discovery !== "complete" || access.unvisited_sources || access.unvisited_interpretations;
+    unvisitedInterpretations = access.unvisited_interpretations;
+    remainingDescriptors = access.observed_interpretation_count - access.trace.interpretation_offset - response.candidates.length;
+    if (remainingDescriptors < 0) throw new Error("native discovery exceeded its observed candidate pool");
     for (const descriptor of response.candidates) {
-      if (seen.has(descriptor.interpretation_id)) continue;
+      if (seen.has(descriptor.interpretation_id)) throw new Error("native discovery repeated a candidate");
       seen.add(descriptor.interpretation_id); descriptors.push(descriptor);
     }
     continuation = response.continuation_handle;
     if (continuation !== undefined && handles.has(continuation)) throw new Error("native discovery continuation did not advance");
     if (continuation !== undefined) handles.add(continuation);
-  } while (continuation !== undefined && pages < config.discovery_page_cap);
-  return { descriptors, discovery_trace: trace, discovery_pages: pages, discovery_open: open || continuation !== undefined,
-    discovery_truncated: truncated || continuation !== undefined, unvisited_source_interpretation_count: null };
+    // Source trace pagination does not create another correspondence opportunity.
+  } while (remainingDescriptors > 0 && continuation !== undefined && pages < config.discovery_page_cap);
+  return { descriptors, discovery_trace: trace, discovery_pages: pages, discovery_open: open || remainingDescriptors > 0,
+    discovery_truncated: open || remainingDescriptors > 0,
+    unvisited_source_interpretation_count: unvisitedInterpretations ? null : 0 };
 }

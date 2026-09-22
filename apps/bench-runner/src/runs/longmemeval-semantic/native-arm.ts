@@ -5,7 +5,7 @@ import {
   SOURCE_SEMANTIC_CACHE_CONTRACT, SOURCE_SEMANTIC_PACKET_CONTRACT, SOURCE_SEMANTIC_QUERY_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
-  SOURCE_SEMANTIC_LIBRARY_OCCUPANCY, SOURCE_SEMANTIC_LIBRARY_TIE_POLICY
+  SOURCE_SEMANTIC_LIBRARY_OCCUPANCY, SOURCE_SEMANTIC_LIBRARY_TIE_POLICY, SourceSemanticAccessPolicySchema
 } from "@do-soul/alaya-protocol";
 import { cacheFilePath } from "../compile-seed/cache/cache-shard.js";
 import { listRetainedSourceSemanticKeys } from "../snapshot/source-records/publish.js";
@@ -19,6 +19,7 @@ export const NATIVE_SEMANTIC_ROUTE = {
   occupancy: SOURCE_SEMANTIC_LIBRARY_OCCUPANCY, tie_policy: SOURCE_SEMANTIC_LIBRARY_TIE_POLICY,
   source_interpretation: SOURCE_SEMANTIC_PACKET_CONTRACT, source_cache: SOURCE_SEMANTIC_CACHE_CONTRACT,
   query_semantics: SOURCE_SEMANTIC_QUERY_CONTRACT, semantic_correspondence: SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
+  access_policy: SourceSemanticAccessPolicySchema.enum["query-conditioned-v1"],
   pair_allocation: "per_query_native_prefix", global_spend: "semantic_proposal_authority_attempt_ledger",
   payload: "native_bounded_encoding"
 } as const;

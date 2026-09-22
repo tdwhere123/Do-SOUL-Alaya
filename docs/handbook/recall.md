@@ -999,9 +999,20 @@ arm. It freezes the complete original source census, retained interpretation cac
 bytes and publication associations, query context/clock, workspace/scopes, native
 delivery contract and resource policy. Existing publication and generic semantic-chain
 owners perform preparation, snapshot reopen, discovery, correspondence receive,
-public recall and initial exposure. Plan v3 gives each query its own bounded native
+public recall and initial exposure. Plan v4 requires an explicit Protocol access
+policy in the frozen configuration and forwards it unchanged during preparation
+and replay. The native arm pins `query-conditioned-v1`; the source-only arm pins
+`canonical-v1`. Historical source-only artifacts keep their explicit offline
+readmission owner; the current chain reader does not fall back to an older plan.
+Each query gets its own bounded native
 candidate opportunity; one combined proposal workset uses the existing authority
-and attempt ledger for global spend. Missing interpretations never delete sources,
+and attempt ledger for global spend. Preparation retains the native access receipt
+and stops once all observed interpretation descriptors have been received. A source
+trace continuation alone is not another correspondence opportunity or an open
+census: the receipt's offsets and omitted counts preserve the undisplayed rows.
+Actual unvisited interpretations retain an unknown count; observed descriptors left
+behind a page cap remain separately visible in the receipt and keep discovery open.
+Missing interpretations never delete sources,
 and unavailable queries remain in the measurement denominator. Validated delivered
 proofs establish engineering mechanism exercise only. This arm changes neither
 native selection policy nor ordinary recall defaults.
