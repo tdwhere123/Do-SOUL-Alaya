@@ -441,11 +441,12 @@ it("does not resurrect an erased current source as evidence", async () => {
 
 it("does not claim complete public MCP payload after preview omission or shortening", async () => {
   expect(LONG.length).toBe(2001);
-  await withHost([{ id: "artifact-long", content: LONG }, { id: "artifact-silent", content: SILENT }], async (session) => {
+  await withHost([...Array.from({ length: 6 }, (_, index) => ({ id: `artifact-long-${index}`, content: LONG })),
+    { id: "artifact-silent", content: SILENT }], async (session) => {
     const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
     const worker = await workerRecall(session, semantics, []);
     const workerPreviews = Object.values(worker.previews ?? {});
-    expect(workerPreviews.every((row) => row.length <= 4_096)).toBe(true);
+    expect(workerPreviews.every((row) => Buffer.byteLength(row, "utf8") <= 4_096)).toBe(true);
     const mcp = await callAlayaMcpMemoryTool(
       { memoryToolHandler: session.handler, contextProvider: () => session.context },
       "soul.interpretation",
@@ -456,7 +457,11 @@ it("does not claim complete public MCP payload after preview omission or shorten
     );
     const publicRecall = mcpRecall(mcp.structuredContent);
     const publicRows = publicRecall.results ?? [];
-    expect(publicRows.length).toBeGreaterThan(0);
+    expect(publicRows).toHaveLength(7);
+    expect(publicRows.every((row) => row.content_preview !== "[payload omitted]")).toBe(true);
+    expect(publicRows.some((row) => row.content_preview === SILENT && row.budget_state.within_budget)).toBe(true);
+    expect(publicRows.reduce((total, row) => total + row.budget_state.token_estimate, 0)).toBeLessThanOrEqual(2000);
+    expect(Buffer.byteLength(JSON.stringify(publicRecall))).toBeLessThanOrEqual(1_000_000);
     const altered = publicRows.some((row, offset) => {
       const entry = publicRecall.index?.entries[offset];
       const stored = entry === undefined ? undefined : worker.previews?.[indexEntryCacheKey(entry)];
@@ -465,6 +470,25 @@ it("does not claim complete public MCP payload after preview omission or shorten
     });
     expect(altered).toBe(true);
     expect(publicRecall.coverage.payload).not.toBe("complete");
+  });
+}, 60000);
+
+it("keeps native and public source previews on UTF-8 boundaries", async () => {
+  const prefix = `User: ${"x".repeat(4089)}`;
+  await withHost([{ id: "unicode-source", content: `${prefix}🙂tail` }], async (session) => {
+    const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
+    const worker = await workerRecall(session, semantics, []);
+    expect(Object.values(worker.previews ?? {})).toEqual([prefix]);
+    expect(worker.coverage.payload).toBe("truncated");
+    const response = await callInterpretation(session.handler, {
+      operation: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
+      query_semantics: semantics, semantic_correspondences: [], budget: BUDGET,
+      output_byte_limit: 1_000_000, authorized_scopes: SCOPES
+    }, session.context);
+    if (response.operation !== "recall") throw new Error("library recall expected");
+    expect(response.results?.[0]?.content_preview).toBe(prefix);
+    expect(response.coverage.payload).toBe("truncated");
+    expect(response.index?.completeness.payload).not.toBe("complete");
   });
 }, 60000);
 

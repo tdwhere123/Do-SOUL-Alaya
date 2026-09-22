@@ -22,6 +22,12 @@ exclusions, and measurement subjects through the shared entity-mention path.
 Catalog grounding and invalid-range rejection remain unchanged; previous raw
 responses and receipts retain their original identity and outcome.
 
+Library previews share the existing Recall token estimator and reserve display
+space for every occupied root before distributing the remaining allowance.
+Native preview reads use the existing UTF-8 hydration owner with a 4096-byte
+limit. Partial native previews remain partial in both public coverage and index
+completeness; the encoded-response byte limit still applies independently.
+
 Protocol 8.0.0 additionally requires complete current library deliveries to identify
 protocol 2 and library v2, membership purpose and the ten-slot page budget. Worker
 and public schemas derive these fields from one delivery contract. Outcome-only

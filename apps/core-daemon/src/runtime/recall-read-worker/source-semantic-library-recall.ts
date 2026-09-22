@@ -9,7 +9,7 @@ import {
 import {
   CoreError, OFFSET_CURSOR, admitSourceSemanticCorrespondence, admitSourceSemanticQuery,
   assembleSourceSemanticLibraryIndex, continuationCapabilityMatches, executeSourceSemanticInterpretation,
-  fieldContractSha256, issuedContinuationTampered, preparedDeliveryId, proofEntriesFromBranch, encodeSourceSemanticLibraryResponse,
+  fieldContractSha256, hydrateUtf8Chunk, issuedContinuationTampered, preparedDeliveryId, proofEntriesFromBranch, encodeSourceSemanticLibraryResponse,
   proofForLibraryEntry, sealIssuedContinuation, slotQualifiersFor, SOURCE_SEMANTIC_LIBRARY_ORDER,
   sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry, sourceSemanticLibraryQueryIdentity, scopeSourceSemanticLibraryBranch
 } from "@do-soul/alaya-core";
@@ -21,7 +21,7 @@ import {
 } from "../field/source-semantic-read-stores.js";
 import { issueSemanticLease, readSemanticLease, sourceSemanticLifetimeNow, sourceSemanticRevision } from "./source-semantic-leases.js";
 
-const LIBRARY_PREVIEW_CHARS = 4_096;
+const LIBRARY_PREVIEW_BYTES = 4_096;
 
 /** Provider-free library recall: one query/scope, independent conditional computation, canonical occupancy delivery. */
 export function runSourceSemanticLibraryRecall(
@@ -379,12 +379,10 @@ function previewsFor(
         previews.set(indexEntryCacheKey(entry), "[empty source]");
         continue;
       }
-      if (stored.content_bytes.length > LIBRARY_PREVIEW_CHARS) {
-        truncated = true;
-        previews.set(indexEntryCacheKey(entry), stored.content_bytes.slice(0, LIBRARY_PREVIEW_CHARS));
-        continue;
-      }
-      previews.set(indexEntryCacheKey(entry), stored.content_bytes);
+      const chunk = hydrateUtf8Chunk(stored.content_bytes, { byteLimit: LIBRARY_PREVIEW_BYTES });
+      if (chunk.status !== "chunk") { truncated = true; continue; }
+      truncated ||= !chunk.complete;
+      previews.set(indexEntryCacheKey(entry), chunk.text);
     } catch (error) {
       if (!(error instanceof CoreError) && !(error instanceof SourceSemanticResourceExhausted)) throw error;
       truncated = true;

@@ -73,6 +73,7 @@ export {
   type SourceObservationPublicationResult
 } from "./memory/evidence-create/source-observation-publication.js";
 export { deriveAddressableSpanViews } from "./memory/evidence-create/source-span-views.js";
+export { hydrateUtf8Chunk } from "./memory/evidence-create/source-utf8-hydrate.js";
 export { createProjectionGenerationReceipt } from
   "./recall/field/retrieval/projection/generation-identity.js";
 export * from "./recall/field/retrieval/projection/generation-lifecycle.js";

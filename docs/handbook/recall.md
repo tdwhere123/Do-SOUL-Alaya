@@ -972,7 +972,15 @@ authorized current sources. Library continuation leases bind the first clock,
 request budget, caller/session, scope and database revision; changing any bound
 input requires a fresh request. Proof demotion preserves occupied positions.
 Public payload coverage and index payload completeness both report shortened
-previews. Measurement retains requested budget separately from the fixed ten-slot
+or unavailable previews. Library preview allocation reserves each occupied slot
+before redistributing unused allowance, using the existing default Recall token
+estimator rather than a UTF-16 character count. Estimates are not measured model
+tokens; the complete encoded response still obeys the independent hard UTF-8 byte
+limit. Truncation preserves complete source characters. A hydrated empty source
+is distinct from unavailable text, and omission markers retain their actual token
+estimate even when a caller supplies too little preview allowance. A prefix is
+not certification that the source's supporting assertion or scope was delivered.
+Measurement retains requested budget separately from the fixed ten-slot
 page policy and requires the delivered source-interpretation, query-semantics, semantic-correspondence, and conditional-computation package and closed proof graph for
 proof-conditioned scoring; source retrieval remains independently scoreable.
 

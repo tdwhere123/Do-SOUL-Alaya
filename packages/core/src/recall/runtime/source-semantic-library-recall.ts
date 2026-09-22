@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { sortIndexEntries } from "./index-continuation.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
+import { makeTokenEstimator } from "./recall-service-port-helpers.js";
 
 /** Offline evidence binds its recorded result contract; live requests use the current version. */
 export function sourceSemanticLibraryQueryIdentity(originalQuery: string, resultVersion: string = SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION): string {
@@ -155,24 +156,30 @@ export function encodeSourceSemanticLibraryResults(
   maxTotalTokens = 2_000
 ): MemorySearchResult[] {
   const encoded: MemorySearchResult[] = [];
-  let usedTokens = 0;
-  for (const [offset, entry] of index.entries.entries()) {
-    if (offset >= index.representation.page_budget) break;
-    const score = entry.association_milligrades / MILLIGRADE_TOP;
-    const cacheKey = indexEntryCacheKey(entry);
+  const estimator = makeTokenEstimator();
+  const entries = index.entries.slice(0, index.representation.page_budget);
+  const payloads = entries.map((entry) => {
     const objectId = indexMemoryObjectId(entry);
-    const preview = previews.get(cacheKey) ?? (objectId === undefined ? undefined : previews.get(objectId)) ?? "[payload omitted]";
-    const tokenEstimate = Math.min(preview.length, Math.max(0, maxTotalTokens - usedTokens));
+    const preview = previews.get(indexEntryCacheKey(entry)) ?? (objectId === undefined ? undefined : previews.get(objectId));
+    return { available: preview !== undefined, text: preview === "" ? "[empty source]" : preview ?? "[payload omitted]" };
+  });
+  const allowances = allocatePreviewTokens(payloads.map(({ text }) => estimator.estimate(text)), maxTotalTokens);
+  let usedTokens = 0;
+  for (const [offset, entry] of entries.entries()) {
+    const score = entry.association_milligrades / MILLIGRADE_TOP;
+    const objectId = indexMemoryObjectId(entry);
+    const payload = payloads[offset]!;
+    const prefix = payload.available ? previewWithinTokens(payload.text, allowances[offset]!, estimator) : "";
+    const content = prefix.length === 0 ? "[payload omitted]" : prefix;
+    const tokenEstimate = estimator.estimate(content);
     usedTokens += tokenEstimate;
-    const omitted = tokenEstimate === 0 && preview.length > 0;
-    const content = omitted ? "[payload omitted]" : preview.slice(0, Math.max(tokenEstimate, 0));
     const proof = entry.interpretation_node !== undefined && entry.explanation_ids.length > 0;
     encoded.push({
       ...(objectId === undefined ? {} : { object_id: objectId }),
       object_kind: indexEntryObjectKind(entry),
       target: entry.target,
       relevance_score: score,
-      content_preview: content.length === 0 ? "[empty source]" : content,
+      content_preview: content,
       evidence_pointers: [],
       hypothesis_id: entry.hypothesis_id,
       program_state: entry.program_state ?? "accepting",
@@ -189,11 +196,41 @@ export function encodeSourceSemanticLibraryResults(
         max_total_tokens: maxTotalTokens,
         remaining_entries: Math.max(0, index.representation.page_budget - encoded.length - 1),
         remaining_tokens: Math.max(0, maxTotalTokens - usedTokens),
-        within_budget: !omitted && tokenEstimate === preview.length
+        within_budget: payload.available && content === payload.text && tokenEstimate <= allowances[offset]!
       }
     });
   }
   return encoded;
+}
+
+/** Reserve every occupied slot before redistributing unused preview allowance. */
+function allocatePreviewTokens(required: readonly number[], limit: number): number[] {
+  const allocated = required.map(() => 0);
+  let remaining = Math.max(0, Math.floor(limit));
+  let pending = required.map((_, index) => index);
+  while (remaining > 0 && pending.length > 0) {
+    const share = Math.floor(remaining / pending.length);
+    const remainder = remaining % pending.length;
+    for (const [position, index] of pending.entries()) {
+      const increment = Math.min(required[index]! - allocated[index]!, share + (position < remainder ? 1 : 0));
+      allocated[index]! += increment;
+      remaining -= increment;
+    }
+    pending = pending.filter((index) => allocated[index]! < required[index]!);
+  }
+  return allocated;
+}
+
+function previewWithinTokens(text: string, allowance: number, estimator: ReturnType<typeof makeTokenEstimator>): string {
+  let low = 0, high = text.length;
+  while (low < high) {
+    const end = Math.ceil((low + high) / 2);
+    if (estimator.estimate(text.slice(0, end)) <= allowance) low = end;
+    else high = end - 1;
+  }
+  // UTF-16 slicing must not turn a source character into a replacement character.
+  if (low > 0 && low < text.length && /[\uD800-\uDBFF]/u.test(text[low - 1]!) && /[\uDC00-\uDFFF]/u.test(text[low]!)) low -= 1;
+  return text.slice(0, low);
 }
 
 /** The worker's byte check and MCP delivery encode the exact same public envelope. */
@@ -202,10 +239,11 @@ export function encodeSourceSemanticLibraryResponse(
 ): SoulInterpretationResponse {
   const { kind: _kind, previews, coverage, ...rest } = result;
   const results = encodeSourceSemanticLibraryResults(result.index, new Map(Object.entries(previews ?? {})));
-  const omitted = results.some((row) => row.content_preview === "[payload omitted]" || !row.budget_state.within_budget);
+  const omitted = results.some((row) => !row.budget_state.within_budget);
+  const incomplete = omitted || coverage.payload !== "complete";
   return SoulInterpretationResponseSchema.parse({ operation: "recall", ...rest, results,
     total_count: results.length, provider_attempts: 0,
-    index: omitted ? { ...result.index, completeness: { ...result.index.completeness, payload: "partial" } } : result.index,
+    index: incomplete ? { ...result.index, completeness: { ...result.index.completeness, payload: "partial" } } : result.index,
     coverage: { ...coverage, payload: omitted ? "truncated" : coverage.payload } });
 }
 
