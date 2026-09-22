@@ -3,9 +3,9 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Who was asked to polish the lens?",
     response: {
-      contract: "source-semantic-query-response-v4", outcome: { status: "interpreted" },
+      contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },
       query: {
-        contract: "source-semantic-query-meaning-v2", gaps: [], return: ["person"],
+        contract: "source-semantic-query-meaning-v3", gaps: [], return: ["person"],
         alternatives: [{ conditions: [{
           kind: "statement", key: "request", predicate: "ask",
           arguments: [{ role: "recipient", target: { kind: "free", key: "person" }, excerpt: "Who" }],
@@ -23,9 +23,9 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Is every registered sensor calibrated?",
     response: {
-      contract: "source-semantic-query-response-v4", outcome: { status: "interpreted" },
+      contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },
       query: {
-        contract: "source-semantic-query-meaning-v2", gaps: [], return: [],
+        contract: "source-semantic-query-meaning-v3", gaps: [], return: [],
         domains: [{ key: "sensors", excerpt: "every registered sensor" }],
         evaluation: { kind: "forall", domain: "sensors", binder: "sensor", local_variables: ["sensor", "calibration"] },
         alternatives: [{ conditions: [{
@@ -38,9 +38,9 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Who has already arrived?",
     response: {
-      contract: "source-semantic-query-response-v4", outcome: { status: "interpreted" },
+      contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },
       query: {
-        contract: "source-semantic-query-meaning-v2", return: ["person"],
+        contract: "source-semantic-query-meaning-v3", return: ["person"],
         alternatives: [{ conditions: [{
           kind: "statement", key: "arrival", predicate: "arrive",
           arguments: [{ role: "agent", target: { kind: "free", key: "person" }, excerpt: "Who" }]

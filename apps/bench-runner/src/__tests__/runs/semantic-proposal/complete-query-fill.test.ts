@@ -33,7 +33,7 @@ function tempRoot(): string {
 
 function queryWorkset(originalQuery: string) {
   return parseSemanticProposalWorkset({
-    contract: "source-semantic-proposal-workset-v2",
+    contract: "source-semantic-proposal-workset-v3", provider_url: "http://127.0.0.1:9",
     kind: "query", model: MODEL, request_profile: PROFILE,
     items: [{ original_query: originalQuery }]
   });
@@ -66,10 +66,10 @@ function extractor(raws: string[], extra: { finish?: string | null; usage?: bool
 
 function meaningBody(themeExcerpt: string): string {
   return JSON.stringify({
-    contract: "source-semantic-query-response-v4",
+    contract: "source-semantic-query-response-v5",
     outcome: { status: "interpreted" },
     query: {
-      contract: "source-semantic-query-meaning-v2",
+      contract: "source-semantic-query-meaning-v3",
       alternatives: [{ conditions: [{
         kind: "statement", key: "send", predicate: "send",
         arguments: [

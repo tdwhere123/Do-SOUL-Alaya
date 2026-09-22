@@ -20,9 +20,11 @@ the same encoder enforces token and full-envelope byte limits before selection.
 Existing leases freeze pages and reservations. Historical source-only archives
 retain their original identities and page policies.
 
-Semantic proposal preflight and authority v3 bind a configurable per-key attempt
-ceiling of one or two (default two). Execution, durable raw recovery and cost
-estimates use that same limit; no generation or cache identity changes.
+Semantic proposal workset v3, preflight/authority v4, cache v3 and proposal
+raw-attempt v1 bind the resolved HTTP endpoint, physical model and exact encoded
+request. Reissued receipts share a durable execution lineage; unknown reservations
+retain their original attempt ownership. Historical raw evidence remains unchanged.
+The per-key attempt ceiling stays one or two (default two).
 
 Protocol 9.0.0 removes the separate finite query generation schema and depth
 export. SOUL generation and admission share the recursive meaning grammar,
@@ -48,12 +50,13 @@ Native preview reads use the existing UTF-8 hydration owner with a 4096-byte
 limit. Partial native previews remain partial in both public coverage and index
 completeness; the encoded-response byte limit still applies independently.
 
-Query meaning v2 and canonical query v3 retain conjunctive answer conditions and
+Query meaning v3 and canonical query v3 retain conjunctive answer conditions and
 independent evidence inputs in one original query identity. Query request/response
-v4 feed the same bounded recursive grammar. Reasoning v5 delivers discriminated
+v5 feed the same bounded recursive grammar. Reporter support comes from the
+original question or a declared reference, independently of arbitrary local handles. Reasoning v5 delivers discriminated
 answer/evidence bindings through one execution and proof authority; evidence does
 not execute a requested operation or claim original-answer completion. Library
-v3/protocol 3 preserves every delivered witness within one occupied source root,
+v4/protocol 4 preserves every delivered witness within one occupied source root,
 verifies siblings, and reports shared answer/input support with unknown cross-source
 compatibility and distinctness. Unfinished phases remain resource-exhausted/partial.
 Archive-only source-evidence v1 identities, pages and order remain unchanged.
@@ -74,7 +77,8 @@ source-only v1 comparison has an explicit offline readmission entry that retains
 its original result, query and first-exposure identity; current readers reject it.
 
 Protocol 7.0.0 and Gateway 1.0.0 recorded the breaking opt-in interpretation migration:
-public H/Q/A/C fields and obsolete producer exports are replaced by their current
+public source interpretation, query semantics, semantic correspondence and conditional
+computation fields and obsolete producer exports are replaced by their current
 responsibility names and envelope contracts below. This authorized replacement
 does not retain deprecated aliases or dual readers; consumers must migrate
 together. MCP schema and tool-description snapshots and their SemVer sidecars

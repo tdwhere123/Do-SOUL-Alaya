@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import {
   findProviderBinding,
@@ -11,10 +12,11 @@ export interface ExtractionTransportRoute {
   readonly model: string;
 }
 
-export interface ExtractionTransportProvenance {
-  readonly provider_url_sha256: string;
-  readonly model: string;
-}
+export const ExtractionTransportProvenanceSchema = z.object({
+  provider_url_sha256: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  model: z.string().min(1)
+}).strict().readonly();
+export type ExtractionTransportProvenance = z.infer<typeof ExtractionTransportProvenanceSchema>;
 
 export function resolveExtractionTransportRoute(
   config: Pick<

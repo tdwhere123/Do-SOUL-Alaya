@@ -47,7 +47,7 @@ export const SemanticChainQuerySchema = z.discriminatedUnion("status", [
     unvisited_source_interpretation_count: z.number().int().nonnegative().nullable(), discovery_truncated: z.boolean()
   }).strict()
 ]);
-export const SEMANTIC_CHAIN_PLAN_CONTRACT = "source-semantic-chain-plan-v4" as const;
+export const SEMANTIC_CHAIN_PLAN_CONTRACT = "source-semantic-chain-plan-v5" as const;
 export const SemanticChainPlanSchema = z.object({
   contract: z.literal(SEMANTIC_CHAIN_PLAN_CONTRACT), input_identity: Digest,
   config: SemanticChainConfigSchema, queries: z.array(SemanticChainQuerySchema),

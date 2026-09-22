@@ -65,7 +65,7 @@ describe("complete-source census and publication", () => {
     const root = join(f.root, "development"), queryCache = join(f.root, "query-cache");
     const frozen = await freezeLongMemEvalSemanticRun({ data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot,
       dataset_sha256: census.dataset_sha256, dataset_question_count: 3, question_ids: ["mixed-roles", "absent-interpretation_abs"],
-      model: "gemini-2.5-flash-lite", request_profile: "gemini-2.5-nonthinking-v1", query_cache_root: queryCache,
+      model: "gemini-2.5-flash-lite", provider_url: "http://127.0.0.1:9", request_profile: "gemini-2.5-nonthinking-v1", query_cache_root: queryCache,
       recorded_at: CLOCK, producer_commit: "a".repeat(40), max_output_tokens: 4096, output_byte_limit: 1000000,
       budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000,
         finalization_reserve: 10000, min_envelope: 10 } }, root);

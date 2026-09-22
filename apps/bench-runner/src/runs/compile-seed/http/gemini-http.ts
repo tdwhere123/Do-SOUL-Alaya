@@ -94,7 +94,8 @@ async function extractGeminiOnce(
   }
 }
 
-function prepareGeminiRequest(config: CompileSeedExtractionConfig, input: ExtractInput): {
+/** Pure request authority shared by preflight identity and the actual HTTP sender. */
+export function prepareGeminiRequest(config: CompileSeedExtractionConfig, input: ExtractInput): {
   url: URL; body: string; timeoutMs: number;
 } {
   assertRequiredRequestProfile(config);

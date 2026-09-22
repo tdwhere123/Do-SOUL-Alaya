@@ -14,6 +14,38 @@ import { compileSourceSemanticGroupProgram } from "../../../../recall/conditiona
 const ORIGINAL = "Who sent the sample to Mira?";
 
 describe("source semantic query meaning admission", () => {
+  it.each(["person", "Who", "reportingEntity", "x73"])("grounds a free reporter independently of its handle %s", (key) => {
+    const original = "Who reported that Lee left?";
+    const query = reportedQuery(original, { kind: "free", key, excerpt: "Who" }, { return: [key] });
+    expect(admitSourceSemanticQuery(query, original).kind).toBe("admitted");
+    expect(query.alternatives[0]!.frames[0]!.role_requirements).toEqual([
+      { id: "reporter", role_reading: "reporter", target_variable: key, support: { kind: "query_text", excerpt: "Who" } }
+    ]);
+    expect(query.variables.find(row => row.id === key)?.reference).toBeUndefined();
+    expect(query.alternatives[0]!.context_obligations).toEqual([
+      { frame: "report", kind: "asserted_at_source" },
+      { frame: "leave", kind: "explicit_embedded_structure", incidence: { kind: "operator_operand", other_frame: "report", role: "content" } }
+    ]);
+  });
+
+  it.each([
+    { original: "Mira reported that Lee left?", declaration: { kind: "named", key: "speaker", excerpt: "Mira" } },
+    { original: "Who reported that Lee left?", declaration: { kind: "free", key: "speaker", excerpt: "Who" } }
+  ])("reuses declared reporter support without repeating its excerpt: $original", ({ original, declaration }) => {
+    const query = reportedQuery(original, { kind: "reference", key: "speaker" }, { entities: [declaration] });
+    expect(admitSourceSemanticQuery(query, original).kind).toBe("admitted");
+    expect(query.alternatives[0]!.frames[0]!.role_requirements[0]!.support.excerpt).toBe(declaration.excerpt);
+  });
+
+  it("rejects absent and fabricated reporter support without treating a matching handle as evidence", () => {
+    const original = "Who reported that Lee left?";
+    for (const key of ["person", "Who"]) {
+      expect(() => reportedQuery(original, { kind: "free", key })).toThrow(/requires query text support/u);
+    }
+    expect(() => reportedQuery(original, { kind: "reference", key: "missing" })).toThrow(/undeclared local reference/u);
+    expect(admitSourceSemanticQuery(reportedQuery(original, { kind: "free", key: "person", excerpt: "invented" }), original).kind).toBe("invalid");
+  });
+
   it("registers meaning syntax without occupying the canonical graph version", () => {
     const record = defaultSourceSemanticQueryProducerRegistry.lookup(SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, "1");
     expect(record?.syntaxes).toEqual([SOURCE_SEMANTIC_QUERY_GRAPH_SYNTAX, SOURCE_SEMANTIC_QUERY_MEANING_SYNTAX]);
@@ -75,3 +107,12 @@ describe("source semantic query meaning admission", () => {
     expect(admitSourceSemanticQuery(malformed, ORIGINAL).kind).toBe("invalid");
   });
 });
+
+function reportedQuery(original: string, reporter: object, extra: object = {}) {
+  return materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+    alternatives: [{ conditions: [{ kind: "reported", key: "report", reporter,
+      content: { kind: "statement", key: "leave", predicate: "left", arguments: [
+        { role: "agent", target: { kind: "named", key: "lee", excerpt: "Lee" } }
+      ] } }] }], ...extra }, { original_query_digest: digestOriginalQuery(original),
+    producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" });
+}

@@ -49,7 +49,7 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
     }
     const result = await executeSemanticProposalFill({
       workset, cacheRoot, authority: readSemanticProposalAuthority(required(args, "--authority")),
-      config: gardenConfig(workset.model, workset.request_profile)
+      config: gardenConfig(workset.model, workset.request_profile, workset.provider_url)
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return 0;
@@ -61,12 +61,12 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
   }
 }
 
-function gardenConfig(model: string, requestProfile: string): CompileSeedExtractionConfig {
+function gardenConfig(model: string, requestProfile: string, authorizedProviderUrl: string): CompileSeedExtractionConfig {
   if (!isNativeGeminiRequestProfile(requestProfile)) {
     throw new Error("semantic proposal fill requires a native Gemini request profile");
   }
   const providerUrl = process.env.OFFICIAL_API_GARDEN_PROVIDER_URL?.trim()
-    || "https://generativelanguage.googleapis.com";
+    || authorizedProviderUrl;
   return { providerUrl, model, requestProfile, apiKey: gardenApiKey() };
 }
 

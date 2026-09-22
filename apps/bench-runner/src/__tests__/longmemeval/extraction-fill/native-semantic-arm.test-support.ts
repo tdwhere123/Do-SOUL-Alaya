@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposure-session.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { expect } from "vitest";
@@ -24,6 +25,10 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
   const root = join(cacheRoots[0]!, "native-experiment"), queryCache = join(root, "query-cache"), correspondenceCache = join(root, "correspondence-cache");
   const model = "gemini-2.5-flash-lite", profile = "gemini-2.5-nonthinking-v1";
   const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir, pinnedMetaRoot });
+  const unsupportedGold = census.records.find(source => source.question_id === "q3" && source.session_id === "s-q3")!;
+  expect(unsupportedGold).toBeDefined();
+  expect(unsupportedGold.content_bytes).not.toMatch(/repair/u);
+  expect(unsupportedGold.units.every(unit => !unit.text.includes("repair"))).toBe(true);
   const retained = cacheRoots.flatMap((cache) => listRetainedSourceSemanticKeys(cache).map((key) => ({ key,
     result: inspectCachedSourceSemantic(cache, key, model, profile) })));
   const associations = census.records.filter((source) => ["q0", "q1"].includes(source.question_id)).map((source) => {
@@ -36,17 +41,17 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     source_cache_roots: cacheRoots, source_publication_associations: associations.slice(0, -1), correspondence_cache_root: correspondenceCache,
     discovery_page_cap: 4, correspondence_pair_cap: 2, authorized_scopes: { mode: "named", scopes: ["project"] },
     data_dir: dataDir, pinned_meta_root: pinnedMetaRoot, dataset_sha256: census.dataset_sha256,
-    dataset_question_count: 9, question_ids: ["q0", "q1", "q2"], previously_exposed_question_ids: ["q0", "q1", "q2"],
-    model, request_profile: profile, query_cache_root: queryCache,
+    dataset_question_count: 9, question_ids: ["q0", "q1", "q2", "q3"], previously_exposed_question_ids: ["q0", "q1", "q2", "q3"],
+    model, provider_url: "http://127.0.0.1:9", request_profile: profile, query_cache_root: queryCache,
     recorded_at: "2026-09-21T00:00:00.000Z", producer_commit: "a".repeat(40), max_output_tokens: 4096, output_byte_limit: 100000,
     budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 }
   }, root);
-  expect(frozen.contract).toBe("longmemeval-native-semantic-v1");
+  expect(frozen.contract).toBe("longmemeval-native-semantic-v2");
   expect(frozen).toMatchObject({ native_route: { access_policy: "query-conditioned-v1" } });
   expect(frozen.metric).toBe("source-bearing-union-first-exposure-any-at-k-v1");
-  expect(frozen.selected.map((row) => row.source_manifest.length)).toEqual([2, 2, 2]);
+  expect(frozen.selected.map((row) => row.source_manifest.length)).toEqual([2, 2, 2, 2]);
   expect(JSON.stringify(frozen)).not.toContain("answer q0");
-  await fillAuthored({ ...frozen.query_workset, items: frozen.query_workset.items.slice(0, 2) }, queryCache, authoredQuery);
+  await fillAuthored({ ...frozen.query_workset, items: frozen.query_workset.items.filter((_item, index) => index !== 2) }, queryCache, authoredQuery);
   const invalidQuery = materializeSemanticProposalLines(frozen.query_workset, 4096)[2]!;
   const invalidPath = semanticProposalShardPath(queryCache, invalidQuery.key);
   mkdirSync(dirname(invalidPath), { recursive: true }); writeFileSync(invalidPath, "{}");
@@ -63,8 +68,12 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
       expect(plan.queries[0]).toMatchObject({ status: "blocked", reason: "cache_invalid" });
       continue;
     }
-    expect(publication.published_count).toBeGreaterThan(0);
-    expect(LongMemEvalPublicationSchema.safeParse(publication).success).toBe(false);
+    if (row.question_id === "q3") {
+      expect(publication.published_count).toBe(0);
+      expect(plan.queries[0]).toMatchObject({ status: "ready", descriptors: [], correspondence_opportunities: [] });
+    }
+    else expect(publication.published_count).toBeGreaterThan(0);
+    expect(LongMemEvalPublicationSchema.safeParse(publication).success).toBe(row.question_id === "q3");
     expect(plan.queries[0]).toMatchObject({ status: "ready", discovery_open: false });
     if (plan.queries[0]?.status === "ready") expect(plan.queries[0].discovery_trace.every((page) =>
       page.access.policy === "query-conditioned-v1")).toBe(true);
@@ -80,16 +89,35 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     if (row.question_id === "q2") { expect(native.rows[0]!.status).toBe("blocked"); continue; }
     const response = SoulInterpretationResponseSchema.parse(native.rows[0]!.response);
     if (response.operation !== "recall") throw new Error("native recall required");
-    expect(response.proofs?.length).toBeGreaterThan(0);
+    if (row.question_id === "q3") {
+      expect(response.proofs ?? []).toEqual([]);
+      expect(JSON.stringify(response.results)).not.toMatch(/repair/u);
+      const publication = LongMemEvalPublicationSchema.parse(readChainArtifact(row.publication_path));
+      const gold = publication.sources.find(source => source.session_id === "s-q3")!;
+      expect(gold).toMatchObject({ admission: "admitted", record_id: expect.any(String) });
+      const page = FirstExposurePageSchema.parse(native.rows[0]!.first_exposure);
+      expect(page.initial?.slots.some(slot => slot.target.kind === "source_evidence" && slot.target.root_id === gold.record_id)).toBe(true);
+    } else expect(response.proofs?.length).toBeGreaterThan(0);
     expect(native.rows[0]!.first_exposure).not.toBeNull();
     expect(response.provider_attempts).toBe(0);
     expect(response.discovery?.access?.policy).toBe("query-conditioned-v1");
   }
   const measured = await measureLongMemEvalSemanticRun(root, replay.path);
   expect(measured.result).toMatchObject({ contract: "longmemeval-native-semantic-measurement-v1", provider_calls: 0,
-    primary: { eligible: 3, hits: 2, misses: 0, unknown: 1 } });
-  expect(measured.result.rows.filter((row) => row.outcome === "hit").every((row) => row.mechanism === "proof_exercised")).toBe(true);
+    primary: { eligible: 4, hits: 3, misses: 0, unknown: 1 } });
+  expect(measured.result.rows.filter((row) => row.outcome === "hit" && row.question_id !== "q3").every((row) => row.mechanism === "proof_exercised")).toBe(true);
   expect(measured.result.rows.filter((row) => row.selected).every((row) => row.prior_development_exposure)).toBe(true);
+  const unsupportedRow = measured.result.rows.find(row => row.question_id === "q3")!;
+  expect(unsupportedRow).toMatchObject({ outcome: "hit", mechanism: "not_exercised" });
+  expect(readChainArtifact(unsupportedRow.measurement_path!)).toMatchObject({ rows: [{
+    measurement: { status: "validated", metrics: {
+      mixed_kind_first_exposure: { any_at_5: { status: "hit" } },
+      proof_conditioned_first_exposure: { any_at_5: { status: "miss" } }
+    } },
+    source_bearing_union: { any_at_5: { status: "hit" } },
+    mechanism: { status: "unexercised", validated_proof_ranks: [] },
+    evaluator_usage: { proof_slots_checked: 0 }
+  }] });
   const manifest = join(cacheRoots[0]!, "manifest.json"), bytes = readFileSync(manifest);
   writeFileSync(manifest, "{}");
   try { await expect(prepareLongMemEvalSemanticRun(root)).rejects.toThrow(/source interpretation cache changed/u); }
@@ -97,6 +125,8 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
 }
 
 export async function assertPerQueryOpportunity(config: SemanticChainConfig, root: string) {
+  // This separate control owns a new full workset, not renewed capacity in the earlier control's grant.
+  config = { ...config, query_cache_root: join(root, "query-cache") };
   await fillAuthored(config.query_workset, config.query_cache_root, authoredQuery);
   const forward = await prepareSemanticChain(config, join(root, "forward-opportunities"));
   const reverse = await prepareSemanticChain({ ...config,
@@ -116,10 +146,12 @@ export async function assertPerQueryOpportunity(config: SemanticChainConfig, roo
   expect(zero.queries.every((query) => query.status === "ready" && query.correspondence_opportunities.every((row) => row.decision === "zero_budget"))).toBe(true);
 }
 
-function authoredQuery() {
+function authoredQuery(userPrompt: string) {
+  const original = (JSON.parse(userPrompt) as { original_query: string }).original_query;
+  const predicate = original === "What was repaired?" ? "repair" : "complete";
   return JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
     outcome: { status: "interpreted" }, query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
-      kind: "statement", key: "complete", predicate: "complete", arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
+      kind: "statement", key: "condition", predicate, arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
     }] }], return: ["theme"], gaps: [] } });
 }
 

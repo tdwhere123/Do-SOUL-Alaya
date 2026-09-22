@@ -7,11 +7,14 @@ import {
   type SourceSemanticCorrespondenceRequest, type SourceSemanticQueryRequest
 } from "@do-soul/alaya-soul";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "@do-soul/alaya-core";
-import { encodeGeminiGenerateContent, isGeminiGenerateContentProfile } from "../extraction/fill/batch/native-codec.js";
-import { geminiGenerationSchemaCacheMaterial } from "../extraction/fill/batch/generation-schema.js";
+import { isGeminiGenerateContentProfile } from "../extraction/fill/batch/native-codec.js";
+import { prepareGeminiRequest } from "../compile-seed/http/gemini-http.js";
+import { normalizeGeminiEndpoint } from "../provider/gemini-endpoint.js";
+import { buildExtractionTransportProvenance, resolveExtractionTransportRoute, type ExtractionTransportProvenance } from "../extraction/transport-route.js";
+import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { attemptInputByteUpperBound } from "../extraction/authority/receipt-limits.js";
 
-export const SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v2" as const;
+export const SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v3" as const;
 export const SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT = 4096;
 
 const QueryItemSchema = z.object({
@@ -32,6 +35,7 @@ export const SemanticProposalWorksetSchema = z.object({
   contract: z.literal(SEMANTIC_PROPOSAL_WORKSET_CONTRACT),
   kind: z.enum(["query", "semantic_correspondence"]),
   model: z.string().min(1),
+  provider_url: z.string().min(1).transform(value => normalizeGeminiEndpoint(value).origin),
   request_profile: z.string().min(1),
   producer_id: z.string().min(1).optional(),
   producer_version: z.string().min(1).optional(),
@@ -50,6 +54,8 @@ export type SemanticProposalLine = Readonly<{
   original_query: string;
   request: SourceSemanticQueryRequest | SourceSemanticCorrespondenceRequest;
   inputByteUpper: number;
+  requestDigest: string;
+  transportProvenance: ExtractionTransportProvenance;
 }>;
 
 export function parseSemanticProposalWorkset(value: unknown): SemanticProposalWorkset {
@@ -105,34 +111,50 @@ function bindLine(
     throw new Error("semantic proposal fill requires a native Gemini request profile");
   }
   const userPrompt = JSON.stringify(request);
-  const encoded = JSON.stringify(encodeGeminiGenerateContent(
-    { systemPrompt, userPrompt },
-    {
-      model: workset.model, requestProfile: workset.request_profile, maxOutputTokens, responseJsonSchema
-    }
-  ));
+  const config = { model: workset.model, providerUrl: workset.provider_url,
+    requestProfile: workset.request_profile, apiKey: null };
+  const binding = semanticProposalRequestBinding(config, { systemPrompt, userPrompt, maxOutputTokens, responseJsonSchema });
   return {
     key: proposalCacheKey(
-      workset.model, workset.request_profile, systemPrompt, userPrompt, responseJsonSchema, maxOutputTokens
+      workset.model, workset.request_profile, systemPrompt, userPrompt, responseJsonSchema, maxOutputTokens, workset.provider_url
     ),
     kind, systemPrompt, userPrompt, responseJsonSchema, original_query, request,
-    inputByteUpper: attemptInputByteUpperBound(encoded)
+    ...binding
+  };
+}
+
+/** The actual sender owns encoding and route resolution, including thinking settings. */
+export function semanticProposalRequestBinding(
+  config: CompileSeedExtractionConfig,
+  request: { systemPrompt: string; userPrompt: string; maxOutputTokens: number; responseJsonSchema: object }
+) {
+  const encoded = prepareGeminiRequest(config, { ...request, retryMode: "disabled", validateRawJson: () => undefined });
+  const route = resolveExtractionTransportRoute(config);
+  return {
+    inputByteUpper: attemptInputByteUpperBound(encoded.body),
+    requestDigest: createHash("sha256").update(JSON.stringify([encoded.url.href, encoded.body])).digest("hex"),
+    transportProvenance: buildExtractionTransportProvenance({ ...config,
+      transportProviderUrl: normalizeGeminiEndpoint(route.providerUrl).origin })
   };
 }
 
 export function proposalCacheKey(
   model: string, requestProfile: string, systemPrompt: string, userPrompt: string, schema: object,
-  maxOutputTokens: number
+  maxOutputTokens: number, providerUrl: string
 ): string {
-  const material = model.startsWith("gemini-")
-    ? geminiGenerationSchemaCacheMaterial(JSON.stringify(schema))
-    : JSON.stringify(schema);
+  if (!isGeminiGenerateContentProfile(requestProfile)) throw new Error("semantic proposal requires a native Gemini profile");
+  const wire = prepareGeminiRequest({ model, requestProfile, providerUrl, apiKey: null }, {
+    systemPrompt, userPrompt, maxOutputTokens, responseJsonSchema: schema,
+    retryMode: "disabled", validateRawJson: () => undefined
+  });
   return createHash("sha256")
+    .update(SEMANTIC_PROPOSAL_WORKSET_CONTRACT, "utf8").update("\u0000", "utf8")
     .update(model, "utf8").update("\u0000", "utf8")
     .update(requestProfile, "utf8").update("\u0000", "utf8")
     .update(systemPrompt, "utf8").update("\u0000", "utf8")
     .update(userPrompt, "utf8").update("\u0000", "utf8")
-    .update(material, "utf8").update("\u0000", "utf8")
+    .update(wire.url.href, "utf8").update("\u0000", "utf8")
+    .update(wire.body, "utf8").update("\u0000", "utf8")
     .update(String(maxOutputTokens), "utf8")
     .digest("hex");
 }

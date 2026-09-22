@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { unlinkSync } from "node:fs";
+import { unlinkSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   completeBenchTerminalRetryClassifications,
@@ -39,6 +39,12 @@ import { boundedArtifactEntryExists } from "../cache-audit/bounded-artifact-read
 
 export { ExtractionAttemptLimitError } from "./attempt-ledger/outcome.js";
 export const computeExtractionAttemptCeiling = computeExtractionFillAttemptCeiling;
+/** Read-only inventory; a new execution must not hide older reservation history. */
+export function listExtractionAttemptLedgerRecords(cacheRoot: string): readonly ExtractionAttemptLedgerRecord[] {
+  if (!boundedArtifactEntryExists(cacheRoot)) return [];
+  return readdirSync(cacheRoot).filter(name => /^extraction-attempt-ledger\.[0-9a-f]{64}\.json$/u.test(name))
+    .map(name => readAttemptLedgerRecord(join(cacheRoot, name)));
+}
 export interface ExtractionAttemptLedgerSnapshot {
   readonly rawLedgerSha256: string;
   readonly ledgerSha256: string;

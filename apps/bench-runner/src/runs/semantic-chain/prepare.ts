@@ -47,7 +47,7 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
     else await prepare();
     const workset = items.length === 0 ? null : parseSemanticProposalWorkset({
       contract: SEMANTIC_PROPOSAL_WORKSET_CONTRACT, kind: "semantic_correspondence", model: config.query_workset.model,
-      request_profile: config.query_workset.request_profile, items
+      request_profile: config.query_workset.request_profile, provider_url: config.query_workset.provider_url, items
     });
     const plan = SemanticChainPlanSchema.parse({ contract: SEMANTIC_CHAIN_PLAN_CONTRACT, input_identity: inputIdentity,
       config, queries, correspondence_workset: workset });

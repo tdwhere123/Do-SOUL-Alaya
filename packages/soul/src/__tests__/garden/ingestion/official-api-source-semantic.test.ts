@@ -354,9 +354,9 @@ describe("query and semantic_correspondence proposal entry points", () => {
       expect(preparedCorrespondence.system_prompt).toContain("request-local handle source1, source2");
       for (const valid of [false, true]) {
         const querySemantics = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
-          contract: "source-semantic-query-response-v4", outcome: { status: "interpreted", gaps: [] },
+          contract: "source-semantic-query-response-v5", outcome: { status: "interpreted", gaps: [] },
           query: {
-            contract: "source-semantic-query-meaning-v2",
+            contract: "source-semantic-query-meaning-v3",
             alternatives: [{ conditions: [{
               kind: "statement", key: "accession", predicate: "accession",
               arguments: [
@@ -388,8 +388,8 @@ describe("query and semantic_correspondence proposal entry points", () => {
       support: [{ kind: "query_text", excerpt: "bay B" }] }];
     const received = proposeQuerySemantics({ original_query: "which folio was accessioned into bay B?",
       producer_id: "query-producer", producer_version: "1" }, { rawJson: JSON.stringify({
-      contract: "source-semantic-query-response-v4", outcome: { status: "interpreted", gaps },
-      query: { contract: "source-semantic-query-meaning-v2", alternatives: [{ conditions: [{
+      contract: "source-semantic-query-response-v5", outcome: { status: "interpreted", gaps },
+      query: { contract: "source-semantic-query-meaning-v3", alternatives: [{ conditions: [{
         kind: "statement", key: "accession", predicate: "accession", arguments: [
           { role: "object", target: { kind: "free", key: "folio" }, excerpt: "folio" },
           { role: "bay", target: { kind: "named", key: "bay", excerpt: "bay B" }, excerpt: "bay B" }
@@ -425,10 +425,10 @@ describe("query and semantic_correspondence proposal entry points", () => {
       producer_id: "query-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-query-response-v4",
+        contract: "source-semantic-query-response-v5",
         outcome: { status: "interpreted", gaps: [] },
         query: {
-          contract: "source-semantic-query-meaning-v2",
+          contract: "source-semantic-query-meaning-v3",
           alternatives: [{ conditions: [{
             kind: "statement", key: "accession", predicate: "accession",
             arguments: [

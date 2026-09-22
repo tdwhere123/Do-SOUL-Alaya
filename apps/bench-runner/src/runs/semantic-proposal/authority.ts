@@ -3,8 +3,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import type { SemanticProposalKind, SemanticProposalLine } from "./workset.js";
+import { ExtractionTransportProvenanceSchema } from "../extraction/transport-route.js";
 
-export const SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT = "source-semantic-proposal-authority-v3" as const;
+export const SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT = "source-semantic-proposal-authority-v4" as const;
 export const DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY = 2;
 const MILLION = 1_000_000;
 const AttemptsPerKeySchema = z.number().int().min(1).max(DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY);
@@ -15,6 +16,8 @@ const AuthoritySchema = z.object({
   kind: z.enum(["query", "semantic_correspondence"]),
   model: z.string().min(1),
   request_profile: z.string().min(1),
+  transport_provenance: ExtractionTransportProvenanceSchema,
+  attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u),
   generated_at: z.string().min(1),
   identity_digest: z.string().regex(/^[0-9a-f]{64}$/u),
   limits: z.object({
@@ -38,10 +41,12 @@ const AuthoritySchema = z.object({
 export type SemanticProposalAuthority = z.infer<typeof AuthoritySchema>;
 
 const PreflightSchema = z.object({
-  contract: z.literal("source-semantic-proposal-preflight-v3"),
+  contract: z.literal("source-semantic-proposal-preflight-v4"),
   kind: z.enum(["query", "semantic_correspondence"]),
   model: z.string().min(1),
   request_profile: z.string().min(1),
+  transport_provenance: ExtractionTransportProvenanceSchema,
+  attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u),
   provider_calls: z.literal(0),
   missing: z.number().int().nonnegative(),
   maximum_attempts_per_key: AttemptsPerKeySchema,
@@ -69,9 +74,15 @@ export function buildSemanticProposalPreflight(input: Readonly<{
   const missingLines = input.lines.filter((line) => !input.cachedKeys.has(line.key));
   const attemptsPerKey = AttemptsPerKeySchema.parse(input.maxAttemptsPerKey ?? DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY);
   const maxInput = missingLines.reduce((max, line) => Math.max(max, line.inputByteUpper), 0);
+  const transport = input.lines[0]?.transportProvenance;
+  if (transport === undefined || input.lines.some(line => canonicalJson(line.transportProvenance) !== canonicalJson(transport))) {
+    throw new Error("semantic proposal preflight requires one resolved transport route");
+  }
   return {
-    contract: "source-semantic-proposal-preflight-v3",
+    contract: "source-semantic-proposal-preflight-v4",
     kind: input.kind, model: input.model, request_profile: input.request_profile,
+    transport_provenance: transport,
+    attempt_lineage_digest: proposalAttemptLineage({ ...input, transport_provenance: transport }),
     provider_calls: 0, missing: missingLines.length,
     maximum_attempts_per_key: attemptsPerKey,
     maximum_attempts: missingLines.length * attemptsPerKey,
@@ -94,6 +105,8 @@ export function pinSemanticProposalAuthority(input: Readonly<{
   const body = {
     contract: SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT, action: "fill" as const,
     kind: input.preflight.kind, model: input.preflight.model, request_profile: input.preflight.request_profile,
+    transport_provenance: input.preflight.transport_provenance,
+    attempt_lineage_digest: input.preflight.attempt_lineage_digest,
     generated_at: new Date().toISOString(),
     limits: {
       starting_missing: input.preflight.missing,
@@ -134,6 +147,9 @@ export function verifySemanticProposalAuthority(authority: SemanticProposalAutho
   if (digest !== identity_digest) {
     throw new Error("semantic proposal authority identity digest is invalid");
   }
+  if (authority.attempt_lineage_digest !== proposalAttemptLineage(authority)) {
+    throw new Error("semantic proposal attempt lineage does not bind its execution scope");
+  }
   if (new Set(authority.keys).size !== authority.keys.length) {
     throw new Error("semantic proposal authority keys are not unique");
   }
@@ -153,6 +169,14 @@ export function verifySemanticProposalAuthority(authority: SemanticProposalAutho
     throw new Error("semantic proposal authority price does not bind its limits");
   }
   return authority;
+}
+
+/** Re-pinning a grant resumes the same bounded execution; it cannot renew its attempts. */
+export function proposalAttemptLineage(input: Pick<SemanticProposalAuthority,
+  "kind" | "model" | "request_profile" | "transport_provenance">): string {
+  return createHash("sha256").update(canonicalJson({ contract: "semantic-proposal-execution-lineage-v1",
+    kind: input.kind, model: input.model, request_profile: input.request_profile,
+    transport_provenance: input.transport_provenance })).digest("hex");
 }
 
 export function readSemanticProposalAuthority(path: string): SemanticProposalAuthority {

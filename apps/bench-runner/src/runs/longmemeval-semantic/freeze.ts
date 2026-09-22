@@ -24,7 +24,7 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
       const frozen = LongMemEvalExperimentFreezeSchema.parse(existing);
       if (chainIdentity(frozen.config) !== chainIdentity(config)
         || frozen.implementation_revision !== readCurrentExtractionAuthorityRevision()) throw new Error("development freeze changed");
-      if (frozen.contract === "longmemeval-native-semantic-v1") assertSourceCaches(frozen.source_caches);
+      if (frozen.contract === "longmemeval-native-semantic-v2") assertSourceCaches(frozen.source_caches);
       writeChainJson(join(root, "query-workset.json"), frozen.query_workset);
       return frozen;
     }
@@ -52,18 +52,18 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
           session_id, session_index, round_index, source_observed_at, roles }) => ({ source_id, source_version,
           content_digest, corpus_digest, session_id, session_index, round_index, source_observed_at, roles })) });
     }
-    const query_workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v2", kind: "query",
-      model: config.model, request_profile: config.request_profile, items: selected.map((row) => ({
+    const query_workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3", kind: "query",
+      model: config.model, provider_url: config.provider_url, request_profile: config.request_profile, items: selected.map((row) => ({
         original_query: row.question, approved_fixed_context: {
           context_id: `longmemeval_s:${row.question_id}:${config.dataset_sha256}`,
           notes: `Question date: ${row.question_date}. Interpretation clock: ${row.interpretation_clock}.`
         }
       })) });
     const lines = materializeSemanticProposalLines(query_workset, config.max_output_tokens);
-    const arm = "arm" in config ? { contract: "longmemeval-native-semantic-v1",
+    const arm = "arm" in config ? { contract: "longmemeval-native-semantic-v2",
       metric: "source-bearing-union-first-exposure-any-at-k-v1", mechanism: "native_source_interpretation_and_semantic_correspondence",
       native_route: NATIVE_SEMANTIC_ROUTE, source_caches: freezeSourceCaches(config.source_cache_roots) }
-      : { contract: "longmemeval-semantic-development-v2", metric: "session-bearing-source-round-mixed-any-at-5",
+      : { contract: "longmemeval-semantic-development-v3", metric: "session-bearing-source-round-mixed-any-at-5",
         mechanism: "source_only_interpretation_and_correspondence_not_exercised" };
     const frozen = LongMemEvalExperimentFreezeSchema.parse({ ...arm, config,
       implementation_revision: readCurrentExtractionAuthorityRevision(), order_policy: "native_canonical_source_root_order",

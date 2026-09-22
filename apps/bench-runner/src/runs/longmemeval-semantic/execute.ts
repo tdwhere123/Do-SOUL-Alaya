@@ -50,7 +50,7 @@ export const LongMemEvalExperimentReplaySchema = z.discriminatedUnion("contract"
 export async function prepareLongMemEvalSemanticRun(root: string) {
   const frozen = readLongMemEvalSemanticFreeze(root);
   await loadFrozenLongMemEvalDataset(frozen.config);
-  if (frozen.contract === "longmemeval-native-semantic-v1") assertSourceCaches(frozen.source_caches);
+  if (frozen.contract === "longmemeval-native-semantic-v2") assertSourceCaches(frozen.source_caches);
   const results = readSemanticChainProposalResults(frozen.query_workset, frozen.config.query_cache_root, frozen.config.max_output_tokens);
   const rows: z.infer<typeof LongMemEvalPreparedSchema>["rows"] = [];
   for (const [index, selected] of frozen.selected.entries()) {
@@ -66,11 +66,11 @@ export async function prepareLongMemEvalSemanticRun(root: string) {
         publication_path: publicationPath, publication_identity: chainIdentity(publication) });
     } catch (error) { rows.push({ question_id: selected.question_id, status: "unavailable", reason: error instanceof Error ? error.message : String(error) }); }
   }
-  const native = frozen.contract === "longmemeval-native-semantic-v1";
+  const native = frozen.contract === "longmemeval-native-semantic-v2";
   const items = native ? rows.flatMap((row) => row.status !== "prepared" ? []
     : SemanticChainPlanSchema.parse(readChainArtifact(join(row.chain_root, "prepare.json"))).correspondence_workset?.items ?? []) : [];
   const workset = items.length === 0 ? null : parseSemanticProposalWorkset({ contract: SEMANTIC_PROPOSAL_WORKSET_CONTRACT,
-    kind: "semantic_correspondence", model: frozen.config.model, request_profile: frozen.config.request_profile, items });
+    kind: "semantic_correspondence", provider_url: frozen.config.provider_url, model: frozen.config.model, request_profile: frozen.config.request_profile, items });
   const result = ExperimentPreparedSchema.parse({ contract: native ? "longmemeval-native-semantic-prepared-v1" : "longmemeval-semantic-prepared-v1",
     freeze_identity: chainIdentity(frozen), rows, ...(native ? { correspondence_workset: workset } : {}) });
   if (workset !== null) writeChainJson(join(root, `semantic_correspondence-workset-${chainIdentity(workset)}.json`), workset);
@@ -110,7 +110,7 @@ export function verifyLongMemEvalQuestionPublication(frozen: LongMemEvalSemantic
   selected: LongMemEvalSemanticFreeze["selected"][number], directory: string, value: unknown) {
   const { config } = frozen;
   const snapshotPath = join(directory, "library.sqlite");
-  const report = (frozen.contract === "longmemeval-native-semantic-v1" ? QuestionPublicationSchema : LongMemEvalPublicationSchema).parse(value);
+  const report = (frozen.contract === "longmemeval-native-semantic-v2" ? QuestionPublicationSchema : LongMemEvalPublicationSchema).parse(value);
   if (report.snapshot_path !== snapshotPath || report.recorded_at !== config.recorded_at
     || report.workspace_id !== questionWorkspace(frozen, selected.index)
     || report.run_id !== questionWorkspace(frozen, selected.index)) throw new Error("question publication identity changed");
@@ -138,7 +138,7 @@ function questionChainConfig(frozen: LongMemEvalSemanticFreeze, selected: LongMe
       ? config.correspondence_cache_root : join(directory, "semantic_correspondence-cache"),
     max_output_tokens: config.max_output_tokens, discovery_page_cap: "arm" in config ? config.discovery_page_cap : 1,
     correspondence_pair_cap: "arm" in config ? config.correspondence_pair_cap : 0,
-    access_policy: frozen.contract === "longmemeval-native-semantic-v1" ? frozen.native_route.access_policy
+    access_policy: frozen.contract === "longmemeval-native-semantic-v2" ? frozen.native_route.access_policy
       : SourceSemanticAccessPolicySchema.enum["canonical-v1"],
     budget: config.budget, output_byte_limit: config.output_byte_limit,
     authorized_scopes: "arm" in config ? config.authorized_scopes : { mode: "named", scopes: ["project"] } };
@@ -157,7 +157,7 @@ export function verifyLongMemEvalQuestionChain(frozen: LongMemEvalSemanticFreeze
 export async function replayLongMemEvalSemanticRun(root: string, preparedPath: string) {
   const frozen = readLongMemEvalSemanticFreeze(root);
   const prepared = ExperimentPreparedSchema.parse(readChainArtifact(preparedPath));
-  if ((prepared.contract === "longmemeval-native-semantic-prepared-v1") !== (frozen.contract === "longmemeval-native-semantic-v1")) {
+  if ((prepared.contract === "longmemeval-native-semantic-prepared-v1") !== (frozen.contract === "longmemeval-native-semantic-v2")) {
     throw new Error("prepared experiment arm differs from freeze");
   }
   if (prepared.freeze_identity !== chainIdentity(frozen)) throw new Error("prepared development run binds another freeze");
@@ -173,11 +173,11 @@ export async function replayLongMemEvalSemanticRun(root: string, preparedPath: s
       if (chainIdentity(publication) !== row.publication_identity) throw new Error("prepared question publication changed");
       verifyLongMemEvalQuestionChain(frozen, selected, directory, publication, row.chain_root);
       const replay = await replaySemanticChain(row.chain_root);
-      if (frozen.contract === "longmemeval-semantic-development-v2") LongMemEvalSourceOnlyReplaySchema.parse(replay.result);
+      if (frozen.contract === "longmemeval-semantic-development-v3") LongMemEvalSourceOnlyReplaySchema.parse(replay.result);
       rows.push({ ...row, status: "replayed", replay_path: replay.path });
     } catch (error) { rows.push({ question_id: row.question_id, status: "unavailable", reason: error instanceof Error ? error.message : String(error) }); }
   }
-  const result = LongMemEvalExperimentReplaySchema.parse({ contract: frozen.contract === "longmemeval-native-semantic-v1"
+  const result = LongMemEvalExperimentReplaySchema.parse({ contract: frozen.contract === "longmemeval-native-semantic-v2"
     ? "longmemeval-native-semantic-replay-v1" : "longmemeval-semantic-replay-v1", freeze_identity: chainIdentity(frozen),
     prepared_identity: chainIdentity(prepared), provider_calls: 0, rows });
   const path = join(root, `replay-${chainIdentity(result)}.json`);

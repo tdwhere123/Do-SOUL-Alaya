@@ -13,6 +13,7 @@ export const LongMemEvalSemanticConfigSchema = z.object({
   dataset_question_count: z.number().int().positive(), question_ids: z.array(z.string().min(1)).min(1).max(500),
   stage: z.enum(["development", "formal"]).optional(),
   previously_exposed_question_ids: z.array(z.string().min(1)).max(500).optional(),
+  provider_url: SemanticProposalWorksetSchema.shape.provider_url,
   model: z.string().min(1), request_profile: z.string().refine(isExtractionRequestProfile),
   query_cache_root: z.string().min(1), recorded_at: z.string().datetime(), producer_commit: z.string().regex(/^[a-f0-9]{40}$/u),
   ...SemanticChainConfigSchema.pick({ budget: true, output_byte_limit: true, max_output_tokens: true }).shape
@@ -32,7 +33,7 @@ const SourceManifest = z.object({ source_id: z.string(), source_version: z.strin
   corpus_digest: z.string(), session_id: z.string(), session_index: z.number(), round_index: z.number(),
   source_observed_at: z.string(), roles: z.array(z.enum(["user", "assistant"])) }).strict();
 export const LongMemEvalSemanticFreezeSchema = z.object({
-  contract: z.literal("longmemeval-semantic-development-v2"), config: LongMemEvalSemanticConfigSchema,
+  contract: z.literal("longmemeval-semantic-development-v3"), config: LongMemEvalSemanticConfigSchema,
   implementation_revision: z.string(), metric: z.literal("session-bearing-source-round-mixed-any-at-5"),
   order_policy: z.literal("native_canonical_source_root_order"), mechanism: z.literal("source_only_interpretation_and_correspondence_not_exercised"),
   exposure: z.enum(["development_exposed", "formal_with_recorded_development_exposure"]), inventory: z.array(InventoryRow),
@@ -41,7 +42,7 @@ export const LongMemEvalSemanticFreezeSchema = z.object({
   query_workset: SemanticProposalWorksetSchema
 }).strict();
 export const LongMemEvalNativeSemanticFreezeSchema = LongMemEvalSemanticFreezeSchema.extend({
-  contract: z.literal("longmemeval-native-semantic-v1"), config: LongMemEvalNativeSemanticConfigSchema,
+  contract: z.literal("longmemeval-native-semantic-v2"), config: LongMemEvalNativeSemanticConfigSchema,
   metric: z.literal("source-bearing-union-first-exposure-any-at-k-v1"),
   mechanism: z.literal("native_source_interpretation_and_semantic_correspondence"),
   native_route: NativeSemanticRouteSchema, source_caches: z.array(SourceCacheFreezeSchema)

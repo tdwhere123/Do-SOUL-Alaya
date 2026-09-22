@@ -132,7 +132,7 @@ function interpretation() {
 function correspondenceWorkset() {
   const sourceInterpretation = interpretation();
   return parseSemanticProposalWorkset({
-    contract: "source-semantic-proposal-workset-v2",
+    contract: "source-semantic-proposal-workset-v3", provider_url: "http://127.0.0.1:9",
     kind: "semantic_correspondence", model: MODEL, request_profile: PROFILE,
     items: [{
       original_query: ORIGINAL,

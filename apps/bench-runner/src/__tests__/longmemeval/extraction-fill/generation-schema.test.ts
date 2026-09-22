@@ -207,6 +207,6 @@ describe("Gemini recursive decoding schema projection", () => {
       request, JSON.stringify(schema), "4096"
     ].join("\0")).digest("hex");
     expect(proposalCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1",
-      SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema, 4096)).not.toBe(oldStructuredKey);
+      SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema, 4096, "http://127.0.0.1:9")).not.toBe(oldStructuredKey);
   });
 });

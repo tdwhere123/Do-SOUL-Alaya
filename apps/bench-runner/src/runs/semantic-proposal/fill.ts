@@ -17,17 +17,16 @@ import { assertAttemptInputWithinReceiptLimit } from "../extraction/authority/re
 import { acquireExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 import { isCompleteGeminiFinish } from "../extraction/fill/batch/native-codec.js";
 import {
-  bindProviderRawAttempt, listProviderRawAttempts, readProviderRawAttempt, requestEnvelopeDigest,
+  bindProviderRawAttempt, listProviderRawAttempts, readProviderRawAttempt,
   writeProviderRawAttempt, retainedFailureOutcome, type ProviderRawAttempt
 } from "../extraction/fill/provider-raw-attempt.js";
 import { readLiveTransportFailure } from "../extraction/cache/cache-live-delegate.js";
-import { buildExtractionTransportProvenance } from "../extraction/transport-route.js";
 import {
   type SemanticProposalLine, type SemanticProposalWorkset,
-  materializeSemanticProposalLines
+  materializeSemanticProposalLines, semanticProposalRequestBinding
 } from "./workset.js";
 import {
-  type SemanticProposalAuthority, buildSemanticProposalPreflight, verifySemanticProposalAuthority
+  type SemanticProposalAuthority, buildSemanticProposalPreflight, verifySemanticProposalAuthority, proposalAttemptLineage
 } from "./authority.js";
 import { openSemanticProposalAttemptLedger } from "./attempt.js";
 import {
@@ -85,9 +84,10 @@ export async function executeSemanticProposalFill(input: Readonly<{
       authority.request_profile !== input.workset.request_profile) {
     throw new Error("semantic proposal authority does not bind this workset");
   }
-  mkdirSync(input.cacheRoot, { recursive: true });
   const maxOutputTokens = authority.limits.max_output_tokens;
   const lines = materializeSemanticProposalLines(input.workset, maxOutputTokens);
+  assertAuthorizedProposalRequest(input, lines, maxOutputTokens);
+  mkdirSync(input.cacheRoot, { recursive: true });
   const authorized = new Set(authority.keys);
   const dispatch: SemanticProposalLine[] = [];
   const retainedLines: SemanticProposalLine[] = [];
@@ -161,13 +161,32 @@ function summarize(
   };
 }
 
+function assertAuthorizedProposalRequest(
+  input: Parameters<typeof executeSemanticProposalFill>[0], lines: readonly SemanticProposalLine[], maxOutputTokens: number
+): void {
+  if (input.config.model !== input.workset.model || input.config.requestProfile !== input.workset.request_profile) {
+    throw new Error("semantic proposal execution config differs from authorized model/profile");
+  }
+  for (const line of lines) {
+    const actual = semanticProposalRequestBinding(input.config, { systemPrompt: line.systemPrompt,
+      userPrompt: line.userPrompt, responseJsonSchema: line.responseJsonSchema, maxOutputTokens });
+    if (actual.requestDigest !== line.requestDigest ||
+        canonicalJson(actual.transportProvenance) !== canonicalJson(line.transportProvenance) ||
+        canonicalJson(line.transportProvenance) !== canonicalJson(input.authority.transport_provenance)) {
+      throw new Error("semantic proposal actual HTTP request differs from authorized request");
+    }
+  }
+}
+
 function lookupOf(
   workset: SemanticProposalWorkset, line: SemanticProposalLine, maxOutputTokens: number
 ): SemanticProposalLookup {
   return {
     kind: workset.kind, model: workset.model, request_profile: workset.request_profile,
     system_prompt: line.systemPrompt, user_prompt: line.userPrompt,
-    schema: line.responseJsonSchema, max_output_tokens: maxOutputTokens
+    schema: line.responseJsonSchema, max_output_tokens: maxOutputTokens,
+    provider_url: workset.provider_url, request_digest: line.requestDigest, transport_provenance: line.transportProvenance,
+    attempt_lineage_digest: proposalAttemptLineage({ ...workset, transport_provenance: line.transportProvenance })
   };
 }
 
@@ -239,7 +258,8 @@ async function fillLine(
     writeProviderRawAttempt({
       root: input.cacheRoot, cacheKey: line.key, attemptOrdinal: ordinal, kind: line.kind,
       model: input.workset.model, requestProfile: input.workset.request_profile,
-      requestDigest: requestEnvelopeDigest(line.userPrompt), decodedText: extracted.rawJson,
+      requestDigest: line.requestDigest, attemptLineageDigest: input.authority.attempt_lineage_digest,
+      decodedText: extracted.rawJson,
       finishReason: extracted.responseMetadata?.finishReason ?? null,
       ...(extracted.usage === undefined ? {} : { usage: extracted.usage })
     });
@@ -327,7 +347,7 @@ function replayPersistedProposalRaw(
   bindProviderRawAttempt(raw, {
     cacheKey: line.key, kind: line.kind, model: input.workset.model,
     requestProfile: input.workset.request_profile,
-    requestDigest: requestEnvelopeDigest(line.userPrompt)
+    requestDigest: line.requestDigest, attemptLineageDigest: input.authority.attempt_lineage_digest
   });
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
@@ -462,7 +482,8 @@ function writeAttempt(
     completion_witness: finishReason === null ? null : "finish_reason",
     raw_digest: createHash("sha256").update(rawJson, "utf8").digest("hex"),
     max_output_tokens: input.authority.limits.max_output_tokens,
-    transport_provenance: buildExtractionTransportProvenance(input.config),
+    transport_provenance: line.transportProvenance,
+    request_digest: line.requestDigest, attempt_lineage_digest: input.authority.attempt_lineage_digest,
     ...(usage === undefined ? {} : { usage })
   });
 }
@@ -513,7 +534,7 @@ function persistFailedExtract(
   const raw = writeProviderRawAttempt({
     root: input.cacheRoot, cacheKey: line.key, attemptOrdinal: ordinal, kind: line.kind,
     model: input.workset.model, requestProfile: input.workset.request_profile,
-    requestDigest: requestEnvelopeDigest(line.userPrompt), decodedText: "",
+    requestDigest: line.requestDigest, attemptLineageDigest: input.authority.attempt_lineage_digest, decodedText: "",
     finishReason: response?.finishReason ?? null,
     ...(response === undefined ? {} : { responseBody: response.rawBody }),
     ...(transport.transportFailures[0] === undefined ? {} : { transportFailure: transport.transportFailures[0] }),

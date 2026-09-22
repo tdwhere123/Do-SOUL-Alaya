@@ -27,7 +27,7 @@ function groups(view: SourceSemanticQueryAlternative | undefined,
   return frames.length === 0 ? [undefined] : frames;
 }
 
-/** One original-Q view determines both adapters and programs; no derived query identity is introduced. */
+/** One view of the original query semantics determines both adapters and programs; no derived query identity is introduced. */
 export function planSourceSemanticBranches(query: SourceSemanticQuery,
   correspondence: SourceSemanticCorrespondence, meter: SourceSemanticResourceLedger): readonly SourceSemanticBranchPlan[] {
   const plans: SourceSemanticBranchPlan[] = [];

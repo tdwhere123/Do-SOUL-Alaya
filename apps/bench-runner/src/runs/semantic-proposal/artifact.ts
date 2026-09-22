@@ -5,8 +5,9 @@ import { z } from "zod";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durable-exclusive-publication.js";
 import { proposalCacheKey, type SemanticProposalKind } from "./workset.js";
+import { ExtractionTransportProvenanceSchema, type ExtractionTransportProvenance } from "../extraction/transport-route.js";
 
-export const SEMANTIC_PROPOSAL_CACHE_CONTRACT = "source-semantic-proposal-cache-v2" as const;
+export const SEMANTIC_PROPOSAL_CACHE_CONTRACT = "source-semantic-proposal-cache-v3" as const;
 
 export class SemanticProposalIdentityError extends Error {
   constructor(message: string) {
@@ -19,11 +20,6 @@ const UsageSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
   totalTokens: z.number().int().nonnegative()
-}).strict();
-
-const TransportProvenanceSchema = z.object({
-  provider_url_sha256: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
-  model: z.string().min(1)
 }).strict();
 
 const ShardSchema = z.object({
@@ -39,13 +35,15 @@ const ShardSchema = z.object({
   outcome: z.unknown(),
   admitted: z.boolean(),
   attempt_ordinal: z.number().int().positive(),
+  attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u),
+  request_digest: z.string().regex(/^[0-9a-f]{64}$/u),
   extracted_at: z.string().min(1),
   usage: UsageSchema.optional(),
   finish_reason: z.string().nullable().optional(),
   completion_witness: z.literal("finish_reason").nullable().optional(),
   raw_digest: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
   max_output_tokens: z.number().int().positive().optional(),
-  transport_provenance: TransportProvenanceSchema.optional()
+  transport_provenance: ExtractionTransportProvenanceSchema
 }).strict();
 
 export type SemanticProposalShard = z.infer<typeof ShardSchema>;
@@ -58,6 +56,10 @@ export type SemanticProposalLookup = Readonly<{
   user_prompt?: string;
   schema?: object;
   max_output_tokens?: number;
+  provider_url?: string;
+  request_digest?: string;
+  transport_provenance?: ExtractionTransportProvenance;
+  attempt_lineage_digest?: string;
 }>;
 
 export function semanticProposalShardPath(cacheRoot: string, key: string): string {
@@ -86,7 +88,8 @@ export function inspectSemanticProposalShard(
     throw new SemanticProposalIdentityError(`semantic proposal cache is malformed: ${key}`);
   }
   if (shard.data.cache_key !== key || shard.data.kind !== expected.kind ||
-      shard.data.model !== expected.model || shard.data.request_profile !== expected.request_profile) {
+      shard.data.model !== expected.model || shard.data.request_profile !== expected.request_profile ||
+      expected.attempt_lineage_digest !== undefined && shard.data.attempt_lineage_digest !== expected.attempt_lineage_digest) {
     throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${key}`);
   }
   const digest = createHash("sha256").update(shard.data.raw_json, "utf8").digest("hex");
@@ -97,12 +100,13 @@ export function inspectSemanticProposalShard(
   if (bind !== undefined) {
     if (shard.data.raw_digest !== digest ||
         shard.data.system_prompt !== bind.system_prompt || shard.data.user_prompt !== bind.user_prompt ||
-        shard.data.max_output_tokens !== bind.max_output_tokens) {
+        shard.data.max_output_tokens !== bind.max_output_tokens || shard.data.request_digest !== bind.request_digest ||
+        canonicalJson(shard.data.transport_provenance) !== canonicalJson(bind.transport_provenance)) {
       throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${key}`);
     }
     const derived = proposalCacheKey(
       shard.data.model, shard.data.request_profile,
-      shard.data.system_prompt, shard.data.user_prompt, bind.schema, bind.max_output_tokens
+      shard.data.system_prompt, shard.data.user_prompt, bind.schema, bind.max_output_tokens, bind.provider_url
     );
     if (derived !== key || derived !== shard.data.cache_key) {
       throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${key}`);
@@ -116,20 +120,26 @@ function requestBind(expected: SemanticProposalLookup): Readonly<{
   user_prompt: string;
   schema: object;
   max_output_tokens: number;
+  provider_url: string;
+  request_digest: string;
+  transport_provenance: ExtractionTransportProvenance;
 }> | undefined {
-  const { system_prompt, user_prompt, schema, max_output_tokens } = expected;
+  const { system_prompt, user_prompt, schema, max_output_tokens, provider_url, request_digest, transport_provenance } = expected;
   const bound = system_prompt !== undefined && user_prompt !== undefined &&
-    schema !== undefined && max_output_tokens !== undefined;
+    schema !== undefined && max_output_tokens !== undefined && provider_url !== undefined &&
+    request_digest !== undefined && transport_provenance !== undefined;
   const absent = system_prompt === undefined && user_prompt === undefined &&
-    schema === undefined && max_output_tokens === undefined;
+    schema === undefined && max_output_tokens === undefined && provider_url === undefined &&
+    request_digest === undefined && transport_provenance === undefined;
   if (!bound && !absent) {
     throw new SemanticProposalIdentityError("semantic proposal cache lookup is incomplete");
   }
   if (system_prompt === undefined || user_prompt === undefined ||
-      schema === undefined || max_output_tokens === undefined) {
+      schema === undefined || max_output_tokens === undefined || provider_url === undefined ||
+      request_digest === undefined || transport_provenance === undefined) {
     return undefined;
   }
-  return { system_prompt, user_prompt, schema, max_output_tokens };
+  return { system_prompt, user_prompt, schema, max_output_tokens, provider_url, request_digest, transport_provenance };
 }
 
 export function writeSemanticProposalShard(cacheRoot: string, shard: SemanticProposalShard): void {

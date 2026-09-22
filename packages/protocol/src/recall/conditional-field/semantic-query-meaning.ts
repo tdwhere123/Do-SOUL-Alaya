@@ -10,7 +10,7 @@ import {
   type SourceSemanticQueryFrame, type SourceSemanticQueryRoleRequirement, type SourceSemanticQueryVariable
 } from "./semantic-query.js";
 
-export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v2" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v3" as const;
 export const SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH = Math.min(8, SOURCE_SEMANTIC_MAX_DEPTH);
 
 const Key = SourceSemanticHandleSchema;
@@ -19,7 +19,7 @@ const Obligation = z.enum(["asserted_at_source", "entailed_at_source", "unresolv
 const SourceAct = z.enum(["question", "directive"]);
 
 const FreeTarget = z.object({
-  kind: z.literal("free"), key: Key, return: z.boolean().optional()
+  kind: z.literal("free"), key: Key, excerpt: z.string().min(1).max(1024).optional(), return: z.boolean().optional()
 }).strict().readonly();
 const NamedTarget = z.object({
   kind: z.literal("named"), key: Key, excerpt: z.string().min(1).max(1024), return: z.boolean().optional()
@@ -236,6 +236,7 @@ function preflight(value: unknown): void {
 class QueryMeaningCompiler {
   private readonly sorts = new Map<string, "entity" | "proposition" | "context">();
   private readonly named = new Map<string, string>();
+  private readonly entitySupport = new Map<string, Set<string>>();
   private readonly returned = new Set<string>();
   private readonly frames = new Map<string, { variable: string; operator?: QueryMeaning["kind"] }>();
   private readonly used = new Set<string>();
@@ -289,7 +290,7 @@ class QueryMeaningCompiler {
     if (meaning.kind === "statement") {
       this.declareOccurrence(meaning.key, "proposition", path);
       for (const [index, argument] of meaning.arguments.entries()) {
-        this.collectTarget(argument.target, [...path, "arguments", index, "target"]);
+        this.collectTarget(argument.target, [...path, "arguments", index, "target"], argument.excerpt);
       }
       if (meaning.content !== undefined) this.collectMeaning(meaning.content, [...path, "content"]);
       if (!this.evidence && meaning.return === true && meaning.key !== undefined) this.returned.add(meaning.key);
@@ -311,9 +312,15 @@ class QueryMeaningCompiler {
     this.collectMeaning(meaning.content, [...path, "content"]);
   }
 
-  private collectTarget(target: EntityTargetValue, path: Path): void {
+  private collectTarget(target: EntityTargetValue, path: Path, argumentExcerpt?: string): void {
     if (target.kind === "reference") return;
     this.declareEntityKey(target.key, path);
+    const excerpt = target.excerpt ?? argumentExcerpt;
+    if (excerpt !== undefined) {
+      const supports = this.entitySupport.get(target.key) ?? new Set<string>();
+      supports.add(excerpt);
+      this.entitySupport.set(target.key, supports);
+    }
     if (target.kind === "named") {
       const previous = this.named.get(target.key);
       if (previous !== undefined && previous !== target.excerpt) {
@@ -425,7 +432,11 @@ class QueryMeaningCompiler {
     argument: RoleArgumentValue, path: Path, used: Set<string>
   ): SourceSemanticQueryRoleRequirement {
     const target = this.entityId(argument.target, [...path, "target"]);
-    const excerpt = argument.excerpt ?? (argument.target.kind === "named" ? argument.target.excerpt : undefined);
+    const declared = this.entitySupport.get(target);
+    const excerpt = argument.excerpt
+      ?? (argument.target.kind === "reference" ? undefined : argument.target.excerpt)
+      ?? this.named.get(target)
+      ?? (declared?.size === 1 ? [...declared][0] : undefined);
     if (excerpt === undefined) fail(path, "role argument requires query text support");
     const id = this.roleId(argument.role, used);
     return {
@@ -437,13 +448,7 @@ class QueryMeaningCompiler {
   private reporterRole(
     target: EntityTargetValue, path: Path, used: Set<string>
   ): SourceSemanticQueryRoleRequirement {
-    used.add("reporter");
-    const excerpt = target.kind === "named" ? target.excerpt : target.kind === "free" ? target.key : undefined;
-    if (excerpt === undefined) fail(path, "reporter requires a declared entity");
-    return {
-      id: "reporter", role_reading: "reporter", target_variable: this.entityId(target, path),
-      support: { kind: "query_text", excerpt }
-    };
+    return this.role({ role: "reporter", target }, path, used);
   }
 
   private entityId(target: EntityTargetValue, path: Path): string {

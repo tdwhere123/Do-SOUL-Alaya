@@ -123,6 +123,23 @@ function canonicalQuery(original: string, body: object) {
 }
 
 describe("query meaning receive and semantic_correspondence selection", () => {
+  it.each(["person", "Who", "speaker", "local73"])("receives a supported free reporter with arbitrary handle %s", key => {
+    const received = proposeQuerySemantics({ original_query: "Who reported that Lee left?", producer_id: "query-producer", producer_version: "1" }, {
+      rawJson: JSON.stringify({ contract: "source-semantic-query-response-v5", outcome: { status: "interpreted" },
+        query: { contract: "source-semantic-query-meaning-v3", return: [key], gaps: [], entities: [{ kind: "free", key, excerpt: "Who" }],
+          alternatives: [{ conditions: [{ kind: "reported", key: "report", reporter: { kind: "reference", key },
+            content: { kind: "statement", key: "leave", predicate: "left", arguments: [
+              { role: "agent", target: { kind: "named", key: "lee", excerpt: "Lee" } }
+            ] } }] }] } })
+    });
+    expect(received.request.contract).toBe("source-semantic-query-request-v5");
+    expect(received.outcome.status).toBe("interpreted");
+    expect(received.query?.alternatives[0]?.frames[0]?.role_requirements).toEqual([
+      { id: "reporter", role_reading: "reporter", target_variable: key, support: { kind: "query_text", excerpt: "Who" } }
+    ]);
+    expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("Local keys are arbitrary identifiers, never text evidence");
+  });
+
   it("materializes complete producer examples without asserting embedded actions or returning universal witnesses", () => {
     const results = sourceSemanticQueryExamples.map((example) => proposeQuerySemantics({
       original_query: example.original_query, producer_id: "query-producer", producer_version: "1"
@@ -159,10 +176,10 @@ describe("query meaning receive and semantic_correspondence selection", () => {
       original_query: "Who sent the sample to Mira?", producer_id: "query-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-query-response-v4",
+        contract: "source-semantic-query-response-v5",
         outcome: { status: "interpreted" },
         query: {
-          contract: "source-semantic-query-meaning-v2",
+          contract: "source-semantic-query-meaning-v3",
           alternatives: [{ conditions: [{
             kind: "statement", key: "send", predicate: "send",
             arguments: [
@@ -180,7 +197,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     expect(meaning.query?.variables.find((row) => row.id === "sender")?.reference).toBeUndefined();
     expect(meaning.query?.variables.find((row) => row.id === "mira")?.reference?.excerpt).toBe("Mira");
     expect(meaning.query?.alternatives[0]?.frames[0]?.source_act).toBeUndefined();
-    expect(meaning.system_prompt).toContain("source-semantic-query-meaning-v2");
+    expect(meaning.system_prompt).toContain("source-semantic-query-meaning-v3");
     expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("source_act is retrieval intent");
 
   });
@@ -229,7 +246,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
         query: existentialBody()
       })
     });
-    expect(query.request.contract).toBe("source-semantic-query-request-v4");
+    expect(query.request.contract).toBe("source-semantic-query-request-v5");
     expect(query.outcome.status).toBe("invalid");
     expect(query.query).toBeUndefined();
 

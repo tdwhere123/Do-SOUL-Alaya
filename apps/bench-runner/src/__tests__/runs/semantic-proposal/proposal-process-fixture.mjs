@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
 
 const repoRoot = process.cwd();
 const cacheRoot = process.env.PROPOSAL_CACHE_ROOT;
@@ -27,6 +28,22 @@ const server = await createServer({
   resolve: benchProject.resolve
 });
 try {
+  if (mode === "fill") {
+    const fill = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/fill.ts");
+    const worksets = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/workset.ts");
+    const authorities = await server.ssrLoadModule("/apps/bench-runner/src/runs/semantic-proposal/authority.ts");
+    const workset = worksets.parseSemanticProposalWorkset(JSON.parse(readFileSync(join(cacheRoot, "workset.json"), "utf8")));
+    try {
+      const result = await fill.executeSemanticProposalFill({ workset, cacheRoot,
+        authority: authorities.readSemanticProposalAuthority(process.env.PROPOSAL_AUTHORITY_PATH),
+        config: { model: workset.model, requestProfile: workset.request_profile, providerUrl: workset.provider_url, apiKey: "loopback-only" } });
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+      process.exit(0);
+    } catch (cause) {
+      process.stderr.write(cause instanceof Error ? cause.message : String(cause));
+      process.exit(2);
+    }
+  }
   const guard = await server.ssrLoadModule(
     "/apps/bench-runner/src/runs/extraction/fill/manifest/fill-root-guard.ts"
   );

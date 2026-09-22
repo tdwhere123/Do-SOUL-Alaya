@@ -31,8 +31,8 @@ import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canon
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-selection-guidance.js";
 
-export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v4" as const;
-export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v4" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v5" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v5" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT = "source-semantic-correspondence-request-v4" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v3" as const;
 
@@ -466,7 +466,7 @@ export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): stri
 }
 
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
-  "Propose query meaning for the original query only, using source-semantic-query-meaning-v2.",
+  "Propose query meaning for the original query only, using source-semantic-query-meaning-v3.",
   "Return nested meaning nodes. Do not write a flat variable/frame/sort graph, hashes, reciprocal incidence, answers, ranking, seeds, QueryProgram, programs, verdicts, or source answer IDs.",
   "Host derives occurrence IDs, sorts, and incidence from declared node kind and nesting. A person and an event cannot share one variable. Free answers may be unknown in value without unresolved meaning.",
   "Each alternative has conditions: a conjunction of nested meanings, sharing entity references when required. content remains real embedding, never a substitute for independent conditions.",
@@ -479,6 +479,7 @@ export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   "source_act is retrieval intent, not query punctuation. Ordinary factual questions omit it. Use source_act=question only when the sought source itself asked or directed. Did X happen seeks asserted or entailed X, not a source question.",
   "possible(X) is a context node whose statement operand carries participants. Promise, report, and hypothetical stay distinct from observed fact. not X is not X; conditional operands keep their declared roles.",
   "Question words locate a free target; they are not an entity named who. A name that happens to be Who is a named constraint. Keep true ambiguous-reference gaps; do not invent a unique entity.",
+  'Local keys are arbitrary identifiers, never text evidence. A free target can declare excerpt with its exact original-query support, including reported.reporter:{kind:"free",key:"speaker",excerpt:"Who"}. Named targets already supply their excerpt. A reference reuses a declared target and its unambiguous support; do not repeat its declaration or excerpt. Ordinary arguments may supply excerpt at the argument instead. Preserve the reported content scope; naming its reporter does not assert that content.',
   "Bind meaning to the original query text. Approved fixed context is given; do not invent a source interpretation or a semantic correspondence.",
   'Optional domains are {key,excerpt}. Universal evaluation is {kind:"forall",domain,binder,local_variables}; binders occur in the body and cannot be returned. entailed_at_source requests inference; asserted_at_source requests a literal assertion. Counterexample alternatives use purpose:"counterexample".',
   "Preserve all/every as universal evaluation over the query-supported domain and its bound participant, never as one named entity containing an entire quantified phrase. Domain excerpts retain the requested population restriction; do not invent a closed census. Preserve already, still and completion/aspect distinctions in the supported predicate meaning or a located gap; a broad topic word does not preserve those qualifications.",

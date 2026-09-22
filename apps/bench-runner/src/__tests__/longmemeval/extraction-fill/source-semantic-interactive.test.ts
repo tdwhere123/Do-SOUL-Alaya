@@ -73,7 +73,7 @@ async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic",
   await writeDataset(Array.from({ length: questions }, (_, index) => ({ ...buildExtractionFillQuestion(`q${index}`,
     "I completed alpha. The room was quiet. The desk was clear. The lamp was on. The window was open. " +
     `The door was closed. The shelf was full. The clock was ticking. The floor was clean. It is ready. Record ${index}.`,
-    `I completed decoy. Record ${index}.`), question: "What was completed?" })));
+    `I completed decoy. Record ${index}.`), question: index === 3 ? "What was repaired?" : "What was completed?" })));
   const inspection = await inspectExtractionAuthority({
     variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot, sourcePacking: "complete-source",
     openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION, revision: readCurrentExtractionAuthorityRevision(),

@@ -11,6 +11,7 @@ import { BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES, BENCH_TE
   type BenchTransportFailureAttempt, type BenchTerminalRetryClassification } from "../../compile-seed/compile-seed-types.js";
 
 export const PROVIDER_RAW_ATTEMPT_CONTRACT = "provider-raw-attempt-v2" as const;
+const PROPOSAL_RAW_ATTEMPT_CONTRACT = "semantic-proposal-raw-attempt-v1" as const;
 const MAX_RETAINED_RAW_BYTES = 1024 * 1024;
 const MAX_RECORD_BYTES = 2 * 1024 * 1024;
 
@@ -20,11 +21,9 @@ const UsageSchema = z.object({
   totalTokens: z.number().int().nonnegative()
 }).strict();
 
-const ProviderRawAttemptSchema = z.object({
-  contract: z.literal(PROVIDER_RAW_ATTEMPT_CONTRACT),
+const RawAttemptFields = {
   cache_key: z.string().regex(/^[0-9a-f]{64}$/u),
   attempt_ordinal: z.number().int().positive(),
-  kind: z.enum(["query", "semantic_correspondence", "source_semantic"]),
   model: z.string().min(1),
   request_profile: z.string().min(1),
   request_digest: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -50,7 +49,15 @@ const ProviderRawAttemptSchema = z.object({
     text: z.string(), truncated: z.boolean(), original_byte_length: z.number().int().nonnegative(), digest: z.string()
   }).strict().optional(),
   extracted_at: z.string().min(1)
-}).strict();
+};
+// Source extraction retains its unchanged raw contract; proposal attempts require reservation ownership.
+const ProviderRawAttemptSchema = z.discriminatedUnion("kind", [
+  z.object({ ...RawAttemptFields, contract: z.literal(PROVIDER_RAW_ATTEMPT_CONTRACT), kind: z.literal("source_semantic") }).strict(),
+  z.object({ ...RawAttemptFields, contract: z.literal(PROPOSAL_RAW_ATTEMPT_CONTRACT),
+    kind: z.enum(["query", "semantic_correspondence"]),
+    attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
+  }).strict()
+]);
 
 export type ProviderRawAttempt = z.infer<typeof ProviderRawAttemptSchema>;
 
@@ -79,19 +86,23 @@ export class ProviderRawAttemptIdentityError extends Error {
   }
 }
 
+type RawAttemptOwner =
+  | { kind: "source_semantic"; attemptLineageDigest?: never }
+  | { kind: "query" | "semantic_correspondence"; attemptLineageDigest: string };
+
 export function bindProviderRawAttempt(
   raw: ProviderRawAttempt,
   expected: Readonly<{
     cacheKey: string;
-    kind: ProviderRawAttempt["kind"];
     model: string;
     requestProfile: string;
     requestDigest: string;
-  }>
+  } & RawAttemptOwner>
 ): ProviderRawAttempt {
   if (raw.cache_key !== expected.cacheKey || raw.kind !== expected.kind ||
       raw.model !== expected.model || raw.request_profile !== expected.requestProfile ||
-      raw.request_digest !== expected.requestDigest) {
+      raw.request_digest !== expected.requestDigest ||
+      raw.kind !== "source_semantic" && raw.attempt_lineage_digest !== expected.attemptLineageDigest) {
     throw new ProviderRawAttemptIdentityError(
       `provider raw attempt identity mismatch: ${expected.cacheKey}`
     );
@@ -117,7 +128,6 @@ export function writeProviderRawAttempt(input: Readonly<{
   root: string;
   cacheKey: string;
   attemptOrdinal: number;
-  kind: ProviderRawAttempt["kind"];
   model: string;
   requestProfile: string;
   requestDigest: string;
@@ -129,12 +139,13 @@ export function writeProviderRawAttempt(input: Readonly<{
   failureRetryable?: boolean;
   failureClassification?: BenchTerminalRetryClassification;
   responseBody?: string;
-}>): ProviderRawAttempt {
+} & RawAttemptOwner>): ProviderRawAttempt {
   const original = Buffer.from(input.decodedText, "utf8");
   const truncated = original.byteLength > MAX_RETAINED_RAW_BYTES;
   const retained = truncated ? original.subarray(0, MAX_RETAINED_RAW_BYTES).toString("utf8") : input.decodedText;
   const record = ProviderRawAttemptSchema.parse({
-    contract: PROVIDER_RAW_ATTEMPT_CONTRACT,
+    contract: input.kind === "source_semantic" ? PROVIDER_RAW_ATTEMPT_CONTRACT : PROPOSAL_RAW_ATTEMPT_CONTRACT,
+    ...(input.kind === "source_semantic" ? {} : { attempt_lineage_digest: input.attemptLineageDigest }),
     cache_key: input.cacheKey,
     attempt_ordinal: input.attemptOrdinal,
     kind: input.kind,

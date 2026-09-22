@@ -33,6 +33,8 @@ const roots: string[] = [];
 
 it("keeps admitted legacy shards without completion witnesses non-executable", () => {
   const shard = {
+    attempt_lineage_digest: "b".repeat(64), request_digest: "c".repeat(64),
+    transport_provenance: { model: MODEL, provider_url_sha256: `sha256:${"d".repeat(64)}` },
     contract: SEMANTIC_PROPOSAL_CACHE_CONTRACT, kind: "query" as const, cache_key: "a".repeat(64),
     model: MODEL, request_profile: PROFILE, original_query: "Who?", system_prompt: "system", user_prompt: "user",
     raw_json: "{}", outcome: { status: "interpreted" }, admitted: true, attempt_ordinal: 1, extracted_at: "now"
@@ -42,14 +44,14 @@ it("keeps admitted legacy shards without completion witnesses non-executable", (
   expect(isExecutableProposalShard({ ...shard, finish_reason: "STOP", completion_witness: "finish_reason" })).toBe(true);
 });
 
-it.each([JSON.stringify({ contract: "source-semantic-query-response-v4", outcome: { status: "abstained" } }), "{}"])(
+it.each([JSON.stringify({ contract: "source-semantic-query-response-v5", outcome: { status: "abstained" } }), "{}"])(
   "recovers a published terminal shard before ledger settlement without credentials: %s", async (rawJson) => {
     const cacheRoot = tempRoot();
     const prepared = workset();
     const authority = pinSemanticProposalAuthority({
       preflight: prepareSemanticProposal(prepared, cacheRoot, 128), inputUsdPerMillion: 1, outputUsdPerMillion: 2
     });
-    const ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${authority.identity_digest}.json`);
+    const ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${authority.attempt_lineage_digest}.json`);
     let reserved = "";
     await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: config(), extractor: {
       extract: async () => {
@@ -82,7 +84,7 @@ function tempRoot(): string {
 
 function workset(context = true, queries: readonly string[] = ["Who chairs SHADOW?"]) {
   return parseSemanticProposalWorkset({
-    contract: "source-semantic-proposal-workset-v2",
+    contract: "source-semantic-proposal-workset-v3", provider_url: "http://127.0.0.1:9",
     kind: "query", model: MODEL, request_profile: PROFILE,
     items: queries.map((original_query) => ({
       original_query,
@@ -166,6 +168,8 @@ it("rejects a foreign-kind shard at the lookup path instead of treating it as a 
   const lines = prepareSemanticProposal(prepared, root, 128);
   const key = lines.keys[0]!;
   writeSemanticProposalShard(root, {
+    attempt_lineage_digest: "b".repeat(64), request_digest: "c".repeat(64),
+    transport_provenance: { model: MODEL, provider_url_sha256: `sha256:${"d".repeat(64)}` },
     contract: SEMANTIC_PROPOSAL_CACHE_CONTRACT, kind: "semantic_correspondence", cache_key: key,
     model: MODEL, request_profile: PROFILE, original_query: "who?",
     system_prompt: "sys", user_prompt: "user", raw_json: "{}",
@@ -240,7 +244,7 @@ it("replays persisted raw without a second provider call after a reserved unreso
   const line = materializeSemanticProposalLines(prepared, 128)[0]!;
   writeProviderRawAttempt({
     root: cacheRoot, cacheKey: key, attemptOrdinal: ordinal, kind: "query",
-    model: MODEL, requestProfile: PROFILE, requestDigest: requestEnvelopeDigest(line.userPrompt),
+    model: MODEL, requestProfile: PROFILE, requestDigest: line.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
     decodedText: "not-json", finishReason: "STOP",
     usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
   });
@@ -329,6 +333,7 @@ it.each([
   });
   try {
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const prepared = { ...workset(), provider_url: origin };
     const authority = pinSemanticProposalAuthority({
       preflight: prepareSemanticProposal(prepared, cacheRoot, 128),
       inputUsdPerMillion: 1, outputUsdPerMillion: 2
@@ -344,7 +349,7 @@ it.each([
       expect(wire.url).toBe("/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse");
       expect(wire.body).not.toHaveProperty("generationConfig.responseJsonSchema");
       expect(wire.body).toMatchObject({ generationConfig: { responseMimeType: "application/json" },
-        systemInstruction: { parts: [expect.anything(), { text: expect.stringContaining("source-semantic-query-meaning-v2") }] } });
+        systemInstruction: { parts: [expect.anything(), { text: expect.stringContaining("source-semantic-query-meaning-v3") }] } });
     }
     expect(readSemanticProposalResults(prepared, cacheRoot, 128)).toMatchObject([
       { status: "transport_failure", shard: { outcome: { status: "transport_failure" } } }
@@ -367,7 +372,7 @@ it.each([
       failure_retryable: true, response_body: { text: response.body }, transport_failure: { kind: "http_error", httpStatus: 500 }
     });
     expect(ledger.snapshot().successfulShards).toBe(0);
-    await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: { ...config(), apiKey: null } });
+    await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: { ...config(), providerUrl: origin, apiKey: null } });
     expect(hits).toBe("attempts" in response ? response.attempts : 1);
   } finally {
     server.closeAllConnections();
@@ -446,6 +451,8 @@ it("rejects a same-kind shard whose request body does not match the workset", as
   const prepared = workset();
   const line = materializeSemanticProposalLines(prepared, 128)[0]!;
   writeSemanticProposalShard(planted, {
+    attempt_lineage_digest: "b".repeat(64), request_digest: "c".repeat(64),
+    transport_provenance: { model: MODEL, provider_url_sha256: `sha256:${"d".repeat(64)}` },
     contract: SEMANTIC_PROPOSAL_CACHE_CONTRACT, kind: "query", cache_key: line.key,
     model: MODEL, request_profile: PROFILE, original_query: "Who chairs SHADOW?",
     system_prompt: line.systemPrompt, user_prompt: "{\"foreign\":true}", raw_json: "{}",
@@ -500,6 +507,8 @@ it("rejects a forged interpreted cache shard after re-admission", () => {
   const prepared = workset();
   const line = materializeSemanticProposalLines(prepared, 128)[0]!;
   writeSemanticProposalShard(root, {
+    attempt_lineage_digest: "b".repeat(64), request_digest: "c".repeat(64),
+    transport_provenance: { model: MODEL, provider_url_sha256: `sha256:${"d".repeat(64)}` },
     contract: SEMANTIC_PROPOSAL_CACHE_CONTRACT, kind: "query", cache_key: line.key,
     model: MODEL, request_profile: PROFILE, original_query: "Who chairs SHADOW?",
     system_prompt: line.systemPrompt, user_prompt: line.userPrompt, raw_json: "not-json",
@@ -611,7 +620,7 @@ it("replays a settled raw without a shard instead of treating the key as missing
   const line = materializeSemanticProposalLines(prepared, 128)[0]!;
   writeProviderRawAttempt({
     root: cacheRoot, cacheKey: key, attemptOrdinal: ordinal, kind: "query",
-    model: MODEL, requestProfile: PROFILE, requestDigest: requestEnvelopeDigest(line.userPrompt),
+    model: MODEL, requestProfile: PROFILE, requestDigest: line.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
     decodedText: '{"outcome":{"status":"abstained"}}', finishReason: "STOP",
     usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
   });
@@ -666,7 +675,7 @@ it("restarts a later key from its own reserved raws instead of the global attemp
   const first = ledger.reserveAttemptOrdinal(line1.key);
   writeProviderRawAttempt({
     root: cacheRoot, cacheKey: line1.key, attemptOrdinal: first, kind: "query",
-    model: MODEL, requestProfile: PROFILE, requestDigest: requestEnvelopeDigest(line1.userPrompt),
+    model: MODEL, requestProfile: PROFILE, requestDigest: line1.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
     decodedText: "not-json", finishReason: "STOP",
     usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
   });
@@ -674,7 +683,7 @@ it("restarts a later key from its own reserved raws instead of the global attemp
   const second = ledger.reserveAttemptOrdinal(line1.key);
   writeProviderRawAttempt({
     root: cacheRoot, cacheKey: line1.key, attemptOrdinal: second, kind: "query",
-    model: MODEL, requestProfile: PROFILE, requestDigest: requestEnvelopeDigest(line1.userPrompt),
+    model: MODEL, requestProfile: PROFILE, requestDigest: line1.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
     decodedText: '{"outcome":{"status":"abstained"}}', finishReason: "STOP",
     usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
   });
@@ -684,7 +693,7 @@ it("restarts a later key from its own reserved raws instead of the global attemp
   expect(third).toBe(3);
   writeProviderRawAttempt({
     root: cacheRoot, cacheKey: line2.key, attemptOrdinal: third, kind: "query",
-    model: MODEL, requestProfile: PROFILE, requestDigest: requestEnvelopeDigest(line2.userPrompt),
+    model: MODEL, requestProfile: PROFILE, requestDigest: line2.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
     decodedText: "not-json", finishReason: "STOP",
     usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
   });
@@ -780,6 +789,7 @@ it("rejects a planted foreign raw at the resume path instead of treating it as t
   const ordinal = ledger.reserveAttemptOrdinal(key);
   writeProviderRawAttempt({
     root: cacheRoot, cacheKey: key, attemptOrdinal: ordinal, kind: "semantic_correspondence",
+    attemptLineageDigest: authority.attempt_lineage_digest,
     model: MODEL, requestProfile: PROFILE, requestDigest: requestEnvelopeDigest("{\"foreign\":true}"),
     decodedText: '{"outcome":{"status":"abstained"}}', finishReason: "STOP",
     usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }

@@ -13,21 +13,20 @@ import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "
 import { requestEnvelopeDigest, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 
 const model = "gemini-3.1-flash-lite", requestProfile = "gemini-3.1-minimal-v1" as const;
-const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v2",
+const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3", provider_url: "http://127.0.0.1:9",
   kind: "query", model, request_profile: requestProfile,
   items: [{ original_query: "Who repaired the pump?" }, { original_query: "Who inspected the pump?" }] });
 const config = { providerUrl: "http://127.0.0.1:9", model, requestProfile, apiKey: "local-fixture" };
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-function fixture() {
+function fixture(prepared = workset) {
   const cacheRoot = mkdtempSync(join(tmpdir(), "proposal-attempt-limit-")); roots.push(cacheRoot);
-  const preflight = prepareSemanticProposal(workset, cacheRoot, 128, 1);
+  const preflight = prepareSemanticProposal(prepared, cacheRoot, 128, 1);
   const authority = pinSemanticProposalAuthority({ preflight, inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   return { cacheRoot, authority };
 }
 
 it("limits each failed HTTP request to one attempt and preserves the next key's opportunity", async () => {
-  const { cacheRoot, authority } = fixture();
   let calls = 0;
   const server = createServer((_request, response) => {
     calls += 1;
@@ -37,8 +36,11 @@ it("limits each failed HTTP request to one attempt and preserves the next key's 
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
     const address = server.address() as AddressInfo;
-    const result = await executeSemanticProposalFill({ workset, cacheRoot, authority,
-      config: { ...config, providerUrl: `http://127.0.0.1:${address.port}` } });
+    const providerUrl = `http://127.0.0.1:${address.port}`;
+    const prepared = { ...workset, provider_url: providerUrl };
+    const { cacheRoot, authority } = fixture(prepared);
+    const result = await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority,
+      config: { ...config, providerUrl } });
     expect(result).toMatchObject({ attempts: 2, terminal_failures: 2, newly_admitted: 0 });
     expect(calls).toBe(2);
     const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot();
@@ -47,7 +49,7 @@ it("limits each failed HTTP request to one attempt and preserves the next key's 
     expect(ledger.pendingKeys).toEqual([]);
     expect(ledger.unresolvedAttempts).toEqual([]);
     expect(new Set(ledger.transportFailures.map(row => row.cacheKey)).size).toBe(2);
-    const replay = await executeSemanticProposalFill({ workset, cacheRoot, authority, config: { ...config, apiKey: null } });
+    const replay = await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: { ...config, providerUrl, apiKey: null } });
     expect(replay).toMatchObject({ cache_hits: 2, attempts: 0, newly_admitted: 0 });
     expect(calls).toBe(2);
   } finally {
@@ -62,7 +64,7 @@ it("settles persisted malformed raw at the single-attempt limit before dispatchi
   const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
   const ordinal = ledger.reserveAttemptOrdinal(first!.key);
   writeProviderRawAttempt({ root: cacheRoot, cacheKey: first!.key, attemptOrdinal: ordinal, kind: "query",
-    model, requestProfile, requestDigest: requestEnvelopeDigest(first!.userPrompt), decodedText: "{", finishReason: "STOP",
+    model, requestProfile, requestDigest: first!.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest, decodedText: "{", finishReason: "STOP",
     usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } });
   const calls: string[] = [];
   const result = await executeSemanticProposalFill({ workset, cacheRoot, authority, config, extractor: {

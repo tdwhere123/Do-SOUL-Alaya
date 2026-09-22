@@ -13,7 +13,8 @@ import { SOURCE_BEARING_UNION_FIRST_EXPOSURE_CONTRACT, SourceGoldUnitSchema } fr
 import { FirstExposurePageSchema } from "./first-exposure-session.js";
 
 // This offline report admits the frozen population, not a runnable producer workset.
-const FrozenPopulationSchema = LongMemEvalSemanticFreezeSchema.pick({ config: true, implementation_revision: true, inventory: true, selected: true }).passthrough();
+const FrozenPopulationSchema = LongMemEvalSemanticFreezeSchema.pick({ config: true, implementation_revision: true, inventory: true, selected: true })
+  .extend({ config: LongMemEvalSemanticFreezeSchema.shape.config.omit({ provider_url: true }).passthrough() }).passthrough();
 type FrozenPopulation = z.infer<typeof FrozenPopulationSchema>;
 
 export interface FrozenUnionRowReport {

@@ -98,7 +98,7 @@ it("preserves every shared-person conjunction binding when condition and corresp
   const correspondence = { ...authored, correspondences: [...authored.correspondences].reverse() };
   const reversed = deliveredProofFixture({ interpretation: forward.proof.interpretation, semantics: query,
     correspondence, original: COUNT, library: true, budget: BUDGET });
-  // The reordered Q/A has its own computation identity; compare the retained coordinates within the same authored H.
+  // Reordered query semantics and semantic correspondence have their own computation identity; compare retained coordinates within the same authored source interpretation.
   const bindings = (proof: typeof forward.proof) => proof.binding_results!.map(row =>
     JSON.stringify(Object.entries(row.bindings).map(([variable, coordinate]) =>
       [variable, coordinate.packet_id, coordinate.node_id]).sort(([left], [right]) => left!.localeCompare(right!)))).sort();

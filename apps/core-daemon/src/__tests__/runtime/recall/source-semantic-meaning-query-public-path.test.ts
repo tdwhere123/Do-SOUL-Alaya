@@ -36,10 +36,10 @@ const SCOPES = { mode: "named" as const, scopes: ["project"] };
 
 /** Frozen contract-repair meaning raw. This is not a host-authored graph body. */
 const FROZEN_MEANING_RAW = JSON.stringify({
-  contract: "source-semantic-query-response-v4",
+  contract: "source-semantic-query-response-v5",
   outcome: { status: "interpreted", gaps: [] },
   query: {
-    contract: "source-semantic-query-meaning-v2",
+    contract: "source-semantic-query-meaning-v3",
     alternatives: [{ conditions: [{
       kind: "possible", key: "q1",
       content: {
@@ -189,7 +189,7 @@ function receiveLatheCorrespondence(querySemantics: SourceSemanticQuery, sourceI
  */
 it("recalls a model-admitted query semantics through SQLite reopen, worker, and public interpretation", async () => {
   const receivedQuerySemantics = receiveFrozenQuerySemantics();
-  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v4");
+  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v5");
   expect(receivedQuerySemantics.query.alternatives[0]?.frames.some((row) => row.operator === "possible")).toBe(true);
 
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-meaning-public-"));
@@ -246,7 +246,7 @@ it("recalls a model-admitted query semantics through SQLite reopen, worker, and 
     const reopened = await openSession(filename);
     try {
       const admitted = receiveFrozenQuerySemantics();
-      expect(admitted.request.contract).toBe("source-semantic-query-request-v4");
+      expect(admitted.request.contract).toBe("source-semantic-query-request-v5");
       const querySemanticsAfter = admitted.query;
       const semantic_correspondence = receiveLatheCorrespondence(querySemanticsAfter, sourceInterpretation, sourceInterpretationId);
       const recalled = await interpret(reopened.handler, {

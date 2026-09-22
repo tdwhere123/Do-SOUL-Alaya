@@ -21,7 +21,7 @@ import { assertPerQueryOpportunity } from "./native-semantic-arm.test-support.js
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 
 export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySnapshot: { snapshot_path: string; db_sha256: string }): Promise<void> {
-  const queryWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v2",
+  const queryWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3", provider_url: "http://127.0.0.1:9",
     kind: "query", model: "gemini-2.5-flash-lite", request_profile: "gemini-2.5-nonthinking-v1",
     items: [{ original_query: "What was completed?" }, { original_query: "What else was completed?" }] });
   const queryCache = join(cacheRoot, "queries"), correspondenceCache = join(cacheRoot, "semantic_correspondences");

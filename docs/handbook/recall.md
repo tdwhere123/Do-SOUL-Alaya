@@ -716,20 +716,25 @@ The `soul.interpretation` channel retains its source-local source interpretation
 query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
 Garden v1. Protocol 9.0.0 uses `source-interpretation-v4`, `source-semantic-query-v3`,
 `source-semantic-correspondence-v3`, response envelope v5, reasoning v5, cache v3,
-library v3, public/worker recall protocol 3, and `source-semantic-k-v3`,
+library v4, public/worker recall protocol 4, and `source-semantic-k-v3`,
 `source-semantic-normalizer-v5` and `source-semantic-lowering-v6`. Each complete
 source-frame group is a jointly constrained compile alternative; slots must not
 float off that group's predicate frame. An older open source interpretation is not relabeled or silently promoted; recreate its interpretation explicitly.
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
 
-Query meaning v2 uses `conditions` for conjunction and optional
+Query meaning v3 uses `conditions` for conjunction and optional
 `evidence_inputs: [{conditions}]` for the facts needed by the original requested
-operation. Query request/response v4 use the same recursive meaning schema as
+operation. Query request/response v5 use the same recursive meaning schema as
 local receive admission; depth and byte limits remain local requirements. Nested
 `forall` is rejected; explicit top-level universal evaluation remains supported.
-The host derives original-Q frame views and execution groups. A view retains
-governing context and sibling operands. It never introduces another Q or A identity.
+Entity handles are arbitrary local references, never text support. A free reporter
+provides its original-question excerpt once; a named reporter already carries its
+excerpt. A reference reuses its declared entity's unambiguous support. Missing or
+fabricated excerpts remain invalid through the existing Core admission owner.
+The host derives frame views and execution groups from the original query semantics.
+A view retains governing context and sibling operands. It never introduces another
+query semantics or semantic correspondence identity.
 Direct answer conditions preserve every original restriction even when inputs
 are also declared. An unrepresented answer relation remains explicit.
 
@@ -744,8 +749,8 @@ or equal names. Incomplete execution phases remain resource-exhausted/partial.
 Archive-only source-evidence protocol 1/library v1 retains its recorded identities,
 page and order through the offline admission owner.
 
-New source-interpretation extraction uses the producer-only `source-semantic-proposal-v4` contract
-with `host-owned-expression-schema-v1` at canonical domination depth 16. Optional
+New source-interpretation extraction uses the producer-only `source-semantic-proposal-v5` contract
+with `host-owned-selection-schema-v1` at canonical domination depth 16. Optional
 quantified and measurement fields remain in that recorded projection; omit empty
 tables when the source does not support them. The producer owns predicate/role
 readings, co-reference, semantic scope, speech acts, domain membership/closure
@@ -761,7 +766,7 @@ its target. Unowned or conflicting scopes are rejected; the compiler never
 guesses assertion permission, pronoun antecedents or domain facts. Compilation
 and normalization share one resource ledger. Structural admission and located
 gaps cannot certify language completeness. The canonical source interpretation and response-envelope
-shapes remain unchanged. Recorded v1/v2/v3 proposals select their original
+shapes remain unchanged. Recorded v1/v2/v3/v4 proposals select their original
 prompt/schema explicitly for replay. Marker-absent normalizer-v3 requests retain
 an explicit historical replay path; new publication requires normalizer-v5.
 Request/schema identities distinguish the producer wire. Canonical-envelope
@@ -769,8 +774,10 @@ archives retain native request/response replay with their original prompt. Their
 normalizer-v3 manifests remain ineligible for current cache reuse; replay does
 not upgrade or publish an old interpretation.
 
-New compact expression requests bind `host-owned-expression-schema-v1`. Protocol
-derives its generation schema from the same compact shapes, with shared acyclic
+Current selection requests bind `host-owned-selection-schema-v1`. Their source
+support uses catalog selections with host expansion into the existing compiler.
+Recorded compact expression v4 requests bind `host-owned-expression-schema-v1`. Protocol
+derives each generation schema from its corresponding shapes, with shared acyclic
 definitions spanning the canonical domination-depth limit. Recorded v3 requests
 keep `bounded-expression-schema-v1` or the recursive decoder. SOUL selects the
 schema for structured generation; reference validation and semantic admission
@@ -1014,7 +1021,7 @@ rows retain this fresh cost. Historical records without it remain missing, while
 a newly evaluated source-only row has zero proof-verification cost. The frozen
 source-only arm still requires zero published interpretations.
 
-Bench orchestration also has an explicitly selected `longmemeval-native-semantic-v1`
+Bench orchestration also has an explicitly selected `longmemeval-native-semantic-v2`
 arm. It freezes the complete original source census, retained interpretation cache
 bytes and publication associations, query context/clock, workspace/scopes, native
 delivery contract and resource policy. Existing publication and generic semantic-chain
@@ -1139,3 +1146,14 @@ Batch retains the request-bound raw response; MCP can return the source-bound
 disposition without minting an empty source interpretation or a memory object. The host operations
 remain provider-free. Authored/native regressions establish engineering
 behavior, not real-model extraction quality or benchmark utility.
+
+Proposal workset v3 freezes the normalized provider endpoint. Preflight/authority
+v4, cache v3 and proposal raw-attempt v1 bind the resolved transport and exact
+HTTP request, including schema guidance and thinking settings. Fill checks the
+actual config before reserving an attempt. Source-extraction raw-attempt v2 is
+unchanged. Historical proposal bytes are retained, never relabeled or reused as
+current evidence. Reissuing a receipt resumes the stable execution lineage in
+the same cache; timestamps and companion keys do not renew request opportunities.
+Existing ledger census and ceiling mismatches fail closed. A different attempt
+cannot settle an unresolved reservation; legacy lineages require explicit settled
+continuation before using the same cache. This repair does not grant new budget.
