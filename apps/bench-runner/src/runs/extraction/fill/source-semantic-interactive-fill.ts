@@ -167,15 +167,18 @@ function importInteractiveFromRaw(
     input.authority!.abandonPendingShard(line.key, raw.attempt_ordinal);
     return raw.failure_retryable === true ? "transport_exhausted" : "quarantined";
   }
-  if (!raw.full_replay_possible) {
-    input.authority!.abandonPendingShard(line.key, raw.attempt_ordinal);
-    return "quarantined";
-  }
-  return importInteractiveLine(input, line, sourceCorpus, {
+  const extracted: InteractiveExtracted = {
     rawJson: raw.decoded_text,
     responseMetadata: { finishReason: raw.finish_reason },
     ...(raw.usage === null ? {} : { usage: raw.usage })
-  }, raw.attempt_ordinal);
+  };
+  if (!raw.full_replay_possible) {
+    // Settle the completed response without parsing its prefix or replacing the full-response digest.
+    recordInteractiveOutcome(input.authority!, line.key, raw.attempt_ordinal,
+      extracted, "quarantined", raw.decoded_text_digest);
+    return "quarantined";
+  }
+  return importInteractiveLine(input, line, sourceCorpus, extracted, raw.attempt_ordinal);
 }
 
 function boundSourceCorpus(workset: BatchExtractionWorkset, line: GeminiBatchLine): string {
@@ -302,7 +305,8 @@ function importInteractiveLine(
     extractionTypedArtifactMode(input.prepared.config)
   );
   if (inspected.status !== "hit") {
-    authority.abandonPendingShard(line.key, attemptOrdinal);
+    // Admission completed; retain the shard reservation so intact raw can rebuild it without another request.
+    recordInteractiveOutcome(authority, line.key, attemptOrdinal, extracted, "admitted");
     return "quarantined";
   }
   recordInteractiveOutcome(authority, line.key, attemptOrdinal, extracted, "admitted");
