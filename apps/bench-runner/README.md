@@ -98,7 +98,7 @@ no provider calls. Query-semantics and semantic-correspondence extraction still 
 `semantic-proposal-fill` preparation, authority, attempt ledger, and interactive
 SSE execution; the chain does not dispatch Batch or authorize extraction.
 Preparation accepts `--max-attempts-per-key 1` for a single-attempt window; the
-default remains two. Preflight and authority v3 bind that per-key limit, total
+default remains two. The [preflight and authority contracts](src/runs/semantic-proposal/authority.ts) bind that per-key limit, total
 attempts and price. Fill and recovery consume the same authority, so a failed
 first key cannot borrow another key's single opportunity. This does not change
 generation/cache identity or authorize reopening a stopped window.
@@ -199,7 +199,7 @@ The [chain configuration schema](src/runs/semantic-chain/contract.ts) requires
 the frozen snapshot path/digest, current extraction-authority implementation
 revision, fixed ISO interpretation clock, workspace/run, exact query workset,
 query-semantics and semantic-correspondence cache roots, output cap, discovery page cap, correspondence pair cap, native
-request budget, authorized scopes, and output byte limit. Plan v3 treats the pair
+request budget, authorized scopes, and output byte limit. The plan treats the pair
 cap as a per-query opportunity, retaining selected, zero-budget, missing-interpretation
 and unselected decisions separately from global spend. Preparation preserves
 every question, blocks non-executable query semantics, and writes a semantic-correspondence workset only

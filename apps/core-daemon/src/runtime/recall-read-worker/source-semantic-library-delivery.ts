@@ -1,7 +1,7 @@
 import { SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
-  canonicalJson, indexEntryCacheKey, type SourceSemanticCoverage, type SourceSemanticLibraryDiscovery,
+  indexEntryCacheKey, type SourceSemanticCoverage, type SourceSemanticLibraryDiscovery,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
-import { CoreError, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResponse, fieldContractSha256,
+import { CoreError, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResponse,
   preparedDeliveryId, selectSourceSemanticLibraryPage, sealIssuedContinuation, slotQualifiersFor,
   sourceGoldRootIdentity, SOURCE_SEMANTIC_LIBRARY_ORDER, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
@@ -14,7 +14,8 @@ type Request = Extract<SourceSemanticWorkerRequest, { kind: "recall" }>;
 type Recall = Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
 export type LibraryDeliveryPlan = Readonly<{
   query_id: string; snapshot_id: string; interpretation_id: string; as_of: string; expires_at: string;
-  authorized: readonly string[] | null; request_identity: string; pool: SourceSemanticAccessPool;
+  // Continuation identity retains exact wire inputs; public identity binds the resolved request.
+  authorized: readonly string[] | null; request_identity: string; public_request_identity: string; pool: SourceSemanticAccessPool;
   discovery: SourceSemanticLibraryDiscovery; coverage: SourceSemanticCoverage;
   pages: readonly (readonly SourceSemanticLibraryPackage[])[];
 }>;
@@ -84,13 +85,13 @@ function pageResult(base: PlanBase, page: readonly SourceSemanticLibraryPackage[
   };
   const proofs = page.flatMap(row => row.proofs);
   const previews = Object.fromEntries(page.map(row => [indexEntryCacheKey(row.entry), row.preview]));
-  const requestDigest = fieldContractSha256(canonicalJson({ budget: request.budget, output_byte_limit: request.output_byte_limit, offset }));
   const discovery = { ...base.discovery, access: libraryAccessReceipt(base.pool,
     base.discovery.examined_source_interpretation_ids, page.flatMap(row => row.entry.target.kind === "source_evidence" ? [row.entry.target.root_id] : []), meter) };
   const work = reserveWork ? { native_work: request.budget.work_units, logical_work: request.budget.work_units,
     native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes, rss_bytes: Number.MAX_SAFE_INTEGER } : workOf(meter);
   const result = SourceSemanticWorkerResultSchema.parse({ kind: "recall", request_budget: request.budget,
-    delivery_id: preparedDeliveryId(requestDigest, index), protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
+    request_identity: base.public_request_identity,
+    delivery_id: preparedDeliveryId(base.public_request_identity, index), protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
     total_count: index.entries.length, index, page_purpose: "membership", order: SOURCE_SEMANTIC_LIBRARY_ORDER,
     discovery, slot_qualifiers: slotQualifiersFor(index, proofs).map((row, position) => ({ ...row,
       payload_support: page[position]!.payload_support, selection_basis: page[position]!.selection_basis })),

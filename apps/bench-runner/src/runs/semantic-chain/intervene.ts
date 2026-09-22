@@ -1,38 +1,25 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { z } from "zod";
-import { canonicalJson, SoulInterpretationResponseSchema, SourceSemanticResourceLedger,
+import { canonicalJson, SourceSemanticResourceLedger,
   type SourceSemanticReasoningResult } from "@do-soul/alaya-protocol";
 import { authorizedScopesFromAdmission, executeSourceSemanticInterpretation, fieldContractSha256,
   semanticInterpretationEvidenceId, verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
 import { closeCachedDatabase, initDatabase, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { restoreSnapshotToDataDir } from "../snapshot/materialize.js";
 import { sourceLookupStores } from "../snapshot/source-records/publish.js";
-import { SemanticChainPlanSchema, assertChainSnapshot, chainIdentity, readChainArtifact, writeChainArtifact } from "./contract.js";
+import { chainIdentity, readChainArtifact, writeChainArtifact } from "./contract.js";
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
-import { readSemanticChainCorrespondences, verifySemanticChainQueries } from "./inputs.js";
-
-const replaySchema = z.object({ contract: z.literal("source-semantic-chain-replay-v2"),
-  plan_identity: z.string(), identity: z.string(), arm: z.literal("retained"),
-  rows: z.array(z.object({ query_key: z.string(), response: SoulInterpretationResponseSchema.optional(),
-    correspondence_outcomes: z.array(z.object({ key: z.string().nullable(), raw_digest: z.string().nullable() }).passthrough()).optional()
-  }).passthrough())
-}).passthrough();
+import { readSemanticChainCorrespondences } from "./inputs.js";
+import { admitSemanticChainReplay } from "./replay.js";
 
 /** A new offline execution, with all withdrawal arms sharing its original compiled state. */
 export function interveneSemanticChain(root: string, replayPath: string, leafTrials = 32) {
   if (!Number.isInteger(leafTrials) || leafTrials < 1 || leafTrials > 64) throw new Error("leaf trials must be 1..64");
-  const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(root, "prepare.json")));
-  assertChainSnapshot(plan.config);
-  verifySemanticChainQueries(plan);
-  const replay = replaySchema.parse(readChainArtifact(replayPath));
-  if (replay.plan_identity !== chainIdentity(plan)) throw new Error("withdrawal replay does not bind this plan");
-  const expected = plan.queries.map((row) => row.query_key).sort();
-  const retained = replay.rows.map((row) => row.query_key).sort();
-  if (canonicalJson(expected) !== canonicalJson(retained)) throw new Error("withdrawal replay requires exact query denominator");
+  const { plan, replay } = admitSemanticChainReplay(root, replayPath);
+  if (replay.arm !== "retained") throw new Error("withdrawal requires the retained replay arm");
   const { semantic_correspondences, identity: currentReplayIdentity } = readSemanticChainCorrespondences(plan, "retained");
   if (currentReplayIdentity !== replay.identity) throw new Error("retained native semantic-correspondence state changed");
-  const identity = chainIdentity({ plan: replay.plan_identity, replay: replay.identity, leafTrials });
+  const identity = chainIdentity({ plan: replay.plan_identity, replay: chainIdentity(replay), leafTrials });
   const path = join(root, `withdrawal-${identity}.json`);
   const prior = readChainArtifact(path);
   if (prior !== undefined) return { path, result: prior };
@@ -47,7 +34,7 @@ export function interveneSemanticChain(root: string, replayPath: string, leafTri
     if (scopes === undefined) throw new Error("withdrawal requires explicit scope admission");
     for (const query of plan.queries) {
       const retainedRow = replay.rows.find((row) => row.query_key === query.query_key);
-      const native = retainedRow?.response;
+      const native = retainedRow?.status === "replayed" ? retainedRow.response : undefined;
       const proofs = native?.operation === "recall" ? native.proofs ?? [] : [];
       if (query.status !== "ready" || proofs.length === 0) {
         rows.push({ query_key: query.query_key, status: "not_exercised", reason: "no_retained_native_proof" }); continue;

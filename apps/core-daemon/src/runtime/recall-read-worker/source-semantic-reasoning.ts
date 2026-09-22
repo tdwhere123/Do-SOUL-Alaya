@@ -2,12 +2,12 @@ import {
   SourceSemanticWorkerResultSchema, SourceSemanticResourceExhausted, buildSourceReferenceCatalog, canonicalJson,
   sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticWorkerResult
 } from "@do-soul/alaya-protocol";
-import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, authorizedScopesFromAdmission,
+import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, authorizeSemanticScope, authorizedScopesFromAdmission,
   fieldContractSha256, reasonSourceSemanticInterpretation } from "@do-soul/alaya-core";
 import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
-import { sourceSemanticReadStores, currentSemanticSource, authorizeSemanticScope, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
+import { sourceSemanticReadStores, currentSemanticSource, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { issueSemanticLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow, sourceSemanticRevision, type SourceSemanticLease } from "./source-semantic-leases.js";
 import { runSourceSemanticLibraryRecall } from "./source-semantic-library-recall.js";
 import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";

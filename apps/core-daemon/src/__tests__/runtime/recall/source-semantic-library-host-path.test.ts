@@ -15,7 +15,7 @@ import {
   admitSourceSemanticCorrespondence, admitSourceSemanticQuery, createAuditedSourceAdmission,
   createSourceSemanticInterpretationPublication, EvidenceService, fieldContractSha256,
   SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
-  sourceGoldRootIdentity
+  sourceGoldRootIdentity, sourceSemanticLibraryRequestIdentity
 } from "@do-soul/alaya-core";
 import {
   closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteFieldEraseBarrierRepo
@@ -317,6 +317,12 @@ it.each([0, 5000])("measures a published source through reopened public recall a
       const withCorrespondence = mcpRecall(publicResult.structuredContent);
       if (withCorrespondence.index === undefined || withCorrespondence.slot_qualifiers === undefined) throw new Error("native slots expected");
       const withoutCorrespondence = await workerRecall(reopened, semantics, []);
+      expect(withCorrespondence.request_identity).toBe(sourceSemanticLibraryRequestIdentity({
+        workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES.scopes,
+        original_query: ORIGINAL, query_semantics: semantics, semantic_correspondences: [semantic_correspondence],
+        budget: BUDGET, output_byte_limit: 1_000_000, access_policy: "query-conditioned-v1"
+      }));
+      expect(withoutCorrespondence.request_identity).not.toBe(withCorrespondence.request_identity);
       const proofSlot = withCorrespondence.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === published.interpretation_id);
       const proofEntry = proofSlot === undefined ? undefined : withCorrespondence.index.entries[proofSlot.index];
       const fallback = withoutCorrespondence.index.entries.find((entry) => entry.target.kind === "source_evidence"
@@ -390,10 +396,42 @@ it("delivers frozen five-source pages through the public MCP request without rer
     expect(next.work.native_work).toBe(0);
     expect(next.work.native_bytes).toBe(0);
     expect(next.index?.as_of).toBe(first.index.as_of);
+    expect(next.request_identity).toBe(first.request_identity);
     expect(next.index?.entries.some(entry => first.index!.entries.some(prior => prior.target.kind === "source_evidence"
       && entry.target.kind === "source_evidence" && prior.target.root_id === entry.target.root_id))).toBe(false);
     expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThanOrEqual(request.output_byte_limit);
     expect(Buffer.byteLength(JSON.stringify(next))).toBeLessThanOrEqual(request.output_byte_limit);
+  });
+});
+
+it.each([false, true])("binds public recall to resolved preparation semantics, policy and source restriction (restricted=%s)", async restricted => {
+  await withHost([{ id: "artifact-alice", content: ALICE }], async session => {
+    const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
+    const scopes = { mode: "named" as const, scopes: ["project", "global_core"] };
+    const source = await callInterpretation(session.handler, { operation: "prepare_source", source_id: "artifact-alice",
+      budget: BUDGET, authorized_scopes: scopes }, session.context);
+    if (source.operation !== "prepare_source" || source.source_handle === undefined) throw new Error("source handle expected");
+    const identities: string[] = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const prepared = await callInterpretation(session.handler, {
+        operation: "prepare_query", original_query: ORIGINAL, query_semantics: semantics,
+        access_policy: "canonical-v1", budget: BUDGET, authorized_scopes: scopes,
+        ...(restricted ? { source_handle: source.source_handle } : {})
+      }, session.context);
+      if (prepared.operation !== "prepare_query" || prepared.query_handle === undefined) throw new Error("prepared query expected");
+      const recalled = await callInterpretation(session.handler, {
+        operation: "recall", accepts_unreviewed_conditional_results: true, query_handle: prepared.query_handle,
+        budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: scopes
+      }, session.context);
+      if (recalled.operation !== "recall" || recalled.request_identity === undefined) throw new Error("bound recall expected");
+      identities.push(recalled.request_identity);
+      expect(recalled.request_identity).toBe(sourceSemanticLibraryRequestIdentity({
+        workspace_id: WS, as_of: CLOCK, authorized_scopes: ["global_core", "project"],
+        original_query: ORIGINAL, query_semantics: semantics, source_id: restricted ? "artifact-alice" : undefined, semantic_correspondences: [],
+        budget: BUDGET, output_byte_limit: 1_000_000, access_policy: "canonical-v1"
+      }));
+    }
+    expect(identities[0]).toBe(identities[1]);
   });
 });
 

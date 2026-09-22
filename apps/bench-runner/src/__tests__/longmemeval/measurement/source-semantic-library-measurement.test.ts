@@ -56,6 +56,7 @@ describe("source semantic library measurement", () => {
       || evaluated.measurement?.status !== "validated") throw new Error("native delivery expected");
     const stored = structuredClone(evaluated.measurement);
     Object.assign(response, { protocol_version: 1 });
+    Reflect.deleteProperty(response, "request_identity");
     Object.assign(response.index, { result_version: "source-semantic-library-v1",
       continuation: { schema_version: 1, continuation_id: "historical-continuation", query_id: response.index.query_id,
         snapshot_id: response.index.snapshot_id, result_version: "source-semantic-library-v1", expires_at: "2026-09-19T00:00:00.000Z",

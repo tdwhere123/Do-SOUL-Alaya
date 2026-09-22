@@ -64,8 +64,8 @@ export {
   retainedSourceSpeaker
 } from "./memory/evidence-create/source-admission.js";
 export { createAuditedSourceAdmission, type AuditedSourceAdmission } from "./memory/evidence-create/audited-source-admission.js";
-export { newerSourceRecord } from "./memory/evidence-create/source-observation-currentness.js";
-export { createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity } from "./recall/runtime/source-semantic-access.js";
+export { newerSourceRecord, resolveCurrentSource } from "./memory/evidence-create/source-observation-currentness.js";
+export { authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity } from "./recall/runtime/source-semantic-access.js";
 export {
   createSourceObservationPublication,
   verifySourceObservationPublication,
@@ -217,5 +217,6 @@ export { selectSourceSemanticLibraryPage, type SourceSemanticLibraryPackage } fr
 export {
   SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResults,
   proofEntriesFromBranch, proofForLibraryEntry, slotQualifiersFor, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry,
-  encodeSourceSemanticLibraryResponse, sourceSemanticLibraryQueryIdentity, scopeSourceSemanticLibraryBranch, sourceSemanticLibraryRawPreview
+  encodeSourceSemanticLibraryResponse, sourceSemanticLibraryQueryIdentity, sourceSemanticLibraryRequestIdentity,
+  scopeSourceSemanticLibraryBranch, sourceSemanticLibraryRawPreview
 } from "./recall/runtime/source-semantic-library-recall.js";

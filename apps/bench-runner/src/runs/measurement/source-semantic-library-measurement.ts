@@ -156,7 +156,7 @@ export function readmitSourceSemanticLibraryMeasurement(rawMeasurement: unknown,
 
 // Offline source-only v1 evidence retains its original index/query/exposure identities.
 // Its canonical ten-slot tuple is historical; unchanged field schemas and complete-delivery checks reuse Protocol.
-const HistoricalSourceOnlyDeliverySchema = SoulInterpretationRecallDeliverySchema.extend({
+const HistoricalSourceOnlyDeliverySchema = SoulInterpretationRecallDeliverySchema.omit({ request_identity: true }).extend({
   protocol_version: z.literal(1),
   index: SoulInterpretationRecallDeliverySchema.shape.index.unwrap().extend({
     result_version: z.literal("source-semantic-library-v1"),

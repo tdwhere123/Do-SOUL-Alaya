@@ -106,6 +106,7 @@ describe("complete-source census and publication", () => {
     const measured = await measureLongMemEvalSemanticRun(root, replayed.path);
     expect(measured.result).toMatchObject({ contract: "longmemeval-semantic-measurement-v1", order_policy: "native_canonical_source_root_order" });
     expect(measured.result.inventory).toEqual({ questions: 3, answerable: 2, abstention: 1 });
+    expect(measured.result.rows.find((row) => row.selected && row.cohort === "answerable")?.reason).toBeNull();
     expect(measured.result.primary).toMatchObject({ eligible: 1, hits: 1, misses: 0, unknown: 0, target_decision: "development_only" });
     expect(measured.result.rows).toHaveLength(3);
     expect(measured.result.rows.find((row) => row.question_id === "absent-interpretation_abs")?.outcome).toBe("uncalibrated");

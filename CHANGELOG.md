@@ -8,12 +8,21 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 9.0.0, engine gateway 1.0.0
+## Unreleased — protocol 10.0.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
 
-Native semantic library delivery advances to result v4 / protocol 4 under the
-pending Protocol 9.0.0 release. Five root slots select complete support packages
+Protocol 10.0.0 requires `request_identity` on native semantic library deliveries
+under invariant §25 (major: newly required public response field). Library
+protocol 5 binds the resolved original query, query semantics, correspondences,
+workspace, interpretation clock, authorized scopes, prepared source restriction, budget, output byte limit,
+and access policy through one Core identity owner. Outcome-only responses remain
+valid without a delivery identity. Process-local continuation bindings retain
+their existing contract; index result v4 and historical artifacts keep their
+original identities. Current consumers reject deliveries missing this binding.
+
+Native semantic library delivery uses result v4 / protocol 5 under the
+pending Protocol 10.0.0 release. Five root slots select complete support packages
 from actual conditional-computation bindings, with bounded demand-coverage exchange
 and raw-source fallback. Exact source windows preserve represented dependencies;
 the same encoder enforces token and full-envelope byte limits before selection.
@@ -56,7 +65,7 @@ v5 feed the same bounded recursive grammar. Reporter support comes from the
 original question or a declared reference, independently of arbitrary local handles. Reasoning v5 delivers discriminated
 answer/evidence bindings through one execution and proof authority; evidence does
 not execute a requested operation or claim original-answer completion. Library
-v4/protocol 4 preserves every delivered witness within one occupied source root,
+v4/protocol 5 preserves every delivered witness within one occupied source root,
 verifies siblings, and reports shared answer/input support with unknown cross-source
 compatibility and distinctness. Unfinished phases remain resource-exhausted/partial.
 Archive-only source-evidence v1 identities, pages and order remain unchanged.

@@ -8,7 +8,8 @@ import {
   CoreError, OFFSET_CURSOR, admitSourceSemanticCorrespondence, admitSourceSemanticQuery,
   continuationCapabilityMatches, executeSourceSemanticInterpretation,
   fieldContractSha256, proofEntriesFromBranch,
-  sourceSemanticLibrarySourceEntry, sourceSemanticLibraryQueryIdentity, scopeSourceSemanticLibraryBranch, sourceGoldRootIdentity
+  sourceSemanticLibrarySourceEntry, sourceSemanticLibraryQueryIdentity, sourceSemanticLibraryRequestIdentity,
+  scopeSourceSemanticLibraryBranch, sourceGoldRootIdentity
 } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
@@ -70,6 +71,12 @@ export function runSourceSemanticLibraryRecall(
   });
   const boundPool = lease?.access_pool;
   const policy = request.access_policy ?? boundPool?.access.policy ?? "query-conditioned-v1";
+  const publicRequestIdentity = sourceSemanticLibraryRequestIdentity({
+    workspace_id: payload.workspace_id, as_of: payload.as_of, authorized_scopes: authorized,
+    original_query: original, query_semantics: admission.query, source_id: lease?.source_id,
+    semantic_correspondences: request.semantic_correspondences ?? [], budget: request.budget,
+    output_byte_limit: request.output_byte_limit, access_policy: policy
+  });
   const inputId = accessInputIdentity(original, admission.query, request.budget, policy, lease?.source_id);
   if (boundPool !== undefined && boundPool.access.input_id !== inputId) {
     throw new CoreError("VALIDATION", "library access policy or budget changed", { details: { admission: "bound" } });
@@ -85,7 +92,7 @@ export function runSourceSemanticLibraryRecall(
     discovered.descriptors, request, admission.query, original);
   meter.absorb(exploration);
   return deliverLibraryPage(runtime, payload, authorized, meter, request, admission.query_id, admission.query,
-    sources, discovered, branches, original, requestIdentity);
+    sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
 }
 
 function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
@@ -163,7 +170,8 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
   request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, queryIdentity: string, query: SourceSemanticQuery,
   sources: Pick<ReturnType<typeof listEligibleSemanticSources>, "sources" | "pages" | "open" | "truncated">, discovered: LibraryDiscovery,
-  branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string): SourceSemanticWorkerResult {
+  branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string,
+  publicRequestIdentity: string): SourceSemanticWorkerResult {
   const { descriptors, interpretationPages, interpretationOpen } = discovered;
   const { proofGroups, examined, pairs, computeOpen } = branches;
   const interpretationTruncated = discovered.interpretationTruncated || branches.interpretationTruncated;
@@ -198,7 +206,7 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   const selection = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
   const plan = prepareLibraryDelivery({
     query_id: sourceSemanticLibraryQueryIdentity(original), snapshot_id: snapshotId, interpretation_id: interpretationId,
-    as_of: payload.as_of, authorized, request_identity: requestIdentity, pool: discovered.pool,
+    as_of: payload.as_of, authorized, request_identity: requestIdentity, public_request_identity: publicRequestIdentity, pool: discovered.pool,
     expires_at: new Date(Date.parse(sourceSemanticLifetimeNow(payload)) + 5 * 60_000).toISOString(),
     coverage: {
       discovery: openResiduals ? "truncated" : "complete",

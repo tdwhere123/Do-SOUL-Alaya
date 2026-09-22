@@ -1,4 +1,5 @@
-import { canonicalJson } from "@do-soul/alaya-protocol";
+import { canonicalJson, type SourceSemanticCorrespondence } from "@do-soul/alaya-protocol";
+import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { readSemanticProposalResults } from "../semantic-proposal/fill.js";
 import { chainIdentity, type SemanticChainPlan } from "./contract.js";
 import { materializeSemanticProposalLines, type SemanticProposalWorkset } from "../semantic-proposal/workset.js";
@@ -40,9 +41,12 @@ export function verifySemanticChainQueries(plan: SemanticChainPlan): void {
   if (currentIdentity !== plan.input_identity) throw new Error("prepared query-semantics state changed before native replay");
   for (const row of plan.queries) {
     const current = queries.find((query) => query.line.key === row.query_key);
-    if ((current?.shard?.raw_digest ?? null) !== row.raw_digest ||
+    if (current === undefined || current.line.original_query !== row.original_query ||
+        (current.shard?.raw_digest ?? null) !== row.raw_digest ||
         row.status === "ready" && (current?.received === undefined || !("query" in current.received) ||
         canonicalJson(current.received.query) !== canonicalJson(row.query_semantics))) throw new Error("prepared query semantics changed before native replay");
+    if (row.status === "blocked" && (current.received === undefined || !("query" in current.received))
+      && row.reason !== current.status) throw new Error("prepared query failure state changed before native replay");
   }
 }
 
@@ -51,4 +55,29 @@ export function readSemanticChainCorrespondences(plan: SemanticChainPlan, arm: "
     plan.correspondence_workset, plan.config.correspondence_cache_root, plan.config.max_output_tokens);
   const identity = chainIdentity({ plan, arm, semantic_correspondences: semanticChainProposalStates(semantic_correspondences) });
   return { semantic_correspondences, identity };
+}
+
+/** Replay and archive admission use the same per-query correspondence set and retained outcomes. */
+export function semanticChainQueryCorrespondences(query: Extract<SemanticChainPlan["queries"][number], { status: "ready" }>,
+  semanticCorrespondences: ReturnType<typeof readSemanticChainCorrespondences>["semantic_correspondences"]) {
+  const ready: SourceSemanticCorrespondence[] = [];
+  const outcomes = query.descriptors.map((descriptor) => {
+    const found = semanticCorrespondences.find((row) => {
+      const request = row.line.request as SourceSemanticCorrespondenceRequest;
+      return row.line.original_query === query.original_query &&
+        request.source_interpretation_descriptors[0]?.source_interpretation_id === descriptor.interpretation_id &&
+        canonicalJson(request.admitted_query_semantics) === canonicalJson(query.query_semantics);
+    });
+    if (found?.received !== undefined && "semantic_correspondence" in found.received && found.received.semantic_correspondence !== undefined) {
+      ready.push(found.received.semantic_correspondence);
+    }
+    return { source_interpretation_id: descriptor.interpretation_id, status: found?.status ?? "unattempted",
+      reason: query.correspondence_opportunities.find((entry) => entry.source_interpretation_id === descriptor.interpretation_id)!.decision,
+      core_admitted: found?.received !== undefined,
+      admitted_endpoint_pairs: found?.received !== undefined && "semantic_correspondence" in found.received
+        ? found.received.semantic_correspondence?.correspondences.length ?? null : null,
+      attempt_ordinal: found?.shard?.attempt_ordinal ?? null, producer_usage: found?.shard?.usage ?? null,
+      key: found?.line.key ?? null, raw_digest: found?.shard?.raw_digest ?? null, cache_identity: found?.cache_identity ?? null };
+  });
+  return { ready, outcomes };
 }

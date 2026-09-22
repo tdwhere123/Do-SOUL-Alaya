@@ -1,9 +1,9 @@
 import { SourceSemanticResourceExhausted, type IndexEntry, type SourceSemanticLibraryProof,
   type SourceSemanticLibrarySlotQualifier } from "@do-soul/alaya-protocol";
-import { CoreError, hydrateUtf8Chunk, sourceSemanticSupportWindow, sourceSemanticLibraryRawPreview,
+import { CoreError, authorizeSemanticScope, hydrateUtf8Chunk, sourceSemanticSupportWindow, sourceSemanticLibraryRawPreview,
   sourceGoldRootIdentity, fieldContractSha256, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, RETAINED_SOURCE_READ_RESERVATION } from "@do-soul/alaya-storage";
-import { authorizeSemanticScope, type SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
+import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { admissionOf, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 

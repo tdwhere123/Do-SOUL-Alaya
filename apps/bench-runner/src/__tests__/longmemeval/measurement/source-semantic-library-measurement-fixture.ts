@@ -53,7 +53,8 @@ export function workerRecall(index: InformationIndex) {
       : { evidence_kind: "source_evidence" as const })
   }));
   const result = SourceSemanticWorkerResultSchema.parse({
-    kind: "recall", request_budget: REQUEST, delivery_id: "delivery", protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, total_count: index.entries.length,
+    kind: "recall", request_budget: REQUEST, delivery_id: "delivery", request_identity: `sha256:${"c".repeat(64)}`,
+    protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, total_count: index.entries.length,
     index, page_purpose: "membership",
     discovery: {
       eligible_source_count: index.entries.length, visited_source_pages: 1, visited_source_interpretation_pages: 1,

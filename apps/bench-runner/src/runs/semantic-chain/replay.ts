@@ -1,10 +1,12 @@
 import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageDatabase, SqliteSourceHintReader } from "@do-soul/alaya-storage";
-import { fieldContractSha256, semanticInterpretationEvidenceId, verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
+import { authorizedScopesFromAdmission, authorizeSemanticScope, fieldContractSha256, preparedDeliveryId, resolveCurrentSource,
+  semanticInterpretationEvidenceId, sourceSemanticAccessInputIdentity, sourceSemanticLibraryQueryIdentity,
+  sourceSemanticLibraryRequestIdentity, verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
 import { z } from "zod";
 import { canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
-  type SourceSemanticCorrespondence } from "@do-soul/alaya-protocol";
+  sourceEvidenceRootTarget, sourceRecallTarget, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../measurement/source-semantic-library-recall.js";
@@ -12,10 +14,9 @@ import { measureSourceSemanticLibraryResponse } from "../measurement/source-sema
 import { sourceLookupStores } from "../snapshot/source-records/publish.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import { FirstExposurePageSchema } from "../measurement/first-exposure-session.js";
-import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainArtifact,
-  assertChainSnapshot, withSemanticChainDaemon } from "./contract.js";
-import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
-import { readSemanticChainCorrespondences, verifySemanticChainQueries } from "./inputs.js";
+import { SemanticChainPlanSchema, SemanticChainQuerySchema, chainIdentity, readChainArtifact, writeChainArtifact,
+  assertChainSnapshot, withSemanticChainDaemon, type SemanticChainPlan } from "./contract.js";
+import { readSemanticChainCorrespondences, semanticChainQueryCorrespondences, verifySemanticChainQueries } from "./inputs.js";
 import { discoverSemanticChainQuery } from "./prepare.js";
 
 export async function replaySemanticChain(root: string, arm: "retained" | "without_semantic_correspondences" = "retained") {
@@ -33,25 +34,7 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
     else await withSemanticChainDaemon(config, root, async (daemon) => {
       for (const query of plan.queries) {
         if (query.status === "blocked") { rows.push(query); continue; }
-        const ready: SourceSemanticCorrespondence[] = [];
-        const outcomes = query.descriptors.map((descriptor) => {
-          const found = semantic_correspondences.find((row) => {
-            const request = row.line.request as SourceSemanticCorrespondenceRequest;
-            return row.line.original_query === query.original_query &&
-              request.source_interpretation_descriptors[0]?.source_interpretation_id === descriptor.interpretation_id &&
-              canonicalJson(request.admitted_query_semantics) === canonicalJson(query.query_semantics);
-          });
-          if (found?.received !== undefined && "semantic_correspondence" in found.received && found.received.semantic_correspondence !== undefined) {
-            ready.push(found.received.semantic_correspondence);
-          }
-          return { source_interpretation_id: descriptor.interpretation_id, status: found?.status ?? "unattempted",
-            reason: query.correspondence_opportunities.find((entry) => entry.source_interpretation_id === descriptor.interpretation_id)!.decision,
-            core_admitted: found?.received !== undefined,
-            admitted_endpoint_pairs: found?.received !== undefined && "semantic_correspondence" in found.received
-              ? found.received.semantic_correspondence?.correspondences.length ?? null : null,
-            attempt_ordinal: found?.shard?.attempt_ordinal ?? null, producer_usage: found?.shard?.usage ?? null,
-            key: found?.line.key ?? null, raw_digest: found?.shard?.raw_digest ?? null, cache_identity: found?.cache_identity ?? null };
-        });
+        const { ready, outcomes } = semanticChainQueryCorrespondences(query, semantic_correspondences);
         const rowPath = join(root, `replay-${identity}`, `${query.query_key}.json`);
         const prior = readChainArtifact(rowPath);
         if (prior !== undefined) { rows.push(prior); continue; }
@@ -113,46 +96,18 @@ function sameSealedSnapshotObservation(expected: Awaited<ReturnType<typeof disco
 }
 
 export function measureSemanticChain(root: string, replayPath: string, goldValue: unknown) {
-  const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(root, "prepare.json")));
-  const replay = z.object({ contract: z.literal("source-semantic-chain-replay-v2"),
-    plan_identity: z.string(), identity: z.string(), rows: z.array(z.object({
-      query_key: z.string(), status: z.enum(["blocked", "replayed", "native_unavailable"]),
-      reason: z.string().optional(), native_elapsed_ms: z.number().nonnegative().optional(),
-      response: SoulInterpretationResponseSchema.optional(), first_exposure: FirstExposurePageSchema.nullable().optional()
-    }).passthrough()) }).passthrough().parse(readChainArtifact(replayPath));
-  if (replay.contract !== "source-semantic-chain-replay-v2" || replay.plan_identity !== chainIdentity(plan)) {
-    throw new Error("measurement replay does not bind this plan");
-  }
+  const { plan, replay } = admitSemanticChainReplay(root, replayPath);
   const gold = z.array(z.object({ query_key: z.string(), source_units: SourceGoldUnitSchema.array() }).strict()).parse(goldValue);
   const expected = plan.queries.map((row) => row.query_key).sort();
-  if (canonicalJson(expected) !== canonicalJson(gold.map((row) => row.query_key).sort()) ||
-      canonicalJson(expected) !== canonicalJson(replay.rows.map((row) => row.query_key).sort())) {
+  if (canonicalJson(expected) !== canonicalJson(gold.map((row) => row.query_key).sort())) {
     throw new Error("measurement requires exact per-query gold and replay denominator coverage");
   }
-  assertChainSnapshot(plan.config);
-  const connection = new BetterSqlite3(plan.config.snapshot_path, { readonly: true, fileMustExist: true });
-  let sourceRecords;
-  try {
-    connection.pragma("query_only = ON");
-    const database = new StorageDatabase(plan.config.snapshot_path, connection);
-    const stores = sourceLookupStores(database);
-    const reader = new SqliteSourceHintReader(connection);
-    sourceRecords = replay.rows.flatMap((row) => row.response?.operation === "recall" ? row.response.proofs ?? [] : []).flatMap((proof) => {
-      try {
-        const retained = reader.readBoundInterpretation(plan.config.workspace_id,
-          semanticInterpretationEvidenceId(proof.source_interpretation_id!, fieldContractSha256), 1_000_000);
-        if (retained.status !== "complete" || retained.gist === null) return [];
-        return [verifyPublishedSourceSemanticInterpretation({ stores, sha256: fieldContractSha256 },
-          JSON.parse(retained.gist), plan.config.workspace_id).stored.record];
-      } catch { return []; }
-    });
-  } finally { connection.close(); }
   const rows = replay.rows.map((row) => {
     const prepared = plan.queries.find((query) => query.query_key === row.query_key)!;
-    const evaluated = row.first_exposure == null ? null : measureSourceSemanticLibraryResponse({
+    const evaluated = row.status !== "replayed" || row.first_exposure == null ? null : measureSourceSemanticLibraryResponse({
       recallResult: row.response, firstExposurePage: row.first_exposure,
-      requestBudget: plan.config.budget, sourceRecords: sourceRecords.filter((record) => row.response?.operation === "recall"
-        && row.response.proofs?.some((proof) => proof.source_record.identity === record.identity)), goldSourceUnits: gold.find((entry) => entry.query_key === row.query_key)!.source_units
+      requestBudget: plan.config.budget, sourceRecords: row.source_records,
+      goldSourceUnits: gold.find((entry) => entry.query_key === row.query_key)!.source_units
     });
     return { query_key: row.query_key, status: row.status,
     reason: row.reason ?? null,
@@ -176,4 +131,131 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
   const path = join(root, `measurement-${chainIdentity(result)}.json`);
   writeChainArtifact(path, result);
   return { path, result };
+}
+
+const ReplaySchema = z.object({ contract: z.literal("source-semantic-chain-replay-v2"),
+  plan_identity: z.string(), identity: z.string(), arm: z.enum(["retained", "without_semantic_correspondences"]), provider_calls: z.literal(0),
+  rows: z.array(z.object({ query_key: z.string(), status: z.enum(["blocked", "replayed", "native_unavailable"]),
+    reason: z.string().optional(), native_elapsed_ms: z.number().nonnegative().optional(),
+    preparation_elapsed_ms: z.number().nonnegative().optional(),
+    response: SoulInterpretationResponseSchema.optional(), first_exposure: FirstExposurePageSchema.nullable().optional(),
+    correspondence_outcomes: z.array(z.object({ key: z.string().nullable(), raw_digest: z.string().nullable() }).passthrough()).optional(),
+    preparation_trace: SemanticChainQuerySchema.options[1].shape.discovery_trace.nullable().optional()
+  }).passthrough()) }).passthrough();
+type ReplayRow = z.infer<typeof ReplaySchema>["rows"][number];
+
+/** All archive consumers re-admit frozen inputs and native delivery before using retained results. */
+export function admitSemanticChainReplay(root: string, replayPath: string) {
+  const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(root, "prepare.json")));
+  const replay = ReplaySchema.parse(readChainArtifact(replayPath));
+  if (replay.plan_identity !== chainIdentity(plan)) {
+    throw new Error("measurement replay does not bind this plan");
+  }
+  const expected = plan.queries.map((row) => row.query_key).sort();
+  if (canonicalJson(expected) !== canonicalJson(replay.rows.map((row) => row.query_key).sort())) {
+    throw new Error("archive requires exact query denominator coverage");
+  }
+  assertChainSnapshot(plan.config);
+  verifySemanticChainQueries(plan);
+  const retained = readSemanticChainCorrespondences(plan, replay.arm);
+  if (retained.identity !== replay.identity) throw new Error("retained native semantic-correspondence state changed");
+  const connection = new BetterSqlite3(plan.config.snapshot_path, { readonly: true, fileMustExist: true });
+  try {
+    connection.pragma("query_only = ON");
+    const database = new StorageDatabase(plan.config.snapshot_path, connection);
+    const stores = sourceLookupStores(database);
+    const reader = new SqliteSourceHintReader(connection);
+    const rows = replay.rows.map((row) => {
+      try {
+        const source_records = admitReplayRow(root, plan, replay, row, retained.semantic_correspondences, stores, reader);
+        return { ...row, source_records };
+      } catch (error) {
+        return { ...row, status: "native_unavailable" as const, source_records: [],
+          reason: `archive_admission: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    });
+    return { plan, replay: { ...replay, rows } };
+  } finally { connection.close(); }
+}
+
+function admitReplayRow(root: string, plan: SemanticChainPlan, replay: z.infer<typeof ReplaySchema>, row: ReplayRow,
+  correspondences: ReturnType<typeof readSemanticChainCorrespondences>["semantic_correspondences"],
+  stores: ReturnType<typeof sourceLookupStores>, reader: SqliteSourceHintReader): SourceRecordIdentity[] {
+  const query = plan.queries.find((entry) => entry.query_key === row.query_key)!;
+  const delivered = row.response?.operation === "recall" && row.response.index !== undefined;
+  if (query.status === "blocked") {
+    if (row.status !== "blocked" || row.reason !== query.reason || row.first_exposure != null || delivered) {
+      throw new Error("blocked query cannot have a native delivery");
+    }
+    return [];
+  }
+  if (row.status === "blocked") throw new Error("ready query cannot become a blocked archive row");
+  const rowPath = join(root, `replay-${replay.identity}`, `${row.query_key}.json`);
+  const retainedRow = readChainArtifact(rowPath), reservation = readChainArtifact(`${rowPath}.reserved`);
+  if (retainedRow === undefined || reservation === undefined || canonicalJson(retainedRow) !== canonicalJson(row)
+    || canonicalJson(reservation) !== canonicalJson({ replay_identity: replay.identity, query_key: row.query_key })) {
+    throw new Error("native row or first-exposure reservation differs from retained replay");
+  }
+  if (row.status === "native_unavailable") {
+    if (row.first_exposure != null || delivered) throw new Error("unavailable row cannot have a native delivery");
+    return [];
+  }
+  const response = row.response;
+  if (response?.operation !== "recall" || response.index === undefined || row.first_exposure == null) {
+    throw new Error("replayed row requires its native initial delivery");
+  }
+  const { config } = plan;
+  const scopes = authorizedScopesFromAdmission(config.authorized_scopes).authorized_scopes;
+  if (scopes === undefined) throw new Error("native delivery requires explicit scope admission");
+  const { ready, outcomes } = semanticChainQueryCorrespondences(query, correspondences);
+  const selected = replay.arm === "retained" ? ready : [];
+  const expectedIdentity = sourceSemanticLibraryRequestIdentity({ workspace_id: config.workspace_id, as_of: config.interpretation_clock,
+    authorized_scopes: scopes, original_query: query.original_query, query_semantics: query.query_semantics,
+    semantic_correspondences: selected, budget: config.budget, output_byte_limit: config.output_byte_limit, access_policy: config.access_policy });
+  if (response.request_identity !== expectedIdentity || response.index.query_id !== sourceSemanticLibraryQueryIdentity(query.original_query)
+    || response.index.as_of !== config.interpretation_clock || canonicalJson(response.request_budget) !== canonicalJson(config.budget)
+    || canonicalJson(row.correspondence_outcomes) !== canonicalJson(outcomes)) throw new Error("native delivery belongs to another frozen request");
+  if (response.delivery_id !== preparedDeliveryId(expectedIdentity, response.index)) {
+    throw new Error("native delivery ID does not bind its frozen request and index");
+  }
+  const trace = row.preparation_trace;
+  const access = response.discovery?.access;
+  if (trace == null || trace.length === 0 || !sameSealedSnapshotObservation(query, { ...query, discovery_trace: trace })
+    || access === undefined || access.pool_id !== trace.at(-1)!.access.pool_id || access.policy !== config.access_policy
+    || access.input_id !== sourceSemanticAccessInputIdentity({ original_query: query.original_query, query_semantics: query.query_semantics,
+      budget: config.budget, policy: config.access_policy })) throw new Error("native delivery does not bind the prepared access pool");
+  return admitDeliveredSources(plan, response, stores, reader, scopes, selected);
+}
+
+function admitDeliveredSources(plan: SemanticChainPlan, response: Extract<z.infer<typeof SoulInterpretationResponseSchema>, { operation: "recall" }>,
+  stores: ReturnType<typeof sourceLookupStores>, reader: SqliteSourceHintReader, scopes: readonly string[] | null,
+  correspondences: ReturnType<typeof semanticChainQueryCorrespondences>["ready"]): SourceRecordIdentity[] {
+  const records: SourceRecordIdentity[] = [];
+  for (const entry of response.index!.entries) {
+    const target = entry.target;
+    if (target.kind !== "source_evidence" || target.workspace_id !== plan.config.workspace_id) throw new Error("native source workspace changed");
+    const retained = stores.getStoredRecord(plan.config.workspace_id, target.root_id);
+    if (retained === null) throw new Error("delivered source is unavailable in sealed snapshot");
+    const current = resolveCurrentSource(stores, plan.config.workspace_id, { artifact_key: retained.record.source_id,
+      source_corpus_digest: target.content_digest.replace(/^sha256:/u, "") }, fieldContractSha256);
+    authorizeSemanticScope(current.record.scope_class, scopes);
+    if (canonicalJson(sourceEvidenceRootTarget(target)) !== canonicalJson(sourceRecallTarget({ workspace_id: current.record.workspace_id,
+      root_kind: "source_record", root_id: current.record.identity, source_version: current.record.source_version,
+      content_digest: current.record.content_digest, evidence_object_id: current.record.evidence_object_id }))) {
+      throw new Error("delivered source identity differs from current sealed source");
+    }
+    records.push(current.record);
+  }
+  for (const proof of response.proofs ?? []) {
+    if (!correspondences.some((value) => canonicalJson(value) === canonicalJson(proof.semantic_correspondence))) {
+      throw new Error("delivered proof lacks its retained semantic correspondence");
+    }
+    const capsule = reader.readBoundInterpretation(plan.config.workspace_id,
+      semanticInterpretationEvidenceId(proof.source_interpretation_id!, fieldContractSha256), 1_000_000);
+    if (capsule.status !== "complete" || capsule.gist === null) throw new Error("delivered interpretation is unavailable in sealed snapshot");
+    const checked = verifyPublishedSourceSemanticInterpretation({ stores, sha256: fieldContractSha256 }, JSON.parse(capsule.gist), plan.config.workspace_id);
+    authorizeSemanticScope(checked.stored.record.scope_class, scopes);
+    records.push(checked.stored.record);
+  }
+  return [...new Map(records.map((record) => [record.identity, record])).values()];
 }

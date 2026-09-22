@@ -1,5 +1,5 @@
 import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
-import { CoreError, fieldContractSha256, type FieldFormationStores } from "@do-soul/alaya-core";
+import { CoreError, authorizeSemanticScope, fieldContractSha256, type FieldFormationStores } from "@do-soul/alaya-core";
 import { RETAINED_SOURCE_READ_RESERVATION, SqliteFieldSourceRecordRepo, sourceRecordFromRow, type StorageDatabase } from "@do-soul/alaya-storage";
 
 export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
@@ -106,11 +106,4 @@ export function currentSemanticSource(stores: Pick<FieldFormationStores, "getCur
   const stored = stores.getStoredRecord(workspace, current.identity);
   if (stored === null) throw new CoreError("CONFLICT", "current source body is not available", { details: { admission: "unavailable", unavailable: "source_body" } });
   return stored;
-}
-
-export function authorizeSemanticScope(scope: string | null | undefined, authorized: readonly string[] | null): void {
-  if (scope == null) throw new CoreError("VALIDATION", "source has no governed scope", { details: { admission: "filtered" } });
-  if (authorized !== null && !authorized.includes(scope)) {
-    throw new CoreError("VALIDATION", "source is outside authorized scopes", { details: { admission: "filtered" } });
-  }
 }

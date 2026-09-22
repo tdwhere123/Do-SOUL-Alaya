@@ -75,9 +75,9 @@ soul:mcp-types.ts#SoulInterpretationProposeRequestSchema(authorized_scopes,budge
 soul:mcp-types.ts#SoulInterpretationProposeResponseSchema(coverage,evidence_object_id,operation,outcome,provider_attempts,published,semantic_status,source_binding,work)#e1c42dd
 soul:mcp-types.ts#SoulInterpretationReasonRequestSchema(accepts_unreviewed_conditional_results,authorized_scopes,budget,operation,original_query,output_byte_limit,query_handle,query_semantics,semantic_correspondence,source_interpretation_id)#e3cfb07
 soul:mcp-types.ts#SoulInterpretationReasonResponseSchema(context,coverage,interpretation,operation,outcome,provider_attempts,query,result,semantic_correspondence,work)#7e6dcc6
-soul:mcp-types.ts#SoulInterpretationRecallDeliverySchema(coverage,delivery_id,discovery,index,operation,order,outcome,page_purpose,proofs,protocol_version,provider_attempts,request_budget,results,slot_qualifiers,total_count,work)#fbea48d
+soul:mcp-types.ts#SoulInterpretationRecallDeliverySchema(coverage,delivery_id,discovery,index,operation,order,outcome,page_purpose,proofs,protocol_version,provider_attempts,request_budget,request_identity,results,slot_qualifiers,total_count,work)#3c91faa
 soul:mcp-types.ts#SoulInterpretationRequestSchema()#f6f98ff
-soul:mcp-types.ts#SoulInterpretationResponseSchema()#59b4f42
+soul:mcp-types.ts#SoulInterpretationResponseSchema()#c049970
 soul:mcp-types.ts#SoulListPendingEdgeProposalsRequestSchema(edge_type,limit,min_confidence,since,trigger_source)#797b0c8
 soul:mcp-types.ts#SoulListPendingEdgeProposalsResponseSchema(proposals,total_count)#730ce68
 soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#766d3d9

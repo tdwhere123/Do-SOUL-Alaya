@@ -6,7 +6,8 @@ import {
   indexMemoryObjectId, type Continuation, type Derivation, type IndexEntry, type InformationIndex, type MemorySearchResult,
   type SourceEvidenceTarget, type SourceSemanticLibraryOrder, type SourceSemanticLibrarySlotQualifier,
   SoulInterpretationResponseSchema, type SourceSemanticWorkerResult, type SoulInterpretationResponse,
-  type SourceSemanticReasoningResult, type SourceSemanticLibraryProof
+  type SourceSemanticReasoningResult, type SourceSemanticLibraryProof, type SourceSemanticQuery,
+  type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type RequestBudget
 } from "@do-soul/alaya-protocol";
 import { sortIndexEntries } from "./index-continuation.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
@@ -16,6 +17,19 @@ import { projectSourceSemanticQuerySupport } from "./source-semantic-query-suppo
 /** Offline evidence binds its recorded result contract; live requests use the current version. */
 export function sourceSemanticLibraryQueryIdentity(originalQuery: string, resultVersion: string = SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION): string {
   return `sha256:${fieldContractSha256(canonicalJson({ kind: resultVersion, query: originalQuery }))}`;
+}
+
+/** Admitted query semantics and resolved execution inputs bind every page independently of process-local handles. */
+export function sourceSemanticLibraryRequestIdentity(input: Readonly<{
+  workspace_id: string; as_of: string; authorized_scopes: readonly string[] | null;
+  original_query: string; query_semantics: SourceSemanticQuery;
+  source_id?: string;
+  semantic_correspondences: readonly SourceSemanticCorrespondence[];
+  budget: RequestBudget; output_byte_limit: number; access_policy: SourceSemanticAccessPolicy;
+}>): string {
+  return `sha256:${fieldContractSha256(canonicalJson({ ...input, source_id: input.source_id ?? null,
+    authorized_scopes: input.authorized_scopes === null ? null : [...input.authorized_scopes].sort()
+  }))}`;
 }
 
 export const SOURCE_SEMANTIC_LIBRARY_ORDER: SourceSemanticLibraryOrder = {

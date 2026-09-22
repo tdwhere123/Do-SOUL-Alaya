@@ -714,9 +714,9 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent
 query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 9.0.0 uses `source-interpretation-v4`, `source-semantic-query-v3`,
+Garden v1. Protocol 10.0.0 uses `source-interpretation-v4`, `source-semantic-query-v3`,
 `source-semantic-correspondence-v3`, response envelope v5, reasoning v5, cache v3,
-library v4, public/worker recall protocol 4, and `source-semantic-k-v3`,
+library v4, public/worker recall protocol 5, and `source-semantic-k-v3`,
 `source-semantic-normalizer-v5` and `source-semantic-lowering-v6`. Each complete
 source-frame group is a jointly constrained compile alternative; slots must not
 float off that group's predicate frame. An older open source interpretation is not relabeled or silently promoted; recreate its interpretation explicitly.
@@ -999,7 +999,7 @@ The separately named source-bearing union metric scores the same initial occupie
 slots across source evidence and validated semantic proofs. The entire delivered
 slot sequence must bind to the native index before either source or proof
 scoring: count, order, kinds and product coordinates must match the native delivery
-owner. Protocol owns the complete delivery identity: protocol 4, library v4,
+owner. Protocol owns the complete delivery identity: protocol 5, library v4,
 membership purpose and the five-slot page budget. Worker and public readers derive
 from it; a public outcome-only response contains no partial delivery fields and
 is unavailable for measurement. Unknown/obsolete delivery versions are invalid.
@@ -1067,6 +1067,21 @@ handle and an observed pool mismatch remain distinct unavailable reasons.
 The repeated preparation's trace/work and elapsed time are recorded separately;
 total native elapsed time includes it. Matching a capped observed prefix does not
 close an unvisited residual or enlarge the frozen candidate opportunity.
+Every indexed public delivery carries a Core-derived `request_identity` over the
+resolved original query, admitted query semantics, semantic correspondences,
+workspace, clock, authorized scopes, any prepared source restriction, access policy
+and resource/output limits.
+Process-local handles are excluded; continuation leases retain their separate
+request-capability identity. The existing native delivery-ID owner commits that
+resolved request identity together with the index; the first-exposure record must
+match this delivery. Archive measurement and withdrawal share one
+readmission entry: it verifies current frozen query/correspondence cache state,
+exact retained row and first-exposure reservation, request identity, and native
+preparation trace before using a response. It also rechecks delivered source roots,
+bodies, currentness and scope against the sealed SQLite snapshot. Blocked or
+unavailable rows cannot contribute a delivery. Invalid rows remain unavailable
+with the eligible denominator intact; a coherent page from another request does
+not become a hit by receiving a new archive envelope.
 Missing interpretations never delete sources,
 and unavailable queries remain in the measurement denominator. Validated delivered
 proofs establish engineering mechanism exercise only. This arm changes neither

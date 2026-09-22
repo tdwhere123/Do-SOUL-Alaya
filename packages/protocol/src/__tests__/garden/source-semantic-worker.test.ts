@@ -64,7 +64,7 @@ it("admits prepare and one-shot reason without a continuation token", () => {
 });
 
 function libraryDelivery() {
-  return { delivery_id: "delivery", protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, total_count: 0,
+  return { delivery_id: "delivery", request_identity: digest, protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, total_count: 0,
     index: { schema_version: 1, query_id: "library-query", snapshot_id: digest, result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
       entries: [], completeness: { schema_version: 1, logical_index: "complete", observed_coverage: "complete",
         transport: "complete", payload: "complete", representation: "complete" }, continuation: null,
@@ -89,7 +89,7 @@ it("shares current delivery version, membership and page budget admission betwee
     expect(InformationIndexSchema.safeParse(index).success).toBe(true);
     expect(accepts({ ...delivery, index })).toEqual([false, false]);
   }
-  for (const changed of [ { ...delivery, protocol_version: 1 }, { ...delivery, page_purpose: "update" },
+  for (const changed of [ { ...delivery, protocol_version: 4 }, { ...delivery, request_identity: "unbound" }, { ...delivery, page_purpose: "update" },
     { ...delivery, order: { ...delivery.order, page_budget: 9 } },
     { ...delivery, index: { ...delivery.index, representation: { ...delivery.index.representation, page_budget: 9 } } },
     { ...delivery, index: { ...delivery.index, page_purpose: "update" } } ]) expect(accepts(changed)).toEqual([false, false]);
@@ -97,7 +97,7 @@ it("shares current delivery version, membership and page budget admission betwee
 
 it("rejects every missing mandatory delivery field and partial deliveries disguised as outcomes", () => {
   const delivery = libraryDelivery();
-  for (const key of ["delivery_id", "protocol_version", "total_count", "index", "page_purpose", "discovery", "order", "slot_qualifiers"]) {
+  for (const key of ["delivery_id", "request_identity", "protocol_version", "total_count", "index", "page_purpose", "discovery", "order", "slot_qualifiers"]) {
     const partial = { ...delivery };
     Reflect.deleteProperty(partial, key);
     expect(SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...partial }).success, key).toBe(false);
@@ -107,7 +107,7 @@ it("rejects every missing mandatory delivery field and partial deliveries disgui
   expect(SoulInterpretationResponseSchema.safeParse({ operation: "recall", ...delivery, provider_attempts: 0 }).success).toBe(false);
   const outcome = { operation: "recall", outcome: { status: "preparation_required", missing: "query_semantics" }, coverage, work, provider_attempts: 0 };
   expect(SoulInterpretationResponseSchema.safeParse(outcome).success).toBe(true);
-  for (const partial of [{ protocol_version: 3 }, { results: [] }, { request_budget: budget }, { proofs: [] }]) {
+  for (const partial of [{ protocol_version: 3 }, { request_identity: digest }, { results: [] }, { request_budget: budget }, { proofs: [] }]) {
     expect(SoulInterpretationResponseSchema.safeParse({ ...outcome, ...partial }).success).toBe(false);
   }
 });

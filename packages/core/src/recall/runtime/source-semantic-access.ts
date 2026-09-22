@@ -4,13 +4,22 @@ import {
 } from "@do-soul/alaya-protocol";
 import { scoreQueryEvidenceContent } from "../../embedding-recall/evidence/query-evidence-scoring.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
+import { CoreError } from "../../shared/errors.js";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "../query/recall-query-probes.js";
 
 export function sourceSemanticAccessInputIdentity(input: Readonly<{
   original_query: string; query_semantics?: SourceSemanticQuery; source_id?: string;
   budget: RequestBudget; policy: SourceSemanticAccessPolicy;
 }>): string {
-  return `sha256:${fieldContractSha256(canonicalJson(input))}`;
+  return `sha256:${fieldContractSha256(canonicalJson({ original_query: input.original_query,
+    query_semantics: input.query_semantics, source_id: input.source_id, budget: input.budget, policy: input.policy }))}`;
+}
+
+export function authorizeSemanticScope(scope: string | null | undefined, authorized: readonly string[] | null): void {
+  if (scope == null) throw new CoreError("VALIDATION", "source has no governed scope", { details: { admission: "filtered" } });
+  if (authorized !== null && !authorized.includes(scope)) {
+    throw new CoreError("VALIDATION", "source is outside authorized scopes", { details: { admission: "filtered" } });
+  }
 }
 
 /** One local access policy for raw sources and verified interpretations. It does not establish correspondence. */

@@ -26,7 +26,7 @@ import {
   SourceSemanticWorkerWorkSchema
 } from "../garden/source-semantic-worker.js";
 
-/** Public MCP/CLI host operations. Provider-free. invariant §25 additive minor. */
+/** Public MCP/CLI host operations. Provider-free. Current delivery follows invariant §25 major request binding. */
 export const SOUL_INTERPRETATION_TOOL_NAME = "soul.interpretation" as const;
 
 const CoverageWork = {

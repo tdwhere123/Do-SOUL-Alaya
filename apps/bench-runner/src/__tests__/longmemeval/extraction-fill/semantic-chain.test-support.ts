@@ -19,6 +19,7 @@ import { interveneSemanticChain } from "../../../runs/semantic-chain/intervene.j
 import { readChainArtifact, writeChainArtifact, withSemanticChainDaemon, type SemanticChainPlan } from "../../../runs/semantic-chain/contract.js";
 import { SemanticChainConfigSchema } from "../../../runs/semantic-chain/contract.js";
 import { assertPerQueryOpportunity } from "./native-semantic-arm.test-support.js";
+import { assertSemanticChainArchiveAdmission } from "./semantic-chain-archive-admission.test-support.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 
 export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySnapshot: { snapshot_path: string; db_sha256: string }): Promise<void> {
@@ -72,20 +73,23 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
     measurement: null, mechanism: { status: "unexercised" } });
 
   const oneQuery = { ...queryWorkset, items: queryWorkset.items.slice(0, 1) };
+  const queryRawJson = JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
+    query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
+      kind: "statement", key: "complete", predicate: "complete",
+      arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
+    }] }], return: ["theme"], gaps: [] } });
   const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(oneQuery, queryCache, 4096),
     inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   const fill = await executeSemanticProposalFill({ workset: oneQuery, cacheRoot: queryCache, authority,
     config: { providerUrl: "http://127.0.0.1:9", model: queryWorkset.model,
       requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
-        query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
-          kind: "statement", key: "complete", predicate: "complete",
-          arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
-        }] }], return: ["theme"], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
+      rawJson: queryRawJson, responseMetadata: { finishReason: "STOP" },
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
     }) } });
   expect(fill.newly_admitted).toBe(1);
   await expect(replaySemanticChain(blockedRoot)).rejects.toThrow(/query-semantics state changed/u);
+  expect(() => measureSemanticChain(blockedRoot, blockedReplay.path,
+    blocked.queries.map((row) => ({ query_key: row.query_key, source_units: [] })))).toThrow(/query-semantics state changed/u);
   const limitedRoot = join(cacheRoot, "limited-observation-chain");
   const limited = await prepareSemanticChain({ ...config,
     budget: { ...config.budget, work_units: 200000, memory_bytes: 20000000 }
@@ -167,13 +171,16 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   expect(proof.discovery?.access?.policy).toBe("canonical-v1");
   expect(proof.index?.as_of).toBe(config.interpretation_clock);
   const selectedSource = ready.descriptors.find((row) => row.interpretation_id === ready.selected_source_interpretation_ids[0])!;
-  const measuredRow = measureSemanticChain(root, proofReplay.path, plan.queries.map((row) => ({
+  const gold = plan.queries.map((row) => ({
     query_key: row.query_key, source_units: row.query_key !== ready.query_key ? [] : [{
-      workspace_id: config.workspace_id, root_kind: "source_record", root_id: hashSourceRecordId(selectedSource, fieldContractSha256),
+      workspace_id: config.workspace_id, root_kind: "source_record" as const, root_id: hashSourceRecordId(selectedSource, fieldContractSha256),
       source_version: selectedSource.source_version, content_digest: selectedSource.content_digest
     }]
-  }))).result.rows.find((row) => row.query_key === ready.query_key);
+  }));
+  expect(() => measureSemanticChain(root, replay.path, gold)).toThrow(/semantic-correspondence state changed/u);
+  const measuredRow = measureSemanticChain(root, proofReplay.path, gold).result.rows.find((row) => row.query_key === ready.query_key);
   const proofMeasurement = measuredRow?.measurement;
+  expect(measuredRow?.reason).toBeNull();
   expect(proofMeasurement?.status).toBe("validated");
   if (proofMeasurement?.status !== "validated") throw new Error("native proof measurement must be validated");
   expect(proofMeasurement.source_records?.length).toBeGreaterThan(0);
@@ -201,6 +208,7 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   if (without.operation !== "recall") throw new Error("wrong control response");
   expect(without.proofs ?? []).toHaveLength(0);
   expect(without.index?.as_of).toBe(config.interpretation_clock);
+  await assertSemanticChainArchiveAdmission({ root, plan, replayPath: proofReplay.path, gold, queryRawJson });
   await assertInterruptedExposure(root, proofReplay.path, ready.query_key);
   await assertPerQueryOpportunity(SemanticChainConfigSchema.parse(config), cacheRoot);
 }
