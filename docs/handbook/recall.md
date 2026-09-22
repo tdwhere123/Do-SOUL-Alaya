@@ -723,11 +723,21 @@ float off that group's predicate frame. An older open source interpretation is n
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
 
-Query meaning v3 uses `conditions` for conjunction and optional
+Query meaning v4 uses `conditions` for conjunction and optional
 `evidence_inputs: [{conditions}]` for the facts needed by the original requested
-operation. Query request/response v5 use the same recursive meaning schema as
+operation. Query request/response v6 use the same recursive meaning schema as
 local receive admission; depth and byte limits remain local requirements. Nested
 `forall` is rejected; explicit top-level universal evaluation remains supported.
+`required_evidence_act: {act, excerpt}` explicitly constrains sought evidence to
+a question or directive, with exact support in the original query; it maps to
+the unchanged canonical `source_act`. The host
+defaults those roots to `unresolved` context; ordinary roots still default to
+`asserted_at_source`. Shared query admission rejects asserted or entailed content
+requirements on a frame constrained to either non-assertive act. Nested incidence
+and explicit compatible obligations remain intact: a source-act root can govern
+content, but a governed occurrence cannot itself require a source act. Query
+wording alone never selects a source speech act, and retrieving one does not
+establish its content.
 Entity handles are arbitrary local references, never text support. A free reporter
 provides its original-question excerpt once; a named reporter already carries its
 excerpt. A reference reuses its declared entity's unambiguous support. Missing or
@@ -808,14 +818,10 @@ schema and actual instruction-only encoding. A recorded request remains bound to
 candidate and wire identity. Provider acceptance and syntactic constraints do
 not certify language fidelity, coverage or operation execution.
 
-Query producer meaning v4 (request/response v6) resolves role references to a
-unique declared entity, proposition or context without adding embedding or
+Query role references resolve to a unique declared entity, proposition or context without adding embedding or
 changing a root's truth obligation. Proposition/context role references require
 an explicit original-query excerpt. Reporter positions remain entity-only.
-`required_evidence_act: {act, excerpt}` constrains the speech act of sought
-evidence, not the current question's mood; its exact excerpt must occur in the
-original query. It maps to the unchanged canonical `source_act`. No word-based
-classifier adds or removes this constraint. Structural checks do not prove that
+Structural checks do not prove that
 the producer chose faithful meaning, complete attachments or requested operations.
 
 SOUL can prepare an explicit `source-semantic-revision-v1` input from retained

@@ -454,7 +454,9 @@ class QueryMeaningCompiler {
       ...(meaning.required_evidence_act === undefined ? {} : { source_act: meaning.required_evidence_act.act })
     });
     if (parent === undefined) {
-      obligations.push({ frame: frameId, kind: meaning.obligation ?? "asserted_at_source" });
+      // A requested question or directive supplies evidence without asserting its content.
+      obligations.push({ frame: frameId, kind: meaning.obligation
+        ?? (meaning.required_evidence_act === undefined ? "asserted_at_source" : "unresolved") });
     } else {
       this.link(frameId, parent, obligations);
       if (meaning.obligation !== undefined) obligations.push({ frame: frameId, kind: meaning.obligation });

@@ -82,11 +82,62 @@ it.each(["question", "directive"] as const)("checks original support before lowe
   const original = `Which ${act} concerned ringing?`;
   const query = compiled(statement("ring", [], { required_evidence_act: { act, excerpt: act } }), {}, original);
   expect(query.alternatives[0]!.frames[0]!.source_act).toBe(act);
+  expect(query.alternatives[0]!.context_obligations).toEqual([{ frame: "ring", kind: "unresolved" }]);
+  expect(compiled(statement("ring", [], { required_evidence_act: { act, excerpt: act }, obligation: "unresolved" }), {}, original))
+    .toEqual(query);
   expect(query.gaps).toEqual([]);
   expect(query.alternatives[0]!.frames[0]!.role_requirements).toEqual([]);
   for (const excerpt of ["", "absent support"]) {
     expect(() => compiled(statement("ring", [], { required_evidence_act: { act, excerpt } }), {}, original)).toThrow();
   }
+});
+
+it.each(["question", "directive"] as const)("rejects explicit assertion and entailment obligations on %s evidence through shared admission", act => {
+  const original = `Which ${act} concerned ringing?`;
+  for (const obligation of ["asserted_at_source", "entailed_at_source"] as const) {
+    expect(() => compiled(statement("ring", [], { required_evidence_act: { act, excerpt: act }, obligation }), {}, original))
+      .toThrow(/cannot require asserted or entailed/u);
+    const canonical = compiled(statement("ring", []), {}, original);
+    expect(() => SourceSemanticQuerySchema.parse({ ...canonical, alternatives: [{
+      ...canonical.alternatives[0], frames: [{ ...canonical.alternatives[0]!.frames[0], source_act: act }],
+      context_obligations: [{ frame: "ring", kind: obligation }]
+    }] })).toThrow(/cannot require asserted or entailed/u);
+  }
+});
+
+it.each(["asserted_at_source", "entailed_at_source", "unresolved"] as const)("retains explicit %s when no non-assertive act is required", obligation => {
+  expect(compiled(statement("ring", [], { obligation })).alternatives[0]!.context_obligations)
+    .toEqual([{ frame: "ring", kind: obligation }]);
+});
+
+it.each(["question", "directive"] as const)("preserves nested content of a requested %s root without asserting it", act => {
+  const original = `Which ${act} concerned possible ringing?`;
+  const query = compiled({ kind: "possible", key: "possibility", required_evidence_act: { act, excerpt: act },
+    content: statement("ring", []) }, {}, original);
+  expect(query.alternatives[0]!.frames.map(row => row.source_act)).toEqual([act, undefined]);
+  expect(query.alternatives[0]!.context_obligations).toEqual([
+    { frame: "possibility", kind: "unresolved" },
+    { frame: "ring", kind: "explicit_embedded_structure", incidence: {
+      kind: "operator_operand", other_frame: "possibility", role: "content"
+    } }
+  ]);
+  for (const kind of ["explicit_embedded_structure", "unresolved"] as const) {
+    expect(() => SourceSemanticQuerySchema.parse({ ...query, alternatives: [{ ...query.alternatives[0],
+      frames: query.alternatives[0]!.frames.map(frame => frame.id === "ring" ? { ...frame, source_act: act } : frame),
+      context_obligations: query.alternatives[0]!.context_obligations.map(row => row.frame === "ring" ? { ...row, kind } : row)
+    }] })).toThrow(/source root, not a governed occurrence/u);
+  }
+});
+
+it("defaults an independently requested question evidence input without changing the factual answer obligation", () => {
+  const query = materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+    requested_operation: { reading: "compare", support: { kind: "query_text", excerpt: "Compare" } },
+    alternatives: [{ conditions: [statement("ring", [])], evidence_inputs: [{ conditions: [
+      statement("ask", [], { required_evidence_act: { act: "question", excerpt: "question" } })
+    ] }] }] }, { ...envelope, original_query: "Compare ringing with the question about it." });
+  expect(query.alternatives[0]!.context_obligations).toEqual([
+    { frame: "ring", kind: "asserted_at_source" }, { frame: "ask", kind: "unresolved" }
+  ]);
 });
 
 it("requires current original text and rejects old meaning or unsupported source-act syntax", () => {
@@ -175,19 +226,14 @@ it("nests possible around a move statement and does not add a source-question co
   ]);
 });
 
-it("marks requested question content and leaves a factual polar question without source_act", () => {
-  const asked = compiled(statement("ask", [
+it("rejects a source act on governed content and leaves a factual polar question without source_act", () => {
+  expect(() => compiled(statement("ask", [
     { role: "asker", target: { kind: "free", key: "asker" }, excerpt: "Who" }
   ], {
     content: statement("open", [
       { role: "theme", target: { kind: "named", key: "vault", excerpt: "vault" }, excerpt: "vault" }
     ], { required_evidence_act: { act: "question", excerpt: "asked whether" } })
-  }), {}, "Who asked whether the vault was open?");
-  expect(asked.alternatives[0]?.frames.find((row) => row.id === "ask")?.source_act).toBeUndefined();
-  expect(asked.alternatives[0]?.frames.find((row) => row.id === "open")?.source_act).toBe("question");
-  expect(asked.alternatives[0]?.context_obligations.find((row) => row.frame === "open")).toMatchObject({
-    kind: "explicit_embedded_structure", incidence: { kind: "embedding", other_frame: "ask", role: "content" }
-  });
+  }), {}, "Who asked whether the vault was open?")).toThrow(/source root, not a governed occurrence/u);
 
   const polar = compiled(statement("open", [
     { role: "theme", target: { kind: "named", key: "vault", excerpt: "vault" }, excerpt: "vault" }

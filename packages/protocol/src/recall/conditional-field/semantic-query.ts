@@ -226,6 +226,14 @@ function refineAlternative(
   }
   const byId = new Map(alternative.frames.map((row) => [row.id, row]));
   for (const obligation of alternative.context_obligations) {
+    if (byId.get(obligation.frame)?.source_act !== undefined &&
+      (obligation.kind === "asserted_at_source" || obligation.kind === "entailed_at_source")) {
+      problem("question or directive evidence cannot require asserted or entailed content");
+    }
+    if (byId.get(obligation.frame)?.source_act !== undefined &&
+      (obligation.kind === "explicit_embedded_structure" || obligation.incidence !== undefined)) {
+      problem("question or directive evidence must be a source root, not a governed occurrence");
+    }
     const edge = obligation.incidence;
     if (edge === undefined) continue;
     if (edge.other_frame === obligation.frame) problem("query incidence cannot govern itself");
