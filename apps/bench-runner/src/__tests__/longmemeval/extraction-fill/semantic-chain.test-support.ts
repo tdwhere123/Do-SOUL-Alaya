@@ -14,11 +14,13 @@ import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
 import { replaySemanticChain, measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { interveneSemanticChain } from "../../../runs/semantic-chain/intervene.js";
 import { readChainArtifact, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { SemanticChainConfigSchema } from "../../../runs/semantic-chain/contract.js";
+import { assertPerQueryOpportunity } from "./native-semantic-arm.test-support.js";
 
 export async function assertNativeSemanticChain(cacheRoot: string): Promise<void> {
   const queryWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v2",
     kind: "query", model: "gemini-2.5-flash-lite", request_profile: "gemini-2.5-nonthinking-v1",
-    items: [{ original_query: "What was completed?" }, { original_query: "Unattempted question?" }] });
+    items: [{ original_query: "What was completed?" }, { original_query: "What else was completed?" }] });
   const queryCache = join(cacheRoot, "queries"), correspondenceCache = join(cacheRoot, "semantic_correspondences");
   const config = { snapshot_path: join(cacheRoot, "published.sqlite"),
     snapshot_sha256: hashRegularFileNoFollow(join(cacheRoot, "published.sqlite")),
@@ -145,6 +147,7 @@ export async function assertNativeSemanticChain(cacheRoot: string): Promise<void
   expect(without.proofs ?? []).toHaveLength(0);
   expect(without.index?.as_of).toBe(config.interpretation_clock);
   await assertInterruptedExposure(root, proofReplay.path, ready.query_key);
+  await assertPerQueryOpportunity(SemanticChainConfigSchema.parse(config), cacheRoot);
 }
 
 async function assertInterruptedExposure(root: string, output: string, queryKey: string): Promise<void> {

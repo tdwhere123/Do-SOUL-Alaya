@@ -22,6 +22,7 @@ export const SemanticChainConfigSchema = z.object({
   query_cache_root: z.string().min(1), correspondence_cache_root: z.string().min(1),
   max_output_tokens: z.number().int().min(1).max(65536),
   discovery_page_cap: z.number().int().min(1).max(64),
+  // Candidate opportunity per query; the proposal authority owns global spend.
   correspondence_pair_cap: z.number().int().min(0).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP),
   budget: RequestBudgetSchema, authorized_scopes: AuthorizedScopesAdmissionSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000)
@@ -33,12 +34,17 @@ export const SemanticChainQuerySchema = z.discriminatedUnion("status", [
   z.object({ ...QueryBase, status: z.literal("blocked"), reason: z.string() }).strict(),
   z.object({ ...QueryBase, status: z.literal("ready"), query_semantics: SourceSemanticQuerySchema,
     descriptors: z.array(SourceSemanticHandleDescriptorSchema), selected_source_interpretation_ids: z.array(z.string()),
+    correspondence_opportunities: z.array(z.object({ source_interpretation_id: z.string(),
+      decision: z.enum(["selected", "zero_budget", "missing_interpretation", "not_selected"])
+    }).strict()),
+    discovery_trace: z.array(z.object({ coverage: z.unknown(), work: z.unknown(),
+      continuation_handle: z.string().nullable(), candidate_ids: z.array(z.string()) }).strict()),
     discovery_pages: z.number().int().nonnegative(), discovery_open: z.boolean(),
     unvisited_source_interpretation_count: z.null(), discovery_truncated: z.boolean()
   }).strict()
 ]);
 export const SemanticChainPlanSchema = z.object({
-  contract: z.literal("source-semantic-chain-plan-v2"), input_identity: Digest,
+  contract: z.literal("source-semantic-chain-plan-v3"), input_identity: Digest,
   config: SemanticChainConfigSchema, queries: z.array(SemanticChainQuerySchema),
   correspondence_workset: SemanticProposalWorksetSchema.nullable()
 }).strict();

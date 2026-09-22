@@ -44,8 +44,12 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
             ready.push(found.received.semantic_correspondence);
           }
           return { source_interpretation_id: descriptor.interpretation_id, status: found?.status ?? "unattempted",
-            reason: query.selected_source_interpretation_ids.includes(descriptor.interpretation_id) ? "selected" : "correspondence_pair_cap",
-            key: found?.line.key ?? null, raw_digest: found?.shard?.raw_digest ?? null };
+            reason: query.correspondence_opportunities.find((entry) => entry.source_interpretation_id === descriptor.interpretation_id)!.decision,
+            core_admitted: found?.received !== undefined,
+            admitted_endpoint_pairs: found?.received !== undefined && "semantic_correspondence" in found.received
+              ? found.received.semantic_correspondence?.correspondences.length ?? null : null,
+            attempt_ordinal: found?.shard?.attempt_ordinal ?? null, producer_usage: found?.shard?.usage ?? null,
+            key: found?.line.key ?? null, raw_digest: found?.shard?.raw_digest ?? null, cache_identity: found?.cache_identity ?? null };
         });
         const rowPath = join(root, `replay-${identity}`, `${query.query_key}.json`);
         const prior = readChainArtifact(rowPath);
@@ -111,6 +115,7 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
     });
   } finally { connection.close(); }
   const rows = replay.rows.map((row) => {
+    const prepared = plan.queries.find((query) => query.query_key === row.query_key)!;
     const evaluated = row.first_exposure == null ? null : measureSourceSemanticLibraryResponse({
       recallResult: row.response, firstExposurePage: row.first_exposure,
       requestBudget: plan.config.budget, sourceRecords: sourceRecords.filter((record) => row.response?.operation === "recall"
@@ -118,6 +123,13 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
     });
     return { query_key: row.query_key, status: row.status,
     reason: row.reason ?? null,
+    mechanism: { status: (evaluated?.validatedProofRanks.length ?? 0) > 0 ? "proof_exercised" : "unexercised",
+      reason: row.status === "blocked" ? row.reason : row.status === "native_unavailable" ? "native_unavailable"
+        : (evaluated?.validatedProofRanks.length ?? 0) > 0 ? null : "no_validated_delivered_proof",
+      validated_proof_ranks: evaluated?.validatedProofRanks ?? [],
+      source_interpretation_candidates: prepared.status === "ready" ? prepared.descriptors.length : 0,
+      correspondence_opportunities: prepared.status === "ready" ? prepared.correspondence_opportunities : [],
+      correspondence_outcomes: row.correspondence_outcomes ?? null },
     diagnostics: row.response?.operation === "recall" ? {
       discovery: row.response.discovery, coverage: row.response.coverage, work: row.response.work,
       delivered_results: row.response.results?.length ?? 0, delivered_proofs: row.response.proofs?.length ?? 0,

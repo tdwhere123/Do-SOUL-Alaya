@@ -6,11 +6,12 @@ import { censusCompleteSourceRecords } from "../snapshot/source-records/census.j
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../semantic-chain/contract.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../semantic-proposal/workset.js";
-import { LongMemEvalSemanticConfigSchema, LongMemEvalSemanticFreezeSchema, loadFrozenLongMemEvalDataset } from "./contract.js";
+import { LongMemEvalExperimentConfigSchema, LongMemEvalExperimentFreezeSchema, loadFrozenLongMemEvalDataset } from "./contract.js";
+import { NATIVE_SEMANTIC_ROUTE, freezeSourceCaches, assertSourceCaches } from "./native-arm.js";
 
 /** Freezes original dataset identities and context before any query-semantics outputs; never dispatches a provider. */
 export async function freezeLongMemEvalSemanticRun(value: unknown, root: string) {
-  const config = LongMemEvalSemanticConfigSchema.parse(value);
+  const config = LongMemEvalExperimentConfigSchema.parse(value);
   if (new Set(config.question_ids).size !== config.question_ids.length) throw new Error("development question IDs repeat");
   if (config.stage !== "formal" && config.question_ids.length > 50) throw new Error("development selection exceeds 50 questions");
   if (config.stage === "formal" && config.previously_exposed_question_ids === undefined) {
@@ -20,9 +21,10 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
     const loaded = await loadFrozenLongMemEvalDataset(config);
     const existing = readChainArtifact(join(root, "freeze.json"));
     if (existing !== undefined) {
-      const frozen = LongMemEvalSemanticFreezeSchema.parse(existing);
+      const frozen = LongMemEvalExperimentFreezeSchema.parse(existing);
       if (chainIdentity(frozen.config) !== chainIdentity(config)
         || frozen.implementation_revision !== readCurrentExtractionAuthorityRevision()) throw new Error("development freeze changed");
+      if (frozen.contract === "longmemeval-native-semantic-v1") assertSourceCaches(frozen.source_caches);
       writeChainJson(join(root, "query-workset.json"), frozen.query_workset);
       return frozen;
     }
@@ -58,9 +60,13 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
         }
       })) });
     const lines = materializeSemanticProposalLines(query_workset, config.max_output_tokens);
-    const frozen = LongMemEvalSemanticFreezeSchema.parse({ contract: "longmemeval-semantic-development-v2", config,
-      implementation_revision: readCurrentExtractionAuthorityRevision(), metric: "session-bearing-source-round-mixed-any-at-5",
-      order_policy: "native_canonical_source_root_order", mechanism: "source_only_interpretation_and_correspondence_not_exercised",
+    const arm = "arm" in config ? { contract: "longmemeval-native-semantic-v1",
+      metric: "source-bearing-union-first-exposure-any-at-k-v1", mechanism: "native_source_interpretation_and_semantic_correspondence",
+      native_route: NATIVE_SEMANTIC_ROUTE, source_caches: freezeSourceCaches(config.source_cache_roots) }
+      : { contract: "longmemeval-semantic-development-v2", metric: "session-bearing-source-round-mixed-any-at-5",
+        mechanism: "source_only_interpretation_and_correspondence_not_exercised" };
+    const frozen = LongMemEvalExperimentFreezeSchema.parse({ ...arm, config,
+      implementation_revision: readCurrentExtractionAuthorityRevision(), order_policy: "native_canonical_source_root_order",
       exposure: config.stage === "formal" ? "formal_with_recorded_development_exposure" : "development_exposed",
       inventory, selected: selected.map((row, index) => ({ ...row, query_key: lines[index]!.key })), query_workset });
     writeChainArtifact(join(root, "freeze.json"), frozen);

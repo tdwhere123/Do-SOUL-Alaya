@@ -946,6 +946,18 @@ rows retain this fresh cost. Historical records without it remain missing, while
 a newly evaluated source-only row has zero proof-verification cost. The frozen
 source-only arm still requires zero published interpretations.
 
+Bench orchestration also has an explicitly selected `longmemeval-native-semantic-v1`
+arm. It freezes the complete original source census, retained interpretation cache
+bytes and publication associations, query context/clock, workspace/scopes, native
+delivery contract and resource policy. Existing publication and generic semantic-chain
+owners perform preparation, snapshot reopen, discovery, correspondence receive,
+public recall and initial exposure. Plan v3 gives each query its own bounded native
+candidate opportunity; one combined proposal workset uses the existing authority
+and attempt ledger for global spend. Missing interpretations never delete sources,
+and unavailable queries remain in the measurement denominator. Validated delivered
+proofs establish engineering mechanism exercise only. This arm changes neither
+native selection policy nor ordinary recall defaults.
+
 Current-source access selects the greatest exact UTC instant, then record identity,
 before checking body retention or authorized scope. Protocol's UTC order key preserves
 minute precision and every admitted fractional digit; SQLite's expression index is

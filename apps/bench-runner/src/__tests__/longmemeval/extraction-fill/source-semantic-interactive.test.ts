@@ -16,6 +16,7 @@ import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtraction
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
 import { assertNativeSemanticChain } from "./semantic-chain.test-support.js";
+import { assertNativeLongMemEvalArm } from "./native-semantic-arm.test-support.js";
 
 const MODEL = "gemini-2.5-flash-lite";
 const REQUEST_PROFILE = "gemini-2.5-nonthinking-v1" as const;
@@ -69,10 +70,10 @@ async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic",
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid");
-  await writeDataset(Array.from({ length: questions }, (_, index) => buildExtractionFillQuestion(`q${index}`,
+  await writeDataset(Array.from({ length: questions }, (_, index) => ({ ...buildExtractionFillQuestion(`q${index}`,
     "I completed alpha. The room was quiet. The desk was clear. The lamp was on. The window was open. " +
     `The door was closed. The shelf was full. The clock was ticking. The floor was clean. It is ready. Record ${index}.`,
-    `I completed decoy. Record ${index}.`)));
+    `I completed decoy. Record ${index}.`), question: "What was completed?" })));
   const inspection = await inspectExtractionAuthority({
     variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot, sourcePacking: "complete-source",
     openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION, revision: readCurrentExtractionAuthorityRevision(),
@@ -161,6 +162,7 @@ it("fills complete-source open semantics through interactive generateContent wit
   expect(report.sources.every((source) => source.source_interpretation_binding?.kind === "host_publication_association")).toBe(true);
   const providerCalls = fixture.fetchMock.mock.calls.length;
   await assertNativeSemanticChain(cacheRoot);
+  await assertNativeLongMemEvalArm(dataDir, pinnedMetaRoot, [cacheRoot, secondCache]);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
 }, 60000);
 

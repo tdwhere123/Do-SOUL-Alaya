@@ -5,6 +5,7 @@ import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { SemanticChainConfigSchema, chainIdentity, readChainArtifact } from "../semantic-chain/contract.js";
 import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
+import { NativeSemanticRouteSchema, SourceCacheFreezeSchema } from "./native-arm.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const LongMemEvalSemanticConfigSchema = z.object({
@@ -17,6 +18,14 @@ export const LongMemEvalSemanticConfigSchema = z.object({
   ...SemanticChainConfigSchema.pick({ budget: true, output_byte_limit: true, max_output_tokens: true }).shape
 }).strict();
 export type LongMemEvalSemanticConfig = z.infer<typeof LongMemEvalSemanticConfigSchema>;
+export const LongMemEvalNativeSemanticConfigSchema = LongMemEvalSemanticConfigSchema.extend({
+  arm: z.literal("native_semantic"), workspace_prefix: z.string().min(1),
+  source_cache_roots: z.array(z.string().min(1)), correspondence_cache_root: z.string().min(1),
+  source_publication_associations: z.array(z.object({ source_id: z.string(), source_version: z.string(),
+    generation_key: Digest, request_digest: Digest }).strict()),
+  ...SemanticChainConfigSchema.pick({ discovery_page_cap: true, correspondence_pair_cap: true, authorized_scopes: true }).shape
+}).strict();
+export const LongMemEvalExperimentConfigSchema = z.union([LongMemEvalSemanticConfigSchema, LongMemEvalNativeSemanticConfigSchema]);
 const InventoryRow = z.object({ index: z.number().int().nonnegative(), question_id: z.string(),
   cohort: z.enum(["answerable", "abstention"]) }).strict();
 const SourceManifest = z.object({ source_id: z.string(), source_version: z.string(), content_digest: z.string(),
@@ -31,10 +40,17 @@ export const LongMemEvalSemanticFreezeSchema = z.object({
     query_key: Digest, source_manifest: z.array(SourceManifest) }).strict()),
   query_workset: SemanticProposalWorksetSchema
 }).strict();
-export type LongMemEvalSemanticFreeze = z.infer<typeof LongMemEvalSemanticFreezeSchema>;
+export const LongMemEvalNativeSemanticFreezeSchema = LongMemEvalSemanticFreezeSchema.extend({
+  contract: z.literal("longmemeval-native-semantic-v1"), config: LongMemEvalNativeSemanticConfigSchema,
+  metric: z.literal("source-bearing-union-first-exposure-any-at-k-v1"),
+  mechanism: z.literal("native_source_interpretation_and_semantic_correspondence"),
+  native_route: NativeSemanticRouteSchema, source_caches: z.array(SourceCacheFreezeSchema)
+}).strict();
+export const LongMemEvalExperimentFreezeSchema = z.discriminatedUnion("contract", [LongMemEvalSemanticFreezeSchema, LongMemEvalNativeSemanticFreezeSchema]);
+export type LongMemEvalSemanticFreeze = z.infer<typeof LongMemEvalExperimentFreezeSchema>;
 
 export function readLongMemEvalSemanticFreeze(root: string): LongMemEvalSemanticFreeze {
-  const frozen = LongMemEvalSemanticFreezeSchema.parse(readChainArtifact(join(root, "freeze.json")));
+  const frozen = LongMemEvalExperimentFreezeSchema.parse(readChainArtifact(join(root, "freeze.json")));
   if (readCurrentExtractionAuthorityRevision() !== frozen.implementation_revision) throw new Error("frozen implementation changed");
   return frozen;
 }

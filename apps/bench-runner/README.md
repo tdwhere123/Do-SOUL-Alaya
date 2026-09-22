@@ -158,6 +158,29 @@ formal target. This source-only baseline does not establish semantic mechanism
 benefit or formal 500-question success. Completed publication reports recover a
 missing orchestration receipt; incomplete publication or exposure fails closed.
 
+The same launcher also accepts an explicit `arm: "native_semantic"` config,
+freezing `longmemeval-native-semantic-v1`. In addition to the source-only config,
+it requires `workspace_prefix`, `source_cache_roots`,
+`source_publication_associations` (source ID/version, generation key and request
+digest), `correspondence_cache_root`, `discovery_page_cap`,
+`correspondence_pair_cap` and `authorized_scopes`. Source cache manifests and
+shards are frozen by content, including invalid artifacts. Preparation uses the
+existing native publication owner and retains every source even when its
+interpretation is absent or rejected. Changed source-cache inputs require a new
+freeze. The source-only development-v2 arm still rejects published interpretations
+and nonempty proof delivery.
+
+Native preparation emits one combined `semantic_correspondence-workset-<identity>.json`
+for the existing proposal prepare/authority/fill commands. Each query receives
+its declared candidate opportunity independently; the existing durable proposal
+authority and attempt ledger own global spending. Generating this workset grants
+no provider authority. Replay uses `soul.interpretation` operation `recall`, a
+fresh daemon over the closed snapshot, and the existing first-exposure recorder.
+The new arm reports the source-bearing union, independently checked proof exercise,
+candidate decisions, cache outcomes and evaluator cost. Authored fixture success
+does not establish model fidelity, useful query-conditioned ordering, ordinary
+`soul.recall` parity or formal dataset success.
+
 Use `stage: "formal"` only with every original dataset question ID and an explicit
 `previously_exposed_question_ids` list. A partial formal selection is rejected,
 including omission of abstention rows. Formal reports record prior exposure per
@@ -171,8 +194,10 @@ The [chain configuration schema](src/runs/semantic-chain/contract.ts) requires
 the frozen snapshot path/digest, current extraction-authority implementation
 revision, fixed ISO interpretation clock, workspace/run, exact query workset,
 query-semantics and semantic-correspondence cache roots, output cap, discovery page cap, correspondence pair cap, native
-request budget, authorized scopes, and output byte limit. Preparation preserves
-every question, blocks non-executable query semantics, and writes an semantic-correspondence workset only
+request budget, authorized scopes, and output byte limit. Plan v3 treats the pair
+cap as a per-query opportunity, retaining selected, zero-budget, missing-interpretation
+and unselected decisions separately from global spend. Preparation preserves
+every question, blocks non-executable query semantics, and writes a semantic-correspondence workset only
 from actual paged native discovery. Unvisited source-interpretation count remains unknown; visited
 but unselected source interpretation remains unattempted. Gold is unavailable to preparation.
 
