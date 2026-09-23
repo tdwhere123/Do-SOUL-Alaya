@@ -103,7 +103,8 @@ export async function assertSemanticChainArchiveAdmission(fixture: Fixture): Pro
       outcome.cache_identity === null ? outcome : { ...outcome, cache_identity: "0".repeat(64) }) }, /another frozen request/u],
     ["unavailable-with-exposure", { ...withoutResponse, status: "native_unavailable" }, /unavailable row cannot have a native delivery/u],
     ["changed-preparation-trace", { ...native, preparation_trace: native.preparation_trace!.map((page, index) => index !== 0 ? page
-      : { ...page, access: { ...page.access, observed_source_count: page.access.observed_source_count + 1 } }) }, /prepared access pool/u]
+      : { ...page, access: { ...page.access, observed_source_count: page.access.observed_source_count + 1,
+        trace: { ...page.access.trace, omitted_source_count: page.access.trace.omitted_source_count + 1 } } }) }, /prepared access pool/u]
   ];
   for (const [name, changed, reason] of rowChanges) {
     const root = join(archiveRoot, name), rows = original.rows.map((row) => row.query_key === native.query_key ? changed : row);

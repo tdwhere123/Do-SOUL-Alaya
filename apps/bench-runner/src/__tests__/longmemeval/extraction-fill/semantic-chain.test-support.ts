@@ -408,7 +408,8 @@ async function assertReplayPreparationPool(plan: SemanticChainPlan, root: string
   const mismatchRoot = join(root, "changed-observation");
   writeChainArtifact(join(mismatchRoot, "prepare.json"), { ...plan, queries: plan.queries.map((entry) => entry.status !== "ready" ? entry
     : { ...entry, discovery_trace: entry.discovery_trace.map((page) => ({ ...page,
-      access: { ...page.access, observed_source_count: page.access.observed_source_count + 1 } })) }) });
+      access: { ...page.access, observed_source_count: page.access.observed_source_count + 1,
+        trace: { ...page.access.trace, omitted_source_count: page.access.trace.omitted_source_count + 1 } } })) }) });
   const mismatch = await replaySemanticChain(mismatchRoot);
   expect(mismatch.result).toMatchObject({ rows: [{ status: "native_unavailable", reason: "prepared_access_pool_mismatch", first_exposure: null },
     { status: "replayed" }] });

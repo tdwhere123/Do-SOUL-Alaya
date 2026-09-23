@@ -30,7 +30,7 @@ describe("source semantic library measurement", () => {
       contract: "source-semantic-access-v1" as const, policy: "canonical-v1" as const,
       input_id: GOLD.content_digest, pool_id: GOLD.content_digest,
       observed_source_count: 1, observed_interpretation_count: 0, source_candidates: [], interpretation_candidates: [],
-      trace: { kind: "library_selection" as const, omitted_source_count: 0, omitted_interpretation_count: 0 },
+      trace: { kind: "library_selection" as const, omitted_source_count: 1, omitted_interpretation_count: 0 },
       unvisited_sources: kind === "source", unvisited_interpretations: kind === "interpretation", stopping_reasons: ["budget" as const]
     } }) };
     const worker = { ...result, discovery };
