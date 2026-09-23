@@ -9,7 +9,7 @@ import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
 import { sourceSemanticReadStores, currentSemanticSource, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
-import { issueSemanticLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow,
+import { issueSemanticLease, issueSemanticLeaseGroup, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow,
   sourceSemanticQueryInputIdentity, sourceSemanticRevision, type SourceSemanticLease } from "./source-semantic-leases.js";
 import { runSourceSemanticLibraryRecall } from "./source-semantic-library-recall.js";
 import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
@@ -130,10 +130,12 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
     query_semantics: admission.kind === "admitted" ? admission.query : undefined,
     candidates: pool.descriptors.map((row) => row.interpretation_id), truncated: discovery.truncated || open,
     access_pool: pool, access_offset: discovery.offset, access_source_offset: nextSourceOffset };
-  const query_handle = issueSemanticLease(runtime, { ...base, kind: "query" }, meter);
-  const continuation_handle = (discovery.truncated || sourceTraceRemaining)
-    && (discovery.offset > (prior?.access_offset ?? 0) || nextSourceOffset > sourceOffset)
-    ? issueSemanticLease(runtime, { ...base, kind: "page" }, meter) : undefined;
+  const needsContinuation = (discovery.truncated || sourceTraceRemaining)
+    && (discovery.offset > (prior?.access_offset ?? 0) || nextSourceOffset > sourceOffset);
+  const [query_handle, continuation_handle] = issueSemanticLeaseGroup(runtime, [
+    { lease: { ...base, kind: "query" } },
+    ...(needsContinuation ? [{ lease: { ...base, kind: "page" as const } }] : [])
+  ], meter);
   const outcome = admission.kind === "admitted" ? undefined : admission.kind === "absent"
     ? { status: "preparation_required" as const, missing: "query_semantics" as const }
     : { status: "invalid" as const, reason: admission.kind === "unsupported" ? "unsupported_producer" : "malformed_query" };

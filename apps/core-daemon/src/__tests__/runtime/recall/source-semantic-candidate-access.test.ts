@@ -326,3 +326,39 @@ it("keeps a complete source census complete while a later trace page remains uns
     expect(next.truncated).toBe(false);
   });
 });
+
+it("returns resource exhaustion instead of a partly expired handle pair", async () => {
+  const original = "orchid irrigation";
+  const semantics = { ...accessQuery(original), gaps: Array.from({ length: 220 }, () => ({
+    kind: "unsupported_meaning" as const, affected_ids: ["statement"],
+    support: [{ kind: "query_text" as const, excerpt: "orchid" }], description: "detail ".repeat(110)
+  })) };
+  const sources = Array.from({ length: 512 }, (_, index) => ({
+    id: `source-${String(index).padStart(3, "0")}-${"x".repeat(240)}`,
+    text: "Orchid irrigation.", reading: original
+  }));
+  await withAccessLibrary(sources, async ({ execute }) => {
+    const request = { ...prepare(original), query_semantics: semantics };
+    const prepared = await accessCall(execute, request);
+    expect(prepared.outcome).toEqual({ status: "resource_exhausted" });
+    expect(prepared.query_handle).toBeUndefined();
+    expect(prepared.continuation_handle).toBeUndefined();
+  });
+}, 120_000);
+
+it("keeps both handles from a fitting preparation usable through the worker", async () => {
+  await withAccessLibrary(Array.from({ length: 17 }, (_, index) => ({
+    id: `source-${index}`, text: "Orchid irrigation."
+  })), async ({ execute }) => {
+    const request = prepare(orchid);
+    const prepared = await accessCall(execute, request);
+    expect(prepared.query_handle).toBeDefined();
+    expect(prepared.continuation_handle).toBeDefined();
+    const recalled = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
+      query_handle: prepared.query_handle!, semantic_correspondences: [], budget: ACCESS_BUDGET,
+      output_byte_limit: 1_000_000 });
+    expect(recalled.kind).toBe("recall");
+    const next = await accessCall(execute, { ...request, continuation_handle: prepared.continuation_handle! });
+    expect(next.access?.pool_id).toBe(prepared.access?.pool_id);
+  });
+});

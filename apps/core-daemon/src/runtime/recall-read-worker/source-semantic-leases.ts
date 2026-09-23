@@ -41,19 +41,39 @@ export function sourceSemanticRevision(runtime: RecallReadWorkerRuntime): string
 }
 
 export function issueSemanticLease(runtime: RecallReadWorkerRuntime, lease: SourceSemanticLease, meter: SourceSemanticReadBudget, issuedId?: string): string {
-  meter.retain(lease, "preparation lease");
-  let rows = LEASES.get(runtime);
-  if (rows === undefined) { rows = new Map(); LEASES.set(runtime, rows); }
-  meter.charge(rows.size * 2, 0, "preparation lease retention accounting");
-  for (const [id, row] of rows) if (row.lease.expires_at <= sourceSemanticLifetimeNow(lease)) rows.delete(id);
-  const id = issuedId ?? randomUUID(); rows.set(id, { lease, bytes: 4 * canonicalJson(lease).length });
-  let bytes = [...rows.values()].reduce((sum, row) => sum + row.bytes, 0);
-  while (rows.size > 32 || bytes > MAX_BYTES) {
-    const oldest = rows.keys().next().value!;
-    bytes -= rows.get(oldest)!.bytes; rows.delete(oldest);
+  return issueSemanticLeaseGroup(runtime, [{ lease, issuedId }], meter)[0]!;
+}
+
+/** Publish all handles in one response together; older leases remain evictable. */
+export function issueSemanticLeaseGroup(runtime: RecallReadWorkerRuntime,
+  issues: readonly Readonly<{ lease: SourceSemanticLease; issuedId?: string }>[], meter: SourceSemanticReadBudget): string[] {
+  if (issues.length === 0) return [];
+  const retained = LEASES.get(runtime);
+  const rows = new Map(retained);
+  const now = sourceSemanticLifetimeNow(issues[0]!.lease);
+  meter.charge(issues.length * (retained?.size ?? 0) * 2 + issues.length * (issues.length - 1), 0,
+    "preparation lease retention accounting");
+  for (const [id, row] of rows) if (row.lease.expires_at <= now) rows.delete(id);
+  const ids: string[] = [];
+  for (const { lease, issuedId } of issues) {
+    meter.retain(lease, "preparation lease");
+    const id = issuedId ?? randomUUID();
+    ids.push(id);
+    rows.set(id, { lease, bytes: 4 * canonicalJson(lease).length });
   }
-  if (!rows.has(id)) throw new CoreError("CONFLICT", "source semantic preparation exceeds lease capacity", { subCode: "RETRYABLE_BACKPRESSURE" });
-  return id;
+  const protectedIds = new Set(ids);
+  if (protectedIds.size !== ids.length) throw new CoreError("CONFLICT", "duplicate source semantic preparation handle");
+  let bytes = [...rows.values()].reduce((sum, row) => sum + row.bytes, 0);
+  for (const id of rows.keys()) {
+    if (rows.size <= 32 && bytes <= MAX_BYTES) break;
+    if (protectedIds.has(id)) continue;
+    bytes -= rows.get(id)!.bytes; rows.delete(id);
+  }
+  if (rows.size > 32 || bytes > MAX_BYTES) {
+    throw new CoreError("CONFLICT", "source semantic preparation exceeds lease capacity", { subCode: "RETRYABLE_BACKPRESSURE" });
+  }
+  LEASES.set(runtime, rows);
+  return ids;
 }
 
 export function readSemanticLease(runtime: RecallReadWorkerRuntime, caller: Caller, id: string,
