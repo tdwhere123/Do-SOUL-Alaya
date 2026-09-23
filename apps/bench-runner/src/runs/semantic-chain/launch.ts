@@ -1,6 +1,7 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 import { prepareSemanticChain } from "./prepare.js";
+import { writeDirectLazyConfig } from "./bind-lazy.js";
 import { replaySemanticChain, measureSemanticChain } from "./replay.js";
 import { interveneSemanticChain } from "./intervene.js";
 import { prepareSourcePublicationAssociations } from "../snapshot/source-records/prepare-associations.js";
@@ -16,7 +17,8 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
   try {
     const [operation, ...rest] = args;
     const flags = new Map<string, string>();
-    const allowed = new Set(["--root", "--config", "--replay", "--gold", "--arm", "--out", "--leaf-trials"]);
+    const allowed = new Set(["--root", "--config", "--replay", "--gold", "--arm", "--out", "--leaf-trials",
+      "--population", "--source-preflight", "--source-cache-root", "--recorded-at", "--producer-commit"]);
     for (let index = 0; index < rest.length; index += 2) {
       const key = rest[index]!, value = rest[index + 1];
       if (!allowed.has(key) || flags.has(key) || value === undefined) throw new AlayaError("VALIDATION", "invalid semantic chain arguments");
@@ -27,6 +29,10 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
       path, maxBytes: 32 * 1024 * 1024, label: "semantic chain input" }));
     let result: unknown;
     if (operation === "prepare") result = await prepareSemanticChain(json(required("--config")), required("--root"));
+    else if (operation === "bind-lazy") result = await writeDirectLazyConfig({ root: required("--root"),
+      chainConfig: json(required("--config")), population: json(required("--population")),
+      sourcePreflightPath: required("--source-preflight"), sourceCacheRoot: required("--source-cache-root"),
+      recordedAt: required("--recorded-at"), producerCommit: required("--producer-commit") }, required("--out"));
     else if (operation === "qualify-window") result = await prepareLazyQualificationWindow(json(required("--config")), required("--root"));
     else if (operation === "qualify-final") result = await sealLazyQualificationFinal(required("--root"));
     else if (operation === "qualify-replay") result = await replayLazyQualifiedFirstExposure(required("--root"));
@@ -48,7 +54,7 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
       const { cacheOwners, ...sourcePopulation } = population;
       result = await prepareSourcePublicationAssociations({ ...sourcePopulation, requestProfile: population.requestProfile },
         cacheOwners, required("--out"));
-    } else throw new AlayaError("VALIDATION", "expected prepare, replay, measure, intervene, associate, qualify-window, qualify-final, or qualify-replay");
+    } else throw new AlayaError("VALIDATION", "expected prepare, bind-lazy, replay, measure, intervene, associate, qualify-window, qualify-final, or qualify-replay");
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return 0;
   } catch (error) {

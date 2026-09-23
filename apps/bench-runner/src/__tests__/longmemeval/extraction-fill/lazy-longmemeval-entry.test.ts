@@ -1,5 +1,5 @@
 import { dirname, join } from "node:path";
-import { existsSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
@@ -17,10 +17,14 @@ import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic
 import { prepareLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/execute.js";
 import { runLongMemEvalSemanticLauncher } from "../../../runs/longmemeval-semantic/launch.js";
 import { writeLongMemEvalLazyConfig } from "../../../runs/longmemeval-semantic/lazy-config.js";
+import { writeDirectLazyConfig } from "../../../runs/semantic-chain/bind-lazy.js";
+import { runSemanticChainLauncher } from "../../../runs/semantic-chain/launch.js";
+import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
+import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
 import { measureLongMemEvalLazyFirstExposure } from "../../../runs/longmemeval-semantic/lazy-measure.js";
 import { prepareLazyQualificationWindow, sealLazyQualificationFinal,
   replayLazyQualifiedFirstExposure } from "../../../runs/semantic-chain/lazy-qualification.js";
-import { chainIdentity, readChainArtifact, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../../../runs/semantic-chain/contract.js";
 import { inspectSemanticChainReplayTarget } from "../../../runs/semantic-chain/replay.js";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 
@@ -69,6 +73,81 @@ async function preparedQuestion(id: string, index: number, questionCount: number
   return { frozen, preflight, prepared, input };
 }
 
+it("binds a direct authored query to its sealed source container and rejects changed owners", async () => {
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", STEP_PLAN_QUOTE_BASIS.selected_provider_url);
+  const guardedFetch = vi.fn(async () => { throw new Error("provider must not be called"); });
+  vi.stubGlobal("fetch", guardedFetch);
+  await writeDataset([question("container", 12)]);
+  const source = await preparedQuestion("container", 0, 1);
+  const row = source.prepared.result.rows[0];
+  if (row?.status !== "prepared") throw new Error("source container did not prepare");
+  const container = readChainArtifact(join(row.chain_root, "prepare.json")) as { config: Record<string, unknown> };
+  const authoredQuestion = "Which item was completed in the source container?";
+  const chainConfig = { ...container.config,
+    query_workset: { ...source.frozen.query_workset, items: [{ original_query: authoredQuestion }] },
+    query_cache_root: join(dirname(cacheRoot), "authored-query-cache") };
+  const chainRoot = join(dirname(cacheRoot), "authored-initial-chain");
+  const plan = await prepareSemanticChain(chainConfig, chainRoot);
+  expect(plan.queries).toMatchObject([{ status: "raw_ready", original_query: authoredQuestion, reason: "unattempted" }]);
+  expect(plan.queries[0]?.query_key).not.toBe(source.frozen.selected[0]?.query_key);
+  const population = { name: "longmemeval_s", dataDir, pinnedMetaRoot,
+    questionWindow: { offset: 0, limit: 1 } };
+  const input = { root: chainRoot, chainConfig, population,
+    sourcePreflightPath: source.input.sourcePreflightPath, sourceCacheRoot: cacheRoot,
+    recordedAt: source.frozen.config.recorded_at, producerCommit: source.frozen.config.producer_commit };
+  const configPath = join(dirname(cacheRoot), "authored-lazy.json");
+  const bound = await writeDirectLazyConfig(input, configPath);
+  expect(bound.config.chain.query_workset.items).toEqual([{ original_query: authoredQuestion }]);
+  expect(bound.config.initial_query_state_identity).toMatch(/^[a-f0-9]{64}$/u);
+  expect(bound.config.source_preparation).toMatchObject({ output_token_cap: 4096,
+    retained_preflight_identity: chainIdentity(source.preflight) });
+  expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual(bound.config);
+  const chainPath = join(dirname(cacheRoot), "authored-chain.json");
+  const populationPath = join(dirname(cacheRoot), "authored-population.json");
+  writeChainJson(chainPath, chainConfig);
+  writeChainJson(populationPath, population);
+  const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  expect(await runSemanticChainLauncher(["bind-lazy", "--root", chainRoot,
+    "--config", chainPath, "--population", populationPath,
+    "--source-preflight", source.input.sourcePreflightPath, "--source-cache-root", cacheRoot,
+    "--recorded-at", input.recordedAt, "--producer-commit", input.producerCommit,
+    "--out", configPath])).toBe(0);
+  expect(stdout).toHaveBeenCalled();
+  const window = await prepareLazyQualificationWindow(bound.config, join(dirname(cacheRoot), "authored-lazy-root"));
+  expect(window.query_key).toBe(plan.queries[0]?.query_key);
+  expect(window.window).toHaveLength(10);
+  expect(guardedFetch).not.toHaveBeenCalled();
+  await expect(prepareLazyQualificationWindow({ ...bound.config,
+    initial_query_state_identity: undefined }, join(dirname(cacheRoot), "unbound-query"))).rejects.toThrow();
+  await expect(prepareLazyQualificationWindow({ ...bound.config,
+    source_preparation: undefined }, join(dirname(cacheRoot), "unbound-source"))).rejects.toThrow();
+
+  await expect(writeDirectLazyConfig({ ...input, chainConfig: { ...chainConfig, run_id: "other" } },
+    join(dirname(cacheRoot), "changed-config.json"))).rejects.toThrow(/differs from its native preparation/u);
+  await expect(writeDirectLazyConfig({ ...input, sourcePreflightPath: join(dirname(cacheRoot), "missing-preflight.json") },
+    join(dirname(cacheRoot), "missing-owner.json"))).rejects.toThrow();
+  const original = readFileSync(input.sourcePreflightPath, "utf8");
+  const foreign = JSON.parse(original);
+  foreign.ready_requests[0].unitKeys = ["foreign-occurrence"];
+  const foreignPath = join(dirname(cacheRoot), "foreign-preflight.json");
+  writeFileSync(foreignPath, JSON.stringify(foreign));
+  await expect(writeDirectLazyConfig({ ...input, sourcePreflightPath: foreignPath },
+    join(dirname(cacheRoot), "foreign-owner.json"))).rejects.toThrow(/foreign ready key/u);
+  const incomplete = JSON.parse(original);
+  incomplete.ready_requests.pop();
+  const incompletePath = join(dirname(cacheRoot), "incomplete-preflight.json");
+  writeFileSync(incompletePath, JSON.stringify(incomplete));
+  await expect(writeDirectLazyConfig({ ...input, sourcePreflightPath: incompletePath },
+    join(dirname(cacheRoot), "incomplete-owner.json"))).rejects.toThrow();
+  const shard = semanticProposalShardPath(chainConfig.query_cache_root as string, plan.queries[0]!.query_key);
+  mkdirSync(dirname(shard), { recursive: true });
+  writeFileSync(shard, "invalid query cache");
+  await expect(writeDirectLazyConfig(input, join(dirname(cacheRoot), "changed-query.json")))
+    .rejects.toThrow(/query-semantics state changed/u);
+});
+
 it("binds one original question through full-source preflight, native window, final SQLite and first exposure before isolated scoring", async () => {
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
@@ -102,10 +181,10 @@ it("binds one original question through full-source preflight, native window, fi
   const lazyRoot = join(dirname(cacheRoot), "lazy-alpha");
   await expect(prepareLazyQualificationWindow({ ...bound.config,
     initial_query_state_identity: "f".repeat(64) }, join(dirname(cacheRoot), "wrong-query-state")))
-    .rejects.toThrow(/query state changed/u);
+    .rejects.toThrow(/native binding/u);
   await expect(prepareLazyQualificationWindow({ ...bound.config,
     source_preparation: { ...bound.config.source_preparation!, output_token_cap: 4095 } },
-  join(dirname(cacheRoot), "wrong-source-cap"))).rejects.toThrow(/output cap changed/u);
+  join(dirname(cacheRoot), "wrong-source-cap"))).rejects.toThrow(/native binding/u);
   const window = await prepareLazyQualificationWindow(bound.config, lazyRoot);
   expect(window.window).toHaveLength(10);
   expect(window.window.map(row => row.record_id)).toEqual(window.starting_access.source_candidates.slice(0, 10).map(row => row.record_id));

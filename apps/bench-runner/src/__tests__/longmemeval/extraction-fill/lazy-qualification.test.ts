@@ -15,6 +15,7 @@ import { prepareLazyQualificationWindow, replayLazyQualifiedFirstExposure,
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact,
   writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
 import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
+import { admitNativeLazyConfig } from "../../../runs/semantic-chain/bind-lazy.js";
 import { inspectSemanticChainReplayTarget, replaySemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SoulInterpretationResponseSchema, SourceSemanticAccessReceiptSchema } from "@do-soul/alaya-protocol";
@@ -69,10 +70,16 @@ async function preparedSourceFixture(contents: readonly string[]) {
     access_policy: "query-conditioned-v1", budget: { schema_version: 1, work_units: 1000000,
       memory_bytes: 60000000, page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 },
     authorized_scopes: { mode: "unrestricted" }, output_byte_limit: 100000 };
-  return { config: { chain, source_population: { name: "fixture", dataDir, pinnedMetaRoot,
-    questionWindow: { offset: 0, limit: 1 }, model: MODEL, requestProfile: PROFILE },
-    cache_owners: [{ cacheRoot, retainedPreparationPath: preflightPath }],
-    recorded_at: "2026-09-23T00:00:00.000Z", producer_commit: "a".repeat(40) }, published };
+  const bind = async (currentChain = chain, label = "initial") => {
+    const initialChainRoot = join(cacheRoot, `initial-${label}`);
+    const plan = await prepareSemanticChain(currentChain, initialChainRoot);
+    const bound = await admitNativeLazyConfig({ plan, initialChainRoot,
+      population: { name: "fixture", dataDir, pinnedMetaRoot, questionWindow: { offset: 0, limit: 1 } },
+      sourcePreflightPath: preflightPath, sourceCacheRoot: cacheRoot,
+      recordedAt: "2026-09-23T00:00:00.000Z", producerCommit: "a".repeat(40) });
+    return bound.config;
+  };
+  return { config: await bind(), published, bind };
 }
 
 it("freezes ten distinct native raw records and reopens a full sealed final library before one first exposure", async () => {
@@ -116,6 +123,16 @@ it("freezes ten distinct native raw records and reopens a full sealed final libr
   await expect(replayLazyQualifiedFirstExposure(root)).rejects.toThrow(/final query plan|frozen source window/u);
 });
 
+it("rejects a retained Batch source cap outside the native provider contract", async () => {
+  const { config } = await preparedSourceFixture(["I completed alpha."]);
+  const path = config.cache_owners[0]!.retainedPreparationPath;
+  const retained = JSON.parse(readFileSync(path, "utf8"));
+  retained.limits.maxOutputTokens = 65537;
+  writeFileSync(path, JSON.stringify(retained));
+  await expect(prepareLazyQualificationWindow(config, join(cacheRoot, "invalid-batch-cap")))
+    .rejects.toThrow(/unsupported Gemini model\/request profile\/output settings/u);
+});
+
 it("binds a newly received duplicate-content result only to frozen occurrences while preserving raw outsiders", async () => {
   const fixture = await preparedSourceFixture(Array.from({ length: 12 }, () => "I completed alpha."));
   const config = { ...fixture.config, chain: { ...fixture.config.chain, correspondence_pair_cap: 10 } };
@@ -131,7 +148,8 @@ it("binds a newly received duplicate-content result only to frozen occurrences w
       responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
     }) } });
   const root = join(cacheRoot, "duplicate-stage");
-  const window = await prepareLazyQualificationWindow(config, root);
+  const boundConfig = await fixture.bind(config.chain, "duplicate");
+  const window = await prepareLazyQualificationWindow(boundConfig, root);
   expect(window.window).toHaveLength(10);
   expect(window.selected_missing_keys).toHaveLength(1);
   setExtractionCredentialFixture();
@@ -220,8 +238,8 @@ it("binds a newly received duplicate-content result only to frozen occurrences w
     provider_url: "https://fixture-provider.invalid", kind: "query", model: MODEL, request_profile: PROFILE,
     items: [{ original_query: "Which item was completed?" }] });
   const nextRoot = join(cacheRoot, "next-query-stage");
-  const next = await prepareLazyQualificationWindow({ ...config,
-    chain: { ...config.chain, query_workset: nextQuery } }, nextRoot);
+  const next = await prepareLazyQualificationWindow(await fixture.bind({ ...config.chain,
+    query_workset: nextQuery }, "next-query"), nextRoot);
   expect(next.window).toHaveLength(10);
   expect(next.window.every(row => row.state === "cache_hit_interpreted")).toBe(true);
   expect(next.selected_missing_keys).toEqual([]);
@@ -255,8 +273,8 @@ it("retains a raw attempt without a cache shard as unknown and refuses a revised
   expect(second.selected_missing_keys).not.toContain(chosen.key);
   expect(second.selected_missing_keys).not.toContain(failed.key);
   await writeDataset([question(["I completed revised alpha.", "I completed beta."])]);
-  await expect(prepareLazyQualificationWindow(config, join(cacheRoot, "before-attempt"))).rejects.toThrow(/source census changed|dataset/u);
-  await expect(sealLazyQualificationFinal(join(cacheRoot, "before-attempt"))).rejects.toThrow(/source census changed|dataset/u);
+  await expect(prepareLazyQualificationWindow(config, join(cacheRoot, "before-attempt"))).rejects.toThrow(/source census changed|dataset|complete source census/u);
+  await expect(sealLazyQualificationFinal(join(cacheRoot, "before-attempt"))).rejects.toThrow(/source census changed|dataset|complete source census/u);
 });
 
 it("recovers a durable native replay after wrapper interruption but refuses a sent row without evidence", async () => {
@@ -333,10 +351,10 @@ it("does not count a copied continuation ledger as a new source call", async () 
 });
 
 it("keeps a budget-limited long raw source in place without qualifying or replacing it", async () => {
-  const { config } = await preparedSourceFixture(["I completed alpha. ".repeat(5000), "I completed beta."]);
+  const { config, bind } = await preparedSourceFixture(["I completed alpha. ".repeat(5000), "I completed beta."]);
   const bounded = { ...config, chain: { ...config.chain, budget: { ...config.chain.budget,
     work_units: 50000, memory_bytes: 2_000_000, page_budget: 20000, finalization_reserve: 1000 } } };
-  const window = await prepareLazyQualificationWindow(bounded, join(cacheRoot, "partial-stage"));
+  const window = await prepareLazyQualificationWindow(await bind(bounded.chain, "budgeted"), join(cacheRoot, "partial-stage"));
   expect(window.starting_access.observed_source_count).toBe(2);
   expect(window.window).toHaveLength(2);
   expect(window.window_open).toBe(true);

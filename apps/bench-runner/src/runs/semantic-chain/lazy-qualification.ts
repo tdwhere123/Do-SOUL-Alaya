@@ -1,18 +1,15 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { AlayaError, canonicalJson, FieldContractDigestSchema, SourceRecordIdentitySchema,
+import { AlayaError, canonicalJson, SourceRecordIdentitySchema,
   SourceSemanticAccessReceiptSchema, SourceSemanticWorkerWorkSchema } from "@do-soul/alaya-protocol";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { censusCompleteSourceRecords } from "../snapshot/source-records/census.js";
-import { prepareSourcePublicationAssociations, readRetainedSourcePublicationOwners,
-  type SourceAssociationCacheOwner } from "../snapshot/source-records/prepare-associations.js";
-import { publishSourceSemanticSnapshot, SourcePublicationAssociationRowSchema, type SourcePublicationAssociation,
-  type SourcePublicationPopulation } from "../snapshot/source-records/publish.js";
+import { prepareSourcePublicationAssociations } from "../snapshot/source-records/prepare-associations.js";
+import { publishSourceSemanticSnapshot, SourcePublicationAssociationRowSchema,
+  type SourcePublicationAssociation } from "../snapshot/source-records/publish.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, parseExtractionOpenSemanticsGeneration } from "../extraction/request-artifact.js";
-import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
-import { parseSourceSemanticInteractivePreflight } from "../extraction/fill/source-semantic-interactive-preflight.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { readSemanticChainProposalResults, semanticChainProposalStates, semanticChainQueryAvailability,
   verifySemanticChainQueries } from "./inputs.js";
@@ -20,31 +17,13 @@ import { discoverSemanticChainQuery } from "./prepare.js";
 import { prepareSemanticChain } from "./prepare.js";
 import { admitSemanticChainReplay, inspectSemanticChainReplayTarget, ReplaySchema,
   replaySemanticChain, semanticChainReplayPath } from "./replay.js";
-import { SemanticChainConfigSchema, SemanticChainPlanSchema, assertChainSnapshot, chainIdentity, readChainArtifact,
+import { SemanticChainPlanSchema, assertChainSnapshot, chainIdentity, readChainArtifact,
   withSemanticChainDaemon, writeChainArtifact, writeChainJson } from "./contract.js";
+import { Digest, SourceTuple, PublicationReport, LazyQualificationConfigSchema,
+  admitNativeLazyConfig, type LazyQualificationConfig } from "./bind-lazy.js";
 import { selectedProducerAttempts, selectedSourceState } from "./lazy-qualification-source-state.js";
 
-const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
-const SourcePopulationSchema = z.object({
-  name: z.string().min(1), dataDir: z.string().min(1), pinnedMetaRoot: z.string().min(1),
-  questionWindow: z.object({ offset: z.number().int().nonnegative(), limit: z.literal(1) }).strict(),
-  model: z.string().min(1), requestProfile: z.string().refine(isExtractionRequestProfile),
-  openSemantics: z.unknown().optional()
-}).strict();
-const CacheOwnerSchema = z.object({ cacheRoot: z.string().min(1), retainedPreparationPath: z.string().min(1) }).strict();
-export const LazyQualificationConfigSchema = z.object({
-  chain: SemanticChainConfigSchema,
-  source_population: SourcePopulationSchema,
-  cache_owners: z.array(CacheOwnerSchema).min(1),
-  initial_query_state_identity: Digest.optional(),
-  source_preparation: z.object({ retained_preflight_identity: Digest,
-    output_token_cap: z.number().int().positive() }).strict().optional(),
-  recorded_at: z.string().datetime(), producer_commit: z.string().regex(/^[a-f0-9]{40}$/u)
-}).strict();
-export type LazyQualificationConfig = z.infer<typeof LazyQualificationConfigSchema>;
 type Config = LazyQualificationConfig;
-const SourceTuple = z.object({ source_id: z.string(), source_version: z.string(), content_digest: z.string(),
-  corpus_digest: z.string(), record_id: FieldContractDigestSchema }).strict();
 const WindowRow = SourceTuple.extend({
   rank: z.number().int().min(1).max(10), key: Digest.nullable(), cache_root: z.string().nullable(),
   question_id: z.string(), session_id: z.string(), session_index: z.number().int().nonnegative(),
@@ -57,13 +36,6 @@ const WindowRow = SourceTuple.extend({
   starting_attempt_refs: z.array(z.string()), starting_raw_refs: z.array(z.string()),
   attempt_history_complete: z.boolean()
 }).strict();
-const PublicationSource = SourceTuple.extend({ admission: z.enum(["admitted", "rejected"]),
-  source_record: SourceRecordIdentitySchema,
-  source_interpretation_generation_key: Digest.optional(),
-  source_interpretation_binding: z.object({ kind: z.literal("host_publication_association"),
-    request_digest: Digest }).strict().optional() }).passthrough();
-const PublicationReport = z.object({ snapshot_path: z.string(), db_sha256: Digest,
-  census_count: z.number().int().nonnegative(), sources: z.array(PublicationSource) }).passthrough();
 const WindowSchema = z.object({
   contract: z.literal("source-semantic-lazy-qualification-window-v2"), provider_calls: z.literal(0),
   config: LazyQualificationConfigSchema, query_key: Digest, query_state_identity: Digest,
@@ -117,31 +89,21 @@ function finalAssociationPolicy(window: LazyQualificationWindow, row: SourcePubl
     ? "forbidden" : "selected_new";
 }
 
-function readInitialPublication(config: Config) {
-  const path = `${config.chain.snapshot_path}.publication.json`;
-  const report = PublicationReport.parse(JSON.parse(readBoundedCanonicalUtf8Artifact({
-    path, maxBytes: 32 * 1024 * 1024, label: "starting source publication" })));
-  if (report.snapshot_path !== config.chain.snapshot_path || report.db_sha256 !== config.chain.snapshot_sha256 ||
-      hashRegularFileNoFollow(report.snapshot_path) !== report.db_sha256 ||
-      report.sources.length !== report.census_count || report.sources.some(row => row.admission !== "admitted")) {
-    throw new AlayaError("CONFLICT", "starting source publication differs from the complete sealed census");
+async function assertNativeBinding(config: Config) {
+  // Native stages re-admit the retained preparation and complete source owner.
+  const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(config.initial_chain_root, "prepare.json")));
+  const population = config.source_population;
+  const owner = config.cache_owners[0];
+  if (owner === undefined) throw new AlayaError("CONFLICT", "bound source preparation requires an owner");
+  const bound = await admitNativeLazyConfig({ plan, initialChainRoot: config.initial_chain_root,
+    population: { name: population.name, dataDir: population.dataDir,
+      pinnedMetaRoot: population.pinnedMetaRoot, questionWindow: population.questionWindow },
+    sourcePreflightPath: owner.retainedPreparationPath, sourceCacheRoot: owner.cacheRoot,
+    recordedAt: config.recorded_at, producerCommit: config.producer_commit });
+  if (canonicalJson(bound.config) !== canonicalJson(config)) {
+    throw new AlayaError("CONFLICT", "lazy qualification config differs from its native binding");
   }
-  return report;
-}
-
-function assertBoundSourcePreparation(config: Config): void {
-  if (config.source_preparation === undefined) return;
-  if (config.cache_owners.length !== 1) throw new AlayaError("CONFLICT", "bound source preparation requires one owning root");
-  const value: unknown = JSON.parse(readBoundedCanonicalUtf8Artifact({
-    path: config.cache_owners[0]!.retainedPreparationPath, maxBytes: 32 * 1024 * 1024,
-    label: "bound source preflight" }));
-  const report = parseSourceSemanticInteractivePreflight(value);
-  if (chainIdentity(report) !== config.source_preparation.retained_preflight_identity ||
-      report.max_output_tokens !== config.source_preparation.output_token_cap ||
-      report.config.model !== config.source_population.model ||
-      report.config.requestProfile !== config.source_population.requestProfile) {
-    throw new AlayaError("CONFLICT", "bound source preflight identity or output cap changed");
-  }
+  return bound;
 }
 
 function currentQuery(config: Config) {
@@ -192,19 +154,14 @@ export async function admitLazyWindow(root: string, expectedConfig?: Config) {
   if (expectedConfig !== undefined && canonicalJson(window.config) !== canonicalJson(expectedConfig)) {
     throw new AlayaError("CONFLICT", "lazy window config changed");
   }
-  assertChainSnapshot(window.config.chain);
-  assertBoundSourcePreparation(window.config);
-  const publication = readInitialPublication(window.config);
+  const bound = await assertNativeBinding(window.config);
+  const { publication, census } = bound;
   assertWindowOwner(root, window, publication);
   if (currentQuery(window.config).identity !== window.query_state_identity ||
-      window.config.initial_query_state_identity !== undefined &&
       window.query_state_identity !== window.config.initial_query_state_identity ||
       publication.db_sha256 !== window.starting_snapshot_sha256) {
     throw new AlayaError("CONFLICT", "lazy qualification starting query or snapshot changed");
   }
-  const population = window.config.source_population;
-  const census = await censusCompleteSourceRecords({ population: population.name, dataDir: population.dataDir,
-    pinnedMetaRoot: population.pinnedMetaRoot, questionWindow: population.questionWindow });
   const records = new Map(publication.sources.map(row => [row.source_id, row]));
   if (census.dataset_sha256 !== window.dataset_sha256 || sourceInventory(census.records.map(row => ({
     ...row, record_id: records.get(row.source_id)?.record_id ?? ""
@@ -285,16 +242,13 @@ export async function admitLazyFinal(root: string) {
 /** The first native preparation page orders raw records; it is not a hidden public recall. */
 export async function prepareLazyQualificationWindow(value: unknown, root: string): Promise<LazyQualificationWindow> {
   const config = LazyQualificationConfigSchema.parse(value);
-  assertChainSnapshot(config.chain);
-  assertBoundSourcePreparation(config);
   const prior = readChainArtifact(join(root, "window.json"));
   if (prior !== undefined) {
     return (await admitLazyWindow(root, config)).window;
   }
-  const publication = readInitialPublication(config);
+  const bound = await assertNativeBinding(config);
+  const { publication, census } = bound;
   const population = config.source_population;
-  const census = await censusCompleteSourceRecords({ population: population.name, dataDir: population.dataDir,
-    pinnedMetaRoot: population.pinnedMetaRoot, questionWindow: population.questionWindow });
   const catalog = new Map(census.records.map(row => [row.source_id, row]));
   const published = new Map(publication.sources.map(row => [row.source_id, row]));
   if (catalog.size !== census.records.length || published.size !== publication.sources.length ||
@@ -305,12 +259,10 @@ export async function prepareLazyQualificationWindow(value: unknown, root: strin
     throw new AlayaError("CONFLICT", "starting snapshot no longer matches the complete source census");
   }
   const generation = parseExtractionOpenSemanticsGeneration(population.openSemantics ?? EXTRACTION_OPEN_SEMANTICS_GENERATION);
-  const owners = readRetainedSourcePublicationOwners(config.cache_owners as readonly SourceAssociationCacheOwner[],
-    population as SourcePublicationPopulation, generation, census.dataset_sha256);
   const starting = await prepareSourcePublicationAssociations({ ...population, openSemantics: generation },
     config.cache_owners, join(root, "starting-associations.json"));
   const query = currentQuery(config);
-  if (config.initial_query_state_identity !== undefined && query.identity !== config.initial_query_state_identity) {
+  if (query.identity !== config.initial_query_state_identity) {
     throw new AlayaError("CONFLICT", "query state changed after the bound initial preparation");
   }
   const availability = semanticChainQueryAvailability(query.row);
@@ -338,7 +290,7 @@ export async function prepareLazyQualificationWindow(value: unknown, root: strin
       question_id: source.question_id, session_id: source.session_id, session_index: source.session_index,
       round_index: source.round_index, source_observed_at: source.source_observed_at,
       roles: source.roles, speaker: source.speaker ?? null, source_record: priorSource.source_record,
-      ...(row.complete ? selectedSourceState(source, config, owners.owned, starting.artifacts) : {
+      ...(row.complete ? selectedSourceState(source, config, bound.sourceOwners, starting.artifacts) : {
         key: null, cache_root: null, state: "observation_incomplete" as const,
         cache_identity: null, attempt_identity: null,
         starting_attempt_refs: [], starting_raw_refs: [], attempt_history_complete: true }) };

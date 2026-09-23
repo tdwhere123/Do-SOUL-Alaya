@@ -7,7 +7,8 @@ import { listExtractionAttemptLedgerRecords } from "../extraction/authority/atte
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, parseExtractionOpenSemanticsGeneration,
   prepareSourceSemanticRequestLine, sourceSemanticArtifactPreparations } from "../extraction/request-artifact.js";
 import { chainIdentity } from "./contract.js";
-import type { LazyQualificationConfig, LazyQualificationWindow } from "./lazy-qualification.js";
+import type { LazyQualificationConfig } from "./bind-lazy.js";
+import type { LazyQualificationWindow } from "./lazy-qualification.js";
 
 function sourceAttemptHistory(cacheRoot: string, key: string, config: LazyQualificationConfig) {
   const raw = listProviderRawAttempts(cacheRoot, key);

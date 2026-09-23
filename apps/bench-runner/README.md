@@ -93,7 +93,8 @@ formation; source preparation does not satisfy those enhancement prerequisites.
 ## Offline semantic chain
 
 After `pnpm build`, `node apps/bench-runner/dist/runs/semantic-chain/launch.js`
-provides `associate`, `prepare`, `replay`, `intervene`, and `measure`. These operations make
+provides `associate`, `prepare`, `bind-lazy`, `qualify-window`, `qualify-final`,
+`qualify-replay`, `replay`, `intervene`, and `measure`. These operations make
 no provider calls. Query-semantics and semantic-correspondence extraction still uses the existing
 `semantic-proposal-fill` preparation, authority, attempt ledger, and interactive
 SSE execution; the chain does not dispatch Batch or authorize extraction.
@@ -114,6 +115,13 @@ node apps/bench-runner/dist/runs/semantic-chain/launch.js associate \
   --config population.json --out associations.json
 node apps/bench-runner/dist/runs/semantic-chain/launch.js prepare \
   --config chain-config.json --root .do-it/bench-runs/semantic-chain
+node apps/bench-runner/dist/runs/semantic-chain/launch.js bind-lazy \
+  --root .do-it/bench-runs/semantic-chain --config chain-config.json \
+  --population source-container.json --source-preflight complete-source-preflight.json \
+  --source-cache-root SOURCE_CACHE_ROOT --recorded-at RECORDED_AT \
+  --producer-commit PRODUCER_COMMIT --out lazy-config.json
+node apps/bench-runner/dist/runs/semantic-chain/launch.js qualify-window \
+  --config lazy-config.json --root .do-it/bench-runs/semantic-lazy
 node apps/bench-runner/dist/runs/semantic-chain/launch.js replay \
   --root .do-it/bench-runs/semantic-chain --arm retained
 node apps/bench-runner/dist/runs/semantic-chain/launch.js measure \
@@ -121,6 +129,16 @@ node apps/bench-runner/dist/runs/semantic-chain/launch.js measure \
 node apps/bench-runner/dist/runs/semantic-chain/launch.js intervene \
   --root .do-it/bench-runs/semantic-chain --replay REPLAY_PATH --leaf-trials 32
 ```
+
+The direct lazy binder requires a retained one-query `prepare.json` matching the
+exact chain config. `source-container.json` names the complete published source
+container with `name`, `dataDir`, `pinnedMetaRoot`, and a one-question
+`questionWindow` (`offset`, `limit: 1`). Its question supplies source records;
+the prepared chain supplies the query. The binder verifies the sealed snapshot,
+complete census, current source preflight and owning cache, and settled query
+state. It writes both native query and preflight identities into the lazy config.
+The lazy stage rechecks this binding before a window or resumed stage; no provider
+authority or call is issued by binding.
 
 Population configuration contains `name`, `dataDir`, `pinnedMetaRoot`,
 `model`, `requestProfile`, an optional original `questionWindow`, and a

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 import { SoulMemorySearchRequestSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
@@ -15,6 +15,8 @@ import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-recor
 import { runSourceSemanticPublicationLauncher } from "../../../runs/snapshot/source-records/launch-publication.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
 import { prepareSourcePublicationAssociations } from "../../../runs/snapshot/source-records/prepare-associations.js";
+import { preflightExtractionBatch } from "../../../runs/extraction/fill/batch-preflight.js";
+import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
 import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/execute.js";
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
@@ -25,7 +27,7 @@ import { chainIdentity, SemanticChainPlanSchema, readChainArtifact } from "../..
 const roots = new Set<string>();
 const CLOCK = "2026-09-13T00:00:00.000Z";
 const AS_OF = "2023-09-13T00:00:00.000Z";
-afterEach(async () => { for (const root of roots) await rm(root, { recursive: true, force: true }); roots.clear(); });
+afterEach(async () => { vi.unstubAllEnvs(); for (const root of roots) await rm(root, { recursive: true, force: true }); roots.clear(); });
 
 async function fixture(duplicate = false, abstention = false, authoredQuestions?: ReturnType<typeof question>[]) {
   const root = await mkdtemp(join(tmpdir(), "source-records-publication-"));
@@ -207,9 +209,21 @@ describe("complete-source census and publication", () => {
     expect(frozen.selected[0]!.source_manifest).toMatchObject(expected);
     expect(readChainArtifact(join(freezeRoot, "freeze.json"))).toEqual(frozen);
     const preflightPath = join(f.root, "retained-preflight.json");
-    await writeFile(preflightPath, JSON.stringify({ contract: "extraction-batch-preflight-v2", planned_requests: [] }));
+    vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", population.model);
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", population.requestProfile);
+    vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "http://127.0.0.1:9");
+    const cleanCacheRoot = join(f.root, "clean-cache");
+    await mkdir(cleanCacheRoot);
+    const preflight = await preflightExtractionBatch({ variant: "longmemeval_s", cacheRoot: cleanCacheRoot,
+      dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot, offset: 0, limit: 1,
+      sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+      batch: { operation: "prepare", limits: { maxJobs: 1, maxRequestsPerJob: 64, maxFileBytes: 1_000_000,
+        maxInputTokensPerJob: 1_000_000, maxEnqueuedTokens: 1_000_000, maxOutputTokens: 4096,
+        maxUsd: 1, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
+        deadlineMs: 60_000, requestTimeoutMs: 5000, maxPolls: 10 } } });
+    await writeFile(preflightPath, JSON.stringify(preflight));
     const associations = await prepareSourcePublicationAssociations(population,
-      [{ cacheRoot: f.cacheRoot, retainedPreparationPath: preflightPath }], join(f.root, "associations.json"));
+      [{ cacheRoot: cleanCacheRoot, retainedPreparationPath: preflightPath }], join(f.root, "associations.json"));
     expect(associations.publicationAssociations).toEqual([]);
     expect(associations.sources).toEqual(expected.map(({ source_id }) => ({
       source_id, source_version: census.dataset_sha256, status: "unbound", reason: "missing_current_artifact"

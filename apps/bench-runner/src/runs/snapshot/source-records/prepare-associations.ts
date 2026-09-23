@@ -9,12 +9,13 @@ import { listRetainedSourceSemanticKeys, parseSourcePublicationAssociations, typ
 import { inspectCachedSourceSemantic } from "../../extraction/cache/source-semantic-artifact.js";
 import { bindProviderRawAttempt, listProviderRawAttempts } from "../../extraction/fill/provider-raw-attempt.js";
 import { parseSourceSemanticInteractivePreflight } from "../../extraction/fill/source-semantic-interactive-preflight.js";
+import { parseRetainedBatchPreflight } from "../../extraction/fill/batch-preflight.js";
 import { sourceSemanticRequestWireDigest } from "../../extraction/fill/source-semantic-interactive-request.js";
 import { readBoundedCanonicalUtf8Artifact } from "../../extraction/cache-audit/bounded-artifact-reader.js";
 import { chainIdentity, writeChainArtifact, writeChainJson } from "../../semantic-chain/contract.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparations,
   parseExtractionOpenSemanticsGeneration, parseSourceSemanticRequestLine, prepareSourceSemanticRequestLine,
-  SourceRequestLineSchema, type SourceRequestLine, type ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
+  type SourceRequestLine, type ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
 
 export type SourceAssociationCacheOwner = Readonly<{ cacheRoot: string; retainedPreparationPath: string }>;
 type RetainedOwner = Readonly<{ cacheRoot: string; digest: string;
@@ -70,10 +71,13 @@ export function readRetainedSourcePublicationOwners(owners: readonly SourceAssoc
           openSemantics: parseExtractionOpenSemanticsGeneration(report.config.openSemantics) }, line, report.max_output_tokens) } : {}) };
       });
     } else {
-      const report = z.object({ contract: z.literal("extraction-batch-preflight-v2"),
-        planned_requests: z.array(SourceRequestLineSchema) }).passthrough().parse(artifact);
+      const report = parseRetainedBatchPreflight(artifact);
       preparationContract = report.contract;
       selectedRequestCount = report.planned_requests.length;
+      if (report.config.model !== population.model || report.config.requestProfile !== population.requestProfile ||
+          report.dataset_revision !== datasetSha256) {
+        throw new AlayaError("CONFLICT", "retained Batch source preparation differs from the current source population");
+      }
       requests = report.planned_requests.map(line => ({ line }));
     }
     for (const { line, wireDigest } of requests) {

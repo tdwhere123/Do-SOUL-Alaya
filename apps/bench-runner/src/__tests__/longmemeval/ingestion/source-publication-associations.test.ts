@@ -82,7 +82,8 @@ async function fixture(revised = false) {
   expect(fetchMock).toHaveBeenCalledTimes(2);
   for (const line of preflight.planned_requests) expect(inspectCachedSourceSemantic(cacheRoot, line.key, MODEL, REQUEST_PROFILE).status).toBe("hit");
   const population = { name: "fixture", dataDir, pinnedMetaRoot, model: MODEL, requestProfile: REQUEST_PROFILE };
-  return { population, preflight, preflightPath, generation, fetchMock };
+  return { population, preflight, preflightPath, preflightOptions: { ...options, openSemantics: generation, batch },
+    generation, fetchMock };
 }
 
 async function prepareWindowOwner(root: string, offset: number) {
@@ -172,7 +173,10 @@ it("associates unique and repeated occurrences with only the independently confi
 
 it("keeps invalid artifacts, missing artifacts, and missing retained request proof explicitly unassociated", async () => {
   const f = await fixture();
-  writeFileSync(f.preflightPath, JSON.stringify({ ...f.preflight, planned_requests: [] }));
+  const warmPreflight = await preflightExtractionBatch(f.preflightOptions);
+  expect(warmPreflight.planned_requests).toEqual([]);
+  expect(warmPreflight.cached_requests).toBe(2);
+  writeFileSync(f.preflightPath, JSON.stringify(warmPreflight));
   const owner = [{ cacheRoot, retainedPreparationPath: f.preflightPath }];
   const unproven = await prepareSourcePublicationAssociations(f.population, owner, join(cacheRoot, "unproven.json"));
   expect(unproven.publicationAssociations).toEqual([]);
@@ -196,7 +200,7 @@ it("rejects duplicate or foreign retained request identity before writing associ
     writeFileSync(f.preflightPath, JSON.stringify({ ...f.preflight, planned_requests }));
     const out = join(cacheRoot, "rejected.json");
     await expect(prepareSourcePublicationAssociations(f.population, [{ cacheRoot, retainedPreparationPath: f.preflightPath }], out))
-      .rejects.toThrow(/foreign or duplicate request identity|repeat an owning request key/u);
+      .rejects.toThrow(/invalid or duplicate Batch line identity|retained Batch preflight differs from its native plan/u);
     expect(existsSync(out)).toBe(false);
   }
   const config = join(cacheRoot, "invalid-window.json");
@@ -374,19 +378,31 @@ it("composes earlier and current owning roots for one original question with uns
     .rejects.toThrow("multiple physical cache roots");
   expect(existsSync(rejected)).toBe(false);
   unlinkSync(foreignPath);
-  const originalSecondPreflight = readFileSync(second.retainedPreparationPath, "utf8");
-  writeFileSync(second.retainedPreparationPath, JSON.stringify({ ...second.preflight,
-    planned_requests: [first.preflight.planned_requests[0], ...second.preflight.planned_requests] }));
-  await expect(prepareSourcePublicationAssociations(population, owners, rejected))
+  const duplicateRoot = join(cacheRoot, "duplicate-report-root");
+  mkdirSync(duplicateRoot);
+  const duplicateOptions = { variant: "longmemeval_s" as const, cacheRoot: duplicateRoot, dataDir, pinnedMetaRoot,
+    offset: 0, limit: 1, sourcePacking: "complete-source" as const,
+    openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    batch: { operation: "prepare" as const, limits: first.preflight.limits } };
+  const duplicatePath = join(duplicateRoot, "preflight.json");
+  const duplicateOwner = [{ cacheRoot, retainedPreparationPath: first.retainedPreparationPath },
+    { cacheRoot: duplicateRoot, retainedPreparationPath: duplicatePath }];
+  const sameRequest = await preflightExtractionBatch(duplicateOptions);
+  expect(sameRequest.planned_requests[0]?.key).toBe(alphaKey);
+  writeFileSync(duplicatePath, JSON.stringify(sameRequest));
+  await expect(prepareSourcePublicationAssociations(population, duplicateOwner, rejected))
     .rejects.toThrow("repeat an owning request key");
   expect(existsSync(rejected)).toBe(false);
-  const secondLine = second.preflight.planned_requests[0]!;
-  writeFileSync(second.retainedPreparationPath, JSON.stringify({ ...second.preflight,
-    planned_requests: [{ ...secondLine, unitKeys: [...secondLine.unitKeys, first.preflight.planned_requests[0]!.unitKeys[0]!] }] }));
-  await expect(prepareSourcePublicationAssociations(population, owners, rejected))
+  const revisedGeneration = { ...EXTRACTION_OPEN_SEMANTICS_GENERATION, revisions: [prepareSourceSemanticRevision(
+    parseSourceSemanticRequest(JSON.parse(first.preflight.planned_requests[0]!.userPrompt)),
+    "invalid JSON", [], { responseCompletion: "complete" })] };
+  const sameOccurrence = await preflightExtractionBatch({ ...duplicateOptions, openSemantics: revisedGeneration });
+  expect(sameOccurrence.planned_requests[0]?.key).not.toBe(alphaKey);
+  expect(sameOccurrence.planned_requests[0]?.unitKeys).toEqual(first.preflight.planned_requests[0]?.unitKeys);
+  writeFileSync(duplicatePath, JSON.stringify(sameOccurrence));
+  await expect(prepareSourcePublicationAssociations(population, duplicateOwner, rejected))
     .rejects.toThrow("repeat a source assignment");
   expect(existsSync(rejected)).toBe(false);
-  writeFileSync(second.retainedPreparationPath, originalSecondPreflight);
   renameSync(alphaPath, foreignPath);
   const displaced = await prepareSourcePublicationAssociations(population, owners, join(cacheRoot, "displaced.json"));
   expect(displaced.sources[0]).toMatchObject({ status: "unbound", reason: "missing_current_artifact" });
@@ -399,7 +415,11 @@ it("composes earlier and current owning roots for one original question with uns
   expect(invalid.sources[0]).toMatchObject({ status: "unbound", reason: "invalid_current_artifact" });
   writeFileSync(alphaPath, alphaBytes);
   const originalFirstPreflight = readFileSync(first.retainedPreparationPath, "utf8");
-  writeFileSync(first.retainedPreparationPath, JSON.stringify({ ...first.preflight, planned_requests: [] }));
+  const warmFirst = await preflightExtractionBatch({ variant: "longmemeval_s", cacheRoot, dataDir, pinnedMetaRoot,
+    offset: 0, limit: 1, sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    batch: { operation: "prepare", limits: first.preflight.limits } });
+  expect(warmFirst.planned_requests).toEqual([]);
+  writeFileSync(first.retainedPreparationPath, JSON.stringify(warmFirst));
   const unproven = await prepareSourcePublicationAssociations(population, owners, join(cacheRoot, "unproven-owner.json"));
   expect(unproven.sources[0]).toMatchObject({ status: "unbound", reason: "unproven_retained_request" });
   writeFileSync(first.retainedPreparationPath, originalFirstPreflight);
