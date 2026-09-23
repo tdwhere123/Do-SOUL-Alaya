@@ -1142,7 +1142,23 @@ native order, and measurement requires the delivered order to match that
 freeze. Native measurement uses `longmemeval-native-semantic-measurement-v3`;
 historical artifacts retain their original declarations. Existing publication and
 generic semantic-chain owners perform preparation, snapshot reopen, discovery,
-correspondence receive, public recall and initial exposure. The current plan
+correspondence receive, public recall and initial exposure.
+An opt-in offline lazy-qualification stage records one native `prepare_query`
+observation before any public recall and freezes the first ten distinct current
+raw source records in access order, or fewer when the pool is smaller. It keeps
+the complete source census and emits only selected, owned cache misses for the
+existing extraction authority; failed, pending, unknown, unsupported and invalid
+states are not misses. Finalization publishes the full census to a distinct sealed
+SQLite snapshot. Newly admitted interpretations may bind only the frozen
+source/version window; compatible associations that predate it remain available
+outside the window. It re-prepares the query and correspondence workset under
+the final revision, then permits one retained first public exposure through the
+existing native selector and proof path. The delivered five may include raw
+sources outside the qualification window, and some interpreted window members
+may remain undelivered; neither changes the frozen extraction scope. Both native
+pool receipts, selected attempt counts, producer usage and separate host work
+are retained. This stage does not alter ordinary recall defaults or scoring.
+The current plan
 requires an explicit Protocol access policy in the frozen configuration and forwards it unchanged during preparation
 and replay. The native arm pins `query-conditioned-v1`; the source-only arm pins
 `canonical-v1`. Historical source-only artifacts keep their explicit offline

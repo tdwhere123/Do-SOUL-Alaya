@@ -30,7 +30,7 @@ function matchesRetainedStepAttempt(input: { cacheRoot: string; key: string; mod
 }
 
 /** Original selected requests allocate keys to roots; cache presence never selects an alternate owner. */
-function readRetainedOwners(owners: readonly SourceAssociationCacheOwner[],
+export function readRetainedSourcePublicationOwners(owners: readonly SourceAssociationCacheOwner[],
   population: Pick<SourcePublicationPopulation, "model" | "requestProfile">,
   generation: ExtractionOpenSemanticsGeneration, datasetSha256: string) {
   if (owners.length === 0) throw new AlayaError("VALIDATION", "association preparation requires owning cache roots");
@@ -93,7 +93,7 @@ export async function prepareSourcePublicationAssociations(
   const census = await censusCompleteSourceRecords({ population: population.name,
     dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
     ...(population.questionWindow === undefined ? {} : { questionWindow: population.questionWindow }) });
-  const { retained, planned } = readRetainedOwners(owners, population, generation, census.dataset_sha256);
+  const { retained, planned } = readRetainedSourcePublicationOwners(owners, population, generation, census.dataset_sha256);
   const physical = new Map<string, string>();
   for (const owner of retained) {
     const keys = listRetainedSourceSemanticKeys(owner.cacheRoot);

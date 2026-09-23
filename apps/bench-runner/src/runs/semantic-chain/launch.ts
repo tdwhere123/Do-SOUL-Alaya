@@ -8,6 +8,8 @@ import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { SourceRecordsDatasetSchema } from "../snapshot/source-records/contract.js";
 import { parseExtractionOpenSemanticsGeneration } from "../extraction/request-artifact.js";
+import { prepareLazyQualificationWindow, sealLazyQualificationFinal,
+  replayLazyQualifiedFirstExposure } from "./lazy-qualification.js";
 
 /** Offline orchestration. Paid query semantics and semantic correspondence uses the existing semantic-proposal-fill entry and its explicit authority. */
 export async function runSemanticChainLauncher(args: readonly string[]): Promise<number> {
@@ -25,6 +27,9 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
       path, maxBytes: 32 * 1024 * 1024, label: "semantic chain input" }));
     let result: unknown;
     if (operation === "prepare") result = await prepareSemanticChain(json(required("--config")), required("--root"));
+    else if (operation === "qualify-window") result = await prepareLazyQualificationWindow(json(required("--config")), required("--root"));
+    else if (operation === "qualify-final") result = await sealLazyQualificationFinal(required("--root"));
+    else if (operation === "qualify-replay") result = await replayLazyQualifiedFirstExposure(required("--root"));
     else if (operation === "replay") result = await replaySemanticChain(required("--root"),
       z.enum(["retained", "without_semantic_correspondences"]).parse(flags.get("--arm") ?? "retained"));
     else if (operation === "measure") result = measureSemanticChain(required("--root"), required("--replay"), json(required("--gold")));
@@ -43,7 +48,7 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
       const { cacheOwners, ...sourcePopulation } = population;
       result = await prepareSourcePublicationAssociations({ ...sourcePopulation, requestProfile: population.requestProfile },
         cacheOwners, required("--out"));
-    } else throw new AlayaError("VALIDATION", "expected prepare, replay, measure, intervene, or associate");
+    } else throw new AlayaError("VALIDATION", "expected prepare, replay, measure, intervene, associate, qualify-window, qualify-final, or qualify-replay");
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return 0;
   } catch (error) {
