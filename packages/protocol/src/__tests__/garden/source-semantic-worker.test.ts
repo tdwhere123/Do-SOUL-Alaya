@@ -2,7 +2,8 @@ import { expect, it } from "vitest";
 import { MemorySearchResultSchema } from "../../surfaces/mcp-memory-search-types.js";
 import { SourceInterpretationReasoningResultSchema } from "../../garden/source-interpretation-packet.js";
 import { InformationIndexSchema } from "../../recall/conditional-field/index-view.js";
-import { SoulInterpretationResponseSchema } from "../../surfaces/mcp-interpretation-types.js";
+import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema } from "../../surfaces/mcp-interpretation-types.js";
+import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
 import {
   SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
   SourceSemanticLibraryContinuationSchema,
@@ -20,6 +21,30 @@ const coverage = {
   conditional_computation: "unexercised" as const, payload: "complete" as const
 };
 const work = { native_work: 1, native_bytes: 2, logical_memory_bytes: 3, rss_bytes: 4 };
+const validQuery = SourceSemanticQuerySchema.parse({
+  contract: "source-semantic-query-v3", original_query_digest: digest,
+  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v3",
+  variables: [{ id: "actor", sort: "entity" }, { id: "fUse", sort: "proposition" }],
+  alternatives: [{ frames: [{ id: "qUse", variable: "fUse", predicate_reading: "use",
+    role_requirements: [{ id: "agent", role_reading: "agent", target_variable: "actor",
+      support: { kind: "query_text", excerpt: "Alice" } }] }],
+  context_obligations: [{ frame: "qUse", kind: "asserted_at_source" }] }],
+  return_variables: ["actor"], gaps: []
+});
+
+it("rejects an unavailable declaration beside valid query semantics on public and worker requests", () => {
+  for (const operation of ["prepare_query", "recall"] as const) {
+    const shared = { original_query: "Alice uses tools?", query_semantics: validQuery,
+      query_semantics_unavailable: "producer_failure", budget };
+    const recall = operation === "recall" ? { accepts_unreviewed_conditional_results: true, output_byte_limit: 1024 } : {};
+    expect(SourceSemanticWorkerRequestSchema.safeParse({ kind: operation, ...shared, ...recall }).success).toBe(false);
+    expect(SoulInterpretationRequestSchema.safeParse({ operation, ...shared, ...recall }).success).toBe(false);
+    expect(SourceSemanticWorkerRequestSchema.safeParse({ kind: operation, ...shared,
+      query_semantics_unavailable: undefined, ...recall }).success).toBe(true);
+    expect(SoulInterpretationRequestSchema.safeParse({ operation, ...shared,
+      query_semantics_unavailable: undefined, ...recall }).success).toBe(true);
+  }
+});
 
 it("admits prepare and one-shot reason without a continuation token", () => {
   expect(SourceSemanticWorkerRequestSchema.parse({

@@ -4,7 +4,8 @@ import { AlayaError, SoulInterpretationRequestSchema, SoulInterpretationResponse
 import { admitSourceSemanticQuery, sourceSemanticQueryStatus } from "@do-soul/alaya-core";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import type { BenchDaemonHandle } from "../../harness/daemon.js";
-import { readSemanticChainProposalResults, semanticChainProposalStates } from "./inputs.js";
+import { readSemanticChainProposalResults, semanticChainProposalStates, semanticChainQueryAvailability,
+  verifySemanticChainQueries } from "./inputs.js";
 import { parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../semantic-proposal/workset.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { SemanticChainConfigSchema, SemanticChainPlanSchema, SEMANTIC_CHAIN_PLAN_CONTRACT, chainIdentity, readChainArtifact, writeChainArtifact,
@@ -21,6 +22,7 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
     if (existing !== undefined) {
       const plan = SemanticChainPlanSchema.parse(existing);
       if (plan.input_identity !== inputIdentity) throw new AlayaError("CONFLICT", "semantic chain preparation inputs changed; use a new stage root");
+      verifySemanticChainQueries(plan);
       materializeCorrespondenceWorkset(plan, root);
       return plan;
     }
@@ -29,16 +31,21 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
     const prepare = async (daemon?: BenchDaemonHandle) => {
       for (const row of results) {
         const base = { query_key: row.line.key, original_query: row.line.original_query, raw_digest: row.shard?.raw_digest ?? null };
-        const querySemantics = row.received !== undefined && "query" in row.received ? row.received.query : undefined;
-        const unavailable = querySemantics === undefined ? row.status === "unattempted" ? undefined
-          : row.status === "invalid" || row.status === "core_rejected" || row.status === "cache_invalid"
-            ? "invalid" as const : "producer_failure" as const : undefined;
+        const availability = semanticChainQueryAvailability(row);
+        const querySemantics = availability.status === "admitted" ? availability.query : undefined;
+        const unavailable = availability.status === "unavailable" && availability.unavailable !== "absent"
+          ? availability.unavailable : undefined;
         let found;
         try { found = (await discoverSemanticChainQuery(daemon!, config, row.line.original_query, querySemantics, unavailable)).discovery; }
-        catch (error) { queries.push({ ...base, status: "blocked", reason: `discovery_unavailable: ${error instanceof Error ? error.message : String(error)}` }); continue; }
+        catch (error) {
+          if (!(error instanceof AlayaError && error.code === "UNAVAILABLE")) throw error;
+          queries.push({ ...base, status: "blocked", reason: `discovery_unavailable: ${error.message}` });
+          continue;
+        }
         if (querySemantics === undefined) {
-          queries.push({ ...base, status: "raw_ready", reason: row.status,
-            query_semantics_unavailable: unavailable ?? "absent", ...found });
+          if (availability.status !== "unavailable") throw new AlayaError("INTERNAL", "raw query availability changed");
+          queries.push({ ...base, status: "raw_ready", reason: availability.reason,
+            query_semantics_unavailable: availability.unavailable, ...found });
           continue;
         }
         const selected = found.descriptors.filter((descriptor) => descriptor.interpretation !== undefined).slice(0, config.correspondence_pair_cap);
@@ -94,6 +101,9 @@ export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, conf
       throw new AlayaError("CONFLICT", "native discovery changed query semantic availability");
     }
     const access = response.access;
+    if (access === undefined && response.outcome?.status === "resource_exhausted") {
+      throw new AlayaError("UNAVAILABLE", "native discovery resource exhausted");
+    }
     if (access === undefined || access.policy !== config.access_policy || access.trace.kind !== "preparation_page") {
       throw new AlayaError("CONFLICT", "native discovery did not bind the frozen access policy");
     }

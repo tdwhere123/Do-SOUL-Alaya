@@ -19,7 +19,7 @@ export function sourceSemanticLibraryQueryIdentity(originalQuery: string, result
   return `sha256:${fieldContractSha256(canonicalJson({ kind: resultVersion, query: originalQuery }))}`;
 }
 
-/** Admitted query semantics and resolved execution inputs bind every page independently of process-local handles. */
+/** Resolved execution inputs and admitted or unavailable query status bind every page independently of process-local handles. */
 export function sourceSemanticLibraryRequestIdentity(input: Readonly<{
   workspace_id: string; as_of: string; authorized_scopes: readonly string[] | null;
   original_query: string; query_semantics?: SourceSemanticQuery; query_semantics_status: SourceSemanticQueryStatus;

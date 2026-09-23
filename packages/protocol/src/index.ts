@@ -265,7 +265,26 @@ export * from "./garden/source-semantic-proposal.js";
 export { canonicalSourceSemanticDecimal, compareSourceSemanticDecimals } from "./garden/source-semantic-quantified-validation.js";
 export { SourceSemanticDiagnosticsSchema, sourceSemanticValidationDiagnostics } from "./garden/source-semantic-diagnostics.js";
 export * from "./garden/source-semantic-interpretation.js";
-export * from "./garden/source-semantic-worker.js";
+export {
+  SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
+  SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX, SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
+  SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
+  SOURCE_SEMANTIC_LIBRARY_OCCUPANCY, SOURCE_SEMANTIC_LIBRARY_TIE_POLICY,
+  SourceSemanticLibraryContinuationSchema, SOURCE_SEMANTIC_COVERAGE_STATES,
+  SourceSemanticCoverageSchema, SourceSemanticQueryUnavailableReasonSchema,
+  SourceSemanticQueryStatusSchema, SourceSemanticHandleDescriptorSchema,
+  SourceSemanticWorkerWorkSchema, SourceSemanticWorkerRequestSchema,
+  SourceSemanticLibraryDiscoverySchema, SourceSemanticLibraryOrderSchema,
+  SourceSemanticQuerySupportSchema, SourceSemanticLibrarySlotQualifierSchema,
+  SourceSemanticLibraryProofSchema, SourceSemanticLibraryDeliverySchema,
+  SourceSemanticWorkerResultSchema
+} from "./garden/source-semantic-worker.js";
+export type {
+  SourceSemanticQueryUnavailableReason, SourceSemanticQueryStatus, SourceSemanticQuerySupport,
+  SourceSemanticLibraryProof, SourceSemanticCoverage, SourceSemanticHandleDescriptor,
+  SourceSemanticWorkerWork, SourceSemanticWorkerRequest, SourceSemanticWorkerResult,
+  SourceSemanticLibraryDiscovery, SourceSemanticLibraryOrder, SourceSemanticLibrarySlotQualifier
+} from "./garden/source-semantic-worker.js";
 export * from "./garden/source-semantic-access.js";
 export * from "./garden/source-semantic-identity.js";
 export * from "./garden/normalize-source-semantics.js";

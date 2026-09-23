@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
 import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
@@ -21,6 +21,7 @@ import { SemanticChainConfigSchema } from "../../../runs/semantic-chain/contract
 import { assertPerQueryOpportunity } from "./native-semantic-arm.test-support.js";
 import { assertSemanticChainArchiveAdmission } from "./semantic-chain-archive-admission.test-support.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
+import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposure-session.js";
 
 export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySnapshot: { snapshot_path: string; db_sha256: string }): Promise<void> {
   const queryWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3", provider_url: "http://127.0.0.1:9",
@@ -65,15 +66,60 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   openSemanticProposalAttemptLedger({ cacheRoot: unknownCache, authority: unknownAuthority, kind: "query" })
     .reserveAttemptOrdinal(unknownKey);
   const unknownPlan = await prepareSemanticChain({ ...config, query_cache_root: unknownCache }, unknownRoot);
-  expect(unknownPlan.queries).toMatchObject([{ status: "raw_ready", reason: "unknown" },
-    { status: "raw_ready", reason: "unattempted" }]);
+  expect(unknownPlan.queries).toMatchObject([{ status: "raw_ready", reason: "unknown",
+    query_semantics_unavailable: "producer_outcome_unknown" },
+    { status: "raw_ready", reason: "unattempted", query_semantics_unavailable: "absent" }]);
   const unknownReplay = await replaySemanticChain(unknownRoot);
+  const unknownRetained = readChainArtifact(unknownReplay.path) as { rows: { response?: unknown; first_exposure?: unknown }[] };
+  const unknownNative = SoulInterpretationResponseSchema.parse(unknownRetained.rows[0]?.response);
+  if (unknownNative.operation !== "recall") throw new Error("unknown query native recall required");
+  expect(unknownNative.query_semantics_status).toEqual({ status: "unavailable", reason: "producer_outcome_unknown" });
+  expect(unknownNative.results?.some(result => result.target.kind === "source_evidence" && result.content_preview.length > 0)).toBe(true);
+  expect(unknownNative.proofs ?? []).toEqual([]);
+  expect(FirstExposurePageSchema.parse(unknownRetained.rows[0]?.first_exposure).initial?.slots
+    .some(slot => slot.target.kind === "source_evidence")).toBe(true);
+  await withSemanticChainDaemon(unknownPlan.config, unknownRoot, async daemon => {
+    const withoutDeclaration = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
+      SoulInterpretationRequestSchema.parse({ operation: "recall", original_query: unknownPlan.queries[0]!.original_query,
+        accepts_unreviewed_conditional_results: true, semantic_correspondences: [], budget: config.budget,
+        output_byte_limit: config.output_byte_limit, authorized_scopes: config.authorized_scopes,
+        access_policy: config.access_policy })));
+    if (withoutDeclaration.operation !== "recall") throw new Error("undeclared raw recall required");
+    expect(withoutDeclaration.query_semantics_status).toEqual({ status: "unavailable", reason: "absent" });
+    expect(withoutDeclaration.request_identity).not.toBe(unknownNative.request_identity);
+  });
   const unknownMeasurement = measureSemanticChain(unknownRoot, unknownReplay.path,
     unknownPlan.queries.map(row => ({ query_key: row.query_key, source_units: [] })));
   expect(unknownMeasurement.result.rows[0]).toMatchObject({ status: "replayed", query_failure_reason: "unknown",
-    diagnostics: { query_semantics_status: { status: "unavailable", reason: "producer_failure" } },
+    diagnostics: { query_semantics_status: { status: "unavailable", reason: "producer_outcome_unknown" } },
     mechanism: { status: "unexercised" } });
   expect(unknownMeasurement.result.rows[0]?.source_bearing_union).not.toBeNull();
+  const tamperedRoot = join(cacheRoot, "tampered-unknown-query-chain");
+  writeChainArtifact(join(tamperedRoot, "prepare.json"), { ...unknownPlan,
+    queries: unknownPlan.queries.map((row, index) => index === 0 && row.status === "raw_ready"
+      ? { ...row, query_semantics_unavailable: "producer_failure" } : row) });
+  await expect(replaySemanticChain(tamperedRoot)).rejects.toThrow(/failure state or declaration changed/u);
+  await expect(prepareSemanticChain({ ...config, query_cache_root: unknownCache }, tamperedRoot))
+    .rejects.toThrow(/failure state or declaration changed/u);
+  const failedDiscoveryRoot = join(cacheRoot, "native-discovery-unavailable-chain");
+  writeChainArtifact(join(failedDiscoveryRoot, "prepare.json"), { ...unknownPlan,
+    queries: unknownPlan.queries.map((row, index) => index === 0
+      ? { query_key: row.query_key, original_query: row.original_query, raw_digest: row.raw_digest,
+        status: "blocked", reason: "discovery_unavailable: native discovery resource exhausted" } : row) });
+  const failedDiscoveryReplay = await replaySemanticChain(failedDiscoveryRoot);
+  const failedDiscoveryRows = readChainArtifact(failedDiscoveryReplay.path) as { rows: { status: string; reason?: string }[] };
+  expect(failedDiscoveryRows.rows).toMatchObject([{ status: "blocked",
+    reason: "discovery_unavailable: native discovery resource exhausted" }, { status: "replayed" }]);
+  const failedDiscoveryMeasurement = measureSemanticChain(failedDiscoveryRoot, failedDiscoveryReplay.path,
+    unknownPlan.queries.map(row => ({ query_key: row.query_key, source_units: [] })));
+  expect(failedDiscoveryMeasurement.result.rows.map(row => row.status)).toEqual(["blocked", "replayed"]);
+  const unreadableCache = join(cacheRoot, "unreadable-query-cache");
+  writeFileSync(unreadableCache, "a file cannot be a proposal cache directory");
+  const unavailablePlan = await prepareSemanticChain({ ...config, query_cache_root: unreadableCache },
+    join(cacheRoot, "unavailable-query-chain"));
+  expect(unavailablePlan.queries).toMatchObject([{ status: "raw_ready", reason: "unavailable",
+    query_semantics_unavailable: "cache_unavailable" }, { status: "raw_ready", reason: "unavailable",
+    query_semantics_unavailable: "cache_unavailable" }]);
 
   const oneQuery = { ...queryWorkset, items: queryWorkset.items.slice(0, 1) };
   const queryRawJson = JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "interpreted" },

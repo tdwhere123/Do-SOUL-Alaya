@@ -25,6 +25,7 @@ import {
   SourceSemanticLibraryContinuationSchema,
   SourceSemanticQueryStatusSchema,
   SourceSemanticQueryUnavailableReasonSchema,
+  refineSourceSemanticQueryRequest,
   SourceSemanticWorkerWorkSchema
 } from "../garden/source-semantic-worker.js";
 
@@ -68,11 +69,7 @@ export const SoulInterpretationPrepareQueryRequestSchema = z.object({
   continuation_handle: BoundedIdSchema.optional(),
   budget: RequestBudgetSchema,
   authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
-}).strict().superRefine((request, context) => {
-  if (request.query_semantics !== undefined && request.query_semantics_unavailable !== undefined) {
-    context.addIssue({ code: "custom", message: "query semantics and an unavailable producer declaration are mutually exclusive" });
-  }
-}).readonly();
+}).strict().superRefine(refineSourceSemanticQueryRequest).readonly();
 
 export const SoulInterpretationReasonRequestSchema = z.object({
   operation: z.literal("reason"),
@@ -100,14 +97,7 @@ const SoulInterpretationRecallRequestSchema = z.object({
   output_byte_limit: z.number().int().min(1024).max(1_000_000),
   continuation: SourceSemanticLibraryContinuationSchema.optional(),
   authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
-}).strict().superRefine((request, context) => {
-  if (request.query_handle === undefined && request.original_query === undefined) {
-    context.addIssue({ code: "custom", message: "recall requires a query handle or original query" });
-  }
-  if (request.query_semantics !== undefined && request.query_semantics_unavailable !== undefined) {
-    context.addIssue({ code: "custom", message: "query semantics and an unavailable producer declaration are mutually exclusive" });
-  }
-}).readonly();
+}).strict().superRefine((request, context) => refineSourceSemanticQueryRequest(request, context, true)).readonly();
 
 export const SoulInterpretationRequestSchema = z.discriminatedUnion("operation", [
   SoulInterpretationPrepareSourceRequestSchema,

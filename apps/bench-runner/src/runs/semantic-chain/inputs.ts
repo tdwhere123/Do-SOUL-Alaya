@@ -1,4 +1,5 @@
-import { AlayaError, canonicalJson, type SourceSemanticCorrespondence } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, type SourceSemanticCorrespondence,
+  type SourceSemanticQueryUnavailableReason } from "@do-soul/alaya-protocol";
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { readSemanticProposalResults } from "../semantic-proposal/fill.js";
 import { chainIdentity, type SemanticChainPlan } from "./contract.js";
@@ -29,6 +30,17 @@ export function semanticChainProposalStates(results: ReturnType<typeof readSeman
     status: row.status, cache_identity: row.cache_identity }));
 }
 
+/** Cache/ledger status is retained separately from what can be declared to native recall. */
+export function semanticChainQueryAvailability(row: ReturnType<typeof readSemanticChainProposalResults>[number]) {
+  const query = row.received !== undefined && "query" in row.received ? row.received.query : undefined;
+  if (query !== undefined) return { status: "admitted" as const, query };
+  const unavailable: SourceSemanticQueryUnavailableReason = row.status === "unattempted" ? "absent"
+    : row.status === "invalid" || row.status === "core_rejected" || row.status === "cache_invalid" ? "invalid"
+    : row.status === "unknown" || row.status === "pending" ? "producer_outcome_unknown"
+    : row.status === "unavailable" ? "cache_unavailable" : "producer_failure";
+  return { status: "unavailable" as const, reason: row.status, unavailable };
+}
+
 /** All consumers of a prepared plan bind the same current query-semantics cache state and denominator. */
 export function verifySemanticChainQueries(plan: SemanticChainPlan): void {
   const config = plan.config;
@@ -41,15 +53,19 @@ export function verifySemanticChainQueries(plan: SemanticChainPlan): void {
   if (currentIdentity !== plan.input_identity) throw new AlayaError("CONFLICT", "prepared query-semantics state changed before native replay");
   for (const row of plan.queries) {
     const current = queries.find((query) => query.line.key === row.query_key);
+    const availability = current === undefined ? undefined : semanticChainQueryAvailability(current);
     if (current === undefined || current.line.original_query !== row.original_query ||
         (current.shard?.raw_digest ?? null) !== row.raw_digest ||
-        row.status === "ready" && (current?.received === undefined || !("query" in current.received) ||
-        canonicalJson(current.received.query) !== canonicalJson(row.query_semantics))) throw new AlayaError("CONFLICT", "prepared query semantics changed before native replay");
-    if ((row.status === "blocked" || row.status === "raw_ready")
-      && (current.received === undefined || !("query" in current.received))
-      && row.reason !== current.status) throw new AlayaError("CONFLICT", "prepared query failure state changed before native replay");
-    if (row.status === "raw_ready" && current.received !== undefined && "query" in current.received) {
-      throw new AlayaError("CONFLICT", "raw retrieval cannot reuse admitted query semantics");
+        row.status === "ready" && (availability?.status !== "admitted" ||
+        canonicalJson(availability.query) !== canonicalJson(row.query_semantics))) {
+      throw new AlayaError("CONFLICT", "prepared query semantics changed before native replay");
+    }
+    if (row.status === "raw_ready" && (availability?.status !== "unavailable" || row.reason !== availability.reason ||
+      row.query_semantics_unavailable !== availability.unavailable)) {
+      throw new AlayaError("CONFLICT", "prepared query failure state or declaration changed before native replay");
+    }
+    if (row.status === "blocked" && !row.reason.startsWith("discovery_unavailable: ")) {
+      throw new AlayaError("CONFLICT", "blocked query lacks an inspectable native discovery failure");
     }
   }
 }

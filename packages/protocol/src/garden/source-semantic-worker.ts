@@ -45,7 +45,7 @@ export const SourceSemanticCoverageSchema = z.object({
 
 /** Semantic admission is independent of raw-source discovery and delivery. */
 export const SourceSemanticQueryUnavailableReasonSchema = z.enum([
-  "absent", "invalid", "unsupported_producer", "producer_failure"
+  "absent", "invalid", "unsupported_producer", "producer_failure", "producer_outcome_unknown", "cache_unavailable"
 ]);
 export type SourceSemanticQueryUnavailableReason = z.infer<typeof SourceSemanticQueryUnavailableReasonSchema>;
 export const SourceSemanticQueryStatusSchema = z.discriminatedUnion("status", [
@@ -53,6 +53,24 @@ export const SourceSemanticQueryStatusSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("unavailable"), reason: SourceSemanticQueryUnavailableReasonSchema }).strict().readonly()
 ]);
 export type SourceSemanticQueryStatus = z.infer<typeof SourceSemanticQueryStatusSchema>;
+
+type QueryRequestRefinement = Readonly<{
+  query_semantics?: z.infer<typeof SourceSemanticQuerySchema>;
+  query_semantics_unavailable?: Exclude<SourceSemanticQueryUnavailableReason, "absent">;
+  original_query?: string; query_handle?: string;
+}>;
+type QueryRequestRefinementContext = { addIssue(issue: { code: "custom"; message: string }): void };
+
+/** Shared public/worker request rules; a declaration cannot stand in for admitted meaning. */
+export function refineSourceSemanticQueryRequest(request: QueryRequestRefinement, context: QueryRequestRefinementContext,
+  requireRecallAnchor = false): void {
+  if (requireRecallAnchor && request.query_handle === undefined && request.original_query === undefined) {
+    context.addIssue({ code: "custom", message: "recall requires a query handle or original query" });
+  }
+  if (request.query_semantics !== undefined && request.query_semantics_unavailable !== undefined) {
+    context.addIssue({ code: "custom", message: "query semantics and an unavailable producer declaration are mutually exclusive" });
+  }
+}
 
 export const SourceSemanticHandleDescriptorSchema = z.object({
   interpretation_id: Sha256DigestSchema,
@@ -88,11 +106,7 @@ const PrepareQueryRequestSchema = z.object({
   source_handle: BoundedIdSchema.optional(),
   continuation_handle: BoundedIdSchema.optional(),
   budget: RequestBudgetSchema
-}).strict().superRefine((request, context) => {
-  if (request.query_semantics !== undefined && request.query_semantics_unavailable !== undefined) {
-    context.addIssue({ code: "custom", message: "query semantics and an unavailable producer declaration are mutually exclusive" });
-  }
-}).readonly();
+}).strict().superRefine(refineSourceSemanticQueryRequest).readonly();
 
 const ValidateSourceRequestSchema = z.object({
   kind: z.literal("validate_source"), source_handle: BoundedIdSchema, budget: RequestBudgetSchema
@@ -132,19 +146,7 @@ const RecallRequestSchema = z.object({
   budget: RequestBudgetSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000),
   continuation: SourceSemanticLibraryContinuationSchema.optional()
-}).strict().superRefine((request, context) => {
-  const leased = request.query_handle !== undefined;
-  const oneshot = request.original_query !== undefined;
-  if (!leased && !oneshot) {
-    context.addIssue({
-      code: "custom",
-      message: "recall requires a query handle or original query"
-    });
-  }
-  if (request.query_semantics !== undefined && request.query_semantics_unavailable !== undefined) {
-    context.addIssue({ code: "custom", message: "query semantics and an unavailable producer declaration are mutually exclusive" });
-  }
-}).readonly();
+}).strict().superRefine((request, context) => refineSourceSemanticQueryRequest(request, context, true)).readonly();
 
 export const SourceSemanticWorkerRequestSchema = z.discriminatedUnion("kind", [
   PrepareSourceRequestSchema, ValidateSourceRequestSchema, PrepareQueryRequestSchema, ReasonRequestSchema,
