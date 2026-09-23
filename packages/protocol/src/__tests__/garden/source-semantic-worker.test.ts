@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { MemorySearchResultSchema } from "../../surfaces/mcp-memory-search-types.js";
 import { SourceInterpretationReasoningResultSchema } from "../../garden/source-interpretation-packet.js";
+import { SourceSemanticAccessReceiptSchema } from "../../garden/source-semantic-access.js";
 import { InformationIndexSchema } from "../../recall/conditional-field/index-view.js";
 import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema } from "../../surfaces/mcp-interpretation-types.js";
 import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
@@ -30,6 +31,30 @@ const validQuery = SourceSemanticQuerySchema.parse({
       support: { kind: "query_text", excerpt: "Alice" } }] }],
   context_obligations: [{ frame: "qUse", kind: "asserted_at_source" }] }],
   return_variables: ["actor"], gaps: []
+});
+
+it("binds access trace counts and source completeness to the observed pool", () => {
+  const access = { contract: "source-semantic-access-v1", policy: "canonical-v1", input_id: digest, pool_id: digest,
+    observed_source_count: 2, observed_interpretation_count: 0,
+    source_candidates: [{ source_id: "source-2", record_id: digest, read_bytes: 1, body_bytes: 1,
+      complete: true, signal: { source_text_score: null, interpretation_reading_score: 0 } }],
+    interpretation_candidates: [], unvisited_sources: false, unvisited_interpretations: false,
+    stopping_reasons: [], trace: { kind: "preparation_page", source_offset: 1, interpretation_offset: 0,
+      omitted_source_count: 1, omitted_interpretation_count: 0 } };
+  expect(SourceSemanticAccessReceiptSchema.safeParse(access).success).toBe(true);
+  expect(SourceSemanticAccessReceiptSchema.safeParse({ ...access,
+    trace: { ...access.trace, omitted_source_count: 0 } }).success).toBe(false);
+  expect(SourceSemanticAccessReceiptSchema.safeParse({ ...access,
+    trace: { ...access.trace, source_offset: 2 } }).success).toBe(false);
+  expect(SourceSemanticAccessReceiptSchema.safeParse({ ...access,
+    source_candidates: [{ ...access.source_candidates[0], read_bytes: 0 }] }).success).toBe(false);
+  expect(SourceSemanticAccessReceiptSchema.safeParse({ ...access,
+    source_candidates: [{ ...access.source_candidates[0], body_bytes: null }] }).success).toBe(false);
+  const selection = { ...access, trace: { kind: "library_selection", omitted_source_count: 1,
+    omitted_interpretation_count: 0 } };
+  expect(SourceSemanticAccessReceiptSchema.safeParse(selection).success).toBe(true);
+  expect(SourceSemanticAccessReceiptSchema.safeParse({ ...selection,
+    trace: { ...selection.trace, omitted_source_count: 0 } }).success).toBe(false);
 });
 
 it("rejects an unavailable declaration beside valid query semantics on public and worker requests", () => {

@@ -3,6 +3,9 @@ import { BoundedIdSchema, NonNegativeIntSchema } from "../shared/schema-primitiv
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 
 export const SourceSemanticAccessPolicySchema = z.enum(["query-conditioned-v1", "canonical-v1"]);
+const SourceSemanticAccessStoppingReasonSchema = z.enum([
+  "budget", "source_limit", "interpretation_limit", "unavailable", "source_tail"
+]);
 export const SourceSemanticAccessSignalSchema = z.object({
   source_text_score: z.number().min(0).max(1).nullable(),
   interpretation_reading_score: z.number().min(0).max(1),
@@ -36,8 +39,25 @@ export const SourceSemanticAccessReceiptSchema = z.object({
   ]),
   unvisited_sources: z.boolean(),
   unvisited_interpretations: z.boolean(),
-  stopping_reasons: z.array(z.enum(["budget", "source_limit", "interpretation_limit", "unavailable", "source_tail"])).max(5).readonly()
-}).strict().readonly();
+  stopping_reasons: z.array(SourceSemanticAccessStoppingReasonSchema).max(5).readonly()
+}).strict().readonly().superRefine((access, ctx) => {
+  for (const source of access.source_candidates) {
+    if (source.body_bytes === null ? source.read_bytes !== 0 || source.complete
+      : source.read_bytes > source.body_bytes || source.complete && source.read_bytes !== source.body_bytes) {
+      ctx.addIssue({ code: "custom", message: "access source completeness contradicts its byte extent" });
+    }
+  }
+  // Native traces omit all other observed rows, including earlier pages.
+  if (access.trace.omitted_source_count !== access.observed_source_count - access.source_candidates.length
+    || access.trace.omitted_interpretation_count !== access.observed_interpretation_count - access.interpretation_candidates.length) {
+    ctx.addIssue({ code: "custom", message: "access trace omitted counts contradict its observed pool" });
+  }
+  if (access.trace.kind === "preparation_page"
+    && (access.trace.source_offset + access.source_candidates.length > access.observed_source_count
+      || access.trace.interpretation_offset + access.interpretation_candidates.length > access.observed_interpretation_count)) {
+    ctx.addIssue({ code: "custom", message: "access preparation offsets exceed its observed pool" });
+  }
+});
 
 export type SourceSemanticAccessPolicy = z.infer<typeof SourceSemanticAccessPolicySchema>;
 export type SourceSemanticAccessSignal = z.infer<typeof SourceSemanticAccessSignalSchema>;
