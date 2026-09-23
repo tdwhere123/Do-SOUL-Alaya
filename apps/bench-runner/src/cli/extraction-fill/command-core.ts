@@ -36,6 +36,11 @@ export async function runExtractionFillCommand(
     if (opts.extractionPreflightKeys !== undefined && opts.extractionPreflightOut === undefined) {
       throw new AlayaError("VALIDATION", "preflight keys require dry preflight output");
     }
+    if (opts.extractionPreflightOutputTokenCap !== undefined &&
+        (opts.extractionPreflightOut === undefined || batch !== undefined ||
+         opts.extractionOpenSemantics !== true || opts.extractionSourcePacking !== "complete-source")) {
+      throw new AlayaError("VALIDATION", "Step source output cap requires a complete-source open-semantics dry preflight without Batch");
+    }
     if (opts.extractionPreflightOut !== undefined) {
       if (opts.extractionCacheRoot === undefined || opts.extractionAuthority !== undefined ||
           opts.extractionPredecessorAuthority !== undefined || opts.extractionTargetSelection !== undefined) {
@@ -45,6 +50,8 @@ export async function runExtractionFillCommand(
         ...readExtractionGeneration(opts),
         cacheRoot: opts.extractionCacheRoot, dataDir: opts.dataDir, pinnedMetaRoot: opts.pinnedMetaRoot,
         limit: opts.limit, offset: opts.offset, ...lazy,
+        ...(opts.extractionPreflightOutputTokenCap === undefined ? {} : {
+          preflightOutputTokenCap: opts.extractionPreflightOutputTokenCap }),
         ...(opts.extractionPreflightKeys === undefined ? {} : { preflightKeys: JSON.parse(readBoundedCanonicalUtf8Artifact({
           path: opts.extractionPreflightKeys, maxBytes: 4 * 1024 * 1024, label: "proposed preflight request keys" })) }) };
       const report = batch === undefined ? await preflightSourceSemanticInteractive(preflightInput) :

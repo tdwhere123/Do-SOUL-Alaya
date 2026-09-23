@@ -52,6 +52,7 @@ import {
 } from "./receipt/artifact-io.js";
 import { assertExtractionAuthorityReceiptScope } from "./receipt/scope.js";
 import { assertStepQuoteBasis, assertStepQuoteRates, stepQuoteBasis } from "./step-quote.js";
+import { bindStepSourcePreflight } from "./source-preflight-binding.js";
 import {
   CURRENT_RECEIPT_VERSION,
   LEGACY_RECEIPT_VERSION,
@@ -112,6 +113,7 @@ export interface ExtractionAuthorityReceipt {
   readonly price: ExtractionAuthorityReceiptPrice;
   readonly probe_key?: string;
   readonly sample_scope?: ExtractionSampleScope;
+  readonly source_preflight_digest?: string;
   readonly target_selection_digest?: string;
   readonly direct_spend?: DirectExtractionSpendAuthorization;
   readonly repair_scope?: ExtractionRepairScope;
@@ -138,6 +140,7 @@ export interface ExtractionAuthorityReceiptInput {
   readonly maxConcurrency?: number;
   readonly probeKey?: string;
   readonly sampleScope?: ExtractionSampleScope;
+  readonly sourcePreflight?: unknown;
   readonly targetSelectionDigest?: string;
   readonly cumulativeLimits?: {
     readonly startingMissing: number;
@@ -153,7 +156,8 @@ export interface ExtractionAuthorityReceiptInput {
 
 export function createExtractionAuthorityReceipt(input: ExtractionAuthorityReceiptInput): ExtractionAuthorityReceipt {
   assertReceiptCreationInput(input);
-  const unsigned = buildUnsignedReceipt(input);
+  const sourcePreflightDigest = bindStepSourcePreflight(input);
+  const unsigned = buildUnsignedReceipt(input, sourcePreflightDigest);
   assertExtractionAuthorityRenewal(unsigned);
   const receipt = Object.freeze({ ...unsigned, receipt_digest: computeReceiptDigest(unsigned) });
   assertSampleReceipt(receipt);
@@ -217,7 +221,7 @@ function assertReceiptCreationInput(input: ExtractionAuthorityReceiptInput): voi
 }
 
 function buildUnsignedReceipt(
-  input: ExtractionAuthorityReceiptInput
+  input: ExtractionAuthorityReceiptInput, sourcePreflightDigest: string | undefined
 ): Omit<ExtractionAuthorityReceipt, "receipt_digest"> {
   if (input.sampleScope !== undefined) assertExtractionSampleScope(input.sampleScope);
   if ((input.action === "sample") !== (input.sampleScope !== undefined)) {
@@ -268,7 +272,8 @@ function buildUnsignedReceipt(
     ...(input.sampleScope === undefined ? {} : { sample_scope: Object.freeze({
       keys: Object.freeze([...input.sampleScope.keys]),
       key_set_sha256: input.sampleScope.key_set_sha256
-    }) })
+    }) }),
+    ...(sourcePreflightDigest === undefined ? {} : { source_preflight_digest: sourcePreflightDigest })
   };
 }
 
@@ -407,6 +412,7 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
       !isExtractionAuthorityReceiptLimits(receipt.limits) ||
       !isExtractionAuthorityReceiptPrice(receipt.price) ||
       (receipt.target_selection_digest !== undefined && !isDigest(receipt.target_selection_digest)) ||
+      (receipt.source_preflight_digest !== undefined && !isDigest(receipt.source_preflight_digest)) ||
       (receipt.direct_spend !== undefined &&
         !isDirectExtractionSpendAuthorization(receipt.direct_spend)) ||
       (receipt.repair_scope !== undefined && !isExtractionRepairScope(receipt.repair_scope)) ||

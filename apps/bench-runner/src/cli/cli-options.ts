@@ -54,6 +54,7 @@ export interface ParsedFlags {
   readonly extractionOpenSemantics?: boolean;
   readonly extractionPreflightOut?: string;
   readonly extractionPreflightKeys?: string;
+  readonly extractionPreflightOutputTokenCap?: number;
   /** Digest-bound extraction authority receipt required for live cache fills. */
   readonly extractionAuthority?: string;
   /** Immutable target-root selection receipt linked from a normal authority receipt. */
@@ -107,6 +108,7 @@ export interface ParsedFlagsState {
   extractionOpenSemantics?: boolean;
   extractionPreflightOut?: string;
   extractionPreflightKeys?: string;
+  extractionPreflightOutputTokenCap?: number;
   extractionAuthority?: string;
   extractionTargetSelection?: string;
   extractionPredecessorAuthority?: string;
@@ -141,6 +143,7 @@ export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   assertFlagAtMostOnce(args, "--embedding-cache-overlay");
   assertFlagAtMostOnce(args, "--query-semantic-factor-cache");
   assertFlagAtMostOnce(args, "--snapshot-consume-authority");
+  assertFlagAtMostOnce(args, "--extraction-preflight-output-token-cap");
   const state = createParsedFlagsState();
   for (let i = 0; i < args.length; i += 1) {
     i = consumeFlagToken(args, i, state);
@@ -368,6 +371,13 @@ function consumeSnapshotCachePathFlags(
   if (matchFlagToken(token, "--extraction-preflight-out")) {
     if (state.extractionPreflightOut !== undefined) throw new AlayaError("VALIDATION", "preflight output may be supplied only once");
     state.extractionPreflightOut = readFlagValue(args, index, token, "--extraction-preflight-out");
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--extraction-preflight-output-token-cap")) {
+    state.extractionPreflightOutputTokenCap = parsePositiveInt(
+      readRequiredFlagValue(args, index, token, "--extraction-preflight-output-token-cap",
+        "--extraction-preflight-output-token-cap requires a value"),
+      "--extraction-preflight-output-token-cap");
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--extraction-source-packing")) {

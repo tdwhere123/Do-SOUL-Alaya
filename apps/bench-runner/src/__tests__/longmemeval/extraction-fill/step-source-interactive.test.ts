@@ -11,6 +11,7 @@ import { createExtractionSampleScope } from "../../../runs/extraction/authority/
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from
   "../../../runs/extraction/authority/receipt.js";
 import { createExtractionExecutionAuthority } from "../../../runs/extraction/fill/execution-authority.js";
+import { assertStepSourcePreflightReceipt } from "../../../runs/extraction/authority/source-preflight-binding.js";
 import { STEP_PLAN_QUOTE_BASIS, assertStepReportedUsage } from "../../../runs/extraction/authority/step-quote.js";
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { listProviderRawAttempts, readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
@@ -50,7 +51,7 @@ function responseFor(userPrompt: string): string {
   });
 }
 
-async function scenario(selectedCount: number) {
+async function scenario(selectedCount: number, outputTokenCap?: number) {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
@@ -67,26 +68,30 @@ async function scenario(selectedCount: number) {
   const selected = inspection.missingKeys.slice(0, selectedCount);
   expect(selected).toHaveLength(selectedCount);
   const preflight = await preflightSourceSemanticInteractive({ ...options, cacheRoot: roots.cacheRoot,
-    preflightKeys: selected });
+    preflightKeys: selected,
+    ...(outputTokenCap === undefined ? {} : { preflightOutputTokenCap: outputTokenCap }) });
   expect(preflight).toMatchObject({
-    contract: "source-semantic-interactive-preflight-v1", provider_calls: 0,
-    selected_requests: selectedCount, maximum_attempts_per_key: 1, max_output_tokens: 4096,
+    contract: "source-semantic-interactive-preflight-v2", provider_calls: 0,
+    selected_requests: selectedCount, maximum_attempts_per_key: 1, max_output_tokens: outputTokenCap ?? 4096,
     output_token_field: "max_tokens", quote_basis: STEP_PLAN_QUOTE_BASIS
   });
   expect(preflight.planned_requests.map(row => row.key).sort()).toEqual([...selected].sort());
   expect(parseSourceSemanticInteractivePreflight(JSON.parse(JSON.stringify(preflight)))).toEqual(preflight);
   const scope = createExtractionSampleScope(selected, inspection);
-  const receipt = createExtractionAuthorityReceipt({ action: "sample", sampleScope: scope,
+  const receiptInput = { action: "sample" as const, sampleScope: scope,
     observation: inspection.observation, inspection, maxConcurrency: 1,
-    outputTokenCap: { field: "max_tokens", value: 4096 }, diskFloorBytes: 0,
+    sourcePreflight: preflight,
+    outputTokenCap: { field: "max_tokens", value: outputTokenCap ?? 4096 }, diskFloorBytes: 0,
     priceEstimate: { inputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million,
       outputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million,
-      maximumInputTokensPerAttempt: preflight.maximum_input_tokens_per_attempt } });
+      maximumInputTokensPerAttempt: preflight.maximum_input_tokens_per_attempt } } as const;
+  const receipt = createExtractionAuthorityReceipt(receiptInput);
   expect(receipt.limits.maximum_attempts).toBe(selectedCount);
   expect(receipt.price.quote_basis).toEqual(preflight.quote_basis);
   const receiptPath = join(roots.cacheRoot, "step-sample-authority.json");
   writeExtractionAuthorityReceipt(receiptPath, receipt);
-  return { options: { ...options, authorityReceiptPath: receiptPath }, selected, preflight, receipt };
+  return { options: { ...options, authorityReceiptPath: receiptPath }, selected, preflight, receipt,
+    receiptInput };
 }
 
 async function listen(
@@ -150,6 +155,52 @@ it("binds a four-key Step sample to exact HTTP bytes and stops after its first i
   expect(http.calls).toHaveLength(1);
 });
 
+it("binds an explicit source cap to encoded HTTP, retained bounds, receipt price, and the reopened attempt", async () => {
+  const fixture = await scenario(1, 16384);
+  const http = await listen(body => ({
+    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop"
+  }));
+  await runExtractionFill(fixture.options);
+  expect(http.calls).toHaveLength(1);
+  expect(http.calls[0]!.body.max_tokens).toBe(16384);
+  const line = fixture.preflight.planned_requests[0]!;
+  const encodedInputUpper = Buffer.byteLength(JSON.stringify(http.calls[0]!.body), "utf8") + 256;
+  expect(line.input_byte_upper).toBe(encodedInputUpper);
+  expect(fixture.preflight.maximum_input_tokens_per_attempt).toBe(encodedInputUpper);
+  expect(fixture.preflight.input_token_bound).toBe(encodedInputUpper);
+  expect(fixture.preflight.cost_bound_usd).toBe((
+    encodedInputUpper * STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million +
+    16384 * STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million
+  ) / 1_000_000);
+  expect(fixture.receipt.limits.max_output_tokens).toBe(16384);
+  expect(fixture.receipt.source_preflight_digest).toMatch(/^[a-f0-9]{64}$/u);
+  expect(assertStepSourcePreflightReceipt(fixture.preflight, fixture.receipt)).toEqual(fixture.preflight);
+  expect(() => assertStepSourcePreflightReceipt({ ...fixture.preflight,
+    max_output_tokens: 4096 }, fixture.receipt)).toThrow();
+  expect(fixture.receipt.price.estimated_upper_usd).toBe(fixture.preflight.cost_bound_usd);
+  const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;
+  expect(raw.request_digest).toBe(line.request_digest);
+  expect(raw.finish_reason).toBe("stop");
+  const reopened = createExtractionExecutionAuthority(fixture.receipt, roots.cacheRoot);
+  expect(reopened.snapshot()?.attempts).toBe(1);
+  await expect(reopened.reserveAttemptOrdinal!(raw.cache_key)).rejects.toThrow(/per-key attempt ceiling/u);
+});
+
+it("rejects a Step sample authority whose cap, input reservation, or selected proof differs before dispatch", async () => {
+  const fixture = await scenario(1, 16384);
+  expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
+    outputTokenCap: { field: "max_tokens", value: 4096 } })).toThrow(/differs from its retained source preflight/u);
+  expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
+    priceEstimate: { ...fixture.receiptInput.priceEstimate,
+      maximumInputTokensPerAttempt: fixture.preflight.maximum_input_tokens_per_attempt - 1 } }))
+    .toThrow(/differs from its retained source preflight/u);
+  expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
+    sourcePreflight: { ...fixture.preflight, selected_keys: ["f".repeat(64)] } }))
+    .toThrow(/foreign ready key/u);
+  expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
+    sourcePreflight: undefined })).toThrow(/requires its retained source preflight/u);
+});
+
 it("rejects altered retained Step preflight wire, route, and selected-key proof", async () => {
   const { preflight } = await scenario(1);
   expect(() => parseSourceSemanticInteractivePreflight({ ...preflight,
@@ -160,7 +211,18 @@ it("rejects altered retained Step preflight wire, route, and selected-key proof"
     .toThrow(/selected subscription endpoint/u);
   expect(() => parseSourceSemanticInteractivePreflight({ ...preflight,
     selected_keys: ["f".repeat(64)] })).toThrow(/foreign ready key/u);
+  expect(() => parseSourceSemanticInteractivePreflight({ ...preflight,
+    max_output_tokens: 16384 })).toThrow(/encoded wire/u);
+  expect(() => parseSourceSemanticInteractivePreflight({ ...preflight,
+    contract: "source-semantic-interactive-preflight-v1" })).toThrow();
 });
+
+it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+  "rejects an invalid explicit Step source output cap %s before preparation", async cap => {
+    await expect(preflightSourceSemanticInteractive({ variant: "longmemeval_s", cacheRoot: "unused",
+      sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+      preflightOutputTokenCap: cap })).rejects.toThrow();
+  });
 
 it("retains contradictory Step usage before refusing settlement or another request", async () => {
   const fixture = await scenario(4);

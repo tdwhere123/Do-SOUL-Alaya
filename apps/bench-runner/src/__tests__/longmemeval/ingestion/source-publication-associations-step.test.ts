@@ -53,7 +53,7 @@ function response(userPrompt: string) {
   } });
 }
 
-async function prepareOwner(root: string, offset: number) {
+async function prepareOwner(root: string, offset: number, retainedCap?: number) {
   const options = { variant: "longmemeval_s" as const, cacheRoot: root, dataDir, pinnedMetaRoot,
     offset, limit: 1, sourcePacking: "complete-source" as const,
     openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION, concurrency: 1, log: () => undefined };
@@ -62,11 +62,15 @@ async function prepareOwner(root: string, offset: number) {
   const selected = inspection.missingKeys;
   expect(selected).toHaveLength(1);
   const preflight = await preflightSourceSemanticInteractive({ ...options, preflightKeys: selected });
+  const retainedPreflight = retainedCap === undefined ? preflight :
+    await preflightSourceSemanticInteractive({ ...options, preflightKeys: selected,
+      preflightOutputTokenCap: retainedCap });
   const retainedPreparationPath = join(root, "retained-step-preflight.json");
-  writeFileSync(retainedPreparationPath, JSON.stringify(preflight));
+  writeFileSync(retainedPreparationPath, JSON.stringify(retainedPreflight));
   const sampleScope = createExtractionSampleScope(selected, inspection);
   const receipt = createExtractionAuthorityReceipt({ action: "sample", sampleScope,
     observation: inspection.observation, inspection, maxConcurrency: 1,
+    sourcePreflight: preflight,
     outputTokenCap: { field: "max_tokens", value: 4096 }, diskFloorBytes: 0,
     priceEstimate: { inputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million,
       outputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million,
@@ -75,8 +79,34 @@ async function prepareOwner(root: string, offset: number) {
   writeExtractionAuthorityReceipt(authorityReceiptPath, receipt);
   await runExtractionFill({ ...options, authorityReceiptPath });
   expect(inspectCachedSourceSemantic(root, selected[0]!, MODEL, PROFILE).status).toBe("hit");
-  return { cacheRoot: root, retainedPreparationPath, preflight };
+  return { cacheRoot: root, retainedPreparationPath, preflight: retainedPreflight };
 }
+
+it("rejects a retained Step preparation whose selected cap differs from the source raw attempt", async () => {
+  setExtractionCredentialFixture();
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", STEP_PLAN_QUOTE_BASIS.selected_provider_url);
+  await writeDataset([question("one-owner", ["alpha"])]);
+  vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { messages: { content: string }[] };
+    expect(body).toMatchObject({ max_tokens: 4096 });
+    const wire = `data: ${JSON.stringify({ choices: [{
+      delta: { content: response(body.messages[1]!.content) }, finish_reason: "stop"
+    }], usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 } })}\n\ndata: [DONE]\n\n`;
+    return new Response(wire, { headers: { "content-type": "text/event-stream" } });
+  }));
+  const owner = await prepareOwner(cacheRoot, 0, 16384);
+  expect(owner.preflight.max_output_tokens).toBe(16384);
+  await expect(prepareSourcePublicationAssociations({ name: "longmemeval_s", dataDir, pinnedMetaRoot,
+    model: MODEL, requestProfile: PROFILE, questionWindow: { offset: 0, limit: 1 } },
+  [owner], join(cacheRoot, "mismatched-cap-associations.json"))).rejects.toThrow(/identity mismatch/u);
+  writeFileSync(owner.retainedPreparationPath, JSON.stringify({ ...owner.preflight,
+    contract: "source-semantic-interactive-preflight-v1" }));
+  await expect(prepareSourcePublicationAssociations({ name: "longmemeval_s", dataDir, pinnedMetaRoot,
+    model: MODEL, requestProfile: PROFILE, questionWindow: { offset: 0, limit: 1 } },
+  [owner], join(cacheRoot, "stale-associations.json"))).rejects.toThrow();
+});
 
 it("joins two native Step owners for a later original question and retains unsupported source through SQLite reopen", async () => {
   setExtractionCredentialFixture();
@@ -112,7 +142,7 @@ it("joins two native Step owners for a later original question and retains unsup
   expect(associated).toMatchObject({ contract: "source-publication-association-preparation-v3",
     source_occurrences: 3, unsupported_source_occurrences: 1, ready_request_keys: 2 });
   expect(associated.retained_preparations.map((owner) => owner.preparation_contract))
-    .toEqual(["source-semantic-interactive-preflight-v1", "source-semantic-interactive-preflight-v1"]);
+    .toEqual(["source-semantic-interactive-preflight-v2", "source-semantic-interactive-preflight-v2"]);
   const bindings = parseSourcePublicationAssociations(JSON.parse(readFileSync(`${out}.associations.json`, "utf8")));
   expect(bindings).toHaveLength(3);
   expect(bindings.find((binding) => "status" in binding)).toMatchObject({ source_id: "longmemeval_s:target-s2-r0",

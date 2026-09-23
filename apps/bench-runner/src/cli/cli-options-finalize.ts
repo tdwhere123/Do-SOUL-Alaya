@@ -36,6 +36,7 @@ export function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     extractionOpenSemantics: state.extractionOpenSemantics,
     extractionPreflightOut: state.extractionPreflightOut,
     extractionPreflightKeys: state.extractionPreflightKeys,
+    extractionPreflightOutputTokenCap: state.extractionPreflightOutputTokenCap,
     extractionAuthority: state.extractionAuthority,
     extractionTargetSelection: state.extractionTargetSelection,
     extractionPredecessorAuthority: state.extractionPredecessorAuthority,

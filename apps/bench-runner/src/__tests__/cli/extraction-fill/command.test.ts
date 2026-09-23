@@ -251,6 +251,30 @@ it("passes explicit provider task failure isolation to the fill runtime", async 
   }));
 });
 
+it("accepts a finite Step source preflight cap and rejects unsupported command combinations", async () => {
+  expect(parseFlags(["--extraction-preflight-output-token-cap", "16384"])
+    .extractionPreflightOutputTokenCap).toBe(16384);
+  for (const value of ["0", "-1", "1.5", "Infinity", String(Number.MAX_SAFE_INTEGER + 1)]) {
+    expect(() => parseFlags(["--extraction-preflight-output-token-cap", value])).toThrow();
+  }
+  expect(() => parseFlags(["--extraction-preflight-output-token-cap"])).toThrow(/requires a value/u);
+  expect(() => parseFlags(["--extraction-preflight-output-token-cap", "16384",
+    "--extraction-preflight-output-token-cap", "4096"])).toThrow(/only once/u);
+  const run = vi.fn(async () => completedFillResult());
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const deps = { runExtractionFill: run as never, signalSource: new FakeSignalSource() };
+  for (const flags of [
+    { extractionPreflightOutputTokenCap: 16384 },
+    { extractionPreflightOutputTokenCap: 16384, extractionPreflightOut: "/tmp/report.json" },
+    { extractionPreflightOutputTokenCap: 16384, extractionPreflightOut: "/tmp/report.json",
+      extractionOpenSemantics: true, extractionSourcePacking: "reference-eight" as const }
+  ]) {
+    expect(await runExtractionFillCommand({ variant: "longmemeval_s", ...flags } as ParsedFlags, deps)).toBe(2);
+  }
+  expect(run).not.toHaveBeenCalled();
+  expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/Step source output cap requires/u));
+});
+
 it.each([
   ["SIGINT", 130],
   ["SIGTERM", 143]

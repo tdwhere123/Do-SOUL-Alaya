@@ -6,6 +6,7 @@ import { censusCompleteSourceRecords } from "./census.js";
 import { listRetainedSourceSemanticKeys, parseSourcePublicationAssociations, type SourcePublicationAssociation,
   type SourcePublicationPopulation } from "./publish.js";
 import { inspectCachedSourceSemantic } from "../../extraction/cache/source-semantic-artifact.js";
+import { bindProviderRawAttempt, listProviderRawAttempts } from "../../extraction/fill/provider-raw-attempt.js";
 import { parseSourceSemanticInteractivePreflight } from "../../extraction/fill/source-semantic-interactive-preflight.js";
 import { readBoundedCanonicalUtf8Artifact } from "../../extraction/cache-audit/bounded-artifact-reader.js";
 import { chainIdentity, writeChainArtifact, writeChainJson } from "../../semantic-chain/contract.js";
@@ -15,8 +16,18 @@ import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparation
 
 export type SourceAssociationCacheOwner = Readonly<{ cacheRoot: string; retainedPreparationPath: string }>;
 type RetainedOwner = Readonly<{ cacheRoot: string; digest: string;
-  contract: "extraction-batch-preflight-v2" | "source-semantic-interactive-preflight-v1";
+  contract: "extraction-batch-preflight-v2" | "source-semantic-interactive-preflight-v2";
   plannedRequests: readonly SourceRequestLine[] }>;
+
+function matchesRetainedStepAttempt(input: { cacheRoot: string; key: string; model: string;
+  requestProfile: string; wireDigest: string; rawJsonSha256: string }): boolean {
+  const attempts = listProviderRawAttempts(input.cacheRoot, input.key);
+  if (attempts.length !== 1) return false;
+  const raw = bindProviderRawAttempt(attempts[0]!, { cacheKey: input.key, model: input.model,
+    requestProfile: input.requestProfile, requestDigest: input.wireDigest, kind: "source_semantic" });
+  return raw.transport_failure === undefined && raw.finish_reason === "stop" &&
+    raw.decoded_text_digest === input.rawJsonSha256;
+}
 
 /** Original selected requests allocate keys to roots; cache presence never selects an alternate owner. */
 function readRetainedOwners(owners: readonly SourceAssociationCacheOwner[],
@@ -24,7 +35,7 @@ function readRetainedOwners(owners: readonly SourceAssociationCacheOwner[],
   generation: ExtractionOpenSemanticsGeneration, datasetSha256: string) {
   if (owners.length === 0) throw new AlayaError("VALIDATION", "association preparation requires owning cache roots");
   const roots = new Set<string>();
-  const planned = new Map<string, Readonly<{ line: SourceRequestLine; cacheRoot: string }>>();
+  const planned = new Map<string, Readonly<{ line: SourceRequestLine; cacheRoot: string; wireDigest?: string }>>();
   const units = new Set<string>();
   const retained: RetainedOwner[] = [];
   for (const owner of owners) {
@@ -38,8 +49,8 @@ function readRetainedOwners(owners: readonly SourceAssociationCacheOwner[],
     const artifact: unknown = JSON.parse(raw);
     const contract = z.object({ contract: z.string() }).passthrough().parse(artifact).contract;
     let preparationContract: RetainedOwner["contract"];
-    let lines: readonly SourceRequestLine[];
-    if (contract === "source-semantic-interactive-preflight-v1") {
+    let requests: readonly Readonly<{ line: SourceRequestLine; wireDigest?: string }>[];
+    if (contract === "source-semantic-interactive-preflight-v2") {
       const report = parseSourceSemanticInteractivePreflight(artifact);
       preparationContract = report.contract;
       if (report.config.model !== population.model || report.config.requestProfile !== population.requestProfile ||
@@ -47,15 +58,15 @@ function readRetainedOwners(owners: readonly SourceAssociationCacheOwner[],
           canonicalJson(report.config.openSemantics) !== canonicalJson(generation)) {
         throw new AlayaError("CONFLICT", "retained Step source preparation differs from the current source population");
       }
-      lines = report.planned_requests.map(({ key, unitKeys, requestSha256, systemPrompt, userPrompt }) =>
-        ({ key, unitKeys, requestSha256, systemPrompt, userPrompt }));
+      requests = report.planned_requests.map(({ key, unitKeys, requestSha256, systemPrompt, userPrompt, request_digest }) =>
+        ({ line: { key, unitKeys, requestSha256, systemPrompt, userPrompt }, wireDigest: request_digest }));
     } else {
       const report = z.object({ contract: z.literal("extraction-batch-preflight-v2"),
         planned_requests: z.array(SourceRequestLineSchema) }).passthrough().parse(artifact);
       preparationContract = report.contract;
-      lines = report.planned_requests;
+      requests = report.planned_requests.map(line => ({ line }));
     }
-    for (const line of lines) {
+    for (const { line, wireDigest } of requests) {
       try { parseSourceSemanticRequestLine(line, population); }
       catch (cause) { throw new AlayaError("CONFLICT", "retained source preflight has foreign or duplicate request identity", { cause }); }
       if (planned.has(line.key)) throw new AlayaError("CONFLICT", "retained source preparations repeat an owning request key");
@@ -63,9 +74,10 @@ function readRetainedOwners(owners: readonly SourceAssociationCacheOwner[],
         if (units.has(unit)) throw new AlayaError("CONFLICT", "retained source preparations repeat a source assignment");
         units.add(unit);
       }
-      planned.set(line.key, { line, cacheRoot });
+      planned.set(line.key, { line, cacheRoot, ...(wireDigest === undefined ? {} : { wireDigest }) });
     }
-    retained.push({ cacheRoot, digest: chainIdentity(artifact), contract: preparationContract, plannedRequests: lines });
+    retained.push({ cacheRoot, digest: chainIdentity(artifact), contract: preparationContract,
+      plannedRequests: requests.map(({ line }) => line) });
   }
   return { retained, planned };
 }
@@ -131,7 +143,11 @@ export async function prepareSourcePublicationAssociations(
       if (belongsHere) for (const source of current?.sources ?? []) reasons.set(source.source_id, "invalid_current_artifact");
       continue;
     }
-    if (!belongsHere || current === undefined || native.requestDigest !== owner.line.requestSha256 ||
+    const rawMatchesPreparation = owner?.wireDigest === undefined || matchesRetainedStepAttempt({
+      cacheRoot, key, model: population.model, requestProfile: population.requestProfile,
+      wireDigest: owner.wireDigest, rawJsonSha256: native.rawJsonSha256
+    });
+    if (!belongsHere || current === undefined || !rawMatchesPreparation || native.requestDigest !== owner.line.requestSha256 ||
         native.requestDigest !== current.requestDigest) {
       if (current !== undefined && owner === undefined) {
         for (const source of current.sources) reasons.set(source.source_id, "unproven_retained_request");

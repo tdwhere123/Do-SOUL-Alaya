@@ -15,6 +15,7 @@ import { SourceRequestLineSchema, parseExtractionOpenSemanticsGeneration,
 import type { ExtractionFillOptions } from "../extraction-fill.js";
 
 export const STEP_SOURCE_OUTPUT_TOKEN_DEFAULT = 4096;
+const StepSourceOutputTokenCapSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
 const DigestSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 const PlannedRequestSchema = SourceRequestLineSchema.unwrap().extend({
@@ -28,7 +29,7 @@ const UnsupportedSourceSchema = SourceSemanticUnsupportedSourceSchema.unwrap().e
   provider_attempts: z.literal(0)
 }).strict().readonly();
 const RetainedPreflightSchema = z.object({
-  contract: z.literal("source-semantic-interactive-preflight-v1"),
+  contract: z.literal("source-semantic-interactive-preflight-v2"),
   execution_authorized: z.literal(false), provider_calls: z.literal(0),
   dataset_revision: z.string().min(1),
   source_occurrences: z.number().int().nonnegative(),
@@ -49,7 +50,7 @@ const RetainedPreflightSchema = z.object({
   }).strict(),
   transport_provenance: ExtractionTransportProvenanceSchema,
   quote_basis: StepQuoteBasisSchema,
-  max_output_tokens: z.literal(STEP_SOURCE_OUTPUT_TOKEN_DEFAULT),
+  max_output_tokens: StepSourceOutputTokenCapSchema,
   output_token_field: z.literal("max_tokens"),
   maximum_attempts_per_key: z.literal(1),
   maximum_input_tokens_per_attempt: z.number().int().nonnegative(),
@@ -114,7 +115,10 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
 export async function preflightSourceSemanticInteractive(options: ExtractionFillOptions & {
   readonly cacheRoot: string;
   readonly preflightKeys?: unknown;
+  readonly preflightOutputTokenCap?: number;
 }) {
+  const maxOutputTokens = StepSourceOutputTokenCapSchema.parse(
+    options.preflightOutputTokenCap ?? STEP_SOURCE_OUTPUT_TOKEN_DEFAULT);
   if (options.batch !== undefined || options.authorityReceiptPath !== undefined ||
       options.ingestionMode === "lazy_field" || options.extractorFactory !== undefined ||
       options.expansionCapability !== undefined || options.openSemantics === undefined ||
@@ -134,7 +138,6 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
   }
   const route = resolveExtractionTransportRoute(inspected.config);
   const quote = stepQuoteBasis(route.model, route.providerUrl);
-  const maxOutputTokens = STEP_SOURCE_OUTPUT_TOKEN_DEFAULT;
   const requests = workset.lines.map((line) => {
     const wire = prepareSourceSemanticRequestWire(inspected.config, line, maxOutputTokens);
     return { ...line, request_digest: sourceSemanticRequestWireDigest(inspected.config, line, maxOutputTokens),
@@ -146,7 +149,7 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
     maxOutputTokens * quote.output_usd_equivalent_per_million
   ) / 1_000_000, 0);
   return parseSourceSemanticInteractivePreflight({
-    contract: "source-semantic-interactive-preflight-v1" as const,
+    contract: "source-semantic-interactive-preflight-v2" as const,
     execution_authorized: false as const, provider_calls: 0 as const,
     dataset_revision: inspected.datasetRevision,
     source_occurrences: inspected.sourceOccurrences,

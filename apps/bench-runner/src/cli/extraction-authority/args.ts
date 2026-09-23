@@ -9,6 +9,7 @@ export interface AuthorizeExtractionArgs {
   readonly diskFloorBytes: number;
   readonly probeKey?: string;
   readonly sampleKeysPath?: string;
+  readonly sourcePreflightPath?: string;
   readonly targetSelectionPath?: string;
   readonly predecessorAuthorityPath?: string;
   readonly repairInvalidShards: boolean;
@@ -19,6 +20,7 @@ export function parseAuthorizeExtractionArgs(
 ): AuthorizeExtractionArgs {
   assertFlagAtMostOnce(args, "--extraction-predecessor-authority");
   assertFlagAtMostOnce(args, "--extraction-sample-keys");
+  assertFlagAtMostOnce(args, "--extraction-source-preflight");
   const parsed = readAuthorizeExtractionArgs(args);
   assertAuthorizeExtractionArgs(parsed);
   return parsed;
@@ -49,6 +51,7 @@ function readAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExtr
     diskFloorBytes: requiredNonNegativeInt(args, "--extraction-disk-floor-bytes"),
     probeKey: optionalString(args, "--extraction-probe-key"),
     sampleKeysPath: optionalRequiredString(args, "--extraction-sample-keys"),
+    sourcePreflightPath: optionalRequiredString(args, "--extraction-source-preflight"),
     targetSelectionPath: optionalRequiredString(args, "--extraction-target-selection"),
     predecessorAuthorityPath: optionalRequiredString(
       args, "--extraction-predecessor-authority"

@@ -57,7 +57,9 @@ export function assertExtractionSampleScope(value: unknown): asserts value is Ex
 
 export function assertSampleReceipt(receipt: ExtractionAuthorityReceipt): void {
   if (receipt.action !== "sample") {
-    if (receipt.sample_scope !== undefined) throw new Error("sample scope requires the sample action");
+    if (receipt.sample_scope !== undefined || receipt.source_preflight_digest !== undefined) {
+      throw new Error("sample scope and source preflight proof require the sample action");
+    }
     return;
   }
   assertExtractionSampleScope(receipt.sample_scope);
@@ -70,6 +72,7 @@ export function assertSampleReceipt(receipt: ExtractionAuthorityReceipt): void {
       receipt.direct_spend !== undefined || receipt.repair_scope !== undefined ||
       receipt.catalog_refill !== undefined || receipt.continuation !== undefined ||
       receipt.probe_key !== undefined ||
+      (isStepInteractiveSampleReceipt(receipt) !== (receipt.source_preflight_digest !== undefined)) ||
       receipt.observation.inventory.invalidTurns !== 0 ||
       count > receipt.observation.inventory.missingTurns ||
       receipt.limits.starting_missing !== receipt.observation.inventory.missingTurns || receipt.limits.maximum_attempts !== count ||

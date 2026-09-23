@@ -329,6 +329,9 @@ function buildReceiptInput(input: {
       JSON.parse(readBoundedCanonicalUtf8Artifact({ path: input.authority.sampleKeysPath,
         maxBytes: 4 * 1024 * 1024, label: "proposed extraction sample keys" })), input.inspection
     ) }),
+    ...(input.authority.sourcePreflightPath === undefined ? {} : { sourcePreflight: JSON.parse(
+      readBoundedCanonicalUtf8Artifact({ path: input.authority.sourcePreflightPath,
+        maxBytes: 32 * 1024 * 1024, label: "retained Step source preflight" })) }),
     observation: input.inspection.observation,
     outputTokenCap: {
       field: input.authority.outputTokenField, value: input.authority.outputTokenCap
