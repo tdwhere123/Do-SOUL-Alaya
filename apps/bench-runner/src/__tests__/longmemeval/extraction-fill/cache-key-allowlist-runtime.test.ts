@@ -281,9 +281,9 @@ parentDescribe("cache-key allowlist runtime resume", () => {
         "--pinned-meta-root", pinnedMetaRoot, "--extraction-cache-root", cacheRoot,
         "--extraction-authority", authorityReceiptPath.authority,
         "--extraction-target-selection", authorityReceiptPath.selection]);
+      expect(fetchAttempt).not.toHaveBeenCalled();
     } finally { stdout.mockRestore(); fetchAttempt.mockRestore(); }
     expect(exitCode).toBe(0);
-    expect(fetchAttempt).not.toHaveBeenCalled();
     expect(output).toContain("failures=1 ");
     expect(output).toContain("terminal_timeouts=1 ");
     expect(output).toContain("adaptive_backoffs=0 adaptive_backoff_ms=0 ");
