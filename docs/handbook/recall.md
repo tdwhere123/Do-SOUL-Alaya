@@ -882,7 +882,13 @@ query and correspondence preparation bind the gateway-encoded strict JSON
 schema body, low reasoning effort, `max_tokens`, route and profile before
 reservation. The Step source dry preflight is provider-free and may select an
 exact set of ready keys while retaining the full source and unsupported
-occurrence counts. A Step complete-source sample receipt reserves at most one
+occurrence counts. It defaults to 4096 output tokens; an explicit positive
+safe `--extraction-preflight-output-token-cap` selects another finite bound.
+The retained `source-semantic-interactive-preflight-v2` binds the encoded wire,
+input and cost bounds. A Step complete-source sample authority requires that
+report via `--extraction-source-preflight`, with matching logical and physical
+route, selected keys, cap and quote; historical v1 reports are not current proof.
+The sample receipt reserves at most one
 attempt per selected key; an incomplete or failed response stops the remaining
 keys. The shared attempt ledger enforces that per-key limit across reopen.
 Query and correspondence proposal authorities use the same one-attempt policy.

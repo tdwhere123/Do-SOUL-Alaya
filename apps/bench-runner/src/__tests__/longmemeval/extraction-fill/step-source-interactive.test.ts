@@ -198,6 +198,15 @@ it("rejects a Step sample authority whose cap, input reservation, or selected pr
     sourcePreflight: { ...fixture.preflight, selected_keys: ["f".repeat(64)] } }))
     .toThrow(/foreign ready key/u);
   expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
+    sourcePreflight: { ...fixture.preflight, config: { ...fixture.preflight.config,
+      providerUrl: "https://logical-other.example.test/v1",
+      transportProviderUrl: fixture.preflight.config.providerUrl } } }))
+    .toThrow(/differs from its retained source preflight/u);
+  expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
+    sourcePreflight: { ...fixture.preflight, config: { ...fixture.preflight.config,
+      modelFamily: "different-logical-family" } } }))
+    .toThrow(/differs from its retained source preflight/u);
+  expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
     sourcePreflight: undefined })).toThrow(/requires its retained source preflight/u);
 });
 
@@ -217,11 +226,11 @@ it("rejects altered retained Step preflight wire, route, and selected-key proof"
     contract: "source-semantic-interactive-preflight-v1" })).toThrow();
 });
 
-it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+it.each([null, 0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
   "rejects an invalid explicit Step source output cap %s before preparation", async cap => {
     await expect(preflightSourceSemanticInteractive({ variant: "longmemeval_s", cacheRoot: "unused",
       sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
-      preflightOutputTokenCap: cap })).rejects.toThrow();
+      preflightOutputTokenCap: cap as unknown as number })).rejects.toThrow();
   });
 
 it("retains contradictory Step usage before refusing settlement or another request", async () => {

@@ -118,7 +118,8 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
   readonly preflightOutputTokenCap?: number;
 }) {
   const maxOutputTokens = StepSourceOutputTokenCapSchema.parse(
-    options.preflightOutputTokenCap ?? STEP_SOURCE_OUTPUT_TOKEN_DEFAULT);
+    options.preflightOutputTokenCap === undefined
+      ? STEP_SOURCE_OUTPUT_TOKEN_DEFAULT : options.preflightOutputTokenCap);
   if (options.batch !== undefined || options.authorityReceiptPath !== undefined ||
       options.ingestionMode === "lazy_field" || options.extractorFactory !== undefined ||
       options.expansionCapability !== undefined || options.openSemantics === undefined ||

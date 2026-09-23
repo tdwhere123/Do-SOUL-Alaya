@@ -55,7 +55,7 @@ Usage:
   alaya-bench-runner extraction-fill --extraction-open-semantics --extraction-source-packing complete-source --extraction-preflight-out <new-report.json> [--extraction-preflight-keys <keys.json>] [--extraction-preflight-output-token-cap N]
     Provider-free Step source preparation defaults to 4096 output tokens; an explicit positive safe cap binds its encoded request and quoted bound.
   alaya-bench-runner extraction-fill --extraction-open-semantics [--extraction-source-packing complete-source] --extraction-authority <receipt.json> [ordinary fill options]
-    Interactive Gemini generateContent shares Batch's whole-source request owner, codec, and admission. Sample authority stays Batch-only.
+    Gemini uses generateContent and Step uses Plan Chat Completions; both share whole-source request and admission owners. Step complete-source samples require retained v2 proof; Gemini samples remain Batch-only.
   alaya-bench-runner extraction-fill [ordinary fill options] [--extraction-packet-profile <profile.json> | --extraction-open-semantics] [--extraction-preflight-out <new-report.json> --extraction-preflight-keys <keys.json>] --batch-operation prepare|submit|status|resume|recover|import|cancel --batch-limits <json> [--batch-window <name>] [--batch-request-limit N] [--batch-local-job <id> --batch-remote-job <batches/id>]
     Gemini uses --extraction-output-token-field maxOutputTokens when creating its extraction authority. Batch prices, input/output caps and root spending remain receipt-bound. A named window selects missing work; resume never submits new jobs.
   alaya-bench-runner extraction-fill --batch-campaign <manifest.json>

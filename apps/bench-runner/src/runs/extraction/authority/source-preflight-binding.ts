@@ -4,6 +4,7 @@ import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-
 import { parseSourceSemanticInteractivePreflight } from "../fill/source-semantic-interactive-preflight.js";
 import { resolveExtractionTransportRoute } from "../transport-route.js";
 import { computeSystemPromptSha256 } from "../cache/extraction-cache-manifest.js";
+import { resolveVendorModel } from "../../provider/catalog.js";
 import type { ExtractionAuthorityReceipt, ExtractionAuthorityReceiptInput } from "./receipt.js";
 
 /** Verify a retained Step report against the proof carried by an issued receipt. */
@@ -43,7 +44,10 @@ export function bindStepSourcePreflight(input: ExtractionAuthorityReceiptInput):
       report.source_occurrences !== input.inspection.sourceOccurrences ||
       report.unsupported_source_occurrences !== input.inspection.unsupportedSourceOccurrences ||
       report.total_requests !== observation.inventory.expectedTurns ||
+      report.config.providerUrl !== observation.extraction.providerUrl ||
       report.config.model !== observation.extraction.model ||
+      resolveVendorModel(report.config.modelFamily ?? report.config.model) !==
+        resolveVendorModel(observation.extraction.modelFamily) ||
       report.config.requestProfile !== observation.extraction.requestProfile ||
       report.config.sourcePacking !== observation.extraction.sourcePacking ||
       canonicalJson(preparedRoute) !== canonicalJson(route) ||
