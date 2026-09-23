@@ -140,9 +140,10 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
     windowLimit: input.prepared.windowLimit, completion,
     status });
   writeExtractionCacheManifest(input.cacheRoot, manifest);
+  const authorityTelemetry = authority.snapshot();
   return { requestedTurns: input.prepared.requestedTurns, cacheHits: workset.cachedRequests.length,
     newlyExtracted: 0, coverage: completion.coverage, manifest, batchState: state,
-    ...readFillRetryTelemetry(newFillStats()), authorityTelemetry: authority.snapshot() };
+    ...readFillRetryTelemetry(authorityTelemetry?.telemetry ?? newFillStats()), authorityTelemetry };
 }
 
 function sampleWindowPlanPath(input: BatchFillInput): string {

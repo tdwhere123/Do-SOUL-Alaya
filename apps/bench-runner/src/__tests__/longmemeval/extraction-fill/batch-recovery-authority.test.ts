@@ -22,6 +22,7 @@ import * as attemptLedger from "../../../runs/extraction/authority/attempt-ledge
 import * as durablePublication from "../../../runs/extraction/fill/manifest/durable-exclusive-publication.js";
 import { accountedCost } from "../../../runs/extraction/fill/batch/executor.js";
 import { peelExtractionBatchFlags } from "../../../cli/extraction-fill/batch-flags.js";
+import { runCli } from "../../../cli/cli.js";
 import type { GeminiBatchHttp, GeminiBatchLimits, GeminiBatchOperation } from
   "../../../runs/extraction/fill/batch/contract.js";
 import { buildAuthorityQuestion, buildGroundedInterpretationResponse, EXTRACTION_FILL_VARIANT,
@@ -239,6 +240,51 @@ it("settles mixed successful, provider-error, missing and truncated lines with c
   expect(job.usageUnknown).toBe(true);
   expect(accountedCost(job, { plan: { identity: "a".repeat(64), model: "gemini-2.5-flash-lite",
     requestProfile: "gemini-2.5-nonthinking-v1", lines: [], limits } })).toBe(job.costBoundUsd);
+});
+
+it.each([
+  { name: "completed responses", results: ["valid", "valid"] as ResultKind[], failures: 0, totalTokens: 60, unknown: 0 },
+  { name: "MAX_TOKENS response schema failure", results: ["valid", "truncated"] as ResultKind[],
+    failures: 1, totalTokens: 60, unknown: 0 },
+  { name: "missing response with unknown usage", results: ["valid", "missing"] as ResultKind[],
+    failures: 1, totalTokens: 30, unknown: 1 }
+])("reports $name from the settled ledger through the real Batch CLI", async ({ results, failures, totalTokens, unknown }) => {
+  const { run, provider, limits } = await setup();
+  provider.results = results;
+  await run("prepare"); await run("submit");
+  const settled = await run("resume");
+  const ledger = settled.authorityTelemetry!.telemetry;
+  expect(ledger.terminalRetryClassifications.failure_non_retryable_response).toBe(failures);
+  expect(ledger.totalTokens).toBe(totalTokens);
+  expect(ledger.usageUnknownAttempts).toBe(unknown);
+  if (results.includes("truncated")) {
+    expect(settled.authorityTelemetry!.transportFailures).toEqual([
+      expect.objectContaining({ kind: "response_schema_error", phase: "response_schema" })
+    ]);
+  }
+  const limitsPath = join(cacheRoot, "limits.json");
+  writeFileSync(limitsPath, JSON.stringify(limits));
+  const fetchAttempt = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+    throw new Error("Batch import must not contact a provider");
+  });
+  let output = "";
+  const stdout = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    output += String(chunk); return true;
+  });
+  let exitCode: number;
+  try {
+    exitCode = await runCli(["extraction-fill", "--variant", "oracle", "--data-dir", dataDir,
+      "--pinned-meta-root", pinnedMetaRoot, "--extraction-cache-root", cacheRoot,
+      "--extraction-authority", join(cacheRoot, "authority.json"),
+      "--batch-operation", "import", "--batch-limits", limitsPath]);
+  } finally { stdout.mockRestore(); }
+  expect(exitCode).toBe(0);
+  expect(fetchAttempt).not.toHaveBeenCalled();
+  const summary = output.split("\n").find((line) => line.startsWith("Partial.") || line.startsWith("Done."));
+  expect(summary).toContain(`failures=${failures} `);
+  expect(summary).toContain(`terminal_nonretryable_response=${ledger.terminalRetryClassifications.failure_non_retryable_response} `);
+  expect(summary).toContain(`usage_total_tokens=${ledger.totalTokens} `);
+  expect(summary).toContain(`usage_unknown=${ledger.usageUnknownAttempts} `);
 });
 
 it("admits a completed empty selection alongside grounded signals without another provider attempt", async () => {

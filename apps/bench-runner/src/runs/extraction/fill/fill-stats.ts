@@ -43,7 +43,8 @@ export function newFillStats(): CompileSeedExtractionStats {
 }
 
 export function readFillRetryTelemetry(
-  stats: CompileSeedExtractionStats
+  stats: Pick<CompileSeedExtractionStats, "retrySuccesses" | "rateLimitRetries" |
+    "adaptiveConcurrencyBackoffs" | "adaptiveConcurrencyBackoffMs" | "terminalRetryClassifications">
 ): FillRetryTelemetry {
   const terminal = stats.terminalRetryClassifications ?? {};
   return {
