@@ -1,12 +1,15 @@
 import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageDatabase, SqliteSourceHintReader } from "@do-soul/alaya-storage";
-import { authorizedScopesFromAdmission, authorizeSemanticScope, fieldContractSha256, preparedDeliveryId, resolveCurrentSource,
+import { authorizedScopesFromAdmission, authorizeSemanticScope, fieldContractSha256, hydrateUtf8Chunk, preparedDeliveryId,
+  proofForLibraryEntry, resolveCurrentSource,
   semanticInterpretationEvidenceId, sourceSemanticAccessInputIdentity, sourceSemanticLibraryQueryIdentity,
   sourceSemanticLibraryRequestIdentity, verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
 import { z } from "zod";
 import { canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
-  sourceEvidenceRootTarget, sourceRecallTarget, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
+  sourceEvidenceRootTarget, sourceRecallTarget, type MemorySearchResult, type SourceEvidenceTarget,
+  type SourceSemanticLibrarySlotQualifier,
+  type SourceRecordIdentity } from "@do-soul/alaya-protocol";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../measurement/source-semantic-library-recall.js";
@@ -232,7 +235,10 @@ function admitDeliveredSources(plan: SemanticChainPlan, response: Extract<z.infe
   stores: ReturnType<typeof sourceLookupStores>, reader: SqliteSourceHintReader, scopes: readonly string[] | null,
   correspondences: ReturnType<typeof semanticChainQueryCorrespondences>["ready"]): SourceRecordIdentity[] {
   const records: SourceRecordIdentity[] = [];
-  for (const entry of response.index!.entries) {
+  if (response.results?.length !== response.index!.entries.length) {
+    throw new Error("native delivery has no complete emitted source page");
+  }
+  for (const [position, entry] of response.index!.entries.entries()) {
     const target = entry.target;
     if (target.kind !== "source_evidence" || target.workspace_id !== plan.config.workspace_id) throw new Error("native source workspace changed");
     const retained = stores.getStoredRecord(plan.config.workspace_id, target.root_id);
@@ -245,6 +251,8 @@ function admitDeliveredSources(plan: SemanticChainPlan, response: Extract<z.infe
       content_digest: current.record.content_digest, evidence_object_id: current.record.evidence_object_id }))) {
       throw new Error("delivered source identity differs from current sealed source");
     }
+    admitEmittedSourcePreview(target.span, response.results[position]!, response.slot_qualifiers?.[position],
+      target, current.content_bytes, proofForLibraryEntry(entry, response.proofs ?? []) !== undefined);
     records.push(current.record);
   }
   for (const proof of response.proofs ?? []) {
@@ -259,4 +267,35 @@ function admitDeliveredSources(plan: SemanticChainPlan, response: Extract<z.infe
     records.push(checked.stored.record);
   }
   return [...new Map(records.map((record) => [record.identity, record])).values()];
+}
+
+export function admitEmittedSourcePreview(span: SourceEvidenceTarget["span"], result: MemorySearchResult,
+  qualifier: SourceSemanticLibrarySlotQualifier | undefined, target: SourceEvidenceTarget, source: string,
+  requiresCompleteSupport: boolean): void {
+  if (canonicalJson(result.target) !== canonicalJson(target)) {
+    throw new Error("emitted source target differs from delivered index");
+  }
+  if (span?.retained_extent !== "body") throw new Error("emitted source has no bound body span");
+  const full = hydrateUtf8Chunk(source, { offset: span.content_start, byteLimit: span.content_end - span.content_start });
+  if (full.status !== "chunk" || full.end_offset !== span.content_end) {
+    throw new Error("emitted source span is not a UTF-8 slice of sealed source");
+  }
+  if (requiresCompleteSupport && (qualifier?.evidence_kind !== "semantic_proof"
+    || qualifier.payload_support !== "available" || !result.budget_state.within_budget)) {
+    throw new Error("available proof support requires its complete emitted source preview");
+  }
+  if (result.content_preview === "[payload omitted]" && !result.budget_state.within_budget) return;
+  const emitted = result.content_preview === "[empty source]" && span.content_end === span.content_start
+    ? "" : result.content_preview;
+  const byteLength = Buffer.byteLength(emitted, "utf8");
+  if (result.budget_state.within_budget && emitted !== full.text) {
+    throw new Error("emitted source preview differs from sealed source span");
+  }
+  if (byteLength > span.content_end - span.content_start) {
+    throw new Error("emitted source preview exceeds sealed source span");
+  }
+  const chunk = hydrateUtf8Chunk(source, { offset: span.content_start, byteLimit: byteLength });
+  if (chunk.status !== "chunk" || chunk.end_offset !== span.content_start + byteLength || chunk.text !== emitted) {
+    throw new Error("emitted source preview differs from sealed source span");
+  }
 }

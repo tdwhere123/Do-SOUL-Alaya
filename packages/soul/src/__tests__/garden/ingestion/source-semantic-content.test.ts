@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSourceSemanticRequest as buildCurrentRequest, parseSourceSemanticRequest,
+import { buildSourceSemanticRequest as buildCurrentRequest, parseSourceSemanticRequest, sourceSemanticRequestCatalog,
   sourceSemanticResponseJsonSchema, sourceSemanticSystemPrompt } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import { receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-content-guidance.js";
@@ -10,7 +10,7 @@ const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor mi
 const raw = () => SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
 const buildSourceSemanticRequest = (value: Parameters<typeof buildCurrentRequest>[0]) => {
   const request = buildCurrentRequest(value);
-  return parseSourceSemanticRequest({ ...request, source_request: {
+  return parseSourceSemanticRequest({ ...request, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(request), source_request: {
     ...request.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v2"
   } });
 };

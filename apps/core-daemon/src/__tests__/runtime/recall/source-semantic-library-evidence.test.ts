@@ -6,7 +6,7 @@ import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../../../../apps/bench-runner/src/runs/measurement/source-semantic-library-recall.js";
-import { ACCESS_BUDGET, CLOCK, WS, accessQuery, withAccessLibrary } from "./source-semantic-access.test-support.js";
+import { ACCESS_BUDGET, CLOCK, WS, accessCall, accessQuery, withAccessLibrary } from "./source-semantic-access.test-support.js";
 import { receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 
 type Library = Parameters<Parameters<typeof withAccessLibrary>[1]>[0];
@@ -99,6 +99,51 @@ function firstPageInputIds(recalled: Awaited<ReturnType<typeof recall>>): Set<nu
   return new Set((recalled.proofs ?? []).flatMap(proof => proof.binding_results?.flatMap(binding =>
     binding.kind === "evidence" ? [binding.input] : []) ?? []));
 }
+
+it.each([31, 32, 33])("preserves finite pair closure and the 32-pair request cap with %i proposals", async (count) => {
+  const original = "Orchid irrigation", semantics = accessQuery(original, "orchid irrigation");
+  await withAccessLibrary([{ id: "orchard", text: "Orchid irrigation began in April.",
+    reading: "orchid irrigation", count }], async ({ execute }) => {
+    const request = { kind: "prepare_query" as const, original_query: original,
+      query_semantics: semantics, budget: ACCESS_BUDGET };
+    const first = await accessCall(execute, request);
+    const descriptors = [...first.candidates];
+    let cursor = first.continuation_handle;
+    while (cursor !== undefined) {
+      const page = await accessCall(execute, { ...request, continuation_handle: cursor });
+      descriptors.push(...page.candidates); cursor = page.continuation_handle;
+    }
+    expect(descriptors).toHaveLength(count);
+    expect(first.access?.unvisited_interpretations).toBe(false);
+    const correspondences = descriptors.map((descriptor) => {
+      if (descriptor.interpretation === undefined) throw new Error("native interpretation required");
+      const received = receiveAuthoredCorrespondence({ original_query: original, admitted_query_semantics: semantics,
+        source_interpretation_descriptors: [{ source_interpretation_id: descriptor.interpretation_id,
+          interpretation: descriptor.interpretation }],
+        producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" },
+      { correspondences: [{ relation: "contextual_equivalence",
+        query_endpoint: { kind: "predicate", alternative: 0, frame: "qStatement" },
+        source_endpoint: { kind: "frame", frame: "fStatement" },
+        query_support: { kind: "query_text", excerpt: original },
+        source_semantic_support: [{ kind: "lexical", mentions: ["mStatement"] }] }] });
+      if (received.semantic_correspondence === undefined) throw new Error("correspondence receive failed");
+      return received.semantic_correspondence;
+    });
+    const recallRequest = { kind: "recall" as const, query_handle: first.query_handle!,
+      semantic_correspondences: correspondences, accepts_unreviewed_conditional_results: true,
+      budget: ACCESS_BUDGET, output_byte_limit: OUTPUT_BYTES };
+    if (count === 33) {
+      await expect(accessCall(execute, recallRequest)).rejects.toThrow(/expected array to have <=32 items/u);
+      return;
+    }
+    const recalled = await accessCall(execute, recallRequest);
+    expect(recalled.discovery.examined_source_interpretation_ids).toHaveLength(count);
+    expect(recalled.discovery.unexamined_source_interpretation_count).toBe(0);
+    expect(recalled.discovery.open_residuals).toBe(false);
+    expect(recalled.discovery.truncated).toBe(false);
+    expect(recalled.coverage.discovery).toBe("complete");
+  });
+}, 60_000);
 
 it("changes native evidence preference for the same question across two different libraries with distractors", async () => {
   const original = "What happened to orchid irrigation?", semantics = accessQuery(original, "orchid irrigation");

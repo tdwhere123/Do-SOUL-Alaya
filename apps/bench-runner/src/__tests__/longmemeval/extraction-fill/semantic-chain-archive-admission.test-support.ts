@@ -5,7 +5,7 @@ import { authorizedScopesFromAdmission, sourceSemanticLibraryRequestIdentity } f
 import { chainIdentity, readChainArtifact, writeChainArtifact, type SemanticChainConfig,
   type SemanticChainPlan } from "../../../runs/semantic-chain/contract.js";
 import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
-import { measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
+import { admitEmittedSourcePreview, measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { interveneSemanticChain } from "../../../runs/semantic-chain/intervene.js";
 import { readSemanticChainCorrespondences, readSemanticChainProposalResults, semanticChainProposalStates,
   semanticChainQueryCorrespondences } from "../../../runs/semantic-chain/inputs.js";
@@ -106,6 +106,49 @@ export async function assertSemanticChainArchiveAdmission(fixture: Fixture): Pro
     const root = join(archiveRoot, name), rows = original.rows.map((row) => row.query_key === native.query_key ? changed : row);
     assertUnknown(root, retainArchive(root, fixture.plan, rows), fixture.plan, native.query_key, reason);
   }
+  const qualifiers = response.slot_qualifiers;
+  const proofOffset = qualifiers?.findIndex((slot) => slot.evidence_kind === "semantic_proof") ?? -1;
+  const proofResult = response.results?.[proofOffset];
+  if (proofOffset < 0 || proofResult?.target.kind !== "source_evidence" || qualifiers === undefined) {
+    throw new Error("native proof preview fixture required");
+  }
+  const forgedPreview = { ...native, response: { ...response, results: response.results!.map((result, position) =>
+    position === proofOffset ? { ...result, content_preview: "The unrelated mountain is purple." } : result) } };
+  const forgedRoot = join(archiveRoot, "changed-supporting-body");
+  assertUnknown(forgedRoot, retainArchive(forgedRoot, fixture.plan, original.rows.map((row) =>
+    row.query_key === native.query_key ? forgedPreview : row)), fixture.plan, native.query_key,
+  /archive_admission:.*preview differs from sealed source span/u);
+  const omittedProof = { ...native, response: { ...response, results: response.results!.map((result, position) =>
+    position === proofOffset ? { ...result, content_preview: "[payload omitted]",
+      budget_state: { ...result.budget_state, within_budget: false } } : result),
+    slot_qualifiers: qualifiers.map((slot, position) => position === proofOffset
+      ? { ...slot, payload_support: "not_applicable" as const } : slot) } };
+  const omittedRoot = join(archiveRoot, "omitted-proof-with-forged-qualifier");
+  assertUnknown(omittedRoot, retainArchive(omittedRoot, fixture.plan, original.rows.map((row) =>
+    row.query_key === native.query_key ? omittedProof : row)), fixture.plan, native.query_key,
+  /archive_admission:.*complete emitted source preview/u);
+
+  // The same admission uses the shared UTF-8 byte slicer for real prefixes and literal marker text.
+  const source = "🙂[empty source] [payload omitted]";
+  const span = { content_start: 4, content_end: Buffer.byteLength(source), retained_extent: "body" as const,
+    content_complete: false, original_complete: false };
+  const target = { ...proofResult.target, span };
+  const result = { ...proofResult, target, content_preview: "[empty source] [payload omitted]" };
+  expect(() => admitEmittedSourcePreview(span, result, qualifiers[proofOffset], target, source, true)).not.toThrow();
+  const short = { ...result, content_preview: "[empty source]", budget_state: { ...result.budget_state, within_budget: false } };
+  expect(() => admitEmittedSourcePreview(span, short, undefined, target, source, false)).not.toThrow();
+  const marker = "[payload omitted]", markerSpan = { ...span, content_start: 0, content_end: Buffer.byteLength(marker) };
+  expect(() => admitEmittedSourcePreview(markerSpan, { ...result, target: { ...target, span: markerSpan }, content_preview: marker },
+    undefined, { ...target, span: markerSpan }, marker, false)).not.toThrow();
+  const emptySpan = { ...span, content_start: 0, content_end: 0 };
+  expect(() => admitEmittedSourcePreview(emptySpan, { ...result, target: { ...target, span: emptySpan }, content_preview: "[empty source]" },
+    undefined, { ...target, span: emptySpan }, "", false)).not.toThrow();
+  expect(() => admitEmittedSourcePreview(span, { ...short, content_preview: "[payload omitted]" },
+    undefined, target, source, false)).not.toThrow();
+  expect(() => admitEmittedSourcePreview({ ...span, content_start: 1 }, result, undefined, target, source, false))
+    .toThrow(/UTF-8 slice/u);
+  expect(() => admitEmittedSourcePreview({ ...span, content_start: 5 }, result, undefined, target, source, false))
+    .toThrow(/preview differs|preview exceeds/u);
   const blocked = fixture.plan.queries.find((query) => query.status === "blocked")!;
   const blockedRoot = join(archiveRoot, "blocked-with-delivery");
   const blockedRows = original.rows.map((row) => row.query_key !== blocked.query_key ? row : { ...native, query_key: blocked.query_key });

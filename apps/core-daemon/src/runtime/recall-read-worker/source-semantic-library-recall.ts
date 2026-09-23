@@ -161,7 +161,7 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
         throw error;
       }
     }
-    if (pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP) { interpretationTruncated = true; break; }
+    if (pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP) break;
   }
   return { proofGroups, proofs, examined, supports, pairs, computeOpen, interpretationTruncated };
 }
@@ -173,7 +173,7 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string,
   publicRequestIdentity: string): SourceSemanticWorkerResult {
   const { descriptors, interpretationPages, interpretationOpen } = discovered;
-  const { proofGroups, examined, pairs, computeOpen } = branches;
+  const { proofGroups, examined, computeOpen } = branches;
   const interpretationTruncated = discovered.interpretationTruncated || branches.interpretationTruncated;
   const interpretationId = `sha256:${fieldContractSha256(canonicalJson({
     kind: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, query: original, query_semantics_id: queryIdentity, scopes: authorized
@@ -198,8 +198,7 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
       source_version: target.source_version, content_digest: target.content_digest, evidence_object_id: target.evidence_object_id,
       hypothesis_id: interpretationId }));
   }
-  const openResiduals = sources.open || sources.truncated || interpretationOpen || interpretationTruncated || computeOpen
-    || pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP;
+  const openResiduals = sources.open || sources.truncated || interpretationOpen || interpretationTruncated || computeOpen;
   const hydration = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 3), memory_bytes: Math.floor(meter.bytes / 3) });
   const prepared = prepareLibraryPackages(runtime, payload, authorized, hydration, sourceEntries, branches.supports);
   meter.absorb(hydration);
