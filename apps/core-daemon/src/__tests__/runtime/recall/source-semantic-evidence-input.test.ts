@@ -1,8 +1,9 @@
 import { expect, it } from "vitest";
 import { deliveredSourceSemanticLibraryProof, projectSourceSemanticQuerySupport,
-  executeSourceSemanticInterpretation, assembleSourceSemanticLibraryIndex, slotQualifiersFor } from "@do-soul/alaya-core";
+  executeSourceSemanticInterpretation, assembleSourceSemanticLibraryIndex, fieldContractSha256, slotQualifiersFor } from "@do-soul/alaya-core";
 import { sourceSemanticQueryBranchViews } from "@do-soul/alaya-protocol";
-import { deliveredProofFixture, BUDGET as BASE_BUDGET } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
+import { correspondenceFor, deliveredProofFixture, query as simpleQuery, source as simpleSource,
+  BUDGET as BASE_BUDGET } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
 import { authoredSource, authoredAlignment, evidenceQuery, mentionTexts, COUNT, DURATION } from "./source-semantic-evidence-input-support.js";
 
 // Explicit finite-engine witness control. Production defaults are unchanged; the low-budget case below remains partial.
@@ -88,6 +89,31 @@ it("retains two dates as individually supported inputs with unknown cross-source
   const inputOnly = fixture("joining-note", "duration", false);
   expect(inputOnly.qualifier.support!.answer).toBe("unrepresented");
 }, 90_000);
+
+it("leaves a past-use question open against an assertion of future use when past meaning is a located gap", () => {
+  const original = "which tools did Alice use?";
+  const prospectiveText = "Alice will use X. Bob will use Y.";
+  const base = simpleSource();
+  const prospective = {
+    ...base,
+    source: { ...base.source, content_digest: `sha256:${fieldContractSha256(prospectiveText)}` },
+    mentions: base.mentions.map(row => row.id === "muses" ? { ...row, text: "will use", utf8_span: [0, 8] as const } : row),
+    frames: base.frames.map(row => ({ ...row, predicate_support: { ...row.predicate_support, reading: "will use" } }))
+  };
+  const bare = simpleQuery(original);
+  const past = { ...bare, gaps: [{ kind: "unsupported_meaning" as const, affected_ids: ["use"],
+    support: [{ kind: "query_text" as const, excerpt: "did Alice use" }],
+    description: "The bare use predicate does not encode past use." }] };
+  const bareProof = deliveredProofFixture({ interpretation: prospective, semantics: bare,
+    correspondence: correspondenceFor(prospective, bare), original, library: true });
+  const limitedProof = deliveredProofFixture({ interpretation: prospective, semantics: past,
+    correspondence: correspondenceFor(prospective, past), original, library: true });
+  expect(bareProof.proof.binding_results?.[0]).toMatchObject({ kind: "answer", query_complete: true });
+  expect(limitedProof.proof.binding_results?.[0]).toMatchObject({ kind: "answer", query_complete: false });
+  expect(limitedProof.proof.query_gaps).toMatchObject([{ affected_ids: ["use"],
+    support: [{ excerpt: "did Alice use" }] }]);
+  expect(limitedProof.qualifier.support?.answer).toBe("open");
+});
 
 it("preserves every shared-person conjunction binding when condition and correspondence input order reverse", () => {
   const forward = fixture("forum-notebook", "count");

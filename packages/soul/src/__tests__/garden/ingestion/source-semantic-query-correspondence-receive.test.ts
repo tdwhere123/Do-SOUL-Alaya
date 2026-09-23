@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  SourceSemanticQuerySchema, sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity
+  SourceSemanticQuerySchema, sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
+  sourceSemanticQueryBranchViews
 } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import {
@@ -247,16 +248,80 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     });
     expect(constrained.variables.find(row => row.id === "tool")?.reference).toBeUndefined();
     expect(constrained.return_variables).toEqual(["tool"]);
-    expect(constrained.gaps).toEqual([]);
+    expect(constrained.gaps).toMatchObject([{ kind: "unsupported_meaning", affected_ids: ["use_event"] }]);
     const unresolved = results[8]!.query!;
     expect(unresolved.variables.find(row => row.id === "technician")?.reference?.excerpt).toBe("that technician");
-    expect(unresolved.gaps).toMatchObject([{ kind: "unresolved_referent", affected_ids: ["technician"] }]);
+    expect(unresolved.gaps).toMatchObject([
+      { kind: "unresolved_referent", affected_ids: ["technician"] },
+      { kind: "unsupported_meaning", affected_ids: ["use_event"] }
+    ]);
     expect(results[8]!.outcome.status).toBe("interpreted");
     const existential = results[9]!.query!;
     expect(existential.variables.find(row => row.id === "person")?.reference).toBeUndefined();
     expect(existential.return_variables).toEqual(["tool"]);
-    expect(existential.gaps).toEqual([]);
+    expect(existential.gaps).toMatchObject([{ kind: "unsupported_meaning", affected_ids: ["use_event"] }]);
     expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("A named target preserves a referentially constrained expression");
+  });
+
+  it("keeps the two qualified event inputs distinct from the requested elapsed-hours answer", () => {
+    const example = sourceSemanticQueryExamples[10];
+    const received = proposeQuerySemantics({ original_query: example.original_query,
+      producer_id: "query-producer", producer_version: "1"
+    }, { rawJson: JSON.stringify(example.response) });
+    expect(received.outcome).toEqual({ status: "interpreted", gaps: [] });
+    const query = received.query!;
+    const views = sourceSemanticQueryBranchViews(query.alternatives[0]!);
+    // Expected from the original question: both events have Tara, crate C and their own stated day;
+    // the hours answer and each event-time input have different jobs.
+    expect(views.map(view => view.alternative.frames.map(frame => frame.id))).toEqual([
+      ["elapsed", "sealing", "opening"], ["sealing", "seal_time"], ["opening", "open_time"]
+    ]);
+    expect(views[1]!.alternative.frames[0]!.role_requirements.map(role => [role.role_reading, role.support.excerpt]))
+      .toEqual([["agent", "Tara"], ["theme", "crate C"], ["date", "3 March 2024"]]);
+    expect(views[2]!.alternative.frames[0]!.role_requirements.map(role => [role.role_reading, role.support.excerpt]))
+      .toEqual([["agent", "Tara"], ["theme", "crate C"], ["date", "4 March 2024"]]);
+    expect(query.return_variables).toEqual(["elapsed_hours"]);
+    expect(views.slice(1).flatMap(view => view.alternative.frames).map(frame => frame.id)).not.toContain("elapsed");
+    expect(query.requested_operation?.reading).toBe("Calculate elapsed hours from the sealing time to the opening time.");
+
+    const withoutRoleSupport = structuredClone(example.response);
+    Object.assign(withoutRoleSupport.query.alternatives[0].evidence_inputs[0].conditions[1].arguments[0], { excerpt: undefined });
+    expect(proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
+      { rawJson: JSON.stringify(withoutRoleSupport) }).outcome.status).toBe("invalid");
+    const forgedRoleSupport = structuredClone(example.response);
+    Object.assign(forgedRoleSupport.query.alternatives[0].evidence_inputs[0].conditions[1].arguments[0], { excerpt: "invented event" });
+    expect(proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
+      { rawJson: JSON.stringify(forgedRoleSupport) }).outcome.status).toBe("invalid");
+    const withoutFreeInputSupport = structuredClone(example.response);
+    Object.assign(withoutFreeInputSupport.query.alternatives[0].evidence_inputs[1].conditions[1].arguments[1].target,
+      { excerpt: undefined });
+    expect(proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
+      { rawJson: JSON.stringify(withoutFreeInputSupport) }).outcome.status).toBe("invalid");
+  });
+
+  it("locates past restrictions on every affected neutral example while leaving nonpast questions unqualified", () => {
+    const past = [
+      [0, "was asked", "request"], [4, "Did ringing precede flashing", "before"],
+      [5, "question asked whether the lens was polished", "polish"],
+      [6, "directive required polishing", "polish"],
+      [7, "did the workshop steward use", "use_event"],
+      [8, "did that technician use", "use_event"], [9, "did someone use", "use_event"]
+    ] as const;
+    for (const [index, phrase, affected] of past) {
+      const example = sourceSemanticQueryExamples[index];
+      const received = proposeQuerySemantics({ original_query: example.original_query,
+        producer_id: "query-producer", producer_version: "1"
+      }, { rawJson: JSON.stringify(example.response) });
+      expect(received.query?.gaps.some(gap => gap.kind === "unsupported_meaning"
+        && gap.affected_ids.includes(affected) && gap.support.some(row => row.excerpt === phrase)), example.original_query).toBe(true);
+    }
+    for (const index of [1, 3, 10] as const) {
+      const example = sourceSemanticQueryExamples[index];
+      const received = proposeQuerySemantics({ original_query: example.original_query,
+        producer_id: "query-producer", producer_version: "1"
+      }, { rawJson: JSON.stringify(example.response) });
+      expect(received.query?.gaps, example.original_query).toEqual([]);
+    }
   });
 
   it("binds required evidence act support to the current original query and rejects replaced producer syntax", () => {

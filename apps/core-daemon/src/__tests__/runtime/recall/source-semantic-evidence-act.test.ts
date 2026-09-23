@@ -35,8 +35,9 @@ function proposed(original: string, response: unknown) {
   const received = proposeQuerySemantics({ original_query: original,
     producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID, producer_version: "1"
   }, { rawJson: JSON.stringify(response) });
-  expect(received.outcome).toEqual({ status: "interpreted", gaps: [] });
+  expect(received.outcome.status).toBe("interpreted");
   if (received.query === undefined) throw new Error("query proposal required");
+  expect(received.query.gaps).toMatchObject([{ kind: "unsupported_meaning", affected_ids: ["polish"] }]);
   expect(admitSourceSemanticQuery(received.query, original).kind).toBe("admitted");
   return received.query;
 }
@@ -119,13 +120,16 @@ it.each(CASES)("retrieves the shipped $act example after source receive, publica
       const positive = execute(example.original_query, example.response);
       expect(positive.query.alternatives[0]!.context_obligations).toEqual([{ frame: "polish", kind: "unresolved" }]);
       expect(positive.result.binding_results).toHaveLength(1);
-      expect(positive.result.binding_results![0]).toMatchObject({ kind: "answer", query_complete: true,
+      expect(positive.result.binding_results![0]).toMatchObject({ kind: "answer", query_complete: false,
         returned: { polish: { node_id: published.bound.interpretation.frames[0]!.id } } });
       expect(positive.result.binding_results![0]!.explanation_ids.length).toBeGreaterThan(0);
       const other = CASES.find(row => row.act !== act)!;
       expect(execute(other.example.original_query, other.example.response).result.binding_results).toEqual([]);
       for (const obligation of [undefined, "asserted_at_source", "entailed_at_source"] as const) {
         const actual = execute("Was the lens polished?", { ...example.response, query: { ...example.response.query,
+          gaps: [{ kind: "unsupported_meaning", affected_ids: ["polish"],
+            support: [{ kind: "query_text", excerpt: "Was the lens polished" }],
+            description: "The past polishing qualification is not encoded by the retained predicate." }],
           alternatives: [{ conditions: [{ kind: "statement", key: "polish", predicate: "polish",
             arguments: example.response.query.alternatives[0].conditions[0].arguments,
             ...(obligation === undefined ? {} : { obligation })
