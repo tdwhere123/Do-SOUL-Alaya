@@ -19,6 +19,11 @@ export const SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-work
 export const STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v4" as const;
 export const SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT = 4096;
 
+export function semanticProposalWorksetContract(requestProfile: string) {
+  return requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+    ? STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT : SEMANTIC_PROPOSAL_WORKSET_CONTRACT;
+}
+
 const QueryItemSchema = z.object({
   original_query: z.string().min(1).max(8192),
   approved_fixed_context: z.object({
@@ -63,7 +68,7 @@ export type SemanticProposalLine = Readonly<{
 export function parseSemanticProposalWorkset(value: unknown): SemanticProposalWorkset {
   const workset = SemanticProposalWorksetSchema.parse(value);
   const step = workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE;
-  if (step !== (workset.contract === STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT)) {
+  if (workset.contract !== semanticProposalWorksetContract(workset.request_profile)) {
     throw new AlayaError("VALIDATION", "semantic proposal workset contract/profile mismatch");
   }
   return { ...workset, provider_url: step
@@ -73,8 +78,7 @@ export function parseSemanticProposalWorkset(value: unknown): SemanticProposalWo
 export function materializeSemanticProposalLines(
   workset: SemanticProposalWorkset, maxOutputTokens: number
 ): readonly SemanticProposalLine[] {
-  if ((workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE) !==
-      (workset.contract === STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT)) {
+  if (workset.contract !== semanticProposalWorksetContract(workset.request_profile)) {
     throw new AlayaError("VALIDATION", "semantic proposal workset contract/profile mismatch");
   }
   if (!isNativeGeminiRequestProfile(workset.request_profile) && workset.request_profile !== STEP_SEMANTIC_REQUEST_PROFILE) {
@@ -166,8 +170,7 @@ export function proposalCacheKey(
     retryMode: "disabled", validateRawJson: () => undefined
   }, "source_semantic_proposal");
   return createHash("sha256")
-    .update(requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT :
-      SEMANTIC_PROPOSAL_WORKSET_CONTRACT, "utf8").update("\u0000", "utf8")
+    .update(semanticProposalWorksetContract(requestProfile), "utf8").update("\u0000", "utf8")
     .update(model, "utf8").update("\u0000", "utf8")
     .update(requestProfile, "utf8").update("\u0000", "utf8")
     .update(systemPrompt, "utf8").update("\u0000", "utf8")

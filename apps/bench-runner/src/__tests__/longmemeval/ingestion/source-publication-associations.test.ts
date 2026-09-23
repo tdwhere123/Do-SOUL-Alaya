@@ -247,7 +247,7 @@ it("retains a 65-unit source beside a ready 64-unit source through association a
   writeFileSync(preflightPath, JSON.stringify(preflight));
   const outputPath = join(cacheRoot, "mixed-associations.json");
   const association = await prepareSourcePublicationAssociations(population, [{ cacheRoot, retainedPreparationPath: preflightPath }], outputPath);
-  expect(association).toMatchObject({ contract: "source-publication-association-preparation-v2",
+  expect(association).toMatchObject({ contract: "source-publication-association-preparation-v3",
     source_occurrences: 2, unsupported_source_occurrences: 1, ready_request_keys: 1 });
   expect(association.sources.map((source) => source.status)).toEqual(["unbound", "unsupported_source"]);
   const bindings = parseSourcePublicationAssociations(JSON.parse(readFileSync(`${outputPath}.associations.json`, "utf8")));

@@ -6,7 +6,7 @@ import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js
 import { censusCompleteSourceRecords } from "../snapshot/source-records/census.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../semantic-chain/contract.js";
-import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../semantic-proposal/workset.js";
+import { materializeSemanticProposalLines, parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../semantic-proposal/workset.js";
 import { LongMemEvalExperimentConfigSchema, LongMemEvalExperimentFreezeSchema, loadFrozenLongMemEvalDataset } from "./contract.js";
 import { NATIVE_SEMANTIC_ROUTE, freezeSourceCaches, assertSourceCaches } from "./native-arm.js";
 
@@ -53,7 +53,7 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
           session_id, session_index, round_index, source_observed_at, roles }) => ({ source_id, source_version,
           content_digest, corpus_digest, session_id, session_index, round_index, source_observed_at, roles })) });
     }
-    const query_workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3", kind: "query",
+    const query_workset = parseSemanticProposalWorkset({ contract: semanticProposalWorksetContract(config.request_profile), kind: "query",
       model: config.model, provider_url: config.provider_url, request_profile: config.request_profile, items: selected.map((row) => ({
         original_query: row.question, approved_fixed_context: {
           context_id: `longmemeval_s:${row.question_id}:${config.dataset_sha256}`,

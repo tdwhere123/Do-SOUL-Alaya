@@ -4,7 +4,7 @@ import { AlayaError, SoulInterpretationRequestSchema, SoulInterpretationResponse
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import type { BenchDaemonHandle } from "../../harness/daemon.js";
 import { readSemanticChainProposalResults, semanticChainProposalStates } from "./inputs.js";
-import { parseSemanticProposalWorkset, SEMANTIC_PROPOSAL_WORKSET_CONTRACT } from "../semantic-proposal/workset.js";
+import { parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../semantic-proposal/workset.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { SemanticChainConfigSchema, SemanticChainPlanSchema, SEMANTIC_CHAIN_PLAN_CONTRACT, chainIdentity, readChainArtifact, writeChainArtifact,
   writeChainJson, assertChainSnapshot, withSemanticChainDaemon, type SemanticChainConfig, type SemanticChainPlan } from "./contract.js";
@@ -46,7 +46,7 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
     if (results.some((row) => row.received !== undefined)) await withSemanticChainDaemon(config, root, prepare);
     else await prepare();
     const workset = items.length === 0 ? null : parseSemanticProposalWorkset({
-      contract: SEMANTIC_PROPOSAL_WORKSET_CONTRACT, kind: "semantic_correspondence", model: config.query_workset.model,
+      contract: semanticProposalWorksetContract(config.query_workset.request_profile), kind: "semantic_correspondence", model: config.query_workset.model,
       request_profile: config.query_workset.request_profile, provider_url: config.query_workset.provider_url, items
     });
     const plan = SemanticChainPlanSchema.parse({ contract: SEMANTIC_CHAIN_PLAN_CONTRACT, input_identity: inputIdentity,

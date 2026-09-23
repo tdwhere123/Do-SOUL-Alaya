@@ -126,9 +126,9 @@ Population configuration contains `name`, `dataDir`, `pinnedMetaRoot`,
 `model`, `requestProfile`, an optional original `questionWindow`, and a
 `cacheOwners` roster of `{ "cacheRoot": "...", "retainedPreparationPath": "..." }` records.
 Prepare one original question/window at a time, using the disjoint owning roots
-and their original retained prefill preparations. The association report retains
+and their original retained Batch or Step source prefill preparations. The v3 preparation report retains
 ambiguous, invalid, and unbound artifacts; its `.associations.json` companion
-is directly usable by source publication. Use the original retained preparation covering
+keeps the v2 publication association wrapper and is directly usable by source publication. Use the original retained preparation covering
 each root's selected request set, including an earlier complete preparation when
 the last fill contains only remaining requests. Associations are new host
 publication decisions, not historical source-origin or completion witnesses.

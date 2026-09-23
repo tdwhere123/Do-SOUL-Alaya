@@ -2,28 +2,29 @@ import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
 import { censusCompleteSourceRecords } from "./census.js";
 import { listRetainedSourceSemanticKeys, parseSourcePublicationAssociations, type SourcePublicationAssociation,
   type SourcePublicationPopulation } from "./publish.js";
 import { inspectCachedSourceSemantic } from "../../extraction/cache/source-semantic-artifact.js";
-import { prepareSourceSemanticBatchLine } from "../../extraction/fill/batch/source-semantic-interpretation.js";
+import { parseSourceSemanticInteractivePreflight } from "../../extraction/fill/source-semantic-interactive-preflight.js";
 import { readBoundedCanonicalUtf8Artifact } from "../../extraction/cache-audit/bounded-artifact-reader.js";
 import { chainIdentity, writeChainArtifact, writeChainJson } from "../../semantic-chain/contract.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparations,
-  parseExtractionOpenSemanticsGeneration, type ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
+  parseExtractionOpenSemanticsGeneration, parseSourceSemanticRequestLine, prepareSourceSemanticRequestLine,
+  SourceRequestLineSchema, type SourceRequestLine, type ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
 
-const LineSchema = z.object({ key: z.string(), unitKeys: z.array(z.string()), requestSha256: z.string(),
-  systemPrompt: z.string(), userPrompt: z.string() }).strict();
 export type SourceAssociationCacheOwner = Readonly<{ cacheRoot: string; retainedPreparationPath: string }>;
-type RetainedLine = z.infer<typeof LineSchema>;
-type RetainedOwner = Readonly<{ cacheRoot: string; digest: string; plannedRequests: readonly RetainedLine[] }>;
+type RetainedOwner = Readonly<{ cacheRoot: string; digest: string;
+  contract: "extraction-batch-preflight-v2" | "source-semantic-interactive-preflight-v1";
+  plannedRequests: readonly SourceRequestLine[] }>;
 
 /** Original selected requests allocate keys to roots; cache presence never selects an alternate owner. */
-function readRetainedOwners(owners: readonly SourceAssociationCacheOwner[], population: Pick<SourcePublicationPopulation, "model" | "requestProfile">) {
+function readRetainedOwners(owners: readonly SourceAssociationCacheOwner[],
+  population: Pick<SourcePublicationPopulation, "model" | "requestProfile">,
+  generation: ExtractionOpenSemanticsGeneration, datasetSha256: string) {
   if (owners.length === 0) throw new AlayaError("VALIDATION", "association preparation requires owning cache roots");
   const roots = new Set<string>();
-  const planned = new Map<string, Readonly<{ line: RetainedLine; cacheRoot: string }>>();
+  const planned = new Map<string, Readonly<{ line: SourceRequestLine; cacheRoot: string }>>();
   const units = new Set<string>();
   const retained: RetainedOwner[] = [];
   for (const owner of owners) {
@@ -34,15 +35,29 @@ function readRetainedOwners(owners: readonly SourceAssociationCacheOwner[], popu
     roots.add(physicalRoot);
     const raw = readBoundedCanonicalUtf8Artifact({ path: owner.retainedPreparationPath,
       maxBytes: 32 * 1024 * 1024, label: "retained source preflight" });
-    const artifact = JSON.parse(raw);
-    const lines = z.object({ contract: z.literal("extraction-batch-preflight-v2"),
-      planned_requests: z.array(LineSchema) }).passthrough().parse(artifact).planned_requests;
-    for (const line of lines) {
-      const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
-      const expected = prepareSourceSemanticBatchLine(request, line.unitKeys, population);
-      if (canonicalJson(line) !== canonicalJson(expected)) {
-        throw new AlayaError("CONFLICT", "retained source preflight has foreign or duplicate request identity");
+    const artifact: unknown = JSON.parse(raw);
+    const contract = z.object({ contract: z.string() }).passthrough().parse(artifact).contract;
+    let preparationContract: RetainedOwner["contract"];
+    let lines: readonly SourceRequestLine[];
+    if (contract === "source-semantic-interactive-preflight-v1") {
+      const report = parseSourceSemanticInteractivePreflight(artifact);
+      preparationContract = report.contract;
+      if (report.config.model !== population.model || report.config.requestProfile !== population.requestProfile ||
+          report.dataset_revision !== datasetSha256 ||
+          canonicalJson(report.config.openSemantics) !== canonicalJson(generation)) {
+        throw new AlayaError("CONFLICT", "retained Step source preparation differs from the current source population");
       }
+      lines = report.planned_requests.map(({ key, unitKeys, requestSha256, systemPrompt, userPrompt }) =>
+        ({ key, unitKeys, requestSha256, systemPrompt, userPrompt }));
+    } else {
+      const report = z.object({ contract: z.literal("extraction-batch-preflight-v2"),
+        planned_requests: z.array(SourceRequestLineSchema) }).passthrough().parse(artifact);
+      preparationContract = report.contract;
+      lines = report.planned_requests;
+    }
+    for (const line of lines) {
+      try { parseSourceSemanticRequestLine(line, population); }
+      catch (cause) { throw new AlayaError("CONFLICT", "retained source preflight has foreign or duplicate request identity", { cause }); }
       if (planned.has(line.key)) throw new AlayaError("CONFLICT", "retained source preparations repeat an owning request key");
       for (const unit of line.unitKeys) {
         if (units.has(unit)) throw new AlayaError("CONFLICT", "retained source preparations repeat a source assignment");
@@ -50,7 +65,7 @@ function readRetainedOwners(owners: readonly SourceAssociationCacheOwner[], popu
       }
       planned.set(line.key, { line, cacheRoot });
     }
-    retained.push({ cacheRoot, digest: chainIdentity(artifact), plannedRequests: lines });
+    retained.push({ cacheRoot, digest: chainIdentity(artifact), contract: preparationContract, plannedRequests: lines });
   }
   return { retained, planned };
 }
@@ -63,7 +78,10 @@ export async function prepareSourcePublicationAssociations(
   owners: readonly SourceAssociationCacheOwner[], outputPath: string
 ) {
   const generation = parseExtractionOpenSemanticsGeneration(population.openSemantics ?? EXTRACTION_OPEN_SEMANTICS_GENERATION);
-  const { retained, planned } = readRetainedOwners(owners, population);
+  const census = await censusCompleteSourceRecords({ population: population.name,
+    dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
+    ...(population.questionWindow === undefined ? {} : { questionWindow: population.questionWindow }) });
+  const { retained, planned } = readRetainedOwners(owners, population, generation, census.dataset_sha256);
   const physical = new Map<string, string>();
   for (const owner of retained) {
     const keys = listRetainedSourceSemanticKeys(owner.cacheRoot);
@@ -73,9 +91,6 @@ export async function prepareSourcePublicationAssociations(
       physical.set(key, owner.cacheRoot);
     }
   }
-  const census = await censusCompleteSourceRecords({ population: population.name,
-    dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
-    ...(population.questionWindow === undefined ? {} : { questionWindow: population.questionWindow }) });
   const expected = new Map<string, { requestDigest: string; sources: typeof census.records[number][] }>();
   const unsupported = new Map<string, Extract<SourcePublicationAssociation, { status: "unsupported_source" }>>();
   for (const source of census.records) {
@@ -88,7 +103,7 @@ export async function prepareSourcePublicationAssociations(
         ...prepared.disposition, provider_attempts: 0 });
       continue;
     }
-    const line = prepareSourceSemanticBatchLine(prepared.semantic, [], population);
+    const line = prepareSourceSemanticRequestLine(prepared.semantic, [], population);
     const match = expected.get(line.key) ?? { requestDigest: line.requestSha256, sources: [] };
     if (match.requestDigest !== line.requestSha256) throw new AlayaError("CONFLICT", "current source requests have ambiguous owning key");
     match.sources.push(source);
@@ -136,9 +151,9 @@ export async function prepareSourcePublicationAssociations(
   }
   const wrapper = { contract: "source-publication-associations-v2", publicationAssociations: associations };
   parseSourcePublicationAssociations(wrapper);
-  const result = { contract: "source-publication-association-preparation-v2", provenance: "new_host_publication_association",
+  const result = { contract: "source-publication-association-preparation-v3", provenance: "new_host_publication_association",
     population: population.name, dataset_sha256: census.dataset_sha256,
-    retained_preparations: retained.map((owner) => ({ cache_root: owner.cacheRoot,
+    retained_preparations: retained.map((owner) => ({ cache_root: owner.cacheRoot, preparation_contract: owner.contract,
       retained_preparation_digest: owner.digest, selected_request_keys: owner.plannedRequests.length })),
     source_occurrences: census.records.length, unsupported_source_occurrences: unsupported.size,
     ready_request_keys: expected.size, publicationAssociations: associations, artifacts,

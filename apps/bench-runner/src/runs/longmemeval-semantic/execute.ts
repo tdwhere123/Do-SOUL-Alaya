@@ -5,7 +5,7 @@ import { AlayaError, SourceSemanticAccessPolicySchema } from "@do-soul/alaya-pro
 import { prepareSemanticChain } from "../semantic-chain/prepare.js";
 import { replaySemanticChain } from "../semantic-chain/replay.js";
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../semantic-chain/contract.js";
-import { SemanticProposalWorksetSchema, parseSemanticProposalWorkset, SEMANTIC_PROPOSAL_WORKSET_CONTRACT } from "../semantic-proposal/workset.js";
+import { SemanticProposalWorksetSchema, parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../semantic-proposal/workset.js";
 import { readSemanticChainProposalResults } from "../semantic-chain/inputs.js";
 import { publishSourceSemanticSnapshot } from "../snapshot/source-records/publish.js";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
@@ -69,7 +69,7 @@ export async function prepareLongMemEvalSemanticRun(root: string) {
   const native = frozen.contract === "longmemeval-native-semantic-v3";
   const items = native ? rows.flatMap((row) => row.status !== "prepared" ? []
     : SemanticChainPlanSchema.parse(readChainArtifact(join(row.chain_root, "prepare.json"))).correspondence_workset?.items ?? []) : [];
-  const workset = items.length === 0 ? null : parseSemanticProposalWorkset({ contract: SEMANTIC_PROPOSAL_WORKSET_CONTRACT,
+  const workset = items.length === 0 ? null : parseSemanticProposalWorkset({ contract: semanticProposalWorksetContract(frozen.config.request_profile),
     kind: "semantic_correspondence", provider_url: frozen.config.provider_url, model: frozen.config.model, request_profile: frozen.config.request_profile, items });
   const result = ExperimentPreparedSchema.parse({ contract: native ? "longmemeval-native-semantic-prepared-v1" : "longmemeval-semantic-prepared-v1",
     freeze_identity: chainIdentity(frozen), rows, ...(native ? { correspondence_workset: workset } : {}) });

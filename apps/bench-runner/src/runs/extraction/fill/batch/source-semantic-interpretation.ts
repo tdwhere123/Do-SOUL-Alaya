@@ -8,9 +8,6 @@ import type { GeminiBatchInvocation, GeminiBatchLine, GeminiBatchPlan } from "./
 import { canonicalBatchPlan } from "./plan.js";
 import { parseSourceSemanticRequestLine } from "../../request-artifact.js";
 
-// Snapshot association still imports this name until its isolated migration lands.
-export { prepareSourceSemanticRequestLine as prepareSourceSemanticBatchLine } from "../../request-artifact.js";
-
 /** Returned drafts still require Core publication; a parser success is not publication. */
 export function receiveSourceSemanticBatchLine(input: Readonly<{
   config: Pick<CompileSeedExtractionConfig, "model" | "requestProfile">;
