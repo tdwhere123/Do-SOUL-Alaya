@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 import { readLiveTransportFailure } from "../cache/cache-live-delegate.js";
-import { createGeminiHttpExtractor, readGeminiFailureResponse } from "../../compile-seed/http/gemini-http.js";
+import { readGeminiFailureResponse } from "../../compile-seed/http/gemini-http.js";
+import { createSemanticProviderHttpExtractor, isCompleteSemanticFinish,
+  readStepFailureResponse, STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../../compile-seed/http/gemini-http.js";
 import { resolveExtractionRequestTimeoutMs } from "../../compile-seed/http/output-token-retry.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
@@ -14,17 +16,19 @@ import {
 import { extractionTypedArtifactMode } from "../request-artifact.js";
 import { readExtractionCacheManifestIdentity, writeExtractionCacheManifest } from
   "../cache/extraction-cache-manifest.js";
-import { resolveExtractionTransportRoute } from "../transport-route.js";
 import type { ExtractionFillOptions, ExtractionFillResult } from "../extraction-fill.js";
 import type { ExecutionExtractionAuthority } from "./fill-execution.js";
 import { inspectFillWindow, type PreparedExtractionFill } from "./fill-preparation.js";
 import { newFillStats, readFillRetryTelemetry } from "./fill-stats.js";
 import { buildFillManifest } from "./manifest/fill-manifest.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
-import { prepareBatchExtractionWorkset, type BatchExtractionWorkset } from "./batch-workset.js";
-import type { GeminiBatchLine } from "./batch/contract.js";
+import { prepareSourceRequestWorkset, type SourceRequestWorkset } from "./source-request-workset.js";
+import { parseSourceSemanticRequest, sourceSemanticResponseJsonSchema } from "@do-soul/alaya-soul";
+import { prepareSourceSemanticRequestWire, sourceSemanticRequestWireDigest } from "./source-semantic-interactive-request.js";
+import type { SourceRequestLine } from "../request-artifact.js";
 import { batchDigest } from "./batch/plan.js";
-import { encodeGeminiGenerateContent, isCompleteGeminiFinish, isGeminiGenerateContentProfile } from "./batch/native-codec.js";
+import { isGeminiGenerateContentProfile } from "./batch/native-codec.js";
+import { assertStepReportedUsage, baseReportedUsage } from "../authority/step-quote.js";
 import {
   bindProviderRawAttempt, listProviderRawAttempts, readProviderRawAttempt, requestEnvelopeDigest,
   writeProviderRawAttempt, retainedFailureOutcome, verifyProviderRawReservation, type ProviderRawAttempt
@@ -52,33 +56,37 @@ export async function executeOpenSemanticsInteractiveFill(
   refuseRecallCampaignLiveExtraction("extraction_write");
   assertInteractiveOpenSemanticsScope(input);
   const authority = input.authority!;
-  const route = resolveExtractionTransportRoute(input.prepared.config);
   const profile = input.prepared.config.requestProfile;
-  if (!isGeminiGenerateContentProfile(profile)) {
+  if (!isGeminiGenerateContentProfile(profile) && profile !== STEP_SEMANTIC_REQUEST_PROFILE) {
     throw new AlayaError("VALIDATION", "open-semantics interactive fill request profile is unsupported");
   }
-  if (authority.receipt.limits.output_token_field !== "maxOutputTokens") {
-    throw new AlayaError("VALIDATION", "open-semantics interactive fill requires maxOutputTokens");
+  if (authority.receipt.limits.output_token_field !==
+      (profile === STEP_SEMANTIC_REQUEST_PROFILE ? "max_tokens" : "maxOutputTokens")) {
+    throw new AlayaError("VALIDATION", "open-semantics interactive fill output field differs from its profile");
   }
   const selected = selectedInteractiveKeys(authority);
-  const workset = prepareBatchExtractionWorkset({
+  const workset = prepareSourceRequestWorkset({
     prepared: input.prepared, cacheRoot: input.cacheRoot,
     ...(selected === undefined ? {} : { executionCacheKeys: selected })
   });
   const maxOutputTokens = authority.receipt.limits.max_output_tokens;
+  if (profile === STEP_SEMANTIC_REQUEST_PROFILE && input.concurrency !== 1) {
+    throw new AlayaError("VALIDATION", "Step source fill requires one sequential request");
+  }
   for (const line of workset.lines) {
     assertAttemptInputWithinReceiptLimit(
-      attemptInputByteUpperBound(JSON.stringify(encodeGeminiGenerateContent(line, {
-        model: route.model, requestProfile: profile, maxOutputTokens
-      }))),
+      attemptInputByteUpperBound(prepareSourceSemanticRequestWire(input.prepared.config, line, maxOutputTokens).body),
       authority.receipt.price.maximum_input_tokens_per_attempt
     );
   }
-  const extractor = createGeminiHttpExtractor(input.prepared.config);
+  const extractor = createSemanticProviderHttpExtractor(input.prepared.config, "source_semantic");
   let newlyExtracted = 0;
   await runBoundedWorkers(workset.lines, input.concurrency, async (line) => {
-    if (await fillInteractiveLine(input, workset, line, extractor, maxOutputTokens) === "admitted") {
+    const outcome = await fillInteractiveLine(input, workset, line, extractor, maxOutputTokens);
+    if (outcome === "admitted") {
       newlyExtracted += 1;
+    } else if (profile === STEP_SEMANTIC_REQUEST_PROFILE) {
+      throw new AlayaError("CONFLICT", `Step source fill stopped after ${outcome} for ${line.key}`);
     }
   });
   importDeterministicEmpty(input, workset);
@@ -93,7 +101,10 @@ function assertInteractiveOpenSemanticsScope(input: InteractiveFillInput): void 
   if (input.authority === undefined) {
     throw new AlayaError("VALIDATION", "open-semantics interactive fill requires an extraction authority receipt");
   }
-  if (input.authority.receipt.action === "sample") throw new AlayaError("CONFLICT", "sample authority is Batch-only");
+  if (input.authority.receipt.action === "sample" &&
+      input.prepared.config.requestProfile !== STEP_SEMANTIC_REQUEST_PROFILE) {
+    throw new AlayaError("CONFLICT", "Gemini sample authority is Batch-only");
+  }
   if (input.authority.receipt.repair_scope !== undefined) {
     throw new AlayaError("VALIDATION", "open-semantics interactive fill needs a fill or probe authority");
   }
@@ -104,23 +115,26 @@ function assertInteractiveOpenSemanticsScope(input: InteractiveFillInput): void 
 
 function selectedInteractiveKeys(authority: ExecutionExtractionAuthority): ReadonlySet<string> | undefined {
   if (authority.receipt.action === "probe") return new Set([authority.receipt.probe_key!]);
+  if (authority.receipt.action === "sample") return new Set(authority.receipt.sample_scope!.keys);
   if (authority.receipt.catalog_refill === undefined) return undefined;
   return new Set(authority.receipt.catalog_refill.keys);
 }
 
 async function fillInteractiveLine(
   input: InteractiveFillInput,
-  workset: BatchExtractionWorkset,
-  line: GeminiBatchLine,
-  extractor: ReturnType<typeof createGeminiHttpExtractor>,
+  workset: SourceRequestWorkset,
+  line: SourceRequestLine,
+  extractor: ReturnType<typeof createSemanticProviderHttpExtractor>,
   maxOutputTokens: number
 ): Promise<"admitted" | "quarantined" | "transport_exhausted"> {
   const replayed = replayInteractiveRaws(input, workset, line);
   if (replayed !== undefined) return replayed;
   const retained = new Set(input.authority!.snapshot()?.transportFailures
     .filter((item) => item.cacheKey === line.key).map((item) => item.attemptOrdinal));
+  const attemptLimit = input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+    ? 1 : COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD;
   let last: "quarantined" | "transport_exhausted" = "transport_exhausted";
-  for (let attempt = retained.size; attempt < COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD; attempt += 1) {
+  for (let attempt = retained.size; attempt < attemptLimit; attempt += 1) {
     const outcome = await dispatchInteractiveLine(input, workset, line, extractor, maxOutputTokens);
     if (outcome === "admitted" || outcome === "quarantined") return outcome;
     last = outcome;
@@ -130,8 +144,8 @@ async function fillInteractiveLine(
 
 function replayInteractiveRaws(
   input: InteractiveFillInput,
-  workset: BatchExtractionWorkset,
-  line: GeminiBatchLine
+  workset: SourceRequestWorkset,
+  line: SourceRequestLine
 ): "admitted" | "quarantined" | "transport_exhausted" | undefined {
   const unresolved = input.authority!.snapshot()?.unresolvedAttempts
     .filter((item) => item.cacheKey === line.key) ?? [];
@@ -147,21 +161,25 @@ function replayInteractiveRaws(
     const outcome = importInteractiveFromRaw(input, line, sourceCorpus, raw);
     if (outcome === "admitted" || outcome === "quarantined") return outcome;
   }
-  return raws.length >= COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD ? "transport_exhausted" : undefined;
+  const attemptLimit = input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+    ? 1 : COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD;
+  return raws.length >= attemptLimit ? "transport_exhausted" : undefined;
 }
 
 function importInteractiveFromRaw(
   input: InteractiveFillInput,
-  line: GeminiBatchLine,
+  line: SourceRequestLine,
   sourceCorpus: string,
   raw: ProviderRawAttempt
 ): "admitted" | "quarantined" | "transport_exhausted" {
   bindProviderRawAttempt(raw, {
     cacheKey: line.key, kind: "source_semantic", model: input.prepared.config.model,
     requestProfile: input.prepared.config.requestProfile,
-    requestDigest: requestEnvelopeDigest(line.userPrompt)
+    requestDigest: sourceSemanticRequestWireDigest(input.prepared.config, line, input.authority!.receipt.limits.max_output_tokens)
   });
   if (verifyProviderRawReservation(raw, input.authority!.snapshot()) === "rejected") return "quarantined";
+  assertStepReportedUsage(input.prepared.config.requestProfile, raw.usage,
+    input.authority!.receipt.limits.max_output_tokens);
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
     input.authority!.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);
@@ -171,7 +189,7 @@ function importInteractiveFromRaw(
   const extracted: InteractiveExtracted = {
     rawJson: raw.decoded_text,
     responseMetadata: { finishReason: raw.finish_reason },
-    ...(raw.usage === null ? {} : { usage: raw.usage })
+    ...(raw.usage === null ? {} : { usage: baseReportedUsage(raw.usage) })
   };
   if (!raw.full_replay_possible) {
     // Settle the completed response without parsing its prefix or replacing the full-response digest.
@@ -182,7 +200,7 @@ function importInteractiveFromRaw(
   return importInteractiveLine(input, line, sourceCorpus, extracted, raw.attempt_ordinal);
 }
 
-function boundSourceCorpus(workset: BatchExtractionWorkset, line: GeminiBatchLine): string {
+function boundSourceCorpus(workset: SourceRequestWorkset, line: SourceRequestLine): string {
   const sourceCorpus = workset.requests.find((request) => request.line.key === line.key)?.units[0]?.sourceCorpus;
   if (sourceCorpus === undefined) throw new AlayaError("INTERNAL", "open-semantics interactive fill lost its bound source corpus");
   return sourceCorpus;
@@ -190,9 +208,9 @@ function boundSourceCorpus(workset: BatchExtractionWorkset, line: GeminiBatchLin
 
 async function dispatchInteractiveLine(
   input: InteractiveFillInput,
-  workset: BatchExtractionWorkset,
-  line: GeminiBatchLine,
-  extractor: ReturnType<typeof createGeminiHttpExtractor>,
+  workset: SourceRequestWorkset,
+  line: SourceRequestLine,
+  extractor: ReturnType<typeof createSemanticProviderHttpExtractor>,
   maxOutputTokens: number
 ): Promise<"admitted" | "quarantined" | "transport_exhausted"> {
   const sourceCorpus = boundSourceCorpus(workset, line);
@@ -211,39 +229,47 @@ async function dispatchInteractiveLine(
       systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, retryMode: "disabled",
       timeoutMs: Math.max(resolveExtractionRequestTimeoutMs(maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS),
       maxOutputTokens,
-      outputTokenField: "maxOutputTokens",
+      outputTokenField: input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+        ? "max_tokens" : "maxOutputTokens",
+      ...(input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? {
+        responseJsonSchema: sourceSemanticResponseJsonSchema(parseSourceSemanticRequest(JSON.parse(line.userPrompt)))
+      } : {}),
       validateRawJson: () => undefined,
       ...(input.options.signal === undefined ? {} : { abortSignal: input.options.signal })
     });
   } catch (cause) {
-    if (input.options.signal?.aborted === true) throw cause;
     if (isLocalPersistenceFailure(cause)) throw cause;
     const outcome = readLiveTransportFailure(cause);
     if (outcome === undefined || outcome.transportFailures.length === 0) throw cause;
     appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
       `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
     const response = readGeminiFailureResponse(cause);
+    const stepResponse = readStepFailureResponse(cause);
     const raw = writeProviderRawAttempt({
       root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",
       model: input.prepared.config.model, requestProfile: input.prepared.config.requestProfile,
-      requestDigest: requestEnvelopeDigest(line.userPrompt), decodedText: "",
+      requestDigest: sourceSemanticRequestWireDigest(input.prepared.config, line, maxOutputTokens), decodedText: "",
       finishReason: response?.finishReason ?? null,
-      failureRetryable: !isCompletedNonRetryableResponse(outcome),
+      failureRetryable: input.options.signal?.aborted === true ? false : !isCompletedNonRetryableResponse(outcome),
       failureClassification: outcome.terminalRetryClassification,
       ...(response === undefined ? {} : { responseBody: response.rawBody }),
+      ...(stepResponse === undefined ? {} : { httpResponse: stepResponse }),
       ...(outcome.transportFailures[0] === undefined ? {} : { transportFailure: outcome.transportFailures[0] }),
       ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
       ...(outcome.transportFailures[0]?.phase === undefined
         ? {} : { transportPhase: outcome.transportFailures[0].phase })
     });
-    return importInteractiveFromRaw(input, line, sourceCorpus, raw);
+    const result = importInteractiveFromRaw(input, line, sourceCorpus, raw);
+    if (input.options.signal?.aborted === true) throw cause;
+    return result;
   }
   const raw = writeProviderRawAttempt({
     root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",
     model: input.prepared.config.model, requestProfile: input.prepared.config.requestProfile,
-    requestDigest: requestEnvelopeDigest(line.userPrompt), decodedText: extracted.rawJson,
+    requestDigest: sourceSemanticRequestWireDigest(input.prepared.config, line, maxOutputTokens), decodedText: extracted.rawJson,
     finishReason: extracted.responseMetadata?.finishReason ?? null,
-    ...(extracted.usage === undefined ? {} : { usage: extracted.usage })
+    ...(extracted.usage === undefined ? {} : { usage: extracted.usage }),
+    ...(extracted.httpResponse === undefined ? {} : { httpResponse: extracted.httpResponse })
   });
   return importInteractiveFromRaw(input, line, sourceCorpus, raw);
 }
@@ -269,7 +295,7 @@ type InteractiveExtracted = Readonly<{
 
 function importInteractiveLine(
   input: InteractiveFillInput,
-  line: GeminiBatchLine,
+  line: SourceRequestLine,
   sourceCorpus: string,
   extracted: InteractiveExtracted,
   attemptOrdinal: number
@@ -277,11 +303,13 @@ function importInteractiveLine(
   const authority = input.authority!;
   const finishReason = extracted.responseMetadata?.finishReason ?? null;
   const provenance = {
-    transport: "gemini-generate-content" as const, finishReason, attemptOrdinal,
+    transport: input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+      ? "step-chat-completion" as const : "gemini-generate-content" as const,
+    finishReason, attemptOrdinal,
     responseSha256: batchDigest(extracted.rawJson),
     ...(extracted.usage === undefined ? {} : { usage: extracted.usage })
   };
-  if (!isCompleteGeminiFinish(finishReason)) {
+  if (!isCompleteSemanticFinish(input.prepared.config.requestProfile, finishReason)) {
     appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
       `${line.key}\tincomplete\tfinish_reason=${String(finishReason)}\n`);
     authority.abandonPendingShard(line.key, attemptOrdinal);
@@ -336,7 +364,7 @@ function recordInteractiveOutcome(
   }, attemptOrdinal);
 }
 
-function importDeterministicEmpty(input: InteractiveFillInput, workset: BatchExtractionWorkset): void {
+function importDeterministicEmpty(input: InteractiveFillInput, workset: SourceRequestWorkset): void {
   for (const { line, sourceTurn } of workset.deterministicEmptyRequests) {
     writeDeterministicSourceSemanticArtifact({
       config: input.prepared.config, cacheRoot: input.cacheRoot, writeLease: input.writeLease, line,
@@ -347,7 +375,7 @@ function importDeterministicEmpty(input: InteractiveFillInput, workset: BatchExt
 }
 
 function publishInteractiveFill(
-  input: InteractiveFillInput, workset: BatchExtractionWorkset, newlyExtracted: number
+  input: InteractiveFillInput, workset: SourceRequestWorkset, newlyExtracted: number
 ): ExtractionFillResult {
   input.writeLease.assertOwned();
   const completion = inspectFillWindow(input.cacheRoot, input.prepared.config, input.prepared.distinctExtractionTurns);

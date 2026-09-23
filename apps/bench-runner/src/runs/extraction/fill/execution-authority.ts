@@ -1,4 +1,5 @@
-import { assertSampleKey, assertSampleKeys, assertSampleReceipt } from "../authority/sample-scope.js";
+import { assertSampleKey, assertSampleKeys, assertSampleReceipt, isStepInteractiveSampleReceipt } from "../authority/sample-scope.js";
+import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 import { readRootBatchRuns } from "./batch/store.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import { inspectExtractionAuthorityDisk } from "../authority/inspection.js";
@@ -94,10 +95,13 @@ function createLedgerExecutionAuthority(
   return {
     receipt,
     reserveAttempt: async (cacheKey, signal) => {
-      if (receipt.sample_scope !== undefined) throw new Error("sample requires the exact Batch submission reservation");
+      if (receipt.sample_scope !== undefined && !isStepInteractiveSampleReceipt(receipt)) {
+        throw new Error("sample requires the exact Batch submission reservation");
+      }
       await reserveAttemptOrdinal(cacheKey, signal);
     },
-    reserveAttemptOrdinal: receipt.sample_scope === undefined ? reserveAttemptOrdinal : undefined,
+    reserveAttemptOrdinal: receipt.sample_scope === undefined || isStepInteractiveSampleReceipt(receipt)
+      ? reserveAttemptOrdinal : undefined,
     reserveSampleBatch: receipt.sample_scope === undefined ? undefined : async (keys, signal) => {
       assertSampleKeys(receipt.sample_scope!, keys);
       assertTarget();
@@ -156,6 +160,9 @@ function openReceiptAttemptLedger(receipt: ExtractionAuthorityReceipt, cacheRoot
     cacheIdentity: receiptExtractionCacheIdentity(receipt),
     startingMissing: receipt.limits.starting_missing,
     maximumAttempts: receipt.limits.maximum_attempts,
+    ...(receipt.observation.extraction.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE &&
+      receipt.observation.extraction.sourcePacking === "complete-source"
+      ? { maximumAttemptsPerKey: 1 } : {}),
     successfulShardCeiling: receipt.limits.successful_shard_ceiling
   });
 }

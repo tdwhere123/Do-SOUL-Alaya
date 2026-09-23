@@ -5,6 +5,7 @@ import type { ExtractionAuthorityInspection } from "./inspection.js";
 import type { ExtractionAuthorityReceipt } from "./receipt.js";
 import type { ExtractionFillOptions } from "../extraction-fill.js";
 import { requiresExtractionTargetSelection } from "./target-selection/receipt.js";
+import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 
 const SampleKeysSchema = z.array(z.string().regex(/^[a-f0-9]{64}$/u)).min(1).readonly();
 const SampleScopeSchema = z.object({
@@ -13,6 +14,13 @@ const SampleScopeSchema = z.object({
 }).strict().readonly();
 
 export type ExtractionSampleScope = z.infer<typeof SampleScopeSchema>;
+
+/** Step interactive uses the sample's exact key set with one reserved attempt per key. */
+export function isStepInteractiveSampleReceipt(receipt: ExtractionAuthorityReceipt): boolean {
+  return receipt.action === "sample" &&
+    receipt.observation.extraction.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE &&
+    receipt.observation.extraction.sourcePacking === "complete-source";
+}
 
 /** A syntactic key proposal has no authority until a receipt binds its inspected scope. */
 export function parseExtractionSampleKeys(value: unknown): readonly string[] {
@@ -105,6 +113,15 @@ export function assertSampleExecutionOptions(
   if (receipt.action !== "sample") return;
   assertSampleReceipt(receipt);
   const batch = options.batch;
+  if (isStepInteractiveSampleReceipt(receipt) &&
+      batch === undefined && options.openSemantics !== undefined &&
+      options.sourcePacking === "complete-source" && options.concurrency === 1 &&
+      options.questionBatchLimit === undefined && options.cacheKeyAllowlist === undefined &&
+      options.predecessorAuthorityReceiptPath === undefined &&
+      options.ingestionMode !== "lazy_field" && options.expansionCapability === undefined &&
+      options.expansionSpendApproval === undefined) {
+    return;
+  }
   if (batch === undefined || batch.limits.maxJobs !== 1 ||
       batch.limits.maxRequestsPerJob !== receipt.sample_scope!.keys.length ||
       batch.requestLimit !== undefined || options.questionBatchLimit !== undefined ||

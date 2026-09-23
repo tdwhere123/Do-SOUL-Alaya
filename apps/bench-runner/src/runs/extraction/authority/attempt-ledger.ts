@@ -259,6 +259,7 @@ export function openExtractionAttemptLedger(input: {
   readonly cacheIdentity: ExtractionAttemptLedgerCacheIdentity;
   readonly startingMissing: number;
   readonly maximumAttempts?: number; readonly successfulShardCeiling?: number;
+  readonly maximumAttemptsPerKey?: number;
   readonly inspectProviderShard?: ExtractionAttemptShardInspector;
 }): {
   readonly reserveAttempt: (cacheKey: string) => void;
@@ -287,7 +288,7 @@ export function openExtractionAttemptLedger(input: {
     persistAttemptLedgerRecord(path, current, input.publicationTemporaryDirectory);
   };
   const reserveAttemptOrdinal = (cacheKey: string): number => {
-    update(reserveTransportAttempt(current, cacheKey));
+    update(reserveTransportAttempt(current, cacheKey, input.maximumAttemptsPerKey));
     return current.attempts;
   };
   return {

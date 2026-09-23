@@ -20,7 +20,7 @@ import {
 import { loadDatasetWindowWithIdentity } from "../../../datasets/longmemeval/ingestion/fetch.js";
 import { EXTRACTION_CACHE_KEY_ALGO } from "../cache/extraction-cache-manifest.js";
 import type { PreparedExtractionFill } from "../fill/fill-preparation.js";
-import { prepareBatchExtractionWorkset } from "../fill/batch-workset.js";
+import { prepareSourceRequestWorkset } from "../fill/source-request-workset.js";
 import {
   batchDigest,
   canonicalBatchPlan,
@@ -158,7 +158,7 @@ export async function runCurrentEnrichmentPreflight(options: {
     if (datasetRevision === undefined) {
       throw new TypeError("enrichment preflight requires a dataset revision");
     }
-    const workset = prepareBatchExtractionWorkset({
+    const workset = prepareSourceRequestWorkset({
       cacheRoot: options.cacheRoot,
       prepared: {
         config: {

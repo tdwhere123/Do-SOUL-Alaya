@@ -15,6 +15,13 @@ export interface ProviderBinding {
  */
 export const PROVIDER_BINDINGS: readonly ProviderBinding[] = [
   {
+    id: "step-3.5-flash-2603",
+    aliases: [],
+    requestProfile: "step-3.5-2603-low-json-schema-v1",
+    supportedRequestProfiles: ["step-3.5-2603-low-json-schema-v1"],
+    probeCallCeiling: 2
+  },
+  {
     id: "gemini-3.1-flash-lite",
     aliases: [],
     requestProfile: "gemini-3.1-minimal-v1",

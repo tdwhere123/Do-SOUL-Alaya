@@ -51,6 +51,7 @@ import {
   writeExtractionAuthorityReceiptArtifactExclusive
 } from "./receipt/artifact-io.js";
 import { assertExtractionAuthorityReceiptScope } from "./receipt/scope.js";
+import { assertStepQuoteBasis, assertStepQuoteRates, stepQuoteBasis } from "./step-quote.js";
 import {
   CURRENT_RECEIPT_VERSION,
   LEGACY_RECEIPT_VERSION,
@@ -224,11 +225,20 @@ function buildUnsignedReceipt(
   }
   const limits = resolveExtractionAuthorityReceiptLimits({
     ...input,
+    requestProfile: input.observation.extraction.requestProfile,
     ...(input.observation.extraction.sourcePacking === undefined ? {} : {
       sourcePacking: input.observation.extraction.sourcePacking
     })
   });
-  const price = resolveExtractionAuthorityReceiptPrice(input.priceEstimate, limits);
+  const transport = input.observation.transport ?? {
+    model: input.observation.extraction.model, providerUrl: input.observation.extraction.providerUrl
+  };
+  assertStepQuoteRates(input.observation.extraction.requestProfile,
+    input.priceEstimate.inputUsdPerMillion, input.priceEstimate.outputUsdPerMillion);
+  const basePrice = resolveExtractionAuthorityReceiptPrice(input.priceEstimate, limits);
+  const price: ExtractionAuthorityReceiptPrice = input.observation.extraction.requestProfile ===
+    "step-3.5-2603-low-json-schema-v1" ? { ...basePrice,
+      quote_basis: stepQuoteBasis(transport.model, transport.providerUrl) } : basePrice;
   const probeKey = input.action === "probe" ? requireProbeKey(input.probeKey) : undefined;
   return {
     schema_version: CURRENT_RECEIPT_VERSION,
@@ -294,6 +304,7 @@ export function assertExtractionAuthorityReceipt(
     maximumAttempts: receipt.limits.maximum_attempts,
     successfulShardCeiling: receipt.limits.successful_shard_ceiling,
     sampleCount: receipt.sample_scope?.keys.length,
+    requestProfile: receipt.observation.extraction.requestProfile,
     ...(receipt.observation.extraction.sourcePacking === undefined ? {} : {
       sourcePacking: receipt.observation.extraction.sourcePacking
     })
@@ -408,6 +419,14 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
     throw new Error("extraction probe authority receipt is missing its target key");
   }
   const verified = receipt as ExtractionAuthorityReceipt;
+  const transport = verified.observation.transport ?? {
+    model: verified.observation.extraction.model,
+    providerUrl: verified.observation.extraction.providerUrl
+  };
+  assertStepQuoteRates(verified.observation.extraction.requestProfile,
+    verified.price.input_usd_per_million, verified.price.output_usd_per_million);
+  assertStepQuoteBasis(verified.observation.extraction.requestProfile,
+    transport.model, transport.providerUrl, verified.price.quote_basis);
   assertExtractionAuthorityReceiptScope(verified);
   if (verified.receipt_digest !== computeReceiptDigest(withoutReceiptDigest(verified))) {
     throw new Error("extraction authority receipt digest is invalid");

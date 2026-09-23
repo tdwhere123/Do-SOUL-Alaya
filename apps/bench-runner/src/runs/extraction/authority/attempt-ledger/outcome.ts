@@ -33,9 +33,21 @@ export class ExtractionAttemptLimitError extends Error {
 
 export function reserveTransportAttempt(
   current: ExtractionAttemptLedgerRecord,
-  cacheKey: string
+  cacheKey: string,
+  maximumAttemptsPerKey?: number
 ): ExtractionAttemptLedgerRecord {
   assertCacheKey(cacheKey);
+  if (maximumAttemptsPerKey !== undefined) {
+    if (!Number.isSafeInteger(maximumAttemptsPerKey) || maximumAttemptsPerKey < 1) {
+      throw new ExtractionAttemptLimitError("invalid extraction per-key attempt ceiling");
+    }
+    const prior = new Set([
+      ...current.unresolved_attempts, ...(current.settled_attempts ?? []), ...current.transport_failures
+    ].filter(attempt => attempt.cache_key === cacheKey).map(attempt => attempt.attempt_ordinal));
+    if (prior.size >= maximumAttemptsPerKey) {
+      throw new ExtractionAttemptLimitError("extraction per-key attempt ceiling exhausted");
+    }
+  }
   if (current.attempts >= current.maximum_attempts) {
     throw new ExtractionAttemptLimitError(
       `extraction attempt ceiling exhausted: ${current.attempts}/${current.maximum_attempts}`

@@ -10,6 +10,7 @@ import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill
 import type { SemanticProposalKind } from "./workset.js";
 import { readProviderRawAttempt, bindProviderRawAttempt, verifyProviderRawReservation, listProviderRawAttempts,
   type ProviderRawAttempt } from "../extraction/fill/provider-raw-attempt.js";
+import { baseReportedUsage } from "../extraction/authority/step-quote.js";
 
 export function readSemanticProposalAttemptState(
   cacheRoot: string, cacheKey: string, expected: SemanticProposalLookup
@@ -60,7 +61,7 @@ export function assertProposalRawReservation(
 function assertProposalShardRaw(shard: SemanticProposalShard, raw: ProviderRawAttempt): void {
   if (raw.decoded_text !== shard.raw_json || raw.finish_reason !== shard.finish_reason ||
       raw.completion_witness !== shard.completion_witness ||
-      canonicalJson(raw.usage) !== canonicalJson(shard.usage ?? null) ||
+      canonicalJson(baseReportedUsage(raw.usage) ?? null) !== canonicalJson(shard.usage ?? null) ||
       hasAdmittedProposalOutcome(shard) && (!raw.full_replay_possible || raw.decoded_text_digest !== shard.raw_digest ||
         raw.transport_failure !== undefined)) {
     throw new SemanticProposalIdentityError("proposal success differs from its reserved raw attempt");
@@ -99,6 +100,8 @@ export function openSemanticProposalAttemptLedger(input: Readonly<{
     },
     startingMissing: input.authority.limits.starting_missing,
     maximumAttempts: input.authority.limits.maximum_attempts,
+    ...(input.authority.request_profile === "step-3.5-2603-low-json-schema-v1"
+      ? { maximumAttemptsPerKey: input.authority.limits.maximum_attempts_per_key } : {}),
     successfulShardCeiling: input.authority.limits.successful_shard_ceiling,
     inspectProviderShard: (cacheRoot, cacheKey, identity) => {
       const shard = inspectSemanticProposalShard(cacheRoot, cacheKey, {

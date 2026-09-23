@@ -2,6 +2,7 @@ import { AlayaError } from "@do-soul/alaya-protocol";
 import { readBoundedCanonicalUtf8Artifact } from "../../runs/extraction/cache-audit/bounded-artifact-reader.js";
 import { writeFileSync } from "node:fs";
 import { preflightExtractionBatch } from "../../runs/extraction/fill/batch-preflight.js";
+import { preflightSourceSemanticInteractive } from "../../runs/extraction/fill/source-semantic-interactive-preflight.js";
 import { readExtractionGeneration } from "./packet-profile.js";
 import process from "node:process";
 import { ExtractionFillTaskError } from "../../runs/extraction/fill/fill-pool.js";
@@ -36,18 +37,20 @@ export async function runExtractionFillCommand(
       throw new AlayaError("VALIDATION", "preflight keys require dry preflight output");
     }
     if (opts.extractionPreflightOut !== undefined) {
-      if (batch === undefined || opts.extractionCacheRoot === undefined || opts.extractionAuthority !== undefined ||
+      if (opts.extractionCacheRoot === undefined || opts.extractionAuthority !== undefined ||
           opts.extractionPredecessorAuthority !== undefined || opts.extractionTargetSelection !== undefined) {
-        throw new AlayaError("VALIDATION", "dry preflight requires Batch prepare settings and a cache root, without execution receipts");
+        throw new AlayaError("VALIDATION", "dry preflight requires a cache root without execution receipts");
       }
-      const report = await preflightExtractionBatch({ variant: opts.variant, sourcePacking: opts.extractionSourcePacking,
+      const preflightInput = { variant: opts.variant, sourcePacking: opts.extractionSourcePacking,
         ...readExtractionGeneration(opts),
         cacheRoot: opts.extractionCacheRoot, dataDir: opts.dataDir, pinnedMetaRoot: opts.pinnedMetaRoot,
-        limit: opts.limit, offset: opts.offset, batch, ...lazy,
+        limit: opts.limit, offset: opts.offset, ...lazy,
         ...(opts.extractionPreflightKeys === undefined ? {} : { preflightKeys: JSON.parse(readBoundedCanonicalUtf8Artifact({
-          path: opts.extractionPreflightKeys, maxBytes: 4 * 1024 * 1024, label: "proposed preflight request keys" })) }) });
+          path: opts.extractionPreflightKeys, maxBytes: 4 * 1024 * 1024, label: "proposed preflight request keys" })) }) };
+      const report = batch === undefined ? await preflightSourceSemanticInteractive(preflightInput) :
+        await preflightExtractionBatch({ ...preflightInput, batch });
       writeFileSync(opts.extractionPreflightOut, `${JSON.stringify(report, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
-      process.stdout.write(`Provider-free Batch preflight: ${opts.extractionPreflightOut}\n`);
+      process.stdout.write(`Provider-free source preflight: ${opts.extractionPreflightOut}\n`);
       return 0;
     }
     if (opts.extractionPredecessorAuthority !== undefined &&

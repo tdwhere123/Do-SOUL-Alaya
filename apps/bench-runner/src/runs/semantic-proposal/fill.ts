@@ -9,13 +9,15 @@ import {
   proposeCorrespondenceSemantics, proposeQuerySemantics,
   type SourceSemanticCorrespondenceRequest, type SourceSemanticQueryRequest
 } from "@do-soul/alaya-soul";
-import { createGeminiHttpExtractor, readGeminiFailureResponse } from "../compile-seed/http/gemini-http.js";
+import { readGeminiFailureResponse } from "../compile-seed/http/gemini-http.js";
+import { createSemanticProviderHttpExtractor, isCompleteSemanticFinish,
+  readStepFailureResponse, STEP_SEMANTIC_REQUEST_PROFILE } from "../compile-seed/http/semantic-provider-http.js";
 import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../compile-seed/http/gemini-http.js";
 import { resolveExtractionRequestTimeoutMs } from "../compile-seed/http/output-token-retry.js";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { assertAttemptInputWithinReceiptLimit } from "../extraction/authority/receipt-limits.js";
 import { acquireExtractionCacheWriteLease, type ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
-import { isCompleteGeminiFinish } from "../extraction/fill/batch/native-codec.js";
+import { assertStepReportedUsage, baseReportedUsage } from "../extraction/authority/step-quote.js";
 import {
   listProviderRawAttempts, readProviderRawAttempt,
   writeProviderRawAttempt, retainedFailureOutcome, type ProviderRawAttempt
@@ -40,9 +42,10 @@ export type ProposalAttemptClass = "interpreted" | "abstained" | "retryable" | "
 
 export function classifyProposalOutcome(
   outcome: Readonly<{ status: string; reason?: string }>,
-  finishReason?: string | null
+  finishReason?: string | null,
+  requestProfile = "gemini-2.5-nonthinking-v1"
 ): ProposalAttemptClass {
-  if (finishReason !== undefined && !isCompleteGeminiFinish(finishReason)) return "incomplete";
+  if (finishReason !== undefined && !isCompleteSemanticFinish(requestProfile, finishReason)) return "incomplete";
   if (outcome.status === "interpreted") return "interpreted";
   if (outcome.status === "abstained") return "abstained";
   if (outcome.status === "transport_failure") return "retryable";
@@ -77,7 +80,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
   cacheRoot: string;
   authority: SemanticProposalAuthority;
   config: CompileSeedExtractionConfig;
-  extractor?: ReturnType<typeof createGeminiHttpExtractor>;
+  extractor?: ReturnType<typeof createSemanticProviderHttpExtractor>;
 }>) {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifySemanticProposalAuthority(input.authority);
@@ -99,7 +102,11 @@ export async function executeSemanticProposalFill(input: Readonly<{
       input.cacheRoot, line.key, lookupOf(input.workset, line, maxOutputTokens)
     ).shard;
     if (existing !== undefined) {
-      replayCachedProposalShard(line, existing);
+      const prior = replayCachedProposalShard(line, existing);
+      if (input.workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE &&
+          prior !== "interpreted" && prior !== "abstained") {
+        throw new AlayaError("CONFLICT", `Step proposal fill stopped after retained ${prior} for ${line.key}`);
+      }
       cacheHits += 1;
       if (authorized.has(line.key)) retainedLines.push(line);
       continue;
@@ -125,18 +132,27 @@ export async function executeSemanticProposalFill(input: Readonly<{
     for (const line of retainedLines) {
       if (!ledger.snapshot().pendingKeys.includes(line.key) &&
           !ledger.snapshot().unresolvedAttempts.some((item) => item.cacheKey === line.key)) continue;
-      replayExistingProposalRaws(input, line, ledger);
+      const replayed = replayExistingProposalRaws(input, line, ledger);
+      if (input.workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE && replayed.done &&
+          replayed.classified !== "interpreted" && replayed.classified !== "abstained") {
+        throw new AlayaError("CONFLICT", `Step proposal fill stopped after retained ${replayed.classified} for ${line.key}`);
+      }
       if (ledger.snapshot().pendingKeys.includes(line.key) ||
           ledger.snapshot().unresolvedAttempts.some((item) => item.cacheKey === line.key)) {
         throw new SemanticProposalIdentityError(`retained proposal has unresolved attempt evidence: ${line.key}`);
       }
     }
-    const extractor = dispatch.length === 0 ? undefined : input.extractor ?? createGeminiHttpExtractor(input.config);
+    const extractor = dispatch.length === 0 ? undefined : input.extractor ??
+      createSemanticProviderHttpExtractor(input.config, "source_semantic_proposal");
     let newlyAdmitted = 0, attempts = 0;
     for (const line of dispatch) {
       assertAttemptInputWithinReceiptLimit(line.inputByteUpper, authority.price.maximum_input_tokens_per_attempt);
       const filled = await fillLine(input, line, extractor!, ledger, maxOutputTokens, lease);
       attempts += filled.attempts;
+      if (input.workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE &&
+          filled.classified !== "interpreted" && filled.classified !== "abstained") {
+        throw new AlayaError("CONFLICT", `Step proposal fill stopped after ${filled.classified} for ${line.key}`);
+      }
       if (filled.admitted) {
         newlyAdmitted += 1;
       }
@@ -221,7 +237,7 @@ type ProposalLedger = ReturnType<typeof openSemanticProposalAttemptLedger>;
 async function fillLine(
   input: Parameters<typeof executeSemanticProposalFill>[0],
   line: SemanticProposalLine,
-  extractor: ReturnType<typeof createGeminiHttpExtractor>,
+  extractor: ReturnType<typeof createSemanticProviderHttpExtractor>,
   ledger: ProposalLedger,
   maxOutputTokens: number,
   writeLease: ExtractionCacheWriteLease
@@ -249,7 +265,8 @@ async function fillLine(
       extracted = await extractor.extract({
         systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, retryMode: "disabled",
         timeoutMs: Math.max(resolveExtractionRequestTimeoutMs(maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS),
-        maxOutputTokens, outputTokenField: "maxOutputTokens",
+        maxOutputTokens, outputTokenField: input.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+          ? "max_tokens" : "maxOutputTokens",
         validateRawJson: () => undefined, responseJsonSchema: line.responseJsonSchema
       });
     } catch (cause) {
@@ -259,7 +276,7 @@ async function fillLine(
       appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
         `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
       const settled = persistFailedExtract(input, line, ledger, transport, ordinal, used,
-        readGeminiFailureResponse(cause), lastAttempt);
+        readGeminiFailureResponse(cause), readStepFailureResponse(cause), lastAttempt);
       if (settled.classified !== "retryable" || lastAttempt) return settled;
       continue;
     }
@@ -269,7 +286,8 @@ async function fillLine(
       requestDigest: line.requestDigest, attemptLineageDigest: input.authority.attempt_lineage_digest,
       decodedText: extracted.rawJson,
       finishReason: extracted.responseMetadata?.finishReason ?? null,
-      ...(extracted.usage === undefined ? {} : { usage: extracted.usage })
+      ...(extracted.usage === undefined ? {} : { usage: extracted.usage }),
+      ...(extracted.httpResponse === undefined ? {} : { httpResponse: extracted.httpResponse })
     });
     const settled = replayPersistedProposalRaw(input, line, ledger, raw, lastAttempt);
     if (settled.classified !== "retryable" || lastAttempt) {
@@ -365,16 +383,17 @@ function replayPersistedProposalRaw(
   lastAttempt: boolean
 ): { classified: ProposalAttemptClass; admitted: boolean } {
   assertProposalRawReservation(raw, ledger.snapshot(), lookupOf(input.workset, line, input.authority.limits.max_output_tokens), line.key);
+  assertStepReportedUsage(input.workset.request_profile, raw.usage, input.authority.limits.max_output_tokens);
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
-    if (raw.failure_retryable !== true || lastAttempt) writeAttempt(input, line, raw.decoded_text, raw.usage ?? undefined,
+    if (raw.failure_retryable !== true || lastAttempt) writeAttempt(input, line, raw.decoded_text, baseReportedUsage(raw.usage),
       { status: "transport_failure", failure: raw.transport_failure }, false, raw.attempt_ordinal, raw.finish_reason);
     ledger.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);
     ledger.abandonPendingShard(line.key, raw.attempt_ordinal);
     return { classified: raw.failure_retryable === true ? "retryable" : "terminal", admitted: false };
   }
   if (!raw.full_replay_possible) {
-    const usage = raw.usage_known && raw.usage !== null ? raw.usage : undefined;
+    const usage = baseReportedUsage(raw.usage);
     writeAttempt(input, line, raw.decoded_text, usage,
       { status: "invalid", reason: "truncated_raw" }, false, raw.attempt_ordinal, raw.finish_reason);
     ledger.recordTransportOutcome(line.key, settledProposalRequestOutcome(usage), raw.attempt_ordinal);
@@ -384,7 +403,7 @@ function replayPersistedProposalRaw(
   return settleDecoded(input, line, ledger, {
     rawJson: raw.decoded_text,
     finishReason: raw.finish_reason,
-    usage: raw.usage ?? undefined
+    usage: baseReportedUsage(raw.usage)
   }, raw.attempt_ordinal, lastAttempt);
 }
 
@@ -400,7 +419,7 @@ function settleDecoded(
   lastAttempt: boolean
 ): { classified: ProposalAttemptClass; admitted: boolean } {
   const received = receiveLine(line, decoded.rawJson);
-  const classified = classifyProposalOutcome(received.outcome, decoded.finishReason);
+  const classified = classifyProposalOutcome(received.outcome, decoded.finishReason, input.workset.request_profile);
   const admitted = classified === "interpreted" && isCoreAdmittedProposal(line, received);
   const persistShard = classified !== "retryable" || lastAttempt;
   // Shard publication precedes reservation settle so a crash cannot look like missing work.
@@ -426,7 +445,8 @@ function replayCachedProposalShard(
     }
     return "empty";
   }
-  const classified = classifyProposalOutcome(receiveLine(line, shard.raw_json).outcome, shard.finish_reason);
+  const classified = classifyProposalOutcome(receiveLine(line, shard.raw_json).outcome, shard.finish_reason,
+    shard.request_profile);
   if (classified === "incomplete") {
     // Parser/semantic outcome stays distinct from completion: interpreted plus
     // non-STOP with admitted=false is the retained incomplete cache state.
@@ -541,6 +561,7 @@ function persistFailedExtract(
   ordinal: number,
   used: number,
   response: ReturnType<typeof readGeminiFailureResponse>,
+  stepResponse: ReturnType<typeof readStepFailureResponse>,
   lastAttempt: boolean
 ): { classified: ProposalAttemptClass; admitted: boolean; attempts: number } {
   const usage = transport.usage;
@@ -551,6 +572,7 @@ function persistFailedExtract(
     requestDigest: line.requestDigest, attemptLineageDigest: input.authority.attempt_lineage_digest, decodedText: "",
     finishReason: response?.finishReason ?? null,
     ...(response === undefined ? {} : { responseBody: response.rawBody }),
+    ...(stepResponse === undefined ? {} : { httpResponse: stepResponse }),
     ...(transport.transportFailures[0] === undefined ? {} : { transportFailure: transport.transportFailures[0] }),
     failureRetryable: !isCompletedNonRetryableResponse(transport),
     ...(transport.terminalRetryClassification === undefined ? {} : { failureClassification: transport.terminalRetryClassification }),

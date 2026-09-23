@@ -8,14 +8,15 @@ import {
   type SourceSemanticCorrespondenceRequest, type SourceSemanticQueryRequest
 } from "@do-soul/alaya-soul";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "@do-soul/alaya-core";
-import { isGeminiGenerateContentProfile } from "../extraction/fill/batch/native-codec.js";
-import { prepareGeminiRequest } from "../compile-seed/http/gemini-http.js";
+import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
+import { prepareSemanticProviderRequest, STEP_SEMANTIC_REQUEST_PROFILE } from "../compile-seed/http/semantic-provider-http.js";
 import { normalizeGeminiEndpoint } from "../provider/gemini-endpoint.js";
 import { buildExtractionTransportProvenance, resolveExtractionTransportRoute, type ExtractionTransportProvenance } from "../extraction/transport-route.js";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { attemptInputByteUpperBound } from "../extraction/authority/receipt-limits.js";
 
 export const SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v3" as const;
+export const STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v4" as const;
 export const SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT = 4096;
 
 const QueryItemSchema = z.object({
@@ -33,10 +34,10 @@ const CorrespondenceItemSchema = z.object({
 }).strict();
 
 export const SemanticProposalWorksetSchema = z.object({
-  contract: z.literal(SEMANTIC_PROPOSAL_WORKSET_CONTRACT),
+  contract: z.enum([SEMANTIC_PROPOSAL_WORKSET_CONTRACT, STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT]),
   kind: z.enum(["query", "semantic_correspondence"]),
   model: z.string().min(1),
-  provider_url: z.string().min(1).transform(value => normalizeGeminiEndpoint(value).origin),
+  provider_url: z.string().min(1),
   request_profile: z.string().min(1),
   producer_id: z.string().min(1).optional(),
   producer_version: z.string().min(1).optional(),
@@ -60,14 +61,24 @@ export type SemanticProposalLine = Readonly<{
 }>;
 
 export function parseSemanticProposalWorkset(value: unknown): SemanticProposalWorkset {
-  return SemanticProposalWorksetSchema.parse(value);
+  const workset = SemanticProposalWorksetSchema.parse(value);
+  const step = workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE;
+  if (step !== (workset.contract === STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT)) {
+    throw new AlayaError("VALIDATION", "semantic proposal workset contract/profile mismatch");
+  }
+  return { ...workset, provider_url: step
+    ? workset.provider_url : normalizeGeminiEndpoint(workset.provider_url).origin };
 }
 
 export function materializeSemanticProposalLines(
   workset: SemanticProposalWorkset, maxOutputTokens: number
 ): readonly SemanticProposalLine[] {
-  if (!isGeminiGenerateContentProfile(workset.request_profile)) {
-    throw new AlayaError("VALIDATION", "semantic proposal fill requires a native Gemini request profile");
+  if ((workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE) !==
+      (workset.contract === STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT)) {
+    throw new AlayaError("VALIDATION", "semantic proposal workset contract/profile mismatch");
+  }
+  if (!isNativeGeminiRequestProfile(workset.request_profile) && workset.request_profile !== STEP_SEMANTIC_REQUEST_PROFILE) {
+    throw new AlayaError("VALIDATION", "semantic proposal fill requires a native semantic request profile");
   }
   if (workset.kind === "query") {
     const producer_id = workset.producer_id ?? SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID;
@@ -108,8 +119,8 @@ function bindLine(
   original_query: string,
   maxOutputTokens: number
 ): SemanticProposalLine {
-  if (!isGeminiGenerateContentProfile(workset.request_profile)) {
-    throw new AlayaError("VALIDATION", "semantic proposal fill requires a native Gemini request profile");
+  if (!isNativeGeminiRequestProfile(workset.request_profile) && workset.request_profile !== STEP_SEMANTIC_REQUEST_PROFILE) {
+    throw new AlayaError("VALIDATION", "semantic proposal fill requires a native semantic request profile");
   }
   const userPrompt = JSON.stringify(request);
   const config = { model: workset.model, providerUrl: workset.provider_url,
@@ -129,13 +140,16 @@ export function semanticProposalRequestBinding(
   config: CompileSeedExtractionConfig,
   request: { systemPrompt: string; userPrompt: string; maxOutputTokens: number; responseJsonSchema: object }
 ) {
-  const encoded = prepareGeminiRequest(config, { ...request, retryMode: "disabled", validateRawJson: () => undefined });
+  const encoded = prepareSemanticProviderRequest(config, { ...request, retryMode: "disabled",
+    outputTokenField: config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? "max_tokens" : "maxOutputTokens",
+    validateRawJson: () => undefined }, "source_semantic_proposal");
   const route = resolveExtractionTransportRoute(config);
   return {
     inputByteUpper: attemptInputByteUpperBound(encoded.body),
     requestDigest: createHash("sha256").update(JSON.stringify([encoded.url.href, encoded.body])).digest("hex"),
     transportProvenance: buildExtractionTransportProvenance({ ...config,
-      transportProviderUrl: normalizeGeminiEndpoint(route.providerUrl).origin })
+      transportProviderUrl: config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+        ? route.providerUrl : normalizeGeminiEndpoint(route.providerUrl).origin })
   };
 }
 
@@ -143,13 +157,17 @@ export function proposalCacheKey(
   model: string, requestProfile: string, systemPrompt: string, userPrompt: string, schema: object,
   maxOutputTokens: number, providerUrl: string
 ): string {
-  if (!isGeminiGenerateContentProfile(requestProfile)) throw new AlayaError("VALIDATION", "semantic proposal requires a native Gemini profile");
-  const wire = prepareGeminiRequest({ model, requestProfile, providerUrl, apiKey: null }, {
+  if (!isNativeGeminiRequestProfile(requestProfile) && requestProfile !== STEP_SEMANTIC_REQUEST_PROFILE) {
+    throw new AlayaError("VALIDATION", "semantic proposal requires a native semantic profile");
+  }
+  const wire = prepareSemanticProviderRequest({ model, requestProfile, providerUrl, apiKey: null }, {
     systemPrompt, userPrompt, maxOutputTokens, responseJsonSchema: schema,
+    outputTokenField: requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? "max_tokens" : "maxOutputTokens",
     retryMode: "disabled", validateRawJson: () => undefined
-  });
+  }, "source_semantic_proposal");
   return createHash("sha256")
-    .update(SEMANTIC_PROPOSAL_WORKSET_CONTRACT, "utf8").update("\u0000", "utf8")
+    .update(requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT :
+      SEMANTIC_PROPOSAL_WORKSET_CONTRACT, "utf8").update("\u0000", "utf8")
     .update(model, "utf8").update("\u0000", "utf8")
     .update(requestProfile, "utf8").update("\u0000", "utf8")
     .update(systemPrompt, "utf8").update("\u0000", "utf8")

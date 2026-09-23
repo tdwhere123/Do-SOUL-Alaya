@@ -5,6 +5,7 @@ import { z } from "zod";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durable-exclusive-publication.js";
 import { proposalCacheKey, type SemanticProposalKind } from "./workset.js";
+import { isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider-http.js";
 import { ExtractionTransportProvenanceSchema, type ExtractionTransportProvenance } from "../extraction/transport-route.js";
 
 export const SEMANTIC_PROPOSAL_CACHE_CONTRACT = "source-semantic-proposal-cache-v3" as const;
@@ -178,7 +179,8 @@ export function proposalOutcomeStatus(shard: SemanticProposalShard): string {
 }
 
 export function hasVerifiedProposalCompletion(shard: SemanticProposalShard): boolean {
-  return shard.finish_reason === "STOP" && shard.completion_witness === "finish_reason";
+  return isCompleteSemanticFinish(shard.request_profile, shard.finish_reason) &&
+    shard.completion_witness === "finish_reason";
 }
 
 /** Local outcome shape only; executable reads also require durable attempt/raw closure. */

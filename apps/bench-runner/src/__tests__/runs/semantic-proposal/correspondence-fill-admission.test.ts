@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +27,8 @@ import {
   materializeSemanticProposalLines, parseSemanticProposalWorkset
 } from "../../../runs/semantic-proposal/workset.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
+import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { proposalRecoveryCases } from "./proposal-recovery.test-support.js";
 
@@ -167,6 +171,61 @@ function selectionBody(request: SourceSemanticCorrespondenceRequest, excerpt: st
     }
   });
 }
+
+it("sends Step correspondence through the pinned route and reopens its admitted raw", async () => {
+  const prepared = parseSemanticProposalWorkset({
+    ...correspondenceWorkset(), contract: "source-semantic-proposal-workset-v4",
+    provider_url: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
+    model: STEP_PLAN_QUOTE_BASIS.selected_model,
+    request_profile: "step-3.5-2603-low-json-schema-v1"
+  });
+  const cacheRoot = join(tempRoot(), "step-cache");
+  const authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(prepared, cacheRoot, 4096, 1),
+    inputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million,
+    outputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million
+  });
+  const line = materializeSemanticProposalLines(prepared, 4096)[0]!;
+  const wire = `data: ${JSON.stringify({ choices: [{
+    delta: { content: selectionBody(line.request as SourceSemanticCorrespondenceRequest, "sent") },
+    finish_reason: "stop"
+  }], usage: { prompt_tokens: 21, completion_tokens: 8, total_tokens: 29 } })}\n\ndata: [DONE]\n\n`;
+  const seen: { path: string | undefined; body: Record<string, unknown> }[] = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    seen.push({ path: request.url, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(wire);
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const config: CompileSeedExtractionConfig = { model: prepared.model, requestProfile: "step-3.5-2603-low-json-schema-v1",
+      providerUrl: prepared.provider_url, apiKey: "loopback-only" };
+    const nativeFetch = globalThis.fetch;
+    const localOrigin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const fetchImpl: typeof fetch = (url, init) => {
+      const selected = new URL(String(url));
+      expect(selected.href).toBe("https://api.stepfun.com/step_plan/v1/chat/completions");
+      return nativeFetch(new URL(selected.pathname, localOrigin), init);
+    };
+    const result = await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority,
+      config, extractor: createSemanticProviderHttpExtractor(config, "source_semantic_proposal", fetchImpl) });
+    expect(result).toMatchObject({ interpreted: 1, newly_admitted: 1, attempts: 1 });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ path: "/step_plan/v1/chat/completions",
+      body: { reasoning_effort: "low", max_tokens: 4096, response_format: { type: "json_schema" } } });
+    expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toMatchObject({
+      contract: "semantic-proposal-raw-attempt-v2", http_response: { bodyBase64: Buffer.from(wire).toString("base64") }
+    });
+    expect(readSemanticProposalResults(prepared, cacheRoot, 4096)[0]?.status).toBe("interpreted");
+    await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: { ...config, apiKey: null } });
+    expect(seen).toHaveLength(1);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
 
 it("rejects an semantic_correspondence workset whose original question differs from the admitted query digest", () => {
   const workset = correspondenceWorkset();

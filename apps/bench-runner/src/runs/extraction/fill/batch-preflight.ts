@@ -1,7 +1,7 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { parseExtractionSampleKeys } from "../authority/sample-scope.js";
 import { inspectExtractionFillPreparation } from "./fill-preparation.js";
-import { prepareBatchExtractionWorkset } from "./batch-workset.js";
+import { prepareSourceRequestWorkset } from "./source-request-workset.js";
 import { batchDigest, canonicalBatchPlan, prepareBatchJobs } from "./batch/plan.js";
 import { isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import { resolveExtractionTransportRoute } from "../transport-route.js";
@@ -19,7 +19,7 @@ export async function preflightExtractionBatch(options: ExtractionFillOptions & 
   if (selectedKeys !== undefined && options.batch.requestLimit !== undefined) {
     throw new AlayaError("VALIDATION", "explicit preflight keys cannot combine a request limit");
   }
-  const workset = prepareBatchExtractionWorkset({ prepared: inspected, cacheRoot: options.cacheRoot,
+  const workset = prepareSourceRequestWorkset({ prepared: inspected, cacheRoot: options.cacheRoot,
     ...(selectedKeys === undefined ? {} : { executionCacheKeys: new Set(selectedKeys) }) });
   if (workset.unsupportedSources.length !== inspected.unsupportedSourceOccurrences) {
     throw new AlayaError("CONFLICT", "Batch host preparation lost unsupported source occurrences");

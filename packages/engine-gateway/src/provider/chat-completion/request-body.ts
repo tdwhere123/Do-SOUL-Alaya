@@ -1,5 +1,5 @@
 import { assertAllowedProviderChatUrl } from "./provider-url-guard.js";
-import type { EnvLookup } from "@do-soul/alaya-protocol";
+import { AlayaError, type EnvLookup } from "@do-soul/alaya-protocol";
 import type {
   ProviderChatCompletionRequest,
   ProviderRequestProfile
@@ -60,7 +60,7 @@ export function buildProviderChatRequestBody(
         !Number.isSafeInteger(request.maxOutputTokens) || (request.maxOutputTokens ?? 0) <= 0 ||
         request.outputTokenField !== undefined && request.outputTokenField !== "max_tokens" ||
         request.sseCompletionPolicy === "allow_clean_eof_v1") {
-      throw new Error("Step 3.5 2603 profile requires its exact model, named JSON Schema, finite max_tokens, and witnessed completion");
+      throw new AlayaError("VALIDATION", "Step 3.5 2603 profile requires its exact model, named JSON Schema, finite max_tokens, and witnessed completion");
     }
     return {
       model: request.model,
@@ -79,7 +79,7 @@ export function buildProviderChatRequestBody(
     };
   }
   if (request.jsonSchema !== undefined) {
-    throw new Error("JSON Schema requires the Step 3.5 2603 profile");
+    throw new AlayaError("VALIDATION", "JSON Schema requires the Step 3.5 2603 profile");
   }
   return {
     model: request.model,

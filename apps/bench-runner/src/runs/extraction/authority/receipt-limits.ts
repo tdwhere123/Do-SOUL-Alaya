@@ -4,6 +4,8 @@ import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "@do-soul/alaya-sou
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { BENCH_HTTP_MAX_RETRIES } from "../../compile-seed/http/garden-http-retry-policy.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
+import type { StepQuoteBasis } from "./step-quote.js";
+import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 
 export const EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS: 1_800_000 = 1_800_000;
 const MAX_ASSERTION_PARTITION_TREE_NODES =
@@ -41,6 +43,7 @@ export interface ExtractionAuthorityReceiptPrice {
   readonly output_usd_per_million: number;
   readonly maximum_input_tokens_per_attempt: number;
   readonly estimated_upper_usd: number;
+  readonly quote_basis?: StepQuoteBasis;
 }
 
 export interface ExtractionAuthorityReceiptLimitInput {
@@ -48,6 +51,7 @@ export interface ExtractionAuthorityReceiptLimitInput {
   readonly sampleScope?: ExtractionSampleScope;
   readonly observation: { readonly inventory: { readonly missingTurns: number } };
   readonly sourcePacking?: ExtractionSourcePacking;
+  readonly requestProfile?: string;
   readonly outputTokenCap: {
     readonly field: ExtractionAuthorityReceiptLimits["output_token_field"];
     readonly value: number;
@@ -76,7 +80,7 @@ export function resolveExtractionAuthorityReceiptLimits(
   const expected = expectedExtractionAuthorityLimits(
     input.action,
     input.action === "sample" ? input.sampleScope!.keys.length : missing,
-    input.sourcePacking
+    input.sourcePacking, input.requestProfile
   );
   if (carried !== undefined && (carried.maximumAttempts !== expected.maximumAttempts ||
       carried.successfulShardCeiling !== expected.successfulShardCeiling)) {
@@ -142,7 +146,8 @@ export function resolveExtractionAuthorityReceiptPrice(
 export function expectedExtractionAuthorityLimits(
   action: "probe" | "fill" | "sample",
   missing: number,
-  sourcePacking?: ExtractionSourcePacking
+  sourcePacking?: ExtractionSourcePacking,
+  requestProfile?: string
 ): { readonly maximumAttempts: number; readonly successfulShardCeiling: number } {
   if (action === "sample") {
     if (!Number.isSafeInteger(missing) || missing < 1) throw new Error("sample requires a nonempty scope");
@@ -153,7 +158,9 @@ export function expectedExtractionAuthorityLimits(
     return { maximumAttempts: 1, successfulShardCeiling: 1 };
   }
   return {
-    maximumAttempts: sourcePacking === "complete-source"
+    maximumAttempts: requestProfile === STEP_SEMANTIC_REQUEST_PROFILE && sourcePacking === "complete-source"
+      ? missing
+      : sourcePacking === "complete-source"
       ? completeSourceFillAttemptCeiling(missing)
       : computeExtractionFillAttemptCeiling(missing),
     successfulShardCeiling: missing

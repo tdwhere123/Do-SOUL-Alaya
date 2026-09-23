@@ -24,7 +24,7 @@ import { newFillStats, readFillRetryTelemetry } from "./fill-stats.js";
 import { buildFillManifest } from "./manifest/fill-manifest.js";
 import { replaceBytesDurable } from "./manifest/durable-exclusive-publication.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
-import { prepareBatchExtractionWorkset, type BatchExtractionWorkset } from "./batch-workset.js";
+import { prepareSourceRequestWorkset, type SourceRequestWorkset } from "./source-request-workset.js";
 import type { GeminiBatchInvocation, GeminiBatchPlan } from "./batch/contract.js";
 import { batchDigest, canonicalBatchPlan, MAX_BATCH_ARTIFACT_BYTES } from "./batch/plan.js";
 import { createGeminiBatchHttp } from "./batch/http.js";
@@ -77,7 +77,7 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
     : authority.receipt.catalog_refill === undefined ? undefined
       : new Set(authority.receipt.catalog_refill.keys);
   if (authority.receipt.repair_scope !== undefined) throw new Error("Batch repair needs a fresh missing-unit authority");
-  const workset = prepareBatchExtractionWorkset({ prepared: input.prepared, cacheRoot: input.cacheRoot,
+  const workset = prepareSourceRequestWorkset({ prepared: input.prepared, cacheRoot: input.cacheRoot,
     ...(selected === undefined ? {} : { executionCacheKeys: selected }) });
   const plan = bindBatchPlan(input, workset, route.model, profile);
   if (extractionTypedArtifactMode(input.prepared.config) !== undefined) retainBatchAuthority(input.writeLease, plan.identity, authority.receipt);
@@ -172,7 +172,7 @@ function assertBatchExpenseScope(limits: NonNullable<ExtractionFillOptions["batc
   }
 }
 
-function bindBatchPlan(input: BatchFillInput, workset: BatchExtractionWorkset,
+function bindBatchPlan(input: BatchFillInput, workset: SourceRequestWorkset,
   model: string, requestProfile: GeminiBatchPlan["requestProfile"]): GeminiBatchPlan {
   const window = input.options.batch!.window ?? "initial";
   const requestLimit = input.options.batch!.requestLimit;
@@ -234,7 +234,7 @@ function bindBatchPlan(input: BatchFillInput, workset: BatchExtractionWorkset,
   return plan;
 }
 
-async function importBatchLine(input: BatchFillInput, workset: BatchExtractionWorkset,
+async function importBatchLine(input: BatchFillInput, workset: SourceRequestWorkset,
   result: Parameters<GeminiBatchInvocation["importLine"]>[0], plan: GeminiBatchPlan): ReturnType<GeminiBatchInvocation["importLine"]> {
   const authority = input.authority!;
   const sourceCorpus = workset.requests.find((request) => request.line.key === result.line.key)?.units[0]?.sourceCorpus;
@@ -275,7 +275,7 @@ async function importBatchLine(input: BatchFillInput, workset: BatchExtractionWo
   authority.commitSuccessfulShard(result.line.key);
 }
 
-async function importEmptyRequests(input: BatchFillInput, workset: BatchExtractionWorkset): Promise<void> {
+async function importEmptyRequests(input: BatchFillInput, workset: SourceRequestWorkset): Promise<void> {
   if (input.prepared.config.openSemantics !== undefined) {
     for (const { line, sourceTurn } of workset.deterministicEmptyRequests) {
       writeDeterministicSourceSemanticArtifact({ config: input.prepared.config, cacheRoot: input.cacheRoot,

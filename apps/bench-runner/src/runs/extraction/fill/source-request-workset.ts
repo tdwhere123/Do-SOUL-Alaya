@@ -2,7 +2,9 @@ import { assertSourcePacketShardCapacity } from "../cache/source-packet-artifact
 import { assertSourceSemanticShardCapacity } from "../cache/source-semantic-artifact.js";
 import { buildOfficialApiSourceCorpus, sourceSemanticTransportUnits } from "@do-soul/alaya-soul";
 import { extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode,
-  sourceSemanticArtifactPreparations, type ExtractionArtifactSource, type SourceSemanticArtifactPreparation } from "../request-artifact.js";
+  sourceSemanticArtifactPreparations, prepareSourceSemanticRequestLine,
+  type ExtractionArtifactSource, type SourceSemanticArtifactPreparation,
+  type SourceRequestLine } from "../request-artifact.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
 import { createHash } from "node:crypto";
 import {
@@ -17,30 +19,29 @@ import {
   extractionRequestCoverageMemoKey,
   type LongMemEvalExtractionTurn
 } from "../turn-contents.js";
-import type { GeminiBatchLine } from "./batch/contract.js";
 import type { PreparedExtractionFill } from "./fill-preparation.js";
 
 export type BatchExtractionSourceUnit = ReturnType<
   typeof planOfficialApiSemanticWorkset
 >["units"][number] | ReturnType<typeof sourceSemanticTransportUnits>[number];
 
-export interface BatchExtractionRequest {
-  readonly line: GeminiBatchLine;
+export interface SourceExtractionRequest {
+  readonly line: SourceRequestLine;
   readonly request: ExtractionArtifactSource;
   readonly sourceTurn: LongMemEvalExtractionTurn;
   readonly units: readonly BatchExtractionSourceUnit[];
 }
 
-export interface BatchExtractionWorkset {
-  readonly lines: readonly GeminiBatchLine[];
-  readonly requests: readonly BatchExtractionRequest[];
-  readonly deterministicEmptyRequests: readonly BatchExtractionRequest[];
-  readonly cachedRequests: readonly BatchExtractionRequest[];
+export interface SourceRequestWorkset {
+  readonly lines: readonly SourceRequestLine[];
+  readonly requests: readonly SourceExtractionRequest[];
+  readonly deterministicEmptyRequests: readonly SourceExtractionRequest[];
+  readonly cachedRequests: readonly SourceExtractionRequest[];
   readonly units: readonly BatchExtractionSourceUnit[];
-  readonly unsupportedSources: readonly BatchUnsupportedSource[];
+  readonly unsupportedSources: readonly UnsupportedSourceRequest[];
 }
 
-export type BatchUnsupportedSource = Readonly<{
+export type UnsupportedSourceRequest = Readonly<{
   messageIds: readonly string[];
   datasetRevision: string;
   disposition: Extract<SourceSemanticArtifactPreparation, { status: "unsupported_source" }>["disposition"];
@@ -51,20 +52,20 @@ type BatchPreparedSources = Pick<PreparedExtractionFill,
   "config" | "datasetRevision" | "executionExtractionTurns" | "occurrenceExtractionTurns">;
 
 /** Cache request shards and source work units retain separate identities. */
-export function prepareBatchExtractionWorkset(input: {
+export function prepareSourceRequestWorkset(input: {
   readonly prepared: BatchPreparedSources;
   readonly cacheRoot: string;
   readonly turns?: readonly LongMemEvalExtractionTurn[];
   readonly executionCacheKeys?: ReadonlySet<string>;
-}): BatchExtractionWorkset {
+}): SourceRequestWorkset {
   const prepared = input.prepared;
   const turns = input.turns ?? prepared.executionExtractionTurns;
   const selectedKeys = selectedRequestKeys(prepared, turns, input.executionCacheKeys);
   const requests = collectBatchRequests(prepared, turns, selectedKeys);
   const unsupportedSources = collectUnsupportedSources(prepared, prepared.occurrenceExtractionTurns ?? turns);
-  const lines: GeminiBatchLine[] = [];
-  const deterministicEmptyRequests: BatchExtractionRequest[] = [];
-  const cachedRequests: BatchExtractionRequest[] = [];
+  const lines: SourceRequestLine[] = [];
+  const deterministicEmptyRequests: SourceExtractionRequest[] = [];
+  const cachedRequests: SourceExtractionRequest[] = [];
   for (const item of requests) {
     const cached = inspectCachedExtractionArtifact(input.cacheRoot, item.line.key,
       prepared.config.model, prepared.config.requestProfile, extractionTypedArtifactMode(prepared.config));
@@ -88,9 +89,9 @@ export function prepareBatchExtractionWorkset(input: {
 }
 
 function collectUnsupportedSources(prepared: BatchPreparedSources,
-  turns: readonly LongMemEvalExtractionTurn[]): readonly BatchUnsupportedSource[] {
+  turns: readonly LongMemEvalExtractionTurn[]): readonly UnsupportedSourceRequest[] {
   if (prepared.config.openSemantics === undefined) return [];
-  const rows: BatchUnsupportedSource[] = [];
+  const rows: UnsupportedSourceRequest[] = [];
   const seen = new Set<string>();
   for (const turn of turns) {
     const messageIds = turn.turnMessages.map((message) => message.message_id);
@@ -128,7 +129,7 @@ function collectBatchRequests(
   prepared: BatchPreparedSources,
   turns: readonly LongMemEvalExtractionTurn[],
   selectedKeys: ReadonlySet<string>
-): readonly BatchExtractionRequest[] {
+): readonly SourceExtractionRequest[] {
   const collected = new Map<string, {
     request: ExtractionArtifactSource;
     sourceTurn: LongMemEvalExtractionTurn;
@@ -172,13 +173,17 @@ function collectBatchRequests(
     .map(([key, item]) => {
       const units = Object.freeze([...item.units.values()].sort((a, b) =>
         a.binding.occurrenceIdentity.localeCompare(b.binding.occurrenceIdentity)));
-      const line: GeminiBatchLine = Object.freeze({
+      const unitKeys = Object.freeze(units.map((unit) => unit.binding.occurrenceIdentity));
+      const line: SourceRequestLine = prepared.config.openSemantics === undefined ? Object.freeze({
         key,
-        unitKeys: Object.freeze(units.map((unit) => unit.binding.occurrenceIdentity)),
+        unitKeys,
         requestSha256: createHash("sha256").update(item.userPrompt, "utf8").digest("hex"),
         systemPrompt: extractionArtifactPrompt(prepared.config.sourceInterpretationProfile, prepared.config.openSemantics),
         userPrompt: item.userPrompt
-      });
+      }) : Object.freeze(prepareSourceSemanticRequestLine(JSON.parse(item.userPrompt), unitKeys, prepared.config));
+      if (line.key !== key || line.userPrompt !== item.userPrompt) {
+        throw new ExtractionCacheInvariantError("source request descriptor differs from its selected cache key");
+      }
       const corpus = buildOfficialApiSourceCorpus(item.sourceTurn.turnContent, item.sourceTurn.turnMessages);
       if (prepared.config.sourceInterpretationProfile !== undefined) assertSourcePacketShardCapacity(corpus, line);
       if (prepared.config.openSemantics !== undefined) assertSourceSemanticShardCapacity(corpus, line);

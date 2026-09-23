@@ -876,6 +876,22 @@ unsupported disposition to native publication, which rechecks it against the
 exact source census and records it in the publication report after SQLite reopen.
 Interactive source preparation surfaces the same typed capacity reason as a
 validation error; its successful response contract is unchanged.
+The native Step Plan path uses `step-3.5-2603-low-json-schema-v1` only with
+`step-3.5-flash-2603` at the exact selected `/step_plan/v1` route. Source,
+query and correspondence preparation bind the gateway-encoded strict JSON
+schema body, low reasoning effort, `max_tokens`, route and profile before
+reservation. The Step source dry preflight is provider-free and may select an
+exact set of ready keys while retaining the full source and unsupported
+occurrence counts. A Step complete-source sample receipt reserves at most one
+attempt per selected key; an incomplete or failed response stops the remaining
+keys. The shared attempt ledger enforces that per-key limit across reopen.
+Query and correspondence proposal authorities use the same one-attempt policy.
+Step raw records retain the bounded original HTTP byte prefix plus the digest,
+length and completeness of all received bytes; only a lowercase `stop`
+finish reason counts as complete. Missing usage remains unknown under the full
+reserved bound, while contradictory reported totals or token caps stop
+settlement. The frozen Step Plan quote is a conservative USD-equivalent policy
+bound derived from documented CNY rates, not an invoice or balance reading.
 Recorded requests without the scope marker remain limited to eight selected
 units and retain their historical replay. Closed Garden/profile extraction
 rejects complete-source packing. This supplies source context without deciding

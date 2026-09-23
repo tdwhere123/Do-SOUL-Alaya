@@ -1,6 +1,7 @@
 import type { OfficialApiInterpretationEntryRejection } from "@do-soul/alaya-soul";
 import type { GeminiGenerateContentSettings } from "./native-codec.js";
 import type { ExtractionCacheWriteLease } from "../manifest/fill-root-guard.js";
+import type { SourceRequestLine } from "../../request-artifact.js";
 
 export type GeminiBatchOperation = "prepare" | "submit" | "status" | "resume" | "recover" | "import" | "cancel";
 
@@ -17,13 +18,7 @@ export type GeminiBatchQuarantineOutcome = {
 };
 
 /** Logical identity is owned by the caller's shared extraction request owner. */
-export interface GeminiBatchLine {
-  readonly key: string;
-  readonly unitKeys: readonly string[];
-  readonly requestSha256: string;
-  readonly systemPrompt: string;
-  readonly userPrompt: string;
-}
+export type GeminiBatchLine = SourceRequestLine;
 
 export interface GeminiBatchLimits {
   readonly maxJobs: number;

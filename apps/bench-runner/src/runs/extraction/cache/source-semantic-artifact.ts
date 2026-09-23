@@ -11,23 +11,25 @@ import { inspectCachedResponseMetadata, persistedResponseMetadata } from "../../
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import { computeExtractionRawJsonSha256 } from "../content-closure.js";
 import { receiveSourceSemanticBatchLine } from "../fill/batch/source-semantic-interpretation.js";
-import type { GeminiBatchInvocation, GeminiBatchPlan, GeminiBatchLine } from "../fill/batch/contract.js";
+import type { GeminiBatchInvocation, GeminiBatchPlan } from "../fill/batch/contract.js";
 import type { ExtractionCacheWriteLease } from "../fill/manifest/fill-root-guard.js";
 import { buildExtractionTransportProvenance, isExtractionTransportProvenance } from "../transport-route.js";
 import { assertExtractionCacheIdentity } from "./cache-identity.js";
 import { extractionAdmissionGenerationSha256, readExtractionCacheManifestIdentity } from "./extraction-cache-manifest.js";
 import { normalizeGeminiEndpoint } from "../../provider/gemini-endpoint.js";
+import { isCompleteSemanticFinish, STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import { readRetainedBatchAuthority } from "../fill/batch/retained-authority.js";
 import { readRetainedBatchLine } from "../fill/batch/retained-line.js";
 import {
   SOURCE_SEMANTIC_BATCH_PRODUCER_ID, SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
 } from "../request-artifact.js";
+import type { SourceRequestLine } from "../request-artifact.js";
 
 export class SourceSemanticAdmissionError extends Error {}
 
-export type GeminiGenerateContentProvenance = Readonly<{
-  readonly transport: "gemini-generate-content";
+export type InteractiveSemanticProvenance = Readonly<{
+  readonly transport: "gemini-generate-content" | "step-chat-completion";
   readonly finishReason: string | null;
   readonly attemptOrdinal: number;
   readonly responseSha256: string;
@@ -38,10 +40,10 @@ export type GeminiGenerateContentProvenance = Readonly<{
   };
 }>;
 
-export type GeminiGenerateContentLineResult = Readonly<{
-  readonly line: GeminiBatchLine;
+export type InteractiveSemanticLineResult = Readonly<{
+  readonly line: SourceRequestLine;
   readonly rawJson: string;
-  readonly provenance: GeminiGenerateContentProvenance;
+  readonly provenance: InteractiveSemanticProvenance;
 }>;
 
 export type CachedSourceSemantic = Readonly<{
@@ -53,11 +55,12 @@ export type CachedSourceSemantic = Readonly<{
   producer_id: string;
 }> & (
   | Readonly<{ kind: "gemini_batch"; plan_identity: string; authority_receipt_digest: string; result: Parameters<GeminiBatchInvocation["importLine"]>[0] }>
-  | Readonly<{ kind: "gemini_generate_content"; result: GeminiGenerateContentLineResult }>
-  | Readonly<{ kind: "deterministic_empty"; line: GeminiBatchLine }>
+  | Readonly<{ kind: "gemini_generate_content"; result: InteractiveSemanticLineResult }>
+  | Readonly<{ kind: "step_chat_completion"; result: InteractiveSemanticLineResult }>
+  | Readonly<{ kind: "deterministic_empty"; line: SourceRequestLine }>
 );
 
-function artifactLine(typed: CachedSourceSemantic): GeminiBatchLine {
+function artifactLine(typed: CachedSourceSemantic): SourceRequestLine {
   return typed.kind === "deterministic_empty" ? typed.line : typed.result.line;
 }
 
@@ -76,7 +79,7 @@ function proposalForRequest(sourceCorpus: string, assertionIds: readonly number[
 }
 
 /** Two retained copies of raw JSON may each expand sixfold; host IR/refs add another escaped copy. */
-export function assertSourceSemanticShardCapacity(sourceCorpus: string, line: GeminiBatchLine): void {
+export function assertSourceSemanticShardCapacity(sourceCorpus: string, line: SourceRequestLine): void {
   const retainedInputBytes = Buffer.byteLength(JSON.stringify({ source_semantic: {
     source_corpus: sourceCorpus, result: { line }
   } }, null, 2), "utf8");
@@ -94,25 +97,27 @@ function retainableOutcome(result: SourceSemanticProposalResult): "interpreted" 
   return undefined;
 }
 
-function assertInteractiveGenerateContentProvenance(provenance: GeminiGenerateContentProvenance): void {
-  if (provenance.transport !== "gemini-generate-content" || "job" in provenance || "inputFile" in provenance) {
+function assertInteractiveProvenance(provenance: InteractiveSemanticProvenance, requestProfile: string): void {
+  const transport = requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+    ? "step-chat-completion" : "gemini-generate-content";
+  if (provenance.transport !== transport || "job" in provenance || "inputFile" in provenance) {
     throw new AlayaError("CONFLICT", "typed open-semantics interactive transport binding mismatch");
   }
 }
 
-function assertCompleteProviderFinish(finishReason: string | null): void {
-  if (finishReason !== "STOP") {
+function assertCompleteProviderFinish(finishReason: string | null, requestProfile: string): void {
+  if (!isCompleteSemanticFinish(requestProfile, finishReason)) {
     throw new SourceSemanticAdmissionError("source semantics completion is not a complete provider finish");
   }
 }
 
 function inspectInteractiveGenerateContent(
-  typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" }>,
+  typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" | "step_chat_completion" }>,
   entry: CachedExtractionEntry,
   request: ReturnType<typeof parseSourceSemanticRequest>
 ): SourceSemanticProposalResult {
-  assertInteractiveGenerateContentProvenance(typed.result.provenance);
-  if (typed.result.provenance.finishReason !== "STOP") {
+  assertInteractiveProvenance(typed.result.provenance, entry.request_profile);
+  if (!isCompleteSemanticFinish(entry.request_profile, typed.result.provenance.finishReason)) {
     throw new AlayaError("CONFLICT", "typed open-semantics interactive completion is not a complete provider finish");
   }
   if (typed.result.rawJson !== entry.raw_json || !isExtractionTransportProvenance(entry.transport_provenance)) {
@@ -141,6 +146,7 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
       typed.interpretation_contract !== SOURCE_SEMANTIC_PACKET_CONTRACT ||
       typeof typed.source_corpus !== "string" || typeof typed.producer_id !== "string" ||
       (typed.kind !== "gemini_batch" && typed.kind !== "gemini_generate_content" &&
+       typed.kind !== "step_chat_completion" &&
        typed.kind !== "deterministic_empty")) {
     throw new AlayaError("CONFLICT", "invalid typed source semantic cache artifact");
   }
@@ -159,7 +165,11 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
     if (admitted.outcome.status !== "no_eligible_source" || typed.completion !== "no_eligible_source") {
       throw new AlayaError("CONFLICT", "deterministic open semantics is not a zero-attempt empty catalog");
     }
-  } else if (typed.kind === "gemini_generate_content") {
+  } else if (typed.kind === "gemini_generate_content" || typed.kind === "step_chat_completion") {
+    if ((typed.kind === "step_chat_completion") !==
+        (entry.request_profile === STEP_SEMANTIC_REQUEST_PROFILE)) {
+      throw new AlayaError("CONFLICT", "typed source semantic cache kind/profile mismatch");
+    }
     admitted = inspectInteractiveGenerateContent(typed, entry, request);
   } else {
     const retained = readRetainedBatchLine(cacheRoot, typed.plan_identity, entry.cache_key);
@@ -227,13 +237,13 @@ export function importSourceSemanticArtifact(input: SourceSemanticImportBase & (
       plan: GeminiBatchPlan; authority: ExtractionAuthorityReceipt;
       result: Parameters<GeminiBatchInvocation["importLine"]>[0];
     }>
-  | Readonly<{ result: GeminiGenerateContentLineResult }>
+  | Readonly<{ result: InteractiveSemanticLineResult }>
 )) {
   return "plan" in input ? importBatchSourceSemanticArtifact(input) : importInteractiveSourceSemanticArtifact(input);
 }
 
 function admitSourceSemanticLine(input: SourceSemanticImportBase & {
-  readonly line: GeminiBatchLine; readonly rawJson: string;
+  readonly line: SourceRequestLine; readonly rawJson: string;
   readonly retained?: Parameters<typeof receiveSourceSemanticBatchLine>[0]["retained"];
 }): { admitted: SourceSemanticProposalResult; completion: NonNullable<ReturnType<typeof retainableOutcome>> } {
   const request = parseSourceSemanticRequest(JSON.parse(input.line.userPrompt));
@@ -254,7 +264,7 @@ function admitSourceSemanticLine(input: SourceSemanticImportBase & {
   return { admitted, completion };
 }
 
-function bindOpenSemanticsImport(input: SourceSemanticImportBase, line: GeminiBatchLine) {
+function bindOpenSemanticsImport(input: SourceSemanticImportBase, line: SourceRequestLine) {
   input.writeLease.assertOwned(); input.writeLease.assertRoot(input.cacheRoot);
   const identity = readExtractionCacheManifestIdentity(input.cacheRoot);
   if (identity === undefined || input.config.openSemantics === undefined) {
@@ -274,7 +284,7 @@ function importBatchSourceSemanticArtifact(input: SourceSemanticImportBase & Rea
   result: Parameters<GeminiBatchInvocation["importLine"]>[0];
 }>) {
   const { result, config, cacheRoot } = input;
-  assertCompleteProviderFinish(result.provenance.finishReason);
+  assertCompleteProviderFinish(result.provenance.finishReason, config.requestProfile);
   const identity = bindOpenSemanticsImport(input, result.line);
   const transport = buildExtractionTransportProvenance(config);
   const authority = readRetainedBatchAuthority(cacheRoot, input.plan.identity, input.authority.receipt_digest);
@@ -304,11 +314,11 @@ function importBatchSourceSemanticArtifact(input: SourceSemanticImportBase & Rea
 }
 
 function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase & Readonly<{
-  result: GeminiGenerateContentLineResult;
+  result: InteractiveSemanticLineResult;
 }>) {
   const { result, config } = input;
-  assertInteractiveGenerateContentProvenance(result.provenance);
-  assertCompleteProviderFinish(result.provenance.finishReason);
+  assertInteractiveProvenance(result.provenance, config.requestProfile);
+  assertCompleteProviderFinish(result.provenance.finishReason, config.requestProfile);
   const identity = bindOpenSemanticsImport(input, result.line);
   const { admitted, completion } = admitSourceSemanticLine({
     ...input, line: result.line, rawJson: result.rawJson
@@ -321,7 +331,8 @@ function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase
     admission_identity: { generation_sha256: extractionAdmissionGenerationSha256(identity.manifest),
       request_key: result.line.key, raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson) },
     source_semantic: { contract: SOURCE_SEMANTIC_CACHE_CONTRACT, source_binding: "unbound",
-      interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT, kind: "gemini_generate_content", completion,
+      interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
+      kind: config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? "step_chat_completion" : "gemini_generate_content", completion,
       source_corpus: input.sourceCorpus, producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID, result }
   }, identity.manifestSha256);
   return admitted;
@@ -329,7 +340,7 @@ function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase
 
 export function writeDeterministicSourceSemanticArtifact(input: Readonly<{
   config: CompileSeedExtractionConfig; cacheRoot: string; writeLease: ExtractionCacheWriteLease;
-  line: GeminiBatchLine; sourceCorpus: string;
+  line: SourceRequestLine; sourceCorpus: string;
 }>) {
   const { cacheRoot, config, writeLease, line } = input;
   writeLease.assertOwned(); writeLease.assertRoot(cacheRoot);

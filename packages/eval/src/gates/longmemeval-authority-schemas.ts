@@ -17,6 +17,7 @@ export const LONGMEMEVAL_EXTRACTION_REQUEST_PROFILES = [
   "gemini-2.5-nonthinking-v1",
   "gemini-3.1-minimal-v1",
   "gemini-3.1-low-v1",
+  "step-3.5-2603-low-json-schema-v1",
   "deepseek-v4-nonthinking-v1",
   "mimo-v2.5-nonthinking-v1"
 ] as const;

@@ -12,9 +12,58 @@ import {
   SourceSemanticRevisionSchema, sourceSemanticBaseRequestDigest, type SourceSemanticRevision
 } from "@do-soul/alaya-soul";
 import type { LongMemEvalExtractionTurn } from "./turn-contents.js";
+import { createHash } from "node:crypto";
+import { computeCacheKey } from "../compile-seed/cache/cache-key.js";
+import { z } from "zod";
+import { parseSourceSemanticRequest, sourceSemanticSystemPrompt } from "@do-soul/alaya-soul";
+import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 
 export const SOURCE_SEMANTIC_BATCH_PRODUCER_ID = "official-api-source-semantic";
 export const SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION = "1";
+
+/** Logical source request identity shared by interactive and Batch transports. */
+export interface SourceRequestLine {
+  readonly key: string;
+  readonly unitKeys: readonly string[];
+  readonly requestSha256: string;
+  readonly systemPrompt: string;
+  readonly userPrompt: string;
+}
+
+export const SourceRequestLineSchema = z.object({
+  key: z.string().regex(/^[a-f0-9]{64}$/u),
+  unitKeys: z.array(z.string().min(1)).readonly(),
+  requestSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  systemPrompt: z.string().min(1),
+  userPrompt: z.string().min(1)
+}).strict().readonly();
+
+/** Persisted logical descriptors rederive their identity from the owning request. */
+export function parseSourceSemanticRequestLine(
+  value: unknown, config: Pick<CompileSeedExtractionConfig, "model" | "requestProfile">
+): SourceRequestLine {
+  const line = SourceRequestLineSchema.parse(value);
+  let request: SourceSemanticRequest;
+  try { request = parseSourceSemanticRequest(JSON.parse(line.userPrompt)); }
+  catch (cause) { throw new AlayaError("VALIDATION", "source semantic request line is malformed", { cause }); }
+  const expected = prepareSourceSemanticRequestLine(request, line.unitKeys, config);
+  if (canonicalJson(line) !== canonicalJson(expected)) {
+    throw new AlayaError("CONFLICT", "source semantic request line identity mismatch");
+  }
+  return line;
+}
+
+export function prepareSourceSemanticRequestLine(
+  requestValue: SourceSemanticRequest,
+  unitKeys: readonly string[],
+  config: Pick<CompileSeedExtractionConfig, "model" | "requestProfile">
+): SourceRequestLine {
+  const request = parseSourceSemanticRequest(requestValue);
+  const userPrompt = JSON.stringify(request);
+  const systemPrompt = sourceSemanticSystemPrompt(request);
+  return { key: computeCacheKey(config.model, config.requestProfile, systemPrompt, userPrompt), unitKeys,
+    requestSha256: createHash("sha256").update(userPrompt).digest("hex"), systemPrompt, userPrompt };
+}
 
 export type ExtractionOpenSemanticsGeneration = Readonly<{
   contract: typeof SOURCE_SEMANTIC_PACKET_CONTRACT;

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES, type ProviderHttpResponseEvidence } from "@do-soul/alaya-engine-gateway";
 import {
   boundedArtifactEntryExists,
   readBoundedCanonicalUtf8Artifact
@@ -14,8 +15,10 @@ import { BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES, BENCH_TE
 
 export const PROVIDER_RAW_ATTEMPT_CONTRACT = "provider-raw-attempt-v2" as const;
 const PROPOSAL_RAW_ATTEMPT_CONTRACT = "semantic-proposal-raw-attempt-v1" as const;
+const STEP_PROVIDER_RAW_ATTEMPT_CONTRACT = "provider-raw-attempt-v3" as const;
+const STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT = "semantic-proposal-raw-attempt-v2" as const;
 const MAX_RETAINED_RAW_BYTES = 1024 * 1024;
-const MAX_RETAINED_RESPONSE_BODY_BYTES = 64 * 1024;
+const MAX_RETAINED_RESPONSE_BODY_BYTES = MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES;
 // JSON can expand each retained byte to six ASCII bytes. A split UTF-8 code point
 // can add two bytes per retained string. The envelope reserve is not a schema
 // field limit: metadata is variable, so publication also checks actual bytes.
@@ -26,7 +29,15 @@ const MAX_RECORD_BYTES = 6 * (MAX_RETAINED_RAW_BYTES + 2 + MAX_RETAINED_RESPONSE
 const UsageSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
-  totalTokens: z.number().int().nonnegative()
+  totalTokens: z.number().int().nonnegative(),
+  cachedInputTokens: z.number().int().nonnegative().optional(),
+  reasoningOutputTokens: z.number().int().nonnegative().optional()
+}).strict();
+
+const HttpResponseSchema = z.object({
+  contentType: z.string().nullable(), bodyBase64: z.string(),
+  bodyByteLength: z.number().int().nonnegative(), bodySha256: z.string().regex(/^[0-9a-f]{64}$/u),
+  bodyTruncated: z.boolean(), bodyComplete: z.boolean()
 }).strict();
 
 const RawAttemptFields = {
@@ -56,12 +67,18 @@ const RawAttemptFields = {
   response_body: z.object({
     text: z.string(), truncated: z.boolean(), original_byte_length: z.number().int().nonnegative(), digest: z.string()
   }).strict().optional(),
+  http_response: HttpResponseSchema.optional(),
   extracted_at: z.string().min(1)
 };
 // Source extraction retains its unchanged raw contract; proposal attempts require reservation ownership.
-const ProviderRawAttemptSchema = z.discriminatedUnion("kind", [
+const ProviderRawAttemptSchema = z.discriminatedUnion("contract", [
   z.object({ ...RawAttemptFields, contract: z.literal(PROVIDER_RAW_ATTEMPT_CONTRACT), kind: z.literal("source_semantic") }).strict(),
+  z.object({ ...RawAttemptFields, contract: z.literal(STEP_PROVIDER_RAW_ATTEMPT_CONTRACT), kind: z.literal("source_semantic") }).strict(),
   z.object({ ...RawAttemptFields, contract: z.literal(PROPOSAL_RAW_ATTEMPT_CONTRACT),
+    kind: z.enum(["query", "semantic_correspondence"]),
+    attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
+  }).strict(),
+  z.object({ ...RawAttemptFields, contract: z.literal(STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT),
     kind: z.enum(["query", "semantic_correspondence"]),
     attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
   }).strict()
@@ -108,6 +125,11 @@ export function bindProviderRawAttempt(
   } & RawAttemptOwner>
 ): ProviderRawAttempt {
   assertProviderRawIntegrity(raw);
+  const step = expected.requestProfile === "step-3.5-2603-low-json-schema-v1";
+  if (step !== (raw.contract === STEP_PROVIDER_RAW_ATTEMPT_CONTRACT ||
+      raw.contract === STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT)) {
+    throw new ProviderRawAttemptIdentityError(`provider raw attempt contract/profile mismatch: ${expected.cacheKey}`);
+  }
   if (raw.cache_key !== expected.cacheKey || raw.kind !== expected.kind ||
       raw.model !== expected.model || raw.request_profile !== expected.requestProfile ||
       raw.request_digest !== expected.requestDigest ||
@@ -160,6 +182,8 @@ function assertProviderRawIntegrity(raw: ProviderRawAttempt): void {
   const bytes = Buffer.from(raw.decoded_text, "utf8");
   const complete = !raw.decoded_text_truncated;
   const body = raw.response_body;
+  const http = raw.http_response;
+  const httpBytes = http === undefined ? undefined : Buffer.from(http.bodyBase64, "base64");
   if (raw.full_replay_possible !== complete ||
       raw.usage_known !== (raw.usage !== null) ||
       raw.completion_witness !== (raw.finish_reason === null ? null : "finish_reason") ||
@@ -170,7 +194,18 @@ function assertProviderRawIntegrity(raw: ProviderRawAttempt): void {
         Buffer.byteLength(body.text, "utf8") !== body.original_byte_length ||
         createHash("sha256").update(body.text, "utf8").digest("hex") !== body.digest) ||
         body.truncated && (body.original_byte_length <= MAX_RETAINED_RESPONSE_BODY_BYTES ||
-          Buffer.byteLength(body.text, "utf8") > MAX_RETAINED_RESPONSE_BODY_BYTES + 2))) {
+          Buffer.byteLength(body.text, "utf8") > MAX_RETAINED_RESPONSE_BODY_BYTES + 2)) ||
+      http !== undefined && (httpBytes === undefined ||
+        httpBytes.toString("base64") !== http.bodyBase64 ||
+        httpBytes.length > MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES ||
+        http.bodyTruncated !== (http.bodyByteLength > MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) ||
+        !http.bodyTruncated && (httpBytes.length !== http.bodyByteLength ||
+          createHash("sha256").update(httpBytes).digest("hex") !== http.bodySha256)) ||
+      raw.request_profile === "step-3.5-2603-low-json-schema-v1" &&
+        (raw.contract !== STEP_PROVIDER_RAW_ATTEMPT_CONTRACT && raw.contract !== STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT ||
+         body !== undefined || raw.transport_failure === undefined &&
+           (http === undefined || !http.bodyComplete)) ||
+      raw.request_profile !== "step-3.5-2603-low-json-schema-v1" && http !== undefined) {
     throw new ProviderRawAttemptIdentityError(`provider raw attempt integrity mismatch: ${raw.cache_key}`);
   }
 }
@@ -190,12 +225,15 @@ export function writeProviderRawAttempt(input: Readonly<{
   failureRetryable?: boolean;
   failureClassification?: BenchTerminalRetryClassification;
   responseBody?: string;
+  httpResponse?: ProviderHttpResponseEvidence;
 } & RawAttemptOwner>): ProviderRawAttempt {
   const original = Buffer.from(input.decodedText, "utf8");
   const truncated = original.byteLength > MAX_RETAINED_RAW_BYTES;
   const retained = truncated ? original.subarray(0, MAX_RETAINED_RAW_BYTES).toString("utf8") : input.decodedText;
   const record = ProviderRawAttemptSchema.parse({
-    contract: input.kind === "source_semantic" ? PROVIDER_RAW_ATTEMPT_CONTRACT : PROPOSAL_RAW_ATTEMPT_CONTRACT,
+    contract: input.requestProfile === "step-3.5-2603-low-json-schema-v1"
+      ? input.kind === "source_semantic" ? STEP_PROVIDER_RAW_ATTEMPT_CONTRACT : STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT
+      : input.kind === "source_semantic" ? PROVIDER_RAW_ATTEMPT_CONTRACT : PROPOSAL_RAW_ATTEMPT_CONTRACT,
     ...(input.kind === "source_semantic" ? {} : { attempt_lineage_digest: input.attemptLineageDigest }),
     cache_key: input.cacheKey,
     attempt_ordinal: input.attemptOrdinal,
@@ -217,6 +255,7 @@ export function writeProviderRawAttempt(input: Readonly<{
     ...(input.failureRetryable === undefined ? {} : { failure_retryable: input.failureRetryable }),
     ...(input.failureClassification === undefined ? {} : { failure_classification: input.failureClassification }),
     ...(input.responseBody === undefined ? {} : { response_body: retainResponseBody(input.responseBody) }),
+    ...(input.httpResponse === undefined ? {} : { http_response: input.httpResponse }),
     extracted_at: new Date().toISOString()
   });
   const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`, "utf8");

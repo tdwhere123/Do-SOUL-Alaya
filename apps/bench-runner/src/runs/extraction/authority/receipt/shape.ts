@@ -4,6 +4,7 @@ import {
   expectedExtractionAuthorityLimits,
   isExtractionOutputTokenField
 } from "../receipt-limits.js";
+import { StepQuoteBasisSchema } from "../step-quote.js";
 
 export const LEGACY_RECEIPT_VERSION = 2;
 export const PREVIOUS_RECEIPT_VERSION = 3;
@@ -15,6 +16,7 @@ export function hasExpectedExtractionAuthorityReceiptLimits(input: {
   readonly action: "probe" | "fill" | "sample";
   readonly sampleCount?: number;
   readonly sourcePacking?: ExtractionSourcePacking;
+  readonly requestProfile?: string;
   readonly startingMissing: number;
   readonly maximumAttempts: number;
   readonly successfulShardCeiling: number;
@@ -28,7 +30,7 @@ export function hasExpectedExtractionAuthorityReceiptLimits(input: {
   if (input.successfulShardCeiling !== expectedSuccesses) return false;
   if (input.schemaVersion === CURRENT_RECEIPT_VERSION) {
     return input.maximumAttempts === expectedExtractionAuthorityLimits(
-      input.action, input.startingMissing, input.sourcePacking
+      input.action, input.startingMissing, input.sourcePacking, input.requestProfile
     ).maximumAttempts;
   }
   return legacyAttemptCeilings(input.schemaVersion, input.action, input.startingMissing)
@@ -67,7 +69,8 @@ export function isExtractionAuthorityReceiptPrice(value: unknown): boolean {
   return isObject(value) && typeof value.input_usd_per_million === "number" &&
     typeof value.output_usd_per_million === "number" &&
     isNonNegativeSafeInteger(value.maximum_input_tokens_per_attempt) &&
-    typeof value.estimated_upper_usd === "number";
+    typeof value.estimated_upper_usd === "number" &&
+    (value.quote_basis === undefined || StepQuoteBasisSchema.safeParse(value.quote_basis).success);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

@@ -3,7 +3,7 @@ import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import type { ExtractionOutputTokenField } from "../extraction/authority/receipt-limits.js";
 import type {
   ProviderRetryClassification,
-  ProviderUsage
+  ProviderUsage, ProviderHttpResponseEvidence
 } from "@do-soul/alaya-engine-gateway";
 import type { SignalExtractor } from "@do-soul/alaya-soul";
 import type {
@@ -57,6 +57,8 @@ export interface BenchSignalExtractor extends SignalExtractor {
     readonly usage?: BenchProviderUsage;
     /** Provider completion metadata bound to the exact successful attempt. */
     readonly responseMetadata?: BenchProviderResponseMetadata;
+    /** Exact provider HTTP envelope evidence, independent of decoded final text. */
+    readonly httpResponse?: ProviderHttpResponseEvidence;
   }>;
 }
 

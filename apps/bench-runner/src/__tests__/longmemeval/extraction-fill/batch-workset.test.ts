@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT, parseOfficialApiSourcePacketRequest, receiveOfficialApiSourcePacket } from "@do-soul/alaya-soul";
-import { prepareBatchExtractionWorkset } from "../../../runs/extraction/fill/batch-workset.js";
+import { prepareSourceRequestWorkset } from "../../../runs/extraction/fill/source-request-workset.js";
 import { computeExtractionTurnCacheKeys } from "../../../runs/compile-seed/cache/cache-key.js";
 import { writeCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
 import {
@@ -39,7 +39,7 @@ describe("fresh Batch source workset", () => {
     expect(inspected.distinctExtractionTurns).toHaveLength(2);
     expect(inspected.distinctExtractionRequestCount).toBe(2);
     const source = turn("If Talia calls, Niko will leave. Talia placed an atlas on the desk. She then opened it.");
-    const plan = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: {
+    const plan = prepareSourceRequestWorkset({ cacheRoot: root, prepared: {
       ...prepared([...inspected.distinctExtractionTurns, source]),
       config: { ...config, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION }
     } });
@@ -68,7 +68,7 @@ describe("fresh Batch source workset", () => {
     const preparedSources = { ...prepared([ready, excess]),
       config: { ...config, sourcePacking: "complete-source" as const,
         openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION } };
-    const plan = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: preparedSources });
+    const plan = prepareSourceRequestWorkset({ cacheRoot: root, prepared: preparedSources });
     expect(plan.lines).toHaveLength(1);
     expect(plan.requests).toHaveLength(1);
     expect(plan.unsupportedSources).toMatchObject([{ messageIds: ["user-excess", "assistant-excess"],
@@ -84,7 +84,7 @@ describe("fresh Batch source workset", () => {
   it("shares duplicate request work while retaining distinct original message occurrences", () => {
     const first = turn("I moved to Berlin in March.", "one");
     const second = turn(first.turnContent, "two");
-    const plan = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: {
+    const plan = prepareSourceRequestWorkset({ cacheRoot: root, prepared: {
       ...prepared([first]), occurrenceExtractionTurns: [first, second]
     } });
     expect(plan.lines).toHaveLength(1);
@@ -100,8 +100,8 @@ describe("fresh Batch source workset", () => {
   it("keeps canonical lines and source identities stable under source order and route changes", () => {
     const turns = [turn("I moved to Berlin in March.", "one"),
       turn("My favorite hobby is cycling.", "two")];
-    const baseline = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: prepared(turns) });
-    const reordered = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: {
+    const baseline = prepareSourceRequestWorkset({ cacheRoot: root, prepared: prepared(turns) });
+    const reordered = prepareSourceRequestWorkset({ cacheRoot: root, prepared: {
       ...prepared([...turns].reverse()), config: { ...config, providerUrl: "https://other.invalid/v1" }
     } });
     expect(reordered.lines).toEqual(baseline.lines);
@@ -111,18 +111,18 @@ describe("fresh Batch source workset", () => {
   it("submits only the selected missing shard while retaining the full occurrence bindings", () => {
     const turns = [turn("I moved to Berlin in March.", "one"),
       turn("My favorite hobby is cycling.", "two")];
-    const first = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: prepared(turns) });
+    const first = prepareSourceRequestWorkset({ cacheRoot: root, prepared: prepared(turns) });
     const cached = first.requests[0]!;
     writeCachedExtraction(root, cached.line.key, {
       model: config.model, request_profile: config.requestProfile,
       cache_key: cached.line.key, extracted_at: "2026-09-12T00:00:00.000Z",
       raw_json: buildGroundedInterpretationResponse(cached.line.userPrompt)
     });
-    const next = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: prepared(turns) });
+    const next = prepareSourceRequestWorkset({ cacheRoot: root, prepared: prepared(turns) });
     expect(next.lines).toHaveLength(1);
     expect(next.cachedRequests.map((item) => item.line.key)).toEqual([cached.line.key]);
     expect(next.units).toEqual(first.units);
-    const scoped = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: prepared(turns),
+    const scoped = prepareSourceRequestWorkset({ cacheRoot: root, prepared: prepared(turns),
       executionCacheKeys: new Set([next.lines[0]!.key]) });
     expect(scoped.requests).toHaveLength(1);
     expect(scoped.lines).toEqual(next.lines);
@@ -130,24 +130,24 @@ describe("fresh Batch source workset", () => {
 
   it("holds corrupt selected cache state and foreign selections instead of silently spending", () => {
     const source = prepared([turn("I moved to Berlin in March.")]);
-    const first = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: source });
+    const first = prepareSourceRequestWorkset({ cacheRoot: root, prepared: source });
     const line = first.lines[0]!;
     writeCachedExtraction(root, line.key, {
       model: config.model, request_profile: config.requestProfile,
       cache_key: line.key, extracted_at: "2026-09-12T00:00:00.000Z", raw_json: "{"
     });
-    expect(() => prepareBatchExtractionWorkset({ cacheRoot: root, prepared: source }))
+    expect(() => prepareSourceRequestWorkset({ cacheRoot: root, prepared: source }))
       .toThrow("is invalid");
-    expect(() => prepareBatchExtractionWorkset({ cacheRoot: root, prepared: source,
+    expect(() => prepareSourceRequestWorkset({ cacheRoot: root, prepared: source,
       executionCacheKeys: new Set(["foreign"]) })).toThrow("outside the selected source window");
   });
 
   it("keeps zero-assertion requests local and refuses an incomplete occurrence inventory", () => {
-    const empty = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: prepared([turn("")]) });
+    const empty = prepareSourceRequestWorkset({ cacheRoot: root, prepared: prepared([turn("")]) });
     expect(empty.lines).toEqual([]);
     expect(empty.deterministicEmptyRequests).toHaveLength(1);
     expect(empty.units).toEqual([]);
-    expect(() => prepareBatchExtractionWorkset({ cacheRoot: root, prepared: {
+    expect(() => prepareSourceRequestWorkset({ cacheRoot: root, prepared: {
       ...prepared([turn("I moved to Berlin in March.")]), occurrenceExtractionTurns: []
     } })).toThrow("does not cover");
   });
@@ -160,7 +160,7 @@ describe("fresh Batch source workset", () => {
     expect(inspected.turnOccurrences).toBe(4);
     expect(inspected.distinctExtractionTurns).toHaveLength(2);
     expect(inspected.occurrenceExtractionTurns).toHaveLength(4);
-    const plan = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: {
+    const plan = prepareSourceRequestWorkset({ cacheRoot: root, prepared: {
       ...prepared(inspected.distinctExtractionTurns),
       occurrenceExtractionTurns: inspected.occurrenceExtractionTurns
     } });
@@ -178,7 +178,7 @@ describe("fresh Batch source workset", () => {
       { message_id: "a1", role: "assistant" as const, content: "Acknowledged." }
     ] };
     const input = { ...prepared([source]), config: { ...config, sourceInterpretationProfile } };
-    const workset = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: input });
+    const workset = prepareSourceRequestWorkset({ cacheRoot: root, prepared: input });
     const item = workset.requests[0]!, request = parseOfficialApiSourcePacketRequest(JSON.parse(item.line.userPrompt));
     expect(item.line.key).toMatch(/^[a-f0-9]{64}$/u);
     expect(item.line.key).toBe(computeExtractionTurnCacheKeys(config.model, config.requestProfile, item.line.systemPrompt,
@@ -187,10 +187,10 @@ describe("fresh Batch source workset", () => {
       { sourceCorpus: item.units[0]!.sourceCorpus, artifactKey: "unbound", producerId: "control" }).status).toBe("empty");
     expect(() => receiveOfficialApiSourcePacket('{"contract":"source-interpretation-response-v2","packet":null}', request,
       { sourceCorpus: source.turnContent, artifactKey: "unbound", producerId: "control" })).toThrow(/generation/u);
-    const changed = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: { ...input, config: { ...input.config,
+    const changed = prepareSourceRequestWorkset({ cacheRoot: root, prepared: { ...input, config: { ...input.config,
       sourceInterpretationProfile: { ...sourceInterpretationProfile, description: "Changed meaning, identical symbols" } } } });
     expect(changed.lines[0]!.key).not.toBe(item.line.key);
-    const empty = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: { ...input,
+    const empty = prepareSourceRequestWorkset({ cacheRoot: root, prepared: { ...input,
       executionExtractionTurns: [turn("")] } });
     expect(empty.lines).toEqual([]);
     expect(empty.deterministicEmptyRequests).toHaveLength(1);

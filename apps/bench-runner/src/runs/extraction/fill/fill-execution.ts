@@ -91,7 +91,7 @@ export async function executeExtractionFill(
   markProgress: (() => void) | undefined
 ): Promise<import("./semantic-fill-executor.js").SemanticFillReport | undefined> {
   refuseRecallCampaignLiveExtraction("extraction_write");
-  if (authority?.receipt.action === "sample") throw new Error("sample authority is Batch-only");
+  if (authority?.receipt.action === "sample") throw new Error("ordinary extraction fill cannot use sample authority");
   const resolved = resolveFillTurns(
     options.cacheKeyAllowlist, prepared, cacheRoot, authority, writeLease
   );
