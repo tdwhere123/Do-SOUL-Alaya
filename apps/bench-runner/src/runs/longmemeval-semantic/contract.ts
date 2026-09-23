@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { z } from "zod";
 import { loadDatasetWindowWithIdentity } from "../../datasets/longmemeval/ingestion/fetch.js";
@@ -53,7 +54,7 @@ export type LongMemEvalSemanticFreeze = z.infer<typeof LongMemEvalExperimentFree
 
 export function readLongMemEvalSemanticFreeze(root: string): LongMemEvalSemanticFreeze {
   const frozen = LongMemEvalExperimentFreezeSchema.parse(readChainArtifact(join(root, "freeze.json")));
-  if (readCurrentExtractionAuthorityRevision() !== frozen.implementation_revision) throw new Error("frozen implementation changed");
+  if (readCurrentExtractionAuthorityRevision() !== frozen.implementation_revision) throw new AlayaError("CONFLICT", "frozen implementation changed");
   return frozen;
 }
 
@@ -62,7 +63,7 @@ export async function loadFrozenLongMemEvalDataset(config: LongMemEvalSemanticCo
     dataDir: config.data_dir, pinnedMetaRoot: config.pinned_meta_root, offset: 0
   });
   if (loaded.sha256 !== config.dataset_sha256 || loaded.datasetQuestionCount !== config.dataset_question_count) {
-    throw new Error("LongMemEval dataset differs from the frozen original identity");
+    throw new AlayaError("CONFLICT", "LongMemEval dataset differs from the frozen original identity");
   }
   return loaded;
 }
@@ -71,6 +72,6 @@ export function assertLongMemEvalSemanticRows(frozen: Pick<LongMemEvalSemanticFr
   const expected = frozen.selected.map((row) => row.question_id).sort();
   const actual = rows.map((row) => row.question_id).sort();
   if (new Set(expected).size !== expected.length || chainIdentity(expected) !== chainIdentity(actual)) {
-    throw new Error("development result requires exact selected question denominator");
+    throw new AlayaError("CONFLICT", "development result requires exact selected question denominator");
   }
 }

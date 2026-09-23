@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod";
-import { canonicalJson } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import type { SemanticProposalKind, SemanticProposalLine } from "./workset.js";
 import { ExtractionTransportProvenanceSchema } from "../extraction/transport-route.js";
 import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/inspection.js";
@@ -86,12 +86,12 @@ export function assertSemanticProposalExecutionScope(
   scope: SemanticProposalAuthority["execution_scope"], cacheRoot: string, writeLease?: ExtractionCacheWriteLease
 ): void {
   if (scope.implementation_revision !== readCurrentExtractionAuthorityRevision()) {
-    throw new Error("semantic proposal executable revision changed");
+    throw new AlayaError("CONFLICT", "semantic proposal executable revision changed");
   }
   writeLease?.assertRoot(cacheRoot);
   const namedRoot = writeLease?.cacheRoot ?? cacheRoot;
   if (canonicalExtractionTargetRoot(namedRoot) !== scope.execution_root_path) {
-    throw new Error("semantic proposal execution root differs from authorized root");
+    throw new AlayaError("CONFLICT", "semantic proposal execution root differs from authorized root");
   }
   assertExtractionTargetRootBinding({ cacheRoot: namedRoot, marker: executionRootMarker, purpose: "semantic proposal",
     binding: scope.execution_root_binding, ...(writeLease === undefined ? {} : { writeLease }) });
@@ -116,7 +116,7 @@ export function buildSemanticProposalPreflight(input: Readonly<{
   const maxInput = missingLines.reduce((max, line) => Math.max(max, line.inputByteUpper), 0);
   const transport = input.lines[0]?.transportProvenance;
   if (transport === undefined || input.lines.some(line => canonicalJson(line.transportProvenance) !== canonicalJson(transport))) {
-    throw new Error("semantic proposal preflight requires one resolved transport route");
+    throw new AlayaError("VALIDATION", "semantic proposal preflight requires one resolved transport route");
   }
   return {
     contract: "source-semantic-proposal-preflight-v5",
@@ -141,11 +141,11 @@ export function pinSemanticProposalAuthority(input: Readonly<{
 }>): SemanticProposalAuthority {
   const preflight = PreflightSchema.parse(input.preflight);
   if (preflight.execution_scope.implementation_revision !== readCurrentExtractionAuthorityRevision()) {
-    throw new Error("semantic proposal executable revision changed since preflight");
+    throw new AlayaError("CONFLICT", "semantic proposal executable revision changed since preflight");
   }
   const estimated = estimatedUpperUsd(input.preflight, input.inputUsdPerMillion, input.outputUsdPerMillion);
   if (input.spendCeilingUsd !== undefined && estimated > input.spendCeilingUsd) {
-    throw new Error(`semantic proposal receipt ${estimated} exceeds spend ceiling ${input.spendCeilingUsd}`);
+    throw new AlayaError("CONFLICT", `semantic proposal receipt ${estimated} exceeds spend ceiling ${input.spendCeilingUsd}`);
   }
   const scope = preflight.execution_scope;
   const binding = scope.execution_root_binding;
@@ -197,20 +197,20 @@ export function verifySemanticProposalAuthority(authority: SemanticProposalAutho
   const { identity_digest, ...body } = authority;
   const digest = createHash("sha256").update(canonicalJson(body)).digest("hex");
   if (digest !== identity_digest) {
-    throw new Error("semantic proposal authority identity digest is invalid");
+    throw new AlayaError("CONFLICT", "semantic proposal authority identity digest is invalid");
   }
   if (authority.attempt_lineage_digest !== proposalAttemptLineage(authority)) {
-    throw new Error("semantic proposal attempt lineage does not bind its execution scope");
+    throw new AlayaError("CONFLICT", "semantic proposal attempt lineage does not bind its execution scope");
   }
   if (new Set(authority.keys).size !== authority.keys.length) {
-    throw new Error("semantic proposal authority keys are not unique");
+    throw new AlayaError("CONFLICT", "semantic proposal authority keys are not unique");
   }
   if (authority.limits.starting_missing !== authority.keys.length ||
       authority.limits.successful_shard_ceiling !== authority.keys.length) {
-    throw new Error("semantic proposal authority key/cap relationship is invalid");
+    throw new AlayaError("CONFLICT", "semantic proposal authority key/cap relationship is invalid");
   }
   if (authority.limits.maximum_attempts !== authority.keys.length * authority.limits.maximum_attempts_per_key) {
-    throw new Error("semantic proposal authority maximum_attempts does not bind its keys");
+    throw new AlayaError("CONFLICT", "semantic proposal authority maximum_attempts does not bind its keys");
   }
   const estimated = estimatedUpperUsd({
     maximum_attempts: authority.limits.maximum_attempts,
@@ -218,7 +218,7 @@ export function verifySemanticProposalAuthority(authority: SemanticProposalAutho
     maximum_input_tokens_per_attempt: authority.price.maximum_input_tokens_per_attempt
   }, authority.price.input_usd_per_million, authority.price.output_usd_per_million);
   if (authority.price.estimated_upper_usd !== estimated) {
-    throw new Error("semantic proposal authority price does not bind its limits");
+    throw new AlayaError("CONFLICT", "semantic proposal authority price does not bind its limits");
   }
   return authority;
 }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { dirname, join } from "node:path";
-import { canonicalJson, hashSourceRecordId } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, hashSourceRecordId } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, sourceSemanticLibraryQueryIdentity } from "@do-soul/alaya-core";
 import { chainIdentity } from "../semantic-chain/contract.js";
 import { LongMemEvalSemanticFreezeSchema, assertLongMemEvalSemanticRows,
@@ -47,7 +47,7 @@ export function reportFrozenSourceBearingUnion(evidence: FrozenUnionEvidence, re
     || summary.freeze_identity !== freezeId || summary.replay_identity !== chainIdentity(replay)
     || summary.dataset_sha256 !== frozen.config.dataset_sha256 || prepared.freeze_identity !== freezeId
     || replay.freeze_identity !== freezeId || replay.prepared_identity !== chainIdentity(prepared)) {
-    throw new Error("frozen comparison identity chain is inconsistent");
+    throw new AlayaError("CONFLICT", "frozen comparison identity chain is inconsistent");
   }
   assertLongMemEvalSemanticRows(frozen, prepared.rows);
   assertLongMemEvalSemanticRows(frozen, replay.rows);
@@ -104,17 +104,17 @@ function population(frozen: FrozenPopulation, summary: Record<string, unknown>):
     || selected.size !== frozen.selected.length
     || canonicalJson([...selected].sort()) !== canonicalJson([...frozen.config.question_ids].sort())
     || frozen.selected.some((row) => !inventory.some((entry) => entry.question_id === row.question_id
-      && entry.index === row.index && entry.cohort === row.cohort))) throw new Error("frozen census or selection is inconsistent");
+      && entry.index === row.index && entry.cohort === row.cohort))) throw new AlayaError("CONFLICT", "frozen census or selection is inconsistent");
   const rows = records(summary.rows);
   if (new Set(rows.map((row) => row.question_id)).size !== rows.length || rows.some((row) =>
     !inventory.some((entry) => row.question_id === entry.question_id && row.index === entry.index
       && row.cohort === entry.cohort && row.selected === selected.has(entry.question_id)))) {
-    throw new Error("summary row identity differs from frozen census");
+    throw new AlayaError("CONFLICT", "summary row identity differs from frozen census");
   }
   const primary = record(summary.primary), summaryInventory = record(summary.inventory);
   if (primary.eligible !== frozen.selected.filter((row) => row.cohort === "answerable").length
     || summaryInventory.questions !== 500 || summaryInventory.answerable !== 470 || summaryInventory.abstention !== 30) {
-    throw new Error("summary denominator differs from frozen census");
+    throw new AlayaError("CONFLICT", "summary denominator differs from frozen census");
   }
   return inventory.map((entry) => rows.find((row) => row.question_id === entry.question_id)
     ?? { ...entry, selected: selected.has(entry.question_id), outcome: "unknown", reason: "missing_summary_row", measurement_path: null });
@@ -127,7 +127,7 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
     `${typeof row.reason === "string" ? row.reason : "missing_measurement_path"}; denominator retained`, "unavailable");
   const measurement = readEnvelope(row.measurement_path, readText);
   if (row.measurement_path !== join(replayed.chain_root, `measurement-${chainIdentity(measurement)}.json`)) {
-    throw new Error("measurement path does not bind this question chain");
+    throw new AlayaError("CONFLICT", "measurement path does not bind this question chain");
   }
   const replay = readEnvelope(replayed.replay_path, readText);
   const plan = readEnvelope(join(replayed.chain_root, "prepare.json"), readText);
@@ -154,7 +154,7 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
     || planned.original_query !== selected.question || publication.census_count !== selected.source_manifest.length
     || publication.sources.some((source) => source.question_id !== selected.question_id)
     || canonicalJson(publication.sources.map(sourceIdentity)) !== canonicalJson(selected.source_manifest.map(sourceIdentity))) {
-    throw new Error("question publication, plan, replay or measurement binding differs");
+    throw new AlayaError("CONFLICT", "question publication, plan, replay or measurement binding differs");
   }
   const response = record(replayRow.response);
   LongMemEvalSourceOnlyResponseSchema.parse(response);
@@ -166,7 +166,7 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
       source.admission === "admitted" && source.record_id === unit.root_id && unit.root_kind === "source_record"
       && source.record_id === hashSourceRecordId(source, fieldContractSha256)
       && source.source_version === unit.source_version && source.content_digest === unit.content_digest))) {
-    throw new Error("stored measurement differs from native first exposure or gold publication");
+    throw new AlayaError("CONFLICT", "stored measurement differs from native first exposure or gold publication");
   }
   const readmit = response.protocol_version === 1 ? readmitHistoricalSourceOnlyLibraryMeasurement : readmitSourceSemanticLibraryMeasurement;
   const evaluated = readmit(chainRow.measurement, { recallResult: archivedSourceResponse(response),
@@ -192,7 +192,7 @@ function archivedSourceResponse(response: Record<string, unknown>): Record<strin
   const rename = (value: unknown, fields: Readonly<Record<string, string>>) => {
     const result = { ...record(value) };
     for (const [oldName, name] of Object.entries(fields)) {
-      if (!(oldName in result) || name in result) throw new Error("ambiguous historical response fields");
+      if (!(oldName in result) || name in result) throw new AlayaError("VALIDATION", "ambiguous historical response fields");
       result[name] = result[oldName];
       delete result[oldName];
     }
@@ -211,21 +211,21 @@ function sourceIdentity(row: { source_id: string; source_version: string; conten
 }
 function envelope(value: unknown): Record<string, unknown> {
   const raw = record(value), payload = record(raw.payload);
-  if (typeof raw.identity !== "string" || raw.identity !== chainIdentity(payload)) throw new Error("artifact envelope identity mismatch");
+  if (typeof raw.identity !== "string" || raw.identity !== chainIdentity(payload)) throw new AlayaError("CONFLICT", "artifact envelope identity mismatch");
   return payload;
 }
 function readEnvelope(path: string, readText: (path: string) => string) { return envelope(JSON.parse(readText(path))); }
 function record(value: unknown): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("artifact object unavailable");
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new AlayaError("VALIDATION", "artifact object unavailable");
   return value as Record<string, unknown>;
 }
 function records(value: unknown) {
-  if (!Array.isArray(value)) throw new Error("artifact rows unavailable");
+  if (!Array.isArray(value)) throw new AlayaError("VALIDATION", "artifact rows unavailable");
   return value.map(record);
 }
 function one(value: unknown, queryKey: string) {
   const rows = records(value);
-  if (rows.length !== 1 || rows[0]!.query_key !== queryKey) throw new Error("artifact query identity mismatch");
+  if (rows.length !== 1 || rows[0]!.query_key !== queryKey) throw new AlayaError("CONFLICT", "artifact query identity mismatch");
   return rows[0]!;
 }
 function reportRow(row: Record<string, unknown>, selected: boolean, cause: string,

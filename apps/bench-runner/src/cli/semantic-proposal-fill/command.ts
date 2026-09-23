@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { resolveSecretRef } from "@do-soul/alaya";
@@ -15,12 +16,12 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
   try {
     const action = required(args, "--action");
     const kind = required(args, "--kind");
-    if (kind !== "query" && kind !== "semantic_correspondence") throw new Error("--kind must be query or semantic_correspondence");
+    if (kind !== "query" && kind !== "semantic_correspondence") throw new AlayaError("VALIDATION", "--kind must be query or semantic_correspondence");
     if (action !== "prepare" && action !== "authorize" && action !== "fill") {
-      throw new Error("--action must be prepare, authorize, or fill");
+      throw new AlayaError("VALIDATION", "--action must be prepare, authorize, or fill");
     }
     const workset = parseSemanticProposalWorkset(JSON.parse(readFileSync(required(args, "--workset"), "utf8")));
-    if (workset.kind !== kind) throw new Error("workset kind does not match --kind");
+    if (workset.kind !== kind) throw new AlayaError("CONFLICT", "workset kind does not match --kind");
     const cacheRoot = required(args, "--cache-root");
     const maxOutputTokens = integerFlag(args, "--max-output-tokens", SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT);
     if (action === "prepare") {
@@ -33,7 +34,7 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
     if (action === "authorize") {
       const preflight = parseSemanticProposalPreflight(JSON.parse(readFileSync(required(args, "--preflight"), "utf8")));
       if (canonicalExtractionTargetRoot(cacheRoot) !== preflight.execution_scope.execution_root_path) {
-        throw new Error("semantic proposal preflight execution root differs from selected root");
+        throw new AlayaError("CONFLICT", "semantic proposal preflight execution root differs from selected root");
       }
       const authority = pinSemanticProposalAuthority({
         preflight,
@@ -67,7 +68,7 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
 
 function gardenConfig(model: string, requestProfile: string, authorizedProviderUrl: string): CompileSeedExtractionConfig {
   if (!isNativeGeminiRequestProfile(requestProfile)) {
-    throw new Error("semantic proposal fill requires a native Gemini request profile");
+    throw new AlayaError("VALIDATION", "semantic proposal fill requires a native Gemini request profile");
   }
   const providerUrl = process.env.OFFICIAL_API_GARDEN_PROVIDER_URL?.trim()
     || authorizedProviderUrl;
@@ -89,7 +90,7 @@ function gardenApiKey(): string | null {
 function required(args: ReadonlyArray<string>, name: string): string {
   const index = args.indexOf(name);
   const value = index >= 0 ? args[index + 1] : undefined;
-  if (value === undefined || value.startsWith("--")) throw new Error(`${name} is required`);
+  if (value === undefined || value.startsWith("--")) throw new AlayaError("VALIDATION", `${name} is required`);
   return value;
 }
 
@@ -100,12 +101,12 @@ function hasFlag(args: ReadonlyArray<string>, name: string): boolean {
 function integerFlag(args: ReadonlyArray<string>, name: string, fallback: number): number {
   if (!hasFlag(args, name)) return fallback;
   const value = Number(required(args, name));
-  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+  if (!Number.isSafeInteger(value) || value <= 0) throw new AlayaError("VALIDATION", `${name} must be a positive integer`);
   return value;
 }
 
 function numberFlag(args: ReadonlyArray<string>, name: string): number {
   const value = Number(required(args, name));
-  if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a non-negative number`);
+  if (!Number.isFinite(value) || value < 0) throw new AlayaError("VALIDATION", `${name} must be a non-negative number`);
   return value;
 }

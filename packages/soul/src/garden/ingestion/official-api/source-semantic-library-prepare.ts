@@ -1,4 +1,4 @@
-import {
+import { AlayaError,
 
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, sourceSemanticQueryIdentity,
   type SourceSemanticCorrespondence, type SourceSemanticQuery, type SourceSemanticOutcome
@@ -53,10 +53,10 @@ export function prepareSourceSemanticLibrary(
   input: SourceSemanticLibraryPrepareInput
 ): SourceSemanticLibraryPrepareResult {
   if (input.cap !== undefined && (!Number.isSafeInteger(input.cap) || input.cap < 0)) {
-    throw new Error("semantic_correspondence preparation cap must be a nonnegative safe integer");
+    throw new AlayaError("VALIDATION", "semantic_correspondence preparation cap must be a nonnegative safe integer");
   }
   if (input.admitted_query_semantics.original_query_digest !== `sha256:${semanticSha256(input.original_query)}`) {
-    throw new Error("semantic_correspondence preparation does not bind the original query");
+    throw new AlayaError("CONFLICT", "semantic_correspondence preparation does not bind the original query");
   }
   const cap = Math.max(0, Math.min(
     input.cap ?? SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,

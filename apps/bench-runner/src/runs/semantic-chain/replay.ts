@@ -6,7 +6,7 @@ import { authorizedScopesFromAdmission, authorizeSemanticScope, fieldContractSha
   semanticInterpretationEvidenceId, sourceSemanticAccessInputIdentity, sourceSemanticLibraryQueryIdentity,
   sourceSemanticLibraryRequestIdentity, verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
 import { z } from "zod";
-import { canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
+import { AlayaError, canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   sourceEvidenceRootTarget, sourceRecallTarget, type MemorySearchResult, type SourceEvidenceTarget,
   type SourceSemanticLibrarySlotQualifier,
   type SourceRecordIdentity } from "@do-soul/alaya-protocol";
@@ -43,7 +43,7 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
         if (prior !== undefined) { rows.push(prior); continue; }
         const reservation = `${rowPath}.reserved`;
         if (readChainArtifact(reservation) !== undefined) {
-          throw new Error("native first exposure is unresolved after interruption; retained reservation forbids re-exposure");
+          throw new AlayaError("CONFLICT", "native first exposure is unresolved after interruption; retained reservation forbids re-exposure");
         }
         writeChainArtifact(reservation, { replay_identity: identity, query_key: query.query_key });
         const started = performance.now();
@@ -68,10 +68,10 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
             semantic_correspondences: arm === "retained" ? ready : [], accepts_unreviewed_conditional_results: true,
             budget: config.budget, output_byte_limit: config.output_byte_limit, authorized_scopes: config.authorized_scopes,
             access_policy: config.access_policy })));
-        if (response.operation !== "recall") throw new Error("native recall returned a different operation");
+        if (response.operation !== "recall") throw new AlayaError("INTERNAL", "native recall returned a different operation");
         if (response.index !== undefined && (response.discovery?.access?.policy !== config.access_policy
           || response.discovery.access.pool_id !== poolId)) {
-          throw new Error("native recall did not bind the prepared access pool");
+          throw new AlayaError("CONFLICT", "native recall did not bind the prepared access pool");
         }
         const exposure = response.index === undefined || response.delivery_id === undefined ? null
           : recordSourceSemanticLibraryFirstExposure(response);
@@ -103,7 +103,7 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
   const gold = z.array(z.object({ query_key: z.string(), source_units: SourceGoldUnitSchema.array() }).strict()).parse(goldValue);
   const expected = plan.queries.map((row) => row.query_key).sort();
   if (canonicalJson(expected) !== canonicalJson(gold.map((row) => row.query_key).sort())) {
-    throw new Error("measurement requires exact per-query gold and replay denominator coverage");
+    throw new AlayaError("VALIDATION", "measurement requires exact per-query gold and replay denominator coverage");
   }
   const rows = replay.rows.map((row) => {
     const prepared = plan.queries.find((query) => query.query_key === row.query_key)!;
@@ -153,16 +153,16 @@ export function admitSemanticChainReplay(root: string, replayPath: string) {
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(root, "prepare.json")));
   const replay = ReplaySchema.parse(readChainArtifact(replayPath));
   if (replay.plan_identity !== chainIdentity(plan)) {
-    throw new Error("measurement replay does not bind this plan");
+    throw new AlayaError("CONFLICT", "measurement replay does not bind this plan");
   }
   const expected = plan.queries.map((row) => row.query_key).sort();
   if (canonicalJson(expected) !== canonicalJson(replay.rows.map((row) => row.query_key).sort())) {
-    throw new Error("archive requires exact query denominator coverage");
+    throw new AlayaError("CONFLICT", "archive requires exact query denominator coverage");
   }
   assertChainSnapshot(plan.config);
   verifySemanticChainQueries(plan);
   const retained = readSemanticChainCorrespondences(plan, replay.arm);
-  if (retained.identity !== replay.identity) throw new Error("retained native semantic-correspondence state changed");
+  if (retained.identity !== replay.identity) throw new AlayaError("CONFLICT", "retained native semantic-correspondence state changed");
   const connection = new BetterSqlite3(plan.config.snapshot_path, { readonly: true, fileMustExist: true });
   try {
     connection.pragma("query_only = ON");
@@ -189,28 +189,28 @@ function admitReplayRow(root: string, plan: SemanticChainPlan, replay: z.infer<t
   const delivered = row.response?.operation === "recall" && row.response.index !== undefined;
   if (query.status === "blocked") {
     if (row.status !== "blocked" || row.reason !== query.reason || row.first_exposure != null || delivered) {
-      throw new Error("blocked query cannot have a native delivery");
+      throw new AlayaError("CONFLICT", "blocked query cannot have a native delivery");
     }
     return [];
   }
-  if (row.status === "blocked") throw new Error("ready query cannot become a blocked archive row");
+  if (row.status === "blocked") throw new AlayaError("CONFLICT", "ready query cannot become a blocked archive row");
   const rowPath = join(root, `replay-${replay.identity}`, `${row.query_key}.json`);
   const retainedRow = readChainArtifact(rowPath), reservation = readChainArtifact(`${rowPath}.reserved`);
   if (retainedRow === undefined || reservation === undefined || canonicalJson(retainedRow) !== canonicalJson(row)
     || canonicalJson(reservation) !== canonicalJson({ replay_identity: replay.identity, query_key: row.query_key })) {
-    throw new Error("native row or first-exposure reservation differs from retained replay");
+    throw new AlayaError("CONFLICT", "native row or first-exposure reservation differs from retained replay");
   }
   if (row.status === "native_unavailable") {
-    if (row.first_exposure != null || delivered) throw new Error("unavailable row cannot have a native delivery");
+    if (row.first_exposure != null || delivered) throw new AlayaError("CONFLICT", "unavailable row cannot have a native delivery");
     return [];
   }
   const response = row.response;
   if (response?.operation !== "recall" || response.index === undefined || row.first_exposure == null) {
-    throw new Error("replayed row requires its native initial delivery");
+    throw new AlayaError("CONFLICT", "replayed row requires its native initial delivery");
   }
   const { config } = plan;
   const scopes = authorizedScopesFromAdmission(config.authorized_scopes).authorized_scopes;
-  if (scopes === undefined) throw new Error("native delivery requires explicit scope admission");
+  if (scopes === undefined) throw new AlayaError("CONFLICT", "native delivery requires explicit scope admission");
   const { ready, outcomes } = semanticChainQueryCorrespondences(query, correspondences);
   const selected = replay.arm === "retained" ? ready : [];
   const expectedIdentity = sourceSemanticLibraryRequestIdentity({ workspace_id: config.workspace_id, as_of: config.interpretation_clock,
@@ -218,16 +218,16 @@ function admitReplayRow(root: string, plan: SemanticChainPlan, replay: z.infer<t
     semantic_correspondences: selected, budget: config.budget, output_byte_limit: config.output_byte_limit, access_policy: config.access_policy });
   if (response.request_identity !== expectedIdentity || response.index.query_id !== sourceSemanticLibraryQueryIdentity(query.original_query)
     || response.index.as_of !== config.interpretation_clock || canonicalJson(response.request_budget) !== canonicalJson(config.budget)
-    || canonicalJson(row.correspondence_outcomes) !== canonicalJson(outcomes)) throw new Error("native delivery belongs to another frozen request");
+    || canonicalJson(row.correspondence_outcomes) !== canonicalJson(outcomes)) throw new AlayaError("CONFLICT", "native delivery belongs to another frozen request");
   if (response.delivery_id !== preparedDeliveryId(expectedIdentity, response.index)) {
-    throw new Error("native delivery ID does not bind its frozen request and index");
+    throw new AlayaError("CONFLICT", "native delivery ID does not bind its frozen request and index");
   }
   const trace = row.preparation_trace;
   const access = response.discovery?.access;
   if (trace == null || trace.length === 0 || !sameSealedSnapshotObservation(query, { ...query, discovery_trace: trace })
     || access === undefined || access.pool_id !== trace.at(-1)!.access.pool_id || access.policy !== config.access_policy
     || access.input_id !== sourceSemanticAccessInputIdentity({ original_query: query.original_query, query_semantics: query.query_semantics,
-      budget: config.budget, policy: config.access_policy })) throw new Error("native delivery does not bind the prepared access pool");
+      budget: config.budget, policy: config.access_policy })) throw new AlayaError("CONFLICT", "native delivery does not bind the prepared access pool");
   return admitDeliveredSources(plan, response, stores, reader, scopes, selected);
 }
 
@@ -236,20 +236,20 @@ function admitDeliveredSources(plan: SemanticChainPlan, response: Extract<z.infe
   correspondences: ReturnType<typeof semanticChainQueryCorrespondences>["ready"]): SourceRecordIdentity[] {
   const records: SourceRecordIdentity[] = [];
   if (response.results?.length !== response.index!.entries.length) {
-    throw new Error("native delivery has no complete emitted source page");
+    throw new AlayaError("CONFLICT", "native delivery has no complete emitted source page");
   }
   for (const [position, entry] of response.index!.entries.entries()) {
     const target = entry.target;
-    if (target.kind !== "source_evidence" || target.workspace_id !== plan.config.workspace_id) throw new Error("native source workspace changed");
+    if (target.kind !== "source_evidence" || target.workspace_id !== plan.config.workspace_id) throw new AlayaError("CONFLICT", "native source workspace changed");
     const retained = stores.getStoredRecord(plan.config.workspace_id, target.root_id);
-    if (retained === null) throw new Error("delivered source is unavailable in sealed snapshot");
+    if (retained === null) throw new AlayaError("CONFLICT", "delivered source is unavailable in sealed snapshot");
     const current = resolveCurrentSource(stores, plan.config.workspace_id, { artifact_key: retained.record.source_id,
       source_corpus_digest: target.content_digest.replace(/^sha256:/u, "") }, fieldContractSha256);
     authorizeSemanticScope(current.record.scope_class, scopes);
     if (canonicalJson(sourceEvidenceRootTarget(target)) !== canonicalJson(sourceRecallTarget({ workspace_id: current.record.workspace_id,
       root_kind: "source_record", root_id: current.record.identity, source_version: current.record.source_version,
       content_digest: current.record.content_digest, evidence_object_id: current.record.evidence_object_id }))) {
-      throw new Error("delivered source identity differs from current sealed source");
+      throw new AlayaError("CONFLICT", "delivered source identity differs from current sealed source");
     }
     admitEmittedSourcePreview(target.span, response.results[position]!, response.slot_qualifiers?.[position],
       target, current.content_bytes, proofForLibraryEntry(entry, response.proofs ?? []) !== undefined);
@@ -257,11 +257,11 @@ function admitDeliveredSources(plan: SemanticChainPlan, response: Extract<z.infe
   }
   for (const proof of response.proofs ?? []) {
     if (!correspondences.some((value) => canonicalJson(value) === canonicalJson(proof.semantic_correspondence))) {
-      throw new Error("delivered proof lacks its retained semantic correspondence");
+      throw new AlayaError("CONFLICT", "delivered proof lacks its retained semantic correspondence");
     }
     const capsule = reader.readBoundInterpretation(plan.config.workspace_id,
       semanticInterpretationEvidenceId(proof.source_interpretation_id!, fieldContractSha256), 1_000_000);
-    if (capsule.status !== "complete" || capsule.gist === null) throw new Error("delivered interpretation is unavailable in sealed snapshot");
+    if (capsule.status !== "complete" || capsule.gist === null) throw new AlayaError("CONFLICT", "delivered interpretation is unavailable in sealed snapshot");
     const checked = verifyPublishedSourceSemanticInterpretation({ stores, sha256: fieldContractSha256 }, JSON.parse(capsule.gist), plan.config.workspace_id);
     authorizeSemanticScope(checked.stored.record.scope_class, scopes);
     records.push(checked.stored.record);
@@ -273,29 +273,29 @@ export function admitEmittedSourcePreview(span: SourceEvidenceTarget["span"], re
   qualifier: SourceSemanticLibrarySlotQualifier | undefined, target: SourceEvidenceTarget, source: string,
   requiresCompleteSupport: boolean): void {
   if (canonicalJson(result.target) !== canonicalJson(target)) {
-    throw new Error("emitted source target differs from delivered index");
+    throw new AlayaError("CONFLICT", "emitted source target differs from delivered index");
   }
-  if (span?.retained_extent !== "body") throw new Error("emitted source has no bound body span");
+  if (span?.retained_extent !== "body") throw new AlayaError("CONFLICT", "emitted source has no bound body span");
   const full = hydrateUtf8Chunk(source, { offset: span.content_start, byteLimit: span.content_end - span.content_start });
   if (full.status !== "chunk" || full.end_offset !== span.content_end) {
-    throw new Error("emitted source span is not a UTF-8 slice of sealed source");
+    throw new AlayaError("CONFLICT", "emitted source span is not a UTF-8 slice of sealed source");
   }
   if (requiresCompleteSupport && (qualifier?.evidence_kind !== "semantic_proof"
     || qualifier.payload_support !== "available" || !result.budget_state.within_budget)) {
-    throw new Error("available proof support requires its complete emitted source preview");
+    throw new AlayaError("CONFLICT", "available proof support requires its complete emitted source preview");
   }
   if (result.content_preview === "[payload omitted]" && !result.budget_state.within_budget) return;
   const emitted = result.content_preview === "[empty source]" && span.content_end === span.content_start
     ? "" : result.content_preview;
   const byteLength = Buffer.byteLength(emitted, "utf8");
   if (result.budget_state.within_budget && emitted !== full.text) {
-    throw new Error("emitted source preview differs from sealed source span");
+    throw new AlayaError("CONFLICT", "emitted source preview differs from sealed source span");
   }
   if (byteLength > span.content_end - span.content_start) {
-    throw new Error("emitted source preview exceeds sealed source span");
+    throw new AlayaError("CONFLICT", "emitted source preview exceeds sealed source span");
   }
   const chunk = hydrateUtf8Chunk(source, { offset: span.content_start, byteLimit: byteLength });
   if (chunk.status !== "chunk" || chunk.end_offset !== span.content_start + byteLength || chunk.text !== emitted) {
-    throw new Error("emitted source preview differs from sealed source span");
+    throw new AlayaError("CONFLICT", "emitted source preview differs from sealed source span");
   }
 }

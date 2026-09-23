@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { publishSourceSemanticSnapshot, type SourcePublicationPopulation } from "./publish.js";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
@@ -9,7 +10,7 @@ export async function runSourceSemanticPublicationLauncher(args: readonly string
   try {
     const flags = parseFlags(args);
     globalThis.fetch = async () => {
-      throw new Error("source semantic publication forbids provider calls");
+      throw new AlayaError("CONFLICT", "source semantic publication forbids provider calls");
     };
     const report = await publishSourceSemanticSnapshot({
       snapshotPath: required(flags, "--snapshot"),
@@ -35,7 +36,7 @@ function population(flags: ReadonlyMap<string, string>, name: "original" | "chal
   const prefix = `--${name}`;
   const cacheRoot = flags.get(`${prefix}-cache-root`);
   const cacheRootsJson = flags.get(`${prefix}-cache-roots`);
-  if (cacheRoot !== undefined && cacheRootsJson !== undefined) throw new Error("choose one cache roots flag per population");
+  if (cacheRoot !== undefined && cacheRootsJson !== undefined) throw new AlayaError("VALIDATION", "choose one cache roots flag per population");
   const cacheRoots = cacheRootsJson === undefined ? (cacheRoot === undefined ? undefined : [cacheRoot])
     : z.array(z.string().min(1)).min(1).max(32).parse(JSON.parse(cacheRootsJson));
   const bindingsPath = flags.get(`${prefix}-publication-associations`);
@@ -65,9 +66,9 @@ function parseFlags(args: readonly string[]): Map<string, string> {
   const flags = new Map<string, string>();
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index]!;
-    if (!allowed.includes(flag) || flags.has(flag)) throw new Error(`unknown or repeated flag '${flag}'`);
+    if (!allowed.includes(flag) || flags.has(flag)) throw new AlayaError("VALIDATION", `unknown or repeated flag '${flag}'`);
     const value = args[index + 1];
-    if (value === undefined || value.length === 0) throw new Error(`${flag} requires a value`);
+    if (value === undefined || value.length === 0) throw new AlayaError("VALIDATION", `${flag} requires a value`);
     flags.set(flag, value);
   }
   return flags;
@@ -75,12 +76,12 @@ function parseFlags(args: readonly string[]): Map<string, string> {
 
 function required(flags: ReadonlyMap<string, string>, name: string): string {
   const value = flags.get(name);
-  if (value === undefined || value.length === 0) throw new Error(`${name} is required`);
+  if (value === undefined || value.length === 0) throw new AlayaError("VALIDATION", `${name} is required`);
   return value;
 }
 
 function requestProfile(value: string): ExtractionRequestProfile {
-  if (!isExtractionRequestProfile(value)) throw new Error(`unsupported request profile '${value}'`);
+  if (!isExtractionRequestProfile(value)) throw new AlayaError("VALIDATION", `unsupported request profile '${value}'`);
   return value;
 }
 

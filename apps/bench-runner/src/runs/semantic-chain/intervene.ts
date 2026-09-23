@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { canonicalJson, SourceSemanticResourceLedger,
+import { AlayaError, canonicalJson, SourceSemanticResourceLedger,
   type SourceSemanticReasoningResult } from "@do-soul/alaya-protocol";
 import { authorizedScopesFromAdmission, executeSourceSemanticInterpretation, fieldContractSha256,
   semanticInterpretationEvidenceId, verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
@@ -16,11 +16,11 @@ const WITHDRAWAL_CONTRACT = "source-semantic-chain-withdrawal-v3" as const;
 
 /** A new offline execution, with all withdrawal arms sharing its original compiled state. */
 export function interveneSemanticChain(root: string, replayPath: string, leafTrials = 32) {
-  if (!Number.isInteger(leafTrials) || leafTrials < 1 || leafTrials > 64) throw new Error("leaf trials must be 1..64");
+  if (!Number.isInteger(leafTrials) || leafTrials < 1 || leafTrials > 64) throw new AlayaError("VALIDATION", "leaf trials must be 1..64");
   const { plan, replay } = admitSemanticChainReplay(root, replayPath);
-  if (replay.arm !== "retained") throw new Error("withdrawal requires the retained replay arm");
+  if (replay.arm !== "retained") throw new AlayaError("VALIDATION", "withdrawal requires the retained replay arm");
   const { semantic_correspondences, identity: currentReplayIdentity } = readSemanticChainCorrespondences(plan, "retained");
-  if (currentReplayIdentity !== replay.identity) throw new Error("retained native semantic-correspondence state changed");
+  if (currentReplayIdentity !== replay.identity) throw new AlayaError("CONFLICT", "retained native semantic-correspondence state changed");
   const identity = chainIdentity({ contract: WITHDRAWAL_CONTRACT,
     plan: replay.plan_identity, replay: chainIdentity(replay), leafTrials });
   const path = join(root, `withdrawal-${identity}.json`);
@@ -34,7 +34,7 @@ export function interveneSemanticChain(root: string, replayPath: string, leafTri
       expectedSha256: plan.config.snapshot_sha256, dataDirRoot: directory });
     const database = initDatabase({ filename });
     const scopes = authorizedScopesFromAdmission(plan.config.authorized_scopes).authorized_scopes;
-    if (scopes === undefined) throw new Error("withdrawal requires explicit scope admission");
+    if (scopes === undefined) throw new AlayaError("CONFLICT", "withdrawal requires explicit scope admission");
     for (const query of plan.queries) {
       const retainedRow = replay.rows.find((row) => row.query_key === query.query_key);
       const native = retainedRow?.status === "replayed" ? retainedRow.response : undefined;
@@ -49,13 +49,13 @@ export function interveneSemanticChain(root: string, replayPath: string, leafTri
             && canonicalJson(request.admitted_query_semantics) === canonicalJson(query.query_semantics);
         });
         if (found?.received === undefined || !("semantic_correspondence" in found.received) || found.received.semantic_correspondence === undefined) {
-          throw new Error("retained native proof lacks its exact available semantic correspondence");
+          throw new AlayaError("CONFLICT", "retained native proof lacks its exact available semantic correspondence");
         }
         if (!retainedRow?.correspondence_outcomes?.some((row) => row.key === found.line.key
-          && row.raw_digest === found.shard?.raw_digest)) throw new Error("retained native semantic-correspondence artifact changed");
+          && row.raw_digest === found.shard?.raw_digest)) throw new AlayaError("CONFLICT", "retained native semantic-correspondence artifact changed");
         const capsule = new SqliteSourceHintReader(database.connection).readBoundInterpretation(plan.config.workspace_id,
           semanticInterpretationEvidenceId(proof.source_interpretation_id!, fieldContractSha256), plan.config.budget.memory_bytes);
-        if (capsule.status !== "complete" || capsule.gist === null) throw new Error("withdrawal source interpretation unavailable in snapshot");
+        if (capsule.status !== "complete" || capsule.gist === null) throw new AlayaError("CONFLICT", "withdrawal source interpretation unavailable in snapshot");
         const checked = verifyPublishedSourceSemanticInterpretation({ stores: sourceLookupStores(database),
           sha256: fieldContractSha256, meter: new SourceSemanticResourceLedger(plan.config.budget) },
         JSON.parse(capsule.gist), plan.config.workspace_id);
@@ -88,7 +88,7 @@ export function interveneSemanticChain(root: string, replayPath: string, leafTri
     execution_origin: "new_offline_compilation_with_same_state_arms", provider_calls: 0,
     plan_identity: replay.plan_identity, replay_identity: replay.identity, leaf_trials: leafTrials, rows };
   if (Buffer.byteLength(JSON.stringify(result)) > 32 * 1024 * 1024) {
-    throw new Error("withdrawal trace exceeds artifact byte bound; lower --leaf-trials; working snapshot retained");
+    throw new AlayaError("CONFLICT", "withdrawal trace exceeds artifact byte bound; lower --leaf-trials; working snapshot retained");
   }
   writeChainArtifact(path, result);
   rmSync(directory, { recursive: true, force: true });

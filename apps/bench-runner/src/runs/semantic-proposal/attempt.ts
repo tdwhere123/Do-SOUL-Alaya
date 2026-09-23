@@ -2,7 +2,7 @@ import { inspectExtractionAttemptLedger,
   listExtractionAttemptLedgerRecords, openExtractionAttemptLedger,
   type ExtractionAttemptLedgerSnapshot } from "../extraction/authority/attempt-ledger.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
-import { canonicalJson } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { inspectSemanticProposalShard, hasAdmittedProposalOutcome, SemanticProposalIdentityError,
   type SemanticProposalLookup, type SemanticProposalShard } from "./artifact.js";
 import { assertSemanticProposalExecutionScope, verifySemanticProposalAuthority, type SemanticProposalAuthority } from "./authority.js";
@@ -75,19 +75,19 @@ export function openSemanticProposalAttemptLedger(input: Readonly<{
 }>) {
   const authority = verifySemanticProposalAuthority(input.authority);
   assertSemanticProposalExecutionScope(authority.execution_scope, input.cacheRoot, input.writeLease);
-  if (authority.kind !== input.kind) throw new Error("semantic proposal attempt ledger kind differs from authority");
+  if (authority.kind !== input.kind) throw new AlayaError("CONFLICT", "semantic proposal attempt ledger kind differs from authority");
   if (!isExtractionRequestProfile(input.authority.request_profile)) {
-    throw new Error("semantic proposal attempt ledger requires an extraction request profile");
+    throw new AlayaError("VALIDATION", "semantic proposal attempt ledger requires an extraction request profile");
   }
   if (input.authority.limits.maximum_attempts < 1) {
-    throw new Error("semantic proposal authority has no remaining provider attempt capacity");
+    throw new AlayaError("CONFLICT", "semantic proposal authority has no remaining provider attempt capacity");
   }
   const lineage = input.authority.attempt_lineage_digest;
   const records = listExtractionAttemptLedgerRecords(input.cacheRoot);
   if (records.some(record => record.lineage_digest !== lineage &&
       record.cache_identity.model === input.authority.model &&
       record.cache_identity.requestProfile === input.authority.request_profile)) {
-    throw new Error("proposal cache contains another execution lineage; explicit settled continuation is required");
+    throw new AlayaError("CONFLICT", "proposal cache contains another execution lineage; explicit settled continuation is required");
   }
   return openExtractionAttemptLedger({
     cacheRoot: input.cacheRoot,
@@ -110,7 +110,7 @@ export function openSemanticProposalAttemptLedger(input: Readonly<{
         return undefined;
       }
       const raw = readProviderRawAttempt(cacheRoot, cacheKey, shard.attempt_ordinal);
-      if (raw === undefined) throw new Error("proposal success lacks its reserved raw attempt");
+      if (raw === undefined) throw new AlayaError("CONFLICT", "proposal success lacks its reserved raw attempt");
       assertProposalRawReservation(raw, inspectExtractionAttemptLedger({ cacheRoot, lineageDigest: lineage,
         cacheIdentity: identity }), { kind: input.kind, model: identity.model, request_profile: identity.requestProfile,
         request_digest: shard.request_digest, attempt_lineage_digest: lineage }, cacheKey);

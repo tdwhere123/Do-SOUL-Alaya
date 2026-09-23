@@ -1,4 +1,4 @@
-import { canonicalJson, type SourceSemanticCorrespondence } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, type SourceSemanticCorrespondence } from "@do-soul/alaya-protocol";
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { readSemanticProposalResults } from "../semantic-proposal/fill.js";
 import { chainIdentity, type SemanticChainPlan } from "./contract.js";
@@ -36,17 +36,17 @@ export function verifySemanticChainQueries(plan: SemanticChainPlan): void {
   const expected = queries.map((row) => row.line.key).sort();
   const recorded = plan.queries.map((row) => row.query_key).sort();
   if (new Set(expected).size !== expected.length || new Set(recorded).size !== recorded.length
-    || canonicalJson(expected) !== canonicalJson(recorded)) throw new Error("prepared query-semantics denominator changed");
+    || canonicalJson(expected) !== canonicalJson(recorded)) throw new AlayaError("CONFLICT", "prepared query-semantics denominator changed");
   const currentIdentity = chainIdentity({ config, queries: semanticChainProposalStates(queries) });
-  if (currentIdentity !== plan.input_identity) throw new Error("prepared query-semantics state changed before native replay");
+  if (currentIdentity !== plan.input_identity) throw new AlayaError("CONFLICT", "prepared query-semantics state changed before native replay");
   for (const row of plan.queries) {
     const current = queries.find((query) => query.line.key === row.query_key);
     if (current === undefined || current.line.original_query !== row.original_query ||
         (current.shard?.raw_digest ?? null) !== row.raw_digest ||
         row.status === "ready" && (current?.received === undefined || !("query" in current.received) ||
-        canonicalJson(current.received.query) !== canonicalJson(row.query_semantics))) throw new Error("prepared query semantics changed before native replay");
+        canonicalJson(current.received.query) !== canonicalJson(row.query_semantics))) throw new AlayaError("CONFLICT", "prepared query semantics changed before native replay");
     if (row.status === "blocked" && (current.received === undefined || !("query" in current.received))
-      && row.reason !== current.status) throw new Error("prepared query failure state changed before native replay");
+      && row.reason !== current.status) throw new AlayaError("CONFLICT", "prepared query failure state changed before native replay");
   }
 }
 

@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type { GeminiBatchInvocation, GeminiBatchJob, GeminiBatchState } from "./contract.js";
 import { resourceName } from "./native-codec.js";
 import { importBatchJob } from "./import.js";
@@ -25,10 +26,10 @@ export async function executeGeminiBatchOperation(invocation: GeminiBatchInvocat
     const job = state.jobs.find((candidate) => candidate.id === requested?.localJob);
     if (requested === undefined || job === undefined || job.remoteJob === undefined ||
         job.remoteJob !== requested.remoteJob || job.submittedAt === undefined || job.inputFile === undefined) {
-      throw new Error("Batch recovery requires exact identities of an acknowledged remote job");
+      throw new AlayaError("CONFLICT", "Batch recovery requires exact identities of an acknowledged remote job");
     }
     if (!input.recoveryRevision?.authority || !input.recoveryRevision.observer) {
-      throw new Error("Batch recovery requires authority and observer revisions");
+      throw new AlayaError("CONFLICT", "Batch recovery requires authority and observer revisions");
     }
     await poll(input, state, job, true);
     return structuredClone(state);

@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -80,7 +81,7 @@ export function listProviderRawAttempts(root: string, key: string): readonly Pro
     .map((name) => {
       const ordinal = Number(name.slice(key.length + 1, -5));
       const record = readProviderRawAttempt(root, key, ordinal);
-      if (record === undefined) throw new Error(`provider raw attempt missing after listing: ${name}`);
+      if (record === undefined) throw new AlayaError("CONFLICT", `provider raw attempt missing after listing: ${name}`);
       return record;
     })
     .sort((left, right) => left.attempt_ordinal - right.attempt_ordinal);

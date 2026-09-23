@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { z } from "zod";
-import { SourceSemanticAccessPolicySchema } from "@do-soul/alaya-protocol";
+import { AlayaError, SourceSemanticAccessPolicySchema } from "@do-soul/alaya-protocol";
 import { prepareSemanticChain } from "../semantic-chain/prepare.js";
 import { replaySemanticChain } from "../semantic-chain/replay.js";
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../semantic-chain/contract.js";
@@ -59,7 +59,7 @@ export async function prepareLongMemEvalSemanticRun(root: string) {
       const publicationPath = join(directory, "publication.json");
       const publication = await publishQuestion(frozen, selected, directory, publicationPath);
       const current = results[index]!;
-      if (current.line.key !== selected.query_key) throw new Error("frozen query request identity changed");
+      if (current.line.key !== selected.query_key) throw new AlayaError("CONFLICT", "frozen query request identity changed");
       const chainRoot = join(directory, `chain-${chainIdentity({ key: current.line.key, cache_identity: current.cache_identity, status: current.status })}`);
       await prepareSemanticChain(questionChainConfig(frozen, selected, directory, publication), chainRoot);
       rows.push({ question_id: selected.question_id, status: "prepared", chain_root: chainRoot,
@@ -89,7 +89,7 @@ async function publishQuestion(frozen: LongMemEvalSemanticFreeze, selected: Long
     if (existsSync(nativeReport)) retained = JSON.parse(readBoundedCanonicalUtf8Artifact({
       path: nativeReport, maxBytes: 32 * 1024 * 1024, label: "completed question publication" }));
     else {
-      if (!isExtractionRequestProfile(config.request_profile)) throw new Error("unsupported request profile");
+      if (!isExtractionRequestProfile(config.request_profile)) throw new AlayaError("VALIDATION", "unsupported request profile");
       retained = await publishSourceSemanticSnapshot({ snapshotPath,
       dataDirRoot: join(directory, "publication-runtime"), recordedAt: config.recorded_at, producerCommit: config.producer_commit,
       workspaceId: questionWorkspace(frozen, selected.index), runId: questionWorkspace(frozen, selected.index),
@@ -113,12 +113,12 @@ export function verifyLongMemEvalQuestionPublication(frozen: LongMemEvalSemantic
   const report = (frozen.contract === "longmemeval-native-semantic-v3" ? QuestionPublicationSchema : LongMemEvalPublicationSchema).parse(value);
   if (report.snapshot_path !== snapshotPath || report.recorded_at !== config.recorded_at
     || report.workspace_id !== questionWorkspace(frozen, selected.index)
-    || report.run_id !== questionWorkspace(frozen, selected.index)) throw new Error("question publication identity changed");
-  if (hashRegularFileNoFollow(report.snapshot_path) !== report.db_sha256) throw new Error("question snapshot changed");
+    || report.run_id !== questionWorkspace(frozen, selected.index)) throw new AlayaError("CONFLICT", "question publication identity changed");
+  if (hashRegularFileNoFollow(report.snapshot_path) !== report.db_sha256) throw new AlayaError("CONFLICT", "question snapshot changed");
   const identity = (rows: readonly { source_id: string; source_version: string; content_digest: string; session_id: string }[]) =>
     chainIdentity(rows.map(({ source_id, source_version, content_digest, session_id }) => ({ source_id, source_version, content_digest, session_id })));
   if (report.census_count !== selected.source_manifest.length || report.sources.some((row) => row.question_id !== selected.question_id)
-    || identity(report.sources) !== identity(selected.source_manifest)) throw new Error("publication changed the complete question haystack");
+    || identity(report.sources) !== identity(selected.source_manifest)) throw new AlayaError("CONFLICT", "publication changed the complete question haystack");
   return report;
 }
 
@@ -150,7 +150,7 @@ export function verifyLongMemEvalQuestionChain(frozen: LongMemEvalSemanticFreeze
   publication: z.infer<typeof QuestionPublicationSchema>, chainRoot: string) {
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(chainRoot, "prepare.json")));
   if (chainIdentity(plan.config) !== chainIdentity(questionChainConfig(frozen, selected, directory, publication))) {
-    throw new Error("prepared native request differs from question freeze");
+    throw new AlayaError("CONFLICT", "prepared native request differs from question freeze");
   }
 }
 
@@ -158,9 +158,9 @@ export async function replayLongMemEvalSemanticRun(root: string, preparedPath: s
   const frozen = readLongMemEvalSemanticFreeze(root);
   const prepared = ExperimentPreparedSchema.parse(readChainArtifact(preparedPath));
   if ((prepared.contract === "longmemeval-native-semantic-prepared-v1") !== (frozen.contract === "longmemeval-native-semantic-v3")) {
-    throw new Error("prepared experiment arm differs from freeze");
+    throw new AlayaError("CONFLICT", "prepared experiment arm differs from freeze");
   }
-  if (prepared.freeze_identity !== chainIdentity(frozen)) throw new Error("prepared development run binds another freeze");
+  if (prepared.freeze_identity !== chainIdentity(frozen)) throw new AlayaError("CONFLICT", "prepared development run binds another freeze");
   assertLongMemEvalSemanticRows(frozen, prepared.rows);
   const rows: z.infer<typeof LongMemEvalReplaySchema>["rows"] = [];
   for (const row of prepared.rows) {
@@ -168,9 +168,9 @@ export async function replayLongMemEvalSemanticRun(root: string, preparedPath: s
     try {
       const selected = frozen.selected.find((selected) => selected.question_id === row.question_id)!;
       const directory = resolve(root, "questions", String(selected.index).padStart(5, "0"));
-      if (row.publication_path !== join(directory, "publication.json")) throw new Error("question publication path changed");
+      if (row.publication_path !== join(directory, "publication.json")) throw new AlayaError("CONFLICT", "question publication path changed");
       const publication = verifyLongMemEvalQuestionPublication(frozen, selected, directory, readChainArtifact(row.publication_path));
-      if (chainIdentity(publication) !== row.publication_identity) throw new Error("prepared question publication changed");
+      if (chainIdentity(publication) !== row.publication_identity) throw new AlayaError("CONFLICT", "prepared question publication changed");
       verifyLongMemEvalQuestionChain(frozen, selected, directory, publication, row.chain_root);
       const replay = await replaySemanticChain(row.chain_root);
       if (frozen.contract === "longmemeval-semantic-development-v3") LongMemEvalSourceOnlyReplaySchema.parse(replay.result);

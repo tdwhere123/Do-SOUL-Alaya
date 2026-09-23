@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type { BenchSignalExtractor } from "../compile-seed-types.js";
 
 export const EXTRACTION_REQUEST_TIMEOUT_MS = 60_000;
@@ -8,13 +9,13 @@ export function resolveExtractionRequestTimeoutMs(
   maxOutputTokens = EXTRACTION_OUTPUT_TOKEN_QUANTUM
 ): number {
   if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1) {
-    throw new Error("extraction output-token ceiling must be a positive integer");
+    throw new AlayaError("VALIDATION", "extraction output-token ceiling must be a positive integer");
   }
   const timeoutMs = EXTRACTION_REQUEST_TIMEOUT_MS * Math.ceil(
     maxOutputTokens / EXTRACTION_OUTPUT_TOKEN_QUANTUM
   );
   if (!Number.isSafeInteger(timeoutMs)) {
-    throw new Error("extraction request timeout exceeds the safe integer range");
+    throw new AlayaError("VALIDATION", "extraction request timeout exceeds the safe integer range");
   }
   return timeoutMs;
 }

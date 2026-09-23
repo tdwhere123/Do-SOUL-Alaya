@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { unlinkSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -402,7 +403,7 @@ function assertSuccessfulShards(
     }
     const current = inspectShard(cacheRoot, shard.cacheKey, record.cache_identity);
     if (current === undefined || current.rawJsonSha256 !== shard.rawJsonSha256) {
-      throw new Error(`extraction authority successful shard closure drifted: ${shard.cacheKey}`);
+      throw new AlayaError("CONFLICT", `extraction authority successful shard closure drifted: ${shard.cacheKey}`);
     }
   }
 }

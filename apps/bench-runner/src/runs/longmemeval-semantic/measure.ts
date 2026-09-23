@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { join, resolve } from "node:path";
 import { measureSemanticChain } from "../semantic-chain/replay.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
@@ -18,16 +19,16 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
   const frozen = readLongMemEvalSemanticFreeze(root);
   const replay = LongMemEvalExperimentReplaySchema.parse(readChainArtifact(replayPath));
   if ((replay.contract === "longmemeval-native-semantic-replay-v1") !== (frozen.contract === "longmemeval-native-semantic-v3")) {
-    throw new Error("replayed experiment arm differs from freeze");
+    throw new AlayaError("CONFLICT", "replayed experiment arm differs from freeze");
   }
-  if (replay.freeze_identity !== chainIdentity(frozen)) throw new Error("development replay binds another freeze");
+  if (replay.freeze_identity !== chainIdentity(frozen)) throw new AlayaError("CONFLICT", "development replay binds another freeze");
   assertLongMemEvalSemanticRows(frozen, replay.rows);
   const dataset = await loadFrozenLongMemEvalDataset(frozen.config);
   const selectedRows: LongMemEvalOutcome[] = [];
   for (const selected of frozen.selected) {
     const question = dataset.questions[selected.index]!;
     if (question.question_id !== selected.question_id || classifyLongMemEvalDatasetCohort(question) !== selected.cohort) {
-      throw new Error("frozen question or cohort changed");
+      throw new AlayaError("CONFLICT", "frozen question or cohort changed");
     }
     const replayed = replay.rows.find((row) => row.question_id === selected.question_id)!;
     let outcome: "hit" | "miss" | "unknown" = "unknown";
@@ -38,9 +39,9 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
     if (replayed.status === "replayed") {
       try {
         const directory = resolve(root, "questions", String(selected.index).padStart(5, "0"));
-        if (replayed.publication_path !== join(directory, "publication.json")) throw new Error("question publication path changed");
+        if (replayed.publication_path !== join(directory, "publication.json")) throw new AlayaError("CONFLICT", "question publication path changed");
         const publication = verifyLongMemEvalQuestionPublication(frozen, selected, directory, readChainArtifact(replayed.publication_path));
-        if (chainIdentity(publication) !== replayed.publication_identity) throw new Error("replayed question publication changed");
+        if (chainIdentity(publication) !== replayed.publication_identity) throw new AlayaError("CONFLICT", "replayed question publication changed");
         verifyLongMemEvalQuestionChain(frozen, selected, directory, publication, replayed.chain_root);
         const answerSessions = new Set(question.answer_session_ids);
         const goldSources = publication.sources.filter((source) => answerSessions.has(source.session_id));
@@ -54,7 +55,7 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
         const measuredRow = measured.result.rows[0];
         if (frozen.contract === "longmemeval-native-semantic-v3" && measuredRow?.status === "replayed"
           && chainIdentity(measuredRow.diagnostics?.order ?? null) !== chainIdentity(frozen.native_route.order)) {
-          throw new Error("native response order differs from experiment freeze");
+          throw new AlayaError("CONFLICT", "native response order differs from experiment freeze");
         }
         attribution = { layer: measuredRow?.status === "blocked" ? "query_unavailable"
           : measuredRow?.status === "native_unavailable" ? "native_unavailable"
@@ -93,7 +94,7 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
   const unknown = eligible.length - hits - misses;
   const totalEligible = frozen.inventory.filter((row) => row.cohort === "answerable").length;
   const formal = frozen.config.stage === "formal";
-  if (formal && selectedRows.length !== frozen.inventory.length) throw new Error("formal result lost dataset rows");
+  if (formal && selectedRows.length !== frozen.inventory.length) throw new AlayaError("INTERNAL", "formal result lost dataset rows");
   const requiredHits = Math.floor(0.9 * totalEligible) + 1;
   const decision = !formal ? "development_only" : hits >= requiredHits ? "achieved"
     : hits + unknown < requiredHits ? "not_achieved" : "unresolved";

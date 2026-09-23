@@ -1,3 +1,4 @@
+import { StorageError } from "../../shared/errors.js";
 import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { readRetainedSourceChunk, writeRetainedSourceChunks } from "./retained-source-chunks.js";
@@ -212,7 +213,7 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     workspaceId: string, sourceId: string, byteLimit = 1, offset = 0
   ): BoundedSourceRecordRead | null {
     assertSourceBodyByteLimit(byteLimit);
-    if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("invalid source-root byte offset");
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new StorageError("VALIDATION_FAILED", "invalid source-root byte offset");
     this.database.reopenIfClosed();
     const raw = this.database.connection.prepare(`${RECORD_BOUNDED_SELECT}
       INDEXED BY idx_source_records_current

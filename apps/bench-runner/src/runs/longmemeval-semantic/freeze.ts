@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { requireLongMemEvalTimestamp } from "../../datasets/longmemeval/ingestion/source-time.js";
 import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/inspection.js";
@@ -12,10 +13,10 @@ import { NATIVE_SEMANTIC_ROUTE, freezeSourceCaches, assertSourceCaches } from ".
 /** Freezes original dataset identities and context before any query-semantics outputs; never dispatches a provider. */
 export async function freezeLongMemEvalSemanticRun(value: unknown, root: string) {
   const config = LongMemEvalExperimentConfigSchema.parse(value);
-  if (new Set(config.question_ids).size !== config.question_ids.length) throw new Error("development question IDs repeat");
-  if (config.stage !== "formal" && config.question_ids.length > 50) throw new Error("development selection exceeds 50 questions");
+  if (new Set(config.question_ids).size !== config.question_ids.length) throw new AlayaError("VALIDATION", "development question IDs repeat");
+  if (config.stage !== "formal" && config.question_ids.length > 50) throw new AlayaError("VALIDATION", "development selection exceeds 50 questions");
   if (config.stage === "formal" && config.previously_exposed_question_ids === undefined) {
-    throw new Error("formal freeze requires explicit prior development exposure");
+    throw new AlayaError("VALIDATION", "formal freeze requires explicit prior development exposure");
   }
   return withSnapshotPublishLock(join(root, "freeze.json"), async () => {
     const loaded = await loadFrozenLongMemEvalDataset(config);
@@ -23,26 +24,26 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
     if (existing !== undefined) {
       const frozen = LongMemEvalExperimentFreezeSchema.parse(existing);
       if (chainIdentity(frozen.config) !== chainIdentity(config)
-        || frozen.implementation_revision !== readCurrentExtractionAuthorityRevision()) throw new Error("development freeze changed");
+        || frozen.implementation_revision !== readCurrentExtractionAuthorityRevision()) throw new AlayaError("CONFLICT", "development freeze changed");
       if (frozen.contract === "longmemeval-native-semantic-v3") assertSourceCaches(frozen.source_caches);
       writeChainJson(join(root, "query-workset.json"), frozen.query_workset);
       return frozen;
     }
     const inventory = loaded.questions.map((question, index) => ({ index, question_id: question.question_id,
       cohort: classifyLongMemEvalDatasetCohort(question) }));
-    if (new Set(inventory.map((row) => row.question_id)).size !== inventory.length) throw new Error("dataset question IDs repeat");
+    if (new Set(inventory.map((row) => row.question_id)).size !== inventory.length) throw new AlayaError("VALIDATION", "dataset question IDs repeat");
     if (config.stage === "formal" && (config.question_ids.length !== inventory.length
       || inventory.some(row => !config.question_ids.includes(row.question_id)))) {
-      throw new Error("formal selection must contain the entire original dataset, including abstention rows");
+      throw new AlayaError("VALIDATION", "formal selection must contain the entire original dataset, including abstention rows");
     }
     const exposed = config.previously_exposed_question_ids ?? [];
     if (new Set(exposed).size !== exposed.length || exposed.some(id => !inventory.some(row => row.question_id === id))) {
-      throw new Error("prior exposure must name unique original dataset questions");
+      throw new AlayaError("VALIDATION", "prior exposure must name unique original dataset questions");
     }
     const selected = [];
     for (const id of config.question_ids) {
       const row = inventory.find((entry) => entry.question_id === id);
-      if (row === undefined) throw new Error("development selection is absent from original dataset");
+      if (row === undefined) throw new AlayaError("VALIDATION", "development selection is absent from original dataset");
       const question = loaded.questions[row.index]!;
       const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: config.data_dir,
         pinnedMetaRoot: config.pinned_meta_root, questionWindow: { offset: row.index, limit: 1 } });

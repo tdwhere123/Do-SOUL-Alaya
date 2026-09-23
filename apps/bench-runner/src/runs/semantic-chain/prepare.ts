@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
+import { AlayaError, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SourceSemanticQuery, type SourceSemanticHandleDescriptor } from "@do-soul/alaya-protocol";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import type { BenchDaemonHandle } from "../../harness/daemon.js";
@@ -19,7 +19,7 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
     const existing = readChainArtifact(path);
     if (existing !== undefined) {
       const plan = SemanticChainPlanSchema.parse(existing);
-      if (plan.input_identity !== inputIdentity) throw new Error("semantic chain preparation inputs changed; use a new stage root");
+      if (plan.input_identity !== inputIdentity) throw new AlayaError("CONFLICT", "semantic chain preparation inputs changed; use a new stage root");
       materializeCorrespondenceWorkset(plan, root);
       return plan;
     }
@@ -79,13 +79,13 @@ export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, conf
       SoulInterpretationRequestSchema.parse({ operation: "prepare_query", original_query: original, query_semantics: querySemantics,
         budget: config.budget, authorized_scopes: config.authorized_scopes, access_policy: config.access_policy,
         ...(continuation === undefined ? {} : { continuation_handle: continuation }) })));
-    if (response.operation !== "prepare_query") throw new Error("native discovery returned a different operation");
+    if (response.operation !== "prepare_query") throw new AlayaError("INTERNAL", "native discovery returned a different operation");
     const access = response.access;
     if (access === undefined || access.policy !== config.access_policy || access.trace.kind !== "preparation_page") {
-      throw new Error("native discovery did not bind the frozen access policy");
+      throw new AlayaError("CONFLICT", "native discovery did not bind the frozen access policy");
     }
     if ((poolId !== undefined && access.pool_id !== poolId) || access.trace.interpretation_offset !== descriptors.length) {
-      throw new Error("native discovery changed its bound candidate pool or offset");
+      throw new AlayaError("CONFLICT", "native discovery changed its bound candidate pool or offset");
     }
     poolId = access.pool_id;
     queryHandle = response.query_handle;
@@ -95,13 +95,13 @@ export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, conf
     open = response.coverage.discovery !== "complete" || access.unvisited_sources || access.unvisited_interpretations;
     unvisitedInterpretations = access.unvisited_interpretations;
     remainingDescriptors = access.observed_interpretation_count - access.trace.interpretation_offset - response.candidates.length;
-    if (remainingDescriptors < 0) throw new Error("native discovery exceeded its observed candidate pool");
+    if (remainingDescriptors < 0) throw new AlayaError("CONFLICT", "native discovery exceeded its observed candidate pool");
     for (const descriptor of response.candidates) {
-      if (seen.has(descriptor.interpretation_id)) throw new Error("native discovery repeated a candidate");
+      if (seen.has(descriptor.interpretation_id)) throw new AlayaError("CONFLICT", "native discovery repeated a candidate");
       seen.add(descriptor.interpretation_id); descriptors.push(descriptor);
     }
     continuation = response.continuation_handle;
-    if (continuation !== undefined && handles.has(continuation)) throw new Error("native discovery continuation did not advance");
+    if (continuation !== undefined && handles.has(continuation)) throw new AlayaError("CONFLICT", "native discovery continuation did not advance");
     if (continuation !== undefined) handles.add(continuation);
     // Source trace pagination does not create another correspondence opportunity.
   } while (remainingDescriptors > 0 && continuation !== undefined && pages < config.discovery_page_cap);

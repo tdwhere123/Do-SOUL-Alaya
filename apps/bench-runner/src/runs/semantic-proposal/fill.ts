@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import {
   admitSourceSemanticCorrespondence, admitSourceSemanticQuery, refuseRecallCampaignLiveExtraction
 } from "@do-soul/alaya-core";
-import { canonicalJson } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import {
   proposeCorrespondenceSemantics, proposeQuerySemantics,
   type SourceSemanticCorrespondenceRequest, type SourceSemanticQueryRequest
@@ -60,7 +60,7 @@ export function prepareSemanticProposal(
     const existing = state.shard;
     if (existing !== undefined) {
       if (state.status !== "settled") {
-        throw new Error(`semantic proposal ${line.key} requires fill recovery with its existing authority before preflight`);
+        throw new AlayaError("CONFLICT", `semantic proposal ${line.key} requires fill recovery with its existing authority before preflight`);
       }
       replayCachedProposalShard(line, existing);
       cachedKeys.add(line.key);
@@ -85,7 +85,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
   input = { ...input, authority, cacheRoot: authority.execution_scope.execution_root_path };
   if (authority.kind !== input.workset.kind || authority.model !== input.workset.model ||
       authority.request_profile !== input.workset.request_profile) {
-    throw new Error("semantic proposal authority does not bind this workset");
+    throw new AlayaError("CONFLICT", "semantic proposal authority does not bind this workset");
   }
   const maxOutputTokens = authority.limits.max_output_tokens;
   const lines = materializeSemanticProposalLines(input.workset, maxOutputTokens);
@@ -110,7 +110,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
     dispatch.push(line);
   }
   if (dispatch.length > 0 && authority.limits.maximum_attempts === 0) {
-    throw new Error("semantic proposal authority has no remaining provider attempt capacity");
+    throw new AlayaError("CONFLICT", "semantic proposal authority has no remaining provider attempt capacity");
   }
   if (dispatch.length === 0 && retainedLines.length === 0) {
     return summarize(input, cacheHits, 0, 0);
@@ -166,7 +166,7 @@ function assertAuthorizedProposalRequest(
   input: Parameters<typeof executeSemanticProposalFill>[0], lines: readonly SemanticProposalLine[], maxOutputTokens: number
 ): void {
   if (input.config.model !== input.workset.model || input.config.requestProfile !== input.workset.request_profile) {
-    throw new Error("semantic proposal execution config differs from authorized model/profile");
+    throw new AlayaError("CONFLICT", "semantic proposal execution config differs from authorized model/profile");
   }
   for (const line of lines) {
     const actual = semanticProposalRequestBinding(input.config, { systemPrompt: line.systemPrompt,
@@ -174,7 +174,7 @@ function assertAuthorizedProposalRequest(
     if (actual.requestDigest !== line.requestDigest ||
         canonicalJson(actual.transportProvenance) !== canonicalJson(line.transportProvenance) ||
         canonicalJson(line.transportProvenance) !== canonicalJson(input.authority.transport_provenance)) {
-      throw new Error("semantic proposal actual HTTP request differs from authorized request");
+      throw new AlayaError("CONFLICT", "semantic proposal actual HTTP request differs from authorized request");
     }
   }
 }
@@ -238,7 +238,7 @@ async function fillLine(
       return { classified: "retryable", admitted: false, attempts: used };
     }
     if (input.extractor === undefined && (input.config.apiKey === null || input.config.apiKey.trim().length === 0)) {
-      throw new Error("garden API key is unavailable");
+      throw new AlayaError("UNAVAILABLE", "garden API key is unavailable");
     }
     assertSemanticProposalExecutionScope(input.authority.execution_scope, input.cacheRoot, writeLease);
     const ordinal = ledger.reserveAttemptOrdinal(line.key);
@@ -458,7 +458,7 @@ function receiveLine(line: SemanticProposalLine, rawJson: string) {
       ...(request.approved_fixed_context === undefined ? {} : { approved_fixed_context: request.approved_fixed_context })
     }, { rawJson });
     if (canonicalJson(received.request) !== canonicalJson(request)) {
-      throw new Error("semantic proposal receive lost the retained request envelope");
+      throw new AlayaError("INTERNAL", "semantic proposal receive lost the retained request envelope");
     }
     return received;
   }
@@ -471,7 +471,7 @@ function receiveLine(line: SemanticProposalLine, rawJson: string) {
     resource_limits: request.resource_limits
   }, { rawJson });
   if (canonicalJson(received.request) !== canonicalJson(request)) {
-    throw new Error("semantic proposal receive lost the retained request envelope");
+    throw new AlayaError("INTERNAL", "semantic proposal receive lost the retained request envelope");
   }
   return received;
 }

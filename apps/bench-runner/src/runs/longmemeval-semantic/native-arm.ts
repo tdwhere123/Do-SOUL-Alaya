@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { SOURCE_SEMANTIC_LIBRARY_ORDER } from "@do-soul/alaya-core";
-import {
+import { AlayaError,
   SOURCE_SEMANTIC_CACHE_CONTRACT, SOURCE_SEMANTIC_PACKET_CONTRACT, SOURCE_SEMANTIC_QUERY_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SourceSemanticAccessPolicySchema
@@ -30,7 +30,7 @@ export const SourceCacheFreezeSchema = z.object({ root: z.string(), manifest_sha
 
 /** Freeze retained bytes, including invalid shards; admission remains publication's responsibility. */
 export function freezeSourceCaches(roots: readonly string[]) {
-  if (new Set(roots.map((root) => resolve(root))).size !== roots.length) throw new Error("source cache roots repeat");
+  if (new Set(roots.map((root) => resolve(root))).size !== roots.length) throw new AlayaError("VALIDATION", "source cache roots repeat");
   return roots.map((root) => ({ root: resolve(root),
     manifest_sha256: existsSync(join(root, "manifest.json")) ? hashRegularFileNoFollow(join(root, "manifest.json")) : null,
     shards: listRetainedSourceSemanticKeys(root).map((key) => ({ key, sha256: hashRegularFileNoFollow(cacheFilePath(root, key)) })) }));
@@ -38,6 +38,6 @@ export function freezeSourceCaches(roots: readonly string[]) {
 
 export function assertSourceCaches(caches: z.infer<typeof SourceCacheFreezeSchema>[]): void {
   if (chainIdentity(freezeSourceCaches(caches.map((cache) => cache.root))) !== chainIdentity(caches)) {
-    throw new Error("frozen source interpretation cache changed; use a new experiment freeze");
+    throw new AlayaError("CONFLICT", "frozen source interpretation cache changed; use a new experiment freeze");
   }
 }

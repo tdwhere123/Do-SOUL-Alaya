@@ -1,5 +1,5 @@
 import { fieldContractSha256, retainedSourceSpeaker } from "@do-soul/alaya-core";
-import { hashContentDigest } from "@do-soul/alaya-protocol";
+import { AlayaError, hashContentDigest } from "@do-soul/alaya-protocol";
 import {
   buildOfficialApiSourceCorpus, collectSourceSemanticUnitPacks
 } from "@do-soul/alaya-soul";
@@ -68,7 +68,7 @@ function collectCompleteSourceRecords(
     for (const [sessionIndex, rawSession] of question.haystack_sessions.entries()) {
       const session = rawSession.map(({ role, content }) => ({ role, content }));
       const sessionId = question.haystack_session_ids[sessionIndex];
-      if (sessionId === undefined || sessionId.length === 0) throw new Error("source session identity is missing");
+      if (sessionId === undefined || sessionId.length === 0) throw new AlayaError("CONFLICT", "source session identity is missing");
       const sourceObservedAt = requireLongMemEvalTimestamp(question.haystack_dates[sessionIndex]);
       for (const [roundIndex, round] of pairSessionIntoRounds(session).entries()) {
         if (round.content.trim().length === 0) continue;
@@ -79,10 +79,10 @@ function collectCompleteSourceRecords(
         const packs = collectSourceSemanticUnitPacks(contentBytes, "complete-source");
         const sourceId = `${population}:${question.question_id}-s${sessionIndex}-r${roundIndex}`;
         // Session labels may recur; uniqueness follows the identity published for this occurrence.
-        if (seen.has(sourceId)) throw new Error("duplicate logical source occurrence");
+        if (seen.has(sourceId)) throw new AlayaError("CONFLICT", "duplicate logical source occurrence");
         seen.add(sourceId);
         const pack = packs[0];
-        if (pack === undefined) throw new Error("complete-source packing produced no source unit");
+        if (pack === undefined) throw new AlayaError("INTERNAL", "complete-source packing produced no source unit");
         const roles = Object.freeze(turnMessages.map((message) => message.role));
         const units = Object.freeze(pack.source_assertions.map((row) => Object.freeze({
           assertion_id: row.assertion_id, text: row.text, source_role: row.source_role

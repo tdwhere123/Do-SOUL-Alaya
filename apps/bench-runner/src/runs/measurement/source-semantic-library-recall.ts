@@ -1,4 +1,4 @@
-import {
+import { AlayaError,
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_OCCUPANCY,
   SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
   SoulMemorySearchResponseSchema, type Continuation, type InformationIndex, type MemorySearchResult,
@@ -25,7 +25,7 @@ export function soulSearchFromLibraryRecall(result: Readonly<{
   delivery_id?: string; index?: InformationIndex; results?: readonly MemorySearchResult[];
   total_count?: number; previews?: Readonly<Record<string, string>>;
 }>): SoulMemorySearchResponse {
-  if (result.delivery_id === undefined || result.index === undefined) throw new Error("library recall has no delivered page");
+  if (result.delivery_id === undefined || result.index === undefined) throw new AlayaError("INTERNAL", "library recall has no delivered page");
   const results = result.results ?? encodeSourceSemanticLibraryResults(
     result.index, new Map(Object.entries(result.previews ?? {}))
   );

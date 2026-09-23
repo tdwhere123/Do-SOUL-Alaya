@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
@@ -66,7 +67,7 @@ export function materializeSemanticProposalLines(
   workset: SemanticProposalWorkset, maxOutputTokens: number
 ): readonly SemanticProposalLine[] {
   if (!isGeminiGenerateContentProfile(workset.request_profile)) {
-    throw new Error("semantic proposal fill requires a native Gemini request profile");
+    throw new AlayaError("VALIDATION", "semantic proposal fill requires a native Gemini request profile");
   }
   if (workset.kind === "query") {
     const producer_id = workset.producer_id ?? SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID;
@@ -108,7 +109,7 @@ function bindLine(
   maxOutputTokens: number
 ): SemanticProposalLine {
   if (!isGeminiGenerateContentProfile(workset.request_profile)) {
-    throw new Error("semantic proposal fill requires a native Gemini request profile");
+    throw new AlayaError("VALIDATION", "semantic proposal fill requires a native Gemini request profile");
   }
   const userPrompt = JSON.stringify(request);
   const config = { model: workset.model, providerUrl: workset.provider_url,
@@ -142,7 +143,7 @@ export function proposalCacheKey(
   model: string, requestProfile: string, systemPrompt: string, userPrompt: string, schema: object,
   maxOutputTokens: number, providerUrl: string
 ): string {
-  if (!isGeminiGenerateContentProfile(requestProfile)) throw new Error("semantic proposal requires a native Gemini profile");
+  if (!isGeminiGenerateContentProfile(requestProfile)) throw new AlayaError("VALIDATION", "semantic proposal requires a native Gemini profile");
   const wire = prepareGeminiRequest({ model, requestProfile, providerUrl, apiKey: null }, {
     systemPrompt, userPrompt, maxOutputTokens, responseJsonSchema: schema,
     retryMode: "disabled", validateRawJson: () => undefined

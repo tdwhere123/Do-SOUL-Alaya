@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -57,10 +58,10 @@ export function inspectExtractionTargetRoot(input: TargetRootInput): ExtractionT
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw cause;
   }
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`${input.purpose} target root is not a real directory`);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new AlayaError("VALIDATION", `${input.purpose} target root is not a real directory`);
   if (readdirSync(root).length === 0) return null;
   if (!existsSync(markerPathFor(root, input.marker))) {
-    throw new Error(`${input.purpose} unbound historical cache is read-only evidence, not an execution grant`);
+    throw new AlayaError("CONFLICT", `${input.purpose} unbound historical cache is read-only evidence, not an execution grant`);
   }
   return Object.freeze({ cache_root_sha256: hashRoot(root), cache_root_device: stat.dev.toString(),
     cache_root_inode: stat.ino.toString(), cache_root_marker_sha256: readMarkerSha256(root, input.marker) });

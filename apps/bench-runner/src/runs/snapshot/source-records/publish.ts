@@ -5,7 +5,7 @@ import {
   fieldContractSha256, type FieldFormationStores
 } from "@do-soul/alaya-core";
 import { sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
-import { IsoDatetimeStringSchema, SOURCE_SEMANTIC_PACKET_CONTRACT } from "@do-soul/alaya-protocol";
+import { AlayaError, IsoDatetimeStringSchema, SOURCE_SEMANTIC_PACKET_CONTRACT } from "@do-soul/alaya-protocol";
 import {
   closeCachedDatabase, initDatabase, sourceRecordFromRow, SqliteEvidenceCapsuleRepo, SqliteEventLogRepo,
   SqliteFieldSourceRecordRepo
@@ -90,9 +90,9 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
 }>): Promise<SourcePublicationReport> {
   const snapshotPath = resolve(input.snapshotPath);
   const dataDirRoot = resolve(input.dataDirRoot);
-  if (snapshotPath === join(dataDirRoot, BENCH_DAEMON_DB_FILENAME)) throw new Error("snapshot must differ from live DB");
+  if (snapshotPath === join(dataDirRoot, BENCH_DAEMON_DB_FILENAME)) throw new AlayaError("VALIDATION", "snapshot must differ from live DB");
   IsoDatetimeStringSchema.parse(input.recordedAt);
-  if (!/^[a-f0-9]{40}$/u.test(input.producerCommit)) throw new Error("producer commit must be a full SHA-1");
+  if (!/^[a-f0-9]{40}$/u.test(input.producerCommit)) throw new AlayaError("VALIDATION", "producer commit must be a full SHA-1");
   const workspaceId = input.workspaceId ?? "source-semantic-library";
   const runId = input.runId ?? "source-semantic-library-run";
   const census = await loadCensus(input.populations);
@@ -114,11 +114,11 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
 }
 
 async function loadCensus(populations: readonly SourcePublicationPopulation[]): Promise<readonly SourceCensus[]> {
-  if (populations.length === 0) throw new Error("source publication requires at least one population");
+  if (populations.length === 0) throw new AlayaError("VALIDATION", "source publication requires at least one population");
   const names = new Set<string>();
   const loaded: SourceCensus[] = [];
   for (const population of populations) {
-    if (names.has(population.name)) throw new Error(`duplicate source population '${population.name}'`);
+    if (names.has(population.name)) throw new AlayaError("VALIDATION", `duplicate source population '${population.name}'`);
     names.add(population.name);
     loaded.push(await censusCompleteSourceRecords({
       population: population.name, dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
@@ -130,7 +130,7 @@ async function loadCensus(populations: readonly SourcePublicationPopulation[]): 
 
 function bindIsolatedSnapshot(dataDirRoot: string, snapshotPath: string): void {
   if (existsSync(join(dataDirRoot, BENCH_DAEMON_DB_FILENAME)) || existsSync(snapshotPath)) {
-    throw new Error("source semantic publication requires an isolated directory");
+    throw new AlayaError("CONFLICT", "source semantic publication requires an isolated directory");
   }
   mkdirSync(dataDirRoot, { recursive: true });
 }
@@ -268,23 +268,23 @@ function indexRetainedSemantics(
     const bindings = population.publicationAssociations ?? [];
     const cacheRoots = population.cacheRoots ?? [];
     if (new Set(cacheRoots.map((root) => resolve(root))).size !== cacheRoots.length) {
-      throw new Error("retained source interpretation cache roots repeat a generation directory");
+      throw new AlayaError("VALIDATION", "retained source interpretation cache roots repeat a generation directory");
     }
-    if (bindings.length > 0 && cacheRoots.length === 0) throw new Error("retained source interpretation association requires a cache root");
+    if (bindings.length > 0 && cacheRoots.length === 0) throw new AlayaError("CONFLICT", "retained source interpretation association requires a cache root");
     const boundSources = new Set<string>();
     for (const binding of bindings) {
       const source = sources.get(binding.source_id);
       if (source === undefined || source.source_version !== binding.source_version ||
           !/^[a-f0-9]{64}$/u.test(binding.generation_key) || !/^[a-f0-9]{64}$/u.test(binding.request_digest)) {
-        throw new Error("retained source-interpretation binding does not match the frozen source census");
+        throw new AlayaError("CONFLICT", "retained source-interpretation binding does not match the frozen source census");
       }
-      if (boundSources.has(binding.source_id)) throw new Error("retained source interpretation association repeats a source");
+      if (boundSources.has(binding.source_id)) throw new AlayaError("CONFLICT", "retained source interpretation association repeats a source");
       boundSources.add(binding.source_id);
     }
     const seenKeys = new Set<string>();
     for (const cacheRoot of cacheRoots) {
       for (const key of listRetainedSourceSemanticKeys(cacheRoot)) {
-        if (seenKeys.has(key)) throw new Error("retained source interpretation generation key occurs in multiple cache roots");
+        if (seenKeys.has(key)) throw new AlayaError("CONFLICT", "retained source interpretation generation key occurs in multiple cache roots");
         seenKeys.add(key);
         const native = inspectCachedSourceSemantic(cacheRoot, key, population.model, population.requestProfile);
         const matched = bindings.filter((binding) => binding.generation_key === key);
@@ -345,7 +345,7 @@ function checkpointSnapshot(snapshotPath: string): void {
       readonly busy: number; readonly log: number; readonly checkpointed: number;
     }>;
     if (checkpoint === undefined || checkpoint.busy !== 0 || checkpoint.log !== checkpoint.checkpointed) {
-      throw new Error("cannot freeze published snapshot: incomplete WAL checkpoint");
+      throw new AlayaError("CONFLICT", "cannot freeze published snapshot: incomplete WAL checkpoint");
     }
   } finally {
     closeCachedDatabase(snapshotPath);

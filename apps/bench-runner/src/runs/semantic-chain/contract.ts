@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { canonicalJson, RequestBudgetSchema, AuthorizedScopesAdmissionSchema,
+import { AlayaError, canonicalJson, RequestBudgetSchema, AuthorizedScopesAdmissionSchema,
   SourceSemanticQuerySchema, SourceSemanticHandleDescriptorSchema, SourceSemanticAccessPolicySchema,
   SourceSemanticAccessReceiptSchema, SourceSemanticCoverageSchema, SourceSemanticWorkerWorkSchema,
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP } from "@do-soul/alaya-protocol";
@@ -61,7 +61,7 @@ export function readChainArtifact(path: string): unknown | undefined {
   const envelope = z.object({ identity: Digest, payload: z.unknown() }).strict().parse(JSON.parse(
     readBoundedCanonicalUtf8Artifact({ path, maxBytes: 32 * 1024 * 1024, label: "semantic chain artifact" })
   ));
-  if (chainIdentity(envelope.payload) !== envelope.identity) throw new Error("semantic chain artifact identity mismatch");
+  if (chainIdentity(envelope.payload) !== envelope.identity) throw new AlayaError("CONFLICT", "semantic chain artifact identity mismatch");
   return envelope.payload;
 }
 
@@ -69,7 +69,7 @@ export function writeChainArtifact(path: string, payload: unknown): void {
   const identity = chainIdentity(payload);
   const existing = readChainArtifact(path);
   if (existing !== undefined) {
-    if (chainIdentity(existing) !== identity) throw new Error("immutable semantic chain stage conflict");
+    if (chainIdentity(existing) !== identity) throw new AlayaError("CONFLICT", "immutable semantic chain stage conflict");
     return;
   }
   mkdirSync(dirname(path), { recursive: true });
@@ -84,8 +84,8 @@ export function writeChainJson(path: string, value: unknown): void {
 }
 
 export function assertChainSnapshot(config: SemanticChainConfig): void {
-  if (hashRegularFileNoFollow(config.snapshot_path) !== config.snapshot_sha256) throw new Error("semantic chain snapshot changed");
-  if (readCurrentExtractionAuthorityRevision() !== config.implementation_revision) throw new Error("semantic chain implementation changed");
+  if (hashRegularFileNoFollow(config.snapshot_path) !== config.snapshot_sha256) throw new AlayaError("CONFLICT", "semantic chain snapshot changed");
+  if (readCurrentExtractionAuthorityRevision() !== config.implementation_revision) throw new AlayaError("CONFLICT", "semantic chain implementation changed");
 }
 
 export async function withSemanticChainDaemon<T>(config: SemanticChainConfig, root: string,

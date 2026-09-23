@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { isNativeGeminiRequestProfile, type NativeGeminiRequestProfile } from "../../request-profile.js";
 import { findProviderBinding, supportsProviderRequestProfile } from "../../../provider/catalog.js";
 import { officialApiExtractionResponseSchema } from "@do-soul/alaya-soul";
@@ -72,7 +73,7 @@ function assembleGeminiSse(raw: string): unknown {
     if (data.length === 0 || data === "[DONE]") continue;
     events.push(JSON.parse(data));
   }
-  if (events.length === 0) throw new Error("Gemini stream is empty");
+  if (events.length === 0) throw new AlayaError("VALIDATION", "Gemini stream is empty");
   return assembleGeminiStreamEvents(events);
 }
 
@@ -86,7 +87,7 @@ function assembleGeminiStreamEvents(events: readonly unknown[]): unknown {
     if (response.usageMetadata !== undefined) usageMetadata = response.usageMetadata;
     const candidates = response.candidates;
     if (!Array.isArray(candidates) || candidates.length === 0) continue;
-    if (candidates.length !== 1) throw new Error("Gemini response requires one candidate");
+    if (candidates.length !== 1) throw new AlayaError("VALIDATION", "Gemini response requires one candidate");
     const candidate = record(candidates[0]);
     if (candidate.finishReason !== undefined) finishReason = candidate.finishReason;
     if (candidate.content === undefined) continue;
@@ -95,7 +96,7 @@ function assembleGeminiStreamEvents(events: readonly unknown[]): unknown {
     for (const partValue of parts) {
       const part = record(partValue);
       if (part.thought === true || part.text === undefined) continue;
-      if (typeof part.text !== "string") throw new Error("Gemini response has non-text output");
+      if (typeof part.text !== "string") throw new AlayaError("VALIDATION", "Gemini response has non-text output");
       texts.push(part.text);
     }
   }
@@ -126,7 +127,7 @@ export function decodeGeminiGenerateContent(value: unknown): GeminiDecodedComple
   if (!Array.isArray(candidates) || candidates.length !== 1) throw new Error("Gemini response requires one candidate");
   const candidate = record(candidates[0]);
   const parts = candidate.content === undefined ? [] : record(candidate.content).parts;
-  if (candidate.content !== undefined && !Array.isArray(parts)) throw new Error("Gemini response content missing");
+  if (candidate.content !== undefined && !Array.isArray(parts)) throw new AlayaError("VALIDATION", "Gemini response content missing");
   const text: string[] = [];
   for (const partValue of Array.isArray(parts) ? parts : []) {
     const part = record(partValue);
@@ -149,7 +150,7 @@ export function decodeGeminiGenerateContent(value: unknown): GeminiDecodedComple
 function observedGeminiFinishReason(value: unknown): string | null {
   if (value === undefined) return null;
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error("Gemini finish reason is malformed");
+    throw new AlayaError("VALIDATION", "Gemini finish reason is malformed");
   }
   return value;
 }
@@ -184,7 +185,7 @@ export function assertGeminiGenerateContentSettings(settings: GeminiGenerateCont
 
 function throwIfGeminiProviderError(value: unknown): void {
   if (value === undefined || value === null) {
-    throw new Error("Gemini response is missing");
+    throw new AlayaError("VALIDATION", "Gemini response is missing");
   }
   if (typeof value !== "object" || Array.isArray(value)) return;
   const error = (value as { readonly error?: unknown }).error;

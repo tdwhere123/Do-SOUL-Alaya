@@ -95,7 +95,7 @@ export class SqliteSourceHintReader {
     let cursor = input.afterCursor, visits = 0, bytes = 0, exhausted = false, resourceLimited = false;
     let seek: readonly [string, string] = cursor === null ? ["", ""] : JSON.parse(cursor);
     if (!Array.isArray(seek) || seek.length !== 2 || !seek.every((value) => typeof value === "string")) {
-      throw new Error("invalid source-hint cursor");
+      throw new AlayaError("VALIDATION", "invalid source-hint cursor");
     }
     const statement = this.db.prepare(`SELECT
       CASE WHEN octet_length(object_id)<=512 THEN object_id ELSE NULL END AS object_id,
@@ -241,7 +241,7 @@ function textHintCursor(input: { workspaceId: string; query: string; afterCursor
     || !Array.isArray(value.done) || value.done.length !== 2
     || typeof value.done[0] !== "boolean" || typeof value.done[1] !== "boolean"
     || emptyLanes[0] && value.done[0] !== true || emptyLanes[1] && value.done[1] !== true
-    || value.turn !== 0 && value.turn !== 1) throw new Error("invalid interpretation text cursor");
+    || value.turn !== 0 && value.turn !== 1) throw new AlayaError("VALIDATION", "invalid interpretation text cursor");
   return { workspace: input.workspaceId, query: input.query,
     rowids: [cursorRowid(value.rowids[0]), cursorRowid(value.rowids[1])],
     done: [value.done[0], value.done[1]], turn: value.turn };
@@ -251,7 +251,7 @@ function cursorRowid(value: unknown): string | null {
   if (value === null) return null;
   if (typeof value !== "string" || !/^(?:0|-[1-9][0-9]{0,18}|[1-9][0-9]{0,18})$/u.test(value)
     || BigInt(value) < -9223372036854775808n || BigInt(value) > 9223372036854775807n) {
-    throw new Error("invalid interpretation text rowid");
+    throw new AlayaError("VALIDATION", "invalid interpretation text rowid");
   }
   return value;
 }

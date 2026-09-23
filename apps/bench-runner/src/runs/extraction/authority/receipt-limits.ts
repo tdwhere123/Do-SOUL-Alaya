@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type { ExtractionSampleScope } from "./sample-scope.js";
 import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "@do-soul/alaya-soul";
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
@@ -161,11 +162,11 @@ export function expectedExtractionAuthorityLimits(
 
 function completeSourceFillAttemptCeiling(missing: number): number {
   if (!Number.isSafeInteger(missing) || missing < 0) {
-    throw new Error("extraction fill starting missing must be a non-negative safe integer");
+    throw new AlayaError("VALIDATION", "extraction fill starting missing must be a non-negative safe integer");
   }
   const ceiling = missing * COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD;
   if (!Number.isSafeInteger(ceiling)) {
-    throw new Error("complete-source fill attempt ceiling exceeds the safe integer range");
+    throw new AlayaError("VALIDATION", "complete-source fill attempt ceiling exceeds the safe integer range");
   }
   return ceiling;
 }

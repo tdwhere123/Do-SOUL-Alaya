@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { canonicalJson } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
 import { censusCompleteSourceRecords } from "./census.js";
 import { listRetainedSourceSemanticKeys, type SourcePublicationPopulation } from "./publish.js";
@@ -20,7 +20,7 @@ export async function prepareSourcePublicationAssociations(
   }>,
   retainedPreflightPath: string, outputPath: string
 ) {
-  if (population.cacheRoot === undefined) throw new Error("association preparation requires a retained cache");
+  if (population.cacheRoot === undefined) throw new AlayaError("VALIDATION", "association preparation requires a retained cache");
   const generation = parseExtractionOpenSemanticsGeneration(population.openSemantics ?? EXTRACTION_OPEN_SEMANTICS_GENERATION);
   const census = await censusCompleteSourceRecords({ population: population.name,
     dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
@@ -34,7 +34,7 @@ export async function prepareSourcePublicationAssociations(
       model: population.model, requestProfile: population.requestProfile
     });
     if (canonicalJson(line) !== canonicalJson(expected) || planned.has(line.key)) {
-      throw new Error("retained source preflight has foreign or duplicate request identity");
+      throw new AlayaError("CONFLICT", "retained source preflight has foreign or duplicate request identity");
     }
     planned.set(line.key, line);
   }
@@ -43,10 +43,10 @@ export async function prepareSourcePublicationAssociations(
   const expected = new Map<string, { requestDigest: string; sources: typeof census.records[number][] }>();
   for (const source of census.records) {
     const requests = sourceSemanticArtifactRequests(source.content_bytes, "complete-source", generation);
-    if (requests.length !== 1) throw new Error("complete source association requires exactly one current request");
+    if (requests.length !== 1) throw new AlayaError("CONFLICT", "complete source association requires exactly one current request");
     const line = prepareSourceSemanticBatchLine(requests[0]!.semantic, [], population);
     const match = expected.get(line.key) ?? { requestDigest: line.requestSha256, sources: [] };
-    if (match.requestDigest !== line.requestSha256) throw new Error("current source requests have ambiguous owning key");
+    if (match.requestDigest !== line.requestSha256) throw new AlayaError("CONFLICT", "current source requests have ambiguous owning key");
     match.sources.push(source);
     expected.set(line.key, match);
   }
@@ -54,7 +54,7 @@ export async function prepareSourcePublicationAssociations(
   const artifacts: { key: string; status: "associated" | "invalid" | "unbound"; sources: string[] }[] = [];
   const reasons = new Map(census.records.map((source) => [source.source_id, "missing_current_artifact"]));
   const keys = listRetainedSourceSemanticKeys(population.cacheRoot);
-  if (new Set(keys).size !== keys.length) throw new Error("retained source cache repeats an owning request key");
+  if (new Set(keys).size !== keys.length) throw new AlayaError("CONFLICT", "retained source cache repeats an owning request key");
   for (const key of keys) {
     const native = inspectCachedSourceSemantic(population.cacheRoot, key, population.model, population.requestProfile);
     const retained = planned.get(key);

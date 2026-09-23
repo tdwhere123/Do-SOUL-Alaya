@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
@@ -54,10 +55,10 @@ export async function executeOpenSemanticsInteractiveFill(
   const route = resolveExtractionTransportRoute(input.prepared.config);
   const profile = input.prepared.config.requestProfile;
   if (!isGeminiGenerateContentProfile(profile)) {
-    throw new Error("open-semantics interactive fill request profile is unsupported");
+    throw new AlayaError("VALIDATION", "open-semantics interactive fill request profile is unsupported");
   }
   if (authority.receipt.limits.output_token_field !== "maxOutputTokens") {
-    throw new Error("open-semantics interactive fill requires maxOutputTokens");
+    throw new AlayaError("VALIDATION", "open-semantics interactive fill requires maxOutputTokens");
   }
   const selected = selectedInteractiveKeys(authority);
   const workset = prepareBatchExtractionWorkset({
@@ -87,17 +88,17 @@ export async function executeOpenSemanticsInteractiveFill(
 function assertInteractiveOpenSemanticsScope(input: InteractiveFillInput): void {
   if (input.options.ingestionMode === "lazy_field" || input.prepared.expansion !== undefined ||
       input.options.extractorFactory !== undefined || input.options.questionBatchLimit !== undefined) {
-    throw new Error("open-semantics interactive fill requires a full, isolated precomputed extraction window");
+    throw new AlayaError("VALIDATION", "open-semantics interactive fill requires a full, isolated precomputed extraction window");
   }
   if (input.authority === undefined) {
-    throw new Error("open-semantics interactive fill requires an extraction authority receipt");
+    throw new AlayaError("VALIDATION", "open-semantics interactive fill requires an extraction authority receipt");
   }
-  if (input.authority.receipt.action === "sample") throw new Error("sample authority is Batch-only");
+  if (input.authority.receipt.action === "sample") throw new AlayaError("CONFLICT", "sample authority is Batch-only");
   if (input.authority.receipt.repair_scope !== undefined) {
-    throw new Error("open-semantics interactive fill needs a fill or probe authority");
+    throw new AlayaError("VALIDATION", "open-semantics interactive fill needs a fill or probe authority");
   }
   if (input.prepared.config.openSemantics === undefined) {
-    throw new Error("open-semantics interactive fill requires pinned open semantics");
+    throw new AlayaError("CONFLICT", "open-semantics interactive fill requires pinned open semantics");
   }
 }
 
@@ -183,7 +184,7 @@ function importInteractiveFromRaw(
 
 function boundSourceCorpus(workset: BatchExtractionWorkset, line: GeminiBatchLine): string {
   const sourceCorpus = workset.requests.find((request) => request.line.key === line.key)?.units[0]?.sourceCorpus;
-  if (sourceCorpus === undefined) throw new Error("open-semantics interactive fill lost its bound source corpus");
+  if (sourceCorpus === undefined) throw new AlayaError("INTERNAL", "open-semantics interactive fill lost its bound source corpus");
   return sourceCorpus;
 }
 
@@ -197,11 +198,11 @@ async function dispatchInteractiveLine(
   const sourceCorpus = boundSourceCorpus(workset, line);
   const authority = input.authority!;
   if (authority.reserveAttemptOrdinal === undefined) {
-    throw new Error("open-semantics interactive fill requires bound attempt authority");
+    throw new AlayaError("CONFLICT", "open-semantics interactive fill requires bound attempt authority");
   }
   input.options.signal?.throwIfAborted();
   if (input.prepared.config.apiKey === null || input.prepared.config.apiKey.trim().length === 0) {
-    throw new Error("garden API key is unavailable");
+    throw new AlayaError("UNAVAILABLE", "garden API key is unavailable");
   }
   const attemptOrdinal = await authority.reserveAttemptOrdinal(line.key, input.options.signal);
   let extracted: Awaited<ReturnType<typeof extractor.extract>>;

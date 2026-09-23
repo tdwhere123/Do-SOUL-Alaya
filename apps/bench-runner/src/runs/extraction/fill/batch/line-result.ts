@@ -8,7 +8,7 @@ export function batchLineResult(plan: GeminiBatchPlan, job: GeminiBatchJob, key:
   Parameters<GeminiBatchInvocation["importLine"]>[0] {
   const decoded = decodeGeminiGenerateContent(response);
   if (!isCompleteGeminiFinish(decoded.responseMetadata.finishReason)) {
-    throw new Error("Gemini response is truncated or not complete");
+    throw new AlayaError("CONFLICT", "Gemini response is truncated or not complete");
   }
   if (decoded.usage !== undefined && decoded.usage.outputTokens > plan.limits.maxOutputTokens) {
     throw new AlayaError("CONFLICT", "provider output exceeds authorized token cap");

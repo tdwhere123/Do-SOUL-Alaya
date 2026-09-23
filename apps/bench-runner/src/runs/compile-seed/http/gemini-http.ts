@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import http from "node:http";
 import https from "node:https";
 import { Readable } from "node:stream";
@@ -207,7 +208,7 @@ async function decodeGeminiResponse(response: Response, input: ExtractInput, att
 function gardenFinishReason(finish: string | null): string {
   if (finish === "STOP") return "stop";
   if (finish === "MAX_TOKENS") return "length";
-  throw new Error("Gemini response finish reason is unknown or incomplete");
+  throw new AlayaError("VALIDATION", "Gemini response finish reason is unknown or incomplete");
 }
 
 function geminiAttemptFailure(cause: unknown, attempt: GeminiAttempt, aborted: boolean, timedOut: boolean) {

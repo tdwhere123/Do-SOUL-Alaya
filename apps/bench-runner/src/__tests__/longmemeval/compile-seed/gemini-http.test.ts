@@ -406,7 +406,16 @@ describe("native Gemini interactive extraction", () => {
       }));
     }, async (origin) => {
       await expect(createGardenHttpExtractor({ ...config, providerUrl: origin }).extract(input))
-        .rejects.toThrow(/finish reason is unknown or incomplete/u);
+        .rejects.toMatchObject({
+          message: expect.stringMatching(/finish reason is unknown or incomplete/u),
+          cause: { name: "AlayaError", code: "VALIDATION" },
+          benchRetry: {
+            retryClassification: "failure_non_retryable_response",
+            transportFailures: [expect.objectContaining({
+              kind: "response_schema_error", phase: "response_schema", attempt: 1
+            })]
+          }
+        });
     });
   });
 
