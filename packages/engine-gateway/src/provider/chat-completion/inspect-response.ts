@@ -46,6 +46,8 @@ function inspectJson(bodyText: string): Omit<ProviderChatCompletionResult, "http
   const content = readNestedString(choice, "message", "content");
   return {
     text: content ?? "",
+    ...reasoningFields(readNestedString(choice, "message", "reasoning_content") ??
+      readNestedString(choice, "message", "reasoning")),
     finishReason: stringOrNull(choice?.finish_reason),
     completion: { mode: "json", complete: true, witness: "message" },
     ...usageFields(usageFromUnknown(payload.usage))
@@ -58,6 +60,8 @@ function inspectSse(
 ): Omit<ProviderChatCompletionResult, "httpStatus"> {
   let mode: "delta" | "message" | null = null;
   let text = "";
+  let reasoningText = "";
+  let sawReasoning = false;
   let finishReason: string | null = null;
   let usage: ProviderUsage | undefined;
   let sawDone = false;
@@ -72,6 +76,17 @@ function inspectSse(
     const choice = firstChoice(chunk);
     const delta = readNestedString(choice, "delta", "content");
     const message = readNestedString(choice, "message", "content");
+    const deltaReasoning = readNestedString(choice, "delta", "reasoning_content") ??
+      readNestedString(choice, "delta", "reasoning");
+    const messageReasoning = readNestedString(choice, "message", "reasoning_content") ??
+      readNestedString(choice, "message", "reasoning");
+    if (deltaReasoning !== undefined) {
+      sawReasoning = true;
+      reasoningText += deltaReasoning;
+    } else if (messageReasoning !== undefined) {
+      sawReasoning = true;
+      reasoningText = messageReasoning;
+    }
     if (delta !== undefined && message !== undefined && (delta !== message || mode === "delta")) {
       throwMixedStream();
     }
@@ -102,6 +117,7 @@ function inspectSse(
   }
   return {
     text,
+    ...(sawReasoning ? { reasoningText } : {}),
     finishReason,
     ...usageFields(usage),
     completion: { mode: "sse", complete: true, witness }
@@ -147,14 +163,32 @@ function usageFromUnknown(value: unknown): ProviderUsage | undefined {
     readonly prompt_tokens?: unknown;
     readonly completion_tokens?: unknown;
     readonly total_tokens?: unknown;
+    readonly prompt_tokens_details?: unknown;
+    readonly completion_tokens_details?: unknown;
   };
   if (!isCount(usage.prompt_tokens) || !isCount(usage.completion_tokens) ||
       !isCount(usage.total_tokens)) return undefined;
   return {
     inputTokens: usage.prompt_tokens,
     outputTokens: usage.completion_tokens,
-    totalTokens: usage.total_tokens
+    totalTokens: usage.total_tokens,
+    ...optionalCount(usage.prompt_tokens_details, "cached_tokens", "cachedInputTokens"),
+    ...optionalCount(usage.completion_tokens_details, "reasoning_tokens", "reasoningOutputTokens")
   };
+}
+
+function optionalCount(
+  details: unknown,
+  field: string,
+  output: "cachedInputTokens" | "reasoningOutputTokens"
+): Partial<ProviderUsage> {
+  if (typeof details !== "object" || details === null) return {};
+  const value = (details as Record<string, unknown>)[field];
+  return isCount(value) ? { [output]: value } : {};
+}
+
+function reasoningFields(reasoningText: string | undefined): { readonly reasoningText?: string } {
+  return reasoningText === undefined ? {} : { reasoningText };
 }
 
 function usageFields(usage: ProviderUsage | undefined): { readonly usage?: ProviderUsage } {

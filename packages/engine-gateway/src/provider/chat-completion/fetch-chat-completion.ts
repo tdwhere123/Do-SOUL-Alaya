@@ -9,13 +9,15 @@ import {
   type ProviderResponseInspectionReason
 } from "./inspect-response.js";
 import { assertAllowedProviderChatUrlResolved } from "./provider-url-guard.js";
+import { readProviderResponseWithEvidence } from "./response-evidence.js";
 import {
   buildProviderChatRequestInit,
   providerChatCompletionsUrl
 } from "./request-body.js";
 import type {
   ProviderChatCompletionRequest,
-  ProviderChatCompletionResult
+  ProviderChatCompletionResult,
+  ProviderHttpResponseEvidence
 } from "./types.js";
 
 export const DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS = 10_000;
@@ -33,15 +35,17 @@ export async function fetchProviderChatCompletion(
   bindAbort(request.abortSignal, onAbort);
   const timer = startTimeout(request.timeoutMs, controller);
   let knownStatus: number | null = null;
+  let responseSnapshot: (() => ProviderHttpResponseEvidence) | undefined;
   try {
     return await settleUnlessAborted(
-      runProviderChatRequest(request, controller.signal, (status) => {
-        knownStatus = status;
-      }),
+      runProviderChatRequest(request, controller.signal,
+        (status) => { knownStatus = status; },
+        (snapshot) => { responseSnapshot = snapshot; }),
       controller.signal
     );
   } catch (error) {
-    throw normalizeTransportError(error, request.abortSignal, controller.signal, knownStatus);
+    throw normalizeTransportError(error, request.abortSignal, controller.signal,
+      knownStatus, responseSnapshot?.());
   } finally {
     if (timer !== null) clearTimeout(timer);
     request.abortSignal?.removeEventListener("abort", onAbort);
@@ -51,10 +55,34 @@ export async function fetchProviderChatCompletion(
 async function runProviderChatRequest(
   request: ProviderChatCompletionRequest,
   signal: AbortSignal,
-  observeStatus: (status: number) => void
+  observeStatus: (status: number) => void,
+  observeResponse: (snapshot: () => ProviderHttpResponseEvidence) => void
 ): Promise<ProviderChatCompletionResult> {
   const response = await postChatCompletion(request, signal);
   observeStatus(response.status);
+  if (request.profile === "step-3.5-2603-low-json-schema-v1") {
+    let bodyText: string;
+    let evidence: ProviderHttpResponseEvidence;
+    try {
+      ({ bodyText, evidence } = await readProviderResponseWithEvidence(response, observeResponse));
+    } catch (cause) {
+      if (response.ok) throw cause;
+      throw new ProviderChatCompletionError(
+        `provider chat completion failed: HTTP ${response.status} ${response.statusText}`,
+        "http_error", response.status,
+        { cause, httpResponse: cause instanceof ProviderChatCompletionError
+          ? cause.httpResponse : undefined }
+      );
+    }
+    if (!response.ok) {
+      throw new ProviderChatCompletionError(
+        `provider chat completion failed: HTTP ${response.status} ${response.statusText}`,
+        "http_error", response.status,
+        { identity: providerFailureIdentityFromBody(bodyText), httpResponse: evidence }
+      );
+    }
+    return inspectBody(request, bodyText, evidence.contentType, response.status, evidence);
+  }
   await throwIfHttpError(response);
   const bodyText = await readBody(response);
   return inspectBody(request, bodyText, response.headers.get("content-type"), response.status);
@@ -104,12 +132,14 @@ function inspectBody(
   request: ProviderChatCompletionRequest,
   bodyText: string,
   contentType: string | null,
-  httpStatus: number
+  httpStatus: number,
+  evidence?: ProviderHttpResponseEvidence
 ): ProviderChatCompletionResult {
   try {
-    return inspectProviderChatCompletionResponse(bodyText, contentType, httpStatus, {
+    const result = inspectProviderChatCompletionResponse(bodyText, contentType, httpStatus, {
       sseCompletionPolicy: request.sseCompletionPolicy
     });
+    return evidence === undefined ? result : { ...result, httpResponse: evidence };
   } catch (error) {
     throw new ProviderChatCompletionError(
       error instanceof Error ? error.message : "provider chat completion response inspect failed",
@@ -118,7 +148,8 @@ function inspectBody(
       {
         cause: error,
         identity: providerFailureIdentityFromBody(bodyText),
-        inspectionReason: inspectionReasonOf(error)
+        inspectionReason: inspectionReasonOf(error),
+        httpResponse: evidence
       }
     );
   }
@@ -182,10 +213,11 @@ function normalizeTransportError(
   error: unknown,
   callerSignal: AbortSignal | undefined,
   requestSignal: AbortSignal,
-  knownStatus: number | null
+  knownStatus: number | null,
+  knownResponse: ProviderHttpResponseEvidence | undefined
 ): Error {
   if (callerSignal?.aborted === true || requestSignal.aborted) {
-    return toCancellationError(error, callerSignal, requestSignal, knownStatus);
+    return toCancellationError(error, callerSignal, requestSignal, knownStatus, knownResponse);
   }
   if (error instanceof ProviderChatCompletionError) return error;
   return new ProviderChatCompletionError(
@@ -200,7 +232,8 @@ function toCancellationError(
   cause: unknown,
   callerSignal: AbortSignal | undefined,
   requestSignal: AbortSignal,
-  knownStatus: number | null
+  knownStatus: number | null,
+  knownResponse: ProviderHttpResponseEvidence | undefined
 ): ProviderChatCompletionError {
   const kind = callerSignal?.aborted === true || requestSignal.reason === CALLER_ABORT
     ? "aborted"
@@ -214,7 +247,8 @@ function toCancellationError(
       : "provider chat completion aborted",
     kind,
     cause instanceof ProviderChatCompletionError ? cause.httpStatus : knownStatus,
-    { cause }
+    { cause, httpResponse: knownResponse ?? (cause instanceof ProviderChatCompletionError
+      ? cause.httpResponse : undefined) }
   );
 }
 

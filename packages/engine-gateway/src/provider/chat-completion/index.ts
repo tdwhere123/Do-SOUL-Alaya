@@ -27,8 +27,10 @@ export {
   DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS
 } from "./fetch-chat-completion.js";
 export { inspectProviderChatCompletionResponse } from "./inspect-response.js";
+export { MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from "./response-evidence.js";
 export { assertAllowedProviderChatUrl } from "./provider-url-guard.js";
 export {
+  buildProviderChatRequestBody,
   buildProviderChatRequestInit,
   normalizeProviderBaseUrl,
   providerChatCompletionsUrl
@@ -36,6 +38,8 @@ export {
 export type {
   ProviderChatCompletionRequest,
   ProviderChatCompletionResult,
+  ProviderHttpResponseEvidence,
+  ProviderJsonSchema,
   ProviderCompletionWitness,
   ProviderChatMode,
   ProviderOutputTokenField,

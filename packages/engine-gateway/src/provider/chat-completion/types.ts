@@ -3,13 +3,29 @@ import type { EnvLookup } from "@do-soul/alaya-protocol";
 export const PROVIDER_REQUEST_PROFILES = [
   "provider-default-v1",
   "deepseek-v4-nonthinking-v1",
-  "mimo-v2.5-nonthinking-v1"
+  "mimo-v2.5-nonthinking-v1",
+  "step-3.5-2603-low-json-schema-v1"
 ] as const;
 
 export type ProviderRequestProfile = (typeof PROVIDER_REQUEST_PROFILES)[number];
 export type ProviderChatMode = "json" | "sse";
 export type ProviderOutputTokenField = "max_tokens" | "max_completion_tokens";
 export type ProviderSseCompletionPolicy = "require_witness" | "allow_clean_eof_v1";
+
+export type ProviderJsonSchema = Readonly<{
+  readonly name: string;
+  readonly schema: Readonly<Record<string, unknown>>;
+}>;
+
+/** Exact received bytes are retained up to the cap; length and digest cover all received bytes. */
+export type ProviderHttpResponseEvidence = Readonly<{
+  readonly contentType: string | null;
+  readonly bodyBase64: string;
+  readonly bodyByteLength: number;
+  readonly bodySha256: string;
+  readonly bodyTruncated: boolean;
+  readonly bodyComplete: boolean;
+}>;
 
 export type ProviderCompletionWitness = Readonly<{
   readonly mode: "json" | "sse";
@@ -29,6 +45,7 @@ export type ProviderChatCompletionRequest = Readonly<{
   readonly mode?: ProviderChatMode;
   readonly profile?: ProviderRequestProfile;
   readonly jsonObject?: boolean;
+  readonly jsonSchema?: ProviderJsonSchema;
   readonly maxOutputTokens?: number;
   readonly outputTokenField?: ProviderOutputTokenField;
   /** Versioned compatibility authority for providers documented to omit SSE sentinels. */
@@ -42,6 +59,8 @@ export type ProviderUsage = Readonly<{
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;
+  readonly cachedInputTokens?: number;
+  readonly reasoningOutputTokens?: number;
 }>;
 
 export type ProviderChatCompletionResult = Readonly<{
@@ -50,4 +69,6 @@ export type ProviderChatCompletionResult = Readonly<{
   readonly usage?: ProviderUsage;
   readonly httpStatus: number;
   readonly completion?: ProviderCompletionWitness;
+  readonly reasoningText?: string;
+  readonly httpResponse?: ProviderHttpResponseEvidence;
 }>;

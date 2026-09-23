@@ -3,6 +3,7 @@ import {
   type ProviderFailureIdentity
 } from "./failure-identity.js";
 import type { ProviderResponseInspectionReason } from "./inspect-response.js";
+import type { ProviderHttpResponseEvidence } from "./types.js";
 
 export type { ProviderResponseInspectionReason };
 
@@ -19,6 +20,7 @@ export class ProviderChatCompletionError extends Error {
   public readonly httpStatus: number | null;
   public readonly inspectionReason: ProviderResponseInspectionReason | null;
   readonly #identity: ProviderFailureIdentity;
+  readonly #httpResponse: ProviderHttpResponseEvidence | undefined;
 
   public constructor(
     message: string,
@@ -28,6 +30,7 @@ export class ProviderChatCompletionError extends Error {
       readonly cause?: unknown;
       readonly identity?: ProviderFailureIdentity;
       readonly inspectionReason?: ProviderResponseInspectionReason;
+      readonly httpResponse?: ProviderHttpResponseEvidence;
     }
   ) {
     super(message, options?.cause === undefined ? undefined : { cause: options.cause });
@@ -38,6 +41,7 @@ export class ProviderChatCompletionError extends Error {
       ? options?.inspectionReason ?? "parse"
       : null;
     this.#identity = options?.identity ?? emptyProviderFailureIdentity();
+    this.#httpResponse = options?.httpResponse;
     // Abort keeps httpStatus for diagnostics; enumerable .status would let
     // status-first retry treat hanging 429/5xx as retryable HTTP.
     if (kind === "http_error" && httpStatus !== null) {
@@ -55,5 +59,9 @@ export class ProviderChatCompletionError extends Error {
 
   public get bodyDigest(): string | null {
     return this.#identity.bodyDigest;
+  }
+
+  public get httpResponse(): ProviderHttpResponseEvidence | undefined {
+    return this.#httpResponse;
   }
 }
