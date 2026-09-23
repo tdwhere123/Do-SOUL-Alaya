@@ -10,6 +10,9 @@ import { listEligibleSemanticSources, sourceSemanticReadStores, SourceSemanticRe
 import { admissionOf, loadVerified, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { sourceSemanticRevision } from "./source-semantic-leases.js";
+import type { QueryPreparationLeaseBase } from "./source-semantic-leases.js";
+import { reserveEmptyInterpretationCompletion } from "./source-semantic-empty-population-budget.js";
+import { sourceSemanticAccessReceiptValue, preparationAccessReceiptValue } from "./source-semantic-access-receipts.js";
 
 type SourceObservation = SourceSemanticAccessReceipt["source_candidates"][number];
 type InterpretationObservation = SourceSemanticAccessReceipt["interpretation_candidates"][number];
@@ -25,6 +28,7 @@ export type SourceSemanticAccessPool = Readonly<{
   access: Omit<SourceSemanticAccessReceipt, "trace">;
   sourcePages: number; interpretationPages: number;
 }>;
+type EmptyCompletion = Readonly<{ leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery }>;
 
 export function accessInputIdentity(original: string, query: SourceSemanticQuery | undefined, budget: RequestBudget,
   policy: SourceSemanticAccessPolicy, sourceId?: string): string {
@@ -36,7 +40,7 @@ export function accessInputIdentity(original: string, query: SourceSemanticQuery
 export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, original: string,
   query: SourceSemanticQuery | undefined, policyName: SourceSemanticAccessPolicy, budget: RequestBudget,
-  sourceId?: string): SourceSemanticAccessPool {
+  sourceId?: string, completion?: EmptyCompletion): SourceSemanticAccessPool {
   const policy = createSourceSemanticAccessPolicy(original, query, policyName, meter);
   // Keep output/lease and branch work available after bounded observation. These are portions of the same request ledger.
   const observation = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
@@ -48,8 +52,18 @@ export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, pa
   const sourceRows = new Map<string, SourceObservation>();
   const stops = new Set<Stop>();
   for (const reason of sources.stopping_reasons) stops.add(reason);
-  const interpretations = observeInterpretations(runtime, payload, authorized, observation, policy, records, byId, sourceRows, stops, sourceId);
-  meter.absorb(observation);
+  let interpretations: ReturnType<typeof observeInterpretations>;
+  try {
+    interpretations = observeInterpretations(runtime, payload, authorized, observation, policy, records, byId, sourceRows, stops,
+      sourceId, completion === undefined ? undefined : () => reserveEmptyInterpretationCompletion({
+        runtime, parent: meter, child: observation, records, sourcePages: sources.pages,
+        policy: policyName, budget, orderCost: policy.orderCost, leaseContext: completion.leaseContext,
+        suppliedQuerySemantics: completion.suppliedQuerySemantics
+      }));
+  } finally {
+    // The navigation/header child already ran even when completion planning fails.
+    meter.absorb(observation);
+  }
   for (const record of records) if (!sourceRows.has(record.identity)) sourceRows.set(record.identity, {
     source_id: record.source_id, record_id: record.identity, read_bytes: 0, body_bytes: null, complete: false, signal: UNKNOWN
   });
@@ -63,13 +77,8 @@ export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, pa
   const orderedInterpretations = policy.order(reconciled.map((row) => ({ ...row, identity: row.interpretation_id })), meter)
     .map(({ identity: _identity, ...row }) => row);
   const inputId = accessInputIdentity(original, query, budget, policyName, sourceId);
-  const receipt = {
-    contract: "source-semantic-access-v1" as const, policy: policyName, input_id: inputId,
-    observed_source_count: orderedSources.length, observed_interpretation_count: orderedInterpretations.length,
-    source_candidates: orderedSources, interpretation_candidates: orderedInterpretations,
-    unvisited_sources: sources.open || sources.truncated || orderedSources.some((row) => !row.complete),
-    unvisited_interpretations: interpretations.open, stopping_reasons: [...stops]
-  };
+  const receipt = sourceSemanticAccessReceiptValue(policyName, inputId, orderedSources, orderedInterpretations,
+    sources.open || sources.truncated || orderedSources.some((row) => !row.complete), interpretations.open, [...stops]);
   meter.retain(receipt, "access receipt identity");
   const access = { ...receipt, pool_id: `sha256:${fieldContractSha256(canonicalJson({ receipt,
     workspace: payload.workspace_id, authorized, revision: sourceSemanticRevision(runtime) }))}` };
@@ -120,7 +129,7 @@ function readSourceText(runtime: RecallReadWorkerRuntime, record: SourceRecordId
 function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, policy: Policy,
   records: SourceRecordIdentity[], byId: Map<string, SourceRecordIdentity>, sources: Map<string, SourceObservation>,
-  stops: Set<Stop>, sourceId?: string) {
+  stops: Set<Stop>, sourceId?: string, onConclusiveEmpty?: () => void) {
   const descriptors = new Map<string, SourceSemanticHandleDescriptor>();
   const rows: InterpretationObservation[] = [];
   let pending: InterpretationHeader[] = [], exploration: InterpretationHeader[] = [];
@@ -141,6 +150,13 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
         } else if (!page.truncated) headersDone = true;
         else if (pages === 32) { headersDone = true; open = true; stops.add("interpretation_limit"); }
         after = page.committedThrough;
+        if (pages === 1 && page.rawEmpty && navigation.rows.length === 0 && !navigation.unavailable && !navigation.resourceLimited) {
+          try { onConclusiveEmpty?.(); }
+          catch (error) {
+            if (error instanceof SourceSemanticResourceExhausted) throw new SourceSemanticResourceExhausted("empty interpretation completion");
+            throw error;
+          }
+        }
       }
       const through = Math.min(records.length, sourceOffset + SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE);
       while (sourceOffset < through) {
@@ -177,6 +193,7 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
     }
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+    if (error.phase === "empty interpretation completion") throw error;
     stops.add("budget"); open = true;
   }
   return { descriptors, rows, pages, open: open || !headersDone || pending.length > 0 };
@@ -257,6 +274,7 @@ function readInterpretationHeaderPage(runtime: RecallReadWorkerRuntime, workspac
     limit: Math.min(SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE, meter.work),
     afterCursor: after, nativeByteLimit: Math.min(Math.floor(meter.bytes / 8), 1_000_000) });
   meter.read(page.nativeVisits, page.bytesRead);
+  const rawEmpty = after === null && page.rows.length === 0 && !page.truncated && !page.resourceLimited;
   const rows: InterpretationHeader[] = [];
   for (const row of page.rows) {
     meter.charge(1, 0, "access capsule lifecycle check");
@@ -264,7 +282,7 @@ function readInterpretationHeaderPage(runtime: RecallReadWorkerRuntime, workspac
     const header = { ...row, identity: row.object_id };
     meter.retain(header, "access interpretation header retention"); rows.push(header);
   }
-  return { ...page, rows };
+  return { ...page, rows, rawEmpty };
 }
 
 export function accessDescriptorPage(runtime: RecallReadWorkerRuntime, workspace: string, authorized: readonly string[] | null,
@@ -289,12 +307,7 @@ export function accessDescriptorPage(runtime: RecallReadWorkerRuntime, workspace
 /** Project a frozen pool without re-reading, rescoring, or claiming that unshown rows were unvisited. */
 export function preparationAccessReceipt(pool: SourceSemanticAccessPool, sourceOffset: number,
   interpretationOffset: number, interpretationCount: number, meter: SourceSemanticReadBudget): SourceSemanticAccessReceipt {
-  const sourceRows = pool.access.source_candidates.slice(sourceOffset, sourceOffset + SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE);
-  const interpretationRows = pool.access.interpretation_candidates.slice(interpretationOffset, interpretationOffset + interpretationCount);
-  const receipt: SourceSemanticAccessReceipt = { ...pool.access, source_candidates: sourceRows, interpretation_candidates: interpretationRows,
-    trace: { kind: "preparation_page", source_offset: sourceOffset, interpretation_offset: interpretationOffset,
-      omitted_source_count: pool.access.observed_source_count - sourceRows.length,
-      omitted_interpretation_count: pool.access.observed_interpretation_count - interpretationRows.length } };
+  const receipt = preparationAccessReceiptValue(pool, sourceOffset, interpretationOffset, interpretationCount);
   meter.retain(receipt, "access trace delivery");
   return receipt;
 }

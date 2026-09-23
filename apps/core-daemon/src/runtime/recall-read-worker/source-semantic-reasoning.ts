@@ -9,8 +9,8 @@ import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
 import { sourceSemanticReadStores, currentSemanticSource, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
-import { issueSemanticLease, issueSemanticLeaseGroup, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow,
-  sourceSemanticQueryInputIdentity, sourceSemanticRevision, type SourceSemanticLease } from "./source-semantic-leases.js";
+import { issueSemanticLease, issueSemanticLeaseGroup, queryPreparationLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow,
+  sourceSemanticQueryInputIdentity, sourceSemanticRevision, type QueryPreparationLeaseBase, type SourceSemanticLease } from "./source-semantic-leases.js";
 import { runSourceSemanticLibraryRecall } from "./source-semantic-library-recall.js";
 import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
 import { accessDescriptorPage, accessInputIdentity, observeSourceSemanticAccess, preparationAccessReceipt } from "./source-semantic-candidate-access.js";
@@ -111,8 +111,13 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
   if (prior !== undefined && prior.access_pool?.access.input_id !== inputId) {
     throw new CoreError("VALIDATION", "preparation continuation access policy or budget changed", { details: { admission: "bound" } });
   }
+  const queryLeaseContext: QueryPreparationLeaseBase = { ...leaseBase(runtime, payload, authorized),
+    ...(scopeLease === undefined ? {} : { source_id: scopeLease.source_id, source_version: scopeLease.source_version, content_digest: scopeLease.content_digest }),
+    original_query: request.original_query, query_semantics_id: querySemanticsId, query_semantics_input_id: queryInputId,
+    query_semantics_status: queryStatus, query_semantics: query };
   const pool = prior?.access_pool ?? observeSourceSemanticAccess(runtime, payload, authorized, meter,
-    request.original_query, query, policy, request.budget, scopeLease?.source_id);
+    request.original_query, query, policy, request.budget, scopeLease?.source_id,
+    { leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics });
   if (prior?.access_pool !== undefined) meter.retain(pool, "continued access pool");
   const discovery = accessDescriptorPage(runtime, payload.workspace_id, authorized, meter, pool, prior?.access_offset ?? 0);
   const sourceOffset = prior?.access_source_offset ?? 0;
@@ -123,13 +128,7 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
   const coverage: SourceSemanticCoverage = { ...IDLE, discovery: discovery.truncated || open ? "truncated" : "complete",
     source_interpretation: "open", query_semantics: admission.kind === "admitted"
       ? admission.query.gaps.length === 0 ? "complete" : "open" : "unexercised" };
-  const base: Omit<SourceSemanticLease, "kind"> = { ...leaseBase(runtime, payload, authorized),
-    ...(scopeLease === undefined ? {} : { source_id: scopeLease.source_id, source_version: scopeLease.source_version, content_digest: scopeLease.content_digest }),
-    original_query: request.original_query, query_semantics_id: querySemanticsId, query_semantics_input_id: queryInputId,
-    query_semantics_status: queryStatus,
-    query_semantics: admission.kind === "admitted" ? admission.query : undefined,
-    candidates: pool.descriptors.map((row) => row.interpretation_id), truncated: discovery.truncated || open,
-    access_pool: pool, access_offset: discovery.offset, access_source_offset: nextSourceOffset };
+  const base = queryPreparationLease(queryLeaseContext, pool, discovery.offset, nextSourceOffset, discovery.truncated || open);
   const needsContinuation = (discovery.truncated || sourceTraceRemaining)
     && (discovery.offset > (prior?.access_offset ?? 0) || nextSourceOffset > sourceOffset);
   const [query_handle, continuation_handle] = issueSemanticLeaseGroup(runtime, [

@@ -8,13 +8,19 @@ import { CoreError } from "../../shared/errors.js";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "../query/recall-query-probes.js";
 
 const UNKNOWN_SIGNAL: SourceSemanticAccessSignal = { source_text_score: null, interpretation_reading_score: 0 };
+const SOURCE_SEMANTIC_ACCESS_RESOURCE_CONTRACT = "empty-interpretation-reserve-v1";
+
+function sourceSemanticAccessOrderCost(count: number): Readonly<{ work_units: number; memory_bytes: number }> {
+  return { work_units: count * Math.ceil(Math.log2(count + 1)), memory_bytes: count * 16 };
+}
 
 export function sourceSemanticAccessInputIdentity(input: Readonly<{
   original_query: string; query_semantics?: SourceSemanticQuery; source_id?: string;
   budget: RequestBudget; policy: SourceSemanticAccessPolicy;
 }>): string {
   return `sha256:${fieldContractSha256(canonicalJson({ original_query: input.original_query,
-    query_semantics: input.query_semantics, source_id: input.source_id, budget: input.budget, policy: input.policy }))}`;
+    query_semantics: input.query_semantics, source_id: input.source_id, budget: input.budget, policy: input.policy,
+    resource_contract: SOURCE_SEMANTIC_ACCESS_RESOURCE_CONTRACT }))}`;
 }
 
 export function authorizeSemanticScope(scope: string | null | undefined, authorized: readonly string[] | null): void {
@@ -58,11 +64,13 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
     return aIdentity < bIdentity ? -1 : aIdentity > bIdentity ? 1 : 0;
   };
   const order = <T>(rows: readonly T[], ledger: SourceSemanticResourceLedger, compareRows: (a: T, b: T) => number): T[] => {
-    ledger.charge(rows.length * Math.ceil(Math.log2(rows.length + 1)), rows.length * 16, "access ordering");
+    const cost = sourceSemanticAccessOrderCost(rows.length);
+    ledger.charge(cost.work_units, cost.memory_bytes, "access ordering");
     return [...rows].sort(compareRows);
   };
   const sourceHints = new Map<string, SourceSemanticAccessSignal>();
   return {
+    orderCost: sourceSemanticAccessOrderCost,
     navigationQuery: (ledger: SourceSemanticResourceLedger): string | null => {
       if (policy === "canonical-v1") return null;
       chargeQueryFeatures(original, ledger);

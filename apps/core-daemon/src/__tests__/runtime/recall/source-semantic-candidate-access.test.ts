@@ -362,3 +362,122 @@ it("keeps both handles from a fitting preparation usable through the worker", as
     expect(next.access?.pool_id).toBe(prepared.access?.pool_id);
   });
 });
+
+it("reads a raw-only body beyond the general observation half after proving no capsules", async () => {
+  const original = "orchid irrigation";
+  await withAccessLibrary([{ id: "raw", text: "Orchid irrigation. ".repeat(600) }], async ({ execute, filename }) => {
+    const budget = { ...ACCESS_BUDGET, work_units: 180_000, memory_bytes: 4_000_000 };
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const runtime = { database } as RecallReadWorkerRuntime;
+    const childSpend: number[] = [];
+    const absorb = SourceSemanticReadBudget.prototype.absorb;
+    const spy = vi.spyOn(SourceSemanticReadBudget.prototype, "absorb").mockImplementation(function (this: SourceSemanticReadBudget, child) {
+      if (child.nativeBytes > 0) childSpend.push(child.spentWork);
+      return absorb.call(this, child);
+    });
+    try {
+      const direct = database.connection.transaction(() => observeSourceSemanticAccess(runtime,
+        { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] },
+          request: { kind: "prepare_query", original_query: original, budget } },
+        ["project"], new SourceSemanticReadBudget(budget), original, undefined, "query-conditioned-v1", budget, undefined,
+        { leaseContext: { workspace_id: WS, principal: "", as_of: CLOCK, authorized: ["project"],
+          expires_at: "2026-09-18T00:10:00.000Z", revision: "test", original_query: original } }))();
+      expect(direct.access.source_candidates[0]?.complete).toBe(true);
+      const prepared = await accessCall(execute, { kind: "prepare_query", original_query: original, budget });
+      expect(prepared.outcome).toEqual({ status: "preparation_required", missing: "query_semantics" });
+      expect(prepared.access?.source_candidates).toEqual([expect.objectContaining({ source_id: "raw", complete: true })]);
+      expect(prepared.access?.unvisited_sources).toBe(false);
+      expect(prepared.query_handle).toBeDefined();
+      expect(childSpend).toEqual([expect.any(Number)]);
+      expect(childSpend[0]).toBeGreaterThan(Math.floor(budget.work_units / 2));
+    } finally { spy.mockRestore(); database.close(); closeCachedDatabase(filename); }
+  });
+});
+
+it("reports census and header work when empty-population planning exhausts its protected allowance", async () => {
+  await withAccessLibrary([{ id: "raw", text: "Orchid irrigation." }], async ({ execute, filename }) => {
+    const budget = { ...ACCESS_BUDGET, work_units: 8_000, memory_bytes: 24_000 };
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const runtime = { database } as RecallReadWorkerRuntime;
+    const meter = new SourceSemanticReadBudget(budget);
+    const planning = vi.fn();
+    const charge = SourceSemanticReadBudget.prototype.charge;
+    const spy = vi.spyOn(SourceSemanticReadBudget.prototype, "charge").mockImplementation(function (this: SourceSemanticReadBudget, ...args) {
+      if (args[2] === "empty interpretation completion planning") planning();
+      return charge.apply(this, args);
+    });
+    try {
+      expect(() => database.connection.transaction(() => observeSourceSemanticAccess(runtime,
+        { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] },
+          request: { kind: "prepare_query", original_query: orchid, budget } },
+        ["project"], meter, orchid, undefined, "query-conditioned-v1", budget, undefined,
+        { leaseContext: { workspace_id: WS, principal: "", as_of: CLOCK, authorized: ["project"],
+          expires_at: "2026-09-18T00:10:00.000Z", revision: "test", original_query: orchid } }))()).toThrow();
+      const result = await accessCall(execute, { kind: "prepare_query", original_query: orchid, budget });
+      expect(planning).toHaveBeenCalledOnce();
+      expect(result.outcome).toEqual({ status: "resource_exhausted" });
+      expect(meter.nativeWork).toBeGreaterThan(0);
+      expect(meter.nativeBytes).toBeGreaterThan(0);
+      expect(meter.spentWork).toBeLessThanOrEqual(budget.work_units);
+      expect(meter.spentBytes).toBeLessThanOrEqual(budget.memory_bytes);
+      expect(result.work.native_work).toBeGreaterThan(0);
+      expect(result.work.native_bytes).toBeGreaterThan(0);
+      expect(result.work.logical_work).toBeGreaterThan(result.work.native_work);
+      expect(result.work.logical_work).toBeLessThanOrEqual(budget.work_units);
+      expect(result.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
+    } finally { spy.mockRestore(); database.close(); closeCachedDatabase(filename); }
+  });
+});
+
+it.each([0, 1, 16, 17])("keeps a proved empty capsule pool pageable for %i raw sources and either query state", async (count) => {
+  await withAccessLibrary(Array.from({ length: count }, (_, index) => ({ id: index === 0 ? 'raw-"雪\\' : `raw-${index}`,
+    text: "Orchid irrigation." })),
+  async ({ execute }) => {
+    for (const query_semantics of [undefined, accessQuery(orchid)]) {
+      const request = { kind: "prepare_query" as const, original_query: orchid, query_semantics, budget: ACCESS_BUDGET };
+      const prepared = await accessCall(execute, request);
+      expect(prepared.access).toMatchObject({ observed_source_count: count, observed_interpretation_count: 0,
+        unvisited_sources: false, unvisited_interpretations: false });
+      expect(prepared.access?.source_candidates).toHaveLength(Math.min(count, 16));
+      expect(prepared.query_handle).toBeDefined();
+      expect(prepared.continuation_handle === undefined).toBe(count <= 16);
+      expect(prepared.outcome?.status).toBe(query_semantics === undefined ? "preparation_required" : undefined);
+      if (prepared.continuation_handle !== undefined) {
+        const page = await accessCall(execute, { ...request, continuation_handle: prepared.continuation_handle });
+        expect(page.access?.pool_id).toBe(prepared.access?.pool_id);
+        expect(page.access?.source_candidates).toHaveLength(1);
+        expect(page.work.native_bytes).toBe(0);
+      }
+    }
+  });
+});
+
+it("does not promote an inactive capsule merely because it yields no verified interpretation", async () => {
+  await withAccessLibrary([{ id: "raw", text: "Orchid irrigation. ".repeat(600), reading: orchid }],
+  async ({ execute, filename }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    database.connection.prepare("UPDATE evidence_capsules SET lifecycle_state='archived'").run();
+    const runtime = { database } as RecallReadWorkerRuntime;
+    const budget = { ...ACCESS_BUDGET, work_units: 180_000, memory_bytes: 4_000_000 };
+    const planning = vi.fn(), charge = SourceSemanticReadBudget.prototype.charge;
+    const spy = vi.spyOn(SourceSemanticReadBudget.prototype, "charge").mockImplementation(function (this: SourceSemanticReadBudget, ...args) {
+      if (args[2] === "empty interpretation completion planning") planning();
+      return charge.apply(this, args);
+    });
+    try {
+      const pool = database.connection.transaction(() => observeSourceSemanticAccess(runtime,
+        { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] },
+          request: { kind: "prepare_query", original_query: orchid, budget } },
+        ["project"], new SourceSemanticReadBudget(budget), orchid, undefined, "query-conditioned-v1", budget, undefined,
+        { leaseContext: { workspace_id: WS, principal: "", as_of: CLOCK, authorized: ["project"],
+          expires_at: "2026-09-18T00:10:00.000Z", revision: "test", original_query: orchid } }))();
+      expect(planning).not.toHaveBeenCalled();
+      expect(pool.access.observed_interpretation_count).toBe(0);
+      expect(pool.access.source_candidates[0]?.complete).toBe(false);
+    } finally { spy.mockRestore(); database.close(); closeCachedDatabase(filename); }
+    const prepared = await accessCall(execute, { kind: "prepare_query", original_query: orchid, budget });
+    expect(prepared.access?.observed_interpretation_count).toBe(0);
+    expect(prepared.access?.source_candidates[0]?.complete).toBe(false);
+    expect(prepared.access?.unvisited_sources).toBe(true);
+  });
+});

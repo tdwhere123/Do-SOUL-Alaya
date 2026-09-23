@@ -21,22 +21,42 @@ export class SourceSemanticResourceLedger {
   }
   /** Bound traversal and copies before schema validation or canonicalization. */
   retain(value: unknown, phase = "preparation"): void {
-    const pending: unknown[] = [value];
-    while (pending.length > 0) {
-      const row = pending.pop();
-      this.charge(1, typeof row === "string" ? 24 + 4 * row.length : 64, phase);
-      if (row === null || typeof row !== "object") continue;
-      if (Array.isArray(row)) {
-        this.charge(0, row.length * 8, phase);
-        this.reserve(row.length, 0, phase);
-        for (const item of row) pending.push(item);
-      } else {
-        const keys = Object.keys(row);
-        this.charge(0, keys.reduce((size, key) => size + 24 + 4 * key.length, 0), phase);
-        this.reserve(keys.length, 0, phase);
-        for (const key of keys) pending.push((row as Record<string, unknown>)[key]);
-      }
-    }
+    traverseRetained(value, this, phase);
+  }
+  /** Measure with the same bounded debit sequence; an optional planner pays as traversal runs. */
+  static measureRetain(value: unknown, allowance: SourceSemanticResourceBudget,
+    planner?: SourceSemanticResourceLedger): SourceSemanticResourceBudget {
+    const measured = new SourceSemanticResourceLedger(allowance);
+    traverseRetained(value, measured, "retained value measurement", planner);
+    return { work_units: measured.spentWork, memory_bytes: measured.spentBytes };
   }
   remaining(): SourceSemanticResourceBudget { return { work_units: this.work, memory_bytes: this.bytes }; }
+}
+
+function traverseRetained(value: unknown, meter: SourceSemanticResourceLedger, phase: string,
+  planner?: SourceSemanticResourceLedger): void {
+  const charge = (work: number, bytes: number) => {
+    planner?.charge(work, bytes, "retained value measurement work");
+    meter.charge(work, bytes, phase);
+  };
+  const reserve = (work: number, bytes: number) => {
+    planner?.reserve(work, bytes, "retained value measurement work");
+    meter.reserve(work, bytes, phase);
+  };
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const row = pending.pop();
+    charge(1, typeof row === "string" ? 24 + 4 * row.length : 64);
+    if (row === null || typeof row !== "object") continue;
+    if (Array.isArray(row)) {
+      charge(0, row.length * 8);
+      reserve(row.length, 0);
+      for (const item of row) pending.push(item);
+    } else {
+      const keys = Object.keys(row);
+      charge(0, keys.reduce((size, key) => size + 24 + 4 * key.length, 0));
+      reserve(keys.length, 0);
+      for (const key of keys) pending.push((row as Record<string, unknown>)[key]);
+    }
+  }
 }

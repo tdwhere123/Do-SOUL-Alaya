@@ -22,8 +22,19 @@ export type SourceSemanticLease = Readonly<{
 }>;
 type Clock = Readonly<{ as_of: string; lifetime_now?: string }>;
 type Caller = Clock & Readonly<{ workspace_id: string; principal?: string }>;
-const LEASES = new WeakMap<RecallReadWorkerRuntime, Map<string, { lease: SourceSemanticLease; bytes: number }>>();
+type LeaseRow<Lease = SourceSemanticLease> = { lease: Lease; bytes: number };
+const LEASES = new WeakMap<RecallReadWorkerRuntime, Map<string, LeaseRow>>();
+const MAX_LEASES = 32;
 const MAX_BYTES = 8_000_000;
+export type QueryPreparationLeaseBase = Omit<SourceSemanticLease,
+  "kind" | "candidates" | "truncated" | "access_pool" | "access_offset" | "access_source_offset">;
+
+export function queryPreparationLease<Pool extends { descriptors: readonly { interpretation_id: string }[] },
+  Offset extends number | string, Truncated extends boolean | string>(base: QueryPreparationLeaseBase, pool: Pool,
+  accessOffset: Offset, sourceOffset: Offset, truncated: Truncated) {
+  return { ...base, candidates: pool.descriptors.map((row) => row.interpretation_id), truncated,
+    access_pool: pool, access_offset: accessOffset, access_source_offset: sourceOffset };
+}
 
 /** Bind the exact supplied object even when Core cannot admit it as Query Semantics. */
 export function sourceSemanticQueryInputIdentity(query: SourceSemanticQuery | undefined): string | undefined {
@@ -44,36 +55,54 @@ export function issueSemanticLease(runtime: RecallReadWorkerRuntime, lease: Sour
   return issueSemanticLeaseGroup(runtime, [{ lease, issuedId }], meter)[0]!;
 }
 
+/** Conservative work for a future group when the retained pool may be full. */
+export function semanticLeaseGroupAccountingCost(count: number, retainedCount = MAX_LEASES): number {
+  return count * retainedCount * 2 + count * (count - 1);
+}
+
+/** Capacity only: template leases are never installed or turned into capability identities. */
+export function preflightSemanticLeaseGroup<Lease extends Clock & { expires_at: string }>(
+  runtime: RecallReadWorkerRuntime, leases: readonly Lease[]): void {
+  if (leases.length === 0) return;
+  admittedRows(runtime, leases.map((lease) => ({ id: Symbol(), lease })), sourceSemanticLifetimeNow(leases[0]!));
+}
+
 /** Publish all handles in one response together; older leases remain evictable. */
 export function issueSemanticLeaseGroup(runtime: RecallReadWorkerRuntime,
   issues: readonly Readonly<{ lease: SourceSemanticLease; issuedId?: string }>[], meter: SourceSemanticReadBudget): string[] {
   if (issues.length === 0) return [];
   const retained = LEASES.get(runtime);
-  const rows = new Map(retained);
-  const now = sourceSemanticLifetimeNow(issues[0]!.lease);
-  meter.charge(issues.length * (retained?.size ?? 0) * 2 + issues.length * (issues.length - 1), 0,
+  meter.charge(semanticLeaseGroupAccountingCost(issues.length, retained?.size ?? 0), 0,
     "preparation lease retention accounting");
-  for (const [id, row] of rows) if (row.lease.expires_at <= now) rows.delete(id);
   const ids: string[] = [];
   for (const { lease, issuedId } of issues) {
     meter.retain(lease, "preparation lease");
-    const id = issuedId ?? randomUUID();
-    ids.push(id);
-    rows.set(id, { lease, bytes: 4 * canonicalJson(lease).length });
+    ids.push(issuedId ?? randomUUID());
   }
   const protectedIds = new Set(ids);
   if (protectedIds.size !== ids.length) throw new CoreError("CONFLICT", "duplicate source semantic preparation handle");
+  const rows = admittedRows(runtime, issues.map(({ lease }, index) => ({ id: ids[index]!, lease })),
+    sourceSemanticLifetimeNow(issues[0]!.lease));
+  LEASES.set(runtime, rows);
+  return ids;
+}
+
+function admittedRows<K extends string | symbol, Lease extends { expires_at: string }>(runtime: RecallReadWorkerRuntime,
+  issues: readonly Readonly<{ id: K; lease: Lease }>[], now: string): Map<string | K, LeaseRow<SourceSemanticLease | Lease>> {
+  const rows = new Map<string | K, LeaseRow<SourceSemanticLease | Lease>>(LEASES.get(runtime));
+  for (const [id, row] of rows) if (row.lease.expires_at <= now) rows.delete(id);
+  for (const { id, lease } of issues) rows.set(id, { lease, bytes: 4 * canonicalJson(lease).length });
+  const protectedIds = new Set<string | K>(issues.map((issue) => issue.id));
   let bytes = [...rows.values()].reduce((sum, row) => sum + row.bytes, 0);
   for (const id of rows.keys()) {
-    if (rows.size <= 32 && bytes <= MAX_BYTES) break;
+    if (rows.size <= MAX_LEASES && bytes <= MAX_BYTES) break;
     if (protectedIds.has(id)) continue;
     bytes -= rows.get(id)!.bytes; rows.delete(id);
   }
-  if (rows.size > 32 || bytes > MAX_BYTES) {
+  if (rows.size > MAX_LEASES || bytes > MAX_BYTES) {
     throw new CoreError("CONFLICT", "source semantic preparation exceeds lease capacity", { subCode: "RETRYABLE_BACKPRESSURE" });
   }
-  LEASES.set(runtime, rows);
-  return ids;
+  return rows;
 }
 
 export function readSemanticLease(runtime: RecallReadWorkerRuntime, caller: Caller, id: string,

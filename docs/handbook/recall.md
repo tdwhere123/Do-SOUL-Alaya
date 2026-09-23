@@ -1070,6 +1070,15 @@ library finalization. Source reads and whole interpretation verification do not
 resume after exhaustion; an unread body tail or budget-limited pool remains open,
 and frozen continuation does not resume observation. These are conservative logical
 charges, not a wall-clock guarantee or an RSS bound.
+Only an initial native `prepare_query` whose navigation and first unfiltered
+chronological header page conclusively find no capsules may promote its source
+observation allowance. It first reserves bounded receipt, ordering, trace and
+lease completion, including source-only continuation feasibility, and retains
+the already-spent census/header cost; an unfunded completion reports resource
+exhaustion. Inactive, filtered, unavailable and truncated populations keep the
+ordinary observation envelope. The shared access input identity includes the
+`empty-interpretation-reserve-v1` resource contract so frozen pools cannot cross
+allocation semantics; continuation and direct Recall behavior remain unchanged.
 Compatible source interpretation, query semantics, and semantic correspondence compile independently through the existing field; there is no
 cross-interpretation join. Native delivery selects at most five source roots
 (`source_gold_root_identity`) after reserving their complete support packages.
