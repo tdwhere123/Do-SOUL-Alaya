@@ -323,6 +323,8 @@ function completedFillResult() {
     cacheHits: 0,
     newlyExtracted: 0,
     coverage: 1,
+    retryTelemetryScope: { kind: "invocation" },
+    adaptiveBackoffScope: "invocation",
     retrySuccesses: 0,
     rateLimitRetries: 0,
     adaptiveConcurrencyBackoffs: 0,

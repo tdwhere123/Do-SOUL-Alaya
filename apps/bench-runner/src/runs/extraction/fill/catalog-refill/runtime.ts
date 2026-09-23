@@ -117,7 +117,7 @@ export function reconcileSettledCatalogRefillCompletion(
     cacheHits: counts.cachedTurns,
     newlyExtracted: 0,
     coverage: counts.coverage,
-    ...readFillRetryTelemetry(ledger.telemetry),
+    ...readFillRetryTelemetry(newFillStats(), ledger),
     authorityTelemetry: ledger,
     manifest: identity.manifest
   });

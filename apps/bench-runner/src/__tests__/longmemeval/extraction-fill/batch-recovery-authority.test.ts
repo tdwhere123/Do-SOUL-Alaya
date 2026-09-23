@@ -254,6 +254,10 @@ it.each([
   await run("prepare"); await run("submit");
   const settled = await run("resume");
   const ledger = settled.authorityTelemetry!.telemetry;
+  expect(settled.retryTelemetryScope).toEqual({
+    kind: "receipt_lineage", lineageDigest: settled.authorityTelemetry!.lineageDigest
+  });
+  expect(settled.adaptiveBackoffScope).toBe("invocation");
   expect(ledger.terminalRetryClassifications.failure_non_retryable_response).toBe(failures);
   expect(ledger.totalTokens).toBe(totalTokens);
   expect(ledger.usageUnknownAttempts).toBe(unknown);
@@ -282,9 +286,62 @@ it.each([
   expect(fetchAttempt).not.toHaveBeenCalled();
   const summary = output.split("\n").find((line) => line.startsWith("Partial.") || line.startsWith("Done."));
   expect(summary).toContain(`failures=${failures} `);
+  expect(summary).toContain(`retry_scope=receipt_lineage retry_lineage_digest=${settled.authorityTelemetry!.lineageDigest} adaptive_scope=invocation `);
   expect(summary).toContain(`terminal_nonretryable_response=${ledger.terminalRetryClassifications.failure_non_retryable_response} `);
   expect(summary).toContain(`usage_total_tokens=${ledger.totalTokens} `);
   expect(summary).toContain(`usage_unknown=${ledger.usageUnknownAttempts} `);
+});
+
+it("keeps receipt-lineage retry counts across a zero-call interactive replay and Batch reopen", async () => {
+  const { run, provider, limits } = await setup();
+  provider.results = ["truncated", "valid"];
+  await run("prepare"); await run("submit"); await run("resume");
+  provider.results = ["valid"]; await run("prepare", "repair"); await run("submit", "repair");
+  const completed = await run("resume", "repair");
+  const ledger = completed.authorityTelemetry!;
+  expect(ledger.telemetry.terminalRetryClassifications.failure_non_retryable_response).toBe(1);
+
+  const extract = vi.fn(async () => { throw new Error("complete replay must not extract"); });
+  const interactive = await runExtractionFill({
+    variant: EXTRACTION_FILL_VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
+    authorityReceiptPath: join(cacheRoot, "authority.json"),
+    extractorFactory: () => ({ extract }), log: () => undefined
+  });
+  expect(extract).not.toHaveBeenCalled();
+  expect(interactive.authorityTelemetry?.rawLedgerSha256).toBe(ledger.rawLedgerSha256);
+  expect(interactive.retryTelemetryScope).toEqual({ kind: "receipt_lineage", lineageDigest: ledger.lineageDigest });
+  expect(interactive.terminalRetryClassifications.failure_non_retryable_response).toBe(1);
+  expect(interactive.adaptiveBackoffScope).toBe("invocation");
+  expect(interactive.adaptiveConcurrencyBackoffs).toBe(0);
+
+  const limitsPath = join(cacheRoot, "limits.json");
+  writeFileSync(limitsPath, JSON.stringify(limits));
+  const fetchAttempt = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+    throw new Error("zero-call replay must not contact a provider");
+  });
+  let output = "";
+  const stdout = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    output += String(chunk); return true;
+  });
+  let interactiveExit: number, batchExit: number;
+  const args = ["extraction-fill", "--variant", "oracle", "--data-dir", dataDir,
+    "--pinned-meta-root", pinnedMetaRoot, "--extraction-cache-root", cacheRoot,
+    "--extraction-authority", join(cacheRoot, "authority.json")];
+  try {
+    interactiveExit = await runCli(args);
+    batchExit = await runCli([...args, "--batch-operation", "import", "--batch-limits", limitsPath]);
+  } finally { stdout.mockRestore(); }
+  expect([interactiveExit, batchExit]).toEqual([0, 0]);
+  expect(fetchAttempt).not.toHaveBeenCalled();
+  const summaries = output.split("\n").filter((line) => line.startsWith("Done."));
+  expect(summaries).toHaveLength(2);
+  for (const summary of summaries) {
+    expect(summary).toContain("failures=1 ");
+    expect(summary).toContain("terminal_nonretryable_response=1 ");
+    expect(summary).toContain("adaptive_backoffs=0 adaptive_backoff_ms=0 ");
+    expect(summary).toContain(`retry_scope=receipt_lineage retry_lineage_digest=${ledger.lineageDigest} adaptive_scope=invocation `);
+  }
+  expect((await run("import")).authorityTelemetry?.rawLedgerSha256).toBe(ledger.rawLedgerSha256);
 });
 
 it("admits a completed empty selection alongside grounded signals without another provider attempt", async () => {

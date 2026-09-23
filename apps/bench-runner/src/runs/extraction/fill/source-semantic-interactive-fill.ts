@@ -396,7 +396,7 @@ function publishInteractiveFill(
   return {
     requestedTurns: input.prepared.requestedTurns, cacheHits: workset.cachedRequests.length,
     newlyExtracted, coverage: completion.coverage, manifest,
-    ...readFillRetryTelemetry({ ...newFillStats(), ...authorityTelemetry?.telemetry }), authorityTelemetry
+    ...readFillRetryTelemetry(newFillStats(), authorityTelemetry), authorityTelemetry
   };
 }
 

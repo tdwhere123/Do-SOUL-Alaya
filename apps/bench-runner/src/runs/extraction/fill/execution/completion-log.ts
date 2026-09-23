@@ -1,6 +1,6 @@
 import type { ExtractionAttemptLedgerSnapshot } from
   "../../authority/attempt-ledger.js";
-import type { FillRetryTelemetry } from "../fill-stats.js";
+import { renderFillRetryScope, type FillRetryTelemetry } from "../fill-stats.js";
 
 export function renderFillCompletion(input: {
   readonly status: string;
@@ -19,6 +19,7 @@ export function renderFillCompletion(input: {
     `rate_limit_retries=${input.retryTelemetry.rateLimitRetries} ` +
     `adaptive_backoffs=${input.retryTelemetry.adaptiveConcurrencyBackoffs} ` +
     `adaptive_backoff_ms=${input.retryTelemetry.adaptiveConcurrencyBackoffMs} ` +
+    renderFillRetryScope(input.retryTelemetry) +
     `terminal_max_retries=${input.retryTelemetry.terminalRetryClassifications.failure_max_retries} ` +
     `terminal_nonretryable_4xx=${input.retryTelemetry.terminalRetryClassifications.failure_non_retryable_4xx} ` +
     `terminal_nonretryable_response=${input.retryTelemetry.terminalRetryClassifications.failure_non_retryable_response} ` +

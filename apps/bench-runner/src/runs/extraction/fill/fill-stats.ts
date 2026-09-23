@@ -4,8 +4,16 @@ import {
   type BenchTerminalRetryClassification,
   type CompileSeedExtractionStats
 } from "../../compile-seed/compile-seed-types.js";
+import type { ExtractionAttemptLedgerSnapshot } from "../authority/attempt-ledger.js";
+
+export type FillRetryTelemetryScope =
+  | Readonly<{ kind: "receipt_lineage"; lineageDigest: string }>
+  | Readonly<{ kind: "invocation" }>;
 
 export interface FillRetryTelemetry {
+  /** Retry and terminal counts cover this scope; adaptive backoff is invocation-only. */
+  readonly retryTelemetryScope: FillRetryTelemetryScope;
+  readonly adaptiveBackoffScope: "invocation";
   readonly retrySuccesses: number;
   readonly rateLimitRetries: number;
   readonly adaptiveConcurrencyBackoffs: number;
@@ -44,16 +52,29 @@ export function newFillStats(): CompileSeedExtractionStats {
 
 export function readFillRetryTelemetry(
   stats: Pick<CompileSeedExtractionStats, "retrySuccesses" | "rateLimitRetries" |
-    "adaptiveConcurrencyBackoffs" | "adaptiveConcurrencyBackoffMs" | "terminalRetryClassifications">
+    "adaptiveConcurrencyBackoffs" | "adaptiveConcurrencyBackoffMs" | "terminalRetryClassifications">,
+  ledger?: ExtractionAttemptLedgerSnapshot
 ): FillRetryTelemetry {
-  const terminal = stats.terminalRetryClassifications ?? {};
+  const counters = ledger?.telemetry ?? stats;
+  const terminal = counters.terminalRetryClassifications ?? {};
   return {
-    retrySuccesses: stats.retrySuccesses ?? 0,
-    rateLimitRetries: stats.rateLimitRetries ?? 0,
+    retryTelemetryScope: ledger === undefined
+      ? { kind: "invocation" }
+      : { kind: "receipt_lineage", lineageDigest: ledger.lineageDigest },
+    adaptiveBackoffScope: "invocation",
+    retrySuccesses: counters.retrySuccesses ?? 0,
+    rateLimitRetries: counters.rateLimitRetries ?? 0,
     adaptiveConcurrencyBackoffs: stats.adaptiveConcurrencyBackoffs ?? 0,
     adaptiveConcurrencyBackoffMs: stats.adaptiveConcurrencyBackoffMs ?? 0,
     terminalRetryClassifications: completeBenchTerminalRetryClassifications(terminal)
   };
+}
+
+export function renderFillRetryScope(telemetry: FillRetryTelemetry): string {
+  const scope = telemetry.retryTelemetryScope;
+  return `retry_scope=${scope.kind} ` +
+    `retry_lineage_digest=${scope.kind === "receipt_lineage" ? scope.lineageDigest : "none"} ` +
+    `adaptive_scope=${telemetry.adaptiveBackoffScope} `;
 }
 
 export function countTerminalProviderFailures(

@@ -60,6 +60,9 @@ describe("cache-only extraction window reframing", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(closed).toMatchObject({ cacheHits: 2, newlyExtracted: 0 });
+    expect(closed.retryTelemetryScope).toEqual({ kind: "invocation" });
+    expect(closed.adaptiveBackoffScope).toBe("invocation");
+    expect(closed.authorityTelemetry).toBeUndefined();
     expect(closed.manifest).toMatchObject({
       fill_status: "complete",
       window_offset: 0,

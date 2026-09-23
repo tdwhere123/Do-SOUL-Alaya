@@ -26,7 +26,8 @@ import { collectSemanticFillTasks } from "./semantic-workset-tasks.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
 import {
   countTerminalProviderFailures,
-  readFillRetryTelemetry
+  readFillRetryTelemetry,
+  renderFillRetryScope
 } from "./fill-stats.js";
 import {
   renderAuthorityTelemetry, renderFillCompletion
@@ -299,14 +300,14 @@ export function finishExtractionFill(
   const completion = inspectFillWindow(
     cacheRoot, prepared.config, prepared.distinctExtractionTurns
   );
-  const retryTelemetry = readFillRetryTelemetry(stats);
+  const invocationTelemetry = readFillRetryTelemetry(stats);
   const intentionalSkippedTurns = countIntentionalSkippedTurns(
     prepared.requestedTurns,
     prepared.existingManifest?.cached_turns,
     cacheKeyAllowlistSize
   );
   const status = resolveFullFillStatus({
-    prepared, stats, completion, telemetry: retryTelemetry,
+    prepared, stats, completion, telemetry: invocationTelemetry,
     repairScopeTurns, allowProviderTaskFailures, intentionalSkippedTurns
   });
   assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
@@ -316,6 +317,7 @@ export function finishExtractionFill(
   );
   const cacheHits = stats.cacheHits;
   const newlyExtracted = stats.llmCalls;
+  const retryTelemetry = readFillRetryTelemetry(stats, authorityTelemetry);
   const failureCount = countTerminalProviderFailures(retryTelemetry);
   log(renderFillCompletion({
     status, cacheHits, newlyExtracted, failureCount, intentionalSkippedTurns,
@@ -352,15 +354,17 @@ export function finishExtractionQuestionBatch(
   const manifest = persistFillManifest(
     prepared, cacheRoot, "in_progress", fullCompletion
   );
-  const retryTelemetry = readFillRetryTelemetry(stats);
+  const invocationTelemetry = readFillRetryTelemetry(stats);
   assertQuestionBatchTaskConservation(
-    prepared, stats, retryTelemetry, repairScopeTurns
+    prepared, stats, invocationTelemetry, repairScopeTurns
   );
+  const retryTelemetry = readFillRetryTelemetry(stats, authorityTelemetry);
   const failureCount = countTerminalProviderFailures(retryTelemetry);
   log(
     `[extraction-fill] question batch complete: questions=${prepared.questionBatchLimit} ` +
       `cache_hits=${stats.cacheHits} newly_extracted=${stats.llmCalls} ` +
       `failures=${failureCount} ` +
+      renderFillRetryScope(retryTelemetry) +
       `batch_status=${batchCompletion.missingTurns === 0 ? "complete" : "incomplete"} ` +
       `batch_coverage=${(batchCompletion.coverage * 100).toFixed(1)}% ` +
       `full_coverage=${(fullCompletion.coverage * 100).toFixed(1)}%`
@@ -404,7 +408,7 @@ export function finishExtractionProbe(
     cacheRoot, prepared.config, prepared.distinctExtractionTurns
   );
   const manifest = persistFillManifest(prepared, cacheRoot, "in_progress", completion);
-  const retryTelemetry = readFillRetryTelemetry(stats);
+  const retryTelemetry = readFillRetryTelemetry(stats, authorityTelemetry);
   if (stats.llmCalls !== 1 || stats.cacheHits !== 0) {
     throw new ExtractionCacheInvariantError(
       "extraction probe did not perform exactly one live target extraction"
@@ -416,6 +420,7 @@ export function finishExtractionProbe(
     `rate_limit_retries=${retryTelemetry.rateLimitRetries} ` +
     `adaptive_backoffs=${retryTelemetry.adaptiveConcurrencyBackoffs} ` +
     `adaptive_backoff_ms=${retryTelemetry.adaptiveConcurrencyBackoffMs} ` +
+    renderFillRetryScope(retryTelemetry) +
     renderAuthorityTelemetry(authorityTelemetry)
   );
   return {

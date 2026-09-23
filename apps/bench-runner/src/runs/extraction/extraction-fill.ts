@@ -383,7 +383,8 @@ async function executeLockedExtractionFill(input: {
         input.stats,
         input.cacheRoot,
         input.options.semanticArtifactRoot,
-        semanticReport
+        semanticReport,
+        input.executionAuthority?.snapshot()
       );
     }
     return finishPreparedExtractionFill(
@@ -533,7 +534,8 @@ function overlayFillResult(
   stats: ReturnType<typeof newFillStats>,
   cacheRoot: string,
   semanticArtifactRoot: string | undefined,
-  semanticReport: import("./fill/semantic-fill-executor.js").SemanticFillReport | undefined
+  semanticReport: import("./fill/semantic-fill-executor.js").SemanticFillReport | undefined,
+  authorityTelemetry: import("./authority/attempt-ledger.js").ExtractionAttemptLedgerSnapshot | undefined
 ): ExtractionFillResult {
   if (semanticArtifactRoot === undefined || semanticReport === undefined) {
     throw new ExtractionCacheInvariantError(
@@ -555,7 +557,8 @@ function overlayFillResult(
     cacheHits: stats.cacheHits,
     newlyExtracted: 0,
     coverage: historical.coverage,
-    ...readFillRetryTelemetry(stats),
+    ...readFillRetryTelemetry(stats, authorityTelemetry),
+    ...(authorityTelemetry === undefined ? {} : { authorityTelemetry }),
     manifest: identity.manifest,
     semanticOverlayIdentity: digestSemanticOverlay(semanticArtifactRoot),
     semanticNewlyExtracted: semanticReport.admitted,

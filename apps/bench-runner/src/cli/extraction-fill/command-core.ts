@@ -12,7 +12,7 @@ import type { ExtractionFillLazyFlags } from "./lazy-field-flags.js";
 import type { ExtractionBatchOptions } from "./batch-flags.js";
 import type { readExpansionSpendApproval } from "../../datasets/longmemeval/promotion/expansion-spend-approval.js";
 import { pct } from "../result-format.js";
-import { countTerminalProviderFailures } from "../../runs/extraction/fill/fill-stats.js";
+import { countTerminalProviderFailures, renderFillRetryScope } from "../../runs/extraction/fill/fill-stats.js";
 import {
   ExtractionFillInterruptedError,
   withExtractionFillSignalScope,
@@ -163,6 +163,7 @@ function renderResult(result: ExtractionFillResult): string {
     `rate_limit_retries=${result.rateLimitRetries} ` +
     `adaptive_backoffs=${result.adaptiveConcurrencyBackoffs} ` +
     `adaptive_backoff_ms=${result.adaptiveConcurrencyBackoffMs} ` +
+    renderFillRetryScope(result) +
     renderAuthorityTelemetry(result.authorityTelemetry) +
     `terminal_max_retries=${result.terminalRetryClassifications.failure_max_retries} ` +
     `terminal_nonretryable_4xx=${result.terminalRetryClassifications.failure_non_retryable_4xx} ` +

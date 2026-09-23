@@ -33,6 +33,8 @@ it("prints extraction retry telemetry in the CLI done line", async () => {
     requestedTurns: 2,
     cacheHits: 1,
     newlyExtracted: 1,
+    retryTelemetryScope: { kind: "invocation" },
+    adaptiveBackoffScope: "invocation",
     retrySuccesses: 1,
     rateLimitRetries: 3,
     terminalRetryClassifications: {
@@ -50,7 +52,7 @@ it("prints extraction retry telemetry in the CLI done line", async () => {
 
   expect(exitCode).toBe(0);
   expect(stdout).toMatch(
-    /failures=2.*retry_successes=1.*rate_limit_retries=3.*terminal_max_retries=0.*terminal_nonretryable_4xx=2.*terminal_nonretryable_response=0.*terminal_timeouts=0/u
+    /failures=2.*retry_successes=1.*rate_limit_retries=3.*retry_scope=invocation retry_lineage_digest=none adaptive_scope=invocation.*terminal_max_retries=0.*terminal_nonretryable_4xx=2.*terminal_nonretryable_response=0.*terminal_timeouts=0/u
   );
 });
 
@@ -59,6 +61,8 @@ it("forwards the selected cache and pinned dataset authority roots", async () =>
     requestedTurns: 0,
     cacheHits: 0,
     newlyExtracted: 0,
+    retryTelemetryScope: { kind: "invocation" },
+    adaptiveBackoffScope: "invocation",
     retrySuccesses: 0,
     rateLimitRetries: 0,
     terminalRetryClassifications: emptyBenchTerminalRetryClassifications(),

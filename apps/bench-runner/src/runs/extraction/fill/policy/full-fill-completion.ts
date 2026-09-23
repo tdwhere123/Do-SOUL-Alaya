@@ -10,7 +10,7 @@ export function resolveFullFillStatus(input: {
   readonly prepared: PreparedExtractionFill;
   readonly stats: CompileSeedExtractionStats;
   readonly completion: ExtractionFillCompletion;
-  readonly telemetry: FillRetryTelemetry;
+  readonly telemetry: Pick<FillRetryTelemetry, "terminalRetryClassifications">;
   readonly repairScopeTurns: number | undefined;
   readonly allowProviderTaskFailures: boolean;
   readonly intentionalSkippedTurns: number;

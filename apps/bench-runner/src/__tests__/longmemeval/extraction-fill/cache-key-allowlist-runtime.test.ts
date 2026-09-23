@@ -28,6 +28,7 @@ import { createExtractionCatalogRefillScope } from
   "../../../runs/extraction/authority/catalog-refill/scope.js";
 import { runExtractionFill } from
   "../../../runs/extraction/extraction-fill.js";
+import { runCli } from "../../../cli/cli.js";
 import { inspectTurnContentKeySpace } from
   "../../../runs/extraction/turn-contents.js";
 import type { LongMemEvalQuestion } from
@@ -247,6 +248,48 @@ parentDescribe("cache-key allowlist runtime resume", () => {
       authorityTelemetry: { attempts: 3, successfulShards: 2 },
       manifest: { fill_status: "complete", expected_turns: 4, cached_turns: 4 }
     });
+    const ledger = result.authorityTelemetry;
+    expect(ledger.telemetry.terminalRetryClassifications.failure_timeout).toBe(1);
+    expect(result.terminalRetryClassifications.failure_timeout).toBe(1);
+    expect(result.retryTelemetryScope).toEqual({ kind: "receipt_lineage", lineageDigest: ledger.lineageDigest });
+    expect(result.adaptiveBackoffScope).toBe("invocation");
+    const reopenedExtract = vi.fn(async () => { throw new Error("complete refill must not extract"); });
+    const reopenOptions = {
+      variant: EXTRACTION_FILL_VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
+      authorityReceiptPath: authorityReceiptPath.authority,
+      targetSelectionReceiptPath: authorityReceiptPath.selection,
+      extractorFactory: () => ({ extract: reopenedExtract }), log: () => undefined
+    };
+    const reopened = await runExtractionFill(reopenOptions);
+    expect(reopenedExtract).not.toHaveBeenCalled();
+    expect(reopened.newlyExtracted).toBe(0);
+    expect(reopened.retryTelemetryScope).toEqual(result.retryTelemetryScope);
+    expect(reopened.terminalRetryClassifications.failure_timeout).toBe(1);
+    expect(reopened.adaptiveConcurrencyBackoffs).toBe(0);
+    expect(reopened.authorityTelemetry.rawLedgerSha256).toBe(ledger.rawLedgerSha256);
+
+    const fetchAttempt = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("complete refill CLI reopen must not contact a provider");
+    });
+    let output = "";
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      output += String(chunk); return true;
+    });
+    let exitCode: number;
+    try {
+      exitCode = await runCli(["extraction-fill", "--variant", "oracle", "--data-dir", dataDir,
+        "--pinned-meta-root", pinnedMetaRoot, "--extraction-cache-root", cacheRoot,
+        "--extraction-authority", authorityReceiptPath.authority,
+        "--extraction-target-selection", authorityReceiptPath.selection]);
+    } finally { stdout.mockRestore(); fetchAttempt.mockRestore(); }
+    expect(exitCode).toBe(0);
+    expect(fetchAttempt).not.toHaveBeenCalled();
+    expect(output).toContain("failures=1 ");
+    expect(output).toContain("terminal_timeouts=1 ");
+    expect(output).toContain("adaptive_backoffs=0 adaptive_backoff_ms=0 ");
+    expect(output).toContain(`retry_scope=receipt_lineage retry_lineage_digest=${ledger.lineageDigest} adaptive_scope=invocation `);
+    expect((await runExtractionFill(reopenOptions)).authorityTelemetry.rawLedgerSha256).toBe(ledger.rawLedgerSha256);
+    expect(reopenedExtract).not.toHaveBeenCalled();
   });
 });
 

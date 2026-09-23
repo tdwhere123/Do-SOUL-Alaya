@@ -143,7 +143,7 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
   const authorityTelemetry = authority.snapshot();
   return { requestedTurns: input.prepared.requestedTurns, cacheHits: workset.cachedRequests.length,
     newlyExtracted: 0, coverage: completion.coverage, manifest, batchState: state,
-    ...readFillRetryTelemetry(authorityTelemetry?.telemetry ?? newFillStats()), authorityTelemetry };
+    ...readFillRetryTelemetry(newFillStats(), authorityTelemetry), authorityTelemetry };
 }
 
 function sampleWindowPlanPath(input: BatchFillInput): string {
