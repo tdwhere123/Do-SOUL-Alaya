@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, renameSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, expect, it, vi } from "vitest";
@@ -15,6 +15,10 @@ import { prepareSourcePublicationAssociations } from "../../../runs/snapshot/sou
 import { parseSourcePublicationAssociations, publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { runSemanticChainLauncher } from "../../../runs/semantic-chain/launch.js";
+import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
+import { LongMemEvalNativeSemanticConfigSchema } from "../../../runs/longmemeval-semantic/contract.js";
+import { verifyLongMemEvalQuestionPublication } from "../../../runs/longmemeval-semantic/execute.js";
+import { readChainArtifact } from "../../../runs/semantic-chain/contract.js";
 
 const MODEL = "gemini-2.5-flash-lite";
 const REQUEST_PROFILE = "gemini-2.5-nonthinking-v1" as const;
@@ -77,19 +81,41 @@ async function fixture(revised = false) {
   await runExtractionFill({ ...options, openSemantics: generation, authorityReceiptPath });
   expect(fetchMock).toHaveBeenCalledTimes(2);
   for (const line of preflight.planned_requests) expect(inspectCachedSourceSemantic(cacheRoot, line.key, MODEL, REQUEST_PROFILE).status).toBe("hit");
-  const population = { name: "fixture", dataDir, pinnedMetaRoot, cacheRoot, model: MODEL, requestProfile: REQUEST_PROFILE };
+  const population = { name: "fixture", dataDir, pinnedMetaRoot, model: MODEL, requestProfile: REQUEST_PROFILE };
   return { population, preflight, preflightPath, generation, fetchMock };
+}
+
+async function prepareWindowOwner(root: string, offset: number) {
+  const options = { variant: "longmemeval_s" as const, cacheRoot: root, dataDir, pinnedMetaRoot,
+    offset, limit: 1, sourcePacking: "complete-source" as const, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION };
+  const preflight = await preflightExtractionBatch({ ...options, batch: { operation: "prepare", limits: {
+    maxJobs: 1, maxRequestsPerJob: 10, maxFileBytes: 1000000, maxInputTokensPerJob: 1000000,
+    maxEnqueuedTokens: 1000000, maxOutputTokens: 4096, maxUsd: 1,
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2, deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10
+  } } });
+  const retainedPreparationPath = join(root, "preflight.json");
+  writeFileSync(retainedPreparationPath, JSON.stringify(preflight));
+  const inspection = await inspectExtractionAuthority({ ...options,
+    revision: readCurrentExtractionAuthorityRevision(), action: "fill" });
+  const receipt = createExtractionAuthorityReceipt({ action: "fill", observation: inspection.observation,
+    outputTokenCap: { field: "maxOutputTokens", value: 4096 }, diskFloorBytes: 0,
+    priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2, maximumInputTokensPerAttempt: 100000 }, inspection });
+  const authorityReceiptPath = join(root, "authority.json");
+  writeExtractionAuthorityReceipt(authorityReceiptPath, receipt);
+  await runExtractionFill({ ...options, authorityReceiptPath });
+  return { cacheRoot: root, retainedPreparationPath, preflight };
 }
 
 it("prepares the fixed CLI window and publishes one admitted interpretation at both original positions and dates", async () => {
   const f = await fixture();
   const population = { ...f.population, questionWindow: { offset: 1, limit: 1 } };
   const config = join(cacheRoot, "association-config.json"), out = join(cacheRoot, "prepared.json");
-  writeFileSync(config, JSON.stringify(population));
+  writeFileSync(config, JSON.stringify({ ...population,
+    cacheOwners: [{ cacheRoot, retainedPreparationPath: f.preflightPath }] }));
   const retained = [f.preflightPath, join(cacheRoot, "manifest.json"), ...f.preflight.planned_requests.map(line => cacheFilePath(cacheRoot, line.key))];
   const before = retained.map(path => readFileSync(path, "utf8"));
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-  expect(await runSemanticChainLauncher(["associate", "--config", config, "--preflight", f.preflightPath, "--out", out])).toBe(0);
+  expect(await runSemanticChainLauncher(["associate", "--config", config, "--out", out])).toBe(0);
   const sidecar = JSON.parse(readFileSync(`${out}.associations.json`, "utf8"));
   expect(sidecar.contract).toBe("source-publication-associations-v2");
   const associations = sidecar.publicationAssociations;
@@ -129,12 +155,13 @@ it("prepares the fixed CLI window and publishes one admitted interpretation at b
 
 it("associates unique and repeated occurrences with only the independently configured request generation", async () => {
   const f = await fixture(true);
-  const unmatched = await prepareSourcePublicationAssociations(f.population, f.preflightPath, join(cacheRoot, "unmatched.json"));
+  const owner = [{ cacheRoot, retainedPreparationPath: f.preflightPath }];
+  const unmatched = await prepareSourcePublicationAssociations(f.population, owner, join(cacheRoot, "unmatched.json"));
   expect(unmatched.publicationAssociations).toEqual([]);
   expect(unmatched.artifacts.every(row => row.status === "unbound")).toBe(true);
   expect(unmatched.sources).toHaveLength(4);
   expect(unmatched.sources.every(row => row.reason === "missing_current_artifact")).toBe(true);
-  const matched = await prepareSourcePublicationAssociations({ ...f.population, openSemantics: f.generation }, f.preflightPath, join(cacheRoot, "matched.json"));
+  const matched = await prepareSourcePublicationAssociations({ ...f.population, openSemantics: f.generation }, owner, join(cacheRoot, "matched.json"));
   expect(matched.publicationAssociations.map(row => row.source_id).sort()).toEqual([
     "fixture:outside-s0-r0", "fixture:repeated-s0-r0", "fixture:repeated-s1-r0", "fixture:unique-s0-r0"
   ]);
@@ -146,18 +173,19 @@ it("associates unique and repeated occurrences with only the independently confi
 it("keeps invalid artifacts, missing artifacts, and missing retained request proof explicitly unassociated", async () => {
   const f = await fixture();
   writeFileSync(f.preflightPath, JSON.stringify({ ...f.preflight, planned_requests: [] }));
-  const unproven = await prepareSourcePublicationAssociations(f.population, f.preflightPath, join(cacheRoot, "unproven.json"));
+  const owner = [{ cacheRoot, retainedPreparationPath: f.preflightPath }];
+  const unproven = await prepareSourcePublicationAssociations(f.population, owner, join(cacheRoot, "unproven.json"));
   expect(unproven.publicationAssociations).toEqual([]);
   expect(unproven.sources.every(row => row.reason === "unproven_retained_request")).toBe(true);
   writeFileSync(f.preflightPath, JSON.stringify(f.preflight));
   const [invalid, missing] = f.preflight.planned_requests;
   writeFileSync(cacheFilePath(cacheRoot, invalid!.key), "{}");
   unlinkSync(cacheFilePath(cacheRoot, missing!.key));
-  const unavailable = await prepareSourcePublicationAssociations(f.population, f.preflightPath, join(cacheRoot, "unavailable.json"));
+  const unavailable = await prepareSourcePublicationAssociations(f.population, owner, join(cacheRoot, "unavailable.json"));
   expect(unavailable.publicationAssociations).toEqual([]);
   expect(unavailable.sources).toHaveLength(4);
   expect(new Set(unavailable.sources.map(row => row.reason))).toEqual(new Set(["invalid_current_artifact", "missing_current_artifact"]));
-  expect(unavailable.artifacts).toEqual([{ key: invalid!.key, status: "invalid", sources: [] }]);
+  expect(unavailable.artifacts).toEqual([{ key: invalid!.key, cache_root: cacheRoot, status: "invalid", sources: [] }]);
   expect(f.fetchMock).toHaveBeenCalledTimes(2);
 }, 60000);
 
@@ -167,19 +195,22 @@ it("rejects duplicate or foreign retained request identity before writing associ
   for (const planned_requests of [[line, line], [{ ...line, requestSha256: "a".repeat(64) }]]) {
     writeFileSync(f.preflightPath, JSON.stringify({ ...f.preflight, planned_requests }));
     const out = join(cacheRoot, "rejected.json");
-    await expect(prepareSourcePublicationAssociations(f.population, f.preflightPath, out)).rejects.toThrow("foreign or duplicate request identity");
+    await expect(prepareSourcePublicationAssociations(f.population, [{ cacheRoot, retainedPreparationPath: f.preflightPath }], out))
+      .rejects.toThrow(/foreign or duplicate request identity|repeat an owning request key/u);
     expect(existsSync(out)).toBe(false);
   }
   const config = join(cacheRoot, "invalid-window.json");
-  writeFileSync(config, JSON.stringify({ ...f.population, questionWindow: { offset: -1, limit: 1 } }));
+  writeFileSync(config, JSON.stringify({ ...f.population, questionWindow: { offset: -1, limit: 1 },
+    cacheOwners: [{ cacheRoot, retainedPreparationPath: f.preflightPath }] }));
   vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-  expect(await runSemanticChainLauncher(["associate", "--config", config, "--preflight", f.preflightPath, "--out", join(cacheRoot, "bad.json")])).toBe(2);
+  expect(await runSemanticChainLauncher(["associate", "--config", config, "--out", join(cacheRoot, "bad.json")])).toBe(2);
   expect(existsSync(join(cacheRoot, "bad.json"))).toBe(false);
   writeFileSync(f.preflightPath, JSON.stringify(f.preflight));
   const duplicateBucket = join(cacheRoot, line.key.startsWith("ff") ? "ee" : "ff");
   mkdirSync(duplicateBucket, { recursive: true });
   writeFileSync(join(duplicateBucket, `${line.key}.json`), readFileSync(cacheFilePath(cacheRoot, line.key)));
-  await expect(prepareSourcePublicationAssociations(f.population, f.preflightPath, join(cacheRoot, "duplicate-owner.json")))
+  await expect(prepareSourcePublicationAssociations(f.population,
+    [{ cacheRoot, retainedPreparationPath: f.preflightPath }], join(cacheRoot, "duplicate-owner.json")))
     .rejects.toThrow("repeats an owning request key");
   expect(existsSync(join(cacheRoot, "duplicate-owner.json"))).toBe(false);
 }, 60000);
@@ -198,7 +229,7 @@ it("retains a 65-unit source beside a ready 64-unit source through association a
         ...Array(assistantCount - 1).fill("Acknowledged."), "再次确认。"
       ].join(" ") }]] });
   await writeDataset([longQuestion("ready", 32), longQuestion("excess", 33)]);
-  const population = { name: "fixture", dataDir, pinnedMetaRoot, cacheRoot,
+  const population = { name: "fixture", dataDir, pinnedMetaRoot,
     model: MODEL, requestProfile: REQUEST_PROFILE };
   const census = await censusCompleteSourceRecords({ population: population.name, dataDir, pinnedMetaRoot });
   expect(census.records.map((source) => source.units.length)).toEqual([64, 65]);
@@ -215,7 +246,7 @@ it("retains a 65-unit source beside a ready 64-unit source through association a
   const preflightPath = join(cacheRoot, "mixed-preflight.json");
   writeFileSync(preflightPath, JSON.stringify(preflight));
   const outputPath = join(cacheRoot, "mixed-associations.json");
-  const association = await prepareSourcePublicationAssociations(population, preflightPath, outputPath);
+  const association = await prepareSourcePublicationAssociations(population, [{ cacheRoot, retainedPreparationPath: preflightPath }], outputPath);
   expect(association).toMatchObject({ contract: "source-publication-association-preparation-v2",
     source_occurrences: 2, unsupported_source_occurrences: 1, ready_request_keys: 1 });
   expect(association.sources.map((source) => source.status)).toEqual(["unbound", "unsupported_source"]);
@@ -244,4 +275,133 @@ it("retains a 65-unit source beside a ready 64-unit source through association a
       })));
   } finally { db.close(); }
   expect(fetchGuard).not.toHaveBeenCalled();
+}, 60000);
+
+it("composes earlier and current owning roots for one original question with unsupported source through native publication", async () => {
+  setExtractionCredentialFixture();
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid");
+  const target = question("target", ["alpha", "beta"]);
+  const longSession = [{ role: "user" as const, content: Array(32).fill("I completed alpha.").join(" ") },
+    { role: "assistant" as const, content: [...Array(32).fill("Acknowledged."), "再次确认。"].join(" ") }];
+  await writeDataset([question("alpha-owner", ["alpha"]), question("beta-owner", ["beta"]), {
+    ...target, haystack_session_ids: [...target.haystack_session_ids, "long-session"],
+    haystack_dates: [...target.haystack_dates, "2023-09-15"],
+    haystack_sessions: [...target.haystack_sessions, longSession]
+  }]);
+  const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+    if (!new URL(String(url)).pathname.endsWith(":streamGenerateContent")) throw new Error("unexpected fixture transport");
+    const userPrompt = JSON.parse(String(init?.body)).contents[0].parts[0].text as string;
+    return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: response(userPrompt) }] } }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const betaRoot = join(cacheRoot, "beta-owner");
+  mkdirSync(betaRoot);
+  const first = await prepareWindowOwner(cacheRoot, 0);
+  const second = await prepareWindowOwner(betaRoot, 1);
+  expect(first.preflight.planned_requests).toHaveLength(1);
+  expect(second.preflight.planned_requests).toHaveLength(1);
+  expect(first.preflight.planned_requests[0]!.key).not.toBe(second.preflight.planned_requests[0]!.key);
+  const owners = [first, second];
+  const population = { name: "longmemeval_s", dataDir, pinnedMetaRoot, model: MODEL,
+    requestProfile: REQUEST_PROFILE, questionWindow: { offset: 2, limit: 1 } };
+  const config = join(cacheRoot, "target-config.json"), out = join(cacheRoot, "target-associations.json");
+  writeFileSync(config, JSON.stringify({ ...population, cacheOwners: owners.map(({ cacheRoot, retainedPreparationPath }) =>
+    ({ cacheRoot, retainedPreparationPath })) }));
+  vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  expect(await runSemanticChainLauncher(["associate", "--config", config, "--out", out])).toBe(0);
+  const result = readChainArtifact(out) as { source_occurrences: number; unsupported_source_occurrences: number;
+    ready_request_keys: number; sources: { status: string }[] };
+  const associations = parseSourcePublicationAssociations(JSON.parse(readFileSync(`${out}.associations.json`, "utf8")));
+  expect(result).toMatchObject({ source_occurrences: 3, unsupported_source_occurrences: 1,
+    ready_request_keys: 2 });
+  expect(result.sources.map((source: { status: string }) => source.status)).toEqual(["associated", "associated", "unsupported_source"]);
+  expect(associations).toHaveLength(3);
+  expect(associations.filter((row) => "generation_key" in row).map((row) => row.source_id)).toEqual([
+    "longmemeval_s:target-s0-r0", "longmemeval_s:target-s1-r0"
+  ]);
+  expect(associations.find((row) => "status" in row)).toMatchObject({ source_id: "longmemeval_s:target-s2-r0",
+    status: "unsupported_source", assertion_count: 65, provider_attempts: 0 });
+  const earlier = await prepareSourcePublicationAssociations({ ...population, questionWindow: { offset: 0, limit: 1 } },
+    owners, join(cacheRoot, "earlier-associations.json"));
+  const census = await censusCompleteSourceRecords({ population: population.name, dataDir, pinnedMetaRoot,
+    questionWindow: population.questionWindow });
+  const freezeRoot = join(cacheRoot, "native-freeze");
+  const frozen = await freezeLongMemEvalSemanticRun({ arm: "native_semantic", workspace_prefix: "root-composition-fixture",
+    source_cache_roots: [cacheRoot, betaRoot], source_publication_associations: [...associations, ...earlier.publicationAssociations],
+    correspondence_cache_root: join(cacheRoot, "correspondence-cache"), discovery_page_cap: 4, correspondence_pair_cap: 2,
+    authorized_scopes: { mode: "named", scopes: ["project"] }, data_dir: dataDir, pinned_meta_root: pinnedMetaRoot,
+    dataset_sha256: census.dataset_sha256, dataset_question_count: 3, question_ids: ["target"],
+    model: MODEL, provider_url: "http://127.0.0.1:9", request_profile: REQUEST_PROFILE,
+    query_cache_root: join(cacheRoot, "query-cache"), recorded_at: CLOCK, producer_commit: "a".repeat(40),
+    max_output_tokens: 4096, output_byte_limit: 1000000,
+    budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000,
+      finalization_reserve: 10000, min_envelope: 10 } }, freezeRoot);
+  expect(frozen.selected).toHaveLength(1);
+  expect(frozen.selected[0]!.source_manifest).toHaveLength(3);
+  const nativeConfig = LongMemEvalNativeSemanticConfigSchema.parse(frozen.config);
+  const selected = frozen.selected[0]!;
+  const directory = join(freezeRoot, "questions", "00002");
+  const report = await publishSourceSemanticSnapshot({ snapshotPath: join(directory, "library.sqlite"),
+    dataDirRoot: join(directory, "publication-runtime"), recordedAt: CLOCK, producerCommit: "a".repeat(40),
+    workspaceId: "root-composition-fixture-2", runId: "root-composition-fixture-2",
+    populations: [{ ...population, cacheRoots: [cacheRoot, betaRoot],
+      publicationAssociations: nativeConfig.source_publication_associations.filter((row) =>
+        selected.source_manifest.some((source) => source.source_id === row.source_id)) }] });
+  expect(report).toMatchObject({ census_count: 3, admitted_count: 3, published_count: 2,
+    host_preparation_counts: { ready: 2, unsupported_source: 1 }, source_interpretation_binding_complete: true });
+  expect(verifyLongMemEvalQuestionPublication(frozen, selected, directory, report)).toEqual(report);
+  expect(report.sources.map((source) => source.roles)).toEqual([["user"], ["user"], ["user", "assistant"]]);
+  const db = new Database(report.snapshot_path, { readonly: true });
+  try {
+    expect(db.prepare("SELECT source_id, event_time, source_body FROM source_records ORDER BY source_id").all())
+      .toEqual(census.records.map((source) => ({ source_id: source.source_id,
+        event_time: source.source_observed_at, source_body: source.content_bytes })));
+  } finally { db.close(); }
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  const rejected = join(cacheRoot, "rejected-composition.json");
+  await expect(prepareSourcePublicationAssociations(population, [first,
+    { ...second, cacheRoot: cacheRoot + "/./" }], rejected)).rejects.toThrow("repeats a resolved cache root");
+  expect(existsSync(rejected)).toBe(false);
+  const alphaKey = first.preflight.planned_requests[0]!.key;
+  const alphaPath = cacheFilePath(cacheRoot, alphaKey);
+  const foreignPath = cacheFilePath(betaRoot, alphaKey);
+  mkdirSync(join(betaRoot, alphaKey.slice(0, 2)), { recursive: true });
+  copyFileSync(alphaPath, foreignPath);
+  await expect(prepareSourcePublicationAssociations(population, owners, rejected))
+    .rejects.toThrow("multiple physical cache roots");
+  expect(existsSync(rejected)).toBe(false);
+  unlinkSync(foreignPath);
+  const originalSecondPreflight = readFileSync(second.retainedPreparationPath, "utf8");
+  writeFileSync(second.retainedPreparationPath, JSON.stringify({ ...second.preflight,
+    planned_requests: [first.preflight.planned_requests[0], ...second.preflight.planned_requests] }));
+  await expect(prepareSourcePublicationAssociations(population, owners, rejected))
+    .rejects.toThrow("repeat an owning request key");
+  expect(existsSync(rejected)).toBe(false);
+  const secondLine = second.preflight.planned_requests[0]!;
+  writeFileSync(second.retainedPreparationPath, JSON.stringify({ ...second.preflight,
+    planned_requests: [{ ...secondLine, unitKeys: [...secondLine.unitKeys, first.preflight.planned_requests[0]!.unitKeys[0]!] }] }));
+  await expect(prepareSourcePublicationAssociations(population, owners, rejected))
+    .rejects.toThrow("repeat a source assignment");
+  expect(existsSync(rejected)).toBe(false);
+  writeFileSync(second.retainedPreparationPath, originalSecondPreflight);
+  renameSync(alphaPath, foreignPath);
+  const displaced = await prepareSourcePublicationAssociations(population, owners, join(cacheRoot, "displaced.json"));
+  expect(displaced.sources[0]).toMatchObject({ status: "unbound", reason: "missing_current_artifact" });
+  expect(displaced.artifacts.find((artifact) => artifact.key === alphaKey)).toMatchObject({
+    cache_root: betaRoot, reason: "foreign_root" });
+  renameSync(foreignPath, alphaPath);
+  const alphaBytes = readFileSync(alphaPath);
+  writeFileSync(alphaPath, "{}");
+  const invalid = await prepareSourcePublicationAssociations(population, owners, join(cacheRoot, "invalid-owner.json"));
+  expect(invalid.sources[0]).toMatchObject({ status: "unbound", reason: "invalid_current_artifact" });
+  writeFileSync(alphaPath, alphaBytes);
+  const originalFirstPreflight = readFileSync(first.retainedPreparationPath, "utf8");
+  writeFileSync(first.retainedPreparationPath, JSON.stringify({ ...first.preflight, planned_requests: [] }));
+  const unproven = await prepareSourcePublicationAssociations(population, owners, join(cacheRoot, "unproven-owner.json"));
+  expect(unproven.sources[0]).toMatchObject({ status: "unbound", reason: "unproven_retained_request" });
+  writeFileSync(first.retainedPreparationPath, originalFirstPreflight);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
 }, 60000);

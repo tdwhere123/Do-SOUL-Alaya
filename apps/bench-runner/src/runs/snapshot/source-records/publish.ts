@@ -30,20 +30,32 @@ export type SourcePublicationAssociation =
   | Readonly<{ source_id: string; source_version: string; content_digest: string; corpus_digest: string;
       provider_attempts: 0 }> & UnsupportedPreparation;
 
+const ReadyAssociationSchema = z.object({ source_id: z.string().min(1), source_version: z.string().min(1),
+  generation_key: z.string().regex(/^[a-f0-9]{64}$/u), request_digest: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
+const UnsupportedOccurrenceSchema = z.object({ source_id: z.string().min(1), source_version: z.string().min(1),
+  content_digest: z.string().min(1), corpus_digest: z.string().min(1), provider_attempts: z.literal(0) }).passthrough();
+
+/** One row contract for source publication inputs and native LongMemEval config. */
+export const SourcePublicationAssociationRowSchema = z.unknown().transform((row, context): SourcePublicationAssociation => {
+  try {
+    return parseSourcePublicationAssociationRow(row);
+  } catch (error) {
+    context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "invalid source association" });
+    return z.NEVER;
+  }
+});
+
+function parseSourcePublicationAssociationRow(row: unknown): SourcePublicationAssociation {
+  if (typeof row !== "object" || row === null || !("status" in row)) return ReadyAssociationSchema.parse(row);
+  const parsed = UnsupportedOccurrenceSchema.parse(row);
+  const { source_id, source_version, content_digest, corpus_digest, provider_attempts, ...host } = parsed;
+  const disposition = SourceSemanticUnsupportedSourceSchema.parse(host);
+  return { source_id, source_version, content_digest, corpus_digest, ...disposition, provider_attempts };
+}
+
 export function parseSourcePublicationAssociations(value: unknown): readonly SourcePublicationAssociation[] {
-  const artifact = z.object({ contract: z.literal("source-publication-associations-v2"),
-    publicationAssociations: z.array(z.unknown()).max(10000) }).strict().parse(value);
-  const ready = z.object({ source_id: z.string().min(1), source_version: z.string().min(1),
-    generation_key: z.string().regex(/^[a-f0-9]{64}$/u), request_digest: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
-  const occurrence = z.object({ source_id: z.string().min(1), source_version: z.string().min(1),
-    content_digest: z.string().min(1), corpus_digest: z.string().min(1), provider_attempts: z.literal(0) }).passthrough();
-  return artifact.publicationAssociations.map((row): SourcePublicationAssociation => {
-    if (typeof row !== "object" || row === null || !("status" in row)) return ready.parse(row);
-    const parsed = occurrence.parse(row);
-    const { source_id, source_version, content_digest, corpus_digest, provider_attempts, ...host } = parsed;
-    const disposition = SourceSemanticUnsupportedSourceSchema.parse(host);
-    return { source_id, source_version, content_digest, corpus_digest, ...disposition, provider_attempts };
-  });
+  return z.object({ contract: z.literal("source-publication-associations-v2"),
+    publicationAssociations: z.array(SourcePublicationAssociationRowSchema).max(10000) }).strict().parse(value).publicationAssociations;
 }
 
 export type SourcePublicationPopulation = Readonly<{

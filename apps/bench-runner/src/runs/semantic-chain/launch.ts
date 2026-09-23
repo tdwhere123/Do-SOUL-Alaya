@@ -14,7 +14,7 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
   try {
     const [operation, ...rest] = args;
     const flags = new Map<string, string>();
-    const allowed = new Set(["--root", "--config", "--replay", "--gold", "--arm", "--preflight", "--out", "--leaf-trials"]);
+    const allowed = new Set(["--root", "--config", "--replay", "--gold", "--arm", "--out", "--leaf-trials"]);
     for (let index = 0; index < rest.length; index += 2) {
       const key = rest[index]!, value = rest[index + 1];
       if (!allowed.has(key) || flags.has(key) || value === undefined) throw new AlayaError("VALIDATION", "invalid semantic chain arguments");
@@ -32,14 +32,17 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
       Number(flags.get("--leaf-trials") ?? "32"));
     else if (operation === "associate") {
       const population = z.object({ name: z.string(), dataDir: z.string(), pinnedMetaRoot: z.string(),
-        cacheRoot: z.string(), model: z.string(), requestProfile: z.string().refine(isExtractionRequestProfile),
+        cacheOwners: z.array(z.object({ cacheRoot: z.string().min(1),
+          retainedPreparationPath: z.string().min(1) }).strict()).min(1),
+        model: z.string(), requestProfile: z.string().refine(isExtractionRequestProfile),
         questionWindow: z.object({ offset: SourceRecordsDatasetSchema.shape.offset,
           limit: SourceRecordsDatasetSchema.shape.limit }).strict().optional(),
         openSemantics: z.unknown().transform(parseExtractionOpenSemanticsGeneration).optional()
       }).strict().parse(json(required("--config")));
       if (!isExtractionRequestProfile(population.requestProfile)) throw new AlayaError("VALIDATION", "unsupported extraction request profile");
-      result = await prepareSourcePublicationAssociations({ ...population, requestProfile: population.requestProfile },
-        required("--preflight"), required("--out"));
+      const { cacheOwners, ...sourcePopulation } = population;
+      result = await prepareSourcePublicationAssociations({ ...sourcePopulation, requestProfile: population.requestProfile },
+        cacheOwners, required("--out"));
     } else throw new AlayaError("VALIDATION", "expected prepare, replay, measure, intervene, or associate");
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return 0;

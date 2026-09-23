@@ -205,8 +205,8 @@ describe("complete-source census and publication", () => {
     expect(readChainArtifact(join(freezeRoot, "freeze.json"))).toEqual(frozen);
     const preflightPath = join(f.root, "retained-preflight.json");
     await writeFile(preflightPath, JSON.stringify({ contract: "extraction-batch-preflight-v2", planned_requests: [] }));
-    const associations = await prepareSourcePublicationAssociations({ ...population, cacheRoot: f.cacheRoot },
-      preflightPath, join(f.root, "associations.json"));
+    const associations = await prepareSourcePublicationAssociations(population,
+      [{ cacheRoot: f.cacheRoot, retainedPreparationPath: preflightPath }], join(f.root, "associations.json"));
     expect(associations.publicationAssociations).toEqual([]);
     expect(associations.sources).toEqual(expected.map(({ source_id }) => ({
       source_id, source_version: census.dataset_sha256, status: "unbound", reason: "missing_current_artifact"

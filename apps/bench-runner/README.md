@@ -111,7 +111,7 @@ reservations. Historical caches without this binding remain read-only evidence.
 
 ```bash
 node apps/bench-runner/dist/runs/semantic-chain/launch.js associate \
-  --config population.json --preflight retained-preflight.json --out associations.json
+  --config population.json --out associations.json
 node apps/bench-runner/dist/runs/semantic-chain/launch.js prepare \
   --config chain-config.json --root .do-it/bench-runs/semantic-chain
 node apps/bench-runner/dist/runs/semantic-chain/launch.js replay \
@@ -123,11 +123,14 @@ node apps/bench-runner/dist/runs/semantic-chain/launch.js intervene \
 ```
 
 Population configuration contains `name`, `dataDir`, `pinnedMetaRoot`,
-`cacheRoot`, `model`, and `requestProfile`. The association report retains
+`model`, `requestProfile`, an optional original `questionWindow`, and a
+`cacheOwners` roster of `{ "cacheRoot": "...", "retainedPreparationPath": "..." }` records.
+Prepare one original question/window at a time, using the disjoint owning roots
+and their original retained prefill preparations. The association report retains
 ambiguous, invalid, and unbound artifacts; its `.associations.json` companion
-is directly usable by source publication. Use the retained preflight covering
-the intended request set, including an earlier complete preflight when the
-last fill contains only remaining requests. Associations are new host
+is directly usable by source publication. Use the original retained preparation covering
+each root's selected request set, including an earlier complete preparation when
+the last fill contains only remaining requests. Associations are new host
 publication decisions, not historical source-origin or completion witnesses.
 Historical templates incompatible with the current request owner fail closed.
 

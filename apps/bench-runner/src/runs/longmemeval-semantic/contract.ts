@@ -7,6 +7,7 @@ import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { SemanticChainConfigSchema, chainIdentity, readChainArtifact } from "../semantic-chain/contract.js";
 import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
 import { NATIVE_SEMANTIC_ROUTE, NativeSemanticRouteSchema, SourceCacheFreezeSchema } from "./native-arm.js";
+import { SourcePublicationAssociationRowSchema } from "../snapshot/source-records/publish.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const LongMemEvalSemanticConfigSchema = z.object({
@@ -23,8 +24,7 @@ export type LongMemEvalSemanticConfig = z.infer<typeof LongMemEvalSemanticConfig
 export const LongMemEvalNativeSemanticConfigSchema = LongMemEvalSemanticConfigSchema.extend({
   arm: z.literal("native_semantic"), workspace_prefix: z.string().min(1),
   source_cache_roots: z.array(z.string().min(1)), correspondence_cache_root: z.string().min(1),
-  source_publication_associations: z.array(z.object({ source_id: z.string(), source_version: z.string(),
-    generation_key: Digest, request_digest: Digest }).strict()),
+  source_publication_associations: z.array(SourcePublicationAssociationRowSchema),
   ...SemanticChainConfigSchema.pick({ discovery_page_cap: true, correspondence_pair_cap: true, authorized_scopes: true }).shape
 }).strict();
 export const LongMemEvalExperimentConfigSchema = z.union([LongMemEvalSemanticConfigSchema, LongMemEvalNativeSemanticConfigSchema]);
