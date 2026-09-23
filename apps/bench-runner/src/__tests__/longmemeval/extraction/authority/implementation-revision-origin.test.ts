@@ -69,10 +69,13 @@ it("binds large tracked patches and untracked bytes and modes to the loaded chec
     .toBeGreaterThan(1024 * 1024);
   const changedTracked = inspect(loaded, foreign).revision;
   expect(changedTracked).not.toBe(baseline);
+  writeFileSync(join(loaded, "source.txt"), "changed UTF-8 内容\n".repeat(90_000) + "tail\n");
+  const changedTail = inspect(loaded, foreign).revision;
+  expect(changedTail).not.toBe(changedTracked);
   const untracked = join(loaded, "untracked source.txt");
   writeFileSync(untracked, "first bytes\n");
   const changedUntracked = inspect(loaded, foreign).revision;
-  expect(changedUntracked).not.toBe(changedTracked);
+  expect(changedUntracked).not.toBe(changedTail);
   writeFileSync(untracked, "new bytes\n");
   const changedBytes = inspect(loaded, foreign).revision;
   expect(changedBytes).not.toBe(changedUntracked);
