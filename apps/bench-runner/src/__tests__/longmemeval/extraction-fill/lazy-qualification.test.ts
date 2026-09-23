@@ -12,7 +12,10 @@ import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/au
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { prepareLazyQualificationWindow, replayLazyQualifiedFirstExposure,
   sealLazyQualificationFinal } from "../../../runs/semantic-chain/lazy-qualification.js";
-import { SemanticChainPlanSchema, readChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { SemanticChainPlanSchema, chainIdentity, readChainArtifact,
+  writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
+import { inspectSemanticChainReplayTarget, replaySemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SoulInterpretationResponseSchema, SourceSemanticAccessReceiptSchema } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
@@ -22,6 +25,7 @@ import { inspectExtractionAuthority } from "../../../runs/extraction/authority/i
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { forkSettledExtractionAttemptLedger, openExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
 
 const MODEL = "gemini-2.5-flash-lite";
 const PROFILE = "gemini-2.5-nonthinking-v1" as const;
@@ -101,6 +105,15 @@ it("freezes ten distinct native raw records and reopens a full sealed final libr
   expect(first.delivery.selected_delivered + first.delivery.outside_delivered).toBeLessThanOrEqual(5);
   expect(await replayLazyQualifiedFirstExposure(root)).toEqual(first);
   expect(readChainArtifact(join(root, "window.json"))).toEqual(window);
+  const otherRoot = join(cacheRoot, "other-valid-chain");
+  const otherPlan = await prepareSemanticChain({ ...config.chain, snapshot_path: final.final_snapshot_path,
+    snapshot_sha256: final.final_snapshot_sha256 }, otherRoot);
+  const finalPath = join(root, "final.json");
+  const swapped = { ...readChainArtifact(finalPath) as object, final_chain_root: otherRoot,
+    final_chain_identity: chainIdentity(otherPlan) };
+  writeFileSync(finalPath, JSON.stringify({ identity: chainIdentity(swapped), payload: swapped }));
+  await expect(sealLazyQualificationFinal(root)).rejects.toThrow(/final query plan|frozen source window/u);
+  await expect(replayLazyQualifiedFirstExposure(root)).rejects.toThrow(/final query plan|frozen source window/u);
 });
 
 it("binds a newly received duplicate-content result only to frozen occurrences while preserving raw outsiders", async () => {
@@ -242,5 +255,120 @@ it("retains a raw attempt without a cache shard as unknown and refuses a revised
   expect(second.selected_missing_keys).not.toContain(chosen.key);
   expect(second.selected_missing_keys).not.toContain(failed.key);
   await writeDataset([question(["I completed revised alpha.", "I completed beta."])]);
+  await expect(prepareLazyQualificationWindow(config, join(cacheRoot, "before-attempt"))).rejects.toThrow(/source census changed|dataset/u);
   await expect(sealLazyQualificationFinal(join(cacheRoot, "before-attempt"))).rejects.toThrow(/source census changed|dataset/u);
+});
+
+it("recovers a durable native replay after wrapper interruption but refuses a sent row without evidence", async () => {
+  const { config } = await preparedSourceFixture(["I completed alpha.", "I completed beta."]);
+  const root = join(cacheRoot, "recovered-exposure");
+  await prepareLazyQualificationWindow(config, root);
+  const final = await sealLazyQualificationFinal(root);
+  const target = inspectSemanticChainReplayTarget(final.final_chain_root, "retained");
+  writeChainArtifact(join(root, "first-exposure.reserved.json"), { final_identity: chainIdentity(final),
+    replay_identity: target.identity, replay_path: target.output });
+  const native = await replaySemanticChain(final.final_chain_root, "retained", target.identity);
+  expect(readChainArtifact(join(root, "first-exposure.json"))).toBeUndefined();
+  const recovered = await replayLazyQualifiedFirstExposure(root);
+  expect(recovered.path).toBe(native.path);
+  expect(recovered.result).toEqual(native.result);
+  expect(await replayLazyQualifiedFirstExposure(root)).toEqual(recovered);
+
+  const unresolvedRoot = join(cacheRoot, "unresolved-exposure");
+  await prepareLazyQualificationWindow(config, unresolvedRoot);
+  const unresolvedFinal = await sealLazyQualificationFinal(unresolvedRoot);
+  const unresolvedTarget = inspectSemanticChainReplayTarget(unresolvedFinal.final_chain_root, "retained");
+  writeChainArtifact(join(unresolvedRoot, "first-exposure.reserved.json"), {
+    final_identity: chainIdentity(unresolvedFinal), replay_identity: unresolvedTarget.identity,
+    replay_path: unresolvedTarget.output });
+  const rowPath = [...unresolvedTarget.rowPaths.values()][0]!;
+  writeChainArtifact(`${rowPath}.reserved`, { replay_identity: unresolvedTarget.identity,
+    query_key: [...unresolvedTarget.rowPaths.keys()][0]! });
+  await expect(replayLazyQualifiedFirstExposure(unresolvedRoot)).rejects.toThrow(/may have been sent/u);
+  expect(readChainArtifact(unresolvedTarget.output)).toBeUndefined();
+});
+
+it("counts ledger reservations separately from raw receipts across the frozen window", async () => {
+  const { config } = await preparedSourceFixture(["I completed alpha.", "I completed beta."]);
+  const initial = await prepareLazyQualificationWindow(config, join(cacheRoot, "ledger-initial"));
+  const [first, second] = initial.window;
+  const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest: "c".repeat(64),
+    cacheIdentity: { model: MODEL, requestProfile: PROFILE }, startingMissing: 2, maximumAttempts: 2 });
+  expect(ledger.reserveAttemptOrdinal(first!.key!)).toBe(1);
+  const root = join(cacheRoot, "ledger-stage");
+  const window = await prepareLazyQualificationWindow(config, root);
+  expect(window.window.find(row => row.key === first!.key)?.state).toBe("attempt_pending");
+  writeProviderRawAttempt({ root: cacheRoot, cacheKey: first!.key!, attemptOrdinal: 1,
+    kind: "source_semantic", model: MODEL, requestProfile: PROFILE, requestDigest: "d".repeat(64),
+    decodedText: "unfinished", finishReason: null,
+    usage: { inputTokens: 11, outputTokens: 3, totalTokens: 14 } });
+  expect(ledger.reserveAttemptOrdinal(second!.key!)).toBe(2);
+  const final = await sealLazyQualificationFinal(root);
+  expect(final.source_producer).toMatchObject({ new_authorized_attempts: 1,
+    new_raw_receipts: 1, preexisting_attempt_raw_receipts: 1, reported_input_tokens: 0,
+    reported_output_tokens: 0, unknown_usage_attempts: 1, unresolved_new_attempts: 1,
+    attempt_history_complete: true });
+});
+
+it("does not count a copied continuation ledger as a new source call", async () => {
+  const { config } = await preparedSourceFixture(["I completed alpha."]);
+  const initial = await prepareLazyQualificationWindow(config, join(cacheRoot, "fork-initial"));
+  const key = initial.window[0]!.key!;
+  const lineage = "e".repeat(64), cacheIdentity = { model: MODEL, requestProfile: PROFILE };
+  const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest: lineage,
+    cacheIdentity, startingMissing: 1, maximumAttempts: 1 });
+  const ordinal = ledger.reserveAttemptOrdinal(key);
+  ledger.recordTransportOutcome(key, { retryCount: 0, rateLimitRetries: 0,
+    successfulRequestCount: 0, unknownRequestCount: 1 }, ordinal);
+  ledger.abandonPendingShard(key, ordinal);
+  const root = join(cacheRoot, "fork-stage");
+  const window = await prepareLazyQualificationWindow(config, root);
+  expect(window.window[0]?.state).toBe("attempt_unknown");
+  forkSettledExtractionAttemptLedger({ cacheRoot, predecessorLineageDigest: lineage,
+    predecessorLedgerSha256: ledger.snapshot().ledgerSha256, successorLineageDigest: "f".repeat(64),
+    cacheIdentity });
+  const final = await sealLazyQualificationFinal(root);
+  expect(final.source_producer).toMatchObject({ new_authorized_attempts: null,
+    new_raw_receipts: 0, attempt_history_complete: false });
+});
+
+it("keeps a budget-limited long raw source in place without qualifying or replacing it", async () => {
+  const { config } = await preparedSourceFixture(["I completed alpha. ".repeat(5000), "I completed beta."]);
+  const bounded = { ...config, chain: { ...config.chain, budget: { ...config.chain.budget,
+    work_units: 50000, memory_bytes: 2_000_000, page_budget: 20000, finalization_reserve: 1000 } } };
+  const window = await prepareLazyQualificationWindow(bounded, join(cacheRoot, "partial-stage"));
+  expect(window.starting_access.observed_source_count).toBe(2);
+  expect(window.window).toHaveLength(2);
+  expect(window.window_open).toBe(true);
+  const incomplete = window.window.find(row => row.state === "observation_incomplete");
+  expect(incomplete).toBeDefined();
+  expect(incomplete).toMatchObject({ key: null, cache_root: null });
+  expect(window.selected_missing_keys.length).toBeLessThanOrEqual(1);
+  const final = await sealLazyQualificationFinal(join(cacheRoot, "partial-stage"));
+  expect(final).toMatchObject({ selected_new_associations: 0, warm_outside_associations: 0 });
+  const report = JSON.parse(readFileSync(final.publication_report_path, "utf8"));
+  expect(report).toMatchObject({ census_count: 2, admitted_count: 2 });
+  const first = await replayLazyQualifiedFirstExposure(join(cacheRoot, "partial-stage"));
+  expect(first.result.rows).toHaveLength(1);
+  expect(first.delivery.selected_delivered + first.delivery.selected_undelivered).toBe(2);
+});
+
+it("retains unsupported dispositions inside and outside the shortlist without interpretation attempts", async () => {
+  const { config } = await preparedSourceFixture(Array.from({ length: 12 }, (_, index) =>
+    `I completed item ${index}. ` + Array.from({ length: 65 }, (_, part) => `Part ${part} occurred.`).join(" ")));
+  const root = join(cacheRoot, "unsupported-stage");
+  const window = await prepareLazyQualificationWindow(config, root);
+  expect(window.window).toHaveLength(10);
+  expect(window.window.every(row => row.state === "unsupported_source")).toBe(true);
+  expect(window.selected_missing_keys).toEqual([]);
+  const final = await sealLazyQualificationFinal(root);
+  expect(final).toMatchObject({ selected_new_associations: 0, warm_outside_associations: 0,
+    source_producer: { new_authorized_attempts: 0, new_raw_receipts: 0 } });
+  const report = JSON.parse(readFileSync(final.publication_report_path, "utf8"));
+  expect(report).toMatchObject({ census_count: 12, admitted_count: 12,
+    host_preparation_counts: { unsupported_source: 12 }, published_count: 0 });
+  expect(report.sources.every((row: { provider_attempts: number }) => row.provider_attempts === 0)).toBe(true);
+  const first = await replayLazyQualifiedFirstExposure(root);
+  expect(first.result.rows).toHaveLength(1);
+  expect(first.delivery.selected_delivered + first.delivery.selected_undelivered).toBe(10);
 });

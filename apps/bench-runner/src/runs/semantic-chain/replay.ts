@@ -23,13 +23,28 @@ import { SemanticChainPlanSchema, SemanticChainQuerySchema, chainIdentity, readC
 import { readSemanticChainCorrespondences, semanticChainQueryCorrespondences, verifySemanticChainQueries } from "./inputs.js";
 import { discoverSemanticChainQuery } from "./prepare.js";
 
-export async function replaySemanticChain(root: string, arm: "retained" | "without_semantic_correspondences" = "retained") {
+export function inspectSemanticChainReplayTarget(root: string, arm: "retained" | "without_semantic_correspondences") {
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(root, "prepare.json")));
   const config = plan.config;
   assertChainSnapshot(config);
   verifySemanticChainQueries(plan);
   const { semantic_correspondences, identity } = readSemanticChainCorrespondences(plan, arm);
-  const output = join(root, `replay-${identity}.json`);
+  const output = semanticChainReplayPath(root, identity);
+  return { plan, config, semantic_correspondences, identity, output,
+    rowPaths: new Map(plan.queries.map(query => [query.query_key,
+      join(root, `replay-${identity}`, `${query.query_key}.json`)])) };
+}
+
+export function semanticChainReplayPath(root: string, identity: string): string {
+  return join(root, `replay-${identity}.json`);
+}
+
+export async function replaySemanticChain(root: string, arm: "retained" | "without_semantic_correspondences" = "retained",
+  expectedIdentity?: string) {
+  const { plan, config, semantic_correspondences, identity, output, rowPaths } = inspectSemanticChainReplayTarget(root, arm);
+  if (expectedIdentity !== undefined && identity !== expectedIdentity) {
+    throw new AlayaError("CONFLICT", "frozen replay correspondence identity changed");
+  }
   return withSnapshotPublishLock(output, async () => {
     const retained = readChainArtifact(output);
     if (retained !== undefined) return { path: output, result: retained };
@@ -40,7 +55,7 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
         if (query.status === "blocked") { rows.push(query); continue; }
         const { ready, outcomes } = query.status === "ready"
           ? semanticChainQueryCorrespondences(query, semantic_correspondences) : { ready: [], outcomes: [] };
-        const rowPath = join(root, `replay-${identity}`, `${query.query_key}.json`);
+        const rowPath = rowPaths.get(query.query_key)!;
         const prior = readChainArtifact(rowPath);
         if (prior !== undefined) { rows.push(prior); continue; }
         const reservation = `${rowPath}.reserved`;
@@ -151,7 +166,7 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
   return { path, result };
 }
 
-const ReplaySchema = z.object({ contract: z.literal("source-semantic-chain-replay-v3"),
+export const ReplaySchema = z.object({ contract: z.literal("source-semantic-chain-replay-v3"),
   plan_identity: z.string(), identity: z.string(), arm: z.enum(["retained", "without_semantic_correspondences"]), provider_calls: z.literal(0),
   rows: z.array(z.object({ query_key: z.string(), status: z.enum(["blocked", "replayed", "native_unavailable"]),
     reason: z.string().optional(), native_elapsed_ms: z.number().nonnegative().optional(),
