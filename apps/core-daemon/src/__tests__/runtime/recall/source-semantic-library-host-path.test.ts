@@ -15,7 +15,7 @@ import {
   admitSourceSemanticCorrespondence, admitSourceSemanticQuery, createAuditedSourceAdmission,
   createSourceSemanticInterpretationPublication, EvidenceService, fieldContractSha256,
   SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
-  sourceGoldRootIdentity, sourceSemanticLibraryRequestIdentity
+  sourceGoldRootIdentity, sourceSemanticLibraryRequestIdentity, sourceSemanticQueryStatus
 } from "@do-soul/alaya-core";
 import {
   closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteFieldEraseBarrierRepo
@@ -300,6 +300,76 @@ function mcpRecall(payload: unknown): RecallOut {
   return body.output;
 }
 
+it("delivers an unchanged question from current raw sources when query semantics is unavailable", async () => {
+  await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }],
+    async (session, _filename, roots) => {
+      const request = { operation: "recall" as const, accepts_unreviewed_conditional_results: true as const,
+        original_query: ORIGINAL, semantic_correspondences: [], budget: BUDGET,
+        output_byte_limit: 1_000_000, authorized_scopes: SCOPES };
+      const absent = await callInterpretation(session.handler, request, session.context);
+      if (absent.operation !== "recall" || absent.index === undefined || absent.results === undefined) throw new Error("raw delivery expected");
+      expect(absent.query_semantics_status).toEqual({ status: "unavailable", reason: "absent" });
+      expect(absent.coverage).toMatchObject({ query_semantics: "unexercised", conditional_computation: "unexercised" });
+      expect(absent.provider_attempts).toBe(0);
+      expect(absent.proofs ?? []).toHaveLength(0);
+      expect(absent.slot_qualifiers?.every((slot) => slot.evidence_kind === "source_evidence")).toBe(true);
+      expect(absent.results.some((row) => row.target.kind === "source_evidence"
+        && row.target.root_id === roots["artifact-alice"] && row.content_preview.includes(ALICE))).toBe(true);
+      const exposure = recordSourceSemanticLibraryFirstExposure(absent);
+      expect(exposure.initial?.slots.map((slot) => slot.target)).toEqual(absent.results.map((row) => row.target));
+      const current = listEligibleSemanticSources(session.database, WS, new SourceSemanticReadBudget(BUDGET), ["project"]);
+      const evaluated = measureSourceSemanticLibraryResponse({ recallResult: absent, firstExposurePage: exposure,
+        requestBudget: BUDGET, sourceRecords: current.sources,
+        goldSourceUnits: [{ workspace_id: WS, root_kind: "source_record", root_id: roots["artifact-alice"]!,
+          source_version: "1", content_digest: `sha256:${fieldContractSha256(ALICE)}` }] });
+      expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("hit");
+      expect(evaluated.validatedProofRanks).toEqual([]);
+
+      const admittedQuery = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
+      expect(SoulInterpretationRequestSchema.safeParse({ ...request, query_semantics: admittedQuery,
+        query_semantics_unavailable: "producer_failure" }).success).toBe(false);
+      expect(SoulInterpretationRequestSchema.safeParse({ ...request, query_semantics: { broken: true } }).success).toBe(false);
+      const invalidQuery = { ...admittedQuery,
+        original_query_digest: `sha256:${"0".repeat(64)}` };
+      const invalid = await callInterpretation(session.handler, { ...request, query_semantics: invalidQuery }, session.context);
+      expect(invalid).toMatchObject({ operation: "recall", query_semantics_status: { status: "unavailable", reason: "invalid" }, provider_attempts: 0 });
+      if (invalid.operation !== "recall") throw new Error("invalid semantics must still recall raw sources");
+      expect(invalid.results?.some((row) => row.target.kind === "source_evidence" && row.target.root_id === roots["artifact-alice"])).toBe(true);
+      expect(invalid.request_identity).not.toBe(absent.request_identity);
+      expect(invalid.proofs ?? []).toHaveLength(0);
+
+      const prepared = await callInterpretation(session.handler, { operation: "prepare_query", original_query: ORIGINAL,
+        query_semantics_unavailable: "producer_failure", budget: BUDGET, authorized_scopes: SCOPES }, session.context);
+      if (prepared.operation !== "prepare_query" || prepared.query_handle === undefined) throw new Error("unavailable Q preparation handle expected");
+      expect(prepared.query_semantics_status).toEqual({ status: "unavailable", reason: "producer_failure" });
+      const leased = await callInterpretation(session.handler, { operation: "recall", accepts_unreviewed_conditional_results: true,
+        query_handle: prepared.query_handle, budget: BUDGET, output_byte_limit: 1_000_000,
+        authorized_scopes: SCOPES }, session.context);
+      expect(leased).toMatchObject({ operation: "recall", query_semantics_status: { status: "unavailable", reason: "producer_failure" }, provider_attempts: 0 });
+      if (leased.operation !== "recall") throw new Error("leased raw recall expected");
+      expect(leased.discovery?.access?.pool_id).toBe(prepared.access?.pool_id);
+      expect(leased.request_identity).not.toBe(absent.request_identity);
+      expect(leased.proofs ?? []).toHaveLength(0);
+      await expect(callInterpretation(session.handler, { ...request, query_handle: prepared.query_handle,
+        authorized_scopes: { mode: "denied" } }, session.context)).rejects.toThrow();
+    });
+}, 60000);
+
+it("reports a complete empty raw index without claiming query semantics", async () => {
+  await withHost([], async session => {
+    const response = await callInterpretation(session.handler, { operation: "recall",
+      accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
+      semantic_correspondences: [], budget: BUDGET, output_byte_limit: 1_000_000,
+      authorized_scopes: SCOPES }, session.context);
+    if (response.operation !== "recall" || response.index === undefined) throw new Error("empty native index expected");
+    expect(response.query_semantics_status).toEqual({ status: "unavailable", reason: "absent" });
+    expect(response.index.entries).toEqual([]);
+    expect(response.index.completeness.logical_index).toBe("complete");
+    expect(response.discovery?.open_residuals).toBe(false);
+    expect(response.proofs ?? []).toEqual([]);
+  });
+});
+
 it.each([0, 5000])("measures a published source through reopened public recall and first exposure with one verification per proof slot (prefix %i)", async (prefixBytes) => {
   const prefix = prefixBytes === 0 ? "" : `${"x".repeat(prefixBytes)}.\n`;
   const source = prefix + ALICE;
@@ -325,7 +395,9 @@ it.each([0, 5000])("measures a published source through reopened public recall a
       const withoutCorrespondence = await workerRecall(reopened, semantics, []);
       expect(withCorrespondence.request_identity).toBe(sourceSemanticLibraryRequestIdentity({
         workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES.scopes,
-        original_query: ORIGINAL, query_semantics: semantics, semantic_correspondences: [semantic_correspondence],
+        original_query: ORIGINAL, query_semantics: semantics,
+        query_semantics_status: sourceSemanticQueryStatus(admitSourceSemanticQuery(semantics, ORIGINAL)),
+        semantic_correspondences: [semantic_correspondence],
         budget: BUDGET, output_byte_limit: 1_000_000, access_policy: "query-conditioned-v1"
       }));
       expect(withoutCorrespondence.request_identity).not.toBe(withCorrespondence.request_identity);
@@ -532,7 +604,9 @@ it.each([false, true])("binds public recall to resolved preparation semantics, p
       identities.push(recalled.request_identity);
       expect(recalled.request_identity).toBe(sourceSemanticLibraryRequestIdentity({
         workspace_id: WS, as_of: CLOCK, authorized_scopes: ["global_core", "project"],
-        original_query: ORIGINAL, query_semantics: semantics, source_id: restricted ? "artifact-alice" : undefined, semantic_correspondences: [],
+        original_query: ORIGINAL, query_semantics: semantics,
+        query_semantics_status: sourceSemanticQueryStatus(admitSourceSemanticQuery(semantics, ORIGINAL)),
+        source_id: restricted ? "artifact-alice" : undefined, semantic_correspondences: [],
         budget: BUDGET, output_byte_limit: 1_000_000, access_policy: "canonical-v1"
       }));
     }

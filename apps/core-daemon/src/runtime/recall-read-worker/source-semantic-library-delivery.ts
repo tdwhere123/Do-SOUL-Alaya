@@ -1,5 +1,5 @@
 import { SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
-  indexEntryCacheKey, type SourceSemanticCoverage, type SourceSemanticLibraryDiscovery,
+  indexEntryCacheKey, type SourceSemanticCoverage, type SourceSemanticQueryStatus, type SourceSemanticLibraryDiscovery,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { CoreError, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResponse,
   preparedDeliveryId, selectSourceSemanticLibraryPage, sealIssuedContinuation, slotQualifiersFor,
@@ -14,6 +14,7 @@ type Request = Extract<SourceSemanticWorkerRequest, { kind: "recall" }>;
 type Recall = Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
 export type LibraryDeliveryPlan = Readonly<{
   query_id: string; snapshot_id: string; interpretation_id: string; as_of: string; expires_at: string;
+  query_semantics_status: SourceSemanticQueryStatus;
   // Continuation identity retains exact wire inputs; public identity binds the resolved request.
   authorized: readonly string[] | null; request_identity: string; public_request_identity: string; pool: SourceSemanticAccessPool;
   discovery: SourceSemanticLibraryDiscovery; coverage: SourceSemanticCoverage;
@@ -91,12 +92,14 @@ function pageResult(base: PlanBase, page: readonly SourceSemanticLibraryPackage[
     native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes, rss_bytes: Number.MAX_SAFE_INTEGER } : workOf(meter);
   const result = SourceSemanticWorkerResultSchema.parse({ kind: "recall", request_budget: request.budget,
     request_identity: base.public_request_identity,
+    query_semantics_status: base.query_semantics_status,
     delivery_id: preparedDeliveryId(base.public_request_identity, index), protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
     total_count: index.entries.length, index, page_purpose: "membership", order: SOURCE_SEMANTIC_LIBRARY_ORDER,
     discovery, slot_qualifiers: slotQualifiersFor(index, proofs).map((row, position) => ({ ...row,
       payload_support: page[position]!.payload_support, selection_basis: page[position]!.selection_basis })),
     ...(proofs.length === 0 ? {} : { proofs }), previews, work,
-    coverage: { ...base.coverage, conditional_computation: proofs.length > 0 && base.coverage.conditional_computation !== "open" ? "complete" : "open",
+    coverage: { ...base.coverage, conditional_computation: base.query_semantics_status.status === "unavailable" ? "unexercised"
+      : proofs.length > 0 && base.coverage.conditional_computation !== "open" ? "complete" : "open",
       payload: page.some(row => row.entry.target.kind === "source_evidence" && !row.entry.target.span?.content_complete)
         ? "truncated" : base.coverage.payload }
   });

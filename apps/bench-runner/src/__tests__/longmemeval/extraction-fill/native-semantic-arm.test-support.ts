@@ -71,7 +71,8 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     expect(plan.config.access_policy).toBe("query-conditioned-v1");
     if (row.question_id === "q2") {
       expect(publication.published_count).toBe(0);
-      expect(plan.queries[0]).toMatchObject({ status: "blocked", reason: "cache_invalid" });
+      expect(plan.queries[0]).toMatchObject({ status: "raw_ready", reason: "cache_invalid",
+        query_semantics_unavailable: "invalid" });
       continue;
     }
     if (row.question_id === "q3") {
@@ -92,7 +93,7 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
   for (const row of replay.result.rows) {
     if (row.status !== "replayed") throw new Error(row.reason);
     const native = readChainArtifact(row.replay_path) as { rows: { status: string; response?: unknown; first_exposure?: unknown }[] };
-    if (row.question_id === "q2") { expect(native.rows[0]!.status).toBe("blocked"); continue; }
+    if (row.question_id === "q2") expect(native.rows[0]!.status).toBe("replayed");
     const response = SoulInterpretationResponseSchema.parse(native.rows[0]!.response);
     if (response.operation !== "recall") throw new Error("native recall required");
     expect(response.order).toEqual(frozen.native_route.order);
@@ -105,6 +106,12 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
       expect(gold).toMatchObject({ admission: "admitted", record_id: expect.any(String) });
       const page = FirstExposurePageSchema.parse(native.rows[0]!.first_exposure);
       expect(page.initial?.slots.some(slot => slot.target.kind === "source_evidence" && slot.target.root_id === gold.record_id)).toBe(true);
+    } else if (row.question_id === "q2") {
+      expect(response.query_semantics_status).toEqual({ status: "unavailable", reason: "invalid" });
+      expect(response.proofs ?? []).toEqual([]);
+      expect(response.results?.some(result => result.target.kind === "source_evidence" && result.content_preview.length > 0)).toBe(true);
+      const page = FirstExposurePageSchema.parse(native.rows[0]!.first_exposure);
+      expect(page.initial?.slots.some(slot => slot.target.kind === "source_evidence")).toBe(true);
     } else expect(response.proofs?.length).toBeGreaterThan(0);
     expect(native.rows[0]!.first_exposure).not.toBeNull();
     expect(response.provider_attempts).toBe(0);
@@ -113,9 +120,17 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
   const measured = await measureLongMemEvalSemanticRun(root, replay.path);
   expect(measured.result).toMatchObject({ contract: "longmemeval-native-semantic-measurement-v3", provider_calls: 0,
     order_policy: "evidence_support",
-    primary: { eligible: 4, hits: 3, misses: 0, unknown: 1 } });
-  expect(measured.result.rows.filter((row) => row.outcome === "hit" && row.question_id !== "q3").every((row) => row.mechanism === "proof_exercised")).toBe(true);
+    primary: { eligible: 4, hits: 4, misses: 0, unknown: 0 } });
+  expect(measured.result.rows.filter((row) => row.outcome === "hit" && !["q2", "q3"].includes(row.question_id))
+    .every((row) => row.mechanism === "proof_exercised")).toBe(true);
   expect(measured.result.rows.filter((row) => row.selected).every((row) => row.prior_development_exposure)).toBe(true);
+  const unavailableRow = measured.result.rows.find(row => row.question_id === "q2")!;
+  expect(unavailableRow).toMatchObject({ outcome: "hit", mechanism: "not_exercised",
+    attribution: { layer: "query_unavailable" } });
+  expect(readChainArtifact(unavailableRow.measurement_path!)).toMatchObject({ rows: [{
+    query_failure_reason: "cache_invalid", diagnostics: { query_semantics_status: { status: "unavailable", reason: "invalid" } },
+    source_bearing_union: { any_at_5: { status: "hit" } }, mechanism: { status: "unexercised", validated_proof_ranks: [] }
+  }] });
   const unsupportedRow = measured.result.rows.find(row => row.question_id === "q3")!;
   expect(unsupportedRow).toMatchObject({ outcome: "hit", mechanism: "not_exercised" });
   expect(readChainArtifact(unsupportedRow.measurement_path!)).toMatchObject({ rows: [{

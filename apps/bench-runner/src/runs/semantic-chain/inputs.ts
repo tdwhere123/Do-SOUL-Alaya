@@ -45,8 +45,12 @@ export function verifySemanticChainQueries(plan: SemanticChainPlan): void {
         (current.shard?.raw_digest ?? null) !== row.raw_digest ||
         row.status === "ready" && (current?.received === undefined || !("query" in current.received) ||
         canonicalJson(current.received.query) !== canonicalJson(row.query_semantics))) throw new AlayaError("CONFLICT", "prepared query semantics changed before native replay");
-    if (row.status === "blocked" && (current.received === undefined || !("query" in current.received))
+    if ((row.status === "blocked" || row.status === "raw_ready")
+      && (current.received === undefined || !("query" in current.received))
       && row.reason !== current.status) throw new AlayaError("CONFLICT", "prepared query failure state changed before native replay");
+    if (row.status === "raw_ready" && current.received !== undefined && "query" in current.received) {
+      throw new AlayaError("CONFLICT", "raw retrieval cannot reuse admitted query semantics");
+    }
   }
 }
 

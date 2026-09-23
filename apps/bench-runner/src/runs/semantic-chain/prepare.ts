@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { AlayaError, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
-  type SourceSemanticQuery, type SourceSemanticHandleDescriptor } from "@do-soul/alaya-protocol";
+  type SourceSemanticQuery, type SourceSemanticQueryUnavailableReason, type SourceSemanticHandleDescriptor } from "@do-soul/alaya-protocol";
+import { admitSourceSemanticQuery, sourceSemanticQueryStatus } from "@do-soul/alaya-core";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import type { BenchDaemonHandle } from "../../harness/daemon.js";
 import { readSemanticChainProposalResults, semanticChainProposalStates } from "./inputs.js";
@@ -29,10 +30,17 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
       for (const row of results) {
         const base = { query_key: row.line.key, original_query: row.line.original_query, raw_digest: row.shard?.raw_digest ?? null };
         const querySemantics = row.received !== undefined && "query" in row.received ? row.received.query : undefined;
-        if (querySemantics === undefined) { queries.push({ ...base, status: "blocked", reason: row.status }); continue; }
+        const unavailable = querySemantics === undefined ? row.status === "unattempted" ? undefined
+          : row.status === "invalid" || row.status === "core_rejected" || row.status === "cache_invalid"
+            ? "invalid" as const : "producer_failure" as const : undefined;
         let found;
-        try { found = (await discoverSemanticChainQuery(daemon!, config, row.line.original_query, querySemantics)).discovery; }
+        try { found = (await discoverSemanticChainQuery(daemon!, config, row.line.original_query, querySemantics, unavailable)).discovery; }
         catch (error) { queries.push({ ...base, status: "blocked", reason: `discovery_unavailable: ${error instanceof Error ? error.message : String(error)}` }); continue; }
+        if (querySemantics === undefined) {
+          queries.push({ ...base, status: "raw_ready", reason: row.status,
+            query_semantics_unavailable: unavailable ?? "absent", ...found });
+          continue;
+        }
         const selected = found.descriptors.filter((descriptor) => descriptor.interpretation !== undefined).slice(0, config.correspondence_pair_cap);
         queries.push({ ...base, status: "ready", query_semantics: querySemantics, ...found,
           selected_source_interpretation_ids: selected.map((entry) => entry.interpretation_id),
@@ -43,8 +51,7 @@ export async function prepareSemanticChain(value: unknown, root: string): Promis
           source_interpretation_descriptors: [{ source_interpretation_id: descriptor.interpretation_id, interpretation: descriptor.interpretation }] });
       }
     };
-    if (results.some((row) => row.received !== undefined)) await withSemanticChainDaemon(config, root, prepare);
-    else await prepare();
+    await withSemanticChainDaemon(config, root, prepare);
     const workset = items.length === 0 ? null : parseSemanticProposalWorkset({
       contract: semanticProposalWorksetContract(config.query_workset.request_profile), kind: "semantic_correspondence", model: config.query_workset.model,
       request_profile: config.query_workset.request_profile, provider_url: config.query_workset.provider_url, items
@@ -64,7 +71,8 @@ function materializeCorrespondenceWorkset(plan: SemanticChainPlan, root: string)
   // existing proposal prepare command immediately before an authorized fill.
 }
 
-export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, config: SemanticChainConfig, original: string, querySemantics: SourceSemanticQuery) {
+export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, config: SemanticChainConfig, original: string,
+  querySemantics?: SourceSemanticQuery, unavailable?: Exclude<SourceSemanticQueryUnavailableReason, "absent">) {
   const descriptors: SourceSemanticHandleDescriptor[] = [];
   const seen = new Set<string>();
   const handles = new Set<string>();
@@ -77,9 +85,14 @@ export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, conf
   do {
     const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
       SoulInterpretationRequestSchema.parse({ operation: "prepare_query", original_query: original, query_semantics: querySemantics,
+        ...(unavailable === undefined ? {} : { query_semantics_unavailable: unavailable }),
         budget: config.budget, authorized_scopes: config.authorized_scopes, access_policy: config.access_policy,
         ...(continuation === undefined ? {} : { continuation_handle: continuation }) })));
     if (response.operation !== "prepare_query") throw new AlayaError("INTERNAL", "native discovery returned a different operation");
+    const expectedStatus = sourceSemanticQueryStatus(admitSourceSemanticQuery(querySemantics, original), unavailable);
+    if (JSON.stringify(response.query_semantics_status) !== JSON.stringify(expectedStatus)) {
+      throw new AlayaError("CONFLICT", "native discovery changed query semantic availability");
+    }
     const access = response.access;
     if (access === undefined || access.policy !== config.access_policy || access.trace.kind !== "preparation_page") {
       throw new AlayaError("CONFLICT", "native discovery did not bind the frozen access policy");
@@ -89,7 +102,8 @@ export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, conf
     }
     poolId = access.pool_id;
     queryHandle = response.query_handle;
-    trace.push({ coverage: response.coverage, work: response.work, access, continuation_handle: response.continuation_handle ?? null,
+    trace.push({ coverage: response.coverage, work: response.work, access, query_semantics_status: response.query_semantics_status,
+      continuation_handle: response.continuation_handle ?? null,
       candidate_ids: response.candidates.map((candidate) => candidate.interpretation_id) });
     pages++;
     open = response.coverage.discovery !== "complete" || access.unvisited_sources || access.unvisited_interpretations;

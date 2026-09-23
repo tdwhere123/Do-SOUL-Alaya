@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import { expect } from "vitest";
 import { SoulInterpretationResponseSchema } from "@do-soul/alaya-protocol";
-import { authorizedScopesFromAdmission, sourceSemanticLibraryRequestIdentity } from "@do-soul/alaya-core";
+import { admitSourceSemanticQuery, authorizedScopesFromAdmission, sourceSemanticLibraryRequestIdentity,
+  sourceSemanticQueryStatus } from "@do-soul/alaya-core";
 import { chainIdentity, readChainArtifact, writeChainArtifact, type SemanticChainConfig,
   type SemanticChainPlan } from "../../../runs/semantic-chain/contract.js";
 import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
@@ -83,7 +84,9 @@ export async function assertSemanticChainArchiveAdmission(fixture: Fixture): Pro
       if (query.status !== "ready") throw new Error("ready query required");
       const requestIdentity = sourceSemanticLibraryRequestIdentity({ workspace_id: config.workspace_id,
         as_of: config.interpretation_clock, authorized_scopes: authorizedScopesFromAdmission(config.authorized_scopes).authorized_scopes!,
-        original_query: query.original_query, query_semantics: query.query_semantics, budget: config.budget,
+        original_query: query.original_query, query_semantics: query.query_semantics,
+        query_semantics_status: sourceSemanticQueryStatus(admitSourceSemanticQuery(query.query_semantics, query.original_query)),
+        budget: config.budget,
         semantic_correspondences: semanticChainQueryCorrespondences(query, replay.semantic_correspondences).ready,
         output_byte_limit: config.output_byte_limit, access_policy: config.access_policy });
       const changed = { ...native, response: { ...response, request_identity: requestIdentity } };
@@ -149,11 +152,11 @@ export async function assertSemanticChainArchiveAdmission(fixture: Fixture): Pro
     .toThrow(/UTF-8 slice/u);
   expect(() => admitEmittedSourcePreview({ ...span, content_start: 5 }, result, undefined, target, source, false))
     .toThrow(/preview differs|preview exceeds/u);
-  const blocked = fixture.plan.queries.find((query) => query.status === "blocked")!;
-  const blockedRoot = join(archiveRoot, "blocked-with-delivery");
-  const blockedRows = original.rows.map((row) => row.query_key !== blocked.query_key ? row : { ...native, query_key: blocked.query_key });
-  assertUnknown(blockedRoot, retainArchive(blockedRoot, fixture.plan, blockedRows), fixture.plan, blocked.query_key,
-    /blocked query cannot have a native delivery/u);
+  const rawReady = fixture.plan.queries.find((query) => query.status === "raw_ready")!;
+  const rawRoot = join(archiveRoot, "unavailable-query-with-foreign-proof");
+  const rawRows = original.rows.map((row) => row.query_key !== rawReady.query_key ? row : { ...native, query_key: rawReady.query_key });
+  assertUnknown(rawRoot, retainArchive(rawRoot, fixture.plan, rawRows), fixture.plan, rawReady.query_key,
+    /another frozen request/u);
   const missingRoot = join(archiveRoot, "missing-reservation");
   assertUnknown(missingRoot, retainArchive(missingRoot, fixture.plan, original.rows, { omitReservation: native.query_key }),
     fixture.plan, native.query_key, /reservation differs/u);
@@ -176,7 +179,7 @@ export async function assertSemanticChainArchiveAdmission(fixture: Fixture): Pro
 function transplantRows(plan: SemanticChainPlan, native: ArchivedRow): ArchivedRow[] {
   const correspondences = readSemanticChainCorrespondences(plan, "retained").semantic_correspondences;
   return plan.queries.map((query) => query.status === "blocked" ? query : { ...native, query_key: query.query_key,
-    correspondence_outcomes: semanticChainQueryCorrespondences(query, correspondences).outcomes });
+    correspondence_outcomes: query.status === "ready" ? semanticChainQueryCorrespondences(query, correspondences).outcomes : [] });
 }
 
 /** Repack actual native response/exposure bytes under the destination plan and retained paths. */
@@ -194,7 +197,7 @@ function retainArchive(root: string, plan: SemanticChainPlan, rows: ArchivedRow[
     }
   }
   const path = join(root, `replay-${identity}.json`);
-  writeChainArtifact(path, { contract: "source-semantic-chain-replay-v2", identity,
+  writeChainArtifact(path, { contract: "source-semantic-chain-replay-v3", identity,
     plan_identity: options.planIdentity ?? chainIdentity(plan), arm: "retained", provider_calls: 0, rows });
   return path;
 }

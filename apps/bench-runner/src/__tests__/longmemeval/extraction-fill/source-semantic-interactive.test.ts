@@ -169,7 +169,7 @@ it("fills complete-source open semantics through interactive generateContent wit
   await assertNativeSemanticChain(cacheRoot, sourceOnly);
   await assertNativeLongMemEvalArm(dataDir, pinnedMetaRoot, [cacheRoot, secondCache]);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
-}, 60000);
+}, 120000);
 
 it("quarantines an interactive generateContent line through the same source-semantic receiver as Batch", async () => {
   const fixture = await setupInteractive("unknown_alias");

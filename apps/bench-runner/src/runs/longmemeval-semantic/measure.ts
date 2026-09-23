@@ -57,7 +57,8 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
           && chainIdentity(measuredRow.diagnostics?.order ?? null) !== chainIdentity(frozen.native_route.order)) {
           throw new AlayaError("CONFLICT", "native response order differs from experiment freeze");
         }
-        attribution = { layer: measuredRow?.status === "blocked" ? "query_unavailable"
+        attribution = { layer: measuredRow?.diagnostics?.query_semantics_status?.status === "unavailable" ? "query_unavailable"
+          : measuredRow?.status === "blocked" ? "query_unavailable"
           : measuredRow?.status === "native_unavailable" ? "native_unavailable"
             : frozen.contract === "longmemeval-native-semantic-v3" ? "native_semantic_recall" : "source_only_canonical_order",
           native: frozen.contract === "longmemeval-semantic-development-v3" ? measuredRow?.diagnostics ?? null

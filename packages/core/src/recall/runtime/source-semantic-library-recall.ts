@@ -7,7 +7,7 @@ import {
   type SourceEvidenceTarget, type SourceSemanticLibraryOrder, type SourceSemanticLibrarySlotQualifier,
   SoulInterpretationResponseSchema, type SourceSemanticWorkerResult, type SoulInterpretationResponse,
   type SourceSemanticReasoningResult, type SourceSemanticLibraryProof, type SourceSemanticQuery,
-  type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type RequestBudget
+  type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type SourceSemanticQueryStatus, type RequestBudget
 } from "@do-soul/alaya-protocol";
 import { sortIndexEntries } from "./index-continuation.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
@@ -22,12 +22,13 @@ export function sourceSemanticLibraryQueryIdentity(originalQuery: string, result
 /** Admitted query semantics and resolved execution inputs bind every page independently of process-local handles. */
 export function sourceSemanticLibraryRequestIdentity(input: Readonly<{
   workspace_id: string; as_of: string; authorized_scopes: readonly string[] | null;
-  original_query: string; query_semantics: SourceSemanticQuery;
+  original_query: string; query_semantics?: SourceSemanticQuery; query_semantics_status: SourceSemanticQueryStatus;
   source_id?: string;
   semantic_correspondences: readonly SourceSemanticCorrespondence[];
   budget: RequestBudget; output_byte_limit: number; access_policy: SourceSemanticAccessPolicy;
 }>): string {
-  return `sha256:${fieldContractSha256(canonicalJson({ ...input, source_id: input.source_id ?? null,
+  return `sha256:${fieldContractSha256(canonicalJson({ ...input, query_semantics: input.query_semantics ?? null,
+    source_id: input.source_id ?? null,
     authorized_scopes: input.authorized_scopes === null ? null : [...input.authorized_scopes].sort()
   }))}`;
 }

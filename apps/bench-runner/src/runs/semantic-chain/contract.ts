@@ -4,6 +4,7 @@ import { z } from "zod";
 import { AlayaError, canonicalJson, RequestBudgetSchema, AuthorizedScopesAdmissionSchema,
   SourceSemanticQuerySchema, SourceSemanticHandleDescriptorSchema, SourceSemanticAccessPolicySchema,
   SourceSemanticAccessReceiptSchema, SourceSemanticCoverageSchema, SourceSemanticWorkerWorkSchema,
+  SourceSemanticQueryStatusSchema, SourceSemanticQueryUnavailableReasonSchema,
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
@@ -33,21 +34,27 @@ export const SemanticChainConfigSchema = z.object({
 export type SemanticChainConfig = z.infer<typeof SemanticChainConfigSchema>;
 
 const QueryBase = { query_key: Digest, original_query: z.string(), raw_digest: Digest.nullable() };
+const Discovery = {
+  descriptors: z.array(SourceSemanticHandleDescriptorSchema),
+  discovery_trace: z.array(z.object({ coverage: SourceSemanticCoverageSchema, work: SourceSemanticWorkerWorkSchema,
+    access: SourceSemanticAccessReceiptSchema, query_semantics_status: SourceSemanticQueryStatusSchema,
+    continuation_handle: z.string().nullable(), candidate_ids: z.array(z.string()) }).strict()),
+  discovery_pages: z.number().int().nonnegative(), discovery_open: z.boolean(),
+  unvisited_source_interpretation_count: z.number().int().nonnegative().nullable(), discovery_truncated: z.boolean()
+};
 export const SemanticChainQuerySchema = z.discriminatedUnion("status", [
   z.object({ ...QueryBase, status: z.literal("blocked"), reason: z.string() }).strict(),
+  z.object({ ...QueryBase, status: z.literal("raw_ready"), reason: z.string(),
+    query_semantics_unavailable: SourceSemanticQueryUnavailableReasonSchema,
+    ...Discovery }).strict(),
   z.object({ ...QueryBase, status: z.literal("ready"), query_semantics: SourceSemanticQuerySchema,
-    descriptors: z.array(SourceSemanticHandleDescriptorSchema), selected_source_interpretation_ids: z.array(z.string()),
+    ...Discovery, selected_source_interpretation_ids: z.array(z.string()),
     correspondence_opportunities: z.array(z.object({ source_interpretation_id: z.string(),
       decision: z.enum(["selected", "zero_budget", "missing_interpretation", "not_selected"])
     }).strict()),
-    discovery_trace: z.array(z.object({ coverage: SourceSemanticCoverageSchema, work: SourceSemanticWorkerWorkSchema,
-      access: SourceSemanticAccessReceiptSchema,
-      continuation_handle: z.string().nullable(), candidate_ids: z.array(z.string()) }).strict()),
-    discovery_pages: z.number().int().nonnegative(), discovery_open: z.boolean(),
-    unvisited_source_interpretation_count: z.number().int().nonnegative().nullable(), discovery_truncated: z.boolean()
   }).strict()
 ]);
-export const SEMANTIC_CHAIN_PLAN_CONTRACT = "source-semantic-chain-plan-v5" as const;
+export const SEMANTIC_CHAIN_PLAN_CONTRACT = "source-semantic-chain-plan-v6" as const;
 export const SemanticChainPlanSchema = z.object({
   contract: z.literal(SEMANTIC_CHAIN_PLAN_CONTRACT), input_identity: Digest,
   config: SemanticChainConfigSchema, queries: z.array(SemanticChainQuerySchema),

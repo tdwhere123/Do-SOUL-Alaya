@@ -2,10 +2,11 @@ import {
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SourceSemanticResourceExhausted, canonicalJson,
   type SourceSemanticCorrespondence, type SourceSemanticHandleDescriptor,
-  type SourceSemanticLibraryProof, type SourceSemanticWorkerResult, type SourceSemanticQuery, type SourceSemanticWorkerRequest
+  type SourceSemanticLibraryProof, type SourceSemanticWorkerResult, type SourceSemanticQuery, type SourceSemanticQueryStatus,
+  type SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
 import {
-  CoreError, OFFSET_CURSOR, admitSourceSemanticCorrespondence, admitSourceSemanticQuery,
+  CoreError, OFFSET_CURSOR, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus,
   continuationCapabilityMatches, executeSourceSemanticInterpretation,
   fieldContractSha256, proofEntriesFromBranch,
   sourceSemanticLibrarySourceEntry, sourceSemanticLibraryQueryIdentity, sourceSemanticLibraryRequestIdentity,
@@ -51,19 +52,28 @@ export function runSourceSemanticLibraryRecall(
   const currentClock = payload.as_of;
   const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, { ...payload, as_of: currentClock }, request.query_handle, authorized, "query");
   if (lease !== undefined && (request.original_query !== undefined && request.original_query !== lease.original_query
-    || request.query_semantics !== undefined && canonicalJson(request.query_semantics) !== canonicalJson(lease.query_semantics))) {
+    || request.query_semantics !== undefined && canonicalJson(request.query_semantics) !== canonicalJson(lease.query_semantics)
+    || request.query_semantics_unavailable !== undefined && (lease.query_semantics_status?.status !== "unavailable"
+      || lease.query_semantics_status.reason !== request.query_semantics_unavailable))) {
     throw new CoreError("VALIDATION", "query handle cannot be retargeted", { details: { admission: "bound" } });
   }
   const original = lease?.original_query ?? request.original_query;
   const querySemantics = lease?.query_semantics ?? request.query_semantics;
-  if (original === undefined || querySemantics === undefined) {
-    throw new CoreError("VALIDATION", "recall lacks its prepared query semantics");
+  if (original === undefined) throw new CoreError("VALIDATION", "recall lacks its original question");
+  if (lease !== undefined) {
+    meter.retain(lease.query_semantics_status, "leased query semantics status");
+    if (querySemantics !== undefined) meter.retain(querySemantics, "leased query semantics admission");
   }
-  if (lease !== undefined) meter.retain(querySemantics, "leased query semantics admission");
   const admission = admitSourceSemanticQuery(querySemantics, original);
-  if (admission.kind !== "admitted") {
-    throw new CoreError("VALIDATION", admission.kind === "unsupported" ? "unsupported_producer" : "malformed_query");
+  const queryStatus = sourceSemanticQueryStatus(admission, request.query_semantics_unavailable);
+  if (lease !== undefined && canonicalJson(lease.query_semantics_status) !== canonicalJson(queryStatus)
+    && request.query_semantics_unavailable === undefined) {
+    // The lease may carry a producer failure that has no semantic object to re-admit.
+    if (admission.kind !== "absent" || lease.query_semantics_status?.status !== "unavailable") {
+      throw new CoreError("VALIDATION", "query handle semantic admission changed", { details: { admission: "bound" } });
+    }
   }
+  const boundStatus = lease?.query_semantics_status ?? queryStatus;
   // Keep a bounded finalization envelope outside exploration and native hydration.
   const exploration = new SourceSemanticReadBudget({
     work_units: Math.max(0, meter.work - Math.min(request.budget.finalization_reserve, Math.floor(meter.work / 4))),
@@ -73,25 +83,30 @@ export function runSourceSemanticLibraryRecall(
   const policy = request.access_policy ?? boundPool?.access.policy ?? "query-conditioned-v1";
   const publicRequestIdentity = sourceSemanticLibraryRequestIdentity({
     workspace_id: payload.workspace_id, as_of: payload.as_of, authorized_scopes: authorized,
-    original_query: original, query_semantics: admission.query, source_id: lease?.source_id,
+    original_query: original, query_semantics: admission.kind === "admitted" ? admission.query : undefined,
+    query_semantics_status: boundStatus, source_id: lease?.source_id,
     semantic_correspondences: request.semantic_correspondences ?? [], budget: request.budget,
     output_byte_limit: request.output_byte_limit, access_policy: policy
   });
-  const inputId = accessInputIdentity(original, admission.query, request.budget, policy, lease?.source_id);
+  const inputId = accessInputIdentity(original, admission.kind === "admitted" ? admission.query : undefined,
+    request.budget, policy, lease?.source_id);
   if (boundPool !== undefined && boundPool.access.input_id !== inputId) {
     throw new CoreError("VALIDATION", "library access policy or budget changed", { details: { admission: "bound" } });
   }
   if (boundPool !== undefined) exploration.retain(boundPool, "leased access pool");
   const pool = boundPool ?? observeSourceSemanticAccess(runtime, payload, authorized, exploration, original,
-    admission.query, policy, request.budget, lease?.source_id);
+    admission.kind === "admitted" ? admission.query : undefined, policy, request.budget, lease?.source_id);
   const sources = { sources: [...pool.sources], pages: pool.sourcePages,
     open: pool.access.unvisited_sources, truncated: pool.access.unvisited_sources };
   const discovered: LibraryDiscovery = { descriptors: pool.descriptors, interpretationPages: pool.interpretationPages,
     interpretationOpen: pool.access.unvisited_interpretations, interpretationTruncated: pool.access.unvisited_interpretations, pool };
-  const branches = executeLibraryBranches(runtime, payload, authorized, exploration,
-    discovered.descriptors, request, admission.query, original);
+  const branches = admission.kind === "admitted"
+    ? executeLibraryBranches(runtime, payload, authorized, exploration,
+      discovered.descriptors, request, admission.query, original)
+    : { proofGroups: [], proofs: [], examined: [], supports: [], pairs: 0, computeOpen: false, interpretationTruncated: false };
   meter.absorb(exploration);
-  return deliverLibraryPage(runtime, payload, authorized, meter, request, admission.query_id, admission.query,
+  return deliverLibraryPage(runtime, payload, authorized, meter, request, boundStatus,
+    admission.kind === "admitted" ? admission.query : undefined,
     sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
 }
 
@@ -168,7 +183,8 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
 
 function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
-  request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, queryIdentity: string, query: SourceSemanticQuery,
+  request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, queryStatus: SourceSemanticQueryStatus,
+  query: SourceSemanticQuery | undefined,
   sources: Pick<ReturnType<typeof listEligibleSemanticSources>, "sources" | "pages" | "open" | "truncated">, discovered: LibraryDiscovery,
   branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string,
   publicRequestIdentity: string): SourceSemanticWorkerResult {
@@ -176,7 +192,7 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   const { proofGroups, examined, computeOpen } = branches;
   const interpretationTruncated = discovered.interpretationTruncated || branches.interpretationTruncated;
   const interpretationId = `sha256:${fieldContractSha256(canonicalJson({
-    kind: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, query: original, query_semantics_id: queryIdentity, scopes: authorized
+    kind: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, query: original, query_semantics_status: queryStatus, scopes: authorized
   }))}`;
   const snapshotId = `sha256:${fieldContractSha256(canonicalJson({
     workspace: payload.workspace_id, as_of: payload.as_of, scopes: authorized, revision: sourceSemanticRevision(runtime), requestIdentity,
@@ -206,13 +222,15 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   const plan = prepareLibraryDelivery({
     query_id: sourceSemanticLibraryQueryIdentity(original), snapshot_id: snapshotId, interpretation_id: interpretationId,
     as_of: payload.as_of, authorized, request_identity: requestIdentity, public_request_identity: publicRequestIdentity, pool: discovered.pool,
+    query_semantics_status: queryStatus,
     expires_at: new Date(Date.parse(sourceSemanticLifetimeNow(payload)) + 5 * 60_000).toISOString(),
     coverage: {
       discovery: openResiduals ? "truncated" : "complete",
       source_interpretation: descriptors.length === 0 ? "unexercised" : "open",
-      query_semantics: query.gaps.length === 0 ? "complete" : "open",
+      query_semantics: query === undefined ? "unexercised" : query.gaps.length === 0 ? "complete" : "open",
       semantic_correspondence: examined.length === 0 ? "unexercised" : "open",
-      conditional_computation: computeOpen ? "open" : "complete", payload: prepared.incomplete ? "truncated" : "complete"
+      conditional_computation: queryStatus.status === "unavailable" ? "unexercised"
+        : computeOpen ? "open" : "complete", payload: prepared.incomplete ? "truncated" : "complete"
     },
     discovery: {
       eligible_source_count: sourceEntries.length, visited_source_pages: sources.pages, visited_source_interpretation_pages: interpretationPages,

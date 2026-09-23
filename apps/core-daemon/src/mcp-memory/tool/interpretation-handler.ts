@@ -41,12 +41,6 @@ export function createSourceSemanticInterpretationHandler(input: Dependencies):
         outcome: { status: "preparation_required", missing: request.semantic_correspondence === undefined ? request.query_semantics === undefined && request.query_handle === undefined ? "query_semantics_and_correspondence" : "semantic_correspondence" : "query_semantics" },
         coverage: IDLE, work: ZERO_WORK, provider_attempts: 0 });
     }
-    if (request.operation === "recall" && request.query_handle === undefined &&
-        (request.query_semantics === undefined || request.original_query === undefined)) {
-      return SoulInterpretationResponseSchema.parse({ operation: "recall",
-        outcome: { status: "preparation_required", missing: "query_semantics" },
-        coverage: IDLE, work: ZERO_WORK, provider_attempts: 0 });
-    }
     const { operation, authorized_scopes, ...rest } = request;
     try {
       const result = await executeWorker(input, context, { kind: operation, ...rest } as SourceSemanticWorkerRequest,

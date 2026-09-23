@@ -54,6 +54,7 @@ export function workerRecall(index: InformationIndex) {
   }));
   const result = SourceSemanticWorkerResultSchema.parse({
     kind: "recall", request_budget: REQUEST, delivery_id: "delivery", request_identity: `sha256:${"c".repeat(64)}`,
+    query_semantics_status: { status: "admitted", query_semantics_id: DIGEST },
     protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, total_count: index.entries.length,
     index, page_purpose: "membership",
     discovery: {

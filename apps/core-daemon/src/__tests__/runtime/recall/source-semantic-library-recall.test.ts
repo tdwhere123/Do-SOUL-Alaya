@@ -647,6 +647,24 @@ it("pages library occupancy without duplicating first-page product identities", 
     const publicNext = await handler(nextRequest, context);
     if (publicNext.operation !== "recall") throw new Error("public recall missing");
     expect(publicNext.index?.entries).toHaveLength(5);
+    const rawRequest = { operation: "recall" as const, original_query: ORIGINAL,
+      accepts_unreviewed_conditional_results: true as const, semantic_correspondences: [],
+      budget: BUDGET, output_byte_limit: 1_000_000,
+      authorized_scopes: { mode: "named" as const, scopes: ["project"] } };
+    const rawFirst = await handler(rawRequest, context);
+    if (rawFirst.operation !== "recall" || rawFirst.index?.continuation == null) throw new Error("raw page missing");
+    expect(rawFirst.query_semantics_status).toEqual({ status: "unavailable", reason: "absent" });
+    expect(rawFirst.index.entries).toHaveLength(5);
+    expect(rawFirst.index.completeness.logical_index).toBe("partial");
+    const rawNextRequest = { ...rawRequest, continuation: rawFirst.index.continuation };
+    const rawNext = await handler(rawNextRequest, context);
+    if (rawNext.operation !== "recall") throw new Error("raw continuation missing");
+    expect(rawNext.index?.entries).toHaveLength(5);
+    await expect(handler({ ...rawNextRequest, original_query: `${ORIGINAL} changed` }, context)).rejects.toThrow();
+    await expect(handler({ ...rawNextRequest, authorized_scopes: { mode: "named", scopes: ["global_core"] } }, context))
+      .rejects.toThrow(/scope/u);
+    await expect(handler({ ...rawNextRequest, continuation: { ...rawFirst.index.continuation, cursor: "offset-0" } }, context))
+      .rejects.toThrow(/continuation/u);
     await expect(handler(nextRequest, { ...context, agentTarget: "other" })).rejects.toThrow(/principal/u);
     await expect(handler({ ...nextRequest, budget: { ...BUDGET, work_units: BUDGET.work_units - 1 } }, context)).rejects.toThrow(/changed/u);
     await expect(handler({ ...nextRequest, authorized_scopes: { mode: "named", scopes: ["global_core"] } }, context)).rejects.toThrow(/scope/u);
@@ -654,11 +672,14 @@ it("pages library occupancy without duplicating first-page product identities", 
     changed.database.connection.prepare("UPDATE source_records SET scope_class = 'global_core' WHERE source_id = 'artifact-0'").run();
     changed.database.close(); closeCachedDatabase(filename);
     await expect(handler(nextRequest, context)).rejects.toThrow(/snapshot/u);
+    await expect(handler(rawNextRequest, context)).rejects.toThrow(/snapshot/u);
     let lifetime = "2026-09-21T00:00:00.000Z";
     const fixed = createSourceSemanticInterpretationHandler({ now: () => lifetime, interpretationClock: CLOCK,
       sourceSemanticsPort: { execute } });
     const fixedFirst = await fixed(publicRequest, context);
     if (fixedFirst.operation !== "recall" || fixedFirst.index?.continuation == null) throw new Error("fixed-clock page missing");
+    const fixedRawFirst = await fixed(rawRequest, context);
+    if (fixedRawFirst.operation !== "recall" || fixedRawFirst.index?.continuation == null) throw new Error("fixed-clock raw page missing");
     expect(fixedFirst.index.as_of).toBe(CLOCK);
     expect(fixedFirst.index.continuation.expires_at).toBe("2026-09-21T00:05:00.000Z");
     const fixedRequest = { ...publicRequest, continuation: fixedFirst.index.continuation };
@@ -668,6 +689,7 @@ it("pages library occupancy without duplicating first-page product identities", 
     expect(fixedNext.index?.as_of).toBe(CLOCK);
     lifetime = "2026-09-21T00:06:00.000Z";
     await expect(fixed(fixedRequest, context)).rejects.toThrow(/expired/u);
+    await expect(fixed({ ...rawRequest, continuation: fixedRawFirst.index.continuation }, context)).rejects.toThrow(/expired/u);
     const firstIds = new Set(first.index.entries.map(canonicalProductIdentityOfEntry));
     expect(second.index.entries.some((entry) => firstIds.has(canonicalProductIdentityOfEntry(entry)))).toBe(false);
     await expect(call(execute, {

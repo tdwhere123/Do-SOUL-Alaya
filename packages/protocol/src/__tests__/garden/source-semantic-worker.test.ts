@@ -36,6 +36,14 @@ it("admits prepare and one-shot reason without a continuation token", () => {
     budget, output_byte_limit: 1024
   }).kind).toBe("recall");
   expect(SourceSemanticWorkerRequestSchema.parse({
+    kind: "recall", accepts_unreviewed_conditional_results: true, original_query: "question",
+    budget, output_byte_limit: 1024
+  }).kind).toBe("recall");
+  expect(SourceSemanticWorkerRequestSchema.safeParse({
+    kind: "recall", accepts_unreviewed_conditional_results: true, original_query: "question",
+    query_semantics_unavailable: "producer_failure", query_semantics: {}, budget, output_byte_limit: 1024
+  }).success).toBe(false);
+  expect(SourceSemanticWorkerRequestSchema.parse({
     kind: "recall", accepts_unreviewed_conditional_results: true, query_handle: "query-handle",
     budget, output_byte_limit: 1024,
     continuation: {
@@ -64,7 +72,8 @@ it("admits prepare and one-shot reason without a continuation token", () => {
 });
 
 function libraryDelivery() {
-  return { delivery_id: "delivery", request_identity: digest, protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, total_count: 0,
+  return { delivery_id: "delivery", request_identity: digest, query_semantics_status: { status: "unavailable", reason: "absent" },
+    protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, total_count: 0,
     index: { schema_version: 1, query_id: "library-query", snapshot_id: digest, result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
       entries: [], completeness: { schema_version: 1, logical_index: "complete", observed_coverage: "complete",
         transport: "complete", payload: "complete", representation: "complete" }, continuation: null,
@@ -84,6 +93,8 @@ it("shares current delivery version, membership and page budget admission betwee
     SoulInterpretationResponseSchema.safeParse(Object.assign({ operation: "recall", results: [], provider_attempts: 0 }, value)).success
   ];
   expect(accepts(delivery)).toEqual([true, true]);
+  expect(accepts({ ...delivery, query_semantics_status: { status: "unavailable", reason: "producer_failure" } })).toEqual([true, true]);
+  expect(accepts({ ...delivery, query_semantics_status: { status: "admitted", query_semantics_id: digest } })).toEqual([true, true]);
   for (const version of ["source-semantic-library-v1", "source-semantic-library-v3", "not-a-native-library-result"]) {
     const index = { ...delivery.index, result_version: version };
     expect(InformationIndexSchema.safeParse(index).success).toBe(true);
@@ -97,7 +108,7 @@ it("shares current delivery version, membership and page budget admission betwee
 
 it("rejects every missing mandatory delivery field and partial deliveries disguised as outcomes", () => {
   const delivery = libraryDelivery();
-  for (const key of ["delivery_id", "request_identity", "protocol_version", "total_count", "index", "page_purpose", "discovery", "order", "slot_qualifiers"]) {
+  for (const key of ["delivery_id", "request_identity", "query_semantics_status", "protocol_version", "total_count", "index", "page_purpose", "discovery", "order", "slot_qualifiers"]) {
     const partial = { ...delivery };
     Reflect.deleteProperty(partial, key);
     expect(SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...partial }).success, key).toBe(false);

@@ -58,9 +58,16 @@ it("parses soul.interpretation host operations including library recall and reje
   expect(SoulInterpretationRequestSchema.parse({
     operation: "recall",
     accepts_unreviewed_conditional_results: true,
+    original_query: "which tools does Alice use?",
     budget: BUDGET,
     output_byte_limit: 4096
   }).operation).toBe("recall");
+  expect(SoulInterpretationRequestSchema.safeParse({ operation: "recall",
+    accepts_unreviewed_conditional_results: true, budget: BUDGET, output_byte_limit: 4096 }).success).toBe(false);
+  expect(SoulInterpretationRequestSchema.safeParse({ operation: "recall",
+    accepts_unreviewed_conditional_results: true, original_query: "question",
+    query_semantics_unavailable: "producer_failure", query_semantics: {},
+    budget: BUDGET, output_byte_limit: 4096 }).success).toBe(false);
   expect(SoulInterpretationRequestSchema.safeParse({
     operation: "report_context_usage",
     budget: BUDGET

@@ -714,9 +714,9 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent
 query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 10.0.0 uses `source-interpretation-v4`, `source-semantic-query-v3`,
+Garden v1. Protocol 11.0.0 uses `source-interpretation-v4`, `source-semantic-query-v3`,
 `source-semantic-correspondence-v3`, response envelope v5, reasoning v5, cache v3,
-library v4, public/worker recall protocol 5, and `source-semantic-k-v3`,
+library v5, public/worker recall protocol 6, and `source-semantic-k-v3`,
 `source-semantic-normalizer-v5` and `source-semantic-lowering-v6`. Each complete
 source-frame group is a jointly constrained compile alternative; slots must not
 float off that group's predicate frame. An older open source interpretation is not relabeled or silently promoted; recreate its interpretation explicitly.
@@ -993,6 +993,11 @@ remain provider-free; query semantics and semantic correspondence are supplied b
 cache. Discovery pages current source records and published source interpretations beyond a single
 16-row descriptor page, records the eligible population, visited pages, candidate
 prefix and open residuals, and does not treat query hints as semantic membership.
+Absent or unadmitted query semantics retains the unchanged original question for
+raw-source access. Preparation and delivery expose one admitted/unavailable semantic
+status with a reason; unavailable semantics cannot produce a conditional proof.
+Malformed public semantic objects still fail schema admission, and access,
+scope, source-currentness, lease and continuation guards remain in force.
 `prepare_query` and library `recall` share Core's `source-semantic-access` owner.
 The `query-conditioned-v1` policy scores original query against observed source
 text, then uses independently verified query/source predicate readings to break
@@ -1083,7 +1088,7 @@ The separately named source-bearing union metric scores the same initial occupie
 slots across source evidence and validated semantic proofs. The entire delivered
 slot sequence must bind to the native index before either source or proof
 scoring: count, order, kinds and product coordinates must match the native delivery
-owner. Protocol owns the complete delivery identity: protocol 5, library v4,
+owner. Protocol owns the complete delivery identity: protocol 6, library v5,
 membership purpose and the five-slot page budget. Worker and public readers derive
 from it; a public outcome-only response contains no partial delivery fields and
 is unavailable for measurement. Unknown/obsolete delivery versions are invalid.

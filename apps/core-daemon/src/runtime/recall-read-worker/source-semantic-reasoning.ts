@@ -3,7 +3,7 @@ import {
   buildSourceReferenceCatalog, canonicalJson,
   sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticWorkerResult
 } from "@do-soul/alaya-protocol";
-import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, authorizeSemanticScope, authorizedScopesFromAdmission,
+import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus, authorizeSemanticScope, authorizedScopesFromAdmission,
   fieldContractSha256, reasonSourceSemanticInterpretation } from "@do-soul/alaya-core";
 import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
@@ -79,8 +79,10 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
   const prior = request.continuation_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.continuation_handle, authorized, "page");
   meter.retain(request.query_semantics, "query semantics admission");
   const admission = admitSourceSemanticQuery(request.query_semantics, request.original_query);
+  const queryStatus = sourceSemanticQueryStatus(admission, request.query_semantics_unavailable);
   const querySemanticsId = admission.kind === "admitted" ? admission.query_id : undefined;
   if (prior !== undefined && (prior.original_query !== request.original_query || prior.query_semantics_id !== querySemanticsId
+    || canonicalJson(prior.query_semantics_status) !== canonicalJson(queryStatus)
     || source !== undefined && prior.source_id !== source.source_id)) {
     throw new CoreError("VALIDATION", "preparation continuation query changed", { details: { admission: "bound" } });
   }
@@ -107,13 +109,15 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
   const sourceTraceRemaining = nextSourceOffset < pool.sources.length;
   const open = pool.access.unvisited_sources || pool.access.unvisited_interpretations;
   const coverage: SourceSemanticCoverage = { ...IDLE, discovery: discovery.truncated || open ? "truncated" : "complete",
-    source_interpretation: "open", query_semantics: admission.kind === "admitted" && admission.query.gaps.length === 0 ? "complete" : "open" };
+    source_interpretation: "open", query_semantics: admission.kind === "admitted"
+      ? admission.query.gaps.length === 0 ? "complete" : "open" : "unexercised" };
   const base: Omit<SourceSemanticLease, "kind"> = { ...leaseBase(runtime, payload, authorized),
     ...(scopeLease === undefined ? {} : { source_id: scopeLease.source_id, source_version: scopeLease.source_version, content_digest: scopeLease.content_digest }),
-    original_query: request.original_query, query_semantics_id: querySemanticsId, query_semantics: admission.kind === "admitted" ? admission.query : undefined,
+    original_query: request.original_query, query_semantics_id: querySemanticsId, query_semantics_status: queryStatus,
+    query_semantics: admission.kind === "admitted" ? admission.query : undefined,
     candidates: pool.descriptors.map((row) => row.interpretation_id), truncated: discovery.truncated || open,
     access_pool: pool, access_offset: discovery.offset, access_source_offset: nextSourceOffset };
-  const query_handle = admission.kind === "admitted" ? issueSemanticLease(runtime, { ...base, kind: "query" }, meter) : undefined;
+  const query_handle = issueSemanticLease(runtime, { ...base, kind: "query" }, meter);
   const continuation_handle = (discovery.truncated || sourceTraceRemaining)
     && (discovery.offset > (prior?.access_offset ?? 0) || nextSourceOffset > sourceOffset)
     ? issueSemanticLease(runtime, { ...base, kind: "page" }, meter) : undefined;
@@ -121,6 +125,7 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
     ? { status: "preparation_required" as const, missing: "query_semantics" as const }
     : { status: "invalid" as const, reason: admission.kind === "unsupported" ? "unsupported_producer" : "malformed_query" };
   return SourceSemanticWorkerResultSchema.parse({ kind: "prepare_query", query_handle, continuation_handle, query_semantics_id: querySemanticsId,
+    query_semantics_status: queryStatus,
     access, candidates: discovery.candidates, truncated: discovery.truncated || sourceTraceRemaining || open, outcome, coverage, work: workOf(meter) });
 }
 

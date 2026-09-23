@@ -8,9 +8,19 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 10.0.0, engine gateway 1.0.0
+## Unreleased — protocol 11.0.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+Protocol 11.0.0 changes `soul.interpretation` prepare-query and recall delivery
+under invariant §25 (major: a required public semantic-availability status and
+guarded original-question fallback). An absent or unadmitted semantic query now
+returns authorized raw source evidence with an explicit unavailable reason;
+conditional proof remains unexercised. Public and worker requests accept an
+explicit unavailable producer declaration only without a semantic object. Native
+library result v5 / protocol 6 and semantic-chain plan v6 / replay v3 bind the
+new admission state and prevent earlier continuation or replay identities from
+silently changing meaning. Historical artifacts keep their original bytes.
 
 Native semantic access interleaves source observation, header discovery and whole
 interpretation verification within its bounded observation envelope. Scheduling

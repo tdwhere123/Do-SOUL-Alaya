@@ -23,6 +23,8 @@ import {
   SourceSemanticHandleDescriptorSchema,
   SourceSemanticLibraryDeliverySchema,
   SourceSemanticLibraryContinuationSchema,
+  SourceSemanticQueryStatusSchema,
+  SourceSemanticQueryUnavailableReasonSchema,
   SourceSemanticWorkerWorkSchema
 } from "../garden/source-semantic-worker.js";
 
@@ -61,11 +63,16 @@ export const SoulInterpretationPrepareQueryRequestSchema = z.object({
   access_policy: SourceSemanticAccessPolicySchema.optional(),
   original_query: z.string().min(1).max(8192),
   query_semantics: SourceSemanticQuerySchema.optional(),
+  query_semantics_unavailable: SourceSemanticQueryUnavailableReasonSchema.exclude(["absent"]).optional(),
   source_handle: BoundedIdSchema.optional(),
   continuation_handle: BoundedIdSchema.optional(),
   budget: RequestBudgetSchema,
   authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
-}).strict().readonly();
+}).strict().superRefine((request, context) => {
+  if (request.query_semantics !== undefined && request.query_semantics_unavailable !== undefined) {
+    context.addIssue({ code: "custom", message: "query semantics and an unavailable producer declaration are mutually exclusive" });
+  }
+}).readonly();
 
 export const SoulInterpretationReasonRequestSchema = z.object({
   operation: z.literal("reason"),
@@ -86,13 +93,21 @@ const SoulInterpretationRecallRequestSchema = z.object({
   accepts_unreviewed_conditional_results: z.literal(true),
   query_handle: BoundedIdSchema.optional(),
   query_semantics: SourceSemanticQuerySchema.optional(),
+  query_semantics_unavailable: SourceSemanticQueryUnavailableReasonSchema.exclude(["absent"]).optional(),
   original_query: z.string().min(1).max(8192).optional(),
   semantic_correspondences: z.array(SourceSemanticCorrespondenceSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   budget: RequestBudgetSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000),
   continuation: SourceSemanticLibraryContinuationSchema.optional(),
   authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
-}).strict().readonly();
+}).strict().superRefine((request, context) => {
+  if (request.query_handle === undefined && request.original_query === undefined) {
+    context.addIssue({ code: "custom", message: "recall requires a query handle or original query" });
+  }
+  if (request.query_semantics !== undefined && request.query_semantics_unavailable !== undefined) {
+    context.addIssue({ code: "custom", message: "query semantics and an unavailable producer declaration are mutually exclusive" });
+  }
+}).readonly();
 
 export const SoulInterpretationRequestSchema = z.discriminatedUnion("operation", [
   SoulInterpretationPrepareSourceRequestSchema,
@@ -125,6 +140,7 @@ export const SoulInterpretationProposeResponseSchema = z.object({
 
 export const SoulInterpretationPrepareQueryResponseSchema = z.object({
   operation: z.literal("prepare_query"),
+  query_semantics_status: SourceSemanticQueryStatusSchema,
   access: SourceSemanticAccessReceiptSchema.optional(),
   query_handle: BoundedIdSchema.optional(),
   continuation_handle: BoundedIdSchema.optional(),

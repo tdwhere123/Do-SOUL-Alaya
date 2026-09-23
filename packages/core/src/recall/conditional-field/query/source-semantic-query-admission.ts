@@ -1,6 +1,8 @@
 import {
   SourceSemanticQuerySchema,
   sourceSemanticQueryIdentity,
+  type SourceSemanticQueryStatus,
+  type SourceSemanticQueryUnavailableReason,
   type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
@@ -53,4 +55,12 @@ export function admitSourceSemanticQuery(
     original_query_digest: parsed.data.original_query_digest,
     producer
   };
+}
+
+/** A producer declaration records failure; only Core admission can report admitted meaning. */
+export function sourceSemanticQueryStatus(admission: SourceSemanticQueryAdmission,
+  declared?: Exclude<SourceSemanticQueryUnavailableReason, "absent">): SourceSemanticQueryStatus {
+  if (admission.kind === "admitted") return { status: "admitted", query_semantics_id: admission.query_id };
+  return { status: "unavailable", reason: admission.kind === "absent" ? declared ?? "absent"
+    : admission.kind === "unsupported" ? "unsupported_producer" : "invalid" };
 }

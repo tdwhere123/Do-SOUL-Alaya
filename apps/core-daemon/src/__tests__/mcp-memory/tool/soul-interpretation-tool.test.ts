@@ -85,6 +85,7 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
   if (request.kind === "prepare_query") {
     return {
       kind: "prepare_query",
+      query_semantics_status: { status: "unavailable", reason: "absent" },
       outcome: { status: "preparation_required", missing: "query_semantics" },
       candidates: [],
       truncated: false,

@@ -196,7 +196,7 @@ export {
   createSourceSemanticInterpretationPublication, verifyPublishedSourceSemanticInterpretation,
   semanticInterpretationEvidenceId
 } from "./memory/evidence-create/source-interpretation-packet-publication.js";
-export { admitSourceSemanticQuery } from "./recall/conditional-field/query/source-semantic-query-admission.js";
+export { admitSourceSemanticQuery, sourceSemanticQueryStatus } from "./recall/conditional-field/query/source-semantic-query-admission.js";
 export {
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
   SourceSemanticQueryProducerRegistry, defaultSourceSemanticQueryProducerRegistry

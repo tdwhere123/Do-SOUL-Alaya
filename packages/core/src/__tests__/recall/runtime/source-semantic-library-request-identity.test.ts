@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { sourceSemanticLibraryRequestIdentity } from "../../../recall/runtime/source-semantic-library-recall.js";
+import { admitSourceSemanticQuery, sourceSemanticQueryStatus } from "../../../recall/conditional-field/query/source-semantic-query-admission.js";
 import { BUDGET, CLOCK, ORIGINAL, correspondenceFor, query, source } from "./source-semantic-proof-fixture.js";
 
 type Request = Parameters<typeof sourceSemanticLibraryRequestIdentity>[0];
@@ -7,6 +8,7 @@ const semantics = query();
 const request: Request = {
   workspace_id: "workspace", as_of: CLOCK, authorized_scopes: ["project", "global_core"],
   original_query: ORIGINAL, query_semantics: semantics,
+  query_semantics_status: sourceSemanticQueryStatus(admitSourceSemanticQuery(semantics, ORIGINAL)),
   semantic_correspondences: [correspondenceFor(source(), semantics)],
   budget: BUDGET, output_byte_limit: 1_000_000, access_policy: "query-conditioned-v1"
 };
@@ -21,6 +23,8 @@ it("binds every resolved request dimension including unused correspondence input
     { original_query: "which tools does Bob use?" },
     { source_id: "restricted-source" },
     { query_semantics: { ...semantics, return_variables: ["actor"] } },
+    { query_semantics: undefined, query_semantics_status: { status: "unavailable", reason: "absent" } },
+    { query_semantics: undefined, query_semantics_status: { status: "unavailable", reason: "invalid" } },
     { semantic_correspondences: [] },
     { semantic_correspondences: [...request.semantic_correspondences, request.semantic_correspondences[0]!] },
     { budget: { ...BUDGET, work_units: BUDGET.work_units - 1 } },
