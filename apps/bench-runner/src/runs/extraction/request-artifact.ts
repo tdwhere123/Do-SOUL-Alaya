@@ -7,8 +7,8 @@ import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   OFFICIAL_API_SYSTEM_PROMPT, OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT, SOURCE_SEMANTIC_SYSTEM_PROMPT,
   buildOfficialApiSourceCorpus, collectOfficialApiExtractionCoverage, buildOfficialApiSourcePacketRequest,
-  buildSourceSemanticRequest, collectSourceSemanticUnitPacks, stringifyOfficialApiExtractionRequest, type OfficialApiExtractionRequest,
-  type OfficialApiSourcePacketRequest, type SourceSemanticRequest,
+  prepareSourceSemanticRequest, collectSourceSemanticUnitPacks, stringifyOfficialApiExtractionRequest, type OfficialApiExtractionRequest,
+  type OfficialApiSourcePacketRequest, type SourceSemanticRequest, type SourceSemanticHostPreparation,
   SourceSemanticRevisionSchema, sourceSemanticBaseRequestDigest, type SourceSemanticRevision
 } from "@do-soul/alaya-soul";
 import type { LongMemEvalExtractionTurn } from "./turn-contents.js";
@@ -88,6 +88,11 @@ export function extractionArtifactPrompt(
 }
 
 export type ExtractionArtifactSource = OfficialApiExtractionRequest | ReturnType<typeof collectSourceSemanticUnitPacks>[number];
+export type SourceSemanticArtifactPreparation =
+  | Readonly<{ status: "ready"; source: ReturnType<typeof collectSourceSemanticUnitPacks>[number];
+      semantic: SourceSemanticRequest; userPrompt: string }>
+  | Readonly<{ status: "unsupported_source"; source: ReturnType<typeof collectSourceSemanticUnitPacks>[number];
+      disposition: Extract<SourceSemanticHostPreparation, { status: "unsupported_source" }> }>;
 
 /** Each extraction generation owns its source membership and packing. */
 export function extractionArtifactRequests(turn: Pick<LongMemEvalExtractionTurn, "turnContent"> &
@@ -113,8 +118,15 @@ export function sourceSemanticArtifactRequests(sourceCorpus: string, packing: Ex
   openSemantics: ExtractionOpenSemanticsGeneration): readonly Readonly<{
     source: ReturnType<typeof collectSourceSemanticUnitPacks>[number]; semantic: SourceSemanticRequest; userPrompt: string;
   }>[] {
+  return sourceSemanticArtifactPreparations(sourceCorpus, packing, openSemantics).flatMap((item) =>
+    item.status === "ready" ? [{ source: item.source, semantic: item.semantic, userPrompt: item.userPrompt }] : []);
+}
+
+/** The source inventory stays whole even when its interpretation has no legal request. */
+export function sourceSemanticArtifactPreparations(sourceCorpus: string, packing: ExtractionSourcePacking | undefined,
+  openSemantics: ExtractionOpenSemanticsGeneration): readonly SourceSemanticArtifactPreparation[] {
   const generation = parseExtractionOpenSemanticsGeneration(openSemantics);
-  return collectSourceSemanticUnitPacks(sourceCorpus, packing).map((source) => {
+  return collectSourceSemanticUnitPacks(sourceCorpus, packing).map((source): SourceSemanticArtifactPreparation => {
     const proposal = {
       sourceCorpus,
       ...(source.source_scope === undefined ? {} : { sourceScope: source.source_scope }),
@@ -123,9 +135,11 @@ export function sourceSemanticArtifactRequests(sourceCorpus: string, packing: Ex
       producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
       producer_version: SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
     };
-    const base = buildSourceSemanticRequest(proposal);
-    const revision = generation.revisions?.find((row) => row.base_request_sha256 === sourceSemanticBaseRequestDigest(base));
-    const semantic = revision === undefined ? base : buildSourceSemanticRequest({ ...proposal, revision });
-    return { source, semantic, userPrompt: JSON.stringify(semantic) };
+    const base = prepareSourceSemanticRequest(proposal);
+    if (base.status === "unsupported_source") return { status: "unsupported_source", source, disposition: base };
+    const revision = generation.revisions?.find((row) => row.base_request_sha256 === sourceSemanticBaseRequestDigest(base.request));
+    const revised = revision === undefined ? base : prepareSourceSemanticRequest({ ...proposal, revision });
+    if (revised.status !== "ready") throw new AlayaError("CONFLICT", "source revision changed host preparation capacity");
+    return { status: "ready", source, semantic: revised.request, userPrompt: JSON.stringify(revised.request) };
   });
 }

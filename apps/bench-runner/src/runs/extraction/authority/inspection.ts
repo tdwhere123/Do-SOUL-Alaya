@@ -43,6 +43,8 @@ const AUTHORIZED_EXTRACTION_OPERATION = "longmemeval-extraction-fill-v1";
 
 export interface ExtractionAuthorityInspection {
   readonly observation: ExtractionAuthorityObservation;
+  readonly sourceOccurrences: number;
+  readonly unsupportedSourceOccurrences: number;
   readonly missingKeys: readonly string[];
   readonly nonemptyKeys?: readonly string[];
   readonly invalidShards: readonly ExtractionRepairShard[];
@@ -99,7 +101,7 @@ export async function inspectExtractionAuthority(input: {
     new Set(input.preservedValidExclusionKeys ?? [])
   );
   const observation = buildAuthorityObservation(input, manifestIdentity, config, window, completion);
-  return buildExtractionAuthorityInspection(input, config, shardStatus, observation);
+  return buildExtractionAuthorityInspection(input, config, shardStatus, observation, window);
 }
 
 function inspectAuthorityCompletion(
@@ -142,6 +144,7 @@ function buildAuthorityObservation(
       offset: window.windowOffset,
       limit: window.questionCount,
       windowUniqueCacheKeys: window.windowUniqueCacheKeys,
+      unsupportedSourceOccurrences: window.unsupportedSourceOccurrences,
       authorizedUniqueCacheKeys: completion.expectedTurns
     }),
     keyDigest: completion.expectedKeySetSha256,
@@ -207,10 +210,13 @@ function buildExtractionAuthorityInspection(
   input: ExtractionAuthorityInspectionInput,
   config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
   shardStatus: ReturnType<typeof collectShardStatus>,
-  observation: ExtractionAuthorityObservation
+  observation: ExtractionAuthorityObservation,
+  window: ExtractionAuthorityWindow
 ): ExtractionAuthorityInspection {
   return Object.freeze({
     observation,
+    sourceOccurrences: window.windowTurnOccurrences,
+    unsupportedSourceOccurrences: window.unsupportedSourceOccurrences,
     missingKeys: Object.freeze(shardStatus.missingKeys),
     nonemptyKeys: Object.freeze(shardStatus.nonemptyKeys ?? []),
     invalidShards: Object.freeze(shardStatus.invalidShards),

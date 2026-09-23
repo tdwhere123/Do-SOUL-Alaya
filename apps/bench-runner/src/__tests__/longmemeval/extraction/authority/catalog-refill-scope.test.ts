@@ -200,6 +200,8 @@ function inspected(missingKeys: readonly string[]): ExtractionAuthorityInspectio
         orphanTurns: 0
       }
     },
+    sourceOccurrences: 4,
+    unsupportedSourceOccurrences: 0,
     missingKeys,
     invalidShards: [],
     preservedValidClosure: {

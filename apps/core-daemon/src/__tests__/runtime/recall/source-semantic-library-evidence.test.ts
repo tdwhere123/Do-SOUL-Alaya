@@ -130,7 +130,7 @@ it.each([31, 32, 33])("preserves finite pair closure and the 32-pair request cap
       return received.semantic_correspondence;
     });
     const recallRequest = { kind: "recall" as const, query_handle: first.query_handle!,
-      semantic_correspondences: correspondences, accepts_unreviewed_conditional_results: true,
+      semantic_correspondences: correspondences, accepts_unreviewed_conditional_results: true as const,
       budget: ACCESS_BUDGET, output_byte_limit: OUTPUT_BYTES };
     if (count === 33) {
       await expect(accessCall(execute, recallRequest)).rejects.toThrow(/expected array to have <=32 items/u);

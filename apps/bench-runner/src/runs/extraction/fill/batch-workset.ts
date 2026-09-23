@@ -1,7 +1,8 @@
 import { assertSourcePacketShardCapacity } from "../cache/source-packet-artifact.js";
 import { assertSourceSemanticShardCapacity } from "../cache/source-semantic-artifact.js";
 import { buildOfficialApiSourceCorpus, sourceSemanticTransportUnits } from "@do-soul/alaya-soul";
-import { extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode, type ExtractionArtifactSource } from "../request-artifact.js";
+import { extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode,
+  sourceSemanticArtifactPreparations, type ExtractionArtifactSource, type SourceSemanticArtifactPreparation } from "../request-artifact.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
 import { createHash } from "node:crypto";
 import {
@@ -36,7 +37,15 @@ export interface BatchExtractionWorkset {
   readonly deterministicEmptyRequests: readonly BatchExtractionRequest[];
   readonly cachedRequests: readonly BatchExtractionRequest[];
   readonly units: readonly BatchExtractionSourceUnit[];
+  readonly unsupportedSources: readonly BatchUnsupportedSource[];
 }
+
+export type BatchUnsupportedSource = Readonly<{
+  messageIds: readonly string[];
+  datasetRevision: string;
+  disposition: Extract<SourceSemanticArtifactPreparation, { status: "unsupported_source" }>["disposition"];
+  sourceUnitCount: number;
+}>;
 
 type BatchPreparedSources = Pick<PreparedExtractionFill,
   "config" | "datasetRevision" | "executionExtractionTurns" | "occurrenceExtractionTurns">;
@@ -52,6 +61,7 @@ export function prepareBatchExtractionWorkset(input: {
   const turns = input.turns ?? prepared.executionExtractionTurns;
   const selectedKeys = selectedRequestKeys(prepared, turns, input.executionCacheKeys);
   const requests = collectBatchRequests(prepared, turns, selectedKeys);
+  const unsupportedSources = collectUnsupportedSources(prepared, prepared.occurrenceExtractionTurns ?? turns);
   const lines: GeminiBatchLine[] = [];
   const deterministicEmptyRequests: BatchExtractionRequest[] = [];
   const cachedRequests: BatchExtractionRequest[] = [];
@@ -72,8 +82,29 @@ export function prepareBatchExtractionWorkset(input: {
     requests,
     deterministicEmptyRequests: Object.freeze(deterministicEmptyRequests),
     cachedRequests: Object.freeze(cachedRequests),
-    units: Object.freeze(requests.flatMap((item) => item.units))
+    units: Object.freeze(requests.flatMap((item) => item.units)),
+    unsupportedSources
   });
+}
+
+function collectUnsupportedSources(prepared: BatchPreparedSources,
+  turns: readonly LongMemEvalExtractionTurn[]): readonly BatchUnsupportedSource[] {
+  if (prepared.config.openSemantics === undefined) return [];
+  const rows: BatchUnsupportedSource[] = [];
+  const seen = new Set<string>();
+  for (const turn of turns) {
+    const messageIds = turn.turnMessages.map((message) => message.message_id);
+    for (const item of sourceSemanticArtifactPreparations(
+      buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages), prepared.config.sourcePacking, prepared.config.openSemantics)) {
+      if (item.status !== "unsupported_source") continue;
+      const identity = JSON.stringify([prepared.datasetRevision, messageIds, item.disposition.source_digest]);
+      if (seen.has(identity)) throw new ExtractionCacheInvariantError("Batch unsupported source occurrence is duplicated");
+      seen.add(identity);
+      rows.push(Object.freeze({ messageIds, datasetRevision: prepared.datasetRevision,
+        disposition: item.disposition, sourceUnitCount: item.source.source_assertions.length }));
+    }
+  }
+  return Object.freeze(rows);
 }
 
 function selectedRequestKeys(

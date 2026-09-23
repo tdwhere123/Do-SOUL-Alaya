@@ -12,7 +12,8 @@ import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/r
 import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { prepareSourcePublicationAssociations } from "../../../runs/snapshot/source-records/prepare-associations.js";
-import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
+import { parseSourcePublicationAssociations, publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
+import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { runSemanticChainLauncher } from "../../../runs/semantic-chain/launch.js";
 
 const MODEL = "gemini-2.5-flash-lite";
@@ -89,7 +90,9 @@ it("prepares the fixed CLI window and publishes one admitted interpretation at b
   const before = retained.map(path => readFileSync(path, "utf8"));
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   expect(await runSemanticChainLauncher(["associate", "--config", config, "--preflight", f.preflightPath, "--out", out])).toBe(0);
-  const associations = JSON.parse(readFileSync(`${out}.associations.json`, "utf8"));
+  const sidecar = JSON.parse(readFileSync(`${out}.associations.json`, "utf8"));
+  expect(sidecar.contract).toBe("source-publication-associations-v2");
+  const associations = sidecar.publicationAssociations;
   expect(associations.map((row: { source_id: string }) => row.source_id)).toEqual(["fixture:repeated-s0-r0", "fixture:repeated-s1-r0"]);
   expect(new Set(associations.map((row: { generation_key: string }) => row.generation_key)).size).toBe(1);
   expect(new Set(associations.map((row: { request_digest: string }) => row.request_digest)).size).toBe(1);
@@ -142,7 +145,7 @@ it("associates unique and repeated occurrences with only the independently confi
 
 it("keeps invalid artifacts, missing artifacts, and missing retained request proof explicitly unassociated", async () => {
   const f = await fixture();
-  writeFileSync(f.preflightPath, JSON.stringify({ planned_requests: [] }));
+  writeFileSync(f.preflightPath, JSON.stringify({ ...f.preflight, planned_requests: [] }));
   const unproven = await prepareSourcePublicationAssociations(f.population, f.preflightPath, join(cacheRoot, "unproven.json"));
   expect(unproven.publicationAssociations).toEqual([]);
   expect(unproven.sources.every(row => row.reason === "unproven_retained_request")).toBe(true);
@@ -162,7 +165,7 @@ it("rejects duplicate or foreign retained request identity before writing associ
   const f = await fixture();
   const line = f.preflight.planned_requests[0]!;
   for (const planned_requests of [[line, line], [{ ...line, requestSha256: "a".repeat(64) }]]) {
-    writeFileSync(f.preflightPath, JSON.stringify({ planned_requests }));
+    writeFileSync(f.preflightPath, JSON.stringify({ ...f.preflight, planned_requests }));
     const out = join(cacheRoot, "rejected.json");
     await expect(prepareSourcePublicationAssociations(f.population, f.preflightPath, out)).rejects.toThrow("foreign or duplicate request identity");
     expect(existsSync(out)).toBe(false);
@@ -179,4 +182,66 @@ it("rejects duplicate or foreign retained request identity before writing associ
   await expect(prepareSourcePublicationAssociations(f.population, f.preflightPath, join(cacheRoot, "duplicate-owner.json")))
     .rejects.toThrow("repeats an owning request key");
   expect(existsSync(join(cacheRoot, "duplicate-owner.json"))).toBe(false);
+}, 60000);
+
+it("retains a 65-unit source beside a ready 64-unit source through association and SQLite reopen", async () => {
+  setExtractionCredentialFixture();
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid");
+  const fetchGuard = vi.fn<typeof fetch>(async () => { throw new Error("provider use forbidden"); });
+  vi.stubGlobal("fetch", fetchGuard);
+  const longQuestion = (id: string, assistantCount: number) => ({ ...question(id, []),
+    haystack_session_ids: ["shared-session"], haystack_dates: ["2023-09-10"],
+    haystack_sessions: [[{ role: "user" as const, content: Array(32).fill("I completed alpha.").join(" ") },
+      { role: "assistant" as const, content: [
+        ...Array(assistantCount - 1).fill("Acknowledged."), "再次确认。"
+      ].join(" ") }]] });
+  await writeDataset([longQuestion("ready", 32), longQuestion("excess", 33)]);
+  const population = { name: "fixture", dataDir, pinnedMetaRoot, cacheRoot,
+    model: MODEL, requestProfile: REQUEST_PROFILE };
+  const census = await censusCompleteSourceRecords({ population: population.name, dataDir, pinnedMetaRoot });
+  expect(census.records.map((source) => source.units.length)).toEqual([64, 65]);
+  const preflight = await preflightExtractionBatch({ variant: "longmemeval_s", cacheRoot, dataDir, pinnedMetaRoot,
+    sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    batch: { operation: "prepare", limits: { maxJobs: 1, maxRequestsPerJob: 10, maxFileBytes: 1000000,
+      maxInputTokensPerJob: 1000000, maxEnqueuedTokens: 1000000, maxOutputTokens: 4096, maxUsd: 10,
+      inputUsdPerMillion: 1, outputUsdPerMillion: 2, deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 } } });
+  expect(preflight).toMatchObject({ contract: "extraction-batch-preflight-v2", provider_calls: 0,
+    source_occurrences: 2, unsupported_source_occurrences: 1, total_requests: 1, selected_requests: 1 });
+  expect(preflight.unsupported_sources).toMatchObject([{ status: "unsupported_source", assertion_count: 65,
+    reason: { dimension: "assertions", actual: 65, limit: 64 }, provider_attempts: 0 }]);
+  expect(preflight.planned_requests).toHaveLength(1);
+  const preflightPath = join(cacheRoot, "mixed-preflight.json");
+  writeFileSync(preflightPath, JSON.stringify(preflight));
+  const outputPath = join(cacheRoot, "mixed-associations.json");
+  const association = await prepareSourcePublicationAssociations(population, preflightPath, outputPath);
+  expect(association).toMatchObject({ contract: "source-publication-association-preparation-v2",
+    source_occurrences: 2, unsupported_source_occurrences: 1, ready_request_keys: 1 });
+  expect(association.sources.map((source) => source.status)).toEqual(["unbound", "unsupported_source"]);
+  const bindings = parseSourcePublicationAssociations(JSON.parse(readFileSync(`${outputPath}.associations.json`, "utf8")));
+  expect(bindings).toHaveLength(1);
+  expect(bindings.filter((binding) => "generation_key" in binding)).toHaveLength(0);
+  const unsupported = bindings.find((binding) => "status" in binding)!;
+  await expect(publishSourceSemanticSnapshot({ snapshotPath: join(cacheRoot, "tampered.sqlite"),
+    dataDirRoot: join(cacheRoot, "tampered-publication"), recordedAt: CLOCK, producerCommit: "a".repeat(40),
+    populations: [{ ...population, cacheRoots: [cacheRoot], publicationAssociations: bindings.map((binding) =>
+      binding === unsupported ? { ...binding, source_digest: "a".repeat(64) } : binding) }] }))
+    .rejects.toThrow(/unsupported source disposition/u);
+  expect(existsSync(join(cacheRoot, "tampered.sqlite"))).toBe(false);
+  const report = await publishSourceSemanticSnapshot({ snapshotPath: join(cacheRoot, "mixed.sqlite"),
+    dataDirRoot: join(cacheRoot, "mixed-publication"), recordedAt: CLOCK, producerCommit: "a".repeat(40),
+    populations: [{ ...population, cacheRoots: [cacheRoot], publicationAssociations: bindings }] });
+  expect(report).toMatchObject({ schema_version: 3, census_count: 2, admitted_count: 2,
+    published_count: 0, host_preparation_counts: { ready: 1, unsupported_source: 1 } });
+  expect(report.sources[1]).toMatchObject({ source_interpretation: "absent", publication: "not_attempted",
+    host_preparation: { status: "unsupported_source" }, provider_attempts: 0 });
+  const db = new Database(report.snapshot_path, { readonly: true });
+  try {
+    expect(db.prepare("SELECT source_id, source_version, source_body FROM source_records ORDER BY source_id").all())
+      .toEqual(census.records.slice().sort((a, b) => a.source_id.localeCompare(b.source_id)).map((source) => ({
+        source_id: source.source_id, source_version: source.source_version, source_body: source.content_bytes
+      })));
+  } finally { db.close(); }
+  expect(fetchGuard).not.toHaveBeenCalled();
 }, 60000);

@@ -2,12 +2,13 @@ import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
 import { censusCompleteSourceRecords } from "./census.js";
-import { listRetainedSourceSemanticKeys, type SourcePublicationPopulation } from "./publish.js";
+import { listRetainedSourceSemanticKeys, type SourcePublicationAssociation,
+  type SourcePublicationPopulation } from "./publish.js";
 import { inspectCachedSourceSemantic } from "../../extraction/cache/source-semantic-artifact.js";
 import { prepareSourceSemanticBatchLine } from "../../extraction/fill/batch/source-semantic-interpretation.js";
 import { readBoundedCanonicalUtf8Artifact } from "../../extraction/cache-audit/bounded-artifact-reader.js";
 import { chainIdentity, writeChainArtifact, writeChainJson } from "../../semantic-chain/contract.js";
-import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactRequests,
+import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparations,
   parseExtractionOpenSemanticsGeneration, type ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
 
 const LineSchema = z.object({ key: z.string(), unitKeys: z.array(z.string()), requestSha256: z.string(),
@@ -26,7 +27,8 @@ export async function prepareSourcePublicationAssociations(
     dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
     ...(population.questionWindow === undefined ? {} : { questionWindow: population.questionWindow }) });
   const raw = readBoundedCanonicalUtf8Artifact({ path: retainedPreflightPath, maxBytes: 32 * 1024 * 1024, label: "retained source preflight" });
-  const lines = z.object({ planned_requests: z.array(LineSchema) }).passthrough().parse(JSON.parse(raw)).planned_requests;
+  const lines = z.object({ contract: z.literal("extraction-batch-preflight-v2"),
+    planned_requests: z.array(LineSchema) }).passthrough().parse(JSON.parse(raw)).planned_requests;
   const planned = new Map<string, z.infer<typeof LineSchema>>();
   for (const line of lines) {
     const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
@@ -41,18 +43,27 @@ export async function prepareSourcePublicationAssociations(
   // These are new host associations, not claims about a retained line's historical unitKeys.
   // The census owns each occurrence; the extraction owner independently rebuilds its current request.
   const expected = new Map<string, { requestDigest: string; sources: typeof census.records[number][] }>();
+  const unsupported = new Map<string, Extract<SourcePublicationAssociation, { status: "unsupported_source" }>>();
   for (const source of census.records) {
-    const requests = sourceSemanticArtifactRequests(source.content_bytes, "complete-source", generation);
-    if (requests.length !== 1) throw new AlayaError("CONFLICT", "complete source association requires exactly one current request");
-    const line = prepareSourceSemanticBatchLine(requests[0]!.semantic, [], population);
+    const preparations = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", generation);
+    if (preparations.length !== 1) throw new AlayaError("CONFLICT", "complete source association requires exactly one host preparation");
+    const prepared = preparations[0]!;
+    if (prepared.status === "unsupported_source") {
+      unsupported.set(source.source_id, { source_id: source.source_id, source_version: source.source_version,
+        content_digest: source.content_digest, corpus_digest: source.corpus_digest,
+        ...prepared.disposition, provider_attempts: 0 });
+      continue;
+    }
+    const line = prepareSourceSemanticBatchLine(prepared.semantic, [], population);
     const match = expected.get(line.key) ?? { requestDigest: line.requestSha256, sources: [] };
     if (match.requestDigest !== line.requestSha256) throw new AlayaError("CONFLICT", "current source requests have ambiguous owning key");
     match.sources.push(source);
     expected.set(line.key, match);
   }
-  const associations: NonNullable<SourcePublicationPopulation["publicationAssociations"]>[number][] = [];
+  const associations: SourcePublicationAssociation[] = [...unsupported.values()];
   const artifacts: { key: string; status: "associated" | "invalid" | "unbound"; sources: string[] }[] = [];
-  const reasons = new Map(census.records.map((source) => [source.source_id, "missing_current_artifact"]));
+  const reasons = new Map(census.records.filter((source) => !unsupported.has(source.source_id))
+    .map((source) => [source.source_id, "missing_current_artifact"]));
   const keys = listRetainedSourceSemanticKeys(population.cacheRoot);
   if (new Set(keys).size !== keys.length) throw new AlayaError("CONFLICT", "retained source cache repeats an owning request key");
   for (const key of keys) {
@@ -76,13 +87,18 @@ export async function prepareSourcePublicationAssociations(
         generation_key: key, request_digest: native.requestDigest });
     }
   }
-  const result = { contract: "source-publication-association-preparation-v1", provenance: "new_host_publication_association",
+  const result = { contract: "source-publication-association-preparation-v2", provenance: "new_host_publication_association",
     population: population.name, dataset_sha256: census.dataset_sha256, retained_preflight_digest: chainIdentity(JSON.parse(raw)),
+    source_occurrences: census.records.length, unsupported_source_occurrences: unsupported.size,
+    ready_request_keys: expected.size,
     publicationAssociations: associations, artifacts,
     sources: census.records.map((source) => ({ source_id: source.source_id, source_version: source.source_version,
-      status: reasons.has(source.source_id) ? "unbound" : "associated",
+      status: unsupported.has(source.source_id) ? "unsupported_source" : reasons.has(source.source_id) ? "unbound" : "associated",
+      ...(unsupported.has(source.source_id) ? { preparation: unsupported.get(source.source_id) } : {}),
       ...(reasons.has(source.source_id) ? { reason: reasons.get(source.source_id) } : {}) })) };
   writeChainArtifact(outputPath, result);
-  writeChainJson(`${outputPath}.associations.json`, associations);
+  writeChainJson(`${outputPath}.associations.json`, {
+    contract: "source-publication-associations-v2", publicationAssociations: associations
+  });
   return result;
 }

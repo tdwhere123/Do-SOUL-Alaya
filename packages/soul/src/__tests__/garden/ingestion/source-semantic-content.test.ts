@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildSourceSemanticRequest as buildCurrentRequest, parseSourceSemanticRequest, sourceSemanticRequestCatalog,
+import { buildSourceSemanticRequest as buildCurrentRequest, prepareSourceSemanticRequest,
+  parseSourceSemanticRequest, sourceSemanticRequestCatalog,
   sourceSemanticResponseJsonSchema, sourceSemanticSystemPrompt } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import { receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-content-guidance.js";
 import { officialApiExtractionResponseSchema, officialApiExtractionResponseSchemaPreimage } from "../../../garden/ingestion/official-api/response-schema.js";
+import { indexSourceSemanticUnits } from "../../../garden/ingestion/official-api/source-semantic-units.js";
 
 const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor might read it.", assertionIds: [1, 2],
   source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
@@ -18,6 +20,29 @@ const proposeSourceSemantics = (value: Parameters<typeof buildCurrentRequest>[0]
   receiveSourceSemantics(response.rawJson, buildSourceSemanticRequest(value), value);
 
 describe("retained source-bound semantic content compilation", () => {
+  it("keeps legal complete-source requests identical and classifies only valid excess source units", () => {
+    const corpus = (assistantSentences: number) => `User: ${Array(32).fill("Café α.").join(" ")}\n` +
+      `Assistant: ${Array(assistantSentences).fill("再次。").join(" ")}`;
+    const source = (assistantSentences: number) => {
+      const sourceCorpus = corpus(assistantSentences);
+      return { ...input, sourceCorpus, sourceScope: "complete-source" as const,
+        assertionIds: indexSourceSemanticUnits(sourceCorpus).map((unit) => unit.assertion_id) };
+    };
+    const ready = source(32), excess = source(33);
+    expect(ready.assertionIds).toHaveLength(64);
+    expect(excess.assertionIds).toHaveLength(65);
+    expect(prepareSourceSemanticRequest(ready)).toEqual({ status: "ready", request: buildCurrentRequest(ready) });
+    const unsupported = prepareSourceSemanticRequest(excess);
+    expect(unsupported).toMatchObject({ status: "unsupported_source", source_scope: "complete-source",
+      source_unit_contract: "source-semantic-units-v1", assertion_count: 65,
+      reason: { dimension: "assertions", actual: 65, limit: 64 } });
+    expect(unsupported).not.toHaveProperty("request");
+    expect(() => prepareSourceSemanticRequest({ ...excess, assertionIds: excess.assertionIds.slice(1) }))
+      .toThrow(/every source unit/u);
+    expect(() => prepareSourceSemanticRequest({ ...excess, producer_id: "" })).toThrow();
+    expect(() => prepareSourceSemanticRequest({ ...excess, profile: {} as never })).toThrow();
+  });
+
   it("compiles promise, coreference and universal possibility without asserting their content", () => {
     const received = proposeSourceSemantics(input, { rawJson: raw() });
     expect(received.outcome).toEqual({ status: "interpreted", gaps: [] });

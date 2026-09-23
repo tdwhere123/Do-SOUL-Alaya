@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
-import { buildSourceReferenceCatalog, sourceReferenceResolver } from "../../evidence/source-reference.js";
+import { buildSourceReferenceCatalog, sourceReferenceCapacityReason, SourceReferenceCapacityReasonSchema,
+  sourceReferenceResolver } from "../../evidence/source-reference.js";
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
@@ -53,4 +54,16 @@ it("retains a source-bound empty catalog without admitting any reference", () =>
   const resolver = sourceReferenceResolver(catalog, sha);
   expect(() => resolver.resolve(catalog.catalog_id, 1, { first: "a1s0", last: "a1s0" })).toThrow();
   expect(buildSourceReferenceCatalog(sha("other"), [], sha).catalog_id).not.toBe(catalog.catalog_id);
+});
+
+it("classifies only valid sources that exceed the shared catalog capacity", () => {
+  const assertions = Array.from({ length: 65 }, (_, index) => ({ assertion_id: index + 1, text: `Café ${index}.` }));
+  expect(sourceReferenceCapacityReason(assertions.slice(0, 64))).toBeNull();
+  expect(sourceReferenceCapacityReason(assertions)).toEqual({ dimension: "assertions", actual: 65, limit: 64 });
+  expect(SourceReferenceCapacityReasonSchema.safeParse({ dimension: "assertions", actual: 65, limit: 63 }).success).toBe(false);
+  expect(() => sourceReferenceCapacityReason([...assertions.slice(0, 64), assertions[0]!])).toThrow(/duplicate/u);
+  expect(() => sourceReferenceCapacityReason([...assertions.slice(0, 64), { assertion_id: 65, text: "\ud800" }]))
+    .toThrow(/surrogate/u);
+  expect(sourceReferenceCapacityReason([{ assertion_id: 1, text: " ".repeat(32769) }]))
+    .toEqual({ dimension: "segments", actual: 32769, limit: 32768 });
 });

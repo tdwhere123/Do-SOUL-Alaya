@@ -8,7 +8,8 @@ import { InterpretationNodeCoordinateSchema } from "../recall/conditional-field/
 import { CompletenessReportSchema } from "../recall/conditional-field/index-view.js";
 import { BoundedIdSchema, BoundedLabelSchema } from "../shared/schema-primitives.js";
 import { SourceAssertionIdSchema, SourceTextSpanSchema } from "../evidence/source-selection.js";
-import { SourceReferenceCatalogSchema, SourceReferenceSchema, sourceReferenceResolver, type SourceReferenceCatalog } from "../evidence/source-reference.js";
+import { SourceReferenceCatalogSchema, SourceReferenceSchema, sourceReferenceResolver,
+  SOURCE_REFERENCE_MAX_ASSERTIONS, type SourceReferenceCatalog } from "../evidence/source-reference.js";
 import { SourceEvidenceTargetSchema } from "../recall/conditional-field/product-identity.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
 import { Sha256DigestSchema, Sha256HexSchema } from "../recall/conditional-field/common.js";
@@ -40,7 +41,7 @@ export const SourceSemanticSourceBindingSchema = z.object({
   source_id: BoundedIdSchema,
   source_version: BoundedIdSchema,
   content_digest: Sha256DigestSchema,
-  assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(64).readonly().optional()
+  assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly().optional()
 }).strict().readonly();
 
 export const SourceSemanticInterpretationSchema = z.object({

@@ -51,6 +51,8 @@ export interface PreparedExtractionFill {
   readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly occurrenceExtractionTurns?: readonly LongMemEvalExtractionTurn[];
   readonly requestedTurns: number;
+  readonly sourceOccurrences: number;
+  readonly unsupportedSourceOccurrences: number;
   readonly executionRequestedTurns: number;
   readonly datasetRevision: string;
   readonly variant: LongMemEvalVariant;
@@ -69,6 +71,8 @@ export interface InspectedExtractionFill {
   readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly occurrenceExtractionTurns?: readonly LongMemEvalExtractionTurn[];
   readonly requestedTurns: number;
+  readonly sourceOccurrences: number;
+  readonly unsupportedSourceOccurrences: number;
   readonly executionRequestedTurns: number;
   readonly datasetRevision: string;
   readonly variant: LongMemEvalVariant;
@@ -119,6 +123,8 @@ function adoptInspectedExtractionFill(
     executionExtractionTurns: inspected.executionExtractionTurns,
     occurrenceExtractionTurns: inspected.occurrenceExtractionTurns,
     requestedTurns: inspected.requestedTurns,
+    sourceOccurrences: inspected.sourceOccurrences,
+    unsupportedSourceOccurrences: inspected.unsupportedSourceOccurrences,
     executionRequestedTurns: inspected.executionRequestedTurns,
     datasetRevision: inspected.datasetRevision,
     variant: inspected.variant,
@@ -153,6 +159,8 @@ export async function inspectExtractionFillPreparation(
     executionExtractionTurns: window.executionExtractionTurns,
     occurrenceExtractionTurns: window.occurrenceExtractionTurns,
     requestedTurns: window.requestedTurns,
+    sourceOccurrences: window.windowTurnOccurrences,
+    unsupportedSourceOccurrences: window.unsupportedSourceOccurrences,
     executionRequestedTurns: window.executionRequestedTurns,
     datasetRevision: window.datasetRevision,
     variant: options.variant,
@@ -202,6 +210,8 @@ export function pinInspectedExtractionFill(
     executionExtractionTurns: inspected.executionExtractionTurns,
     occurrenceExtractionTurns: inspected.occurrenceExtractionTurns,
     requestedTurns: inspected.requestedTurns,
+    sourceOccurrences: inspected.sourceOccurrences,
+    unsupportedSourceOccurrences: inspected.unsupportedSourceOccurrences,
     executionRequestedTurns: inspected.executionRequestedTurns,
     datasetRevision: inspected.datasetRevision,
     variant: inspected.variant,

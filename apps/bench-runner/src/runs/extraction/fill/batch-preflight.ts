@@ -21,6 +21,9 @@ export async function preflightExtractionBatch(options: ExtractionFillOptions & 
   }
   const workset = prepareBatchExtractionWorkset({ prepared: inspected, cacheRoot: options.cacheRoot,
     ...(selectedKeys === undefined ? {} : { executionCacheKeys: new Set(selectedKeys) }) });
+  if (workset.unsupportedSources.length !== inspected.unsupportedSourceOccurrences) {
+    throw new AlayaError("CONFLICT", "Batch host preparation lost unsupported source occurrences");
+  }
   const route = resolveExtractionTransportRoute(inspected.config);
   if (!isGeminiGenerateContentProfile(inspected.config.requestProfile)) {
     throw new AlayaError("VALIDATION", "unsupported Batch request profile");
@@ -33,8 +36,14 @@ export async function preflightExtractionBatch(options: ExtractionFillOptions & 
   const content = { model: route.model, requestProfile: inspected.config.requestProfile, lines, limits: options.batch.limits };
   const preview = canonicalBatchPlan({ ...content, identity: batchDigest(JSON.stringify(content)) });
   const jobs = prepareBatchJobs(preview);
-  return { contract: "extraction-batch-preflight-v1" as const, execution_authorized: false as const,
+  return { contract: "extraction-batch-preflight-v2" as const, execution_authorized: false as const,
     provider_calls: 0 as const, dataset_revision: inspected.datasetRevision,
+    source_occurrences: inspected.sourceOccurrences,
+    unsupported_source_occurrences: workset.unsupportedSources.length,
+    unsupported_sources: workset.unsupportedSources.map((source) => ({
+      message_ids: source.messageIds, dataset_revision: source.datasetRevision,
+      ...source.disposition, provider_attempts: 0 as const
+    })),
     total_requests: inspected.completion.expectedTurns, selected_requests: lines.length,
     selected_keys: selectedKeys ?? lines.map((line) => line.key),
     cached_requests: workset.cachedRequests.length, config: { ...inspected.config, apiKey: null },

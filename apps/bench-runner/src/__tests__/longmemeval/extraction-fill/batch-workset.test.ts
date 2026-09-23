@@ -55,6 +55,32 @@ describe("fresh Batch source workset", () => {
     expect(plan.lines.every((line) => JSON.parse(line.userPrompt).source_request.source_unit_contract === "source-semantic-units-v1")).toBe(true);
   });
 
+  it("prepares legal requests beside complete sources over catalog capacity without inventing a key", () => {
+    const source = (assistantCount: number, suffix: string): LongMemEvalExtractionTurn => {
+      const user = Array(32).fill("Café α.").join(" ");
+      const assistant = Array(assistantCount).fill("再次。").join(" ");
+      return { turnContent: `${user} ${assistant}`, turnMessages: [
+        { message_id: `user-${suffix}`, role: "user", content: user },
+        { message_id: `assistant-${suffix}`, role: "assistant", content: assistant }
+      ] };
+    };
+    const ready = source(32, "ready"), excess = source(33, "excess");
+    const preparedSources = { ...prepared([ready, excess]),
+      config: { ...config, sourcePacking: "complete-source" as const,
+        openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION } };
+    const plan = prepareBatchExtractionWorkset({ cacheRoot: root, prepared: preparedSources });
+    expect(plan.lines).toHaveLength(1);
+    expect(plan.requests).toHaveLength(1);
+    expect(plan.unsupportedSources).toMatchObject([{ messageIds: ["user-excess", "assistant-excess"],
+      datasetRevision: "synthetic-revision", sourceUnitCount: 65,
+      disposition: { status: "unsupported_source", assertion_count: 65,
+        reason: { dimension: "assertions", actual: 65, limit: 64 } } }]);
+    expect(plan.lines[0]!.key).toBe(computeExtractionTurnCacheKeys(config.model, config.requestProfile,
+      plan.lines[0]!.systemPrompt, ready, "complete-source", undefined, EXTRACTION_OPEN_SEMANTICS_GENERATION)[0]);
+    expect(computeExtractionTurnCacheKeys(config.model, config.requestProfile, plan.lines[0]!.systemPrompt,
+      excess, "complete-source", undefined, EXTRACTION_OPEN_SEMANTICS_GENERATION)).toEqual([]);
+  });
+
   it("shares duplicate request work while retaining distinct original message occurrences", () => {
     const first = turn("I moved to Berlin in March.", "one");
     const second = turn(first.turnContent, "two");

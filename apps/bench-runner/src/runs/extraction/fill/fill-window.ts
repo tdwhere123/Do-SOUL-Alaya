@@ -28,6 +28,7 @@ interface ExtractionFillWindow {
   readonly executionRequestedTurns: number;
   readonly windowUniqueCacheKeys: number;
   readonly windowTurnOccurrences: number;
+  readonly unsupportedSourceOccurrences: number;
   readonly executionTurnOccurrences: number;
   readonly questionCount: number;
   readonly datasetRevision: string;
@@ -65,6 +66,7 @@ function prepareExpansionWindow(
     executionRequestedTurns: keySpace.distinctExtractionRequestCount,
     windowUniqueCacheKeys: keySpace.distinctExtractionRequestCount,
     windowTurnOccurrences: expansion.nextTurns.length,
+    unsupportedSourceOccurrences: keySpace.unsupportedSourceOccurrences,
     executionTurnOccurrences: expansion.nextTurns.length,
     questionCount: expansion.nextQuestions.length,
     datasetRevision: expansion.datasetRevision,
@@ -101,6 +103,7 @@ async function prepareDatasetWindow(
     executionRequestedTurns: executionKeySpace.distinctExtractionRequestCount,
     windowUniqueCacheKeys: windowKeySpace.distinctExtractionRequestCount,
     windowTurnOccurrences: windowKeySpace.turnOccurrences,
+    unsupportedSourceOccurrences: windowKeySpace.unsupportedSourceOccurrences,
     executionTurnOccurrences: executionKeySpace.turnOccurrences,
     questionCount: questions.length,
     datasetRevision: dataset.sha256,

@@ -307,10 +307,11 @@ export {
   SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT,
   SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
-  sourceSemanticSystemPrompt, buildSourceSemanticRequest, buildSourceSemanticQueryRequest,
+  sourceSemanticSystemPrompt, buildSourceSemanticRequest, prepareSourceSemanticRequest, SourceSemanticUnsupportedSourceSchema,
+  buildSourceSemanticQueryRequest,
   buildSourceSemanticCorrespondenceRequest, parseSourceSemanticRequest, sourceSemanticRequestCatalog, sourceSemanticResponseJsonSchema,
   sourceSemanticQueryResponseJsonSchema, sourceSemanticCorrespondenceResponseJsonSchema,
-  type SourceSemanticRequest, type SourceSemanticProposalInput, type SourceSemanticQueryProposalInput,
+  type SourceSemanticRequest, type SourceSemanticProposalInput, type SourceSemanticHostPreparation, type SourceSemanticQueryProposalInput,
   type SourceSemanticCorrespondenceProposalInput, type SourceInterpretationDescriptor, type SourceSemanticQueryRequest,
   type SourceSemanticCorrespondenceRequest
 } from "./garden/ingestion/official-api/source-semantic-request.js";

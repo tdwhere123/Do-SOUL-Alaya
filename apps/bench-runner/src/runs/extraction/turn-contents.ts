@@ -10,6 +10,7 @@ import {
   type LongMemEvalRoundMessage,
   type LongMemEvalQuestion
 } from "../../datasets/longmemeval/ingestion/dataset.js";
+import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparations } from "./request-artifact.js";
 
 export interface LongMemEvalExtractionTurn {
   readonly turnContent: string;
@@ -30,6 +31,7 @@ export function computeTrustedRoleCorpusDigest(
 
 export interface TurnContentKeySpace {
   readonly turnOccurrences: number;
+  readonly unsupportedSourceOccurrences: number;
   readonly distinctExtractionRequestCount: number;
   readonly distinctTurnContents: readonly string[];
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
@@ -42,6 +44,7 @@ export function inspectTurnContentKeySpace(
   openSemantics = false
 ): TurnContentKeySpace {
   let turnOccurrences = 0;
+  let unsupportedSourceOccurrences = 0;
   let distinctExtractionRequestCount = 0;
   const distinct = new Map<string, LongMemEvalExtractionTurn>();
   const occurrences: LongMemEvalExtractionTurn[] = [];
@@ -58,6 +61,7 @@ export function inspectTurnContentKeySpace(
         );
         const coverage = coverageForTurn(normalized, turnMessages, sourcePacking, coverageMemo, openSemantics);
         turnOccurrences += 1;
+        unsupportedSourceOccurrences += coverage.unsupportedSourceCount;
         const occurrence = Object.freeze({ turnContent: normalized, turnMessages });
         occurrences.push(occurrence);
         if (distinct.has(coverage.identity)) continue;
@@ -69,6 +73,7 @@ export function inspectTurnContentKeySpace(
   const distinctExtractionTurns = Object.freeze([...distinct.values()]);
   return Object.freeze({
     turnOccurrences,
+    unsupportedSourceOccurrences,
     distinctExtractionRequestCount,
     distinctTurnContents: Object.freeze(distinctExtractionTurns.map((turn) => turn.turnContent)),
     distinctExtractionTurns,
@@ -99,6 +104,7 @@ export function extractionRequestCoverageMemoKey(
 interface CachedTurnCoverage {
   readonly requests: readonly unknown[];
   readonly identity: string;
+  readonly unsupportedSourceCount: number;
 }
 
 function coverageForTurn(
@@ -113,12 +119,17 @@ function coverageForTurn(
   if (cached !== undefined) return cached;
   const coverage = openSemantics
     ? (() => {
-      const requests = collectSourceSemanticUnitPacks(buildOfficialApiSourceCorpus(turnContent, turnMessages), sourcePacking);
-      return Object.freeze({ requests, identity: JSON.stringify(requests) });
+      const packs = collectSourceSemanticUnitPacks(buildOfficialApiSourceCorpus(turnContent, turnMessages), sourcePacking);
+      const prepared = sourceSemanticArtifactPreparations(buildOfficialApiSourceCorpus(turnContent, turnMessages),
+        sourcePacking, EXTRACTION_OPEN_SEMANTICS_GENERATION);
+      return Object.freeze({ requests: prepared.filter((row) => row.status === "ready"),
+        unsupportedSourceCount: prepared.filter((row) => row.status === "unsupported_source").length,
+        identity: JSON.stringify(packs) });
     })()
     : (() => {
       const requests = collectOfficialApiExtractionCoverage(turnContent, turnMessages, sourcePacking).requests;
-      return Object.freeze({ requests, identity: JSON.stringify(requests.map(stringifyOfficialApiExtractionRequest)) });
+      return Object.freeze({ requests, unsupportedSourceCount: 0,
+        identity: JSON.stringify(requests.map(stringifyOfficialApiExtractionRequest)) });
     })();
   memo.set(memoKey, coverage);
   return coverage;

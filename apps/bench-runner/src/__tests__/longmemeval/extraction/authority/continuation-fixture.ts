@@ -391,6 +391,8 @@ function continuationInspection(
 ) {
   return {
     observation: observationValue,
+    sourceOccurrences: 2,
+    unsupportedSourceOccurrences: 0,
     missingKeys: [secondKey],
     invalidShards: [],
     preservedValidClosure,

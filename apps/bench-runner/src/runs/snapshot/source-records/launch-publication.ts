@@ -1,5 +1,5 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
-import { publishSourceSemanticSnapshot, type SourcePublicationPopulation } from "./publish.js";
+import { parseSourcePublicationAssociations, publishSourceSemanticSnapshot, type SourcePublicationPopulation } from "./publish.js";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { ExtractionRequestProfile } from "../../extraction/request-profile.js";
@@ -46,10 +46,8 @@ function population(flags: ReadonlyMap<string, string>, name: "original" | "chal
     pinnedMetaRoot: required(flags, `${prefix}-pinned-meta-root`),
     model: required(flags, "--model"),
     requestProfile: requestProfile(required(flags, "--request-profile")),
-    ...(bindingsPath === undefined ? {} : { publicationAssociations: z.array(z.object({
-      source_id: z.string().min(1), source_version: z.string().min(1),
-      generation_key: z.string().regex(/^[a-f0-9]{64}$/u), request_digest: z.string().regex(/^[a-f0-9]{64}$/u)
-    }).strict()).max(10000).parse(JSON.parse(readFileSync(bindingsPath, "utf8"))) }),
+    ...(bindingsPath === undefined ? {} : { publicationAssociations: parseSourcePublicationAssociations(
+      JSON.parse(readFileSync(bindingsPath, "utf8"))) }),
     ...(cacheRoots === undefined ? {} : { cacheRoots })
   };
 }

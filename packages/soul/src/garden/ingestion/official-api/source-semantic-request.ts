@@ -18,6 +18,8 @@ import {
 
   SourceSemanticQueryMeaningBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceSelectionSchema,
   buildSourceReferenceCatalog, buildSourceSemanticCorrespondenceEndpointCatalog, canonicalJson,
+  sourceReferenceCapacityReason, SourceReferenceCapacityExceeded, SourceReferenceCapacityReasonSchema,
+  SOURCE_REFERENCE_MAX_ASSERTIONS,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery,
   type SourceSemanticCorrespondenceEndpointCatalog
 } from "@do-soul/alaya-protocol";
@@ -66,10 +68,10 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   revision: SourceSemanticRevisionSchema.optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
-  assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(64).readonly().optional(),
+  assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly().optional(),
   source_assertions: z.array(z.object({
     assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1), source_role: z.enum(["user", "assistant"]).optional()
-  }).strict().readonly()).max(64).readonly()
+  }).strict().readonly()).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly()
 }).strict().superRefine((request, context) => {
   if (request.source_scope === undefined && (request.source_assertions.length > 8 || (request.assertion_locations?.length ?? 0) > 8)) {
     context.addIssue({ code: "custom", message: "partial source requests permit at most eight source units" });
@@ -157,6 +159,22 @@ export type SourceSemanticProposalInput = Readonly<{
   profile?: SourceInterpretationProfile;
   revision?: SourceSemanticRevision;
 }>;
+
+export const SourceSemanticUnsupportedSourceSchema = z.object({
+  status: z.literal("unsupported_source"),
+  source_digest: z.string().regex(/^[a-f0-9]{64}$/u),
+  source_scope: z.literal("complete-source"),
+  source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT),
+  interpretation_contract: z.literal(SOURCE_SEMANTIC_PACKET_CONTRACT),
+  k_version: z.literal(SOURCE_SEMANTIC_K_VERSION),
+  normalizer_version: z.literal(SOURCE_SEMANTIC_NORMALIZER_VERSION),
+  proposal_contract: z.literal(SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT),
+  generation_schema_contract: z.literal(SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT),
+  assertion_count: z.number().int().positive(),
+  reason: SourceReferenceCapacityReasonSchema
+}).strict().readonly();
+export type SourceSemanticHostPreparation = Readonly<{ status: "ready"; request: SourceSemanticRequest }>
+  | z.infer<typeof SourceSemanticUnsupportedSourceSchema>;
 
 export type SourceSemanticQueryProposalInput = Readonly<{
   original_query: string;
@@ -258,13 +276,32 @@ export function sourceSemanticRequestCatalog(request: SourceSemanticRequest): So
   return catalog;
 }
 
-export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): SourceSemanticRequest {
+export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput): SourceSemanticHostPreparation {
   rejectForbiddenProposalInput(input);
   const units = input.sourceScope === "complete-source"
     ? indexSourceSemanticUnits(input.sourceCorpus) : selectSourceSemanticUnits(input.sourceCorpus, input.assertionIds);
   if (input.sourceScope === "complete-source" && (units.length !== input.assertionIds.length ||
     units.some((unit, index) => unit.assertion_id !== input.assertionIds[index]))) {
     throw new AlayaError("CONFLICT", "complete source scope requires every source unit in original order");
+  }
+  const producer = producerCapability(input.producer_id, input.producer_version);
+  const limits = resourceLimits(input.resource_limits);
+  const sourceDigest = semanticSha256(input.sourceCorpus);
+  SourceSemanticRequestEnvelopeSchema.parse({ schema_version: SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION,
+    interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT, source_request: null,
+    source_digest: sourceDigest, ...(input.profile === undefined ? {} : { profile: input.profile }) });
+  if (input.revision !== undefined) SourceSemanticRevisionSchema.parse(input.revision);
+  const capacity = sourceReferenceCapacityReason(units);
+  if (capacity !== null) {
+    if (input.sourceScope !== "complete-source") throw new SourceReferenceCapacityExceeded(capacity);
+    if (input.revision !== undefined) throw new AlayaError("CONFLICT", "unsupported source has no legal revision request");
+    return SourceSemanticUnsupportedSourceSchema.parse({ status: "unsupported_source", source_digest: sourceDigest,
+      source_scope: "complete-source", source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
+      interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
+      k_version: SOURCE_SEMANTIC_K_VERSION, normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
+      proposal_contract: SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
+      generation_schema_contract: SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT,
+      assertion_count: units.length, reason: capacity });
   }
   const source_request = SourceSemanticOpenRequestBodySchema.parse({
     k_version: SOURCE_SEMANTIC_K_VERSION,
@@ -273,8 +310,8 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
     source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
     ...(input.sourceScope !== undefined ? { source_scope: input.sourceScope } : {}),
     generation_schema_contract: SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT,
-    producer_capability: producerCapability(input.producer_id, input.producer_version),
-    resource_limits: resourceLimits(input.resource_limits),
+    producer_capability: producer,
+    resource_limits: limits,
     assertion_locations: units.map((row) => ({
       assertion_id: row.assertion_id, source_utf8_span: [Buffer.byteLength(input.sourceCorpus.slice(0, row.start)), Buffer.byteLength(input.sourceCorpus.slice(0, row.end))]
     })),
@@ -284,11 +321,17 @@ export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): 
     schema_version: SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION,
     interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
     source_request,
-    source_digest: semanticSha256(input.sourceCorpus),
+    source_digest: sourceDigest,
     ...(input.profile !== undefined ? { profile: input.profile } : {})
   });
-  return input.revision === undefined ? request : parseSourceSemanticRequest({ ...request,
-    source_request: { ...request.source_request, revision: input.revision } });
+  return { status: "ready", request: input.revision === undefined ? request : parseSourceSemanticRequest({ ...request,
+    source_request: { ...request.source_request, revision: input.revision } }) };
+}
+
+export function buildSourceSemanticRequest(input: SourceSemanticProposalInput): SourceSemanticRequest {
+  const prepared = prepareSourceSemanticRequest(input);
+  if (prepared.status === "unsupported_source") throw new SourceReferenceCapacityExceeded(prepared.reason);
+  return prepared.request;
 }
 
 function originalQueryDigest(original_query: string): string {

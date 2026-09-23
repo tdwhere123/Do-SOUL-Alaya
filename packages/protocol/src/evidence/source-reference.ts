@@ -5,13 +5,15 @@ import { Sha256HexSchema, Sha256DigestSchema } from "../recall/conditional-field
 import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 
-const MAX_SEGMENTS = 32768;
-const MAX_SOURCE_UNITS = 65536;
+export const SOURCE_REFERENCE_MAX_ASSERTIONS = 64;
+export const SOURCE_REFERENCE_MAX_SEGMENTS = 32768;
+export const SOURCE_REFERENCE_MAX_TEXT_UNITS = 65536;
+const SEGMENT_PATTERN = /[A-Za-z0-9_]+|[^]/gu;
 const SegmentId = z.string().regex(/^a[1-9][0-9]*s[0-9]+$/u).max(48);
-const Segment = z.object({ id: SegmentId, text: z.string().min(1).max(MAX_SOURCE_UNITS) }).strict().readonly();
+const Segment = z.object({ id: SegmentId, text: z.string().min(1).max(SOURCE_REFERENCE_MAX_TEXT_UNITS) }).strict().readonly();
 const CatalogBody = z.object({ contract: z.literal("ascii-run-unicode-scalar-v1"), source_digest: Sha256HexSchema,
   assertions: z.array(z.object({ assertion_id: SourceAssertionIdSchema,
-    segments: z.array(Segment).min(1).max(MAX_SEGMENTS).readonly() }).strict().readonly()).max(64).readonly()
+    segments: z.array(Segment).min(1).max(SOURCE_REFERENCE_MAX_SEGMENTS).readonly() }).strict().readonly()).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly()
 }).strict();
 export const SourceReferenceCatalogSchema = CatalogBody.extend({ catalog_id: Sha256DigestSchema }).strict().readonly();
 export const SourceReferenceSchema = z.object({ first: SegmentId, last: SegmentId }).strict().readonly();
@@ -19,18 +21,62 @@ export type SourceReferenceCatalog = z.infer<typeof SourceReferenceCatalogSchema
 export type SourceReference = z.infer<typeof SourceReferenceSchema>;
 type Assertion = Readonly<{ assertion_id: number; text: string }>;
 
-function* selectedSegments(assertions: readonly Assertion[]) {
-  if (assertions.length > 64 ||
-      new Set(assertions.map((row) => row.assertion_id)).size !== assertions.length ||
-      assertions.reduce((sum, row) => sum + row.text.length, 0) > MAX_SOURCE_UNITS) {
-    throw new AlayaError("VALIDATION", "source reference catalog exceeds its assertion/text bound");
+const CAPACITY_LIMITS = { assertions: SOURCE_REFERENCE_MAX_ASSERTIONS,
+  text_units: SOURCE_REFERENCE_MAX_TEXT_UNITS, segments: SOURCE_REFERENCE_MAX_SEGMENTS } as const;
+export const SourceReferenceCapacityReasonSchema = z.object({
+  dimension: z.enum(["assertions", "text_units", "segments"]),
+  actual: z.number().int().nonnegative(), limit: z.number().int().positive()
+}).strict().superRefine((reason, context) => {
+  if (reason.limit !== CAPACITY_LIMITS[reason.dimension] || reason.actual <= reason.limit) {
+    context.addIssue({ code: "custom", message: "source reference capacity reason is inconsistent" });
   }
-  let count = 0;
+}).readonly();
+export type SourceReferenceCapacityReason = z.infer<typeof SourceReferenceCapacityReasonSchema>;
+
+export class SourceReferenceCapacityExceeded extends AlayaError {
+  public constructor(public readonly reason: SourceReferenceCapacityReason) {
+    super("VALIDATION", `source reference catalog exceeds its ${reason.dimension} bound (${reason.actual}/${reason.limit})`);
+  }
+}
+
+/** Validate source membership before classifying only representation capacity. */
+function assertionCapacityReason(assertions: readonly Assertion[]): SourceReferenceCapacityReason | null {
+  const ids = new Set<number>();
+  let textUnits = 0;
   for (const row of assertions) {
+    SourceAssertionIdSchema.parse(row.assertion_id);
+    if (typeof row.text !== "string" || row.text.length === 0) {
+      throw new AlayaError("VALIDATION", "source reference catalog has an invalid assertion text");
+    }
+    if (ids.has(row.assertion_id)) throw new AlayaError("VALIDATION", "source reference catalog has duplicate assertion identities");
+    ids.add(row.assertion_id);
     if (/[\uD800-\uDFFF]/u.test(row.text)) throw new AlayaError("VALIDATION", "source reference catalog contains an unpaired surrogate");
+    textUnits += row.text.length;
+  }
+  if (assertions.length > SOURCE_REFERENCE_MAX_ASSERTIONS) return { dimension: "assertions", actual: assertions.length, limit: SOURCE_REFERENCE_MAX_ASSERTIONS };
+  if (textUnits > SOURCE_REFERENCE_MAX_TEXT_UNITS) return { dimension: "text_units", actual: textUnits, limit: SOURCE_REFERENCE_MAX_TEXT_UNITS };
+  return null;
+}
+
+export function sourceReferenceCapacityReason(assertions: readonly Assertion[]): SourceReferenceCapacityReason | null {
+  const capacity = assertionCapacityReason(assertions);
+  if (capacity !== null) return capacity;
+  const textUnits = assertions.reduce((sum, row) => sum + row.text.length, 0);
+  if (textUnits <= SOURCE_REFERENCE_MAX_SEGMENTS) return null;
+  let segments = 0;
+  for (const row of assertions) for (const _segment of row.text.matchAll(SEGMENT_PATTERN)) segments++;
+  return segments > SOURCE_REFERENCE_MAX_SEGMENTS ? { dimension: "segments", actual: segments, limit: SOURCE_REFERENCE_MAX_SEGMENTS } : null;
+}
+
+function* selectedSegments(assertions: readonly Assertion[]) {
+  const capacity = assertionCapacityReason(assertions);
+  if (capacity !== null) throw new SourceReferenceCapacityExceeded(capacity);
+  let segments = 0;
+  for (const row of assertions) {
     let ordinal = 0;
-    for (const match of row.text.matchAll(/[A-Za-z0-9_]+|[^]/gu)) {
-      if (++count > MAX_SEGMENTS) throw new AlayaError("VALIDATION", "source reference catalog exceeds its segment bound");
+    for (const match of row.text.matchAll(SEGMENT_PATTERN)) {
+      if (++segments > SOURCE_REFERENCE_MAX_SEGMENTS) throw new SourceReferenceCapacityExceeded({
+        dimension: "segments", actual: segments, limit: SOURCE_REFERENCE_MAX_SEGMENTS });
       yield { assertion_id: row.assertion_id, id: `a${row.assertion_id}s${ordinal}`, text: match[0],
         start: match.index, end: match.index + match[0].length, ordinal };
       ordinal += 1;

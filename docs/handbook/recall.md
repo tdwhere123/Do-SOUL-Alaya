@@ -855,7 +855,19 @@ Open extraction may explicitly select `complete-source` packing. Its request
 records that scope and binds all indexed units of the supplied source corpus
 in order, including both message roles. SOUL checks this membership against the
 original source on receipt. Existing catalog limits (64 units, bounded text and
-segments) apply; oversize input fails preparation without implicit partitioning.
+segments) apply. For a valid complete source beyond a catalog limit, the host
+records a typed `unsupported_source` preparation disposition with the exact
+capacity reason and source/contract identity. The full raw source and every
+question occurrence remain in the census; that source has no extraction request,
+cache key, provider attempt, or interpretation. Invalid source identities,
+membership, metadata, or revisions remain errors rather than unsupported
+sources. Ready requests retain their existing identities. Batch dry preflight
+reports ready request counts separately from original source and unsupported
+occurrence counts. Its versioned source-publication associations carry the
+unsupported disposition to native publication, which rechecks it against the
+exact source census and records it in the publication report after SQLite reopen.
+Interactive source preparation surfaces the same typed capacity reason as a
+validation error; its successful response contract is unchanged.
 Recorded requests without the scope marker remain limited to eight selected
 units and retain their historical replay. Closed Garden/profile extraction
 rejects complete-source packing. This supplies source context without deciding

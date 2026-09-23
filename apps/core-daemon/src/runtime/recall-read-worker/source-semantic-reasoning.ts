@@ -1,5 +1,6 @@
 import {
-  SourceSemanticWorkerResultSchema, SourceSemanticResourceExhausted, buildSourceReferenceCatalog, canonicalJson,
+  SourceSemanticWorkerResultSchema, SourceSemanticResourceExhausted, SourceReferenceCapacityExceeded,
+  buildSourceReferenceCatalog, canonicalJson,
   sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticWorkerResult
 } from "@do-soul/alaya-protocol";
 import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, authorizeSemanticScope, authorizedScopesFromAdmission,
@@ -29,6 +30,8 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
   };
   try { return runtime.database.connection.inTransaction ? run() : runtime.database.connection.transaction(run)(); }
   catch (error) {
+    if (error instanceof SourceReferenceCapacityExceeded) throw new CoreError("VALIDATION", error.message,
+      { details: { admission: "unsupported_source", capacity: error.reason, work: workOf(meter) } });
     if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work: workOf(meter) } });
     if (error instanceof CoreError) throw new CoreError(error.code, error.message, { subCode: error.subCode, details: { ...error.details, work: workOf(meter) } });
     throw error;
