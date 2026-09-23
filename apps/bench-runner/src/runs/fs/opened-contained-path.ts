@@ -66,6 +66,15 @@ export function samePhysicalLocation(left: string, right: string): boolean {
   return canonicalPath(left) === canonicalPath(right);
 }
 
+/** Compare paths already resolved by canonicalPath when checking a fixed set of roots. */
+export function canonicalPathsOverlap(left: string, right: string): boolean {
+  const relative = path.relative(left, right);
+  if (relative === "") return true;
+  const reverse = path.relative(right, left);
+  return [relative, reverse].some(value => value !== "" && !path.isAbsolute(value) &&
+    !value.split(path.sep).includes(".."));
+}
+
 function comparableWin32Path(input: string): string {
   const native = input.replaceAll("/", "\\");
   let resolved = native;

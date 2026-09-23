@@ -1185,6 +1185,20 @@ unreserved exposure from an unresolved native or stage reservation, with no reca
 gold join. A verified positive source hit survives partial answer-session mapping;
 only a negative requires complete mapping. Unselected development questions remain
 in the inventory but are not scored, and this bridge does not authorize a formal arm.
+For fixed development20 and reused-readiness50 lazy populations, Bench freezes the
+ordered metadata membership, existing selection contract, explicit prior exposure,
+per-member native config identity, resource references and physically separate
+producer/evaluator roots before running a named member. It does not load the dataset
+or grant extraction at population freeze. Each member advances through the existing
+single-question native stages; no population command fills a provider cache. A
+durable cutoff captures stage, first-exposure and Q/H/C attempt references before
+isolated scoring. The population result keeps every frozen answerable member in
+H/M/U, including an early failure or unknown effect, while abstention remains
+separate. Only a readmitted durable first exposure uses the existing lazy gold
+join and metric. Native reservations and raw usage are projected per physical root
+and reserved ordinal, so a copied continuation or shared cache attempt is counted
+once in the observed scope. Missing scopes or usage keep the population total
+unknown, and this development result does not authorize a formal arm.
 Each query gets its own bounded native
 candidate opportunity; one combined proposal workset uses the existing authority
 and attempt ledger for global spend. Preparation retains the native access receipt

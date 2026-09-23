@@ -1,8 +1,8 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { measureSemanticChain } from "../semantic-chain/replay.js";
 import { readLazyQualifiedExposureState } from "../semantic-chain/lazy-qualification.js";
-import { chainIdentity, writeChainArtifact } from "../semantic-chain/contract.js";
+import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { QuestionPublicationSchema } from "./execute.js";
@@ -126,4 +126,16 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
   const path = join(input.evaluatorRoot, `lazy-measurement-${chainIdentity(result)}.json`);
   writeChainArtifact(path, result);
   return { path, result };
+}
+
+/** Recomputes from the admitted first replay and gold; retained scores cannot author their own outcome. */
+export async function admitLongMemEvalLazyMeasurement(input: LongMemEvalLazyMeasurementInput, path: string) {
+  if (!isContainedPath(input.evaluatorRoot, path)) throw new AlayaError("CONFLICT", "lazy measurement escaped evaluator root");
+  const retained = readChainArtifact(path);
+  if (retained === undefined) throw new AlayaError("CONFLICT", "retained lazy measurement is missing");
+  const current = await measureLongMemEvalLazyFirstExposure(input);
+  if (resolve(current.path) !== resolve(path) || chainIdentity(retained) !== chainIdentity(current.result)) {
+    throw new AlayaError("CONFLICT", "retained lazy measurement differs from the native first exposure and gold join");
+  }
+  return current;
 }

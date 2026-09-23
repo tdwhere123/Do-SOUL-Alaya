@@ -39,6 +39,23 @@ export function longMemEvalMetricOutcome(metric: { status: string } | undefined,
   return "unknown";
 }
 
+/** Fixed selected-population denominator; abstention remains a separate inventory row. */
+export function summarizeLongMemEvalOutcomes(rows: readonly {
+  cohort: "answerable" | "abstention";
+  outcome: "hit" | "miss" | "unknown" | "uncalibrated" | "not_selected_development";
+}[]) {
+  const eligible = rows.filter(row => row.cohort === "answerable");
+  if (eligible.some(row => row.outcome === "not_selected_development" || row.outcome === "uncalibrated")) {
+    throw new AlayaError("CONFLICT", "selected answerable population lost an outcome");
+  }
+  const hits = eligible.filter(row => row.outcome === "hit").length;
+  const misses = eligible.filter(row => row.outcome === "miss").length;
+  const unknown = eligible.length - hits - misses;
+  return { eligible: eligible.length, hits, misses, unknown,
+    lower_bound: eligible.length === 0 ? null : hits / eligible.length,
+    upper_bound: eligible.length === 0 ? null : (hits + unknown) / eligible.length };
+}
+
 /** Gold is read only after native replay is immutable, and never enters publication or retrieval. */
 export async function measureLongMemEvalSemanticRun(root: string, replayPath: string) {
   const frozen = readLongMemEvalSemanticFreeze(root);
@@ -108,10 +125,8 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
       measurement_path: null, reason: null, attribution: { layer: "not_selected", native: null }, mechanism: "not_exercised" as const }),
     prior_development_exposure: frozen.config.previously_exposed_question_ids?.includes(entry.question_id) ?? false,
     abstention_calibration: entry.cohort === "abstention" ? "uncalibrated" : "not_applicable" }));
-  const eligible = selectedRows.filter((row) => row.cohort === "answerable");
-  const hits = eligible.filter((row) => row.outcome === "hit").length;
-  const misses = eligible.filter((row) => row.outcome === "miss").length;
-  const unknown = eligible.length - hits - misses;
+  const primary = summarizeLongMemEvalOutcomes(selectedRows);
+  const { hits, unknown } = primary;
   const totalEligible = frozen.inventory.filter((row) => row.cohort === "answerable").length;
   const formal = frozen.config.stage === "formal";
   if (formal && selectedRows.length !== frozen.inventory.length) throw new AlayaError("INTERNAL", "formal result lost dataset rows");
@@ -124,10 +139,8 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
     exposure: frozen.exposure, metric: frozen.metric, order_policy: frozen.order_policy,
     mechanism: frozen.mechanism, provider_calls: 0,
     inventory: { questions: rows.length, answerable: totalEligible, abstention: rows.length - totalEligible },
-    primary: { eligible: eligible.length, hits, misses, unknown,
-      lower_bound: eligible.length === 0 ? null : hits / eligible.length,
-      upper_bound: eligible.length === 0 ? null : (hits + unknown) / eligible.length,
-      strict_over_90_required_hits: eligible.length === 0 ? null : Math.floor(0.9 * eligible.length) + 1, target_decision: decision },
+    primary: { ...primary,
+      strict_over_90_required_hits: primary.eligible === 0 ? null : Math.floor(0.9 * primary.eligible) + 1, target_decision: decision },
     formal_target: { eligible: totalEligible, strict_over_90_required_hits: totalEligible === 0 ? null : requiredHits,
       status: formal ? decision : "not_run", additional_confirmed_hits_needed: formal ? Math.max(0, requiredHits - hits) : null }, rows };
   const path = join(root, `measurement-${chainIdentity(result)}.json`);

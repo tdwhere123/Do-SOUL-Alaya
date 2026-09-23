@@ -187,7 +187,7 @@ function assertWindowOwner(root: string, window: LazyQualificationWindow,
   }
 }
 
-async function admitLazyWindow(root: string, expectedConfig?: Config) {
+export async function admitLazyWindow(root: string, expectedConfig?: Config) {
   const window = WindowSchema.parse(readChainArtifact(join(root, "window.json")));
   if (expectedConfig !== undefined && canonicalJson(window.config) !== canonicalJson(expectedConfig)) {
     throw new AlayaError("CONFLICT", "lazy window config changed");
@@ -224,7 +224,7 @@ async function admitLazyWindow(root: string, expectedConfig?: Config) {
   return { window, publication, census };
 }
 
-async function admitLazyFinal(root: string) {
+export async function admitLazyFinal(root: string) {
   const { window, publication: initial, census } = await admitLazyWindow(root);
   const final = FinalSchema.parse(readChainArtifact(join(root, "final.json")));
   const snapshotPath = join(root, "final-library.sqlite");
