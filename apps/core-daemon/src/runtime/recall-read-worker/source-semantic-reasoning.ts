@@ -66,14 +66,17 @@ function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, autho
   if (lease !== undefined && (lease.source_version !== stored.record.source_version || lease.content_digest !== stored.record.content_digest)) {
     throw new CoreError("VALIDATION", "preparation source is no longer current", { details: { admission: "filtered" } });
   }
-  const assertions = stored.content_bytes.length === 0 ? [] : indexSourceSemanticUnits(stored.content_bytes)
-    .map((unit) => ({ assertion_id: unit.assertion_id, text: unit.text, source_role: unit.source_role }));
+  const units = stored.content_bytes.length === 0 ? [] : indexSourceSemanticUnits(stored.content_bytes);
+  const assertions = units.map((unit) => ({ assertion_id: unit.assertion_id, text: unit.text, source_role: unit.source_role }));
   const cost = sourceReferencePreparationCost(assertions);
   meter.charge(cost.work_units, cost.memory_bytes, "source references");
   const catalog = buildSourceReferenceCatalog(fieldContractSha256(stored.content_bytes), assertions, fieldContractSha256);
   const fields = { source_id: sourceId, source_version: stored.record.source_version, content_digest: stored.record.content_digest, catalog };
   if (request.kind === "validate_source") return SourceSemanticWorkerResultSchema.parse({
-    kind: request.kind, ...fields, source: stored.content_bytes, coverage: { ...IDLE, discovery: "complete" }, work: workOf(meter)
+    kind: request.kind, ...fields, source: stored.content_bytes,
+    assertion_locations: units.map((unit) => ({ assertion_id: unit.assertion_id,
+      source_utf8_span: [Buffer.byteLength(stored.content_bytes.slice(0, unit.start)), Buffer.byteLength(stored.content_bytes.slice(0, unit.end))] })),
+    coverage: { ...IDLE, discovery: "complete" }, work: workOf(meter)
   });
   const source_handle = issueSemanticLease(runtime, { ...leaseBase(runtime, payload, authorized), kind: "source",
     source_id: sourceId, source_version: stored.record.source_version, content_digest: stored.record.content_digest }, meter);

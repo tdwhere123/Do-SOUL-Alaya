@@ -2,11 +2,11 @@
   "original_query": "Which brands offer which items?",
   "source_interpretation_id": "sha256:b313a448a950c8ddd45382e6cd16171d412c50646204c50740cec66e2f219c78",
   "query_semantics": {
-    "contract": "source-semantic-query-v2",
+    "contract": "source-semantic-query-v3",
     "original_query_digest": "sha256:330a5309583f83aec96644da01d867e9e2d528e0a3467eaa1ab2a60a51527e64",
     "producer_id": "alaya.source.semantic.query.soul.v1",
     "producer_version": "1",
-    "contract_version": "source-semantic-query-v2",
+    "contract_version": "source-semantic-query-v3",
     "variables": [
       {
         "id": "offer_action",
@@ -67,7 +67,7 @@
   "semantic_correspondence": {
     "contract": "source-semantic-correspondence-v3",
     "source_interpretation_id": "sha256:b313a448a950c8ddd45382e6cd16171d412c50646204c50740cec66e2f219c78",
-    "query_semantics_id": "sha256:5f61fded7b9d45ed64c0549fb977ffe2f5dcef018a729af7943e40d66fbfb788",
+    "query_semantics_id": "sha256:a306e7972a8d2c0dd57c6a47b739e9941264265d719d3326b65b95c529b5b8ba",
     "producer_id": "alaya.source.semantic.correspondence.soul.v1",
     "producer_version": "1",
     "contract_version": "source-semantic-correspondence-v3",

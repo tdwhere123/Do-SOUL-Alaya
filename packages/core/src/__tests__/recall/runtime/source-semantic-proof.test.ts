@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SourceSemanticDraftSchema, SourceSemanticQuerySchema, sourceSemanticCorrespondenceIdentity, sourceSemanticQueryIdentity, SOURCE_SEMANTIC_QUERY_CONTRACT,
+import { SourceSemanticDraftSchema, SourceSemanticQuerySchema, sourceSemanticCorrespondenceIdentity,
   type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticReasoningResult } from "@do-soul/alaya-protocol";
 import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-field/query/source-semantic-correspondence-admission.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
@@ -72,10 +72,7 @@ describe("source semantic proof obligations", () => {
   });
   it("compiles five complete groups to five answers without exhausting the existing budget", () => {
     const packet = JSON.parse(readFileSync(fileURLToPath(new URL("./source-semantic-set-valued-catalog-fixture.json", import.meta.url)), "utf8"));
-    // Preserve the retained packet; this current-contract regression rebinds its authored query through the identity owner.
-    packet.query_semantics = SourceSemanticQuerySchema.parse({ ...packet.query_semantics,
-      contract: SOURCE_SEMANTIC_QUERY_CONTRACT, contract_version: SOURCE_SEMANTIC_QUERY_CONTRACT });
-    packet.semantic_correspondence.query_semantics_id = sourceSemanticQueryIdentity(packet.query_semantics, fieldContractSha256);
+    expect(SourceSemanticQuerySchema.parse(packet.query_semantics)).toEqual(packet.query_semantics);
     expect(packet.semantic_correspondence.correspondences.filter((row: { query_endpoint: { kind: string } }) => row.query_endpoint.kind === "predicate")).toHaveLength(5);
     expect(packet.semantic_correspondence.correspondences.filter((row: { query_endpoint: { kind: string } }) => row.query_endpoint.kind === "slot")).toHaveLength(10);
     const executed = executeSourceSemanticInterpretation({

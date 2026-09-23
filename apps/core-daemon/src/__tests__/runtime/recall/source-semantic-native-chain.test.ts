@@ -827,3 +827,62 @@ it("invalidates stale results after source update and recovers a pre-failure cop
     await rm(directory, { recursive: true, force: true });
   }
 }, 60000);
+
+it("publishes repeated source assertions through the public handle and delivers the current source after reopen", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "source-semantic-public-repeated-"));
+  const filename = join(directory, "alaya.db");
+  const repeated = "Plain archived café background.";
+  const source = `Alice uses tools. ${repeated} ${repeated}`;
+  const sourceId = "artifact-repeated";
+  try {
+    const identities = await admitSources(filename, [{ id: sourceId, content: source }]);
+    const session = await openSession(filename);
+    let published: Awaited<ReturnType<typeof proposeDraft>>;
+    try {
+      const before = await callInterpretation(session.handler, {
+        operation: "prepare_query", original_query: ORIGINAL, budget: BUDGET, authorized_scopes: SCOPES
+      }, session.context);
+      if (before.operation !== "prepare_query" || before.query_handle === undefined) throw new Error("query handle required");
+      const prepared = await prepareSource(session.handler, session.context, sourceId);
+      expect(prepared.catalog.assertions).toHaveLength(3);
+      const received = proposeSourceSemantics({ sourceCorpus: source, sourceScope: "complete-source",
+        assertionIds: prepared.catalog.assertions.map((row) => row.assertion_id), source_id: sourceId,
+        source_version: "1", producer_id: "test-author", producer_version: "p1" },
+      { rawJson: JSON.stringify(compactUse(prepared.catalog)) });
+      expect(received.outcome.status).toBe("interpreted");
+      expect(received.draft).toBeDefined();
+      published = await proposeDraft(session.handler, session.context, prepared.source_handle, received.draft, "p1");
+      expect(published.source_target.root_id).toBe(identities[sourceId]);
+      expect(published.source_target.source_version).toBe("1");
+      expect(published.source_target.content_digest).toBe(`sha256:${fieldContractSha256(source)}`);
+      const expectedSpans = [source.indexOf(repeated), source.lastIndexOf(repeated)].map((start) =>
+        [Buffer.byteLength(source.slice(0, start)), Buffer.byteLength(source.slice(0, start + repeated.length))]);
+      expect(published.interpretation.source.assertion_locations?.slice(1).map((row) => row.source_utf8_span)).toEqual(expectedSpans);
+      await expect(callInterpretation(session.handler, {
+        operation: "recall", accepts_unreviewed_conditional_results: true, query_handle: before.query_handle,
+        budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
+      }, session.context)).rejects.toThrow();
+    } finally { await closeSession(session, filename); }
+
+    const reopened = await openSession(filename);
+    try {
+      const after = await callInterpretation(reopened.handler, {
+        operation: "prepare_query", original_query: ORIGINAL, budget: BUDGET, authorized_scopes: SCOPES
+      }, reopened.context);
+      if (after.operation !== "prepare_query" || after.query_handle === undefined) throw new Error("fresh query handle required");
+      expect(after.candidates.some((row) => row.interpretation_id === published!.interpretation_id)).toBe(true);
+      const mcp = await callAlayaMcpMemoryTool(
+        { memoryToolHandler: reopened.handler, contextProvider: () => reopened.context }, "soul.interpretation",
+        SoulInterpretationRequestSchema.parse({ operation: "recall", accepts_unreviewed_conditional_results: true,
+          query_handle: after.query_handle, budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES })
+      );
+      const response = SoulInterpretationResponseSchema.parse((mcp.structuredContent as { output: unknown }).output);
+      if (response.operation !== "recall") throw new Error("public recall required");
+      expect(response.provider_attempts).toBe(0);
+      const search = soulSearchFromLibraryRecall(response);
+      expect(search.results.some((row) => row.target.kind === "source_evidence"
+        && row.target.root_id === identities[sourceId])).toBe(true);
+      expect(recordSourceSemanticLibraryFirstExposure(response).initial?.scoring_slots.length).toBeGreaterThan(0);
+    } finally { await closeSession(reopened, filename); }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}, 60000);

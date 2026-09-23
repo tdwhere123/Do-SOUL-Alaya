@@ -2,7 +2,7 @@ import { z } from "zod";
 import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema } from "./source-semantic-access.js";
 import { SourceRecordIdentitySchema } from "../recall/field-contract/source-span.js";
 import { BoundedIdSchema, BoundedLabelSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
-import { SourceReferenceCatalogSchema } from "../evidence/source-reference.js";
+import { SourceReferenceCatalogSchema, SOURCE_REFERENCE_MAX_ASSERTIONS } from "../evidence/source-reference.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceSemanticQuerySchema } from "../recall/conditional-field/semantic-query.js";
@@ -10,7 +10,7 @@ import { SourceSemanticCorrespondenceSchema } from "../recall/conditional-field/
 import { SourceSemanticEvaluationContextSchema } from "../recall/conditional-field/interpretation-context.js";
 import { ContinuationSchema, InformationIndexSchema, SOURCE_SEMANTIC_PROOF_OBJECT_KIND } from "../recall/conditional-field/index-view.js";
 import {
-  SourceSemanticInterpretationSchema, SourceSemanticOutcomeSchema, SourceSemanticReasoningResultSchema
+  SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, SourceSemanticOutcomeSchema, SourceSemanticReasoningResultSchema
 } from "./source-semantic-interpretation.js";
 
 /** Native evidence selection occupies roots and reserves their complete support packages. */
@@ -291,6 +291,7 @@ export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("validate_source"), source_id: BoundedIdSchema, source_version: BoundedIdSchema,
     content_digest: Sha256DigestSchema, source: z.string().max(65536), catalog: SourceReferenceCatalogSchema,
+    assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly(),
     ...CoverageWork
   }).strict().readonly(),
   z.object({

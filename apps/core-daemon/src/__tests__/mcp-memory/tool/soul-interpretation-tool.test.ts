@@ -69,7 +69,8 @@ const DRAFT = {
 
 function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorkerResult {
   if (request.kind === "validate_source") return { kind: "validate_source", source_id: "artifact-1", source_version: "1",
-    content_digest: `sha256:${fieldContractSha256(SOURCE)}`, source: SOURCE, catalog: CATALOG, coverage: IDLE, work: WORK };
+    content_digest: `sha256:${fieldContractSha256(SOURCE)}`, source: SOURCE, catalog: CATALOG,
+    assertion_locations: [{ assertion_id: 1, source_utf8_span: [0, Buffer.byteLength(SOURCE)] }], coverage: IDLE, work: WORK };
   if (request.kind === "prepare_source") {
     return {
       kind: "prepare_source",
@@ -230,8 +231,10 @@ describe("soul.interpretation MCP/CLI surface", () => {
 
   it("awaits Core publish before returning propose", async () => {
     let finished = false;
+    let assertionLocations: unknown;
     const publication: SourceSemanticPublicationPort = {
-      publish: async () => {
+      publish: async (input) => {
+        assertionLocations = input.assertion_locations;
         await Promise.resolve();
         finished = true;
         throw new CoreError("VALIDATION", "malformed interpretation");
@@ -256,6 +259,7 @@ describe("soul.interpretation MCP/CLI surface", () => {
       contract_version: "source-interpretation-v4"
     });
     expect(finished).toBe(true);
+    expect(assertionLocations).toEqual([{ assertion_id: 1, source_utf8_span: [0, Buffer.byteLength(SOURCE)] }]);
     expect(proposed.ok).toBe(true);
     if (!proposed.ok) throw new Error("propose must return a tool result");
     expect(proposed.output).toMatchObject({
