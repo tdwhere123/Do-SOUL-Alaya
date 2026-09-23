@@ -338,6 +338,27 @@ it("delivers an unchanged question from current raw sources when query semantics
       expect(invalid.request_identity).not.toBe(absent.request_identity);
       expect(invalid.proofs ?? []).toHaveLength(0);
 
+      for (const [unadmitted, reason] of [[invalidQuery, "invalid"],
+        [{ ...admittedQuery, producer_id: "unsupported-query-producer" }, "unsupported_producer"]] as const) {
+        const preparedUnadmitted = await callInterpretation(session.handler, { operation: "prepare_query",
+          original_query: ORIGINAL, query_semantics: unadmitted, budget: BUDGET, authorized_scopes: SCOPES }, session.context);
+        if (preparedUnadmitted.operation !== "prepare_query" || preparedUnadmitted.query_handle === undefined) {
+          throw new Error("unadmitted query preparation handle expected");
+        }
+        expect(preparedUnadmitted.query_semantics_status).toEqual({ status: "unavailable", reason });
+        const bound = { ...request, query_handle: preparedUnadmitted.query_handle };
+        const handleOnly = await callInterpretation(session.handler, bound, session.context);
+        const echoed = await callInterpretation(session.handler, { ...bound, query_semantics: unadmitted }, session.context);
+        if (handleOnly.operation !== "recall" || echoed.operation !== "recall") throw new Error("raw bound recall expected");
+        expect(echoed.query_semantics_status).toEqual({ status: "unavailable", reason });
+        expect(echoed.request_identity).toBe(handleOnly.request_identity);
+        expect(echoed.results?.some(row => row.target.kind === "source_evidence"
+          && row.target.root_id === roots["artifact-alice"] && row.content_preview.includes(ALICE))).toBe(true);
+        expect(echoed.proofs ?? []).toEqual([]);
+        await expect(callInterpretation(session.handler, { ...bound,
+          query_semantics: { ...unadmitted, producer_version: "retargeted" } }, session.context)).rejects.toThrow();
+      }
+
       const prepared = await callInterpretation(session.handler, { operation: "prepare_query", original_query: ORIGINAL,
         query_semantics_unavailable: "producer_failure", budget: BUDGET, authorized_scopes: SCOPES }, session.context);
       if (prepared.operation !== "prepare_query" || prepared.query_handle === undefined) throw new Error("unavailable Q preparation handle expected");
@@ -367,6 +388,24 @@ it("reports a complete empty raw index without claiming query semantics", async 
     expect(response.index.completeness.logical_index).toBe("complete");
     expect(response.discovery?.open_residuals).toBe(false);
     expect(response.proofs ?? []).toEqual([]);
+  });
+});
+
+it("reports native query preparation resource exhaustion and still prepares a later short question", async () => {
+  await withHost([{ id: "artifact-alice", content: ALICE }], async session => {
+    const budget = { ...BUDGET, work_units: 20_000, finalization_reserve: 1_000 };
+    const longQuestion = `${ORIGINAL}${" context".repeat(200)}`;
+    const exhausted = await callInterpretation(session.handler, { operation: "prepare_query",
+      original_query: longQuestion, budget, authorized_scopes: SCOPES }, session.context);
+    if (exhausted.operation !== "prepare_query") throw new Error("preparation response expected");
+    expect(exhausted).toMatchObject({ outcome: { status: "resource_exhausted" },
+      query_semantics_status: { status: "unavailable", reason: "absent" }, provider_attempts: 0 });
+    expect(exhausted.query_handle).toBeUndefined();
+    const short = await callInterpretation(session.handler, { operation: "prepare_query",
+      original_query: ORIGINAL, budget, authorized_scopes: SCOPES }, session.context);
+    if (short.operation !== "prepare_query") throw new Error("short preparation response expected");
+    expect(short.query_handle).toBeDefined();
+    expect(short.access?.observed_source_count).toBe(1);
   });
 });
 

@@ -19,7 +19,8 @@ import { accessInputIdentity, observeSourceSemanticAccess, type SourceSemanticAc
 import {
   listEligibleSemanticSources, SourceSemanticReadBudget
 } from "../field/source-semantic-read-stores.js";
-import { readSemanticLease, sourceSemanticLifetimeNow, sourceSemanticRevision } from "./source-semantic-leases.js";
+import { readSemanticLease, sourceSemanticLifetimeNow, sourceSemanticQueryInputIdentity,
+  sourceSemanticRevision } from "./source-semantic-leases.js";
 
 import { prepareLibraryPackages, type LibraryExecutedSupport } from "./source-semantic-library-packages.js";
 import { prepareLibraryDelivery, deliverFrozenLibraryPage } from "./source-semantic-library-delivery.js";
@@ -52,7 +53,7 @@ export function runSourceSemanticLibraryRecall(
   const currentClock = payload.as_of;
   const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, { ...payload, as_of: currentClock }, request.query_handle, authorized, "query");
   if (lease !== undefined && (request.original_query !== undefined && request.original_query !== lease.original_query
-    || request.query_semantics !== undefined && canonicalJson(request.query_semantics) !== canonicalJson(lease.query_semantics)
+    || request.query_semantics !== undefined && sourceSemanticQueryInputIdentity(request.query_semantics) !== lease.query_semantics_input_id
     || request.query_semantics_unavailable !== undefined && (lease.query_semantics_status?.status !== "unavailable"
       || lease.query_semantics_status.reason !== request.query_semantics_unavailable))) {
     throw new CoreError("VALIDATION", "query handle cannot be retargeted", { details: { admission: "bound" } });

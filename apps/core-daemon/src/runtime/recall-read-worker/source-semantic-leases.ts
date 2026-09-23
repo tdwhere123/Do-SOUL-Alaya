@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { canonicalJson, type SourceSemanticQuery, type SourceSemanticQueryStatus, type Continuation } from "@do-soul/alaya-protocol";
-import { CoreError } from "@do-soul/alaya-core";
+import { CoreError, fieldContractSha256 } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
@@ -13,6 +13,7 @@ export type SourceSemanticLease = Readonly<{
   expires_at: string; revision: string;
   source_id?: string; source_version?: string; content_digest?: string;
   original_query?: string; query_semantics?: SourceSemanticQuery; query_semantics_id?: string;
+  query_semantics_input_id?: string;
   query_semantics_status?: SourceSemanticQueryStatus;
   candidates?: readonly string[];
   access_pool?: SourceSemanticAccessPool; access_offset?: number; access_source_offset?: number; truncated?: boolean;
@@ -23,6 +24,11 @@ type Clock = Readonly<{ as_of: string; lifetime_now?: string }>;
 type Caller = Clock & Readonly<{ workspace_id: string; principal?: string }>;
 const LEASES = new WeakMap<RecallReadWorkerRuntime, Map<string, { lease: SourceSemanticLease; bytes: number }>>();
 const MAX_BYTES = 8_000_000;
+
+/** Bind the exact supplied object even when Core cannot admit it as Query Semantics. */
+export function sourceSemanticQueryInputIdentity(query: SourceSemanticQuery | undefined): string | undefined {
+  return query === undefined ? undefined : `sha256:${fieldContractSha256(canonicalJson(query))}`;
+}
 
 /** Interpretation time may be frozen; capability lifetime must keep advancing. */
 export function sourceSemanticLifetimeNow(clock: Clock): string {

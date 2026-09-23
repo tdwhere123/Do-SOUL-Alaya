@@ -39,6 +39,20 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
       page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 },
     authorized_scopes: { mode: "unrestricted" }, output_byte_limit: 100000 };
   expect(SemanticChainConfigSchema.safeParse({ ...config, access_policy: undefined }).success).toBe(false);
+  const boundedWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3",
+    provider_url: "http://127.0.0.1:9", kind: "query", model: "gemini-2.5-flash-lite",
+    request_profile: "gemini-2.5-nonthinking-v1",
+    items: [{ original_query: `What was completed?${" context".repeat(200)}` }, { original_query: "What was completed?" }] });
+  const boundedRoot = join(cacheRoot, "bounded-query-discovery-chain");
+  const bounded = await prepareSemanticChain({ ...config, query_workset: boundedWorkset,
+    snapshot_path: sourceOnlySnapshot.snapshot_path, snapshot_sha256: sourceOnlySnapshot.db_sha256,
+    budget: { ...config.budget, work_units: 20_000, finalization_reserve: 1_000 } }, boundedRoot);
+  expect(bounded.queries).toMatchObject([{ status: "blocked",
+    reason: "discovery_unavailable: native discovery resource exhausted" }, { status: "raw_ready", reason: "unattempted" }]);
+  const boundedReplay = await replaySemanticChain(boundedRoot);
+  const boundedMeasured = measureSemanticChain(boundedRoot, boundedReplay.path,
+    bounded.queries.map(row => ({ query_key: row.query_key, source_units: [] })));
+  expect(boundedMeasured.result.rows.map(row => row.status)).toEqual(["blocked", "replayed"]);
   const blockedRoot = join(cacheRoot, "blocked-chain");
   const blocked = await prepareSemanticChain(config, blockedRoot);
   expect(blocked.queries.every((row) => row.status === "raw_ready")).toBe(true);

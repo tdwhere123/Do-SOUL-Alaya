@@ -9,7 +9,8 @@ import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
 import { sourceSemanticReadStores, currentSemanticSource, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
-import { issueSemanticLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow, sourceSemanticRevision, type SourceSemanticLease } from "./source-semantic-leases.js";
+import { issueSemanticLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow,
+  sourceSemanticQueryInputIdentity, sourceSemanticRevision, type SourceSemanticLease } from "./source-semantic-leases.js";
 import { runSourceSemanticLibraryRecall } from "./source-semantic-library-recall.js";
 import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
 import { accessDescriptorPage, accessInputIdentity, observeSourceSemanticAccess, preparationAccessReceipt } from "./source-semantic-candidate-access.js";
@@ -30,6 +31,15 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
   };
   try { return runtime.database.connection.inTransaction ? run() : runtime.database.connection.transaction(run)(); }
   catch (error) {
+    if (payload.request.kind === "prepare_query" && (error instanceof SourceSemanticResourceExhausted
+      || error instanceof CoreError && error.subCode === "RETRYABLE_BACKPRESSURE")) {
+      const request = payload.request;
+      return SourceSemanticWorkerResultSchema.parse({ kind: "prepare_query",
+        query_semantics_status: sourceSemanticQueryStatus(admitSourceSemanticQuery(request.query_semantics, request.original_query),
+          request.query_semantics_unavailable),
+        outcome: { status: "resource_exhausted" }, candidates: [], truncated: true,
+        coverage: IDLE, work: workOf(meter) });
+    }
     if (error instanceof SourceReferenceCapacityExceeded) throw new CoreError("VALIDATION", error.message,
       { details: { admission: "unsupported_source", capacity: error.reason, work: workOf(meter) } });
     if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work: workOf(meter) } });
@@ -81,7 +91,9 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
   const admission = admitSourceSemanticQuery(request.query_semantics, request.original_query);
   const queryStatus = sourceSemanticQueryStatus(admission, request.query_semantics_unavailable);
   const querySemanticsId = admission.kind === "admitted" ? admission.query_id : undefined;
+  const queryInputId = sourceSemanticQueryInputIdentity(request.query_semantics);
   if (prior !== undefined && (prior.original_query !== request.original_query || prior.query_semantics_id !== querySemanticsId
+    || prior.query_semantics_input_id !== queryInputId
     || canonicalJson(prior.query_semantics_status) !== canonicalJson(queryStatus)
     || source !== undefined && prior.source_id !== source.source_id)) {
     throw new CoreError("VALIDATION", "preparation continuation query changed", { details: { admission: "bound" } });
@@ -113,7 +125,8 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
       ? admission.query.gaps.length === 0 ? "complete" : "open" : "unexercised" };
   const base: Omit<SourceSemanticLease, "kind"> = { ...leaseBase(runtime, payload, authorized),
     ...(scopeLease === undefined ? {} : { source_id: scopeLease.source_id, source_version: scopeLease.source_version, content_digest: scopeLease.content_digest }),
-    original_query: request.original_query, query_semantics_id: querySemanticsId, query_semantics_status: queryStatus,
+    original_query: request.original_query, query_semantics_id: querySemanticsId, query_semantics_input_id: queryInputId,
+    query_semantics_status: queryStatus,
     query_semantics: admission.kind === "admitted" ? admission.query : undefined,
     candidates: pool.descriptors.map((row) => row.interpretation_id), truncated: discovery.truncated || open,
     access_pool: pool, access_offset: discovery.offset, access_source_offset: nextSourceOffset };
