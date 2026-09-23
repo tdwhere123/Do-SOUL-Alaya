@@ -142,7 +142,7 @@ it("retains unbound historical cache bytes as read-only evidence instead of sile
   expect(readdirSync(cacheRoot)).toEqual(["historical.json"]);
 });
 
-it("rejects real host-only Git revision drift before dispatch and preserves unknowns under a new receipt", async () => {
+it("ignores unrelated host Git revision drift and preserves existing unknown reservations", async () => {
   const http = await loopback();
   try {
     const directory = root(), checkout = join(directory, "checkout"), cacheRoot = join(directory, "cache");
@@ -162,9 +162,21 @@ it("rejects real host-only Git revision drift before dispatch and preserves unkn
       child.on("error", reject); child.on("exit", code => resolve({ code, stdout, stderr }));
     });
     expect(result, result.stderr).toMatchObject({ code: 0 });
-    expect(JSON.parse(result.stdout.trim())).toMatchObject({ request_unchanged: true, revision_changed: true,
-      old_fill_errors: ["semantic proposal executable revision changed", "semantic proposal executable revision changed"],
+    expect(JSON.parse(result.stdout.trim())).toMatchObject({ request_unchanged: true, revision_changed: false,
+      scope_unchanged: true,
       unknown_preserved: true, lineage_unchanged: true, ledger_count: 1, resumed: { unknown: 1, attempts: 1 } });
     expect(http.hits()).toBe(0);
   } finally { await http.close(); }
 }, 40_000);
+
+it("rejects a foreign implementation pin before creating the query execution root", () => {
+  const cacheRoot = join(root(), "cache"), prepared = workset("http://127.0.0.1:9");
+  const preflight = prepareSemanticProposal(prepared, cacheRoot, 128, 1);
+  const wrong = { ...preflight, execution_scope: {
+    ...preflight.execution_scope,
+    implementation_revision: `git-worktree-v1:${"a".repeat(40)}:${"b".repeat(64)}`
+  } };
+  expect(() => pinSemanticProposalAuthority({ preflight: wrong, inputUsdPerMillion: 1,
+    outputUsdPerMillion: 2 })).toThrow(/executable revision changed/u);
+  expect(existsSync(cacheRoot)).toBe(false);
+});

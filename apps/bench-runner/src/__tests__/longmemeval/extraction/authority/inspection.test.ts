@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   computeExtractionAuthorityWorktreeRevision,
-  inspectExtractionAuthority
+  inspectExtractionAuthority,
+  readCurrentExtractionAuthorityRevision
 } from "../../../../runs/extraction/authority/inspection.js";
 import { EXTRACTION_CACHE_KEY_ALGO } from
   "../../../../runs/extraction/cache/extraction-cache-manifest.js";
@@ -183,12 +184,13 @@ describe("no-network extraction authority inspection", () => {
       buildExtractionFillQuestion("q001", "User: alpha", "User: decoy"),
       buildExtractionFillQuestion("q002", "User: beta", "User: distraction")
     ]);
+    const revision = readCurrentExtractionAuthorityRevision();
     const inspected = await inspectExtractionAuthority({
       variant: EXTRACTION_FILL_VARIANT,
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      revision: "a".repeat(40),
+      revision,
       action: "fill"
     });
     const receipt = createExtractionAuthorityReceipt({
@@ -214,7 +216,7 @@ describe("no-network extraction authority inspection", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      revision: "a".repeat(40),
+      revision,
       action: "fill"
     });
     const changedAction = await inspectExtractionAuthority({
@@ -222,7 +224,7 @@ describe("no-network extraction authority inspection", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      revision: "a".repeat(40),
+      revision,
       action: "probe"
     });
 
@@ -231,5 +233,9 @@ describe("no-network extraction authority inspection", () => {
       .toThrow(/identity drift|does not match/u);
     expect(() => assertExtractionAuthorityReceipt(receipt, changedAction.observation))
       .toThrow(/identity drift|does not match/u);
+    expect(() => assertExtractionAuthorityReceipt(receipt, {
+      ...inspected.observation,
+      revision: `git-worktree-v1:${"a".repeat(40)}:${"b".repeat(64)}`
+    })).toThrow(/identity drift|does not match/u);
   });
 });

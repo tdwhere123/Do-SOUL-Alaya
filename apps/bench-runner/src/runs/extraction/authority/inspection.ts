@@ -6,8 +6,9 @@ import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-
 import { AlayaError, type SourceInterpretationProfile, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { lstatSync, statfsSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, realpathSync, statfsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
 import {
   assertRequiredRequestProfile,
@@ -303,10 +304,21 @@ export function inspectExtractionAuthorityDisk(
 }
 
 export function readCurrentExtractionAuthorityRevision(): string {
+  // Bind source state to the checkout that loaded this implementation, regardless of caller cwd.
+  const checkoutRoot = resolve(dirname(realpathSync(fileURLToPath(import.meta.url))), "../../../../../..");
+  let gitRoot: string;
+  try {
+    gitRoot = realpathSync(readGitText(["rev-parse", "--show-toplevel"], checkoutRoot));
+  } catch (cause) {
+    throw new Error("cannot establish the loaded bench-runner Git checkout", { cause });
+  }
+  if (gitRoot !== checkoutRoot) {
+    throw new Error("loaded bench-runner module is outside its Git checkout root");
+  }
   return computeExtractionAuthorityWorktreeRevision({
-    head: readGitText(["rev-parse", "HEAD"]),
-    trackedDiff: readGitBuffer(["diff", "--no-ext-diff", "--binary", "HEAD", "--"]),
-    untrackedFiles: readUntrackedFileDigests()
+    head: readGitText(["rev-parse", "HEAD"], checkoutRoot),
+    trackedDiff: readGitBuffer(["diff", "--no-ext-diff", "--binary", "HEAD", "--"], checkoutRoot),
+    untrackedFiles: readUntrackedFileDigests(checkoutRoot)
   });
 }
 
@@ -334,29 +346,31 @@ export function computeExtractionAuthorityWorktreeRevision(input: {
   return `git-worktree-v1:${input.head}:${digest.digest("hex")}`;
 }
 
-function readUntrackedFileDigests(): readonly {
+function readUntrackedFileDigests(checkoutRoot: string): readonly {
   readonly path: string;
   readonly mode: number;
   readonly blobDigest: string;
 }[] {
-  return readGitBuffer(["ls-files", "--others", "--exclude-standard", "-z"])
+  return readGitBuffer(["ls-files", "--others", "--exclude-standard", "-z"], checkoutRoot)
     .toString("utf8").split("\0").filter((path) => path.length > 0)
     .map((path) => ({
       path,
-      mode: lstatSync(path).mode & 0o777,
-      blobDigest: readGitText(["hash-object", "--no-filters", "--", path])
+      mode: lstatSync(join(checkoutRoot, path)).mode & 0o777,
+      blobDigest: readGitText(["hash-object", "--no-filters", "--", path], checkoutRoot)
     }));
 }
 
-function readGitText(args: readonly string[]): string {
+function readGitText(args: readonly string[], checkoutRoot: string): string {
   return execFileSync("git", args, {
+    cwd: checkoutRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"]
   }).trim();
 }
 
-function readGitBuffer(args: readonly string[]): Buffer {
+function readGitBuffer(args: readonly string[], checkoutRoot: string): Buffer {
   return execFileSync("git", args, {
+    cwd: checkoutRoot,
     encoding: "buffer",
     // Authority binds the full patch; large legitimate retirements exceed Node's default.
     maxBuffer: 64 * 1024 * 1024,

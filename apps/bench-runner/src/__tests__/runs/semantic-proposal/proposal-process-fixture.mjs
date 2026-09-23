@@ -38,24 +38,23 @@ try {
     process.chdir(process.env.PROPOSAL_GIT_ROOT);
     const pin = root => authorities.pinSemanticProposalAuthority({ preflight: fill.prepareSemanticProposal(workset, root, 128, 1),
       inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
-    const authority = pin(cacheRoot), freshRoot = `${cacheRoot}-unreserved`, freshAuthority = pin(freshRoot);
+    const authority = pin(cacheRoot);
     attempts.openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: workset.kind }).reserveAttemptOrdinal(authority.keys[0]);
     const ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${authority.attempt_lineage_digest}.json`);
     const before = readFileSync(ledgerPath, "utf8");
     const request = worksets.materializeSemanticProposalLines(workset, 128)[0].requestDigest;
     writeFileSync("host-only.ts", "export const admissionRevision = 2;\n");
-    const config = { model: workset.model, requestProfile: workset.request_profile, providerUrl: workset.provider_url, apiKey: "loopback-only" };
-    const errors = [];
-    for (const [root, receipt] of [[cacheRoot, authority], [freshRoot, freshAuthority]]) {
-      try { await fill.executeSemanticProposalFill({ workset, cacheRoot: root, authority: receipt, config }); errors.push(null); }
-      catch (cause) { errors.push(cause instanceof Error ? cause.message : String(cause)); }
-    }
+    const scopeUnchanged = authorities.inspectSemanticProposalExecutionScope(cacheRoot).implementation_revision ===
+      authority.execution_scope.implementation_revision;
+    authorities.assertSemanticProposalExecutionScope(authority.execution_scope, cacheRoot);
     const repinned = pin(cacheRoot);
-    const resumed = await fill.executeSemanticProposalFill({ workset, cacheRoot, authority: repinned, config });
+    const resumed = await fill.executeSemanticProposalFill({ workset, cacheRoot, authority: repinned,
+      config: { model: workset.model, requestProfile: workset.request_profile, providerUrl: workset.provider_url,
+        apiKey: "loopback-only" } });
     process.stdout.write(`${JSON.stringify({
       request_unchanged: request === worksets.materializeSemanticProposalLines(workset, 128)[0].requestDigest,
       revision_changed: authority.execution_scope.implementation_revision !== repinned.execution_scope.implementation_revision,
-      old_fill_errors: errors, unknown_preserved: readFileSync(ledgerPath, "utf8") === before,
+      scope_unchanged: scopeUnchanged, unknown_preserved: readFileSync(ledgerPath, "utf8") === before,
       lineage_unchanged: authority.attempt_lineage_digest === repinned.attempt_lineage_digest,
       ledger_count: ledgers.listExtractionAttemptLedgerRecords(cacheRoot).length, resumed
     })}\n`);
