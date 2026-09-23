@@ -26,6 +26,7 @@ import {
   SourceSemanticQueryStatusSchema,
   SourceSemanticQueryUnavailableReasonSchema,
   refineSourceSemanticQueryRequest,
+  refineSourceSemanticLibraryDelivery,
   SourceSemanticWorkerWorkSchema
 } from "../garden/source-semantic-worker.js";
 
@@ -152,15 +153,18 @@ export const SoulInterpretationReasonResponseSchema = z.object({
   ...CoverageWork
 }).strict().readonly();
 
-export const SoulInterpretationRecallDeliverySchema = SourceSemanticLibraryDeliverySchema.extend({
+const SoulInterpretationRecallDeliveryBaseSchema = z.object({
+  ...SourceSemanticLibraryDeliverySchema.shape,
   operation: z.literal("recall"),
   results: z.array(MemorySearchResultSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly(),
   outcome: SourceSemanticOutcomeSchema.optional(),
   ...CoverageWork
 }).strict();
+export const SoulInterpretationRecallDeliverySchema = SoulInterpretationRecallDeliveryBaseSchema
+  .superRefine(refineSourceSemanticLibraryDelivery);
 
 const SoulInterpretationRecallResponseSchema = z.object({
-  ...SoulInterpretationRecallDeliverySchema.partial().shape,
+  ...SoulInterpretationRecallDeliveryBaseSchema.partial().shape,
   operation: z.literal("recall"),
   ...CoverageWork
 }).strict().superRefine((response, ctx) => {

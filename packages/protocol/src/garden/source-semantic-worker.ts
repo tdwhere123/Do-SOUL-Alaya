@@ -8,7 +8,7 @@ import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceSemanticQuerySchema } from "../recall/conditional-field/semantic-query.js";
 import { SourceSemanticCorrespondenceSchema } from "../recall/conditional-field/semantic-correspondence.js";
 import { SourceSemanticEvaluationContextSchema } from "../recall/conditional-field/interpretation-context.js";
-import { ContinuationSchema, InformationIndexSchema } from "../recall/conditional-field/index-view.js";
+import { ContinuationSchema, InformationIndexSchema, SOURCE_SEMANTIC_PROOF_OBJECT_KIND } from "../recall/conditional-field/index-view.js";
 import {
   SourceSemanticInterpretationSchema, SourceSemanticOutcomeSchema, SourceSemanticReasoningResultSchema
 } from "./source-semantic-interpretation.js";
@@ -226,6 +226,44 @@ export const SourceSemanticLibraryProofSchema = SourceSemanticReasoningResultSch
 }).strict().readonly();
 export type SourceSemanticLibraryProof = z.infer<typeof SourceSemanticLibraryProofSchema>;
 
+type LibraryDeliveryConsistency = Readonly<{
+  query_semantics_status: SourceSemanticQueryStatus;
+  slot_qualifiers: readonly SourceSemanticLibrarySlotQualifier[];
+  proofs?: readonly SourceSemanticLibraryProof[];
+  results?: readonly Readonly<{ object_kind: string }>[];
+  index: z.infer<typeof InformationIndexSchema>;
+  coverage?: SourceSemanticCoverage;
+}>;
+type DeliveryRefinementContext = { addIssue(issue: { code: "custom"; path?: (string | number)[]; message: string }): void };
+
+/** Availability and proof claims share one admission rule across worker and public deliveries. */
+export function refineSourceSemanticLibraryDelivery(value: LibraryDeliveryConsistency, context: DeliveryRefinementContext): void {
+  const status = value.query_semantics_status;
+  if (status.status === "unavailable") {
+    if ((value.proofs?.length ?? 0) > 0 || value.results?.some((result) => result.object_kind === SOURCE_SEMANTIC_PROOF_OBJECT_KIND)
+      || value.slot_qualifiers.some((slot) => slot.evidence_kind !== "source_evidence"
+      || slot.query_semantics_id !== undefined || slot.semantic_correspondence_id !== undefined
+      || slot.conditional_computation_id !== undefined || slot.witnesses !== undefined || slot.support !== undefined)
+      || value.index.entries.some((entry) => entry.interpretation_node !== undefined || entry.explanation_ids.length > 0)
+      || (value.index.explanations?.length ?? 0) > 0) {
+      context.addIssue({ code: "custom", message: "unavailable query semantics cannot deliver semantic proof claims" });
+    }
+    if (value.coverage !== undefined && (value.coverage.query_semantics !== "unexercised"
+      || value.coverage.semantic_correspondence !== "unexercised"
+      || value.coverage.conditional_computation !== "unexercised")) {
+      context.addIssue({ code: "custom", path: ["coverage"], message: "unavailable query semantics cannot claim semantic computation coverage" });
+    }
+    return;
+  }
+  if (value.slot_qualifiers.some((slot) => slot.evidence_kind === "semantic_proof"
+    && slot.query_semantics_id !== status.query_semantics_id)
+    || value.proofs?.some((proof) => proof.query_semantics_id !== status.query_semantics_id
+      || proof.semantic_correspondence.query_semantics_id !== status.query_semantics_id
+      || proof.context.query_semantics_id !== status.query_semantics_id)) {
+    context.addIssue({ code: "custom", message: "delivered proof query identity differs from admitted query semantics" });
+  }
+}
+
 /** Current native library delivery; invariant §25 major requires request binding. Generic InformationIndex stays independent. */
 export const SourceSemanticLibraryDeliverySchema = z.object({
   delivery_id: BoundedIdSchema,
@@ -247,7 +285,7 @@ export const SourceSemanticLibraryDeliverySchema = z.object({
   slot_qualifiers: z.array(SourceSemanticLibrarySlotQualifierSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly(),
   proofs: z.array(SourceSemanticLibraryProofSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   request_budget: RequestBudgetSchema.optional()
-}).strict();
+}).strict().superRefine(refineSourceSemanticLibraryDelivery);
 
 export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -290,7 +328,7 @@ export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
     ...SourceSemanticLibraryDeliverySchema.shape,
     previews: z.record(z.string().min(1).max(16384), z.string().max(65536)).optional(),
     ...CoverageWork
-  }).strict().readonly()
+  }).strict().superRefine(refineSourceSemanticLibraryDelivery).readonly()
 ]);
 
 export type SourceSemanticCoverage = z.infer<typeof SourceSemanticCoverageSchema>;

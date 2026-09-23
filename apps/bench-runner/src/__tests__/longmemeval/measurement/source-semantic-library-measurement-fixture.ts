@@ -89,7 +89,8 @@ export function nativeProofResponseFixture(unverifiedFirst = false, workspaceId 
   const index = assembleSourceSemanticLibraryIndex({ query_id: first.index.query_id, snapshot_id: first.index.snapshot_id,
     interpretation_id: "library-interpretation", as_of: CLOCK, source_entries: [], truncated: false, open_residuals: false,
     proof_groups: fixtures.map((fixture) => ({ entries: fixture.index.entries, explanations: fixture.index.explanations })) }).index;
-  const response = encodeSourceSemanticLibraryResponse({ ...workerRecall(index), proofs, slot_qualifiers: slotQualifiersFor(index, proofs) });
+  const response = encodeSourceSemanticLibraryResponse({ ...workerRecall(index), proofs, slot_qualifiers: slotQualifiersFor(index, proofs),
+    query_semantics_status: { status: "admitted", query_semantics_id: first.proof.query_semantics_id! } });
   if (response.operation !== "recall") throw new Error("native proof response expected");
   const target = index.entries[unverifiedFirst ? 1 : 0]!.target;
   if (target.kind !== "source_evidence") throw new Error("native source root expected");

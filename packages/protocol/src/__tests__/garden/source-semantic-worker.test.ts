@@ -6,7 +6,7 @@ import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema } fro
 import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
 import {
   SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
-  SourceSemanticLibraryContinuationSchema,
+  SourceSemanticLibraryContinuationSchema, SourceSemanticLibraryDeliverySchema,
   SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET
 } from "../../garden/source-semantic-worker.js";
 
@@ -129,6 +129,28 @@ it("shares current delivery version, membership and page budget admission betwee
     { ...delivery, order: { ...delivery.order, page_budget: 9 } },
     { ...delivery, index: { ...delivery.index, representation: { ...delivery.index.representation, page_budget: 9 } } },
     { ...delivery, index: { ...delivery.index, page_purpose: "update" } } ]) expect(accepts(changed)).toEqual([false, false]);
+});
+
+it("binds availability, semantic coverage and qualified slots on both delivery surfaces", () => {
+  const delivery = libraryDelivery();
+  const accepts = (value: Record<string, unknown>) => [
+    SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...value }).success,
+    SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [], provider_attempts: 0, ...value }).success
+  ];
+  const proofSlot = { index: 0, evidence_kind: "semantic_proof", source_interpretation_id: digest,
+    query_semantics_id: digest, semantic_correspondence_id: digest, conditional_computation_id: digest,
+    witnesses: [{ conditional_computation_id: digest, binding_id: "binding" }],
+    support: { answer: "open", evidence_inputs: [], operation: "not_requested", compatibility: "unknown", distinctness: "unknown" } };
+  expect(accepts(delivery)).toEqual([true, true]);
+  expect(accepts({ ...delivery, coverage: { ...coverage, query_semantics: "complete" } })).toEqual([false, false]);
+  expect(accepts({ ...delivery, slot_qualifiers: [proofSlot] })).toEqual([false, false]);
+  const { coverage: _coverage, work: _work, ...baseDelivery } = delivery;
+  expect(SourceSemanticLibraryDeliverySchema.safeParse(baseDelivery).success).toBe(true);
+  expect(SourceSemanticLibraryDeliverySchema.safeParse({ ...baseDelivery, slot_qualifiers: [proofSlot] }).success).toBe(false);
+  expect(accepts({ ...delivery, query_semantics_status: { status: "admitted", query_semantics_id: digest },
+    coverage: { ...coverage, query_semantics: "complete" }, slot_qualifiers: [proofSlot] })).toEqual([true, true]);
+  expect(accepts({ ...delivery, query_semantics_status: { status: "admitted", query_semantics_id: `sha256:${"b".repeat(64)}` },
+    coverage: { ...coverage, query_semantics: "complete" }, slot_qualifiers: [proofSlot] })).toEqual([false, false]);
 });
 
 it("rejects every missing mandatory delivery field and partial deliveries disguised as outcomes", () => {

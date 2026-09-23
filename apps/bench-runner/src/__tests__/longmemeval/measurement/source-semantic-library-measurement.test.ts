@@ -49,6 +49,10 @@ describe("source semantic library measurement", () => {
       if (changed?.status !== "validated" || !("native_observation" in changed)) throw new Error("current native observation expected");
       Object.assign(changed.native_observation.discovery, { open_residuals: !discovery.open_residuals });
       expect(readmitSourceSemanticLibraryMeasurement(changed, input).measurement?.status).toBe("invalid");
+      const changedStatus = structuredClone(evaluated.measurement);
+      if (changedStatus?.status !== "validated" || !("native_observation" in changedStatus)) throw new Error("current native observation expected");
+      Object.assign(changedStatus.native_observation, { query_semantics_status: { status: "unavailable", reason: "absent" } });
+      expect(readmitSourceSemanticLibraryMeasurement(changedStatus, input).measurement?.status).toBe("invalid");
     }
   });
 

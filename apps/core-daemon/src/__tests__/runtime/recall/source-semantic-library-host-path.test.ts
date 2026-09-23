@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import * as core from "@do-soul/alaya-core";
 import {
-  SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, hashLabeledIdentity,
+  SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, SourceSemanticWorkerResultSchema,
+  SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, hashLabeledIdentity,
   indexEntryCacheKey, materializeSourceSemanticCompactProposal,
   type SourceSemanticCorrespondence, type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
   type SoulInterpretationResponse,
@@ -324,6 +325,9 @@ it("delivers an unchanged question from current raw sources when query semantics
           source_version: "1", content_digest: `sha256:${fieldContractSha256(ALICE)}` }] });
       expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("hit");
       expect(evaluated.validatedProofRanks).toEqual([]);
+      const claimedProofResult = structuredClone(absent);
+      Object.assign(claimedProofResult.results![0]!, { object_kind: "semantic_proof" });
+      expect(SoulInterpretationResponseSchema.safeParse(claimedProofResult).success).toBe(false);
 
       const admittedQuery = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
       expect(SoulInterpretationRequestSchema.safeParse({ ...request, query_semantics: admittedQuery,
@@ -477,12 +481,29 @@ it.each([0, 5000])("measures a published source through reopened public recall a
       expect(proofSlots).toBeGreaterThan(0);
       expect(verify).toHaveBeenCalledTimes(proofSlots);
       expect(evaluated.measurement?.status).toBe("validated");
-      expect(evaluated.measurement).toMatchObject({ contract: "source-semantic-library-delivered-slots-v2",
-        native_observation: { discovery: withCorrespondence.discovery, coverage: withCorrespondence.coverage },
+      expect(evaluated.measurement).toMatchObject({ contract: "source-semantic-library-delivered-slots-v3",
+        native_observation: { query_semantics_status: withCorrespondence.query_semantics_status,
+          discovery: withCorrespondence.discovery, coverage: withCorrespondence.coverage },
         metrics: { delivered_slot_union: { any_at_5: { status: "hit" } } } });
       expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("hit");
       expect(evaluated.evaluator_usage).toMatchObject({ proof_slots_checked: proofSlots });
       expect(evaluated.evaluator_usage.work_units).toBeGreaterThan(0);
+      const unavailableProof = { ...withCorrespondence,
+        query_semantics_status: { status: "unavailable" as const, reason: "absent" as const } };
+      expect(SoulInterpretationResponseSchema.safeParse(unavailableProof).success).toBe(false);
+      const { operation: _operation, results: _results, provider_attempts: _providerAttempts, ...workerPage } = unavailableProof;
+      expect(SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...workerPage,
+        query_semantics_status: withCorrespondence.query_semantics_status }).success).toBe(true);
+      expect(SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...workerPage }).success).toBe(false);
+      verify.mockClear();
+      expect(measureSourceSemanticLibraryResponse({ ...input, recallResult: unavailableProof })).toMatchObject({
+        measurement: { status: "invalid", reason: "invalid_response" }, validatedProofRanks: [], sourceBearingUnion: null,
+        evaluator_usage: { proof_slots_checked: 0 }
+      });
+      expect(verify).not.toHaveBeenCalled();
+      const wrongAdmittedId = { ...withCorrespondence,
+        query_semantics_status: { status: "admitted" as const, query_semantics_id: `sha256:${"0".repeat(64)}` } };
+      expect(SoulInterpretationResponseSchema.safeParse(wrongAdmittedId).success).toBe(false);
       const forged = structuredClone(withCorrespondence);
       const forgedEntry = forged.index!.entries[proofSlot!.index]!;
       if (forgedEntry.target.kind !== "source_evidence") throw new Error("source target expected");
@@ -525,7 +546,7 @@ it("keeps a late gold root unavailable after native source access stops while pr
         const input = { recallResult: recalled, firstExposurePage: recordSourceSemanticLibraryFirstExposure(recalled),
           requestBudget: ACCESS_BUDGET, goldSourceUnits: [lateGold], sourceRecords: current.sources };
         const evaluated = measureSourceSemanticLibraryResponse(input);
-        expect(evaluated.measurement).toMatchObject({ status: "validated", contract: "source-semantic-library-delivered-slots-v2",
+        expect(evaluated.measurement).toMatchObject({ status: "validated", contract: "source-semantic-library-delivered-slots-v3",
           native_observation: { discovery: recalled.discovery, coverage: recalled.coverage },
           metrics: { delivered_slot_union: { any_at_5: { status: "miss", value: false } } } });
         expect(evaluated.sourceBearingUnion?.any_at_5).toMatchObject({ status: "unavailable", value: null });
