@@ -1,7 +1,7 @@
 import { sourceSemanticQueryBranchViews, type SourceSemanticQuery, type SourceSemanticBindingResult,
   type SourceSemanticQuerySupport } from "@do-soul/alaya-protocol";
 
-/** Call only with execution-owned or verified bindings from this original Q. Input coverage never executes its operation. */
+/** Call only with execution-owned or verified bindings from this original query semantics. Input coverage never executes its operation. */
 export function projectSourceSemanticQuerySupport(query: SourceSemanticQuery,
   bindings: readonly SourceSemanticBindingResult[]): SourceSemanticQuerySupport {
   const represented = query.evaluation !== undefined || query.alternatives.some(alternative =>

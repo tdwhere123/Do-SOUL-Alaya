@@ -26,7 +26,7 @@ export function sourceSemanticQueryScopeView(
   };
 }
 
-/** Views retain original Q endpoints; they never create another query or correspondence identity. */
+/** Views retain original query semantics endpoints; they never create another query or correspondence identity. */
 export function sourceSemanticQueryBranchViews(alternative: SourceSemanticQueryAlternative): SourceSemanticQueryBranchView[] {
   return [
     { target: { kind: "answer" }, alternative: sourceSemanticQueryScopeView(alternative,
