@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { SourceSemanticResourceLedger, sourceSemanticQueryIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { selectSourceSemanticLibraryPage, type SourceSemanticLibraryPackage } from "../../../recall/runtime/source-semantic-library-selection.js";
-import { sourceSemanticLibrarySourceEntry } from "../../../recall/runtime/source-semantic-library-recall.js";
+import { assembleSourceSemanticLibraryIndex, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry } from "../../../recall/runtime/source-semantic-library-recall.js";
 import { deliveredProofFixture, source, query, correspondenceFor } from "./source-semantic-proof-fixture.js";
 
 const budget = () => new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 20_000_000 });
@@ -21,6 +21,29 @@ function raw(id: string, position = 0): SourceSemanticLibraryPackage {
   return { entry, entries: [entry], explanations: [], proofs: [], preview: "weather", access_position: position, payload_support: "not_applicable" };
 }
 const qualified = Array.from({ length: 6 }, (_, index) => witnessed(`speaker-${index}`));
+
+function demandWitnesses() {
+  const frames = Array.from({ length: 6 }, (_, index) => ({ ...query().alternatives[0]!.frames[0]!, id: `qUse${index}`, variable: `use${index}` }));
+  const semantics: SourceSemanticQuery = { ...evidenceQuery,
+    variables: [...query().variables.filter(row => row.id !== "use"), ...frames.map(row => ({ id: row.variable, sort: "proposition" as const }))],
+    alternatives: [{ frames, context_obligations: frames.map(row => ({ frame: row.id, kind: "asserted_at_source" })),
+      answer_frames: [], evidence_inputs: frames.map(row => ({ frames: [row.id] })) }] };
+  return (id: string, inputs: readonly number[]): SourceSemanticLibraryPackage => {
+    const interpretation = { ...source(), source: { ...source().source, source_id: id } };
+    const original = correspondenceFor(interpretation, query());
+    const correspondence = { ...original, query_semantics_id: sourceSemanticQueryIdentity(semantics, fieldContractSha256),
+      correspondences: original.correspondences.flatMap(row => row.query_endpoint.kind === "referent" ? [row]
+        : inputs.map(input => ({ ...row, query_endpoint: { ...row.query_endpoint, frame: `qUse${input}` } }))) };
+    const actual = deliveredProofFixture({ interpretation, semantics, correspondence, library: true });
+    return { entry: actual.entry, entries: actual.index.entries, explanations: actual.index.explanations ?? [],
+      proofs: [actual.proof], preview: id, access_position: 0, payload_support: "available" };
+  };
+}
+
+function root(row: SourceSemanticLibraryPackage): string {
+  if (row.entry.target.kind !== "source_evidence") throw new Error("source root expected");
+  return sourceGoldRootIdentity(row.entry.target);
+}
 
 it("matches a tiny exhaustive eligibility oracle after demand saturation without claiming distinct people", () => {
   const pool = [raw("unrelated"), ...qualified, qualified[0]!];
@@ -63,22 +86,29 @@ it("prefers an actually executed complete answer and fills remaining slots from 
   expect(selected[1]!.entry.target).toEqual(pool[1]!.entry.target);
 });
 
+it("compares the same immutable candidates in native canonical and selected index orders", () => {
+  const candidates = [raw("a0"), raw("a1"), raw("a2"), raw("a3"), raw("a4"), raw("a5"), witnessed("z-answer", query())];
+  const expectedAnswer = root(candidates[6]!);
+  const selected = selectSourceSemanticLibraryPage({ candidates, meter: budget(), fits: rows => rows.length <= 5 });
+  const input = { query_id: "fixed-query", snapshot_id: `sha256:${"cd".repeat(32)}`, interpretation_id: "fixed-interpretation",
+    as_of: "2026-09-18T00:00:00.000Z", proof_groups: candidates.filter(row => row.proofs.length > 0)
+      .map(row => ({ entries: row.entries, explanations: row.explanations })),
+    source_entries: candidates.map(row => row.entry), truncated: false, open_residuals: false };
+  const canonical = assembleSourceSemanticLibraryIndex(input);
+  const proposed = assembleSourceSemanticLibraryIndex({ ...input, root_order: selected.map(root),
+    selected_entries: selected.map(row => row.entry), more_roots: true });
+  expect(new Set(candidates.map(root)).size).toBe(7);
+  expect(canonical.index.entries).toHaveLength(5);
+  expect(proposed.index.entries).toHaveLength(5);
+  expect(proposed.index.entries[0]?.target.kind === "source_evidence"
+    && sourceGoldRootIdentity(proposed.index.entries[0].target)).toBe(expectedAnswer);
+  expect(canonical.index.entries.some(row => row.target.kind === "source_evidence"
+    && sourceGoldRootIdentity(row.target) === expectedAnswer)).toBe(false);
+  expect(selected[0]?.selection_basis).toBe("direct_answer");
+});
+
 it("repairs the greedy overlapping-demand choice by one root exchange against exhaustive subsets", () => {
-  const frames = Array.from({ length: 6 }, (_, index) => ({ ...query().alternatives[0]!.frames[0]!, id: `qUse${index}`, variable: `use${index}` }));
-  const semantics: SourceSemanticQuery = { ...evidenceQuery,
-    variables: [...query().variables.filter(row => row.id !== "use"), ...frames.map(row => ({ id: row.variable, sort: "proposition" as const }))],
-    alternatives: [{ frames, context_obligations: frames.map(row => ({ frame: row.id, kind: "asserted_at_source" })),
-      answer_frames: [], evidence_inputs: frames.map(row => ({ frames: [row.id] })) }] };
-  const make = (id: string, inputs: readonly number[]) => {
-    const interpretation = { ...source(), source: { ...source().source, source_id: id } };
-    const original = correspondenceFor(interpretation, query());
-    const correspondence = { ...original, query_semantics_id: sourceSemanticQueryIdentity(semantics, fieldContractSha256),
-      correspondences: original.correspondences.flatMap(row => row.query_endpoint.kind === "referent" ? [row]
-        : inputs.map(input => ({ ...row, query_endpoint: { ...row.query_endpoint, frame: `qUse${input}` } }))) };
-    const actual = deliveredProofFixture({ interpretation, semantics, correspondence, library: true });
-    return { entry: actual.entry, entries: actual.index.entries, explanations: actual.index.explanations ?? [],
-      proofs: [actual.proof], preview: id, access_position: 0, payload_support: "available" as const };
-  };
+  const make = demandWitnesses();
   const pool = [make("overlap", [0, 1, 2, 3]), make("left", [0, 1, 4]), make("right", [2, 3, 5])];
   const coverage = (rows: readonly SourceSemanticLibraryPackage[]) => new Set(rows.flatMap(row => row.proofs.flatMap(proof =>
     proof.binding_results?.flatMap(binding => binding.kind === "evidence" ? [binding.input] : []) ?? []))).size;
@@ -98,6 +128,19 @@ it("repairs the greedy overlapping-demand choice by one root exchange against ex
       .map(row => JSON.stringify(row.entry.target)).sort());
   expect(memberships[1]).toEqual(memberships[0]);
   expect(memberships[2]).toEqual(memberships[0]);
+});
+
+it("leaves one of six necessary source-local inputs outside the fixed first five roots", () => {
+  const make = demandWitnesses();
+  const candidates = Array.from({ length: 6 }, (_, input) => make(`necessary-${input}`, [input]));
+  const selected = selectSourceSemanticLibraryPage({ candidates, meter: budget(), fits: rows => rows.length <= 5 });
+  const covered = new Set(selected.flatMap(row => row.proofs.flatMap(proof => proof.binding_results?.flatMap(binding =>
+    binding.kind === "evidence" ? [binding.input] : []) ?? [])));
+  expect(new Set(candidates.map(root)).size).toBe(6);
+  expect(selected).toHaveLength(5);
+  expect(new Set(selected.map(root)).size).toBe(5);
+  expect(covered.size).toBe(5);
+  expect([0, 1, 2, 3, 4, 5].filter(input => !covered.has(input))).toHaveLength(1);
 });
 
 it("keeps reserved slots when later selection work exhausts", () => {
