@@ -37,7 +37,7 @@ function sourceAttemptHistory(cacheRoot: string, key: string, config: LazyQualif
 }
 
 export function selectedSourceState(source: Awaited<ReturnType<typeof censusCompleteSourceRecords>>["records"][number],
-  config: LazyQualificationConfig, planned: ReturnType<typeof readRetainedSourcePublicationOwners>["planned"],
+  config: LazyQualificationConfig, owned: ReturnType<typeof readRetainedSourcePublicationOwners>["owned"],
   artifacts: readonly { key: string; cache_root: string; status: string; reason?: string }[]) {
   const generation = parseExtractionOpenSemanticsGeneration(config.source_population.openSemantics ?? EXTRACTION_OPEN_SEMANTICS_GENERATION);
   const preparations = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", generation);
@@ -47,7 +47,7 @@ export function selectedSourceState(source: Awaited<ReturnType<typeof censusComp
     state: "unsupported_source" as const, cache_identity: null, attempt_identity: null,
     starting_attempt_refs: [], starting_raw_refs: [], attempt_history_complete: true };
   const line = prepareSourceSemanticRequestLine(prepared.semantic, [], config.source_population);
-  const owner = planned.get(line.key);
+  const owner = owned.get(line.key);
   const artifact = artifacts.find(row => row.key === line.key);
   if (owner === undefined) return { key: line.key, cache_root: null,
     state: "unowned" as const, cache_identity: null, attempt_identity: null,

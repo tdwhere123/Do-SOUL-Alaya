@@ -15,7 +15,7 @@ import { assertLongMemEvalSemanticRows, loadFrozenLongMemEvalDataset, readLongMe
   type LongMemEvalSemanticFreeze } from "./contract.js";
 import { assertSourceCaches } from "./native-arm.js";
 
-const QuestionPublicationSchema = z.object({ workspace_id: z.string(), run_id: z.string(), recorded_at: z.string(),
+export const QuestionPublicationSchema = z.object({ workspace_id: z.string(), run_id: z.string(), recorded_at: z.string(),
   snapshot_path: z.string(), db_sha256: z.string(), census_count: z.number(), admitted_count: z.number(), published_count: z.number().int().nonnegative(),
   sources: z.array(z.object({ question_id: z.string(), session_id: z.string(), source_id: z.string(), source_version: z.string(),
     content_digest: z.string(), corpus_digest: z.string(), admission: z.enum(["admitted", "rejected"]), record_id: z.string().optional()
@@ -43,7 +43,7 @@ export const LongMemEvalReplaySchema = z.object({ contract: z.literal("longmemev
   ])) }).strict();
 const NativePreparedSchema = LongMemEvalPreparedSchema.extend({ contract: z.literal("longmemeval-native-semantic-prepared-v1"),
   correspondence_workset: SemanticProposalWorksetSchema.nullable() }).strict();
-const ExperimentPreparedSchema = z.discriminatedUnion("contract", [LongMemEvalPreparedSchema, NativePreparedSchema]);
+export const ExperimentPreparedSchema = z.discriminatedUnion("contract", [LongMemEvalPreparedSchema, NativePreparedSchema]);
 const NativeReplaySchema = LongMemEvalReplaySchema.extend({ contract: z.literal("longmemeval-native-semantic-replay-v1") }).strict();
 export const LongMemEvalExperimentReplaySchema = z.discriminatedUnion("contract", [LongMemEvalReplaySchema, NativeReplaySchema]);
 

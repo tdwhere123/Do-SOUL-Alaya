@@ -884,10 +884,15 @@ reservation. The Step source dry preflight is provider-free and may select an
 exact set of ready keys while retaining the full source and unsupported
 occurrence counts. It defaults to 4096 output tokens; an explicit positive
 safe `--extraction-preflight-output-token-cap` selects another finite bound.
-The retained `source-semantic-interactive-preflight-v2` binds the encoded wire,
-input and cost bounds. A Step complete-source sample authority requires that
+The retained `source-semantic-interactive-preflight-v3` binds the encoded wire,
+input and cost bounds. Its complete ready-request inventory includes compatible
+cache hits and their current occurrence keys; planned requests remain only new
+payable misses, and deterministic empty requests remain zero-attempt. The native
+association reader validates each retained ready request against its current source
+and retained cache/raw evidence, so a later question can reuse the same key without
+pretending the earlier question's occurrence keys were new attempts. A Step complete-source sample authority requires that
 report via `--extraction-source-preflight`, with matching logical and physical
-route, selected keys, cap and quote; historical v1 reports are not current proof.
+route, selected keys, cap and quote; historical v1/v2 reports are not current proof.
 The sample receipt reserves at most one
 attempt per selected key; an incomplete or failed response stops the remaining
 keys. The shared attempt ledger enforces that per-key limit across reopen.
@@ -1170,6 +1175,16 @@ requires an explicit Protocol access policy in the frozen configuration and forw
 and replay. The native arm pins `query-conditioned-v1`; the source-only arm pins
 `canonical-v1`. Historical source-only artifacts keep their explicit offline
 readmission owner; the current chain reader does not fall back to an older plan.
+For an offline single-question LongMemEval native freeze, the lazy binder admits
+the original complete source census, initial question publication and settled query,
+and the full retained Step source preflight before constructing the existing lazy
+config. Its isolated evaluator joins gold only for an admitted durable first
+exposure and writes outside producer and cache roots. A sealed final stage with no
+durable first exposure remains one selected answerable unknown, distinguishing an
+unreserved exposure from an unresolved native or stage reservation, with no recall or
+gold join. A verified positive source hit survives partial answer-session mapping;
+only a negative requires complete mapping. Unselected development questions remain
+in the inventory but are not scored, and this bridge does not authorize a formal arm.
 Each query gets its own bounded native
 candidate opportunity; one combined proposal workset uses the existing authority
 and attempt ledger for global spend. Preparation retains the native access receipt

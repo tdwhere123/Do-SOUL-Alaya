@@ -1,5 +1,5 @@
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
-import { SourceSemanticUnsupportedSourceSchema } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, SourceSemanticUnsupportedSourceSchema } from "@do-soul/alaya-soul";
 import { z } from "zod";
 import { parseExtractionSampleKeys } from "../authority/sample-scope.js";
 import { attemptInputByteUpperBound } from "../authority/receipt-limits.js";
@@ -29,7 +29,7 @@ const UnsupportedSourceSchema = SourceSemanticUnsupportedSourceSchema.unwrap().e
   provider_attempts: z.literal(0)
 }).strict().readonly();
 const RetainedPreflightSchema = z.object({
-  contract: z.literal("source-semantic-interactive-preflight-v2"),
+  contract: z.literal("source-semantic-interactive-preflight-v3"),
   execution_authorized: z.literal(false), provider_calls: z.literal(0),
   dataset_revision: z.string().min(1),
   source_occurrences: z.number().int().nonnegative(),
@@ -39,6 +39,7 @@ const RetainedPreflightSchema = z.object({
   selected_requests: z.number().int().nonnegative(),
   selected_keys: z.array(DigestSchema).readonly(),
   cached_requests: z.number().int().nonnegative(),
+  deterministic_requests: z.number().int().nonnegative(),
   config: z.object({
     providerUrl: z.string().min(1), model: z.string().min(1),
     transportProviderUrl: z.string().min(1).optional(),
@@ -56,7 +57,8 @@ const RetainedPreflightSchema = z.object({
   maximum_input_tokens_per_attempt: z.number().int().nonnegative(),
   input_token_bound: z.number().int().nonnegative(),
   cost_bound_usd: z.number().nonnegative(),
-  planned_requests: z.array(PlannedRequestSchema).readonly()
+  planned_requests: z.array(PlannedRequestSchema).readonly(),
+  ready_requests: z.array(SourceRequestLineSchema).readonly()
 }).strict().readonly();
 export type SourceSemanticInteractivePreflight = z.infer<typeof RetainedPreflightSchema>;
 
@@ -74,6 +76,8 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
   if (new Set(report.selected_keys).size !== report.selected_keys.length ||
       canonicalJson(sortedKeys) !== canonicalJson(report.selected_keys) ||
       report.selected_requests !== report.planned_requests.length ||
+      report.ready_requests.length !== report.selected_keys.length ||
+      report.selected_requests + report.cached_requests + report.deterministic_requests !== report.ready_requests.length ||
       report.cached_requests > report.total_requests ||
       report.selected_keys.length > report.total_requests ||
       report.unsupported_source_occurrences !== report.unsupported_sources.length ||
@@ -82,6 +86,17 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
     throw new AlayaError("CONFLICT", "retained Step preflight population or selected keys are inconsistent");
   }
   const selected = new Set(report.selected_keys);
+  const ready = new Map<string, typeof report.ready_requests[number]>();
+  for (const row of report.ready_requests) {
+    const line = parseSourceSemanticRequestLine(row, config);
+    if (!selected.has(line.key) || ready.has(line.key)) {
+      throw new AlayaError("CONFLICT", "retained Step preflight repeats or selects a foreign ready key");
+    }
+    ready.set(line.key, line);
+  }
+  if (canonicalJson([...ready.keys()].sort()) !== canonicalJson(report.selected_keys)) {
+    throw new AlayaError("CONFLICT", "retained Step preflight ready inventory differs from selected keys");
+  }
   const planned = new Set<string>();
   let largestInput = 0, inputBound = 0, costBound = 0;
   for (const row of report.planned_requests) {
@@ -89,7 +104,8 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
       key: row.key, unitKeys: row.unitKeys, requestSha256: row.requestSha256,
       systemPrompt: row.systemPrompt, userPrompt: row.userPrompt
     }, config);
-    if (!selected.has(line.key) || planned.has(line.key)) {
+    if (!selected.has(line.key) || planned.has(line.key) ||
+        canonicalJson(ready.get(line.key)) !== canonicalJson(line)) {
       throw new AlayaError("CONFLICT", "retained Step preflight repeats or selects a foreign ready key");
     }
     planned.add(line.key);
@@ -107,6 +123,12 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
   if (report.maximum_input_tokens_per_attempt !== largestInput ||
       report.input_token_bound !== inputBound || report.cost_bound_usd !== costBound) {
     throw new AlayaError("CONFLICT", "retained Step preflight bounds differ from its exact planned requests");
+  }
+  const deterministic = report.ready_requests.filter(line =>
+    parseSourceSemanticRequest(JSON.parse(line.userPrompt)).source_request.source_assertions.length === 0);
+  if (deterministic.length !== report.deterministic_requests ||
+      deterministic.some(line => planned.has(line.key))) {
+    throw new AlayaError("CONFLICT", "retained Step preflight deterministic source count differs from ready requests");
   }
   return report;
 }
@@ -150,7 +172,7 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
     maxOutputTokens * quote.output_usd_equivalent_per_million
   ) / 1_000_000, 0);
   return parseSourceSemanticInteractivePreflight({
-    contract: "source-semantic-interactive-preflight-v2" as const,
+    contract: "source-semantic-interactive-preflight-v3" as const,
     execution_authorized: false as const, provider_calls: 0 as const,
     dataset_revision: inspected.datasetRevision,
     source_occurrences: inspected.sourceOccurrences,
@@ -160,8 +182,9 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
       ...source.disposition, provider_attempts: 0 as const
     })),
     total_requests: inspected.completion.expectedTurns,
-    selected_requests: requests.length, selected_keys: [...(selectedKeys ?? new Set(requests.map(row => row.key)))],
+    selected_requests: requests.length, selected_keys: [...(selectedKeys ?? new Set(workset.requests.map(row => row.line.key)))].sort(),
     cached_requests: workset.cachedRequests.length,
+    deterministic_requests: workset.deterministicEmptyRequests.length,
     config: { ...inspected.config, apiKey: null },
     transport_provenance: buildExtractionTransportProvenance(inspected.config),
     quote_basis: quote,
@@ -170,6 +193,7 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
     maximum_input_tokens_per_attempt: maximumInputTokensPerAttempt,
     input_token_bound: requests.reduce((sum, row) => sum + row.input_byte_upper, 0),
     cost_bound_usd: costBoundUsd,
-    planned_requests: requests
+    planned_requests: requests,
+    ready_requests: workset.requests.map(row => row.line)
   });
 }

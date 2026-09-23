@@ -3,8 +3,11 @@ import { join, resolve } from "node:path";
 import { measureSemanticChain } from "../semantic-chain/replay.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
+import type { LongMemEvalQuestion } from "../../datasets/longmemeval/ingestion/dataset.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
-import { LongMemEvalExperimentReplaySchema, LongMemEvalSourceOnlyReplaySchema, verifyLongMemEvalQuestionPublication, verifyLongMemEvalQuestionChain } from "./execute.js";
+import { LongMemEvalExperimentReplaySchema, LongMemEvalSourceOnlyReplaySchema, verifyLongMemEvalQuestionPublication, verifyLongMemEvalQuestionChain,
+  type QuestionPublicationSchema } from "./execute.js";
+import type { z } from "zod";
 import { assertLongMemEvalSemanticRows, loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze } from "./contract.js";
 
 type LongMemEvalOutcome = Readonly<{
@@ -13,6 +16,28 @@ type LongMemEvalOutcome = Readonly<{
   measurement_path: string | null; reason: string | null; mechanism: "not_exercised" | "proof_exercised";
   attribution: { layer: string; native: unknown };
 }>;
+
+/** Original answer-session membership joins only admitted source records in the verified publication. */
+export function joinLongMemEvalGold(question: Pick<LongMemEvalQuestion, "answer_session_ids">,
+  publication: z.infer<typeof QuestionPublicationSchema>, expectedSourceCount: number) {
+  const answerSessions = new Set(question.answer_session_ids);
+  const goldSources = publication.sources.filter(source => answerSessions.has(source.session_id));
+  const sourceUnits = goldSources.filter(source => source.admission === "admitted" && source.record_id !== undefined)
+    .map(source => SourceGoldUnitSchema.parse({ workspace_id: publication.workspace_id, root_kind: "source_record",
+      root_id: source.record_id, source_version: source.source_version, content_digest: source.content_digest }));
+  const complete = answerSessions.size > 0 && publication.admitted_count === expectedSourceCount &&
+    [...answerSessions].every(id => goldSources.some(source => source.session_id === id &&
+      source.admission === "admitted" && source.record_id !== undefined));
+  return { sourceUnits, complete };
+}
+
+/** A verified positive survives an incomplete gold join; only absence needs full coverage. */
+export function longMemEvalMetricOutcome(metric: { status: string } | undefined, complete: boolean):
+  "hit" | "miss" | "unknown" {
+  if (metric?.status === "hit") return "hit";
+  if (metric?.status === "miss" && complete) return "miss";
+  return "unknown";
+}
 
 /** Gold is read only after native replay is immutable, and never enters publication or retrieval. */
 export async function measureLongMemEvalSemanticRun(root: string, replayPath: string) {
@@ -43,14 +68,10 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
         const publication = verifyLongMemEvalQuestionPublication(frozen, selected, directory, readChainArtifact(replayed.publication_path));
         if (chainIdentity(publication) !== replayed.publication_identity) throw new AlayaError("CONFLICT", "replayed question publication changed");
         verifyLongMemEvalQuestionChain(frozen, selected, directory, publication, replayed.chain_root);
-        const answerSessions = new Set(question.answer_session_ids);
-        const goldSources = publication.sources.filter((source) => answerSessions.has(source.session_id));
-        const gold = goldSources.filter((source) => source.admission === "admitted" && source.record_id !== undefined)
-          .map((source) => SourceGoldUnitSchema.parse({ workspace_id: publication.workspace_id, root_kind: "source_record",
-            root_id: source.record_id, source_version: source.source_version, content_digest: source.content_digest }));
+        const gold = joinLongMemEvalGold(question, publication, selected.source_manifest.length);
         if (frozen.contract === "longmemeval-semantic-development-v3") LongMemEvalSourceOnlyReplaySchema.parse(readChainArtifact(replayed.replay_path));
         const measured = measureSemanticChain(replayed.chain_root, replayed.replay_path,
-          [{ query_key: selected.query_key, source_units: gold }]);
+          [{ query_key: selected.query_key, source_units: gold.sourceUnits }]);
         measurementPath = measured.path;
         const measuredRow = measured.result.rows[0];
         if (frozen.contract === "longmemeval-native-semantic-v3" && measuredRow?.status === "replayed"
@@ -69,11 +90,9 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
         // Source-only replay rejects proof slots above, so the shared union admission
         // preserves its source metric while retaining the same native residuals.
         const metric = measuredRow?.source_bearing_union?.any_at_5;
-        const complete = publication.admitted_count === selected.source_manifest.length
-          && [...answerSessions].every((id) => goldSources.some((source) => source.session_id === id && source.record_id !== undefined));
-        if (metric?.status === "hit") outcome = "hit";
-        else if (metric?.status === "miss" && complete) outcome = "miss";
-        else reason = complete ? measuredRow?.reason ?? "native_measurement_unavailable" : "source_or_gold_mapping_incomplete";
+        const complete = gold.complete;
+        outcome = longMemEvalMetricOutcome(metric, complete);
+        if (outcome === "unknown") reason = complete ? measuredRow?.reason ?? "native_measurement_unavailable" : "source_or_gold_mapping_incomplete";
         if (!complete) attribution.layer = "source_or_gold_mapping_incomplete";
       } catch (error) {
         reason = error instanceof Error ? error.message : String(error);

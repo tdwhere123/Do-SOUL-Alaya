@@ -78,7 +78,9 @@ describe("complete-source census and publication", () => {
     const blocked = await prepareLongMemEvalSemanticRun(root);
     const blockedReplay = await replayLongMemEvalSemanticRun(root, blocked.path);
     const blockedMeasurement = await measureLongMemEvalSemanticRun(root, blockedReplay.path);
-    expect(blockedMeasurement.result.primary).toMatchObject({ eligible: 1, unknown: 1, lower_bound: 0, upper_bound: 1 });
+    // An unavailable Q interpretation still permits the original-query raw source hit.
+    expect(blockedMeasurement.result.primary).toMatchObject({ eligible: 1, hits: 1, unknown: 0,
+      lower_bound: 1, upper_bound: 1 });
     const published = blocked.result.rows[0]!;
     if (published.status !== "prepared") throw new Error("question publication required");
     unlinkSync(published.publication_path);
@@ -131,9 +133,10 @@ describe("complete-source census and publication", () => {
     const formalPrepared = await prepareLongMemEvalSemanticRun(formalRoot);
     const formalReplay = await replayLongMemEvalSemanticRun(formalRoot, formalPrepared.path);
     const formalMeasurement = await measureLongMemEvalSemanticRun(formalRoot, formalReplay.path);
-    expect(formalMeasurement.result.primary).toMatchObject({ eligible: 2, hits: 0, unknown: 2, target_decision: "unresolved" });
+    // This legacy source-only fixture observes the native raw-query fallback; it does not approve a new formal arm.
+    expect(formalMeasurement.result.primary).toMatchObject({ eligible: 2, hits: 2, unknown: 0, target_decision: "achieved" });
     expect(formalMeasurement.result.formal_target).toMatchObject({ eligible: 2, strict_over_90_required_hits: 2,
-      status: "unresolved", additional_confirmed_hits_needed: 2 });
+      status: "achieved", additional_confirmed_hits_needed: 0 });
     expect(formalMeasurement.result.rows.filter(row => row.prior_development_exposure).map(row => row.question_id)).toEqual(["mixed-roles"]);
     expect(formalMeasurement.result.rows.filter(row => row.cohort === "answerable")
       .every(row => row.attribution.layer === "query_unavailable")).toBe(true);

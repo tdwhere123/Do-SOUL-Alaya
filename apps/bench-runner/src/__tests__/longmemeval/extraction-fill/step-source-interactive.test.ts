@@ -71,7 +71,7 @@ async function scenario(selectedCount: number, outputTokenCap?: number) {
     preflightKeys: selected,
     ...(outputTokenCap === undefined ? {} : { preflightOutputTokenCap: outputTokenCap }) });
   expect(preflight).toMatchObject({
-    contract: "source-semantic-interactive-preflight-v2", provider_calls: 0,
+    contract: "source-semantic-interactive-preflight-v3", provider_calls: 0,
     selected_requests: selectedCount, maximum_attempts_per_key: 1, max_output_tokens: outputTokenCap ?? 4096,
     output_token_field: "max_tokens", quote_basis: STEP_PLAN_QUOTE_BASIS
   });

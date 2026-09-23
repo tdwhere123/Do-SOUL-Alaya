@@ -142,7 +142,7 @@ it("joins two native Step owners for a later original question and retains unsup
   expect(associated).toMatchObject({ contract: "source-publication-association-preparation-v3",
     source_occurrences: 3, unsupported_source_occurrences: 1, ready_request_keys: 2 });
   expect(associated.retained_preparations.map((owner) => owner.preparation_contract))
-    .toEqual(["source-semantic-interactive-preflight-v2", "source-semantic-interactive-preflight-v2"]);
+    .toEqual(["source-semantic-interactive-preflight-v3", "source-semantic-interactive-preflight-v3"]);
   const bindings = parseSourcePublicationAssociations(JSON.parse(readFileSync(`${out}.associations.json`, "utf8")));
   expect(bindings).toHaveLength(3);
   expect(bindings.find((binding) => "status" in binding)).toMatchObject({ source_id: "longmemeval_s:target-s2-r0",

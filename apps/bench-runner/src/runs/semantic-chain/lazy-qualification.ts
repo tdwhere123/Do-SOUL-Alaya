@@ -12,6 +12,7 @@ import { publishSourceSemanticSnapshot, SourcePublicationAssociationRowSchema, t
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, parseExtractionOpenSemanticsGeneration } from "../extraction/request-artifact.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
+import { parseSourceSemanticInteractivePreflight } from "../extraction/fill/source-semantic-interactive-preflight.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { readSemanticChainProposalResults, semanticChainProposalStates, semanticChainQueryAvailability,
   verifySemanticChainQueries } from "./inputs.js";
@@ -35,6 +36,9 @@ export const LazyQualificationConfigSchema = z.object({
   chain: SemanticChainConfigSchema,
   source_population: SourcePopulationSchema,
   cache_owners: z.array(CacheOwnerSchema).min(1),
+  initial_query_state_identity: Digest.optional(),
+  source_preparation: z.object({ retained_preflight_identity: Digest,
+    output_token_cap: z.number().int().positive() }).strict().optional(),
   recorded_at: z.string().datetime(), producer_commit: z.string().regex(/^[a-f0-9]{40}$/u)
 }).strict();
 export type LazyQualificationConfig = z.infer<typeof LazyQualificationConfigSchema>;
@@ -125,6 +129,21 @@ function readInitialPublication(config: Config) {
   return report;
 }
 
+function assertBoundSourcePreparation(config: Config): void {
+  if (config.source_preparation === undefined) return;
+  if (config.cache_owners.length !== 1) throw new AlayaError("CONFLICT", "bound source preparation requires one owning root");
+  const value: unknown = JSON.parse(readBoundedCanonicalUtf8Artifact({
+    path: config.cache_owners[0]!.retainedPreparationPath, maxBytes: 32 * 1024 * 1024,
+    label: "bound source preflight" }));
+  const report = parseSourceSemanticInteractivePreflight(value);
+  if (chainIdentity(report) !== config.source_preparation.retained_preflight_identity ||
+      report.max_output_tokens !== config.source_preparation.output_token_cap ||
+      report.config.model !== config.source_population.model ||
+      report.config.requestProfile !== config.source_population.requestProfile) {
+    throw new AlayaError("CONFLICT", "bound source preflight identity or output cap changed");
+  }
+}
+
 function currentQuery(config: Config) {
   if (config.chain.query_workset.items.length !== 1) {
     throw new AlayaError("VALIDATION", "lazy qualification requires exactly one original query");
@@ -174,9 +193,12 @@ async function admitLazyWindow(root: string, expectedConfig?: Config) {
     throw new AlayaError("CONFLICT", "lazy window config changed");
   }
   assertChainSnapshot(window.config.chain);
+  assertBoundSourcePreparation(window.config);
   const publication = readInitialPublication(window.config);
   assertWindowOwner(root, window, publication);
   if (currentQuery(window.config).identity !== window.query_state_identity ||
+      window.config.initial_query_state_identity !== undefined &&
+      window.query_state_identity !== window.config.initial_query_state_identity ||
       publication.db_sha256 !== window.starting_snapshot_sha256) {
     throw new AlayaError("CONFLICT", "lazy qualification starting query or snapshot changed");
   }
@@ -264,6 +286,7 @@ async function admitLazyFinal(root: string) {
 export async function prepareLazyQualificationWindow(value: unknown, root: string): Promise<LazyQualificationWindow> {
   const config = LazyQualificationConfigSchema.parse(value);
   assertChainSnapshot(config.chain);
+  assertBoundSourcePreparation(config);
   const prior = readChainArtifact(join(root, "window.json"));
   if (prior !== undefined) {
     return (await admitLazyWindow(root, config)).window;
@@ -287,6 +310,9 @@ export async function prepareLazyQualificationWindow(value: unknown, root: strin
   const starting = await prepareSourcePublicationAssociations({ ...population, openSemantics: generation },
     config.cache_owners, join(root, "starting-associations.json"));
   const query = currentQuery(config);
+  if (config.initial_query_state_identity !== undefined && query.identity !== config.initial_query_state_identity) {
+    throw new AlayaError("CONFLICT", "query state changed after the bound initial preparation");
+  }
   const availability = semanticChainQueryAvailability(query.row);
   const started = performance.now();
   const observed = await withSemanticChainDaemon(config.chain, root, async daemon => discoverSemanticChainQuery(daemon,
@@ -312,7 +338,7 @@ export async function prepareLazyQualificationWindow(value: unknown, root: strin
       question_id: source.question_id, session_id: source.session_id, session_index: source.session_index,
       round_index: source.round_index, source_observed_at: source.source_observed_at,
       roles: source.roles, speaker: source.speaker ?? null, source_record: priorSource.source_record,
-      ...(row.complete ? selectedSourceState(source, config, owners.planned, starting.artifacts) : {
+      ...(row.complete ? selectedSourceState(source, config, owners.owned, starting.artifacts) : {
         key: null, cache_root: null, state: "observation_incomplete" as const,
         cache_identity: null, attempt_identity: null,
         starting_attempt_refs: [], starting_raw_refs: [], attempt_history_complete: true }) };
@@ -431,15 +457,7 @@ export async function replayLazyQualifiedFirstExposure(root: string) {
   return withSnapshotPublishLock(path, async () => {
     const prior = readChainArtifact(path);
     if (prior !== undefined) {
-      const recorded = ExposureSchema.parse(prior);
-      const replay = admitFrozenExposure(window, final, recorded);
-      if (recorded.replay_digest !== chainIdentity(replay.result) ||
-          recorded.selected_delivered !== replay.delivery.selected_delivered ||
-          recorded.selected_undelivered !== replay.delivery.selected_undelivered ||
-          recorded.outside_delivered !== replay.delivery.outside_delivered) {
-        throw new AlayaError("CONFLICT", "first exposure commitment differs from native replay");
-      }
-      return replay;
+      return admitRetainedLazyExposure(window, final, prior);
     }
     const frozenArtifact = readChainArtifact(reservation);
     let frozen: z.infer<typeof ExposureReservationSchema>;
@@ -467,4 +485,47 @@ export async function replayLazyQualifiedFirstExposure(root: string) {
       replay_digest: chainIdentity(replay.result), ...replay.delivery }));
     return replay;
   });
+}
+
+function admitRetainedLazyExposure(window: LazyQualificationWindow, final: z.infer<typeof FinalSchema>, value: unknown) {
+  const recorded = ExposureSchema.parse(value);
+  const replay = admitFrozenExposure(window, final, recorded);
+  if (recorded.replay_digest !== chainIdentity(replay.result) ||
+      recorded.selected_delivered !== replay.delivery.selected_delivered ||
+      recorded.selected_undelivered !== replay.delivery.selected_undelivered ||
+      recorded.outside_delivered !== replay.delivery.outside_delivered) {
+    throw new AlayaError("CONFLICT", "first exposure commitment differs from native replay");
+  }
+  return replay;
+}
+
+/** Evaluators distinguish an unreserved stage from unresolved reservations without dispatching recall. */
+export async function readLazyQualifiedExposureState(root: string) {
+  const { window, final } = await admitLazyFinal(root);
+  const retained = readChainArtifact(join(root, "first-exposure.json"));
+  if (retained === undefined) {
+    const target = inspectSemanticChainReplayTarget(final.final_chain_root, "retained");
+    const reservation = readChainArtifact(join(root, "first-exposure.reserved.json"));
+    if (reservation !== undefined) {
+      const frozen = ExposureReservationSchema.parse(reservation);
+      if (frozen.final_identity !== chainIdentity(final) || frozen.replay_identity !== target.identity ||
+          frozen.replay_path !== target.output) {
+        throw new AlayaError("CONFLICT", "reserved first exposure differs from the sealed final stage");
+      }
+    }
+    const rowPath = target.rowPaths.get(window.query_key)!;
+    const row = readChainArtifact(rowPath), rowReservation = readChainArtifact(`${rowPath}.reserved`);
+    if (rowReservation !== undefined && canonicalJson(rowReservation) !== canonicalJson({
+      replay_identity: target.identity, query_key: window.query_key })) {
+      throw new AlayaError("CONFLICT", "native first-exposure row reservation changed");
+    }
+    if (row !== undefined && rowReservation === undefined) {
+      throw new AlayaError("CONFLICT", "native first-exposure row has no owning reservation");
+    }
+    const nativeReplay = readChainArtifact(target.output);
+    return { status: reservation !== undefined || rowReservation !== undefined || nativeReplay !== undefined
+      ? "reserved_unknown" as const : "unattempted" as const, window, final };
+  }
+  return { ...admitRetainedLazyExposure(window, final, retained), window, final,
+    exposure: ExposureSchema.parse(retained), status: "durable" as const };
 }

@@ -124,7 +124,7 @@ function sameSealedSnapshotObservation(expected: Awaited<ReturnType<typeof disco
   return canonicalJson(comparable(expected)) === canonicalJson(comparable(actual));
 }
 
-export function measureSemanticChain(root: string, replayPath: string, goldValue: unknown) {
+export function measureSemanticChain(root: string, replayPath: string, goldValue: unknown, outputRoot = root) {
   const { plan, replay } = admitSemanticChainReplay(root, replayPath);
   const gold = z.array(z.object({ query_key: z.string(), source_units: SourceGoldUnitSchema.array() }).strict()).parse(goldValue);
   const expected = plan.queries.map((row) => row.query_key).sort();
@@ -161,7 +161,7 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
     evaluator_usage: evaluated?.evaluator_usage ?? null };
   });
   const result = { contract: "source-semantic-chain-measurement-v3", replay_identity: replay.identity, gold, rows };
-  const path = join(root, `measurement-${chainIdentity(result)}.json`);
+  const path = join(outputRoot, `measurement-${chainIdentity(result)}.json`);
   writeChainArtifact(path, result);
   return { path, result };
 }
