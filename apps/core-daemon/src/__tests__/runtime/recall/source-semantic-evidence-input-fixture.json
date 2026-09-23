@@ -16,7 +16,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v6",
+      "contract": "source-semantic-proposal-v7",
       "outcome": {
         "status": "interpreted"
       },
@@ -286,7 +286,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v6",
+      "contract": "source-semantic-proposal-v7",
       "outcome": {
         "status": "interpreted"
       },
@@ -1271,7 +1271,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v6",
+      "contract": "source-semantic-proposal-v7",
       "outcome": {
         "status": "interpreted"
       },
@@ -1502,7 +1502,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v6",
+      "contract": "source-semantic-proposal-v7",
       "outcome": {
         "status": "interpreted"
       },
@@ -1708,7 +1708,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v6",
+      "contract": "source-semantic-proposal-v7",
       "outcome": {
         "status": "interpreted"
       },

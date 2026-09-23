@@ -723,11 +723,16 @@ float off that group's predicate frame. An older open source interpretation is n
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
 
-Query meaning v4 uses `conditions` for conjunction and optional
+Query meaning v5 uses `conditions` for conjunction and optional
 `evidence_inputs: [{conditions}]` for the facts needed by the original requested
-operation. Query request/response v6 use the same recursive meaning schema as
+operation. Query request/response v7 use the same recursive meaning schema as
 local receive admission; depth and byte limits remain local requirements. Nested
 `forall` is rejected; explicit top-level universal evaluation remains supported.
+The producer marks each requested entity, statement or operator on its declaration with
+`return:true`; Protocol derives the canonical return list. A separate producer
+return list is rejected. Evidence inputs cannot declare returned targets. Boolean
+queries need no return marker. The host still cannot supply an omitted answer
+relation or copy a qualification from an answer into an input.
 `required_evidence_act: {act, excerpt}` explicitly constrains sought evidence to
 a question or directive, with exact support in the original query; it maps to
 the unchanged canonical `source_act`. The host
@@ -764,8 +769,8 @@ or equal names. Incomplete execution phases remain resource-exhausted/partial.
 Archive-only source-evidence protocol 1/library v1 retains its recorded identities,
 page and order through the offline admission owner.
 
-New source-interpretation extraction uses the producer-only `source-semantic-proposal-v6` contract
-with `host-owned-selection-schema-v2` at canonical domination depth 16. Optional
+New source-interpretation extraction uses the producer-only `source-semantic-proposal-v7` contract
+with `host-owned-selection-schema-v3` at canonical domination depth 16. Optional
 quantified and measurement fields remain in that recorded projection; omit empty
 tables when the source does not support them. The producer owns predicate/role
 readings, co-reference, semantic scope, speech acts, domain membership/closure
@@ -794,14 +799,17 @@ archives retain native request/response replay with their original prompt. Their
 normalizer-v3 manifests remain ineligible for current cache reuse; replay does
 not upgrade or publish an old interpretation.
 
-Current selection requests bind `host-owned-selection-schema-v2`. Every selection
-names an assertion ID and exact text; repeated text requires an explicit zero-based
-occurrence. The shared text locator and catalog boundary resolver reject absent,
-ambiguous, out-of-range and word-internal selections. Discontinuous lists retain
-their existing bounds. The request carries the original source digest and units;
+Current selection requests bind `host-owned-selection-schema-v3`. Every selection
+names an assertion ID and exact text. Occurrences are zero-based among exact
+catalog-eligible matches ordered by start, including overlapping matches; only
+multiple eligible matches require an explicit occurrence. The catalog boundary
+resolver rejects absent, ambiguous, out-of-range and word-internal selections.
+The historical raw-substring locator does not define this producer's ordinal.
+Discontinuous lists retain their existing bounds. The request carries the original source digest and units;
 the catalog remains host-owned and is reconstructed by the existing owner. The
 selection compiler lowers into the unchanged compact/expression compiler. There
-is no v5 compatibility or fallback selection syntax.
+is no v6 compatibility or fallback selection syntax. Retained v6 raw responses
+remain historical execution evidence, not current v7 admissions.
 Recorded compact expression v4 requests bind `host-owned-expression-schema-v1`. Protocol
 derives each generation schema from its corresponding shapes, with shared acyclic
 definitions spanning the canonical domination-depth limit. Recorded v3 requests

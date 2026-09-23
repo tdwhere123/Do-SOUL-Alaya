@@ -31,11 +31,11 @@ const BUDGET = { schema_version: 1 as const, work_units: 200_000, memory_bytes: 
 
 function occurrenceQuery(): SourceSemanticQuery {
   return materializeSourceSemanticQueryMeaning({
-    contract: "source-semantic-query-meaning-v4", gaps: [], return: ["precedence"],
+    contract: "source-semantic-query-meaning-v5", gaps: [],
     alternatives: [{ conditions: [
       { kind: "statement", key: "ring", predicate: "ring", arguments: [] },
       { kind: "statement", key: "flash", predicate: "flash", arguments: [] },
-      { kind: "statement", key: "precedence", predicate: "precede", arguments: [
+      { kind: "statement", key: "precedence", predicate: "precede", return: true, arguments: [
         { role: "earlier", target: { kind: "reference", key: "ring" }, excerpt: "ringing" },
         { role: "later", target: { kind: "reference", key: "flash" }, excerpt: "flashing" }
       ] }

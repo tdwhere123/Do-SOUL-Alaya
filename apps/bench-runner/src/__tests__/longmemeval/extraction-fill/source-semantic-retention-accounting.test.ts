@@ -16,7 +16,7 @@ import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtraction
 
 const MODEL = "gemini-2.5-flash-lite";
 const REQUEST_PROFILE = "gemini-2.5-nonthinking-v1" as const;
-const ABSTAINED = JSON.stringify({ contract: "source-semantic-proposal-v6", outcome: { status: "abstained" } });
+const ABSTAINED = JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "abstained" } });
 const OVERSIZED = ABSTAINED + "\n".repeat(1024 * 1024);
 const FULL_DIGEST = createHash("sha256").update(OVERSIZED).digest("hex");
 const execFileAsync = promisify(execFile);

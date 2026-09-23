@@ -10,7 +10,7 @@ import {
   type SourceSemanticQueryFrame, type SourceSemanticQueryRoleRequirement, type SourceSemanticQueryVariable
 } from "./semantic-query.js";
 
-export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v4" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v5" as const;
 export const SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH = Math.min(8, SOURCE_SEMANTIC_MAX_DEPTH);
 
 const Key = SourceSemanticHandleSchema;
@@ -61,6 +61,7 @@ export type QueryStatementMeaning = Readonly<{
 export type QueryNotMeaning = Readonly<{
   readonly kind: "not";
   readonly key?: string;
+  readonly return?: boolean;
   readonly content: QueryMeaning;
   readonly obligation?: ObligationKind;
   readonly required_evidence_act?: RequiredEvidenceActValue;
@@ -68,6 +69,7 @@ export type QueryNotMeaning = Readonly<{
 export type QueryPossibleMeaning = Readonly<{
   readonly kind: "possible";
   readonly key?: string;
+  readonly return?: boolean;
   readonly content: QueryMeaning;
   readonly obligation?: ObligationKind;
   readonly required_evidence_act?: RequiredEvidenceActValue;
@@ -75,6 +77,7 @@ export type QueryPossibleMeaning = Readonly<{
 export type QueryReportedMeaning = Readonly<{
   readonly kind: "reported";
   readonly key?: string;
+  readonly return?: boolean;
   readonly content: QueryMeaning;
   readonly reporter?: EntityTargetValue;
   readonly obligation?: ObligationKind;
@@ -83,6 +86,7 @@ export type QueryReportedMeaning = Readonly<{
 export type QueryConditionalMeaning = Readonly<{
   readonly kind: "conditional";
   readonly key?: string;
+  readonly return?: boolean;
   readonly antecedent: QueryMeaning;
   readonly consequent: QueryMeaning;
   readonly obligation?: ObligationKind;
@@ -91,6 +95,7 @@ export type QueryConditionalMeaning = Readonly<{
 export type QueryOpaqueMeaning = Readonly<{
   readonly kind: "opaque";
   readonly key?: string;
+  readonly return?: boolean;
   readonly operands: readonly QueryMeaning[];
   readonly obligation?: ObligationKind;
   readonly required_evidence_act?: RequiredEvidenceActValue;
@@ -105,23 +110,23 @@ function meaningShape(operand: z.ZodType<QueryMeaning>): z.ZodType<QueryMeaning>
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional(), return: z.boolean().optional()
     }).strict().readonly(),
     z.object({
-      kind: z.literal("not"), key: Key.optional(), content: operand,
+      kind: z.literal("not"), key: Key.optional(), return: z.boolean().optional(), content: operand,
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
-      kind: z.literal("possible"), key: Key.optional(), content: operand,
+      kind: z.literal("possible"), key: Key.optional(), return: z.boolean().optional(), content: operand,
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
-      kind: z.literal("reported"), key: Key.optional(), content: operand, reporter: EntityTarget.optional(),
+      kind: z.literal("reported"), key: Key.optional(), return: z.boolean().optional(), content: operand, reporter: EntityTarget.optional(),
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
-      kind: z.literal("conditional"), key: Key.optional(), antecedent: operand, consequent: operand,
+      kind: z.literal("conditional"), key: Key.optional(), return: z.boolean().optional(), antecedent: operand, consequent: operand,
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
-      kind: z.literal("opaque"), key: Key.optional(), operands: z.array(operand).min(1).max(8).readonly(),
+      kind: z.literal("opaque"), key: Key.optional(), return: z.boolean().optional(), operands: z.array(operand).min(1).max(8).readonly(),
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     Occurrence
@@ -146,7 +151,6 @@ export const SourceSemanticQueryMeaningBodySchema = z.object({
     contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT),
     alternatives: z.array(Alternative).min(1).max(16).readonly(),
     gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly(),
-    return: z.array(Key).max(64).readonly().optional(),
     domains: z.array(Domain).max(64).readonly().optional(),
     entities: z.array(z.discriminatedUnion("kind", [FreeTarget, NamedTarget])).max(64).readonly().optional(),
     evaluation: SourceSemanticQueryEvaluationSchema.optional(),
@@ -262,9 +266,7 @@ class QueryMeaningCompiler {
   } {
     this.collectAnonymousOccurrenceAliases(body);
     this.collect(body);
-    if (body.return !== undefined) {
-      for (const key of body.return) this.markReturn(key, ["return"]);
-    }
+    for (const entity of body.entities ?? []) if (entity.return === true) this.returned.add(entity.key);
     const alternatives = body.alternatives.map((alternative, index) =>
       this.alternative(alternative, ["alternatives", index], body.evaluation?.kind === "comparison"));
     const variables: SourceSemanticQueryVariable[] = [...this.sorts.entries()].map(([id, sort]) => ({
@@ -277,7 +279,7 @@ class QueryMeaningCompiler {
 
   private collectAnonymousOccurrenceAliases(body: SourceSemanticQueryMeaningBody): void {
     const referenced = new Set([
-      ...(body.return ?? []), ...body.gaps.flatMap((gap) => gap.affected_ids),
+      ...body.gaps.flatMap((gap) => gap.affected_ids),
       ...(body.domains ?? []).map((domain) => domain.key)
     ]);
     const evaluation = body.evaluation;
@@ -298,8 +300,8 @@ class QueryMeaningCompiler {
     const visit = (value: QueryMeaning): void => {
       if (value.kind === "occurrence") { referenced.add(value.key); return; }
       if (value.key !== undefined) occurrences.set(value.key, (occurrences.get(value.key) ?? 0) + 1);
+      if (value.return === true && value.key !== undefined) referenced.add(value.key);
       if (value.kind === "statement") {
-        if (value.return === true && value.key !== undefined) referenced.add(value.key);
         for (const argument of value.arguments) target(argument.target);
         if (value.content !== undefined) visit(value.content);
       } else if (value.kind === "conditional") {
@@ -353,10 +355,11 @@ class QueryMeaningCompiler {
         this.collectTarget(argument.target, [...path, "arguments", index, "target"], argument.excerpt);
       }
       if (meaning.content !== undefined) this.collectMeaning(meaning.content, [...path, "content"]);
-      if (!this.evidence && meaning.return === true && meaning.key !== undefined) this.returned.add(meaning.key);
+      if (this.evidence && meaning.return === true) fail(path, "evidence input cannot declare a returned target");
       return;
     }
     this.declareOccurrence(meaning.key, "context", path);
+    if (this.evidence && meaning.return === true) fail(path, "evidence input cannot declare a returned target");
     if (meaning.kind === "reported" && meaning.reporter !== undefined) {
       this.collectTarget(meaning.reporter, [...path, "reporter"]);
     }
@@ -393,7 +396,7 @@ class QueryMeaningCompiler {
       }
       this.named.set(target.key, target.excerpt);
     }
-    if (!this.evidence && target.return === true) this.returned.add(target.key);
+    if (target.return === true && this.evidence) fail(path, "evidence input cannot declare a returned target");
   }
 
   private alternative(
@@ -432,7 +435,7 @@ class QueryMeaningCompiler {
     if (this.compiling.has(frameId)) fail(path, "cyclic local reference");
     this.compiling.add(frameId);
     const variable = frameId;
-    if (!this.evidence && meaning.kind === "statement" && meaning.return === true) this.returned.add(frameId);
+    if (!this.evidence && meaning.return === true) this.returned.add(frameId);
     const operator = meaning.kind === "statement" ? undefined
       : meaning.kind === "opaque" ? "opaque" : meaning.kind === "conditional" ? "conditional"
       : meaning.kind === "reported" ? "reported" : meaning.kind === "possible" ? "possible" : "not";
@@ -502,6 +505,7 @@ class QueryMeaningCompiler {
     argument: RoleArgumentValue, path: Path, used: Set<string>
   ): SourceSemanticQueryRoleRequirement {
     const target = argument.target.key;
+    if (argument.target.kind !== "reference" && argument.target.return === true) this.returned.add(target);
     const sort = this.sorts.get(target);
     if (sort === undefined) fail([...path, "target"], "undeclared local reference");
     if (sort !== "entity") {
@@ -578,11 +582,6 @@ class QueryMeaningCompiler {
 
   private reserve(key: string, _path: Path): void {
     this.used.add(key);
-  }
-
-  private markReturn(key: string, path: Path): void {
-    if (!this.sorts.has(key)) fail(path, "return target is undeclared");
-    this.returned.add(key);
   }
 
   private fresh(prefix: string): string {

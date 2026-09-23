@@ -355,17 +355,16 @@ describe("query and semantic_correspondence proposal entry points", () => {
       expect(preparedCorrespondence.system_prompt).toContain("request-local handle source1, source2");
       for (const valid of [false, true]) {
         const querySemantics = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
-          contract: "source-semantic-query-response-v6", outcome: { status: "interpreted", gaps: [] },
+          contract: "source-semantic-query-response-v7", outcome: { status: "interpreted", gaps: [] },
           query: {
-            contract: "source-semantic-query-meaning-v4",
+            contract: "source-semantic-query-meaning-v5",
             alternatives: [{ conditions: [{
               kind: "statement", key: "accession", predicate: "accession",
               arguments: [
-                { role: "object", target: { kind: "free", key: "folio" }, excerpt: "folio" },
+                { role: "object", target: { kind: "free", key: "folio", return: true }, excerpt: "folio" },
                 { role: "bay", target: { kind: "named", key: "bay", excerpt: "bay B" }, excerpt: "bay B" }
               ]
             }] }],
-            return: ["folio"],
             gaps: []
           }
         }) : "{}" });
@@ -389,12 +388,12 @@ describe("query and semantic_correspondence proposal entry points", () => {
       support: [{ kind: "query_text", excerpt: "bay B" }] }];
     const received = proposeQuerySemantics({ original_query: "which folio was accessioned into bay B?",
       producer_id: "query-producer", producer_version: "1" }, { rawJson: JSON.stringify({
-      contract: "source-semantic-query-response-v6", outcome: { status: "interpreted", gaps },
-      query: { contract: "source-semantic-query-meaning-v4", alternatives: [{ conditions: [{
+      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted", gaps },
+      query: { contract: "source-semantic-query-meaning-v5", alternatives: [{ conditions: [{
         kind: "statement", key: "accession", predicate: "accession", arguments: [
-          { role: "object", target: { kind: "free", key: "folio" }, excerpt: "folio" },
+          { role: "object", target: { kind: "free", key: "folio", return: true }, excerpt: "folio" },
           { role: "bay", target: { kind: "named", key: "bay", excerpt: "bay B" }, excerpt: "bay B" }
-        ] }] }], return: ["folio"], gaps: matching ? gaps : [] }
+        ] }] }], gaps: matching ? gaps : [] }
     }) });
     if (matching) {
       expect(received.outcome).toEqual({ status: "interpreted", gaps });
@@ -426,18 +425,17 @@ describe("query and semantic_correspondence proposal entry points", () => {
       producer_id: "query-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-query-response-v6",
+        contract: "source-semantic-query-response-v7",
         outcome: { status: "interpreted", gaps: [] },
         query: {
-          contract: "source-semantic-query-meaning-v4",
+          contract: "source-semantic-query-meaning-v5",
           alternatives: [{ conditions: [{
             kind: "statement", key: "accession", predicate: "accession",
             arguments: [
-              { role: "object", target: { kind: "free", key: "folio" }, excerpt: "folio" },
+              { role: "object", target: { kind: "free", key: "folio", return: true }, excerpt: "folio" },
               { role: "bay", target: { kind: "named", key: "bay", excerpt: "bay B" }, excerpt: "bay B" }
             ]
           }] }],
-          return: ["folio"],
           gaps: []
         }
       })

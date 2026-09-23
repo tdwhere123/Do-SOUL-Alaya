@@ -36,10 +36,10 @@ const SCOPES = { mode: "named" as const, scopes: ["project"] };
 
 /** Contract-migrated meaning fixture for the model response receiver. */
 const FROZEN_MEANING_RAW = JSON.stringify({
-  contract: "source-semantic-query-response-v6",
+  contract: "source-semantic-query-response-v7",
   outcome: { status: "interpreted", gaps: [] },
   query: {
-    contract: "source-semantic-query-meaning-v4",
+    contract: "source-semantic-query-meaning-v5",
     alternatives: [{ conditions: [{
       kind: "possible", key: "q1",
       content: {
@@ -51,7 +51,7 @@ const FROZEN_MEANING_RAW = JSON.stringify({
       }
     }], evidence_inputs: [{ conditions: [{ kind: "occurrence", key: "s1" }] }] }],
     requested_operation: { reading: "identify the agent of the possible operation", support: { kind: "query_text", excerpt: ORIGINAL } },
-    gaps: [], return: ["person"],
+    gaps: [],
     entities: [{ kind: "named", key: "lathe", excerpt: "lathe" }]
   }
 });
@@ -189,7 +189,7 @@ function receiveLatheCorrespondence(querySemantics: SourceSemanticQuery, sourceI
  */
 it("recalls admitted query meaning through SQLite reopen, worker, and public interpretation", async () => {
   const receivedQuerySemantics = receiveFrozenQuerySemantics();
-  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v6");
+  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v7");
   expect(receivedQuerySemantics.query.alternatives[0]?.frames.some((row) => row.operator === "possible")).toBe(true);
 
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-meaning-public-"));
@@ -212,7 +212,7 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
         producer_id: "test-author", producer_version: "p1"
       }, {
         rawJson: JSON.stringify({
-          contract: "source-semantic-proposal-v6", outcome: { status: "interpreted" },
+          contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
           content: { roots: [{ act: "assertion", expression: {
             kind: "possible", support: quote(catalog, "can"),
             content: {
@@ -246,7 +246,7 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
     const reopened = await openSession(filename);
     try {
       const admitted = receiveFrozenQuerySemantics();
-      expect(admitted.request.contract).toBe("source-semantic-query-request-v6");
+      expect(admitted.request.contract).toBe("source-semantic-query-request-v7");
       const querySemanticsAfter = admitted.query;
       const semantic_correspondence = receiveLatheCorrespondence(querySemanticsAfter, sourceInterpretation, sourceInterpretationId);
       const recalled = await interpret(reopened.handler, {

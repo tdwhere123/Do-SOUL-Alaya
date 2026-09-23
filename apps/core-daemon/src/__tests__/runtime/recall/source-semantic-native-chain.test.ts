@@ -72,7 +72,7 @@ function quote(catalog: SourceReferenceCatalog, text: string, assertionId = 1) {
 
 function compactUse(catalog: SourceReferenceCatalog, extra: { gap?: boolean } = {}) {
   return {
-    contract: "source-semantic-proposal-v6" as const,
+    contract: "source-semantic-proposal-v7" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{
@@ -94,7 +94,7 @@ function compactUse(catalog: SourceReferenceCatalog, extra: { gap?: boolean } = 
 
 function compactPromise(catalog: SourceReferenceCatalog) {
   return {
-    contract: "source-semantic-proposal-v6" as const,
+    contract: "source-semantic-proposal-v7" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{
@@ -649,7 +649,7 @@ it("drops only dependent proof when a necessary source interpretation binding is
       const other = await prepareSource(session.handler, session.context, "artifact-other");
       const full = receiveInterpretation(ALICE, "artifact-alice", compactUse(alice.catalog));
       const otherInterpretation = receiveInterpretation(OTHER, "artifact-other", {
-        contract: "source-semantic-proposal-v6",
+        contract: "source-semantic-proposal-v7",
         outcome: { status: "interpreted" },
         content: {
           roots: [{

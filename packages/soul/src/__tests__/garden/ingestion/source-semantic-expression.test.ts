@@ -25,7 +25,7 @@ describe("source-bound nested semantic expressions", () => {
     expect(() => parseSourceSemanticRequest({ ...wire, source_catalog: sourceSemanticRequestCatalog(current) })).toThrow();
     expect(() => parseSourceSemanticRequest({ ...wire, source_digest: undefined })).toThrow();
     expect(() => parseSourceSemanticRequest({ ...wire, source_request: {
-      ...wire.source_request, proposal_contract: "source-semantic-proposal-v5", generation_schema_contract: "host-owned-selection-schema-v1"
+      ...wire.source_request, proposal_contract: "source-semantic-proposal-v6", generation_schema_contract: "host-owned-selection-schema-v2"
     } })).toThrow();
     const forged = parseSourceSemanticRequest({ ...wire, source_digest: "0".repeat(64) });
     expect(() => receiveSourceSemantics(raw, forged, input)).toThrow(/source owner|generation/u);
@@ -37,7 +37,7 @@ describe("source-bound nested semantic expressions", () => {
     const select = (text: string) => ({ assertion_id: 1, text });
     const event = { kind: "statement", predicate: { kind: "explicit", reading: "inspect", support: select("inspect") },
       arguments: [{ role: "inspector", target: select("Rin") }, { role: "item", target: select("crates") }] };
-    const proposal = { contract: "source-semantic-proposal-v6", outcome: { status: "interpreted" }, content: {
+    const proposal = { contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" }, content: {
       roots: [{ act: "assertion", expression: { kind: "possible", support: select(modal), content: event } }]
     } };
     const rawJson = JSON.stringify(proposal);
@@ -81,7 +81,7 @@ describe("source-bound nested semantic expressions", () => {
     const historical = parseSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v2"
     } });
-    expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v6");
+    expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v7");
     expect(sourceSemanticSystemPrompt(current)).toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
     expect(sourceSemanticSystemPrompt(historical)).toBe(CONTENT_PROMPT);
     expect(JSON.stringify(sourceSemanticResponseJsonSchema(current))).toContain('"roots"');
@@ -101,7 +101,7 @@ describe("source-bound nested semantic expressions", () => {
   it("pins host-owned generation separately while replaying historical nested requests unchanged", () => {
     const current = buildSourceSemanticRequest(input);
     const { generation_schema_contract: _generation, ...body } = current.source_request;
-    expect(current.source_request.generation_schema_contract).toBe("host-owned-selection-schema-v2");
+    expect(current.source_request.generation_schema_contract).toBe("host-owned-selection-schema-v3");
     expect(() => parseSourceSemanticRequest({ ...current, source_request: body })).toThrow(/host-owned selection schema/u);
     const historical = parseSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...body, proposal_contract: "source-semantic-proposal-v3"

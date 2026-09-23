@@ -26,7 +26,7 @@ function statement(predicate: string, args: object[], extra: object = {}) {
 }
 
 const occurrenceMeaning = (target = "ring", excerpt: string | null = "ringing") => ({
-  contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [], return: [],
+  contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
   alternatives: [{ conditions: [statement("before", [
     { role: "earlier", target: { kind: "reference", key: target }, ...(excerpt === null ? {} : { excerpt }) },
     { role: "later", target: { kind: "reference", key: "flash" }, excerpt: "flashing" }
@@ -36,6 +36,7 @@ const occurrenceEnvelope = { ...identity, original_query: "Did ringing precede f
 
 it("resolves forward role references to declared propositions without creating entities or embedding", () => {
   const query = materializeSourceSemanticQueryMeaning(occurrenceMeaning(), occurrenceEnvelope);
+  expect(query.return_variables).toEqual([]);
   expect(query.variables).toEqual([
     { id: "before", sort: "proposition" }, { id: "ring", sort: "proposition" }, { id: "flash", sort: "proposition" }
   ]);
@@ -157,8 +158,8 @@ it("does not classify question wording or silently clear an explicitly supported
 
 it("represents independent conjuncts with a shared participant without inventing embedding", () => {
   const query = materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
-    alternatives: [{ conditions: [statement("invited", [{ role: "person", target: { kind: "free", key: "person" }, excerpt: "Who" }]),
-      statement("spoke", [{ role: "person", target: { kind: "reference", key: "person" }, excerpt: "Who" }])] }], return: ["person"] }, envelope);
+    alternatives: [{ conditions: [statement("invited", [{ role: "person", target: { kind: "free", key: "person", return: true }, excerpt: "Who" }]),
+      statement("spoke", [{ role: "person", target: { kind: "reference", key: "person" }, excerpt: "Who" }])] }] }, envelope);
   expect(query.alternatives[0]!.context_obligations).toEqual([
     { frame: "invited", kind: "asserted_at_source" }, { frame: "spoke", kind: "asserted_at_source" }
   ]);
@@ -192,10 +193,10 @@ it("rejects finite evaluation with evidence inputs before any branch can be sile
 
 it("keeps a free sender distinct from a named recipient and a send proposition", () => {
   const query = compiled(statement("send", [
-    { role: "sender", target: { kind: "free", key: "sender" }, excerpt: "Who" },
+    { role: "sender", target: { kind: "free", key: "sender", return: true }, excerpt: "Who" },
     { role: "theme", target: { kind: "named", key: "sample", excerpt: "sample" }, excerpt: "sample" },
     { role: "recipient", target: { kind: "named", key: "mira", excerpt: "Mira" }, excerpt: "Mira" }
-  ]), { return: ["sender"] });
+  ]));
   const byId = new Map(query.variables.map((row) => [row.id, row]));
   expect(byId.get("sender")).toMatchObject({ sort: "entity" });
   expect(byId.get("sender")?.reference).toBeUndefined();
@@ -206,14 +207,42 @@ it("keeps a free sender distinct from a named recipient and a send proposition",
   expect(query.alternatives[0]?.context_obligations).toEqual([{ frame: "send", kind: "asserted_at_source" }]);
 });
 
+it("derives multiple returns from answer declarations and rejects a competing return list", () => {
+  const answer = statement("send", [
+    { role: "sender", target: { kind: "free", key: "sender", return: true }, excerpt: "Who" },
+    { role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "what" }
+  ]);
+  expect(compiled(answer, {}, "Who sent what?").return_variables).toEqual(["sender", "theme"]);
+  expect(SourceSemanticQueryMeaningBodySchema.safeParse(meaning(answer, { return: ["sender", "theme"] })).success).toBe(false);
+  expect(() => materializeSourceSemanticQueryMeaning({ ...meaning(answer), requested_operation: operation,
+    alternatives: [{ conditions: [answer], evidence_inputs: [{ conditions: [statement("find", [
+      { role: "value", target: { kind: "free", key: "input", return: true }, excerpt: "what" }
+    ])] }] }] }, { ...envelope, original_query: "Who sent what?" })).toThrow(/evidence input cannot declare a returned target/u);
+});
+
+it("returns anonymous proposition and context declarations by their host IDs", () => {
+  const proposition = compiled({ kind: "statement", predicate: "ring", arguments: [], return: true }, {}, "Which ringing?");
+  expect(proposition.return_variables).toEqual(["s1"]);
+  expect(proposition.variables.find(row => row.id === "s1")?.sort).toBe("proposition");
+  const context = compiled({ kind: "possible", return: true,
+    content: { kind: "statement", predicate: "ring", arguments: [] } }, {}, "Which possible ringing?");
+  expect(context.return_variables).toEqual(["c1"]);
+  expect(context.variables.find(row => row.id === "c1")?.sort).toBe("context");
+  expect(() => materializeSourceSemanticQueryMeaning({ ...meaning(statement("ring", [])), requested_operation: operation,
+    alternatives: [{ conditions: [statement("ring", [])], evidence_inputs: [{ conditions: [
+      { kind: "possible", return: true, content: statement("ring_input", []) }
+    ] }] }] }, { ...envelope, original_query: "Who heard ringing?" }))
+    .toThrow(/evidence input cannot declare a returned target/u);
+});
+
 it("nests possible around a move statement and does not add a source-question constraint", () => {
   const query = compiled({
     kind: "possible", key: "possible",
     content: statement("move", [
-      { role: "actor", target: { kind: "free", key: "actor" }, excerpt: "Who" },
+      { role: "actor", target: { kind: "free", key: "actor", return: true }, excerpt: "Who" },
       { role: "destination", target: { kind: "named", key: "suzhou", excerpt: "Suzhou" }, excerpt: "Suzhou" }
     ])
-  }, { return: ["actor"] });
+  });
   const frames = query.alternatives[0]!.frames;
   expect(frames[0]).toMatchObject({ id: "possible", operator: "possible", role_requirements: [] });
   expect(frames[1]).toMatchObject({ id: "move", predicate_reading: "move" });
@@ -247,10 +276,10 @@ it("keeps a promised send embedded rather than asserted as an actual send", () =
     { role: "promisor", target: { kind: "named", key: "bob", excerpt: "Bob" }, excerpt: "Bob" }
   ], {
     content: statement("send", [
-      { role: "theme", target: { kind: "free", key: "parcel" }, excerpt: "parcel" },
+      { role: "theme", target: { kind: "free", key: "parcel", return: true }, excerpt: "parcel" },
       { role: "recipient", target: { kind: "named", key: "alice", excerpt: "Alice" }, excerpt: "Alice" }
     ])
-  }), { return: ["parcel"] });
+  }));
   expect(query.alternatives[0]?.context_obligations).toEqual([
     { frame: "promise", kind: "asserted_at_source" },
     { frame: "send", kind: "explicit_embedded_structure",
@@ -299,9 +328,9 @@ it.each(["free", "named"] as const)("rejects conflicting entity declarations aft
   const first = declaration(kind), second = declaration(kind === "free" ? "named" : "free");
   const argument = (target: object) => ({ role: "person", target });
   const bodies = [
-    meaning(statement("tell", [argument(first), { role: "recipient", target: second }]), { return: ["person"] }),
-    meaning(statement("tell", [argument(second)]), { entities: [first], return: ["person"] }),
-    { ...meaning(statement("tell", [argument(first)])), return: ["person"], requested_operation: operation,
+    meaning(statement("tell", [argument(first), { role: "recipient", target: second }])),
+    meaning(statement("tell", [argument(second)]), { entities: [first] }),
+    { ...meaning(statement("tell", [argument(first)])), requested_operation: operation,
       alternatives: [{ conditions: [statement("tell", [argument(first)])],
         evidence_inputs: [{ conditions: [statement("leave", [argument(second)])] }] }] }
   ];
@@ -313,8 +342,8 @@ it.each(["free", "named"] as const)("rejects conflicting entity declarations aft
 it.each(["free", "named"] as const)("preserves %s redeclarations and explicit references across answer and evidence inputs", (kind) => {
   const declaration = { kind, key: "person", excerpt: kind === "free" ? "Who" : "Mira" };
   const query = materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-    entities: [declaration], return: ["person"], gaps: [], requested_operation: operation,
-    alternatives: [{ conditions: [statement("tell", [{ role: "person", target: declaration }])],
+    entities: [declaration], gaps: [], requested_operation: operation,
+    alternatives: [{ conditions: [statement("tell", [{ role: "person", target: { ...declaration, return: true } }])],
       evidence_inputs: [{ conditions: [statement("leave", [
         { role: "person", target: { kind: "reference", key: "person" } }
       ]), statement("arrive", [{ role: "person", target: declaration }])] }] }] }, envelope);
@@ -327,12 +356,12 @@ it.each(["free", "named"] as const)("preserves %s redeclarations and explicit re
 
 it("reuses a shared entity and can return a proposition without forcing an entity conversion", () => {
   const query = compiled(statement("pack", [
-    { role: "theme", target: { kind: "free", key: "parcel" }, excerpt: "parcel" }
+    { role: "theme", target: { kind: "free", key: "parcel", return: true }, excerpt: "parcel" }
   ], {
     content: statement("inspect", [
       { role: "theme", target: { kind: "reference", key: "parcel" }, excerpt: "parcel" }
     ], { return: true })
-  }), { return: ["parcel"] });
+  }));
   const roles = query.alternatives[0]!.frames.flatMap((row) => row.role_requirements);
   expect(roles.map((row) => row.target_variable)).toEqual(["parcel", "parcel"]);
   expect(query.return_variables).toEqual(expect.arrayContaining(["parcel", "inspect"]));
@@ -407,7 +436,7 @@ it("refuses cyclic, undeclared, and kind-conflicting references instead of repai
   ]))).toThrow(/undeclared local reference/u);
   expect(() => materializeSourceSemanticQueryMeaning(meaning(statement("send", [
     { role: "agent", target: { kind: "free", key: "send" }, excerpt: "Who" }
-  ]), { return: ["send"] }), envelope)).toThrow(/cannot share one variable/u);
+  ], { return: true })), envelope)).toThrow(/cannot share one variable/u);
 });
 
 it.each(["shared", "person", "s1"])("allocates an unreferenced occurrence independently of entity alias %s", (key) => {
@@ -430,7 +459,7 @@ it("preserves embedding, explicit gaps and absent operation inputs when an unuse
     support: [{ kind: "query_text", excerpt: "elapsed days" }], description: "The interval remains unrepresented." }];
   const body = meaning(statement("promote", [], { key: "promotion", content: statement("occur_in", [
     { role: "time", target: { kind: "named", key: "period", excerpt: "July 2027" } }
-  ], { key: "period" }) }), { return: [], gaps });
+  ], { key: "period" }) }), { gaps });
   const before = JSON.stringify(body);
   const query = materializeSourceSemanticQueryMeaning(body, envelope);
   expect(JSON.stringify(body)).toBe(before);
@@ -472,7 +501,6 @@ const collided = () => statement("send", [
   { role: "agent", target: { kind: "named", key: "shared", excerpt: "Mira" } }
 ], { key: "shared" });
 const referenceProtections: readonly [string, () => unknown][] = [
-  ["explicit return", () => meaning(collided(), { return: ["shared"] })],
   ["occurrence return", () => meaning({ ...collided(), return: true })],
   ["inline target return", () => meaning(statement("send", [
     { role: "agent", target: { kind: "free", key: "shared", return: true }, excerpt: "Who" }
@@ -513,10 +541,10 @@ it("rejects multiple occurrence declarations, other occurrence sorts and conflic
 });
 
 it("preserves an accepted query's complete graph and existing identity material", () => {
-  const query = compiled(statement("send", [{ role: "agent", target: { kind: "free", key: "person" }, excerpt: "Who" }], {
+  const query = compiled(statement("send", [{ role: "agent", target: { kind: "free", key: "person", return: true }, excerpt: "Who" }], {
     content: { kind: "possible", content: { kind: "statement", predicate: "arrive",
       arguments: [{ role: "agent", target: { kind: "reference", key: "person" }, excerpt: "Who" }] } }
-  }), { return: ["person"] });
+  }));
   const expected = SourceSemanticQuerySchema.parse({
     contract: SOURCE_SEMANTIC_QUERY_CONTRACT, ...identity, contract_version: SOURCE_SEMANTIC_QUERY_CONTRACT,
     variables: [{ id: "send", sort: "proposition" }, { id: "person", sort: "entity" },

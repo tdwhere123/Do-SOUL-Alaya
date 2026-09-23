@@ -28,7 +28,7 @@ function interpretReport(includeReportDate = true): SourceSemanticInterpretation
     expect(SOURCE.indexOf(text, start + 1)).toBe(-1);
     return { assertion_id: 1, text };
   };
-  const proposal = { contract: "source-semantic-proposal-v6", outcome: { status: "interpreted" }, content: {
+  const proposal = { contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" }, content: {
     roots: [{ act: "assertion", expression: {
       kind: "statement", predicate: { kind: "explicit", reading: "report", support: select("reported") },
       arguments: [
@@ -60,9 +60,9 @@ function reportQuery(constraints: Constraints = {}) {
   const reportDate = constraints.reportDate ?? "which reporting date";
   const approvalDate = constraints.approvalDate ?? "which approval date";
   const original = `${reporter} reported on ${reportDate} that Talia might approve grant G-8 on ${approvalDate}?`;
-  const target = (key: string, excerpt: string, named: boolean) => ({ kind: named ? "named" : "free", key, excerpt });
+  const target = (key: string, excerpt: string, named: boolean) => ({ kind: named ? "named" : "free", key, excerpt, return: true });
   return { original, semantics: meaningQuery(original, [{
-    kind: "statement", key: "report", predicate: "report", arguments: [
+    kind: "statement", key: "report", predicate: "report", return: true, arguments: [
       { role: "reporter", target: target("reporter", reporter, constraints.reporter !== undefined) },
       { role: "time", target: target("reportedOn", reportDate, constraints.reportDate !== undefined) }
     ], content: { kind: "possible", key: "possibility", content: {
@@ -72,12 +72,12 @@ function reportQuery(constraints: Constraints = {}) {
         { role: "time", target: target("approvalOn", approvalDate, constraints.approvalDate !== undefined) }
       ]
     } }
-  }], ["report", "reporter", "reportedOn", "approvalOn"]) };
+  }]) };
 }
 
-function meaningQuery(original: string, conditions: object[], returned: string[]): SourceSemanticQuery {
+function meaningQuery(original: string, conditions: object[]): SourceSemanticQuery {
   const semantics = materializeSourceSemanticQueryMeaning({
-    contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions }], return: returned, gaps: []
+    contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions }], gaps: []
   }, { original_query: original, original_query_digest: digestOriginalQuery(original),
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" });
   expect(admitSourceSemanticQuery(semantics, original).kind).toBe("admitted");
@@ -86,12 +86,12 @@ function meaningQuery(original: string, conditions: object[], returned: string[]
 
 function actualApprovalQuery(obligation: "asserted_at_source" | "entailed_at_source") {
   const original = `Did Talia approve grant G-8 on ${APPROVAL_DATE}?`;
-  const semantics = meaningQuery(original, [{ kind: "statement", key: "approval", predicate: "approve", obligation,
+  const semantics = meaningQuery(original, [{ kind: "statement", key: "approval", predicate: "approve", obligation, return: true,
     arguments: [
       { role: "approver", target: { kind: "named", key: "approver", excerpt: "Talia" } },
       { role: "item", target: { kind: "named", key: "grant", excerpt: "grant G-8" } },
       { role: "time", target: { kind: "named", key: "approvalOn", excerpt: APPROVAL_DATE } }
-    ] }], ["approval"]);
+    ] }]);
   return { original, semantics };
 }
 

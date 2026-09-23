@@ -55,7 +55,7 @@ function compactStatement(
   roles: readonly { role: string; text: string }[]
 ) {
   return {
-    contract: "source-semantic-proposal-v6" as const,
+    contract: "source-semantic-proposal-v7" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{

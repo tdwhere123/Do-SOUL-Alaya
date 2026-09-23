@@ -129,6 +129,7 @@ export function sourceReferenceResolver(value: SourceReferenceCatalog, sha256: F
     });
     assertions.set(row.assertion_id, { text: row.segments.map((segment) => segment.text).join(""), segments: row.segments });
   }
+  const selectionIndex = new Map<number, { starts: Map<number, string>; ends: Map<number, string> }>();
   return {
     resolve(catalogId: string, assertionId: number, value: SourceReference) {
       const reference = SourceReferenceSchema.parse(value);
@@ -151,6 +152,52 @@ export function sourceReferenceResolver(value: SourceReferenceCatalog, sha256: F
         throw new AlayaError("VALIDATION", "unsupported source reference boundary inside a segment");
       }
       return { first: first.id, last: last.id };
+    },
+    /** Occurrences are zero-based among catalog-eligible exact matches, including overlaps. */
+    selectExactText(assertionId: number, selection: Readonly<{ text: string; occurrence?: number }>,
+      account: (work: number, bytes: number) => void):
+      { readonly reference: SourceReference } | { readonly reason: "absent" | "ambiguous" | "out_of_range" | "unsupported_boundary" } {
+      const row = assertions.get(assertionId);
+      if (row === undefined) throw new AlayaError("VALIDATION", "unknown source assertion");
+      if (selection.text.length === 0) throw new AlayaError("VALIDATION", "source selection text must be non-empty");
+      if (!selectionIndex.has(assertionId)) {
+        // Charge two endpoint maps once for this assertion before allocating them.
+        account(2 * row.segments.length, 160 * row.segments.length);
+        const starts = new Map<number, string>();
+        const ends = new Map<number, string>();
+        let position = 0;
+        for (const segment of row.segments) {
+          starts.set(position, segment.id);
+          position += segment.text.length;
+          ends.set(position, segment.id);
+        }
+        selectionIndex.set(assertionId, { starts, ends });
+      }
+      const endpoints = selectionIndex.get(assertionId)!;
+      let offset = 0;
+      let rawMatch = false;
+      let eligible = 0;
+      let selected: SourceReference | undefined;
+      while (offset <= row.text.length - selection.text.length) {
+        const start = row.text.indexOf(selection.text, offset);
+        if (start < 0) break;
+        account(selection.text.length, 0);
+        rawMatch = true;
+        const first = endpoints.starts.get(start);
+        const last = endpoints.ends.get(start + selection.text.length);
+        if (first !== undefined && last !== undefined) {
+          if (selection.occurrence === eligible) return { reference: { first, last } };
+          if (selection.occurrence === undefined) {
+            if (selected !== undefined) return { reason: "ambiguous" };
+            selected = { first, last };
+          }
+          eligible += 1;
+        }
+        offset = start + 1;
+      }
+      if (selected !== undefined) return { reference: selected };
+      if (!rawMatch) return { reason: "absent" };
+      return { reason: eligible === 0 ? "unsupported_boundary" : "out_of_range" };
     }
   };
 }

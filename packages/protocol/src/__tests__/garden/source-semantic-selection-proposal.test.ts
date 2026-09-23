@@ -44,7 +44,7 @@ describe("exact-text source semantic selections", () => {
   it("requires an explicit occurrence only for repeated exact text within the named assertion", () => {
     const source = ["Mira saw Mira.", "Mira arrived."];
     const make = (support: unknown) => proposal([root(statement("see", quote("saw"), [{ role: "agent", target: support }]))]);
-    expect(() => compile(make(quote("Mira")), source)).toThrow(/one occurrence/u);
+    expect(() => compile(make(quote("Mira")), source)).toThrow(/one catalog-eligible occurrence/u);
     const first = compile(make(quote("Mira", 1, 0)), source);
     const second = compile(make(quote("Mira", 1, 1)), source);
     expect(first.mentions.find(row => row.source_ref.first === "a1s0")).toBeDefined();
@@ -52,6 +52,41 @@ describe("exact-text source semantic selections", () => {
     expect(() => compile(make(quote("Mira", 1, 2)), source)).toThrow();
     expect(() => compile(make(quote("Mira", 3)), source)).toThrow(/supplied assertion/u);
     expect(compile(make(quote("Mira", 2)), source).mentions.some(row => row.assertion_id === 2)).toBe(true);
+  });
+
+  it("counts only catalog-eligible exact matches and includes overlapping matches", () => {
+    const note = ["This note records no promotion event."];
+    const selected = compile(proposal([root(statement("negation", quote("no")))]), note);
+    const noteBinding = binding(note), noteResolver = sourceReferenceResolver(noteBinding.catalog, sha256);
+    expect(selected.mentions.map(row => noteResolver.resolve(noteBinding.catalog.catalog_id, row.assertion_id, row.source_ref).span))
+      .toContainEqual([18, 20]);
+    expect(() => compile(proposal([root(statement("negation", quote("no", 1, 1)))]), note)).toThrow(/one catalog-eligible occurrence/u);
+
+    const overlapping = ["哈哈哈"];
+    const make = (occurrence?: number) => proposal([root(statement("repeat", quote("哈哈", 1, occurrence)))]);
+    expect(() => compile(make(), overlapping)).toThrow(/one catalog-eligible occurrence/u);
+    const { catalog } = binding(overlapping), resolver = sourceReferenceResolver(catalog, sha256);
+    const spans = [0, 1].map(occurrence => compile(make(occurrence), overlapping).mentions
+      .map(row => resolver.resolve(catalog.catalog_id, row.assertion_id, row.source_ref).span));
+    expect(spans).toEqual([[[0, 2]], [[1, 3]]]);
+    expect(() => compile(make(2), overlapping)).toThrow(/one catalog-eligible occurrence/u);
+    expect(() => compile(proposal([root(statement("negation", quote("no")))]), ["no note says no."])).toThrow(/one catalog-eligible occurrence/u);
+  });
+
+  it("does not admit an undeclared domain reference after eligible selection", () => {
+    const raw = proposal([root(statement("record", quote("no")))], { domains: [{
+      key: "badge_domain", context: null, support: quote("badge"),
+      members: [{ referent: quote("L-19"), evidence: "employee_badge_record", restrictions: [] }],
+      exclusions: [], closure: { kind: "open" }
+    }] });
+    expect(() => compile(raw, ["This note records no promotion event; badge L-19."]))
+      .toThrow(/unknown_or_wrong_kind_key/u);
+  });
+
+  it("bounds repeated illegal substring candidates before an adversarial scan can finish", () => {
+    const text = "a".repeat(65536);
+    expect(() => compile(proposal([root(statement("fragment", quote("a".repeat(1024))))]), [text]))
+      .toThrow(SourceSemanticResourceExhausted);
   });
 
   it("preserves full dates and identifiers without inferring missing text or attachment", () => {

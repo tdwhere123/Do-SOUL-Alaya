@@ -89,8 +89,8 @@ describe("complete-source census and publication", () => {
       config: { providerUrl: "http://127.0.0.1:9", model: frozen.config.model, requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" },
       extractor: { extract: async () => ({ rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
         outcome: { status: "interpreted" }, query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
-          kind: "statement", key: "record", predicate: "record", arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
-        }] }], return: ["theme"], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
+          kind: "statement", key: "record", predicate: "record", arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }]
+        }] }], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
     expect(filled.newly_admitted).toBe(2);
     const prepared = await prepareLongMemEvalSemanticRun(root);

@@ -74,7 +74,7 @@ it.each(CASES)("retrieves the shipped $act example after source receive, publica
       source_id: sourceId, source_version: "1", producer_id: "authored-act", producer_version: "1" };
     const request = buildSourceSemanticRequest(input);
     const select = (text: string) => ({ assertion_id: 1, text });
-    const received = receiveSourceSemantics(JSON.stringify({ contract: "source-semantic-proposal-v6",
+    const received = receiveSourceSemantics(JSON.stringify({ contract: "source-semantic-proposal-v7",
       outcome: { status: "interpreted" }, content: { roots: [{ act, expression: {
         kind: "statement", predicate: { kind: "explicit", reading: "polish", support: select(predicate) },
         arguments: [{ role: "theme", target: select("the lens") }]

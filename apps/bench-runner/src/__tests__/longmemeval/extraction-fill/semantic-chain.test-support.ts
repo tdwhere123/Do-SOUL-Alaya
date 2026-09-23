@@ -76,8 +76,8 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   const queryRawJson = JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
     query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
       kind: "statement", key: "complete", predicate: "complete",
-      arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
-    }] }], return: ["theme"], gaps: [] } });
+      arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }]
+    }] }], gaps: [] } });
   const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(oneQuery, queryCache, 4096),
     inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   const fill = await executeSemanticProposalFill({ workset: oneQuery, cacheRoot: queryCache, authority,
@@ -235,8 +235,8 @@ async function assertEvidenceInputWithdrawal(cacheRoot: string, config: Semantic
     query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
       requested_operation: { reading: "What was completed?", support: { kind: "query_text", excerpt: "What was completed?" } },
       alternatives: [{ conditions: [{ kind: "statement", key: "answer", predicate: "complete",
-        arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }] }], evidence_inputs }],
-      return: ["theme"], gaps: [] } });
+        arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }] }], evidence_inputs }],
+      gaps: [] } });
   const queryAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, queryCache, config.max_output_tokens),
     inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   const queryFill = await executeSemanticProposalFill({ workset, cacheRoot: queryCache, authority: queryAuthority,

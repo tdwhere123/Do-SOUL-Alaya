@@ -72,7 +72,7 @@ function quote(catalog: SourceReferenceCatalog, text: string, assertionId = 1) {
 
 function compactUse(catalog: SourceReferenceCatalog, assertionId = 1) {
   return {
-    contract: "source-semantic-proposal-v6" as const,
+    contract: "source-semantic-proposal-v7" as const,
     outcome: { status: "interpreted" as const },
     content: {
       roots: [{

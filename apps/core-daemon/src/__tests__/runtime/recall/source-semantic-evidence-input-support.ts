@@ -46,8 +46,8 @@ export function evidenceQuery(kind: "count" | "duration", direct = true): Source
       free("timestamp", "promoted_at", "promotion")])] }
   ];
   const received = proposeQuerySemantics({ original_query: original, producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
-    producer_version: "1" }, { rawJson: JSON.stringify({ contract: "source-semantic-query-response-v6", outcome: { status: "interpreted" },
-    query: { contract: "source-semantic-query-meaning-v4", requested_operation: { reading: kind === "count"
+    producer_version: "1" }, { rawJson: JSON.stringify({ contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+    query: { contract: "source-semantic-query-meaning-v5", requested_operation: { reading: kind === "count"
       ? "count different invited speakers who actually spoke at the specified event and date"
       : "elapsed UTC days from joining to promotion in June 2026", support: { kind: "query_text", excerpt: original } },
     alternatives: [{ conditions: direct ? [answer] : [], evidence_inputs: inputs }], gaps: [] } }) });

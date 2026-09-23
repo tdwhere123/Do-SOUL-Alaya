@@ -30,7 +30,7 @@ async function loopback() {
   const server = createServer((_request, response) => {
     hits += 1; response.setHeader("Content-Type", "application/json");
     response.end(JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({
-      contract: "source-semantic-query-response-v6", outcome: { status: "abstained" }
+      contract: "source-semantic-query-response-v7", outcome: { status: "abstained" }
     }) }] } }] }));
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));

@@ -161,8 +161,8 @@ function authoredQuery(userPrompt: string) {
   const predicate = original === "What was repaired?" ? "repair" : "complete";
   return JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
     outcome: { status: "interpreted" }, query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
-      kind: "statement", key: "condition", predicate, arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }]
-    }] }], return: ["theme"], gaps: [] } });
+      kind: "statement", key: "condition", predicate, arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }]
+    }] }], gaps: [] } });
 }
 
 function authoredCorrespondence(userPrompt: string) {

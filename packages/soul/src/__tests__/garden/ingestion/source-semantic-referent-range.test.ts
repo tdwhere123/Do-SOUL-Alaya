@@ -10,7 +10,7 @@ function source(sourceCorpus: string, assertionIds: number[]) {
   const segment = (text: string, assertion_id = 1) => ({ assertion_id, text });
   const range = (first: string, last: string, assertion_id = 1) => ({ assertion_id, text: `${first} ${last}` });
   const receive = (content: object) => {
-    const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v6", outcome: { status: "interpreted" }, content });
+    const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" }, content });
     const result = receiveSourceSemantics(rawJson, request, input);
     expect(result.rawJson).toBe(rawJson);
     return result;

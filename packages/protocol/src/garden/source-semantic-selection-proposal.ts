@@ -7,13 +7,13 @@ import {
   SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT, materializeSourceSemanticCompactProposal
 } from "./source-semantic-compact-proposal.js";
 import { SourceSemanticOutcomeSchema, SourceSemanticNoPropositionOutcomeSchema, type SourceSemanticResponseEnvelope } from "./source-semantic-interpretation.js";
-import { locateSourceTextSelection, SourceAssertionIdSchema, SourceOccurrenceSchema } from "../evidence/source-selection.js";
+import { SourceAssertionIdSchema, SourceOccurrenceSchema } from "../evidence/source-selection.js";
 import { sourceReferenceResolver, sourceReferencePreparationCost, type SourceReferenceCatalog } from "../evidence/source-reference.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "./source-semantic-resources.js";
 
-export const SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT = "source-semantic-proposal-v6" as const;
-export const SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT = "host-owned-selection-schema-v2" as const;
+export const SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT = "source-semantic-proposal-v7" as const;
+export const SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT = "host-owned-selection-schema-v3" as const;
 export const SOURCE_SEMANTIC_SELECTION_GENERATION_DEPTH = SOURCE_SEMANTIC_MAX_DEPTH;
 export const SOURCE_SEMANTIC_SELECTION_FEATURES = ["nested_expression", "quantified", "measurement"] as const;
 /** Canonical coalesced spans retained after meaning-preserving merge; not a silent clip. */
@@ -306,11 +306,12 @@ class SelectionLowerer {
     const text = this.assertions.get(selection.assertion_id);
     if (text === undefined) invalid(path, "unknown_source_assertion", String(selection.assertion_id), "Selection requires a supplied assertion.");
     this.meter.charge(text.length + selection.text.length, 128, "exact source selection");
-    const located = locateSourceTextSelection(text, selection);
-    if ("reason" in located) invalid(path, `source_selection_${located.reason}`, selection.text, "Exact source selection must identify one occurrence within its assertion.");
-    let reference;
-    try { reference = this.resolver.referenceForSpan(selection.assertion_id, located.span); }
-    catch { invalid(path, "unsupported_source_boundary", selection.text, "Selection must preserve the source catalog's ASCII word and Unicode scalar boundaries."); }
+    const selected = this.resolver.selectExactText(selection.assertion_id, selection,
+      (work, bytes) => this.meter.charge(work, bytes, "exact source selection indexing and candidates"));
+    if ("reason" in selected) invalid(path, selected.reason === "unsupported_boundary"
+      ? "unsupported_source_boundary" : `source_selection_${selected.reason}`, selection.text,
+      "Exact source selection must identify one catalog-eligible occurrence within its assertion.");
+    const reference = selected.reference;
     return { assertion_id: selection.assertion_id, ...reference,
       firstOrd: this.ordinals.get(reference.first)!, lastOrd: this.ordinals.get(reference.last)! };
   }

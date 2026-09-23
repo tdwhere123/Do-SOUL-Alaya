@@ -69,19 +69,18 @@ function extractor(raws: string[], extra: { finish?: string | null; usage?: bool
 
 function meaningBody(themeExcerpt: string): string {
   return JSON.stringify({
-    contract: "source-semantic-query-response-v6",
+    contract: "source-semantic-query-response-v7",
     outcome: { status: "interpreted" },
     query: {
-      contract: "source-semantic-query-meaning-v4",
+      contract: "source-semantic-query-meaning-v5",
       alternatives: [{ conditions: [{
         kind: "statement", key: "send", predicate: "send",
         arguments: [
-          { role: "sender", target: { kind: "free", key: "sender" }, excerpt: "Who" },
+          { role: "sender", target: { kind: "free", key: "sender", return: true }, excerpt: "Who" },
           { role: "theme", target: { kind: "named", key: "sample", excerpt: themeExcerpt }, excerpt: themeExcerpt },
           { role: "recipient", target: { kind: "named", key: "mira", excerpt: "Mira" }, excerpt: "Mira" }
         ]
       }] }],
-      return: ["sender"],
       gaps: []
     }
   });

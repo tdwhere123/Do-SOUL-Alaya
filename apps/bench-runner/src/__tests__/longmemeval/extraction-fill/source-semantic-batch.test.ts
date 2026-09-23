@@ -39,7 +39,7 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const contract = request.source_request.proposal_contract ?? "source-semantic-proposal-v3";
-  const envelope = contract === "source-semantic-proposal-v6" ? {
+  const envelope = contract === "source-semantic-proposal-v7" ? {
     contract, outcome: { status: "interpreted" }, content: {
       roots: [{ act: "assertion", expression: {
         kind: "statement", predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
@@ -66,12 +66,12 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   };
   const editable = JSON.parse(JSON.stringify(envelope));
   if (mode === "unknown_alias") {
-    editable.content.roots[0].expression.arguments[0].target = contract === "source-semantic-proposal-v6"
+    editable.content.roots[0].expression.arguments[0].target = contract === "source-semantic-proposal-v7"
       ? { kind: "occurrence", key: segment(theme).id }
       : { kind: "reference", key: segment(theme).id };
   }
   if (mode === "duplicate_gap_channel" || mode === "partial") {
-    const gaps = contract === "source-semantic-proposal-v6"
+    const gaps = contract === "source-semantic-proposal-v7"
       ? [{ kind: "unresolved_referent", affected: ["r0"], support: { assertion_id: assertion.assertion_id, text: theme } }]
       : [{ kind: "unresolved_referent", affected: ["r0"], evidence: [anchor(theme)] }];
     if (mode === "partial") editable.content.gaps = gaps;

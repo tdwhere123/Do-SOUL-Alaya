@@ -16,7 +16,7 @@ const ORIGINAL = "Who sent the sample to Mira?";
 describe("source semantic query meaning admission", () => {
   it.each(["person", "Who", "reportingEntity", "x73"])("grounds a free reporter independently of its handle %s", (key) => {
     const original = "Who reported that Lee left?";
-    const query = reportedQuery(original, { kind: "free", key, excerpt: "Who" }, { return: [key] });
+    const query = reportedQuery(original, { kind: "free", key, excerpt: "Who", return: true });
     expect(admitSourceSemanticQuery(query, original).kind).toBe("admitted");
     expect(query.alternatives[0]!.frames[0]!.role_requirements).toEqual([
       { id: "reporter", role_reading: "reporter", target_variable: key, support: { kind: "query_text", excerpt: "Who" } }
@@ -61,13 +61,12 @@ describe("source semantic query meaning admission", () => {
         conditions: [{
           kind: "statement", key: "send", predicate: "send",
           arguments: [
-            { role: "sender", target: { kind: "free", key: "sender" }, excerpt: "Who" },
+            { role: "sender", target: { kind: "free", key: "sender", return: true }, excerpt: "Who" },
             { role: "theme", target: { kind: "named", key: "sample", excerpt: "sample" }, excerpt: "sample" },
             { role: "recipient", target: { kind: "named", key: "mira", excerpt: "Mira" }, excerpt: "Mira" }
           ]
         }]
       }],
-      return: ["sender"],
       gaps: []
     }, {
       original_query: ORIGINAL, original_query_digest: digestOriginalQuery(ORIGINAL),
