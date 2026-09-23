@@ -20,12 +20,15 @@ const RequiredEvidenceAct = z.object({
   act: z.enum(["question", "directive"]), excerpt: z.string().min(1).max(1024)
 }).strict().readonly();
 
+/** A variable to bind; its excerpt supports a role but supplies no referent correspondence obligation. */
 const FreeTarget = z.object({
   kind: z.literal("free"), key: Key, excerpt: z.string().min(1).max(1024).optional(), return: z.boolean().optional()
 }).strict().readonly();
+/** A query-text referential constraint, including deictic or definite expressions; no global identity is asserted. */
 const NamedTarget = z.object({
   kind: z.literal("named"), key: Key, excerpt: z.string().min(1).max(1024), return: z.boolean().optional()
 }).strict().readonly();
+/** Reuses the declaration and its constraints; it never resolves an external referent. */
 const LocalReference = z.object({ kind: z.literal("reference"), key: Key }).strict().readonly();
 const EntityTarget = z.discriminatedUnion("kind", [FreeTarget, NamedTarget, LocalReference]);
 const RoleArgument = z.object({

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  SourceSemanticQuerySchema, sourceSemanticInterpretationIdentity
+  SourceSemanticQuerySchema, sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity
 } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import {
@@ -172,6 +172,35 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("Local keys are arbitrary identifiers, never text evidence");
   });
 
+  it("retains an unresolved speaker expression without assigning a speaker identity", () => {
+    const original_query = "What degree did I graduate with?";
+    const body = (target: object, gaps: object[]) => ({
+      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      query: { contract: "source-semantic-query-meaning-v5", gaps,
+        alternatives: [{ conditions: [{ kind: "statement", predicate: "graduate", arguments: [
+          { role: "agent", target },
+          { role: "degree", target: { kind: "free", key: "degree", excerpt: "What degree", return: true } }
+        ] }] }] }
+    });
+    const input = { original_query, producer_id: "query-producer", producer_version: "1" };
+    const gap = { kind: "unresolved_referent", affected_ids: ["subject"],
+      support: [{ kind: "query_text", excerpt: "I" }], description: "The approved query context does not identify the speaker." };
+    const constrained = proposeQuerySemantics(input, { rawJson: JSON.stringify(body(
+      { kind: "named", key: "subject", excerpt: "I" }, [gap]
+    )) });
+    expect(constrained.outcome).toEqual({ status: "interpreted", gaps: [gap] });
+    expect(constrained.query?.variables.find(row => row.id === "subject")?.reference).toEqual({ kind: "query_text", excerpt: "I" });
+    expect(constrained.query?.variables.find(row => row.id === "degree")?.reference).toBeUndefined();
+    expect(constrained.query?.return_variables).toEqual(["degree"]);
+    const structurallyValidButUnfaithful = proposeQuerySemantics(input, { rawJson: JSON.stringify(body(
+      { kind: "free", key: "subject", excerpt: "I" }, []
+    )) });
+    expect(structurallyValidButUnfaithful.outcome.status).toBe("interpreted");
+    expect(structurallyValidButUnfaithful.query?.variables.find(row => row.id === "subject")?.reference).toBeUndefined();
+    expect(sourceSemanticQueryIdentity(constrained.query!, semanticSha256)).not.toBe(
+      sourceSemanticQueryIdentity(structurallyValidButUnfaithful.query!, semanticSha256));
+  });
+
   it("materializes complete producer examples without asserting embedded actions or returning universal witnesses", () => {
     const results = sourceSemanticQueryExamples.map((example) => proposeQuerySemantics({
       original_query: example.original_query, producer_id: "query-producer", producer_version: "1"
@@ -212,6 +241,22 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     expect(results[5]!.query!.alternatives[0]!.frames[0]!.source_act).toBe("question");
     expect(results[6]!.query!.alternatives[0]!.frames[0]!.source_act).toBe("directive");
     expect(occurrence.alternatives[0]!.frames.every(row => row.source_act === undefined)).toBe(true);
+    const constrained = results[7]!.query!;
+    expect(constrained.variables.find(row => row.id === "steward")?.reference).toEqual({
+      kind: "query_text", excerpt: "the workshop steward"
+    });
+    expect(constrained.variables.find(row => row.id === "tool")?.reference).toBeUndefined();
+    expect(constrained.return_variables).toEqual(["tool"]);
+    expect(constrained.gaps).toEqual([]);
+    const unresolved = results[8]!.query!;
+    expect(unresolved.variables.find(row => row.id === "technician")?.reference?.excerpt).toBe("that technician");
+    expect(unresolved.gaps).toMatchObject([{ kind: "unresolved_referent", affected_ids: ["technician"] }]);
+    expect(results[8]!.outcome.status).toBe("interpreted");
+    const existential = results[9]!.query!;
+    expect(existential.variables.find(row => row.id === "person")?.reference).toBeUndefined();
+    expect(existential.return_variables).toEqual(["tool"]);
+    expect(existential.gaps).toEqual([]);
+    expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("A named target preserves a referentially constrained expression");
   });
 
   it("binds required evidence act support to the current original query and rejects replaced producer syntax", () => {

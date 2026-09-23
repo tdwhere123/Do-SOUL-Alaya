@@ -220,6 +220,10 @@ describe("Gemini complete generation schema guidance", () => {
     ].join("\0")).digest("hex");
     expect(proposalCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1",
       SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema, 4096, "http://127.0.0.1:9")).not.toBe(oldStructuredKey);
+    expect(proposalCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1",
+      SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema, 4096, "http://127.0.0.1:9")).not.toBe(
+      proposalCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1",
+        `${SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT} revised`, request, schema, 4096, "http://127.0.0.1:9"));
   });
 
   it("retains complete source and query schemas without a weaker recursive decoder", () => {

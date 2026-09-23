@@ -131,5 +131,47 @@ export const sourceSemanticQueryExamples = [
         }] }]
       }
     }
+  },
+  {
+    original_query: "Which tool did the workshop steward use?",
+    response: {
+      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+        alternatives: [{ conditions: [{ kind: "statement", predicate: "use", arguments: [
+          { role: "agent", target: { kind: "named", key: "steward", excerpt: "the workshop steward" } },
+          { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
+        ] }] }]
+      }
+    }
+  },
+  {
+    original_query: "Which tool did that technician use?",
+    response: {
+      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        alternatives: [{ conditions: [{ kind: "statement", predicate: "use", arguments: [
+          { role: "agent", target: { kind: "named", key: "technician", excerpt: "that technician" } },
+          { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
+        ] }] }],
+        gaps: [{ kind: "unresolved_referent", affected_ids: ["technician"],
+          support: [{ kind: "query_text", excerpt: "that technician" }],
+          description: "The supplied question and context do not identify which technician is meant." }]
+      }
+    }
+  },
+  {
+    original_query: "Which tool did someone use?",
+    response: {
+      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+        alternatives: [{ conditions: [{ kind: "statement", predicate: "use", arguments: [
+          { role: "agent", target: { kind: "free", key: "person", excerpt: "someone" } },
+          { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
+        ] }] }]
+      }
+    }
   }
 ] as const;

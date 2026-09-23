@@ -84,7 +84,7 @@ function referentOf(sourceInterpretation: SourceSemanticInterpretation, text: st
   return row;
 }
 
-async function admitSource(filename: string): Promise<void> {
+async function admitSource(filename: string, content = SOURCE, sourceId = "artifact-lathe"): Promise<void> {
   const { database } = await createRecallRealStorage(() => undefined, filename);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
@@ -92,9 +92,9 @@ async function admitSource(filename: string): Promise<void> {
     stores, eventLogRepo, runtimeNotifier: { notifyEntry: async () => undefined }, sha256: fieldContractSha256
   });
   await admission.admit({
-    workspace_id: WS, source_id: "artifact-lathe", source_version: "1", content_bytes: SOURCE,
+    workspace_id: WS, source_id: sourceId, source_version: "1", content_bytes: content,
     evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
-    speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(SOURCE)
+    speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(content)
   }, { workspaceId: WS });
   database.close();
   closeCachedDatabase(filename);
@@ -272,4 +272,121 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+}, 60000);
+
+it("requires the requested graduate's referent even when another graduate has the same agent role", async () => {
+  const content = "Mara graduated with Biology; Theo earned a Physics degree.";
+  const sourceId = "graduate-pair";
+  const fixedQuestion = "What degree did Mara graduate with?";
+  const freeQuestion = "What degree did someone graduate with?";
+  const directory = await mkdtemp(join(tmpdir(), "source-semantic-graduate-person-"));
+  const filename = join(directory, "alaya.db");
+  try {
+    await admitSource(filename, content, sourceId);
+    const session = await openSession(filename);
+    let published: NonNullable<Extract<Awaited<ReturnType<typeof interpret>>, { operation: "propose" }>["published"]>;
+    try {
+      const prepared = await interpret(session.handler, {
+        operation: "prepare_source", source_id: sourceId, budget: BUDGET, authorized_scopes: SCOPES
+      }, session.context);
+      if (prepared.operation !== "prepare_source" || prepared.catalog === undefined || prepared.source_handle === undefined) {
+        throw new Error("prepare_source required");
+      }
+      const proposal = proposeSourceSemantics({ sourceCorpus: content, assertionIds: [1], source_id: sourceId,
+        source_version: "1", producer_id: "test-author", producer_version: "p1" }, { rawJson: JSON.stringify({
+          contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
+          content: { roots: [
+            { act: "assertion", expression: { kind: "statement", predicate: { kind: "explicit", reading: "graduate", support: quote(prepared.catalog, "graduated") },
+              arguments: [{ role: "agent", target: quote(prepared.catalog, "Mara") },
+                { role: "degree", target: quote(prepared.catalog, "Biology") }] } },
+            { act: "assertion", expression: { kind: "statement", predicate: { kind: "explicit", reading: "graduate", support: quote(prepared.catalog, "earned") },
+              arguments: [{ role: "agent", target: quote(prepared.catalog, "Theo") },
+                { role: "degree", target: quote(prepared.catalog, "Physics") }] } }
+          ] }
+        }) });
+      if (proposal.draft === undefined || proposal.interpretation === undefined) throw new Error(JSON.stringify(proposal.outcome));
+      const result = await interpret(session.handler, { operation: "propose", source_handle: prepared.source_handle,
+        draft: proposal.draft, producer_id: "test-author", producer_version: "p1",
+        contract_version: "source-interpretation-v4", budget: BUDGET, authorized_scopes: SCOPES }, session.context);
+      if (result.operation !== "propose" || result.published === undefined) throw new Error(JSON.stringify(result.outcome));
+      published = result.published;
+    } finally { await closeSession(session, filename); }
+
+    const reopened = await openSession(filename);
+    try {
+      const interpretation = published!.interpretation;
+      const mara = referentOf(interpretation, "Mara").id;
+      const biology = referentOf(interpretation, "Biology").id;
+      const physics = referentOf(interpretation, "Physics").id;
+      expect(interpretation.frames.filter(row => row.predicate_support.reading === "graduate")).toHaveLength(2);
+      const check = async (original_query: string, target: object, expected: string[], constrained: boolean) => {
+        const received = proposeQuerySemantics({ original_query, producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
+          producer_version: "1" }, { rawJson: JSON.stringify({
+            contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+            query: { contract: "source-semantic-query-meaning-v5", gaps: [],
+              alternatives: [{ conditions: [{ kind: "statement", predicate: "graduate", arguments: [
+                { role: "agent", target },
+                { role: "degree", target: { kind: "free", key: "degree", excerpt: "What degree", return: true } }
+              ] }] }] }
+          }) });
+        if (received.query === undefined) throw new Error(JSON.stringify(received.outcome));
+        const query = received.query;
+        expect(query.variables.find(row => row.id === "actor")?.reference?.excerpt).toBe(constrained ? "Mara" : undefined);
+        expect(query.variables.find(row => row.id === "degree")?.reference).toBeUndefined();
+        const queryFrame = query.alternatives[0]!.frames[0]!;
+        const rows = interpretation.frames.flatMap(frame => {
+          if (frame.predicate_support.kind !== "explicit") throw new Error("explicit graduation predicate required");
+          const agentSlot = frame.slots.find(row => row.role_reading === "agent")!.id;
+          const degreeSlot = frame.slots.find(row => row.role_reading === "degree")!.id;
+          const agent = frame.bindings.find(row => row.slot_id === agentSlot)!.target;
+          const degree = frame.bindings.find(row => row.slot_id === degreeSlot)!.target;
+          if (agent.kind !== "node" || degree.kind !== "node") throw new Error("grouped referents required");
+          const support = (id: string) => [{ kind: "lexical" as const, mentions: [interpretation.referents.find(row => row.id === id)!.mentions[0]!] }];
+          return [
+            { relation: "contextual_equivalence", query_endpoint: { kind: "predicate", alternative: 0, frame: queryFrame.id },
+              source_endpoint: { kind: "frame", frame: frame.id }, query_support: { kind: "query_text", excerpt: "graduate" },
+              source_semantic_support: [{ kind: "lexical", mentions: frame.predicate_support.mentions }] },
+            { relation: "contextual_equivalence", query_endpoint: { kind: "slot", alternative: 0, frame: queryFrame.id, slot: "agent" },
+              source_endpoint: { kind: "slot", frame: frame.id, slot: agentSlot }, query_support: { kind: "query_text", excerpt: constrained ? "Mara" : "someone" },
+              source_semantic_support: support(agent.id) },
+            { relation: "contextual_equivalence", query_endpoint: { kind: "slot", alternative: 0, frame: queryFrame.id, slot: "degree" },
+              source_endpoint: { kind: "slot", frame: frame.id, slot: degreeSlot }, query_support: { kind: "query_text", excerpt: "degree" },
+              source_semantic_support: support(degree.id) }
+          ];
+        });
+        const referent = { relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
+          source_endpoint: { kind: "referent", referent: mara }, query_support: { kind: "query_text", excerpt: "Mara" },
+          source_semantic_support: [{ kind: "lexical", mentions: referentOf(interpretation, "Mara").mentions }] };
+        const correspondence = receiveAuthoredCorrespondence({ original_query, admitted_query_semantics: query,
+          source_interpretation_descriptors: [{ source_interpretation_id: published!.interpretation_id, interpretation }],
+          producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" },
+        { correspondences: constrained ? [referent, ...rows] : rows }, { status: "interpreted", gaps: [] });
+        if (correspondence.semantic_correspondence === undefined) throw new Error(JSON.stringify(correspondence.outcome));
+        const recall = await interpret(reopened.handler, { operation: "recall", accepts_unreviewed_conditional_results: true,
+          original_query, query_semantics: query, semantic_correspondences: [correspondence.semantic_correspondence],
+          budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES }, reopened.context);
+        if (recall.operation !== "recall") throw new Error("recall required");
+        expect(recall.provider_attempts).toBe(0);
+        const bindings = recall.proofs?.flatMap(proof => proof.binding_results ?? []) ?? [];
+        expect(bindings.map(row => row.returned.degree?.node_id).sort()).toEqual(expected);
+        if (constrained) {
+          expect(bindings[0]?.bindings.actor?.node_id).toBe(mara);
+          expect(bindings[0]?.query_complete).toBe(true);
+          expect(recall.proofs?.[0]?.consumed_leaves.some(row => row.leaf_kind === "semantic_correspondence_referent")).toBe(true);
+          const withoutReferent = receiveAuthoredCorrespondence({ original_query, admitted_query_semantics: query,
+            source_interpretation_descriptors: [{ source_interpretation_id: published!.interpretation_id, interpretation }],
+            producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" },
+          { correspondences: rows }, { status: "interpreted", gaps: [] });
+          if (withoutReferent.semantic_correspondence === undefined) throw new Error(JSON.stringify(withoutReferent.outcome));
+          const withdrawn = await interpret(reopened.handler, { operation: "recall", accepts_unreviewed_conditional_results: true,
+            original_query, query_semantics: query, semantic_correspondences: [withoutReferent.semantic_correspondence],
+            budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES }, reopened.context);
+          if (withdrawn.operation !== "recall") throw new Error("recall required");
+          expect(withdrawn.proofs?.flatMap(proof => proof.binding_results ?? []) ?? []).toEqual([]);
+        }
+      };
+      await check(fixedQuestion, { kind: "named", key: "actor", excerpt: "Mara" }, [biology], true);
+      await check(freeQuestion, { kind: "free", key: "actor", excerpt: "someone" }, [biology, physics].sort(), false);
+    } finally { await closeSession(reopened, filename); }
+  } finally { await rm(directory, { recursive: true, force: true }); }
 }, 60000);

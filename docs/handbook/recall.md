@@ -747,6 +747,21 @@ Entity handles are arbitrary local references, never text support. A free report
 provides its original-question excerpt once; a named reporter already carries its
 excerpt. A reference reuses its declared entity's unambiguous support. Missing or
 fabricated excerpts remain invalid through the existing Core admission owner.
+More generally, a free target binds a value without an added identity constraint
+from that declaration; unknown answers, existential witnesses and binders remain
+free when the question leaves them unconstrained. A `named` target retains an
+original-query referential expression, including a speaker, addressee or definite
+description, through the canonical variable `reference`. It does not assert a
+resolved global identity or that any source participant is equivalent. A local
+reference reuses the declared constraints. An exact excerpt on a free role proves
+text support only; a suggestive key or matching role cannot supply a missing
+referent obligation. If authorized query context genuinely leaves the intended
+referent unresolved, retain its constrained target with a located
+`unresolved_referent` gap, or return unavailable meaning when no faithful query
+can be proposed. Lack of source correspondence alone does not require a query
+gap. Core admission checks structure and excerpts; it cannot infer omitted
+language constraints. Semantic correspondence must independently justify a
+reference-bearing target against a source referent before conditional proof.
 Optional occurrence aliases are bookkeeping, not evidence. A single occurrence
 alias that collides with an entity declaration can use a fresh host ID only when
 no reference, return, gap, domain or evaluation uses that alias. Referenced,

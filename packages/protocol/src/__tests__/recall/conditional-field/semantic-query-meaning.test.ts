@@ -313,14 +313,28 @@ it("preserves not and conditional operand roles instead of reversing implication
     .toEqual([undefined, "antecedent", "consequent"]);
 });
 
-it("separates a named entity called Who from a free target and retains an ambiguous gap", () => {
+it("keeps a referential constraint and its unresolved gap separate from answer binding", () => {
   const query = compiled(statement("greet", [
     { role: "agent", target: { kind: "named", key: "whoPerson", excerpt: "Who" }, excerpt: "Who" },
-    { role: "theme", target: { kind: "free", key: "guest" }, excerpt: "them" }
+    { role: "theme", target: { kind: "named", key: "guest", excerpt: "them" }, excerpt: "them" }
   ]), { gaps: [{ kind: "unresolved_referent", affected_ids: ["guest"], support: [{ kind: "query_text", excerpt: "them" }] }] });
   expect(query.variables.find((row) => row.id === "whoPerson")?.reference?.excerpt).toBe("Who");
-  expect(query.variables.find((row) => row.id === "guest")?.reference).toBeUndefined();
+  expect(query.variables.find((row) => row.id === "guest")?.reference?.excerpt).toBe("them");
   expect(query.gaps[0]?.kind).toBe("unresolved_referent");
+});
+
+it("keeps a constrained participant distinct from a free answer and an existential witness", () => {
+  const original = "Which degree did the session chair and another attendee earn?";
+  const query = compiled(statement("earn", [
+    { role: "graduate", target: { kind: "named", key: "someone", excerpt: "the session chair" } },
+    { role: "co-graduate", target: { kind: "free", key: "witness", excerpt: "another attendee" } },
+    { role: "degree", target: { kind: "free", key: "answer", excerpt: "Which degree", return: true } }
+  ]), {}, original);
+  expect(query.variables.find(row => row.id === "someone")?.reference).toEqual({ kind: "query_text", excerpt: "the session chair" });
+  expect(query.variables.find(row => row.id === "witness")?.reference).toBeUndefined();
+  expect(query.variables.find(row => row.id === "answer")?.reference).toBeUndefined();
+  expect(query.return_variables).toEqual(["answer"]);
+  expect(query.alternatives[0]!.frames[0]!.role_requirements.map(row => row.target_variable)).toEqual(["someone", "witness", "answer"]);
 });
 
 it.each(["free", "named"] as const)("rejects conflicting entity declarations after an initial %s across every declaration boundary", (kind) => {

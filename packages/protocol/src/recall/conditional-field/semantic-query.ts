@@ -35,6 +35,7 @@ export const SourceSemanticQueryGapSchema = z.object({
   description: z.string().min(1).max(1024).optional()
 }).strict().readonly();
 
+/** Only reference-bearing entities require referent correspondence; role support alone does not add it. */
 export const SourceSemanticQueryVariableSchema = z.object({
   id: Handle,
   sort: z.enum(["entity", "proposition", "context"]),
