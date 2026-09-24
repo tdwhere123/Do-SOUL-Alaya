@@ -12,6 +12,9 @@ export { SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_SELECTION_
   SOURCE_SEMANTIC_SELECTION_SUPPORT_BOUND, SOURCE_SEMANTIC_SELECTION_SUPPORT_LIST_BOUND,
   SourceSemanticSelectionProposalSchema, SourceSemanticSelectionGenerationSchema,
   materializeSourceSemanticSelectionProposal } from "./source-semantic-selection-proposal.js";
+export { SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT,
+  sourceSemanticTableJsonSchema,
+  materializeSourceSemanticTableProposal } from "./source-semantic-table-proposal.js";
 import {
   SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticContextOwnerSchema,
   SourceSemanticFrameSchema, SourceSemanticGraphFields, SourceSemanticOperatorSchema

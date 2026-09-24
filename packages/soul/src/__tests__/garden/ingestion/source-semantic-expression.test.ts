@@ -6,6 +6,7 @@ import { proposeSourceSemantics, receiveSourceSemantics, verifyRetainedSourceSem
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as CONTENT_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-content-guidance.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as EXPRESSION_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-expression-guidance.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as COMPACT_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-compact-guidance.js";
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT as SELECTION_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-selection-guidance.js";
 import { prepareSourceSemanticRevision } from "../../../garden/ingestion/official-api/source-semantic-revision.js";
 import { officialApiExtractionResponseSchema, officialApiExtractionResponseSchemaPreimage } from "../../../garden/ingestion/official-api/response-schema.js";
 
@@ -38,10 +39,15 @@ describe("source-bound nested semantic expressions", () => {
     const source = { ...input, sourceCorpus: `Rin ${modal} inspect crates.`, assertionIds: [1] };
     const request = buildSourceSemanticRequest(source);
     const select = (text: string) => ({ assertion_id: 1, text });
-    const event = { kind: "statement", predicate: { kind: "explicit", reading: "inspect", support: select("inspect") },
-      arguments: [{ role: "inspector", target: select("Rin") }, { role: "item", target: select("crates") }] };
-    const proposal = { contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" }, content: {
-      roots: [{ act: "assertion", expression: { kind: "possible", support: select(modal), content: event } }]
+    const event = { kind: "statement", key: "inspection", predicate: { kind: "explicit", reading: "inspect", support: select("inspect") },
+      arguments: [{ role: "inspector", target: { kind: "entity_ref", key: "rin" } },
+        { role: "item", target: { kind: "entity_ref", key: "crates" } }], qualifications: [] };
+    const proposal = { contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" }, content: {
+      roots: [{ act: "assertion", expression: { kind: "content_ref", key: "possibility" } }],
+      entities: [{ form: "selection", key: "rin", selection: select("Rin") },
+        { form: "selection", key: "crates", selection: select("crates") }],
+      nodes: [event, { kind: "possible", key: "possibility", support: select(modal),
+        content: { kind: "content_ref", key: "inspection" } }], gaps: []
     } };
     const rawJson = JSON.stringify(proposal);
     const received = receiveSourceSemantics(rawJson, request, source);
@@ -53,7 +59,8 @@ describe("source-bound nested semantic expressions", () => {
     expect(h.asserted_at_scope).toEqual([possibility.id]);
     expect(nested.context_owner).toEqual({ kind: "operator", operator_handle: possibility.id });
     // Admission validates a supplied scope; it must not invent a modal missing from model output.
-    const omitted = { ...proposal, content: { roots: [{ act: "assertion", expression: event }] } };
+    const omitted = { ...proposal, content: { ...proposal.content,
+      roots: [{ act: "assertion", expression: { kind: "content_ref", key: "inspection" } }], nodes: [event] } };
     const flattened = receiveSourceSemantics(JSON.stringify(omitted), request, source).interpretation!;
     expect(flattened.operators).toHaveLength(0);
     expect(flattened.asserted_at_scope).toEqual([flattened.frames[0]!.id]);
@@ -83,9 +90,10 @@ describe("source-bound nested semantic expressions", () => {
     const historical = parseRetainedSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v2"
     } });
-    expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v7");
+    expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v8");
     expect(sourceSemanticSystemPrompt(current)).toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
     expect(retainedSourceSemanticSystemPrompt(historical)).toBe(CONTENT_PROMPT);
+    expect(sourceSemanticResponseJsonSchema()).toEqual(sourceSemanticResponseJsonSchema(current));
     expect(JSON.stringify(sourceSemanticResponseJsonSchema(current))).toContain('"roots"');
     expect(JSON.stringify(retainedSourceSemanticResponseJsonSchema(historical))).toContain('"statements"');
     for (const request of [current]) {
@@ -102,8 +110,8 @@ describe("source-bound nested semantic expressions", () => {
   it("pins host-owned generation separately while replaying historical nested requests unchanged", () => {
     const current = buildSourceSemanticRequest(input);
     const { generation_schema_contract: _generation, ...body } = current.source_request;
-    expect(current.source_request.generation_schema_contract).toBe("host-owned-selection-schema-v3");
-    expect(() => parseSourceSemanticRequest({ ...current, source_request: body })).toThrow(/host-owned selection schema/u);
+    expect(current.source_request.generation_schema_contract).toBe("host-owned-table-schema-v1");
+    expect(() => parseSourceSemanticRequest({ ...current, source_request: body })).toThrow(/host-owned table schema/u);
     const historical = parseRetainedSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...body, proposal_contract: "source-semantic-proposal-v3"
     } });
@@ -123,7 +131,7 @@ describe("source-bound nested semantic expressions", () => {
     expect(() => prepareSourceSemanticRevision(historical, nestedRaw)).toThrow(/ineligible/u);
     expect(() => parseSourceSemanticRequest({ ...current, source_request: {
       ...current.source_request, proposal_contract: "source-semantic-proposal-v2"
-    } })).toThrow(/host-owned selection schema/u);
+    } })).toThrow(/host-owned table schema/u);
   });
 
   it("retains contradictory declarations as rejected raw without publishing an interpretation", () => {
@@ -142,7 +150,7 @@ describe("source-bound nested semantic expressions", () => {
     expect(received.interpretation).toBeUndefined();
   });
 
-  it("binds selection producer contract, prompt and schema in request identity and shrinks ordinary prompt bytes", () => {
+  it("binds table producer contract, prompt and schema in request identity while retaining selection bytes", () => {
     const current = buildSourceSemanticRequest(input);
     const nested = parseRetainedSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...current.source_request, proposal_contract: "source-semantic-proposal-v3",
@@ -157,9 +165,12 @@ describe("source-bound nested semantic expressions", () => {
     expect(sourceSemanticSystemPrompt(current)).toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
     expect(retainedSourceSemanticSystemPrompt(nested)).toBe(EXPRESSION_PROMPT);
     expect(retainedSourceSemanticSystemPrompt(compact)).toBe(COMPACT_PROMPT);
-    expect(Buffer.byteLength(SOURCE_SEMANTIC_SYSTEM_PROMPT)).toBeLessThan(Buffer.byteLength(EXPRESSION_PROMPT));
-    expect(Buffer.byteLength(JSON.stringify(sourceSemanticResponseJsonSchema(current))))
-      .toBeLessThan(Buffer.byteLength(JSON.stringify(retainedSourceSemanticResponseJsonSchema(compact))));
+    const selection = parseRetainedSourceSemanticRequest({ ...current, source_request: {
+      ...current.source_request, proposal_contract: "source-semantic-proposal-v7",
+      generation_schema_contract: "host-owned-selection-schema-v3"
+    } });
+    expect(retainedSourceSemanticSystemPrompt(selection)).toBe(SELECTION_PROMPT);
+    expect(sourceSemanticResponseJsonSchema(current)).not.toEqual(retainedSourceSemanticResponseJsonSchema(selection));
     expect(verifyRetainedSourceSemantics(raw, nested, input).result.outcome.status).toBe("invalid");
     expect(receiveSourceSemantics(EXPRESSION_PROMPT.split("Example response:\n")[1]!, current, input).outcome.status).toBe("invalid");
     expect(verifyRetainedSourceSemantics(COMPACT_PROMPT.split("Example response:\n")[1]!, compact, input).result.outcome.status).toBe("interpreted");

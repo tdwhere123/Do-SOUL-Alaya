@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, buildSourceSemanticRequest,
   buildSourceSemanticQueryRequest, officialApiExtractionResponseSchemaPreimage, retainedOfficialApiExtractionResponseSchemaPreimage,
   parseRetainedSourceSemanticRequest, receiveSourceSemantics, sourceSemanticQueryResponseJsonSchema,
@@ -142,17 +142,17 @@ describe("Gemini complete generation schema guidance", () => {
       .toBe(createHash("sha256").update([...fields, material].join("\0")).digest("hex"));
   });
 
-  it("binds source selection request identity to complete guidance in JSON mode", () => {
+  it("binds source table request identity to its structured decoder schema", () => {
     const live = buildSourceSemanticRequest(input);
-    expect(live.source_request.proposal_contract).toBe(SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT);
+    expect(live.source_request.proposal_contract).toBe(SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT);
     const request = JSON.stringify(live);
     const source = officialApiExtractionResponseSchemaPreimage(request);
-    expect(source).toContain(SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT);
+    expect(source).toContain(SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT);
     expect(source).not.toContain("source-semantic-proposal-v4");
     const projected = projectGeminiGenerationSchema(JSON.parse(source));
-    expect(projected.recursive).toBe(true);
-    expect(projected.schema).toBeUndefined();
-    expect(projected.instruction).toBeDefined();
+    expect(projected.recursive).toBe(false);
+    expect(projected.schema).toBeDefined();
+    expect(projected.instruction).toBeUndefined();
     const body = encodeGeminiGenerateContent({ userPrompt: request, systemPrompt: SOURCE_SEMANTIC_SYSTEM_PROMPT },
       { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1", maxOutputTokens: 32768 });
     const material = geminiGenerationSchemaCacheMaterial(source);
@@ -166,20 +166,31 @@ describe("Gemini complete generation schema guidance", () => {
     const compactSource = retainedOfficialApiExtractionResponseSchemaPreimage(JSON.stringify(compactCurrent));
     expect(Buffer.byteLength(source)).toBeLessThan(Buffer.byteLength(compactSource));
     expect(body).toMatchObject({ generationConfig: { responseMimeType: "application/json" } });
-    expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
-    expect(JSON.parse(material)).toMatchObject({ contract: "gemini-recursive-generation-schema-v3",
-      source_schema: JSON.parse(source), response_schema: null, instruction: projected.instruction });
+    expect(body).toHaveProperty("generationConfig.responseJsonSchema", projected.schema);
+    expect(material).toBe(source);
     const fields = ["gemini-3.1-flash-lite", "gemini-3.1-low-v1", SOURCE_SEMANTIC_SYSTEM_PROMPT, request];
     const key = computeCacheKey(fields[0]!, "gemini-3.1-low-v1", fields[2]!, request);
     expect(key).toBe(createHash("sha256").update([...fields, material].join("\0")).digest("hex"));
-    expect(body).toMatchObject({ systemInstruction: { parts: [{ text: SOURCE_SEMANTIC_SYSTEM_PROMPT }, { text: projected.instruction }] } });
+    expect(body).toMatchObject({ systemInstruction: { parts: [{ text: SOURCE_SEMANTIC_SYSTEM_PROMPT }] } });
+    const selection = parseRetainedSourceSemanticRequest({ ...live, source_request: {
+      ...live.source_request, proposal_contract: SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
+      generation_schema_contract: "host-owned-selection-schema-v3"
+    } });
+    const selectionRequest = JSON.stringify(selection);
+    const selectionPrompt = retainedSourceSemanticSystemPrompt(selection);
+    const selectionSchema = retainedOfficialApiExtractionResponseSchemaPreimage(selectionRequest);
+    expect(selectionRequest).not.toBe(request);
+    expect(selectionPrompt).not.toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
+    expect(selectionSchema).not.toBe(source);
+    expect(computeRetainedCacheKey(fields[0]!, "gemini-3.1-low-v1", selectionPrompt, selectionRequest)).not.toBe(key);
   });
 
-  it("still rejects a missing nested operand through the unchanged strict local receiver", () => {
-    const request = buildSourceSemanticRequest(input);
+  it("rejects a missing table operator operand through the strict local receiver", () => {
+    const exampleInput = { ...input, sourceCorpus: "The permit is valid on Tuesday only. The clerk does not know whether the permit is valid on Thursday." };
+    const request = buildSourceSemanticRequest(exampleInput);
     const raw = JSON.parse(SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!);
-    delete raw.content.roots[1].expression.content;
-    const result = receiveSourceSemantics(JSON.stringify(raw), request, input);
+    delete raw.content.nodes[3].content;
+    const result = receiveSourceSemantics(JSON.stringify(raw), request, exampleInput);
     expect(result.outcome.status).toBe("invalid");
     expect(result.interpretation).toBeUndefined();
   });
@@ -229,14 +240,17 @@ describe("Gemini complete generation schema guidance", () => {
         `${SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT} revised`, request, schema, 4096, "http://127.0.0.1:9"));
   });
 
-  it("retains the recursive source schema and projects the complete acyclic query schema", () => {
+  it("projects the complete acyclic source and query schemas without mutation", () => {
     const source = JSON.parse(officialApiExtractionResponseSchemaPreimage(JSON.stringify(buildSourceSemanticRequest(input))));
-    const query = sourceSemanticQueryResponseJsonSchema();
-    expect(projectGeminiGenerationSchema(source).recursive).toBe(true);
-    expect(projectGeminiGenerationSchema(source).schema).toBeUndefined();
-    expect(projectGeminiGenerationSchema(query)).toMatchObject({ recursive: false });
-    expect(projectGeminiGenerationSchema(query).schema).toBeDefined();
-    expect(projectGeminiGenerationSchema(query).instruction).toBeUndefined();
+    for (const schema of [source, sourceSemanticQueryResponseJsonSchema()]) {
+      const before = structuredClone(schema);
+      const projected = projectGeminiGenerationSchema(schema);
+      expect(projected.recursive).toBe(false);
+      expect(projected.schema).toBeDefined();
+      expect(projected.instruction).toBeUndefined();
+      expect(schema).toEqual(before);
+      expect(projectGeminiGenerationSchema(schema)).toEqual(projected);
+    }
   });
 
   it("sends the complete structured query schema through an actual local SSE socket", async () => {

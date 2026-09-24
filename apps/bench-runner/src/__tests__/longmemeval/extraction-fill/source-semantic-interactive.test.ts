@@ -21,6 +21,7 @@ import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-recor
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
 import { assertNativeSemanticChain } from "./semantic-chain.test-support.js";
 import { assertNativeLongMemEvalArm } from "./native-semantic-arm.test-support.js";
+import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
 
 const MODEL = "gemini-2.5-flash-lite";
 const REQUEST_PROFILE = "gemini-2.5-nonthinking-v1" as const;
@@ -39,7 +40,8 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const contract = request.source_request.proposal_contract ?? "source-semantic-proposal-v3";
-  const envelope = contract === "source-semantic-proposal-v7" ? {
+  const envelope = contract === "source-semantic-proposal-v8" ? tableCompletedResponse(assertion.assertion_id, theme)
+    : contract === "source-semantic-proposal-v7" ? {
     contract, outcome: { status: "interpreted" }, content: {
       roots: [{ act: "assertion", expression: {
         kind: "statement", predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
@@ -65,7 +67,10 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
     }
   };
   const editable = JSON.parse(JSON.stringify(envelope));
-  if (mode === "unknown_alias") editable.content.roots[0].expression.arguments[0].target = { kind: "reference", key: segment(theme).id };
+  if (mode === "unknown_alias") {
+    if (contract === "source-semantic-proposal-v8") editable.content.nodes[0].arguments[0].target = { kind: "entity_ref", key: "missing" };
+    else editable.content.roots[0].expression.arguments[0].target = { kind: "reference", key: segment(theme).id };
+  }
   return JSON.stringify(editable);
 }
 

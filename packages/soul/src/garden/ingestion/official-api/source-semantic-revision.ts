@@ -3,7 +3,9 @@ import {
   AlayaError, SourceAssertionIdSchema, SourceSemanticDiagnosticsSchema,
   materializeSourceSemanticContentProposal, materializeSourceSemanticExpressionProposal,
   materializeSourceSemanticCompactProposal, materializeSourceSemanticSelectionProposal,
-  SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, sourceSemanticValidationDiagnostics
+  materializeSourceSemanticTableProposal,
+  SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT,
+  sourceSemanticValidationDiagnostics
 } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, type SourceSemanticRequest } from "./source-semantic-request.js";
 
@@ -49,7 +51,8 @@ export function prepareSourceSemanticRevision(requestValue: SourceSemanticReques
   if (request.source_request.proposal_contract !== "source-semantic-proposal-v2" &&
       request.source_request.proposal_contract !== "source-semantic-proposal-v3" &&
       request.source_request.proposal_contract !== "source-semantic-proposal-v4" &&
-      request.source_request.proposal_contract !== SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT) {
+      request.source_request.proposal_contract !== SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT &&
+      request.source_request.proposal_contract !== SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT) {
     throw new AlayaError("VALIDATION", "revision requires the semantic content proposal contract");
   }
   if (Buffer.byteLength(previousResponse, "utf8") > 524288) throw new AlayaError("VALIDATION", "revision response exceeds its byte bound");
@@ -107,13 +110,18 @@ function structuralDiagnostics(raw: string, request: SourceSemanticRequest, comp
     return [{ code: "invalid_json", path: [], message: "The retained complete response is not valid JSON. Return one complete JSON proposal matching the response schema while preserving source content and scope." }];
   }
   try {
-    if (request.source_request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT) materializeSourceSemanticSelectionProposal(previous, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 });
+    if (request.source_request.proposal_contract === SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT) materializeSourceSemanticTableProposal(previous, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 });
+    else if (request.source_request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT) materializeSourceSemanticSelectionProposal(previous, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 });
     else if (request.source_request.proposal_contract === "source-semantic-proposal-v4") materializeSourceSemanticCompactProposal(previous);
     else if (request.source_request.proposal_contract === "source-semantic-proposal-v3") materializeSourceSemanticExpressionProposal(previous);
     else materializeSourceSemanticContentProposal(previous);
   }
   catch (error) {
-    if (!(error instanceof z.ZodError)) throw error;
+    if (!(error instanceof z.ZodError)) {
+      if (request.source_request.proposal_contract !== SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT) throw error;
+      return SourceSemanticDiagnosticsSchema.parse([{ code: "invalid_table_proposal", path: [],
+        message: String(error instanceof Error ? error.message : error).slice(0, 256) }]);
+    }
     return sourceSemanticValidationDiagnostics(error);
   }
   return [];

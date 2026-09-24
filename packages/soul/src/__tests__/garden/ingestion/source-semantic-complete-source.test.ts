@@ -9,8 +9,8 @@ const producer = { source_id: "source", source_version: "1", producer_id: "autho
 const source = (count: number) => Array.from({ length: count }, (_, i) => `Item ${i} is recorded.`).join(" ");
 const inputFor = (count: number) => ({ ...producer, sourceCorpus: source(count),
   assertionIds: Array.from({ length: count }, (_, i) => i + 1), sourceScope: "complete-source" as const });
-const emptyDraft = JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
-  content: { roots: [] } });
+const emptyDraft = JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" },
+  content: { roots: [], entities: [], nodes: [], gaps: [] } });
 
 describe("bounded complete-source semantic requests", () => {
   it("packs all source units once while preserving historical eight-unit and singleton packing", () => {
@@ -69,12 +69,13 @@ describe("bounded complete-source semantic requests", () => {
     const request = buildSourceSemanticRequest(input);
     expect(request.source_request.source_assertions.map(row => row.source_role)).toEqual([...Array<string>(8).fill("user"), "assistant"]);
     const anchor = (assertion_id: number, text: string) => ({ assertion_id, text });
-    const raw = JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" }, content: {
-      roots: [{ act: "assertion", expression: { kind: "statement", predicate: {
+    const raw = JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" }, content: {
+      roots: [{ act: "assertion", expression: { kind: "content_ref", key: "opening" } }],
+      entities: [{ form: "entity", key: "atlas", semantic_key: "atlas", mentions: [anchor(1, "atlas"), anchor(9, "it")] }],
+      nodes: [{ kind: "statement", key: "opening", predicate: {
         kind: "explicit", reading: "opened", support: anchor(9, "opened")
-      }, arguments: [{ role: "theme", target: {
-        kind: "entity", key: "atlas", mentions: [anchor(1, "atlas"), anchor(9, "it")]
-      } }] } }]
+      }, arguments: [{ role: "theme", target: { kind: "entity_ref", key: "atlas" } }], qualifications: [] }],
+      gaps: []
     } });
     const result = receiveSourceSemantics(raw, request, input);
     expect(result.outcome.status, JSON.stringify(result.outcome)).toBe("interpreted");

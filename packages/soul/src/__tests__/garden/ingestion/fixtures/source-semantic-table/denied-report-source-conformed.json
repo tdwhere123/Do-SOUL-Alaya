@@ -1,0 +1,464 @@
+{
+  "provenance": "offline authored table, not provider output",
+  "wire": {
+    "contract": "offline-source-occurrence-table-v1",
+    "outcome": {
+      "status": "interpreted"
+    },
+    "content": {
+      "roots": [
+        {
+          "act": "assertion",
+          "expression": {
+            "kind": "content_ref",
+            "key": "denial"
+          }
+        }
+      ],
+      "entities": [
+        {
+          "form": "entity",
+          "key": "e0",
+          "semantic_key": "mira",
+          "mentions": [
+            {
+              "assertion_id": 1,
+              "text": "Mira"
+            }
+          ]
+        },
+        {
+          "form": "entity",
+          "key": "e1",
+          "semantic_key": "mira",
+          "mentions": [
+            {
+              "assertion_id": 1,
+              "text": "I"
+            }
+          ]
+        },
+        {
+          "form": "selection",
+          "key": "e2",
+          "selection": {
+            "assertion_id": 1,
+            "text": "copper order"
+          }
+        }
+      ],
+      "nodes": [
+        {
+          "kind": "statement",
+          "key": "approval",
+          "predicate": {
+            "kind": "explicit",
+            "reading": "approve",
+            "support": {
+              "assertion_id": 1,
+              "text": "approved"
+            }
+          },
+          "arguments": [
+            {
+              "role": "approver",
+              "target": {
+                "kind": "entity_ref",
+                "key": "e1"
+              }
+            },
+            {
+              "role": "approved item",
+              "target": {
+                "kind": "entity_ref",
+                "key": "e2"
+              }
+            }
+          ],
+          "qualifications": []
+        },
+        {
+          "kind": "statement",
+          "key": "saying",
+          "predicate": {
+            "kind": "explicit",
+            "reading": "say",
+            "support": {
+              "assertion_id": 1,
+              "text": "say"
+            }
+          },
+          "arguments": [
+            {
+              "role": "speaker",
+              "target": {
+                "kind": "entity_ref",
+                "key": "e0"
+              }
+            },
+            {
+              "role": "reported content",
+              "target": {
+                "kind": "content_ref",
+                "key": "approval"
+              },
+              "support": {
+                "assertion_id": 2,
+                "text": "\""
+              }
+            }
+          ],
+          "qualifications": []
+        },
+        {
+          "kind": "not",
+          "key": "denial",
+          "support": {
+            "assertion_id": 1,
+            "text": "did not"
+          },
+          "content": {
+            "kind": "content_ref",
+            "key": "saying"
+          }
+        }
+      ],
+      "gaps": []
+    }
+  },
+  "interpretation": {
+    "contract": "source-interpretation-v4",
+    "k_version": "source-semantic-k-v3",
+    "normalizer_version": "source-semantic-normalizer-v5",
+    "source": {
+      "source_id": "unbound",
+      "source_version": "unbound",
+      "content_digest": "sha256:e1befa58161c115e0c3ffab3a38dccb38101dc659f674fa894feb120ac7a1125",
+      "attribution_context": {
+        "contract": "utterance-attribution-v1",
+        "status": "unknown"
+      },
+      "assertion_locations": [
+        {
+          "assertion_id": 1,
+          "source_utf8_span": [
+            0,
+            53
+          ]
+        },
+        {
+          "assertion_id": 2,
+          "source_utf8_span": [
+            53,
+            54
+          ]
+        }
+      ]
+    },
+    "producer_id": "official-api-source-semantic",
+    "producer_version": "1",
+    "contract_version": "source-interpretation-v4",
+    "mentions": [
+      {
+        "id": "hostMention0",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s3",
+          "last": "a1s3"
+        },
+        "text": "Mira",
+        "utf8_span": [
+          6,
+          10
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention1",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s13",
+          "last": "a1s13"
+        },
+        "text": "I",
+        "utf8_span": [
+          25,
+          26
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention2",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s19",
+          "last": "a1s21"
+        },
+        "text": "copper order",
+        "utf8_span": [
+          40,
+          52
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention3",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s9",
+          "last": "a1s9"
+        },
+        "text": "say",
+        "utf8_span": [
+          19,
+          22
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention4",
+        "assertion_id": 2,
+        "source_ref": {
+          "first": "a2s0",
+          "last": "a2s0"
+        },
+        "text": "\"",
+        "utf8_span": [
+          0,
+          1
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention5",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s15",
+          "last": "a1s15"
+        },
+        "text": "approved",
+        "utf8_span": [
+          27,
+          35
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention6",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s5",
+          "last": "a1s7"
+        },
+        "text": "did not",
+        "utf8_span": [
+          11,
+          18
+        ],
+        "span_space": "assertion_code_units"
+      }
+    ],
+    "referents": [
+      {
+        "id": "hostentity0",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention0",
+          "hostMention1"
+        ]
+      },
+      {
+        "id": "hostentity1",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention2"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "hoststatement0",
+        "assertion_ids": [
+          1,
+          2
+        ],
+        "context_owner": {
+          "kind": "operator",
+          "operator_handle": "hostoperator0"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "say",
+          "mentions": [
+            "hostMention3"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "speaker",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention0"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "reported content",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention4"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity0"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention0"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hoststatement1"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention4"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hoststatement1",
+        "assertion_ids": [
+          1
+        ],
+        "context_owner": {
+          "kind": "embedding",
+          "parent_frame": "hoststatement0",
+          "content_argument": "hoststatement1"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "approve",
+          "mentions": [
+            "hostMention5"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "approver",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention1"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "approved item",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention2"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity0"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention1"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hostentity1"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention2"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "operators": [
+      {
+        "id": "hostoperator0",
+        "assertion_ids": [
+          1
+        ],
+        "context_owner": {
+          "kind": "source_act",
+          "source_act": "assertion"
+        },
+        "additional_support": [
+          {
+            "kind": "lexical",
+            "mentions": [
+              "hostMention6"
+            ]
+          }
+        ],
+        "operator": "not",
+        "content": "hoststatement0"
+      }
+    ],
+    "gaps": [],
+    "entry_roots": [
+      "hostoperator0"
+    ],
+    "asserted_at_scope": [
+      "hostoperator0"
+    ]
+  }
+}

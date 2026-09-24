@@ -19,6 +19,7 @@ import { parseSourceSemanticInteractivePreflight, preflightSourceSemanticInterac
   "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
+import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
 
 const MODEL = "step-3.5-flash-2603";
 const PROFILE = "step-3.5-2603-low-json-schema-v1";
@@ -39,16 +40,7 @@ function responseFor(userPrompt: string): string {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
   const assertion = request.source_request.source_assertions.find(row => row.text.includes("completed"))!;
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
-  return JSON.stringify({
-    contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
-    content: { roots: [{ act: "assertion", expression: {
-      kind: "statement",
-      predicate: { kind: "explicit", reading: "complete",
-        support: { assertion_id: assertion.assertion_id, text: "completed" } },
-      arguments: [{ role: "theme", target: { kind: "entity", key: "r0",
-        mentions: [{ assertion_id: assertion.assertion_id, text: theme }] } }]
-    } }] }
-  });
+  return JSON.stringify(tableCompletedResponse(assertion.assertion_id, theme));
 }
 
 async function scenario(selectedCount: number, outputTokenCap?: number) {

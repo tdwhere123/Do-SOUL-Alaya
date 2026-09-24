@@ -13,6 +13,7 @@ import {
   materializeSourceSemanticExpressionProposal, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
   materializeSourceSemanticCompactProposal, SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT,
   materializeSourceSemanticSelectionProposal, SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
+  materializeSourceSemanticTableProposal, SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT,
   SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   normalizeSourceSemantics, normalizeRetainedSourceSemantics, sourceSemanticQueryIdentity,
   verifySourceSemanticDisposition, canonicalJson,
@@ -155,12 +156,14 @@ function decodeSourceSemantics(
   const limits = request.source_request.resource_limits;
   const compact = request.source_request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT;
   const selection = request.source_request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT;
+  const table = request.source_request.proposal_contract === SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT;
   const expression = request.source_request.proposal_contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT;
-  const meter = compact || selection || expression || request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
+  const meter = compact || selection || table || expression || request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
     ? new SourceSemanticResourceLedger({ work_units: limits.work_units ?? 200000, memory_bytes: limits.memory_bytes ?? 20000000 }) : undefined;
   try {
     envelope = request.source_request.proposal_contract === undefined
       ? SourceSemanticResponseEnvelopeSchema.safeParse(parsed.value)
+      : table ? { success: true, data: materializeSourceSemanticTableProposal(parsed.value, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 }, meter) }
       : selection ? { success: true, data: materializeSourceSemanticSelectionProposal(parsed.value, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 }, meter) }
       : compact ? { success: true, data: materializeSourceSemanticCompactProposal(parsed.value, meter) }
       : expression ? { success: true, data: materializeSourceSemanticExpressionProposal(parsed.value, meter) }

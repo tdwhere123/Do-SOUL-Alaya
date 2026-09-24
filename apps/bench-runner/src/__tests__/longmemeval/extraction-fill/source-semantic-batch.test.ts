@@ -18,6 +18,7 @@ import { decodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch
 import { batchDigest } from "../../../runs/extraction/fill/batch/plan.js";
 import type { GeminiBatchLimits, GeminiBatchPlan, GeminiBatchState } from "../../../runs/extraction/fill/batch/contract.js";
 import { buildAuthorityQuestion, registerExtractionFillHooks, setExtractionCredentialFixture, buildExtractionFillQuestion } from "./fixture.js";
+import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
 
 const PROFILE = { contract: "source-interpretation-profile-v1" as const, description: "Completed event structure",
   predicates: [{ symbol: "complete", meaning: "An actor completed a theme.", governing_roles: [] }],
@@ -39,7 +40,8 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const contract = request.source_request.proposal_contract ?? "source-semantic-proposal-v3";
-  const envelope = contract === "source-semantic-proposal-v7" ? {
+  const envelope = contract === "source-semantic-proposal-v8" ? tableCompletedResponse(assertion.assertion_id, theme)
+    : contract === "source-semantic-proposal-v7" ? {
     contract, outcome: { status: "interpreted" }, content: {
       roots: [{ act: "assertion", expression: {
         kind: "statement", predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
@@ -66,12 +68,16 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   };
   const editable = JSON.parse(JSON.stringify(envelope));
   if (mode === "unknown_alias") {
-    editable.content.roots[0].expression.arguments[0].target = contract === "source-semantic-proposal-v7"
+    if (contract === "source-semantic-proposal-v8") editable.content.nodes[0].arguments[0].target = { kind: "entity_ref", key: "missing" };
+    else editable.content.roots[0].expression.arguments[0].target = contract === "source-semantic-proposal-v7"
       ? { kind: "occurrence", key: segment(theme).id }
       : { kind: "reference", key: segment(theme).id };
   }
   if (mode === "duplicate_gap_channel" || mode === "partial") {
-    const gaps = contract === "source-semantic-proposal-v7"
+    const gaps = contract === "source-semantic-proposal-v8"
+      ? [{ kind: "unresolved_referent", affected: [{ kind: "entity_ref", key: "theme" }],
+          support: { assertion_id: assertion.assertion_id, text: theme } }]
+      : contract === "source-semantic-proposal-v7"
       ? [{ kind: "unresolved_referent", affected: ["r0"], support: { assertion_id: assertion.assertion_id, text: theme } }]
       : [{ kind: "unresolved_referent", affected: ["r0"], evidence: [anchor(theme)] }];
     if (mode === "partial") editable.content.gaps = gaps;
@@ -299,7 +305,7 @@ it.each(["unknown_alias", "duplicate_gap_channel"] as const)("retains %s admissi
   for (const line of fixture.plan().lines) {
     const outcome = outcomes[line.key]!;
     expect(outcome.status).toBe("quarantined");
-    expect(outcome.reason).toContain(mode === "unknown_alias" ? '"code":"unknown_or_wrong_kind_key"' : "unrecognized_keys");
+    expect(outcome.reason).toContain(mode === "unknown_alias" ? "missing_entity: missing" : "unrecognized_keys");
     if (mode === "duplicate_gap_channel") expect(outcome.reason).toContain('"path":["outcome"]');
     expect(outcome.reason).toContain("raw_response_id=sha256:");
     expect(outcome.reason!.length).toBeLessThan(16384);

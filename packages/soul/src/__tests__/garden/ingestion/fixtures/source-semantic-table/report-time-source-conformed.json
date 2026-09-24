@@ -1,0 +1,606 @@
+{
+  "provenance": "offline authored table, not provider output",
+  "wire": {
+    "contract": "offline-source-occurrence-table-v1",
+    "outcome": {
+      "status": "interpreted"
+    },
+    "content": {
+      "roots": [
+        {
+          "act": "assertion",
+          "expression": {
+            "kind": "content_ref",
+            "key": "telling"
+          }
+        }
+      ],
+      "entities": [
+        {
+          "form": "selection",
+          "key": "e0",
+          "selection": {
+            "assertion_id": 1,
+            "text": "Mira"
+          }
+        },
+        {
+          "form": "selection",
+          "key": "e1",
+          "selection": {
+            "assertion_id": 1,
+            "text": "me"
+          }
+        },
+        {
+          "form": "selection",
+          "key": "e2",
+          "selection": {
+            "assertion_id": 1,
+            "text": "8 June 2026"
+          }
+        },
+        {
+          "form": "selection",
+          "key": "e3",
+          "selection": {
+            "assertion_id": 1,
+            "text": "Oren"
+          }
+        },
+        {
+          "form": "selection",
+          "key": "e4",
+          "selection": {
+            "assertion_id": 1,
+            "text": "the valve"
+          }
+        },
+        {
+          "form": "selection",
+          "key": "e5",
+          "selection": {
+            "assertion_id": 1,
+            "text": "6 June 2026"
+          }
+        }
+      ],
+      "nodes": [
+        {
+          "kind": "statement",
+          "key": "inspection",
+          "predicate": {
+            "kind": "explicit",
+            "reading": "inspect",
+            "support": {
+              "assertion_id": 1,
+              "text": "inspected"
+            }
+          },
+          "arguments": [
+            {
+              "role": "agent",
+              "target": {
+                "kind": "entity_ref",
+                "key": "e3"
+              }
+            },
+            {
+              "role": "object",
+              "target": {
+                "kind": "entity_ref",
+                "key": "e4"
+              }
+            },
+            {
+              "role": "event time",
+              "target": {
+                "kind": "entity_ref",
+                "key": "e5"
+              }
+            }
+          ],
+          "qualifications": []
+        },
+        {
+          "kind": "statement",
+          "key": "telling",
+          "predicate": {
+            "kind": "explicit",
+            "reading": "tell",
+            "support": {
+              "assertion_id": 1,
+              "text": "told"
+            }
+          },
+          "arguments": [
+            {
+              "role": "speaker",
+              "target": {
+                "kind": "entity_ref",
+                "key": "e0"
+              }
+            },
+            {
+              "role": "addressee",
+              "target": {
+                "kind": "entity_ref",
+                "key": "e1"
+              }
+            },
+            {
+              "role": "event time",
+              "target": {
+                "kind": "entity_ref",
+                "key": "e2"
+              }
+            },
+            {
+              "role": "reported content",
+              "target": {
+                "kind": "content_ref",
+                "key": "inspection"
+              },
+              "support": {
+                "assertion_id": 2,
+                "text": "\""
+              }
+            }
+          ],
+          "qualifications": []
+        }
+      ],
+      "gaps": []
+    }
+  },
+  "interpretation": {
+    "contract": "source-interpretation-v4",
+    "k_version": "source-semantic-k-v3",
+    "normalizer_version": "source-semantic-normalizer-v5",
+    "source": {
+      "source_id": "unbound",
+      "source_version": "unbound",
+      "content_digest": "sha256:3f8421a479f04b5e76fdb8c817f5ac6f3ba8f07d50ba0da6b25958c1aa815979",
+      "attribution_context": {
+        "contract": "utterance-attribution-v1",
+        "status": "unknown"
+      },
+      "assertion_locations": [
+        {
+          "assertion_id": 1,
+          "source_utf8_span": [
+            0,
+            77
+          ]
+        },
+        {
+          "assertion_id": 2,
+          "source_utf8_span": [
+            77,
+            78
+          ]
+        }
+      ]
+    },
+    "producer_id": "official-api-source-semantic",
+    "producer_version": "1",
+    "contract_version": "source-interpretation-v4",
+    "mentions": [
+      {
+        "id": "hostMention0",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s12",
+          "last": "a1s12"
+        },
+        "text": "Mira",
+        "utf8_span": [
+          22,
+          26
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention1",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s16",
+          "last": "a1s16"
+        },
+        "text": "me",
+        "utf8_span": [
+          32,
+          34
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention2",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s5",
+          "last": "a1s9"
+        },
+        "text": "8 June 2026",
+        "utf8_span": [
+          9,
+          20
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention3",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s20",
+          "last": "a1s20"
+        },
+        "text": "Oren",
+        "utf8_span": [
+          37,
+          41
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention4",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s24",
+          "last": "a1s26"
+        },
+        "text": "the valve",
+        "utf8_span": [
+          52,
+          61
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention5",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s30",
+          "last": "a1s34"
+        },
+        "text": "6 June 2026",
+        "utf8_span": [
+          65,
+          76
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention6",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s14",
+          "last": "a1s14"
+        },
+        "text": "told",
+        "utf8_span": [
+          27,
+          31
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention7",
+        "assertion_id": 2,
+        "source_ref": {
+          "first": "a2s0",
+          "last": "a2s0"
+        },
+        "text": "\"",
+        "utf8_span": [
+          0,
+          1
+        ],
+        "span_space": "assertion_code_units"
+      },
+      {
+        "id": "hostMention8",
+        "assertion_id": 1,
+        "source_ref": {
+          "first": "a1s22",
+          "last": "a1s22"
+        },
+        "text": "inspected",
+        "utf8_span": [
+          42,
+          51
+        ],
+        "span_space": "assertion_code_units"
+      }
+    ],
+    "referents": [
+      {
+        "id": "hostentity0",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention0"
+        ]
+      },
+      {
+        "id": "hostentity1",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention1"
+        ]
+      },
+      {
+        "id": "hostentity2",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention2"
+        ]
+      },
+      {
+        "id": "hostentity3",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention3"
+        ]
+      },
+      {
+        "id": "hostentity4",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention4"
+        ]
+      },
+      {
+        "id": "hostentity5",
+        "referent_kind": "grouped",
+        "mentions": [
+          "hostMention5"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "hoststatement0",
+        "assertion_ids": [
+          1,
+          2
+        ],
+        "context_owner": {
+          "kind": "source_act",
+          "source_act": "assertion"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "tell",
+          "mentions": [
+            "hostMention6"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "speaker",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention0"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "addressee",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention1"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument2",
+            "role_reading": "event time",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention2"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument3",
+            "role_reading": "reported content",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention7"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity0"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention0"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hostentity1"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention1"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument2",
+            "target": {
+              "kind": "node",
+              "id": "hostentity2"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention2"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument3",
+            "target": {
+              "kind": "node",
+              "id": "hoststatement1"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention7"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hoststatement1",
+        "assertion_ids": [
+          1
+        ],
+        "context_owner": {
+          "kind": "embedding",
+          "parent_frame": "hoststatement0",
+          "content_argument": "hoststatement1"
+        },
+        "additional_support": [],
+        "predicate_support": {
+          "kind": "explicit",
+          "reading": "inspect",
+          "mentions": [
+            "hostMention8"
+          ]
+        },
+        "slots": [
+          {
+            "id": "argument0",
+            "role_reading": "agent",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention3"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument1",
+            "role_reading": "object",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention4"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "argument2",
+            "role_reading": "event time",
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention5"
+                ]
+              }
+            ]
+          }
+        ],
+        "bindings": [
+          {
+            "slot_id": "argument0",
+            "target": {
+              "kind": "node",
+              "id": "hostentity3"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention3"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument1",
+            "target": {
+              "kind": "node",
+              "id": "hostentity4"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention4"
+                ]
+              }
+            ]
+          },
+          {
+            "slot_id": "argument2",
+            "target": {
+              "kind": "node",
+              "id": "hostentity5"
+            },
+            "support": [
+              {
+                "kind": "lexical",
+                "mentions": [
+                  "hostMention5"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "operators": [],
+    "gaps": [],
+    "entry_roots": [
+      "hoststatement0"
+    ],
+    "asserted_at_scope": [
+      "hoststatement0"
+    ]
+  }
+}
