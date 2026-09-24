@@ -3,8 +3,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { registerExtractionFillHooks } from "./fixture.js";
 import { preflightExtractionBatch } from "../../../runs/extraction/fill/batch-preflight.js";
-import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
+import { EXTRACTION_OPEN_SEMANTICS_GENERATION, parseExtractionOpenSemanticsGeneration } from "../../../runs/extraction/request-artifact.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
+import { prepareSourcePublicationAssociations } from "../../../runs/snapshot/source-records/prepare-associations.js";
 import { parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../../../runs/semantic-proposal/workset.js";
 import { materializeSemanticProposalLines } from "../../../runs/semantic-proposal/workset.js";
 import { prepareSemanticProposal, executeSemanticProposalFill } from "../../../runs/semantic-proposal/fill.js";
@@ -41,7 +42,7 @@ function question(contents: readonly string[]) {
     haystack_sessions: contents.map(content => [{ role: "user" as const, content }]), answer_session_ids: [] };
 }
 
-async function preparedSourceFixture(contents: readonly string[]) {
+async function preparedSourceFixture(contents: readonly string[], outputByteLimit = 100000) {
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid");
@@ -69,7 +70,7 @@ async function preparedSourceFixture(contents: readonly string[]) {
     max_output_tokens: 4096, discovery_page_cap: 4, correspondence_pair_cap: 2,
     access_policy: "query-conditioned-v1", budget: { schema_version: 1, work_units: 1000000,
       memory_bytes: 60000000, page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 },
-    authorized_scopes: { mode: "unrestricted" }, output_byte_limit: 100000 };
+    authorized_scopes: { mode: "unrestricted" }, output_byte_limit: outputByteLimit };
   const bind = async (currentChain = chain, label = "initial") => {
     const initialChainRoot = join(cacheRoot, `initial-${label}`);
     const plan = await prepareSemanticChain(currentChain, initialChainRoot);
@@ -81,6 +82,121 @@ async function preparedSourceFixture(contents: readonly string[]) {
   };
   return { config: await bind(), published, bind };
 }
+
+it("delivers a raw source outside the frozen qualification window after final native reprepare", async () => {
+  const contents = [
+    ...Array.from({ length: 10 }, (_, index) => `What was completed? I completed item ${index}. ${"details ".repeat(500)}`),
+    "A short unrelated note.",
+    "Another short unrelated note."
+  ];
+  const { config } = await preparedSourceFixture(contents, 21600);
+  const root = join(cacheRoot, "raw-outside-stage");
+  const window = await prepareLazyQualificationWindow(config, root);
+  expect(window.window).toHaveLength(10);
+  expect(window.window.map(row => row.record_id)).toEqual(
+    window.starting_access.source_candidates.slice(0, 10).map(row => row.record_id));
+  expect(window.selected_missing_keys).toHaveLength(10);
+  const selected = new Set(window.window.map(row => row.record_id));
+  const final = await sealLazyQualificationFinal(root);
+  expect(final.final_access?.observed_source_count).toBe(12);
+  expect(final.final_access?.source_candidates).toHaveLength(12);
+  const first = await replayLazyQualifiedFirstExposure(root);
+  expect(first.delivery.outside_delivered).toBeGreaterThan(0);
+  const response = SoulInterpretationResponseSchema.parse(first.result.rows[0]?.response);
+  if (response.operation !== "recall") throw new Error("native recall required");
+  const outside = response.index!.entries.flatMap((entry, index) => entry.target.kind === "source_evidence"
+    && !selected.has(entry.target.root_id) ? [{ entry, qualifier: response.slot_qualifiers?.[index] }] : []);
+  expect(outside).toHaveLength(first.delivery.outside_delivered);
+  expect(outside.every(row => row.qualifier?.evidence_kind === "source_evidence"
+    && row.qualifier.selection_basis === "source_access" && row.entry.interpretation_node === undefined)).toBe(true);
+  const report = JSON.parse(readFileSync(final.publication_report_path, "utf8"));
+  expect(outside.every(row => {
+    if (row.entry.target.kind !== "source_evidence") return false;
+    const rootId = row.entry.target.root_id;
+    return report.sources.some((source: { record_id: string; publication: string }) =>
+      source.record_id === rootId && source.publication === "not_attempted");
+  })).toBe(true);
+  expect(first.result.provider_calls).toBe(0);
+  expect(final.source_producer.new_authorized_attempts).toBe(0);
+  expect(final.selected_new_associations).toBe(0);
+});
+
+it("keeps the durable first delivery fixed when source qualification completes afterward", async () => {
+  const { config } = await preparedSourceFixture(["I completed alpha."]);
+  const root = join(cacheRoot, "late-qualification-stage");
+  const window = await prepareLazyQualificationWindow(config, root);
+  expect(window.window).toHaveLength(1);
+  expect(window.selected_missing_keys).toHaveLength(1);
+  const final = await sealLazyQualificationFinal(root);
+  expect(final.selected_new_associations).toBe(0);
+  const first = await replayLazyQualifiedFirstExposure(root);
+  const firstResponse = SoulInterpretationResponseSchema.parse(first.result.rows[0]?.response);
+  if (firstResponse.operation !== "recall") throw new Error("native recall required");
+  const initial = { delivery_id: firstResponse.delivery_id, request_identity: firstResponse.request_identity,
+    entries: firstResponse.index?.entries, order: firstResponse.order, proofs: firstResponse.proofs ?? [],
+    results: firstResponse.results, slot_qualifiers: firstResponse.slot_qualifiers };
+  const reservation = readFileSync(join(root, "first-exposure.reserved.json"));
+  const commitment = readFileSync(join(root, "first-exposure.json"));
+  const frozenWindow = readFileSync(join(root, "window.json"));
+  const frozenFinal = readFileSync(join(root, "final.json"));
+  const nativeRow = readFileSync(inspectSemanticChainReplayTarget(final.final_chain_root, "retained")
+    .rowPaths.get(window.query_key)!);
+
+  setExtractionCredentialFixture();
+  const options = { variant: "longmemeval_s" as const, cacheRoot, dataDir, pinnedMetaRoot,
+    offset: 0, limit: 1, sourcePacking: "complete-source" as const,
+    openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION };
+  const inspection = await inspectExtractionAuthority({ ...options,
+    revision: readCurrentExtractionAuthorityRevision(), action: "fill" });
+  const receipt = createExtractionAuthorityReceipt({ action: "fill", observation: inspection.observation,
+    outputTokenCap: { field: "maxOutputTokens", value: 4096 }, diskFloorBytes: 0,
+    priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2, maximumInputTokensPerAttempt: 100000 }, inspection });
+  const receiptPath = join(cacheRoot, "late-fixture-authority.json");
+  writeExtractionAuthorityReceipt(receiptPath, receipt);
+  const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
+    const userPrompt = JSON.parse(String(init?.body)).contents[0].parts[0].text as string;
+    const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
+    const assertion = request.source_request.source_assertions[0]!;
+    const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" }, content: {
+      roots: [{ act: "assertion", expression: { kind: "statement",
+        predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
+        arguments: [] } }] } });
+    return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: rawJson }] } }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  await runExtractionFill({ ...options, authorityReceiptPath: receiptPath });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const afterQualification = await prepareSourcePublicationAssociations({ ...config.source_population,
+    openSemantics: parseExtractionOpenSemanticsGeneration(config.source_population.openSemantics ??
+      EXTRACTION_OPEN_SEMANTICS_GENERATION) },
+    config.cache_owners, join(root, "late-associations.json"));
+  expect(afterQualification.publicationAssociations).toMatchObject([{
+    source_id: window.window[0]!.source_id, source_version: window.window[0]!.source_version,
+    generation_key: expect.any(String), request_digest: expect.any(String)
+  }]);
+  expect(afterQualification.publicationAssociations[0]).toMatchObject({
+    generation_key: window.selected_missing_keys[0]
+  });
+  expect(afterQualification.artifacts).toMatchObject([{ status: "associated",
+    sources: [window.window[0]!.source_id] }]);
+
+  const after = await replayLazyQualifiedFirstExposure(root);
+  const response = SoulInterpretationResponseSchema.parse(after.result.rows[0]?.response);
+  if (response.operation !== "recall") throw new Error("native recall required");
+  expect(after.path).toBe(first.path);
+  expect(after.result.identity).toBe(first.result.identity);
+  expect({ delivery_id: response.delivery_id, request_identity: response.request_identity,
+    entries: response.index?.entries, order: response.order, proofs: response.proofs ?? [],
+    results: response.results, slot_qualifiers: response.slot_qualifiers }).toEqual(initial);
+  expect(readFileSync(join(root, "first-exposure.reserved.json"))).toEqual(reservation);
+  expect(readFileSync(join(root, "first-exposure.json"))).toEqual(commitment);
+  expect(readFileSync(join(root, "window.json"))).toEqual(frozenWindow);
+  expect(readFileSync(join(root, "final.json"))).toEqual(frozenFinal);
+  expect(readFileSync(inspectSemanticChainReplayTarget(final.final_chain_root, "retained")
+    .rowPaths.get(window.query_key)!)).toEqual(nativeRow);
+  expect(final.selected_new_associations).toBe(0);
+});
 
 it("freezes ten distinct native raw records and reopens a full sealed final library before one first exposure", async () => {
   const contents = Array.from({ length: 12 }, (_, index) =>

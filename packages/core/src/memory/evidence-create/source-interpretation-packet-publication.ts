@@ -160,14 +160,18 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
       const bound = bindSemanticInterpretation(activeOwner, input);
       const objectId = semanticInterpretationEvidenceId(bound.interpretation_id, owner.sha256);
       const current = () => verifyPublishedSourceSemanticInterpretation(activeOwner, bound, input.workspaceId);
+      const storedBound = (evidence: { lifecycle_state: string; gist: string }) => {
+        const stored = SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(evidence.gist));
+        if (evidence.lifecycle_state !== "active" || publicationIdentity(stored) !== publicationIdentity(bound)) {
+          throw new CoreError("VALIDATION", "published interpretation differs from its source binding");
+        }
+        return stored;
+      };
       const existing = await owner.evidenceService.findByIdScoped(objectId, input.workspaceId);
       current();
       if (existing !== null) {
-        const stored = SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(existing.gist));
-        if (existing.lifecycle_state !== "active" || publicationIdentity(stored) !== publicationIdentity(bound)) {
-          throw new CoreError("VALIDATION", "published interpretation differs from its source binding");
-        }
-        return { bound: stored, evidence: existing, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } };
+        return { bound: storedBound(existing), evidence: existing,
+          resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } };
       }
       let evidence;
       try { evidence = await owner.evidenceService.create({ object_id: objectId,
@@ -181,10 +185,10 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
       }, [], undefined, undefined, undefined, current);
       } catch (error) {
         const raced = await owner.evidenceService.findByIdScoped(objectId, input.workspaceId);
-        if (raced === null || raced.lifecycle_state !== "active"
-          || publicationIdentity(SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(raced.gist))) !== publicationIdentity(bound)) throw error;
+        if (raced === null) throw error;
         current();
-        evidence = raced;
+        return { bound: storedBound(raced), evidence: raced,
+          resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } };
       }
       current();
       return { bound, evidence, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } };
