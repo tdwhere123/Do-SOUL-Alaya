@@ -4,7 +4,7 @@ import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { isContainedPath } from "../fs/opened-contained-path.js";
-import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
+import { admitEvaluatorOutputRoots } from "../measurement/evaluator-output.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { admitLazyFinal, admitLazyWindow, readLazyQualifiedExposureState } from "../semantic-chain/lazy-qualification.js";
@@ -275,9 +275,9 @@ export async function observeLongMemEvalLazyPopulation(root: string, value: unkn
   cutoffConfigPath?: string) {
   const input = ObservationInputSchema.parse(value);
   const { population, admittedInputPaths } = await readLongMemEvalLazyPopulationForObservation(root);
-  const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, ...admittedInputPaths,
-    ...(cutoffConfigPath === undefined ? [] : [cutoffConfigPath]),
-    ...population.members.map(member => member.evaluator_root)]);
+  const protectedPaths = [root, ...admittedInputPaths, ...(cutoffConfigPath === undefined ? [] : [cutoffConfigPath])];
+  const outputRoot = admitEvaluatorOutputRoots([evaluatorRoot, ...population.members.map(member => member.evaluator_root)],
+    protectedPaths)[0]!;
   const path = join(outputRoot, `population-observation-${input.cutoff_id}.json`);
   const populationIdentity = chainIdentity(population);
   return withSnapshotPublishLock(join(outputRoot, "population-observations"), async () => {

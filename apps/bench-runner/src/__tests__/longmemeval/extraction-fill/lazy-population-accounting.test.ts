@@ -333,6 +333,61 @@ it("runs one explicit member through native SQLite first exposure and preserves 
   expect(after.result.primary.hits + after.result.primary.misses + after.result.primary.unknown).toBe(20);
   expect(readChainArtifact(after.path)).toEqual(after.result);
   expect(forbiddenFetch).not.toHaveBeenCalled();
+  const memberCutoff = { cutoff_id: "member-input", cutoff_at: "2026-09-23T00:02:15.000Z", predecessor_identity: null };
+  const memberCutoffPath = join(member.evaluator_root, "cutoff-input.json");
+  writeFileSync(memberCutoffPath, JSON.stringify(memberCutoff));
+  const memberEntries = readdirSync(member.evaluator_root).sort();
+  const cliAggregate = join(dirname(root), "member-input-aggregate");
+  const invokeCli = async (configPath: string, outputPath: string) => {
+    let error = "";
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(chunk => { error += String(chunk); return true; });
+    try {
+      const code = await runLongMemEvalSemanticLauncher(["observe-population", "--root", root,
+        "--config", configPath, "--evaluator-root", outputPath]);
+      return { code, error };
+    } finally { stdout.mockRestore(); stderr.mockRestore(); }
+  };
+  const directMemberInput = await invokeCli(memberCutoffPath, cliAggregate);
+  expect(directMemberInput.code).toBe(2);
+  expect(directMemberInput.error).toMatch(/separate from producer and input roots/u);
+  expect(readdirSync(member.evaluator_root).sort()).toEqual(memberEntries);
+  expect(existsSync(cliAggregate)).toBe(false);
+  expect(existsSync(join(root, "population-cutoff-member-input.json"))).toBe(false);
+  const memberAlias = join(dirname(root), "member-input-directory-alias");
+  symlinkSync(member.evaluator_root, memberAlias, "dir");
+  const aliasedMemberInput = await invokeCli(join(memberAlias, "cutoff-input.json"), cliAggregate);
+  expect(aliasedMemberInput.code).toBe(2);
+  expect(aliasedMemberInput.error).toMatch(/separate from producer and input roots/u);
+  expect(readdirSync(member.evaluator_root).sort()).toEqual(memberEntries);
+  unlinkSync(memberAlias); unlinkSync(memberCutoffPath);
+  const safeCutoffPath = join(dirname(root), "separate-cutoff-input.json");
+  writeFileSync(safeCutoffPath, JSON.stringify({ ...memberCutoff, cutoff_id: "separate-input" }));
+  const safeAggregate = join(dirname(root), "separate-member-aggregate");
+  expect((await invokeCli(safeCutoffPath, safeAggregate)).code).toBe(0);
+  expect(readChainArtifact(join(safeAggregate, "population-observation-separate-input.json"))).toMatchObject({
+    primary: { eligible: 20, hits: 1, misses: 0, unknown: 19 }
+  });
+  const peerFreeze = readChainArtifact(join(third.native_root, "freeze.json")) as {
+    selected: { query_key: string }[]; config: { query_cache_root: string } };
+  const peerBucket = join(peerFreeze.config.query_cache_root, peerFreeze.selected[0]!.query_key.slice(0, 2));
+  const physicalPeerBucket = join(dirname(root), "physical-peer-query-bucket");
+  mkdirSync(dirname(peerBucket), { recursive: true });
+  const hadPeerBucket = existsSync(peerBucket);
+  if (hadPeerBucket) renameSync(peerBucket, physicalPeerBucket);
+  symlinkSync(member.evaluator_root, peerBucket, "dir");
+  const beforePeerEntries = readdirSync(member.evaluator_root).sort();
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "peer-member-output",
+    cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: chainIdentity(after.result) }, evaluatorRoot))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(readdirSync(member.evaluator_root).sort()).toEqual(beforePeerEntries);
+  expect(existsSync(join(root, "population-cutoff-peer-member-output.json"))).toBe(false);
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "after",
+    cutoff_at: "2026-09-23T00:02:00.000Z", predecessor_identity: chainIdentity(queryOnly.result) }, evaluatorRoot))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(readChainArtifact(after.path)).toEqual(after.result);
+  unlinkSync(peerBucket);
+  if (hadPeerBucket) renameSync(physicalPeerBucket, peerBucket);
   const sourceKey = preflight.selected_keys[0]!;
   const sourceRawBucket = join(cacheRoot, "provider-raw", sourceKey.slice(0, 2));
   const physicalSourceRaw = join(dirname(root), "physical-member-source-raw");
