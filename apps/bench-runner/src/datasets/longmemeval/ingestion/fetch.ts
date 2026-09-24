@@ -53,6 +53,15 @@ function pinnedMetaPath(variant: LongMemEvalVariant, root?: string): string {
   return path.join(root ?? PINNED_META_ROOT, `${variant}.meta.json`);
 }
 
+/** Exact files read by the pinned dataset importer, including the metadata leaf. */
+export function longMemEvalDatasetInputPaths(variant: LongMemEvalVariant,
+  options: { dataDir?: string; pinnedMetaRoot?: string } = {}) {
+  return {
+    sourcePath: path.join(options.dataDir ?? DATA_DIR_ROOT, `${variant}.json`),
+    checksumSource: pinnedMetaPath(variant, path.resolve(options.pinnedMetaRoot ?? PINNED_META_ROOT))
+  };
+}
+
 export interface FetchResult {
   readonly variant: LongMemEvalVariant;
   readonly localPath: string;
@@ -194,10 +203,8 @@ export async function loadDatasetWindowWithIdentity(
   }
 ): Promise<LoadedLongMemEvalDatasetWindow> {
   assertDatasetWindow(options.offset, options.limit);
-  const dataDir = options.dataDir ?? DATA_DIR_ROOT;
-  const localPath = path.join(dataDir, `${variant}.json`);
+  const { sourcePath: localPath, checksumSource: pinnedPath } = longMemEvalDatasetInputPaths(variant, options);
   const pinnedMetaRoot = path.resolve(options.pinnedMetaRoot ?? PINNED_META_ROOT);
-  const pinnedPath = pinnedMetaPath(variant, pinnedMetaRoot);
   const pinned = await readPinnedDatasetIdentity(variant, pinnedPath);
   const questions: LongMemEvalQuestion[] = [];
   const assignments: LongMemEvalSelectionAssignment[] = [];

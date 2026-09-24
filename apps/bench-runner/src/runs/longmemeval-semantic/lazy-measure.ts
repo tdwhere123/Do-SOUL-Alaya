@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 import { AlayaError } from "@do-soul/alaya-protocol";
-import { measureSemanticChain } from "../semantic-chain/replay.js";
+import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
 import { readLazyQualifiedExposureState } from "../semantic-chain/lazy-qualification.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
@@ -12,6 +12,7 @@ import { joinLongMemEvalGold } from "./measure.js";
 import { longMemEvalMetricOutcome } from "./measure.js";
 import { isContainedPath } from "../fs/opened-contained-path.js";
 import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
+import { longMemEvalDatasetInputPaths } from "../../datasets/longmemeval/ingestion/fetch.js";
 
 export type LongMemEvalLazyMeasurementInput = LongMemEvalLazyConfigInput & Readonly<{
   lazyRoot: string;
@@ -26,12 +27,15 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
   if (frozen.contract !== "longmemeval-native-semantic-v3") throw new AlayaError("CONFLICT", "native question arm changed");
   const selected = frozen.selected[0]!;
   const questionDirectory = resolve(input.root, "questions", String(selected.index).padStart(5, "0"));
+  const datasetPaths = longMemEvalDatasetInputPaths("longmemeval_s", {
+    dataDir: frozen.config.data_dir, pinnedMetaRoot: frozen.config.pinned_meta_root });
   const outputRoot = admitEvaluatorOutputRoot(input.evaluatorRoot, [input.root, input.lazyRoot,
     input.preparedPath, input.sourcePreflightPath, input.sourceCacheRoot,
-    ...(first.status === "durable" ? [first.path] : []),
+    ...(first.status === "durable" ? semanticChainReplayInputPaths(first.final.final_chain_root, first.path) : []),
     first.final.final_chain_root, first.final.final_snapshot_path, first.final.publication_report_path,
     questionDirectory, join(questionDirectory, "library.sqlite"), join(questionDirectory, "publication.json"),
-    frozen.config.data_dir, frozen.config.pinned_meta_root, frozen.config.query_cache_root,
+    frozen.config.data_dir, frozen.config.pinned_meta_root,
+    datasetPaths.sourcePath, datasetPaths.checksumSource, frozen.config.query_cache_root,
     frozen.config.correspondence_cache_root, ...frozen.config.source_cache_roots,
     bound.config.chain.snapshot_path, bound.config.chain.query_cache_root, bound.config.chain.correspondence_cache_root]);
   if (chainIdentity(first.window.config) !== chainIdentity(bound.config) ||

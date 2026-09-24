@@ -33,11 +33,15 @@ export function inspectSemanticChainReplayTarget(root: string, arm: "retained" |
   const output = semanticChainReplayPath(root, identity);
   return { plan, config, semantic_correspondences, identity, output,
     rowPaths: new Map(plan.queries.map(query => [query.query_key,
-      join(root, `replay-${identity}`, `${query.query_key}.json`)])) };
+      semanticChainReplayRowPath(root, identity, query.query_key)])) };
 }
 
 export function semanticChainReplayPath(root: string, identity: string): string {
   return join(root, `replay-${identity}.json`);
+}
+
+function semanticChainReplayRowPath(root: string, identity: string, queryKey: string): string {
+  return join(root, `replay-${identity}`, `${queryKey}.json`);
 }
 
 export async function replaySemanticChain(root: string, arm: "retained" | "without_semantic_correspondences" = "retained",
@@ -126,8 +130,8 @@ function sameSealedSnapshotObservation(expected: Awaited<ReturnType<typeof disco
 }
 
 export function measureSemanticChain(root: string, replayPath: string, goldValue: unknown, evaluatorRoot: string) {
-  const { plan, replay } = admitSemanticChainReplay(root, replayPath);
-  const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, replayPath, join(root, "prepare.json"),
+  const { plan, replay, admittedInputPaths } = admitSemanticChainReplay(root, replayPath);
+  const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, ...admittedInputPaths,
     plan.config.snapshot_path, plan.config.query_cache_root, plan.config.correspondence_cache_root]);
   const gold = z.array(z.object({ query_key: z.string(), source_units: SourceGoldUnitSchema.array() }).strict()).parse(goldValue);
   const expected = plan.queries.map((row) => row.query_key).sort();
@@ -180,6 +184,19 @@ export const ReplaySchema = z.object({ contract: z.literal("source-semantic-chai
   }).passthrough()) }).passthrough();
 type ReplayRow = z.infer<typeof ReplaySchema>["rows"][number];
 
+/** The replay owner supplies every row/reservation leaf that archive admission may read. */
+export function semanticChainReplayInputPaths(root: string, replayPath: string): readonly string[] {
+  return replayInputPaths(root, replayPath, ReplaySchema.parse(readChainArtifact(replayPath)));
+}
+
+function replayInputPaths(root: string, replayPath: string, replay: z.infer<typeof ReplaySchema>): readonly string[] {
+  return [join(root, "prepare.json"), replayPath, ...replay.rows.flatMap(row => {
+    if (row.status === "blocked") return [];
+    const path = semanticChainReplayRowPath(root, replay.identity, row.query_key);
+    return [path, `${path}.reserved`];
+  })];
+}
+
 /** All archive consumers re-admit frozen inputs and native delivery before using retained results. */
 export function admitSemanticChainReplay(root: string, replayPath: string) {
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(root, "prepare.json")));
@@ -210,7 +227,7 @@ export function admitSemanticChainReplay(root: string, replayPath: string) {
           reason: `archive_admission: ${error instanceof Error ? error.message : String(error)}` };
       }
     });
-    return { plan, replay: { ...replay, rows } };
+    return { plan, replay: { ...replay, rows }, admittedInputPaths: replayInputPaths(root, replayPath, replay) };
   } finally { connection.close(); }
 }
 
@@ -226,7 +243,7 @@ function admitReplayRow(root: string, plan: SemanticChainPlan, replay: z.infer<t
     return [];
   }
   if (row.status === "blocked") throw new AlayaError("CONFLICT", "ready query cannot become a blocked archive row");
-  const rowPath = join(root, `replay-${replay.identity}`, `${row.query_key}.json`);
+  const rowPath = semanticChainReplayRowPath(root, replay.identity, row.query_key);
   const retainedRow = readChainArtifact(rowPath), reservation = readChainArtifact(`${rowPath}.reserved`);
   if (retainedRow === undefined || reservation === undefined || canonicalJson(retainedRow) !== canonicalJson(row)
     || canonicalJson(reservation) !== canonicalJson({ replay_identity: replay.identity, query_key: row.query_key })) {

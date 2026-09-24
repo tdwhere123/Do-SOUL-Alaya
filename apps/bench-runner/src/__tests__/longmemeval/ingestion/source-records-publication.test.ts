@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -178,6 +178,15 @@ describe("complete-source census and publication", () => {
     expect(prepared.result.rows.every(row => row.status === "prepared")).toBe(true);
     const replay = await replayLongMemEvalSemanticRun(root, prepared.path);
     expect(replay.result.rows.every(row => row.status === "replayed")).toBe(true);
+    const physicalMeta = join(f.root, "physical-metadata-file");
+    await mkdir(physicalMeta);
+    const metadataPath = join(f.pinnedMetaRoot, "longmemeval_s.meta.json");
+    const physicalMetadataPath = join(physicalMeta, "pin.json");
+    await rename(metadataPath, physicalMetadataPath);
+    await symlink(physicalMetadataPath, metadataPath, "file");
+    await expect(measureLongMemEvalSemanticRun(root, replay.path, physicalMeta))
+      .rejects.toThrow(/separate from producer and input roots/u);
+    expect(readdirSync(physicalMeta).some(name => name.startsWith("measurement-"))).toBe(false);
     await expect(measureLongMemEvalSemanticRun(root, replay.path, physicalQuestion))
       .rejects.toThrow(/separate from producer and input roots/u);
     const first = replay.result.rows[0]!;
@@ -191,6 +200,16 @@ describe("complete-source census and publication", () => {
     const goldPath = join(f.root, "gold.json");
     const gold = (readChainArtifact(detailPath) as { gold: unknown }).gold;
     writeFileSync(goldPath, JSON.stringify(gold));
+    const nativeReplay = readChainArtifact(first.replay_path) as { identity: string };
+    const replayRows = join(first.chain_root, `replay-${nativeReplay.identity}`);
+    const physicalRows = join(f.root, "physical-replay-rows");
+    await rename(replayRows, physicalRows);
+    await symlink(physicalRows, replayRows, "dir");
+    await expect(measureLongMemEvalSemanticRun(root, replay.path, physicalRows))
+      .rejects.toThrow(/separate from producer and input roots/u);
+    expect(() => measureSemanticChain(first.chain_root, first.replay_path, gold, physicalRows))
+      .toThrow(/separate from producer and input roots/u);
+    expect(readdirSync(physicalRows).some(name => name.startsWith("measurement-"))).toBe(false);
     expect(() => measureSemanticChain(first.chain_root, first.replay_path, gold, first.chain_root))
       .toThrow(/separate from producer and input roots/u);
     const base = ["measure", "--root", first.chain_root, "--replay", first.replay_path, "--gold", goldPath];

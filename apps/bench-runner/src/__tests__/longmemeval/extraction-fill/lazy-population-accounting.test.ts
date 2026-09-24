@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -19,6 +19,7 @@ import { freezeLongMemEvalLazyPopulation,
   "../../../runs/longmemeval-semantic/population.js";
 import { observeLongMemEvalLazyPopulation } from
   "../../../runs/longmemeval-semantic/population-observation.js";
+import { runLongMemEvalSemanticLauncher } from "../../../runs/longmemeval-semantic/launch.js";
 
 const roots: string[] = [];
 let cacheRoot: string, dataDir: string, pinnedMetaRoot: string;
@@ -124,10 +125,25 @@ it("pins native resource config and rejects evaluator aliases before writing pop
 it("keeps every held and unresolved member in separate fixed denominators without gold", async () => {
   for (const kind of ["development20", "reused_readiness50"] as const) {
     const { root, input } = authoredPopulation(kind);
+    const evaluatorRoot = join(dirname(root), "aggregate-evaluator");
     const frozen = freezeLongMemEvalLazyPopulation({ ...input, members: input.members.map((member, index) =>
       index === 1 ? { ...member, execution_policy: "eligible" } : member) }, root);
     const cutoff = { cutoff_id: "initial", cutoff_at: "2026-09-23T00:00:00.000Z", predecessor_identity: null };
-    const observed = await observeLongMemEvalLazyPopulation(root, cutoff);
+    await expect(observeLongMemEvalLazyPopulation(root, cutoff, root))
+      .rejects.toThrow(/separate from producer and input roots/u);
+    await expect(observeLongMemEvalLazyPopulation(root, cutoff, input.members[0]!.evaluator_root))
+      .rejects.toThrow(/separate from producer and input roots/u);
+    if (kind === "development20") {
+      const configs = join(dirname(root), "configs");
+      const physicalConfigs = join(dirname(root), "physical-native-configs");
+      renameSync(configs, physicalConfigs);
+      symlinkSync(physicalConfigs, configs, "dir");
+      await expect(observeLongMemEvalLazyPopulation(root, cutoff, physicalConfigs))
+        .rejects.toThrow(/separate from producer and input roots/u);
+      expect(existsSync(join(root, "population-cutoff-initial.json"))).toBe(false);
+    }
+    const observed = await observeLongMemEvalLazyPopulation(root, cutoff, evaluatorRoot);
+    expect(observed.path.startsWith(`${evaluatorRoot}/`)).toBe(true);
     expect(observed.result.population_identity).toBe(chainIdentity(frozen));
     expect(observed.result.primary).toEqual({ eligible: frozen.selection.selected_count,
       hits: 0, misses: 0, unknown: frozen.selection.selected_count, lower_bound: 0, upper_bound: 1 });
@@ -137,8 +153,26 @@ it("keeps every held and unresolved member in separate fixed denominators withou
     expect(observed.result.producer_coverage).toMatchObject({ frozen_members: frozen.selection.selected_count,
       population_attempt_coverage_complete: false, population_authorized_attempts: null });
     expect(observed.result.producer_evidence?.scoped_authorized_attempts).toBeNull();
-    expect(await observeLongMemEvalLazyPopulation(root, cutoff)).toEqual(observed);
-    await expect(observeLongMemEvalLazyPopulation(root, { ...cutoff, cutoff_at: "2026-09-24T00:00:00.000Z" }))
+    const producerEntries = readdirSync(root).sort();
+    const frozenBytes = readFileSync(join(root, "population.json"), "utf8");
+    const cutoffBytes = readFileSync(join(root, "population-cutoff-initial.json"), "utf8");
+    expect(await observeLongMemEvalLazyPopulation(root, cutoff, evaluatorRoot)).toEqual(observed);
+    if (kind === "development20") {
+      const cutoffPath = join(dirname(root), "cutoff-input.json");
+      writeFileSync(cutoffPath, JSON.stringify(cutoff));
+      const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        expect(await runLongMemEvalSemanticLauncher(["observe-population", "--root", root,
+          "--config", cutoffPath])).toBe(2);
+        expect(await runLongMemEvalSemanticLauncher(["observe-population", "--root", root,
+          "--config", cutoffPath, "--evaluator-root", evaluatorRoot])).toBe(0);
+      } finally { stdout.mockRestore(); stderr.mockRestore(); }
+    }
+    expect(readdirSync(root).sort()).toEqual(producerEntries);
+    expect(readFileSync(join(root, "population.json"), "utf8")).toBe(frozenBytes);
+    expect(readFileSync(join(root, "population-cutoff-initial.json"), "utf8")).toBe(cutoffBytes);
+    await expect(observeLongMemEvalLazyPopulation(root, { ...cutoff, cutoff_at: "2026-09-24T00:00:00.000Z" }, evaluatorRoot))
       .rejects.toThrow(/retained cutoff/u);
   }
 });
@@ -194,6 +228,7 @@ it("runs one explicit member through native SQLite first exposure and preserves 
   const forbiddenFetch = vi.fn(async () => { throw new Error("provider must not be called"); });
   vi.stubGlobal("fetch", forbiddenFetch);
   const { root, input, metadata } = authoredPopulation("development20");
+  const evaluatorRoot = join(dirname(root), "aggregate-evaluator");
   const ids = [...metadata.development20, ...metadata.reused50].map(row => row.question_id);
   await writeDataset([...ids, ...Array.from({ length: 430 }, (_, i) => `other-${i}`)].map(question));
   const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir, pinnedMetaRoot,
@@ -219,11 +254,11 @@ it("runs one explicit member through native SQLite first exposure and preserves 
   writeFileSync(member.source_preflight_path, JSON.stringify(preflight));
   freezeLongMemEvalLazyPopulation({ ...input, dataset_sha256: census.dataset_sha256, members }, root);
   const before = await observeLongMemEvalLazyPopulation(root, { cutoff_id: "before",
-    cutoff_at: "2026-09-23T00:01:00.000Z", predecessor_identity: null });
+    cutoff_at: "2026-09-23T00:01:00.000Z", predecessor_identity: null }, evaluatorRoot);
   expect(before.result.primary).toMatchObject({ eligible: 20, hits: 0, misses: 0, unknown: 20 });
   unlinkSync(before.path);
   const recoveredBefore = await observeLongMemEvalLazyPopulation(root, { cutoff_id: "before",
-    cutoff_at: "2026-09-23T00:01:00.000Z", predecessor_identity: null });
+    cutoff_at: "2026-09-23T00:01:00.000Z", predecessor_identity: null }, evaluatorRoot);
   expect(recoveredBefore.result.primary).toMatchObject({ hits: 0, misses: 0, unknown: 20 });
   expect(recoveredBefore.result.cutoff_identity).toBe(before.result.cutoff_identity);
   await expect(measureLongMemEvalLazyFirstExposure({ root: member.native_root,
@@ -233,7 +268,7 @@ it("runs one explicit member through native SQLite first exposure and preserves 
   await runLongMemEvalLazyPopulationStage(root, member.question_id, "freeze");
   await runLongMemEvalLazyPopulationStage(root, third.question_id, "freeze");
   const queryOnly = await observeLongMemEvalLazyPopulation(root, { cutoff_id: "query-only",
-    cutoff_at: "2026-09-23T00:01:30.000Z", predecessor_identity: chainIdentity(recoveredBefore.result) });
+    cutoff_at: "2026-09-23T00:01:30.000Z", predecessor_identity: chainIdentity(recoveredBefore.result) }, evaluatorRoot);
   expect(queryOnly.result.rows[0]?.attempt_scopes.map(scope => scope.layer)).toEqual(["query"]);
   expect(queryOnly.result.rows[2]?.attempt_scopes.map(scope => scope.layer)).toEqual(["query"]);
   expect(queryOnly.result.producer_coverage).toMatchObject({ members_with_scopes: 0,
@@ -245,7 +280,7 @@ it("runs one explicit member through native SQLite first exposure and preserves 
   await expect(runLongMemEvalLazyPopulationStage(root, second.question_id, "freeze")).rejects.toThrow();
   expect(await runLongMemEvalLazyPopulationStage(root, member.question_id, "exposure")).toMatchObject({ state: "completed" });
   const after = await observeLongMemEvalLazyPopulation(root, { cutoff_id: "after",
-    cutoff_at: "2026-09-23T00:02:00.000Z", predecessor_identity: chainIdentity(queryOnly.result) });
+    cutoff_at: "2026-09-23T00:02:00.000Z", predecessor_identity: chainIdentity(queryOnly.result) }, evaluatorRoot);
   expect(after.result.rows).toHaveLength(20);
   expect(after.result.rows[0]?.first_exposure_identity).toMatch(/^[a-f0-9]{64}$/u);
   expect(after.result.rows[0]).toMatchObject({ outcome: "hit", measurement_path: expect.any(String) });
@@ -261,11 +296,21 @@ it("runs one explicit member through native SQLite first exposure and preserves 
   expect(after.result.primary.hits + after.result.primary.misses + after.result.primary.unknown).toBe(20);
   expect(readChainArtifact(after.path)).toEqual(after.result);
   expect(forbiddenFetch).not.toHaveBeenCalled();
+  const final = readChainArtifact(join(member.lazy_root, "final.json")) as { final_chain_root: string };
+  const exposure = readChainArtifact(join(member.lazy_root, "first-exposure.json")) as { replay_identity: string };
+  const replayRows = join(final.final_chain_root, `replay-${exposure.replay_identity}`);
+  const physicalRows = join(dirname(root), "physical-member-replay-rows");
+  renameSync(replayRows, physicalRows);
+  symlinkSync(physicalRows, replayRows, "dir");
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "unsafe-output",
+    cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: chainIdentity(after.result) }, physicalRows))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(existsSync(join(root, "population-cutoff-unsafe-output.json"))).toBe(false);
   const requestedPath = join(root, "stages", String(second.index).padStart(5, "0"), "freeze.requested.json");
   const foreignStage = { ...readChainArtifact(requestedPath) as object, question_id: member.question_id };
   writeFileSync(requestedPath, JSON.stringify({ identity: chainIdentity(foreignStage), payload: foreignStage }));
   const foreign = await observeLongMemEvalLazyPopulation(root, { cutoff_id: "foreign",
-    cutoff_at: "2026-09-23T00:03:00.000Z", predecessor_identity: chainIdentity(after.result) });
+    cutoff_at: "2026-09-23T00:03:00.000Z", predecessor_identity: chainIdentity(after.result) }, evaluatorRoot);
   expect(foreign.result.rows[1]).toMatchObject({ outcome: "unknown", measurement_path: null });
   expect(foreign.result.rows[1]?.boundary).toMatch(/another frozen member/u);
   const nativePath = after.result.rows[0]!.measurement_path!;
@@ -279,9 +324,9 @@ it("runs one explicit member through native SQLite first exposure and preserves 
     primary: { ...after.result.primary, hits: 0, misses: 1, lower_bound: 0, upper_bound: 0.95 } };
   writeFileSync(after.path, JSON.stringify({ identity: chainIdentity(forgedResult), payload: forgedResult }));
   await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "after",
-    cutoff_at: "2026-09-23T00:02:00.000Z", predecessor_identity: chainIdentity(queryOnly.result) }))
+    cutoff_at: "2026-09-23T00:02:00.000Z", predecessor_identity: chainIdentity(queryOnly.result) }, evaluatorRoot))
     .rejects.toThrow(/immutable semantic chain stage conflict|retained lazy measurement differs/u);
   await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "later",
-    cutoff_at: "2026-09-23T00:04:00.000Z", predecessor_identity: chainIdentity(foreign.result) }))
+    cutoff_at: "2026-09-23T00:04:00.000Z", predecessor_identity: chainIdentity(foreign.result) }, evaluatorRoot))
     .rejects.toThrow(/immutable semantic chain stage conflict|retained lazy measurement differs/u);
 }, 120000);

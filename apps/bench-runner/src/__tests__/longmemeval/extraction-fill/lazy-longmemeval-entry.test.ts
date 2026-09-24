@@ -1,5 +1,5 @@
 import { dirname, join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
@@ -256,6 +256,21 @@ it("binds one original question through full-source preflight, native window, fi
     await expect(measureLongMemEvalLazyFirstExposure({ ...alpha.input, lazyRoot, evaluatorRoot: unsafe }))
       .rejects.toThrow(/separate from producer and input roots/u);
   }
+  const physicalMeta = join(dirname(cacheRoot), "physical-metadata-file");
+  mkdirSync(physicalMeta);
+  const metadataPath = join(pinnedMetaRoot, "longmemeval_s.meta.json");
+  const physicalMetadataPath = join(physicalMeta, "pin.json");
+  renameSync(metadataPath, physicalMetadataPath);
+  symlinkSync(physicalMetadataPath, metadataPath);
+  await expect(measureLongMemEvalLazyFirstExposure({ ...alpha.input, lazyRoot, evaluatorRoot: physicalMeta }))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  const physicalRows = join(dirname(cacheRoot), "physical-replay-rows");
+  const replayRows = join(final.final_chain_root, `replay-${target.identity}`);
+  renameSync(replayRows, physicalRows);
+  symlinkSync(physicalRows, replayRows, "dir");
+  await expect(measureLongMemEvalLazyFirstExposure({ ...alpha.input, lazyRoot, evaluatorRoot: physicalRows }))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(readdirSync(physicalRows).some(name => name.startsWith("measurement-"))).toBe(false);
   expect(readdirSync(dataDir).some(name => name.startsWith("measurement-") || name.startsWith("lazy-measurement-"))).toBe(false);
   expect(readdirSync(pinnedMetaRoot).some(name => name.startsWith("measurement-") || name.startsWith("lazy-measurement-"))).toBe(false);
   expect(existsSync(join(pinnedMetaRoot, "nested-output"))).toBe(false);

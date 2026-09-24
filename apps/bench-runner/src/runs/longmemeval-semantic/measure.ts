@@ -1,10 +1,11 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { join, resolve } from "node:path";
 import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
-import { measureSemanticChain } from "../semantic-chain/replay.js";
+import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import type { LongMemEvalQuestion } from "../../datasets/longmemeval/ingestion/dataset.js";
+import { longMemEvalDatasetInputPaths } from "../../datasets/longmemeval/ingestion/fetch.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
 import { LongMemEvalExperimentReplaySchema, LongMemEvalSourceOnlyReplaySchema, verifyLongMemEvalQuestionPublication, verifyLongMemEvalQuestionChain,
   type QuestionPublicationSchema } from "./execute.js";
@@ -72,9 +73,13 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
     return [directory, join(directory, "library.sqlite"), join(directory, "publication.json")];
   });
   const replayPaths = replay.rows.flatMap((row) => row.status === "replayed"
-    ? [row.chain_root, row.replay_path, row.publication_path] : []);
+    ? [row.chain_root, row.publication_path,
+      ...semanticChainReplayInputPaths(row.chain_root, row.replay_path)] : []);
+  const datasetPaths = longMemEvalDatasetInputPaths("longmemeval_s", {
+    dataDir: config.data_dir, pinnedMetaRoot: config.pinned_meta_root });
   const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, replayPath, ...questionPaths, ...replayPaths,
-    config.data_dir, config.pinned_meta_root, config.query_cache_root,
+    config.data_dir, config.pinned_meta_root, datasetPaths.sourcePath, datasetPaths.checksumSource,
+    config.query_cache_root,
     ...("arm" in config ? [config.correspondence_cache_root, ...config.source_cache_roots] : [])]);
   const dataset = await loadFrozenLongMemEvalDataset(frozen.config);
   const selectedRows: LongMemEvalOutcome[] = [];

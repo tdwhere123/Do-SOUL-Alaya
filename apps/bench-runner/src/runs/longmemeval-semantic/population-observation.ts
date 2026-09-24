@@ -4,14 +4,16 @@ import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { isContainedPath } from "../fs/opened-contained-path.js";
+import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { admitLazyFinal, admitLazyWindow, readLazyQualifiedExposureState } from "../semantic-chain/lazy-qualification.js";
+import { inspectSemanticChainReplayTarget } from "../semantic-chain/replay.js";
 import { materializeSemanticProposalLines } from "../semantic-proposal/workset.js";
 import { admitLongMemEvalLazyConfig } from "./lazy-config.js";
 import { admitLongMemEvalLazyMeasurement, measureLongMemEvalLazyFirstExposure } from "./lazy-measure.js";
 import { summarizeLongMemEvalOutcomes } from "./measure.js";
-import { admitNativeFreeze, PopulationSchema, readLongMemEvalLazyPopulation,
+import { admitNativeFreeze, PopulationSchema, readLongMemEvalLazyPopulationForObservation,
   STAGES, StageRecordSchema, stageRecord, type Population } from "./population.js";
 import { inspectPopulationAttemptScopes, PopulationAttemptEvidenceSchema, PopulationAttemptScopeSchema,
   type PopulationAttemptScope } from "./population-attempts.js";
@@ -198,11 +200,23 @@ async function admitObservation(result: z.infer<typeof ObservationSchema>, popul
 }
 
 /** Samples frozen native references first; absent or rejected stages remain in the fixed denominator. */
-export async function observeLongMemEvalLazyPopulation(root: string, value: unknown) {
+export async function observeLongMemEvalLazyPopulation(root: string, value: unknown, evaluatorRoot: string) {
   const input = ObservationInputSchema.parse(value);
-  const path = join(root, `population-observation-${input.cutoff_id}.json`);
-  const population = readLongMemEvalLazyPopulation(root), populationIdentity = chainIdentity(population);
-  return withSnapshotPublishLock(join(root, "population-observations"), async () => {
+  const { population, admittedInputPaths } = readLongMemEvalLazyPopulationForObservation(root);
+  const memberReplayPaths: string[] = [];
+  for (const member of population.members) {
+    try {
+      const { final } = await admitLazyFinal(member.lazy_root);
+      const target = inspectSemanticChainReplayTarget(final.final_chain_root, "retained");
+      memberReplayPaths.push(join(final.final_chain_root, "prepare.json"), target.output);
+      for (const path of target.rowPaths.values()) memberReplayPaths.push(path, `${path}.reserved`);
+    } catch { /* Invalid member state remains unknown during aggregate observation. */ }
+  }
+  const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, ...admittedInputPaths, ...memberReplayPaths,
+    ...population.members.map(member => member.evaluator_root)]);
+  const path = join(outputRoot, `population-observation-${input.cutoff_id}.json`);
+  const populationIdentity = chainIdentity(population);
+  return withSnapshotPublishLock(join(outputRoot, "population-observations"), async () => {
   const retained = readChainArtifact(path);
   if (retained !== undefined) {
     const result = ObservationSchema.parse(retained);
@@ -214,10 +228,10 @@ export async function observeLongMemEvalLazyPopulation(root: string, value: unkn
     }
     return { path, result: await admitObservation(result, population, populationIdentity, cutoff, true) };
   }
-  const priorPaths = existsSync(root) ? readdirSync(root).filter(name => /^population-observation-[a-zA-Z0-9_-]+\.json$/u.test(name)) : [];
+  const priorPaths = existsSync(outputRoot) ? readdirSync(outputRoot).filter(name => /^population-observation-[a-zA-Z0-9_-]+\.json$/u.test(name)) : [];
   const prior = [];
   for (const name of priorPaths) {
-    const observation = ObservationSchema.parse(readChainArtifact(join(root, name)));
+    const observation = ObservationSchema.parse(readChainArtifact(join(outputRoot, name)));
     const priorCutoff = await readOrFreezeCutoff(root, {
       cutoff_id: observation.cutoff_id, cutoff_at: observation.cutoff_at,
       predecessor_identity: observation.predecessor_identity

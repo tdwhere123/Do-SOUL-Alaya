@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
+import { longMemEvalDatasetInputPaths } from "../../datasets/longmemeval/ingestion/fetch.js";
 import { canonicalPath, canonicalPathsOverlap } from "../fs/opened-contained-path.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { admitLazyFinal, admitLazyWindow, prepareLazyQualificationWindow, replayLazyQualifiedFirstExposure,
@@ -70,8 +71,13 @@ function assertRootIsolation(population: Population, root: string,
   const producerPaths = population.members.flatMap(member => [member.native_root, member.lazy_root,
     member.source_cache_root, member.native_config_path, member.source_preflight_path,
     member.lazy_config_path]);
-  producerPaths.push(...configs.flatMap(config => [config.query_cache_root, config.correspondence_cache_root,
-    config.data_dir, config.pinned_meta_root, ...config.source_cache_roots]));
+  producerPaths.push(...configs.flatMap(config => {
+    const dataset = longMemEvalDatasetInputPaths("longmemeval_s", {
+      dataDir: config.data_dir, pinnedMetaRoot: config.pinned_meta_root });
+    return [config.query_cache_root, config.correspondence_cache_root,
+      config.data_dir, config.pinned_meta_root, dataset.sourcePath, dataset.checksumSource,
+      ...config.source_cache_roots];
+  }));
   producerPaths.push(population.membership_index_path);
   const paths = new Map([...exclusiveProducers, ...producerPaths, ...population.members.map(member => member.evaluator_root), root]
     .map(value => [value, canonicalPath(value)]));
@@ -91,6 +97,7 @@ function assertRootIsolation(population: Population, root: string,
       throw new AlayaError("CONFLICT", "population evaluator root overlaps a producer, output, or another evaluator");
     }
   }
+  return producerPaths;
 }
 
 function readNativeConfig(member: Member, datasetSha256: string, datasetQuestionCount: number) {
@@ -140,13 +147,13 @@ function admitPopulation(value: unknown, root: string) {
   }
   const configs = population.members.map(member => readNativeConfig(member, population.dataset_sha256,
     population.dataset_question_count));
-  assertRootIsolation(population, root, configs);
+  const admittedInputPaths = assertRootIsolation(population, root, configs);
   for (const [index, member] of population.members.entries()) {
     if (chainIdentity(configs[index]) !== member.native_config_identity) {
       throw new AlayaError("CONFLICT", "frozen native resource or profile config changed");
     }
   }
-  return { ...population, selection };
+  return { population: { ...population, selection }, admittedInputPaths };
 }
 
 /** This operation reads membership metadata only: no corpus, source, gold, or provider access. */
@@ -156,7 +163,7 @@ export function freezeLongMemEvalLazyPopulation(value: unknown, root: string) {
   const members = input.members.map(member => ({ ...member,
     native_config_identity: chainIdentity(readNativeConfig(member, input.dataset_sha256,
       input.dataset_question_count)) }));
-  const population = admitPopulation({ ...input, members, contract: "longmemeval-lazy-population-v1",
+  const { population } = admitPopulation({ ...input, members, contract: "longmemeval-lazy-population-v1",
     population_root: resolve(root),
     membership_index_identity: chainIdentity(metadata), metric: "source-bearing-union-first-exposure-any-at-k-v1",
     formal_arm: false, selection: createLongMemEvalSelectionContractFromAssignments({
@@ -167,6 +174,11 @@ export function freezeLongMemEvalLazyPopulation(value: unknown, root: string) {
 }
 
 export function readLongMemEvalLazyPopulation(root: string) {
+  return readLongMemEvalLazyPopulationForObservation(root).population;
+}
+
+/** Native population admission exposes the exact member inputs used before aggregate measurement. */
+export function readLongMemEvalLazyPopulationForObservation(root: string) {
   return admitPopulation(readChainArtifact(join(root, "population.json")), root);
 }
 
