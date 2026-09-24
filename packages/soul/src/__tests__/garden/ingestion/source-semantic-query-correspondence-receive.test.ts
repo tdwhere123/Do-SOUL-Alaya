@@ -5,11 +5,10 @@ import {
 } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import {
-  buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, semanticSha256,
-  parseSourceSemanticRequest, sourceSemanticRequestCatalog, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT
+  semanticSha256, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import {
-  proposeCorrespondenceSemantics, proposeQuerySemantics, receiveSourceSemantics
+  proposeCorrespondenceSemantics, proposeQuerySemantics, proposeSourceSemantics
 } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { sourceSemanticQueryExamples } from "../../../garden/ingestion/official-api/source-semantic-query-examples.js";
 
@@ -25,67 +24,22 @@ function sourceInput(text = TEXT) {
   };
 }
 
-function graphRequest(input: ReturnType<typeof sourceInput>) {
-  const current = buildCurrentSourceSemanticRequest(input);
-  return parseSourceSemanticRequest({
-    ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current),
-    source_request: {
-      ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v1"
-    }
-  });
-}
-
-function segment(request: ReturnType<typeof graphRequest>, text: string) {
-  return sourceSemanticRequestCatalog(request).assertions[0]!.segments.find((row) => row.text === text)!;
-}
-
-function accessionDraft(request: ReturnType<typeof graphRequest>) {
-  const assertionId = request.source_request.source_assertions[0]!.assertion_id;
-  const mention = (id: string, token: string) => {
-    const row = segment(request, token);
-    return { id, assertion_id: assertionId, source_ref: { first: row.id, last: row.id } };
-  };
-  return {
-    contract: "source-interpretation-v4" as const,
-    mentions: [
-      mention("mArchivist", "archivist"), mention("mAccessioned", "accessioned"),
-      mention("mFolio", "folio"), mention("mF", "F"), mention("mBay", "bay"), mention("mB", "B")
-    ],
-    referents: [
-      { id: "rArchivist", referent_kind: "grouped" as const, mentions: ["mArchivist"] },
-      { id: "rFolio", referent_kind: "grouped" as const, mentions: ["mF"] },
-      { id: "rBay", referent_kind: "grouped" as const, mentions: ["mB"] }
-    ],
-    frames: [{
-      id: "fAccession", assertion_ids: [assertionId],
-      context_owner: { kind: "source_act" as const, source_act: "assertion" as const },
-      additional_support: [],
-      predicate_support: { kind: "explicit" as const, reading: "accession", mentions: ["mAccessioned"] },
-      slots: [
-        { id: "agent", role_reading: "agent", support: [{ kind: "lexical" as const, mentions: ["mArchivist"] }] },
-        { id: "object", role_reading: "folio", support: [{ kind: "lexical" as const, mentions: ["mFolio"] }] },
-        { id: "bay", role_reading: "bay", support: [{ kind: "lexical" as const, mentions: ["mBay"] }] }
-      ],
-      bindings: [
-        { slot_id: "agent", target: { kind: "node" as const, id: "rArchivist" }, support: [] },
-        { slot_id: "object", target: { kind: "node" as const, id: "rFolio" }, support: [] },
-        { slot_id: "bay", target: { kind: "node" as const, id: "rBay" }, support: [] }
-      ]
-    }],
-    operators: [],
-    gaps: []
-  };
-}
-
 function interpretation(producerVersion = "p1") {
   const input = { ...sourceInput(), producer_version: producerVersion };
-  const request = graphRequest(input);
-  const received = receiveSourceSemantics(JSON.stringify({
-    contract: "source-semantic-proposal-v1",
+  const quote = (text: string) => ({ assertion_id: input.assertionIds[0]!, text });
+  const received = proposeSourceSemantics(input, { rawJson: JSON.stringify({
+    contract: "source-semantic-proposal-v7",
     outcome: { status: "interpreted" },
-    draft: accessionDraft(request)
-  }), request, input);
-  if (received.interpretation === undefined) throw new Error("interpreted source required");
+    content: { roots: [{ act: "assertion", expression: {
+      kind: "statement", predicate: { kind: "explicit", reading: "accession", support: quote("accessioned") },
+      arguments: [
+        { role: "agent", target: { kind: "entity", key: "archivist", mentions: [quote("archivist")] } },
+        { role: "object", target: { kind: "entity", key: "folio", mentions: [quote("folio F")] } },
+        { role: "bay", target: { kind: "entity", key: "bay", mentions: [quote("bay B")] } }
+      ]
+    } }] }
+  }) });
+  if (received.interpretation === undefined) throw new Error(`current source fixture failed: ${JSON.stringify(received.outcome)}`);
   return received.interpretation;
 }
 
@@ -391,6 +345,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
 
   it("materializes catalog selections", () => {
     const sourceInterpretation = interpretation();
+    expect(sourceInterpretation.normalizer_version).toBe("source-semantic-normalizer-v5");
     const sourceInterpretationId = sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256);
     const admitted = canonicalQuery(EXISTENTIAL, existentialBody());
     const selected = proposeCorrespondenceSemantics({ original_query: EXISTENTIAL,
@@ -399,8 +354,12 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     });
     const predicate = selected.request.catalog?.query_endpoints.find((row) => row.kind === "predicate");
     const frame = selected.request.catalog?.source_endpoints.find((row) => row.kind === "frame");
+    const sourceFrame = sourceInterpretation.frames.find((row) => row.predicate_support.reading === "accession");
+    const predicateMention = sourceFrame?.predicate_support.kind === "explicit"
+      ? sourceFrame.predicate_support.mentions[0] : undefined;
     expect(predicate).toBeDefined();
     expect(frame).toBeDefined();
+    expect(predicateMention).toBeDefined();
     const received = proposeCorrespondenceSemantics({ original_query: EXISTENTIAL,
       admitted_query_semantics: admitted, source_interpretation_descriptors: [{ source_interpretation_id: sourceInterpretationId, interpretation: sourceInterpretation }],
       producer_id: "correspondence-producer", producer_version: "1"
@@ -412,7 +371,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
           contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1",
           selections: [{
             query: predicate!.handle, source: frame!.handle, query_excerpt: "accessioned",
-            source_semantic_support: [{ kind: "lexical", mentions: ["mAccessioned"] }]
+            source_semantic_support: [{ kind: "lexical", mentions: [predicateMention] }]
           }]
         }
       })
@@ -421,6 +380,12 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     expect(received.semantic_correspondence?.correspondences[0]?.query_endpoint).toEqual({
       kind: "predicate", alternative: 0, frame: "qAccession"
     });
+    expect(received.semantic_correspondence?.correspondences[0]?.source_endpoint).toEqual({
+      kind: "frame", frame: sourceFrame!.id
+    });
+    expect(received.semantic_correspondence?.correspondences[0]?.source_semantic_support).toEqual([
+      { kind: "lexical", mentions: [predicateMention] }
+    ]);
 
   });
 
