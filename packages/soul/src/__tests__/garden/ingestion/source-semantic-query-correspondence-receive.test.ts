@@ -83,16 +83,22 @@ function interpretation(producerVersion = "p1") {
   const input = { ...sourceInput(), producer_version: producerVersion };
   const quote = (text: string) => ({ assertion_id: input.assertionIds[0]!, text });
   const received = proposeSourceSemantics(input, { rawJson: JSON.stringify({
-    contract: "source-semantic-proposal-v7",
+    contract: "source-semantic-proposal-v8",
     outcome: { status: "interpreted" },
-    content: { roots: [{ act: "assertion", expression: {
-      kind: "statement", predicate: { kind: "explicit", reading: "accession", support: quote("accessioned") },
+    content: {
+      roots: [{ act: "assertion", expression: { kind: "content_ref", key: "accession" } }],
+      entities: [
+        { form: "entity", key: "archivist", semantic_key: "archivist", mentions: [quote("archivist")] },
+        { form: "entity", key: "folio", semantic_key: "folio", mentions: [quote("folio F")] },
+        { form: "entity", key: "bay", semantic_key: "bay", mentions: [quote("bay B")] }
+      ],
+      nodes: [{ kind: "statement", key: "accession",
+        predicate: { kind: "explicit", reading: "accession", support: quote("accessioned") },
       arguments: [
-        { role: "agent", target: { kind: "entity", key: "archivist", mentions: [quote("archivist")] } },
-        { role: "object", target: { kind: "entity", key: "folio", mentions: [quote("folio F")] } },
-        { role: "bay", target: { kind: "entity", key: "bay", mentions: [quote("bay B")] } }
-      ]
-    } }] }
+        { role: "agent", target: { kind: "entity_ref", key: "archivist" } },
+        { role: "object", target: { kind: "entity_ref", key: "folio" } },
+        { role: "bay", target: { kind: "entity_ref", key: "bay" } }
+      ], qualifications: [] }], gaps: [] }
   }) });
   if (received.interpretation === undefined) throw new Error(`current source fixture failed: ${JSON.stringify(received.outcome)}`);
   return received.interpretation;

@@ -14,21 +14,28 @@ const LENDER = "Who lent me the charger that I took to Ravi?";
 function quote(assertion_id: number, text: string) { return { assertion_id, text }; }
 
 function chargerSource() {
-  const speaker = { kind: "entity", key: "speaker", mentions: [quote(1, "me"), quote(2, "I")] };
-  const charger = { kind: "entity", key: "charger", mentions: [quote(1, "a charger"), quote(2, "that charger")] };
+  const speaker = { kind: "entity_ref", key: "speaker" };
+  const charger = { kind: "entity_ref", key: "charger" };
   const received = proposeSourceSemantics({ sourceCorpus: SOURCE, assertionIds: [1, 2], sourceScope: "complete-source",
     source_id: "reference-source", source_version: "1", producer_id: "authored-control", producer_version: "1" },
-  { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
-    content: { roots: [
-      { act: "assertion", expression: { kind: "statement",
+  { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" },
+    content: {
+      roots: ["lending", "taking"].map(key => ({ act: "assertion", expression: { kind: "content_ref", key } })),
+      entities: [
+        { form: "entity", key: "speaker", semantic_key: "speaker", mentions: [quote(1, "me"), quote(2, "I")] },
+        { form: "entity", key: "charger", semantic_key: "charger", mentions: [quote(1, "a charger"), quote(2, "that charger")] },
+        { form: "selection", key: "nora", selection: quote(1, "Nora") },
+        { form: "selection", key: "ravi", selection: quote(2, "Ravi") }
+      ], nodes: [
+      { kind: "statement", key: "lending",
         predicate: { kind: "explicit", reading: "lend", support: quote(1, "lent") },
-        arguments: [{ role: "lender", target: quote(1, "Nora") },
-          { role: "recipient", target: speaker }, { role: "theme", target: charger }] } },
-      { act: "assertion", expression: { kind: "statement",
+        arguments: [{ role: "lender", target: { kind: "entity_ref", key: "nora" } },
+          { role: "recipient", target: speaker }, { role: "theme", target: charger }], qualifications: [] },
+      { kind: "statement", key: "taking",
         predicate: { kind: "explicit", reading: "take", support: quote(2, "took") },
         arguments: [{ role: "agent", target: speaker }, { role: "theme", target: charger },
-          { role: "recipient", target: quote(2, "Ravi") }] } }
-    ] } }) });
+          { role: "recipient", target: { kind: "entity_ref", key: "ravi" } }], qualifications: [] }
+    ], gaps: [] } }) });
   if (received.interpretation === undefined) throw new Error(`authored H failed: ${JSON.stringify(received.outcome)}`);
   return received.interpretation;
 }

@@ -24,6 +24,7 @@ import { SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, SOURCE_SEMANTIC_QUER
 import { parseSourceSemanticRequest, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
   type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
+import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
 import { setExtractionCredentialFixture } from "./fixture.js";
 import { inspectExtractionAuthority } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
@@ -161,10 +162,11 @@ it("keeps the durable first delivery fixed when source qualification completes a
     const userPrompt = JSON.parse(String(init?.body)).contents[0].parts[0].text as string;
     const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
     const assertion = request.source_request.source_assertions[0]!;
-    const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" }, content: {
-      roots: [{ act: "assertion", expression: { kind: "statement",
+    const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" }, content: {
+      roots: [{ act: "assertion", expression: { kind: "content_ref", key: "completion" } }], entities: [],
+      nodes: [{ kind: "statement", key: "completion",
         predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
-        arguments: [] } }] } });
+        arguments: [], qualifications: [] }], gaps: [] } });
     return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: rawJson }] } }],
       usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } });
   });
@@ -286,11 +288,7 @@ it("binds a newly received duplicate-content result only to frozen occurrences w
     const userPrompt = JSON.parse(String(init?.body)).contents[0].parts[0].text as string;
     const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
     const assertion = request.source_request.source_assertions[0]!;
-    const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" }, content: {
-      roots: [{ act: "assertion", expression: { kind: "statement",
-        predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
-        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [
-          { assertion_id: assertion.assertion_id, text: "alpha" }] } }] } }] } });
+    const rawJson = JSON.stringify(tableCompletedResponse(assertion.assertion_id, "alpha"));
     return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: rawJson }] } }],
       usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } });
   });
@@ -518,11 +516,10 @@ async function fillAuthoredCompletionQuery(workset: Parameters<typeof prepareSem
     cacheRoot: queryCacheRoot, authority: queryAuthority,
     config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
       requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
-        outcome: { status: "interpreted" }, query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+      rawJson: interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
           alternatives: [{ conditions: [{ kind: "statement", key: "complete", predicate: "complete",
             arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true },
-              excerpt: "What" }] }] }], gaps: [] } }),
+              excerpt: "What" }] }] }], gaps: [] }),
       responseMetadata: { finishReason: "STOP" },
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
     }) } });
@@ -533,12 +530,7 @@ function shortSourceBatchResponse(line: { key: string; request: { contents: { pa
   const assertion = request.source_request.source_assertions[0]!;
   const theme = /^User: I completed (beta|item \d+)\.$/u.exec(assertion.text)?.[1];
   if (theme === undefined) throw new Error("sample requested a non-short or unsupported source");
-  const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v7",
-    outcome: { status: "interpreted" }, content: { roots: [{ act: "assertion",
-      expression: { kind: "statement", predicate: { kind: "explicit", reading: "complete",
-        support: { assertion_id: assertion.assertion_id, text: "completed" } },
-        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [
-          { assertion_id: assertion.assertion_id, text: theme }] } }] } }] } });
+  const rawJson = JSON.stringify(tableCompletedResponse(assertion.assertion_id, theme));
   return JSON.stringify({ key: line.key, response: { candidates: [{ finishReason: "STOP",
     content: { parts: [{ text: rawJson }] } }], usageMetadata: {
       promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } } });
@@ -753,16 +745,16 @@ it("delivers the fixed completed item through the normal native qualification li
     ...Array.from({ length: 10 }, (_, index) => `I completed item ${index + 2}.`)];
   const expectedWindow = [5, 11, 3, 8, 1, 10, 9, 2, 6, 7];
   const expectedSourceKeys = [
-    ["fixture:bounded-s5-r0", "a2410ac50624929934178a977ab6a53438b311b88fafc1bd2ed78c7ba1df22ef"],
-    ["fixture:bounded-s11-r0", "a7a157ddde8b0775ae5259b74d27280bf2fd9705d4aa3a4533cd37f505d694d0"],
-    ["fixture:bounded-s3-r0", "b7da46265fa5bc12fb35becba7bcee8f4557e4e68b632ac831af5fb27c8427ee"],
-    ["fixture:bounded-s8-r0", "ad845372ab76e3b9d4e0cbe2bdce3fcc9b036f361b28bcb8063b8ebd2f679967"],
-    ["fixture:bounded-s1-r0", "8c38f90bffd90400c4d682ab6dc8fe5e5781f871659713f04ccf325496cf2a93"],
-    ["fixture:bounded-s10-r0", "ab38cb74d6192ab35727cdaeec53bbde0cb17a13c30bd09e947de77da5e88f88"],
-    ["fixture:bounded-s9-r0", "4098987b723808ead23eec33ebf7014fe4ef25fc9520b0ba87293b79f3e36596"],
-    ["fixture:bounded-s2-r0", "bfdf3e8ed7aa5932298b715d4d421dd85eec374b9ef4a5ab0857652a83ab1796"],
-    ["fixture:bounded-s6-r0", "4dd9133fdb7d3db7c1dcbede497a766228fccd440e150a979921fe717fa2dac3"],
-    ["fixture:bounded-s7-r0", "a19699d47647a19acfb54715173da48141351955d96e56e0306b0807a7ecc58b"]
+    ["fixture:bounded-s5-r0", "771d102e2bfb32dccecbb331c23da0e468d9580be122bf68a065e2a49c303a86"],
+    ["fixture:bounded-s11-r0", "5ffcce96854dfb2e14e9c22f05e9d9e3d75f20cbd94e89d840874de7d01a51c0"],
+    ["fixture:bounded-s3-r0", "3f6ef4668db9f0233c27c4236ad20cf6b88f97b80f594a67297993e5f12077ea"],
+    ["fixture:bounded-s8-r0", "d78068e0a374a4b5b0a4cf4fc6996288c1679e05d0842871385df3d70f8f2628"],
+    ["fixture:bounded-s1-r0", "54543ab54db7bbd40c80f97f50e8c20ce09a03271d7be0bde4db6b65e37c1db0"],
+    ["fixture:bounded-s10-r0", "b090c44090fbff25b273e10521b62fd73f40b741990062bea4c2901c346e8ef8"],
+    ["fixture:bounded-s9-r0", "2d63f1db084db67b8f97e5ea0365c8ba160f1561cd3de07b7b48b3ad5eb651ed"],
+    ["fixture:bounded-s2-r0", "132d3220865c619b3b742dc4a48573f9ebd4d4b72cad16c8daf84b7bd890e720"],
+    ["fixture:bounded-s6-r0", "7062fa196d56bec9be9c745532acbdea558d948d216b552145ca594b4440457a"],
+    ["fixture:bounded-s7-r0", "064174b1d122806392e55cf5939b5862a72a5f8a19996a45af4d9df082d5045c"]
   ] as const;
   const expectedRecords = ["06a672c9f0466751e19d3c33f56bbee649e49b7b7da3e306d58e5f7a98a43da5",
     "3c1de53a4a3dc4c90a2464191796b78ffe21a1f614f6042d8cc535d3cbbeeca1",
@@ -786,7 +778,7 @@ it("delivers the fixed completed item through the normal native qualification li
     const window = await prepareLazyQualificationWindow(config, root);
     if (returnRoot !== undefined) writeFileSync(join(returnRoot, "window.json"), JSON.stringify(window, null, 2));
     expect(window.config.chain.query_workset.items).toEqual([{ original_query: "What was completed?" }]);
-    expect(window.query_key).toBe("557fc3568c912fcc313f621622704b67ce669d12c2e8f9e65697d2003a812e8a");
+    expect(window.query_key).toBe("f423a5b53723bfc1739dba6b3ebaf034e4b8afde07bffae8eeaf97655b7a5f8b");
     expect(window.window.map(row => row.source_id)).toEqual(expectedWindow.map(index => `fixture:bounded-s${index}-r0`));
     expect(window.window.map(row => row.record_id)).toEqual(expectedRecords);
     expect(window.window.map(row => row.source_version)).toEqual(Array(10)
@@ -828,7 +820,7 @@ it("delivers the fixed completed item through the normal native qualification li
       JSON.stringify({ query, lines: lines.map(line => ({ key: line.key, request: line.request })) }, null, 2));
     expect(query.status).toBe("ready");
     if (query.status !== "ready") throw new Error("fixed source requires a ready native opportunity");
-    expect(query.descriptors.map(row => row.source_id)).toEqual(["fixture:bounded-s7-r0"]);
+    expect(query.descriptors.map(row => row.source_id)).toEqual(["fixture:bounded-s8-r0"]);
     expect(query.correspondence_opportunities).toEqual([{
       source_interpretation_id: query.descriptors[0]!.interpretation_id, decision: "selected" }]);
     expect(query).toMatchObject({ discovery_open: true, discovery_truncated: true,
@@ -836,7 +828,7 @@ it("delivers the fixed completed item through the normal native qualification li
     expect(lines).toHaveLength(1);
     const request = lines[0]!.request as SourceSemanticCorrespondenceRequest;
     expect(request.source_interpretation_descriptors[0]?.interpretation.source.source_id)
-      .toBe("fixture:bounded-s7-r0");
+      .toBe("fixture:bounded-s8-r0");
     const correspondence = await fillAuthoredCompletionCorrespondence(workset, 0,
       fixture.config.chain.correspondence_cache_root);
     if (returnRoot !== undefined) writeFileSync(join(returnRoot, "correspondence.json"),
@@ -850,10 +842,10 @@ it("delivers the fixed completed item through the normal native qualification li
     const native = SoulInterpretationResponseSchema.parse(row.response);
     if (native.operation !== "recall" || native.index === undefined) throw new Error("native indexed recall required");
     const roots = native.index.entries.map(entry => entry.target.kind === "source_evidence" ? entry.target.root_id : null);
-    expect(roots).toEqual([7, 5, 11, 3, 8].map(index =>
+    expect(roots).toEqual([8, 5, 11, 3, 1].map(index =>
       report.sources.find((source: { source_id: string }) => source.source_id === `fixture:bounded-s${index}-r0`)?.record_id));
-    expect(roots).not.toContain(report.sources[1]?.record_id);
-    const target = report.sources[7]!.record_id;
+    expect(roots).not.toContain(report.sources[4]?.record_id);
+    const target = report.sources[8]!.record_id;
     const slot = native.slot_qualifiers?.[0];
     const proof = native.proofs?.find(value => value.source_interpretation_id === query.descriptors[0]!.interpretation_id);
     expect(slot).toMatchObject({ index: 0, evidence_kind: "semantic_proof", selection_basis: "direct_answer",
@@ -863,7 +855,7 @@ it("delivers the fixed completed item through the normal native qualification li
     expect(proof?.binding_results?.some(binding => binding.query_complete && Object.keys(binding.returned).length > 0))
       .toBe(true);
     const answer = proof?.binding_results?.find(binding => binding.kind === "answer" && binding.query_complete);
-    const themeMention = proof?.interpretation.mentions.find(mention => mention.text === "item 7");
+    const themeMention = proof?.interpretation.mentions.find(mention => mention.text === "item 8");
     const themeReferent = proof?.interpretation.referents.find(referent =>
       themeMention !== undefined && referent.mentions.includes(themeMention.id));
     expect(answer).toBeDefined();
@@ -878,7 +870,7 @@ it("delivers the fixed completed item through the normal native qualification li
     expect(proof?.consumed_leaves.some(leaf => leaf.leaf_kind.startsWith("semantic_correspondence_"))).toBe(true);
     const result = native.results?.[0];
     expect(result).toMatchObject({ object_kind: "semantic_proof", target: { root_id: target } });
-    expect(result?.content_preview).toBe("User: I completed item 7.");
+    expect(result?.content_preview).toBe("User: I completed item 8.");
     expect(result?.target).toEqual(native.index.entries[0]!.target);
     expect(result?.output_binding).toBe(answer?.binding_id);
     expect(native.index.entries[0]?.interpretation_node?.packet_id).toBe(proof?.source_interpretation_id);
