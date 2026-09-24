@@ -57,24 +57,23 @@ export const sourceSemanticQueryExamples = [
     }
   },
   {
-    original_query: "What is the ratio of amber beads to blue beads in tray T?",
+    original_query: "Does tray T contain more amber beads than blue beads?",
     response: {
       contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
-        requested_operation: { reading: "Divide the amber bead count by the blue bead count in tray T.",
-          support: { kind: "query_text", excerpt: "ratio of amber beads to blue beads in tray T" } },
+        requested_operation: { reading: "Compare the amber and blue bead counts in tray T.",
+          support: { kind: "query_text", excerpt: "more amber beads than blue beads" } },
         entities: [
           { kind: "named", key: "amber", excerpt: "amber beads" },
           { kind: "named", key: "blue", excerpt: "blue beads" },
           { kind: "named", key: "tray", excerpt: "tray T" }
         ],
         alternatives: [{
-          conditions: [{ kind: "statement", predicate: "ratio", arguments: [
-            { role: "numerator population", target: { kind: "reference", key: "amber" } },
-            { role: "denominator population", target: { kind: "reference", key: "blue" } },
+          conditions: [{ kind: "statement", predicate: "contain more than", arguments: [
+            { role: "greater population", target: { kind: "reference", key: "amber" } },
+            { role: "lesser population", target: { kind: "reference", key: "blue" } },
             { role: "container", target: { kind: "reference", key: "tray" } },
-            { role: "value", target: { kind: "free", key: "ratio", excerpt: "What is the ratio", return: true } }
           ] }],
           evidence_inputs: [
             { conditions: [{ kind: "statement", predicate: "count", arguments: [

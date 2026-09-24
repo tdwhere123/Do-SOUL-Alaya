@@ -179,14 +179,14 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     const operation = results[3]!.query!;
     const alternative = operation.alternatives[0]!;
     expect(operation.requested_operation).toEqual(sourceSemanticQueryExamples[3].response.query.requested_operation);
-    expect(operation.return_variables).toEqual(["ratio"]);
+    expect(operation.return_variables).toEqual([]);
     expect(operation.evaluation).toBeUndefined();
     expect(alternative.answer_frames).toEqual([alternative.frames[0]!.id]);
     expect(alternative.evidence_inputs).toEqual([
       { frames: [alternative.frames[1]!.id] }, { frames: [alternative.frames[2]!.id] }
     ]);
     expect(alternative.frames.map((frame) => frame.role_requirements.map((role) => role.target_variable)))
-      .toEqual([["amber", "blue", "tray", "ratio"], ["amber", "tray", "amber_count"], ["blue", "tray", "blue_count"]]);
+      .toEqual([["amber", "blue", "tray"], ["amber", "tray", "amber_count"], ["blue", "tray", "blue_count"]]);
     const occurrence = results[4]!.query!;
     expect(occurrence.variables.map(row => row.sort)).toEqual(["proposition", "proposition", "proposition"]);
     expect(occurrence.alternatives[0]!.context_obligations).toEqual([
