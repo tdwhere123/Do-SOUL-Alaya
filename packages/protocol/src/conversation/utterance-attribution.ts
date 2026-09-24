@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AlayaError } from "../shared/alaya-error.js";
 import { BoundedIdSchema } from "../shared/schema-primitives.js";
 
 export const UTTERANCE_ATTRIBUTION_CONTRACT = "utterance-attribution-v1" as const;
@@ -52,7 +53,7 @@ export function bindUtteranceAttribution(value: unknown, text: string): Utteranc
   for (const row of attribution.utterances) {
     const [start, end] = row.utf8_span;
     if (end > bytes.length || !isBoundary(bytes, start) || !isBoundary(bytes, end)) {
-      throw new Error("utterance attribution range differs from its UTF-8 input");
+      throw new AlayaError("VALIDATION", "utterance attribution range differs from its UTF-8 input");
     }
   }
   return attribution;

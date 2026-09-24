@@ -16,6 +16,7 @@ import {
   type SourceScopeClass,
   type SourceSpeakerRole
 } from "@do-soul/alaya-protocol";
+import { CoreError } from "../../shared/errors.js";
 import type { FieldFormationStores } from "./field-stores.js";
 import {
   assertSpanInContent,
@@ -70,7 +71,7 @@ function persistRecord(
       canonicalJson(current.attribution_context ?? null) !== canonicalJson(attribution) &&
       (current.source_version === request.source_version ||
         compareUtcInstants(request.recorded_at, current.recorded_at) !== 1)) {
-    throw new Error("source attribution correction requires a later recorded time and new source revision");
+    throw new CoreError("CONFLICT", "source attribution correction requires a later recorded time and new source revision");
   }
   const record = verifySourceRecordIdentity(SourceRecordIdentitySchema.parse({
     ...receiptFields(identity),
@@ -93,7 +94,7 @@ function persistRecord(
     if (retained === null || (retained.record.attribution_context !== null &&
         retained.record.attribution_context !== undefined) ||
         retained.content_bytes !== request.content_bytes) {
-      throw new Error("null attribution is reserved for an exact retained source record");
+      throw new CoreError("VALIDATION", "null attribution is reserved for an exact retained source record");
     }
   }
   return stores.putRecord(record, request.content_bytes);
