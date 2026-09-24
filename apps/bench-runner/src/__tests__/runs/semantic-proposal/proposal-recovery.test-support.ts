@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +16,7 @@ import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artif
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults } from "../../../runs/semantic-proposal/fill.js";
 import { materializeSemanticProposalLines, type SemanticProposalLine, type SemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
+import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -34,10 +37,13 @@ export function proposalRecoveryCases(input: {
         inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
       const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: workset.kind });
       const ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${authority.attempt_lineage_digest}.json`);
-      const raw = (ordinal: number, decodedText: string, usage?: { inputTokens: number; outputTokens: number; totalTokens: number }) => writeProviderRawAttempt({ root: cacheRoot,
+      const raw = (ordinal: number, decodedText: string, usage?: { inputTokens: number; outputTokens: number; totalTokens: number },
+        physical: "bound" | "missing" | "truncated" = "bound") => writeProviderRawAttempt({ root: cacheRoot,
         cacheKey: line.key, attemptOrdinal: ordinal, kind: line.kind, model: workset.model,
         requestProfile: workset.request_profile, requestDigest: line.requestDigest,
-        attemptLineageDigest: authority.attempt_lineage_digest, decodedText, finishReason: "STOP", ...(usage ? { usage } : {}) });
+        attemptLineageDigest: authority.attempt_lineage_digest, decodedText, finishReason: "STOP", ...(usage ? { usage } : {}),
+        ...(physical === "missing" ? {} : { responseBody: syntheticGeminiBody(decodedText, "STOP", usage) +
+          (physical === "truncated" ? " ".repeat(1024 * 1024) : "") }) });
       const read = () => readSemanticProposalResults(workset, cacheRoot, maxOutputTokens)[0]!;
       const chain = () => readSemanticChainProposalResults(workset, cacheRoot, maxOutputTokens)[0]!;
       const fill = () => executeSemanticProposalFill({ workset, cacheRoot, authority,
@@ -50,7 +56,12 @@ export function proposalRecoveryCases(input: {
           cwd: process.cwd(), timeout: 30_000, env: { ...process.env, PROPOSAL_CACHE_ROOT: cacheRoot,
             PROPOSAL_PROCESS_MODE: "recover", PROPOSAL_AUTHORITY_PATH: authorityPath }
         });
-        return JSON.parse(stdout.trim());
+        const prefix = "PROPOSAL_RECOVERY_RESULT:";
+        const result = stdout.split(/\r?\n/u).find(line => line.startsWith(prefix));
+        if (result === undefined) {
+          throw new Error(`recovery child did not emit its result: ${JSON.stringify(stdout.slice(0, 2048))}`);
+        }
+        return JSON.parse(result.slice(prefix.length));
       };
       return { cacheRoot, workset, line, authority, ledger, ledgerPath, raw, read, chain, fill, restart };
     }
@@ -66,11 +77,12 @@ export function proposalRecoveryCases(input: {
       if (path === "retained recovery") {
         f.ledger.reserveAttemptOrdinal(f.line.key); f.raw(1, text, usage);
         expect(f.read().status).toBe("pending");
-        expect(await f.restart()).toMatchObject({ statuses: [truncated ? "incomplete" : "invalid"] });
+        expect(await f.restart()).toMatchObject({ statuses: ["incomplete"] });
       } else {
         await executeSemanticProposalFill({ workset: f.workset, cacheRoot: f.cacheRoot, authority: f.authority,
           config: input.config(), extractor: { extract: async () => {
-            calls += 1; return { rawJson: text, responseMetadata: { finishReason: "STOP" }, ...(usage ? { usage } : {}) };
+            calls += 1; return { rawJson: text, responseMetadata: { finishReason: "STOP" },
+              responseBody: syntheticGeminiBody(text, "STOP", usage), ...(usage ? { usage } : {}) };
           } } });
       }
       const raw = readProviderRawAttempt(f.cacheRoot, f.line.key, 1)!;
@@ -78,7 +90,7 @@ export function proposalRecoveryCases(input: {
         original_byte_length: Buffer.byteLength(text), decoded_text_digest: createHash("sha256").update(text).digest("hex"),
         finish_reason: "STOP", usage_known: usageKnown, usage: usage ?? null });
       if (truncated) expect(JSON.parse(raw.decoded_text)).toEqual(JSON.parse(prefix));
-      const status = truncated ? "incomplete" : "invalid";
+      const status = "incomplete";
       expect(f.read().status).toBe(status);
       expect(f.chain().received).toBeUndefined();
       expect(JSON.parse(readFileSync(semanticProposalShardPath(f.cacheRoot, f.line.key), "utf8"))).toMatchObject({ admitted: false });
@@ -91,7 +103,7 @@ export function proposalRecoveryCases(input: {
       for (let replay = 0; replay < 2; replay += 1) {
         const summary = replay === 0 && path === "live" ? (await f.restart()).summary : await f.fill();
         expect(summary).toMatchObject({ pending: 0, newly_admitted: 0, unknown: 0,
-          ...(truncated ? { incomplete: 1 } : { rejected: 1 }) });
+          incomplete: 1 });
         expect(f.read().status).toBe(status);
         expect(f.chain().received).toBeUndefined();
         expect(JSON.parse(readFileSync(f.ledgerPath, "utf8"))).toEqual(settled);
@@ -119,6 +131,112 @@ export function proposalRecoveryCases(input: {
       expect(f.read().status).toBe("incomplete");
       expect(await f.fill()).toMatchObject({ unknown: 0, incomplete: 1, terminal_failures: 0, unattempted: 0, attempts: 1 });
     });
+
+    it("retains native Gemini success bytes through proposal admission, reopen and no-call reuse", async () => {
+      const cacheRoot = mkdtempSync(join(tmpdir(), "proposal-native-response-")); roots.push(cacheRoot);
+      let calls = 0;
+      let responseBody = "";
+      const server = createServer(async (request, response) => {
+        for await (const _chunk of request) { /* consume the complete request before responding */ }
+        calls += 1;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(responseBody);
+      });
+      await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+      try {
+        const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        const workset = { ...input.workset(), provider_url: origin };
+        const line = materializeSemanticProposalLines(workset, 128)[0]!;
+        const usage = { inputTokens: 2, outputTokens: 3, totalTokens: 5 };
+        responseBody = syntheticGeminiBody(input.body(line), "STOP", usage);
+        const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, 128),
+          inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+        const config = { ...input.config(), providerUrl: origin };
+        expect(await executeSemanticProposalFill({ workset, cacheRoot, authority, config }))
+          .toMatchObject({ attempts: 1, newly_admitted: 1 });
+        expect(calls).toBe(1);
+        expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toMatchObject({
+          response_body: { text: responseBody, truncated: false }, usage_known: true, usage
+        });
+        expect(readSemanticProposalResults(workset, cacheRoot, 128)[0]?.status).toBe("interpreted");
+        expect(readSemanticChainProposalResults(workset, cacheRoot, 128)[0]?.received).toBeDefined();
+        expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: workset.kind }).snapshot())
+          .toMatchObject({ unresolvedAttempts: [], telemetry: { totalTokens: 5 },
+            settledAttempts: [{ attemptOrdinal: 1, usageSha256: expect.stringMatching(/^[0-9a-f]{64}$/u) }] });
+        await executeSemanticProposalFill({ workset, cacheRoot, authority, config: { ...config, apiKey: null } });
+        expect(calls).toBe(1);
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>(resolve => server.close(() => resolve()));
+      }
+    });
+
+    it.each(["missing", "truncated"] as const)("settles retained %s Gemini response evidence as incomplete without a provider call", async physical => {
+      const f = fixture(); f.ledger.reserveAttemptOrdinal(f.line.key);
+      const usage = { inputTokens: 2, outputTokens: 3, totalTokens: 5 };
+      f.raw(1, input.body(f.line), usage, physical);
+      expect(f.read().status).toBe("pending");
+      const beforeRaw = readFileSync(providerRawAttemptPath(f.cacheRoot, f.line.key, 1));
+      const result = await f.fill();
+      expect(result).toMatchObject({ attempts: 1, incomplete: 1, newly_admitted: 0, unknown: 0 });
+      expect(f.read().status).toBe("incomplete");
+      expect(f.chain().received).toBeUndefined();
+      expect(readProviderRawAttempt(f.cacheRoot, f.line.key, 1)?.response_body?.truncated)
+        .toBe(physical === "truncated" ? true : undefined);
+      expect(readFileSync(providerRawAttemptPath(f.cacheRoot, f.line.key, 1)).equals(beforeRaw)).toBe(true);
+      const settled = readFileSync(f.ledgerPath, "utf8");
+      expect(JSON.parse(settled)).toMatchObject({ telemetry: { total_tokens: 5, usage_unavailable_requests: 0 },
+        settled_attempts: [{ cache_key: f.line.key, attempt_ordinal: 1 }], successful_shards: [] });
+      expect(await f.fill()).toMatchObject({ attempts: 0, cache_hits: 1, incomplete: 1, newly_admitted: 0 });
+      expect(readFileSync(f.ledgerPath, "utf8")).toBe(settled);
+    });
+
+    it("refuses an admitted legacy shard whose retained Gemini response witness is absent", async () => {
+      const f = fixture(); f.ledger.reserveAttemptOrdinal(f.line.key); f.raw(1, input.body(f.line));
+      await f.fill();
+      const path = providerRawAttemptPath(f.cacheRoot, f.line.key, 1);
+      const raw = JSON.parse(readFileSync(path, "utf8")); delete raw.response_body;
+      writeFileSync(path, JSON.stringify(raw));
+      const ledger = readFileSync(f.ledgerPath, "utf8");
+      expect(() => f.read()).toThrow(/proposal success differs/u);
+      expect(f.chain()).toMatchObject({ status: "cache_invalid", received: undefined });
+      expect(() => prepareSemanticProposal(f.workset, f.cacheRoot, 128)).toThrow();
+      await expect(f.fill()).rejects.toThrow();
+      expect(readFileSync(f.ledgerPath, "utf8")).toBe(ledger);
+    });
+
+    it.each(["body only", "body and normalized usage"] as const)(
+      "refuses admitted proposal after %s contradicts the retained attempt", async change => {
+        const f = fixture(); f.ledger.reserveAttemptOrdinal(f.line.key);
+        f.raw(1, input.body(f.line), { inputTokens: 2, outputTokens: 3, totalTokens: 5 });
+        await f.fill();
+        const rawPath = providerRawAttemptPath(f.cacheRoot, f.line.key, 1);
+        const raw = JSON.parse(readFileSync(rawPath, "utf8"));
+        const body = JSON.parse(raw.response_body.text);
+        body.usageMetadata.promptTokenCount = 8;
+        body.usageMetadata.totalTokenCount = 11;
+        const text = JSON.stringify(body);
+        raw.response_body = { ...raw.response_body, text, original_byte_length: Buffer.byteLength(text),
+          digest: createHash("sha256").update(text).digest("hex") };
+        if (change === "body and normalized usage") {
+          raw.usage = { inputTokens: 8, outputTokens: 3, totalTokens: 11 };
+          const shardPath = semanticProposalShardPath(f.cacheRoot, f.line.key);
+          const shard = JSON.parse(readFileSync(shardPath, "utf8"));
+          shard.usage = raw.usage;
+          writeFileSync(shardPath, JSON.stringify(shard));
+        }
+        writeFileSync(rawPath, JSON.stringify(raw));
+        const ledger = readFileSync(f.ledgerPath, "utf8");
+        if (change === "body only") expect(() => readProviderRawAttempt(f.cacheRoot, f.line.key, 1))
+          .toThrow(/physical response differs/u);
+        else expect(readProviderRawAttempt(f.cacheRoot, f.line.key, 1)?.usage).toEqual(raw.usage);
+        expect(() => f.read()).toThrow(change === "body only" ? /physical response differs/u : /exact settled attempt/u);
+        expect(f.chain()).toMatchObject({ status: "cache_invalid", received: undefined });
+        expect(() => prepareSemanticProposal(f.workset, f.cacheRoot, 128)).toThrow();
+        await expect(f.fill()).rejects.toThrow();
+        expect(readFileSync(f.ledgerPath, "utf8")).toBe(ledger);
+      }
+    );
 
     it("does not publish successful raw against a durably failed transport attempt", async () => {
       const f = fixture(); f.ledger.reserveAttemptOrdinal(f.line.key);
@@ -149,7 +267,9 @@ export function proposalRecoveryCases(input: {
       let calls = 0;
       const result = await executeSemanticProposalFill({ workset: f.workset, cacheRoot: f.cacheRoot, authority: f.authority,
         config: input.config(), extractor: { extract: async () => {
-          calls += 1; return { rawJson: input.body(f.line), responseMetadata: { finishReason: "STOP" } };
+          calls += 1; const rawJson = input.body(f.line);
+          return { rawJson, responseMetadata: { finishReason: "STOP" },
+            responseBody: syntheticGeminiBody(rawJson, "STOP") };
         } } });
       expect(calls).toBe(1); expect(result).toMatchObject({ interpreted: 1, attempts: 2, unknown: 0 });
       expect(f.read().status).toBe("interpreted");
@@ -196,7 +316,8 @@ export function proposalRecoveryCases(input: {
       const settled = inspectExtractionAttemptLedger({ cacheRoot: f.cacheRoot,
         lineageDigest: f.authority.attempt_lineage_digest,
         cacheIdentity: { model: f.workset.model, requestProfile: input.config().requestProfile } })!;
-      expect(settled.settledAttempts).toEqual([{ cacheKey: f.line.key, attemptOrdinal: 1 }]);
+      expect(settled.settledAttempts).toMatchObject([{ cacheKey: f.line.key, attemptOrdinal: 1,
+        usageSha256: expect.stringMatching(/^[0-9a-f]{64}$/u) }]);
       expect(settled.unresolvedAttempts).toEqual([]);
     });
 

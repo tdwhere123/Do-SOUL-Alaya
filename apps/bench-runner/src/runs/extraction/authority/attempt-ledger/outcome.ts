@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { canonicalJson } from "@do-soul/alaya-protocol";
+import { baseReportedUsage } from "../step-quote.js";
 import {
   BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES,
   type BenchProviderUsage,
@@ -121,7 +124,8 @@ export function settleTransportOutcome(
   }
   const currentReservations = unresolved.slice(-currentReservationCount);
   const mappedFailures = mapTransportFailures(currentReservations, failures);
-  const settled = applySettledOutcome(current, input, unresolved, mappedFailures);
+  const settled = applySettledOutcome(current, input, unresolved, mappedFailures,
+    attemptOrdinal !== undefined);
   // A bound terminal attempt releases its shard slot in this same durable
   // transition. A newer outstanding attempt retains ownership of that slot.
   return attemptOrdinal !== undefined && terminal
@@ -161,7 +165,8 @@ function applySettledOutcome(
   current: ExtractionAttemptLedgerRecord,
   input: ExtractionTransportOutcome,
   unresolved: readonly ExtractionAttemptReservationRecord[],
-  failures: readonly ExtractionTransportFailureRecord[]
+  failures: readonly ExtractionTransportFailureRecord[],
+  exactAttempt: boolean
 ): ExtractionAttemptLedgerRecord {
   const terminal = {
     ...current.telemetry.terminal,
@@ -175,7 +180,12 @@ function applySettledOutcome(
   const usage = input.usage;
   return {
     ...current,
-    settled_attempts: [...(current.settled_attempts ?? []), ...unresolved]
+    settled_attempts: [...(current.settled_attempts ?? []), ...unresolved.map(reservation => ({
+      ...reservation,
+      ...(exactAttempt && unresolved.length === 1 ? {
+        usage_sha256: settledAttemptUsageDigest(input.usage)
+      } : {})
+    }))]
       .sort((left, right) => left.attempt_ordinal - right.attempt_ordinal),
     unresolved_attempts: current.unresolved_attempts.filter((reservation) =>
       !unresolved.some((settled) => settled.attempt_ordinal === reservation.attempt_ordinal)),
@@ -195,6 +205,11 @@ function applySettledOutcome(
         unresolved.length - knownUsageAttempts
     }
   };
+}
+
+export function settledAttemptUsageDigest(usage: BenchProviderUsage | null | undefined): string {
+  return createHash("sha256")
+    .update(canonicalJson(baseReportedUsage(usage) ?? null), "utf8").digest("hex");
 }
 
 function assertFailureCount(

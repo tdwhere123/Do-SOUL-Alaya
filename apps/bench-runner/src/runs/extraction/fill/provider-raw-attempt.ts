@@ -13,6 +13,7 @@ import {
 } from "../cache-audit/bounded-artifact-reader.js";
 import { writeBytesExclusiveDurable } from "./manifest/durable-exclusive-publication.js";
 import { assertExtractionAttemptReservation, type ExtractionAttemptLedgerSnapshot } from "../authority/attempt-ledger.js";
+import { settledAttemptUsageDigest } from "../authority/attempt-ledger/outcome.js";
 import { BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES, BENCH_TERMINAL_RETRY_CLASSIFICATIONS,
   type BenchTransportFailureAttempt, type BenchTerminalRetryClassification } from "../../compile-seed/compile-seed-types.js";
 
@@ -173,7 +174,8 @@ export function verifyProviderRawReservation(
 ): "rejected" | undefined {
   assertExtractionAttemptReservation(ledger, raw.cache_key, raw.attempt_ordinal);
   const failure = ledger?.transportFailures.find(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
-  const settled = ledger?.settledAttempts.some(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
+  const settlement = ledger?.settledAttempts.find(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
+  const settled = settlement !== undefined;
   // Source admission records a completed but rejected response with its raw digest.
   // It is not a failed HTTP response and must remain replayable as quarantine.
   const sourceRejection = raw.kind === "source_semantic" && raw.transport_failure === undefined &&
@@ -185,7 +187,22 @@ export function verifyProviderRawReservation(
       settled && failure === undefined && raw.transport_failure !== undefined) {
     throw new ProviderRawAttemptIdentityError("provider raw differs from its settled transport outcome");
   }
+  if (settlement?.usageSha256 !== undefined &&
+      settlement.usageSha256 !== settledAttemptUsageDigest(raw.usage)) {
+    throw new ProviderRawAttemptIdentityError("provider raw usage differs from its exact settled attempt");
+  }
   return sourceRejection ? "rejected" : undefined;
+}
+
+/** Retained raw remains readable for accounting even when no complete response can be executed. */
+export function providerRawSuccessEvidenceState(
+  raw: ProviderRawAttempt
+): "bound" | "missing" | "truncated" | "failed" | "unsupported" {
+  if (raw.transport_failure !== undefined) return "failed";
+  if (raw.request_profile === "step-3.5-2603-low-json-schema-v1") return "bound";
+  if (!isGeminiGenerateContentProfile(raw.request_profile)) return "unsupported";
+  if (raw.response_body === undefined) return "missing";
+  return raw.response_body.truncated ? "truncated" : "bound";
 }
 
 export function readProviderRawAttempt(

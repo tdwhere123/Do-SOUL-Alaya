@@ -59,6 +59,8 @@ export interface BenchSignalExtractor extends SignalExtractor {
     readonly responseMetadata?: BenchProviderResponseMetadata;
     /** Exact provider HTTP envelope evidence, independent of decoded final text. */
     readonly httpResponse?: ProviderHttpResponseEvidence;
+    /** Exact decoded UTF-8 Gemini response body received by the transport. */
+    readonly responseBody?: string;
   }>;
 }
 

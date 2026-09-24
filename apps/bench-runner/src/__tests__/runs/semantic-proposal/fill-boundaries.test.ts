@@ -24,6 +24,7 @@ import {
 } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
+import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js";
 
 const MODEL = "gemini-3.1-flash-lite";
 const PROFILE = "gemini-3.1-minimal-v1" as const;
@@ -56,7 +57,8 @@ it.each([JSON.stringify({ contract: "source-semantic-query-response-v8", outcome
     await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: config(), extractor: {
       extract: async () => {
         reserved = readFileSync(ledgerPath, "utf8");
-        return { rawJson, responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } };
+        return { rawJson, responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 },
+          responseBody: syntheticGeminiBody(rawJson, "STOP", { inputTokens: 2, outputTokens: 3, totalTokens: 5 }) };
       }
     } });
     expect(readSemanticProposalResults(prepared, cacheRoot, 128)[0]?.status)
@@ -135,6 +137,7 @@ function extractor(raws: string[], finish: string | null = "STOP") {
       return {
         rawJson,
         usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8 },
+        responseBody: syntheticGeminiBody(rawJson, finish, { inputTokens: 3, outputTokens: 5, totalTokens: 8 }),
         responseMetadata: finish === null
           ? { finishReason: null as string | null }
           : { finishReason: finish, completionWitness: "finish_reason" as const, completionContractVersion: 1 as const }
@@ -249,7 +252,8 @@ it("replays persisted raw without a second provider call after a reserved unreso
     root: cacheRoot, cacheKey: key, attemptOrdinal: ordinal, kind: "query",
     model: MODEL, requestProfile: PROFILE, requestDigest: line.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
     decodedText: "not-json", finishReason: "STOP",
-    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+    responseBody: syntheticGeminiBody("not-json", "STOP", { inputTokens: 1, outputTokens: 1, totalTokens: 2 })
   });
   const spy = extractor(["should-not-run"]);
   const result = await executeSemanticProposalFill({
@@ -625,7 +629,9 @@ it("replays a settled raw without a shard instead of treating the key as missing
     root: cacheRoot, cacheKey: key, attemptOrdinal: ordinal, kind: "query",
     model: MODEL, requestProfile: PROFILE, requestDigest: line.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
     decodedText: '{"outcome":{"status":"abstained"}}', finishReason: "STOP",
-    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+    responseBody: syntheticGeminiBody('{"outcome":{"status":"abstained"}}', "STOP",
+      { inputTokens: 1, outputTokens: 1, totalTokens: 2 })
   });
   ledger.recordTransportOutcome(key, {
     retryCount: 0, rateLimitRetries: 0, successfulRequestCount: 1,
@@ -680,7 +686,8 @@ it("restarts a later key from its own reserved raws instead of the global attemp
     root: cacheRoot, cacheKey: line1.key, attemptOrdinal: first, kind: "query",
     model: MODEL, requestProfile: PROFILE, requestDigest: line1.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
     decodedText: "not-json", finishReason: "STOP",
-    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+    responseBody: syntheticGeminiBody("not-json", "STOP", { inputTokens: 1, outputTokens: 1, totalTokens: 2 })
   });
   ledger.recordTransportOutcome(line1.key, settledUsage(), first);
   const second = ledger.reserveAttemptOrdinal(line1.key);
@@ -688,7 +695,9 @@ it("restarts a later key from its own reserved raws instead of the global attemp
     root: cacheRoot, cacheKey: line1.key, attemptOrdinal: second, kind: "query",
     model: MODEL, requestProfile: PROFILE, requestDigest: line1.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
     decodedText: '{"outcome":{"status":"abstained"}}', finishReason: "STOP",
-    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+    responseBody: syntheticGeminiBody('{"outcome":{"status":"abstained"}}', "STOP",
+      { inputTokens: 1, outputTokens: 1, totalTokens: 2 })
   });
   ledger.recordTransportOutcome(line1.key, settledUsage(), second);
   ledger.abandonPendingShard(line1.key, second);
@@ -698,7 +707,8 @@ it("restarts a later key from its own reserved raws instead of the global attemp
     root: cacheRoot, cacheKey: line2.key, attemptOrdinal: third, kind: "query",
     model: MODEL, requestProfile: PROFILE, requestDigest: line2.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
     decodedText: "not-json", finishReason: "STOP",
-    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+    responseBody: syntheticGeminiBody("not-json", "STOP", { inputTokens: 1, outputTokens: 1, totalTokens: 2 })
   });
   ledger.recordTransportOutcome(line2.key, settledUsage(), third);
   const spy = extractor(['{"outcome":{"status":"abstained"}}']);
@@ -795,7 +805,9 @@ it("rejects a planted foreign raw at the resume path instead of treating it as t
     attemptLineageDigest: authority.attempt_lineage_digest,
     model: MODEL, requestProfile: PROFILE, requestDigest: requestEnvelopeDigest("{\"foreign\":true}"),
     decodedText: '{"outcome":{"status":"abstained"}}', finishReason: "STOP",
-    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+    responseBody: syntheticGeminiBody('{"outcome":{"status":"abstained"}}', "STOP",
+      { inputTokens: 1, outputTokens: 1, totalTokens: 2 })
   });
   ledger.recordTransportOutcome(key, settledUsage(), ordinal);
   const spy = extractor(["should-not-run"]);

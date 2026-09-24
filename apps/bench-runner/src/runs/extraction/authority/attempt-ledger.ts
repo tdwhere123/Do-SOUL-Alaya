@@ -62,7 +62,9 @@ export interface ExtractionAttemptLedgerSnapshot {
     readonly attemptOrdinal: number;
     readonly cacheKey: string;
   }>[];
-  readonly settledAttempts: readonly Readonly<{ attemptOrdinal: number; cacheKey: string }>[];
+  readonly settledAttempts: readonly Readonly<{
+    attemptOrdinal: number; cacheKey: string; usageSha256?: string
+  }>[];
   readonly transportFailures: readonly Readonly<{
     readonly attemptOrdinal: number;
     readonly cacheKey: string;
@@ -481,7 +483,8 @@ function toSnapshot(
       cacheKey: attempt.cache_key
     }))),
     settledAttempts: Object.freeze((record.settled_attempts ?? []).map(attempt => Object.freeze({
-      attemptOrdinal: attempt.attempt_ordinal, cacheKey: attempt.cache_key
+      attemptOrdinal: attempt.attempt_ordinal, cacheKey: attempt.cache_key,
+      ...(attempt.usage_sha256 === undefined ? {} : { usageSha256: attempt.usage_sha256 })
     }))),
     transportFailures: Object.freeze(record.transport_failures.map((failure) => Object.freeze({
       attemptOrdinal: failure.attempt_ordinal,
@@ -535,7 +538,8 @@ function canonicalLedgerRecord(record: ExtractionAttemptLedgerRecord) {
       cache_key: attempt.cache_key
     })),
     ...(record.settled_attempts === undefined ? {} : { settled_attempts: record.settled_attempts.map(attempt => ({
-      attempt_ordinal: attempt.attempt_ordinal, cache_key: attempt.cache_key
+      attempt_ordinal: attempt.attempt_ordinal, cache_key: attempt.cache_key,
+      ...(attempt.usage_sha256 === undefined ? {} : { usage_sha256: attempt.usage_sha256 })
     })) }),
     transport_failures: record.transport_failures.map((failure) => ({
       attempt_ordinal: failure.attempt_ordinal,

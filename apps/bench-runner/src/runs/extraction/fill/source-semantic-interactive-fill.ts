@@ -31,7 +31,8 @@ import { isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import { assertStepReportedUsage, baseReportedUsage } from "../authority/step-quote.js";
 import {
   bindProviderRawAttempt, listProviderRawAttempts, readProviderRawAttempt, requestEnvelopeDigest,
-  writeProviderRawAttempt, retainedFailureOutcome, verifyProviderRawReservation, type ProviderRawAttempt
+  writeProviderRawAttempt, retainedFailureOutcome, verifyProviderRawReservation,
+  providerRawSuccessEvidenceState, type ProviderRawAttempt
 } from "./provider-raw-attempt.js";
 import { assertExtractionFillComplete } from "./fill-completion.js";
 import { retainInteractiveAuthority } from "./retained-interactive-authority.js";
@@ -196,6 +197,15 @@ function importInteractiveFromRaw(
     responseMetadata: { finishReason: raw.finish_reason },
     ...(raw.usage === null ? {} : { usage: baseReportedUsage(raw.usage) })
   };
+  const physicalEvidence = providerRawSuccessEvidenceState(raw);
+  if (physicalEvidence !== "bound") {
+    appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
+      `${line.key}\tphysical_response_${physicalEvidence}\n`);
+    input.authority!.abandonPendingShard(line.key, raw.attempt_ordinal);
+    recordInteractiveOutcome(input.authority!, line.key, raw.attempt_ordinal,
+      extracted, "quarantined", raw.decoded_text_digest);
+    return "quarantined";
+  }
   if (!raw.full_replay_possible) {
     // Settle the completed response without parsing its prefix or replacing the full-response digest.
     recordInteractiveOutcome(input.authority!, line.key, raw.attempt_ordinal,
@@ -280,6 +290,7 @@ async function dispatchInteractiveLine(
     requestDigest: sourceSemanticRequestWireDigest(input.prepared.config, line, maxOutputTokens), decodedText: extracted.rawJson,
     finishReason: extracted.responseMetadata?.finishReason ?? null,
     ...(extracted.usage === undefined ? {} : { usage: extracted.usage }),
+    ...(extracted.responseBody === undefined ? {} : { responseBody: extracted.responseBody }),
     ...(extracted.httpResponse === undefined ? {} : { httpResponse: extracted.httpResponse })
   });
   return importInteractiveFromRaw(input, line, sourceCorpus, raw);

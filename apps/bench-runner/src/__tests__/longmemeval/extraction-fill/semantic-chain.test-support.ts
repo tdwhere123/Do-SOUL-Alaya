@@ -24,6 +24,13 @@ import { assertSemanticChainArchiveAdmission } from "./semantic-chain-archive-ad
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposure-session.js";
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
+import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
+
+function syntheticGeminiExtract(rawJson: string) {
+  const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+  return { rawJson, responseMetadata: { finishReason: "STOP" }, usage,
+    responseBody: syntheticGeminiBody(rawJson, "STOP", usage) };
+}
 
 export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySnapshot: { snapshot_path: string; db_sha256: string }): Promise<void> {
   const evaluatorRoot = join(cacheRoot, "..", "semantic-chain-evaluator");
@@ -148,8 +155,7 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   const fill = await executeSemanticProposalFill({ workset: oneQuery, cacheRoot: queryCache, authority,
     config: { providerUrl: "http://127.0.0.1:9", model: queryWorkset.model,
       requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: queryRawJson, responseMetadata: { finishReason: "STOP" },
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+      ...syntheticGeminiExtract(queryRawJson)
     }) } });
   expect(fill.newly_admitted).toBe(1);
   await expect(replaySemanticChain(blockedRoot)).rejects.toThrow(/query-semantics state changed/u);
@@ -230,12 +236,12 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   const aligned = await executeSemanticProposalFill({ workset, cacheRoot: correspondenceCache, authority: correspondenceAuthority,
     config: { providerUrl: "http://127.0.0.1:9", model: workset.model,
       requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
+      ...syntheticGeminiExtract(JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
         semantic_correspondence: { contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, source_interpretation_handle: "source1", assessments: assessmentForTestPairs(request.catalog, request.original_query, [
           { query: predicate.handle, source: frame.handle, query_excerpt: "completed",
             source_semantic_support: support.kind === "explicit" ? [{ kind: "lexical", mentions: support.mentions }] : [] },
           { query: slot.handle, source: sourceSlot.handle, query_excerpt: "What", source_semantic_support: sourceInterpretation.frames[0]!.slots[0]!.support }
-        ]) } }), responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+        ]) } }))
     }) } });
   expect(aligned.newly_admitted).toBe(1);
   const proofReplay = await replaySemanticChain(root);
@@ -318,8 +324,7 @@ async function assertEvidenceInputWithdrawal(cacheRoot: string, config: Semantic
     inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   const queryFill = await executeSemanticProposalFill({ workset, cacheRoot: queryCache, authority: queryAuthority,
     config: { providerUrl: "http://127.0.0.1:9", model: workset.model, requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" },
-    extractor: { extract: async () => ({ rawJson: queryRawJson, responseMetadata: { finishReason: "STOP" },
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
+    extractor: { extract: async () => syntheticGeminiExtract(queryRawJson) } });
   expect(queryFill.newly_admitted).toBe(1);
   const plan = await prepareSemanticChain({ ...config, query_cache_root: queryCache, correspondence_cache_root: correspondenceCache }, root);
   const ready = plan.queries[0];
@@ -348,11 +353,10 @@ async function assertEvidenceInputWithdrawal(cacheRoot: string, config: Semantic
     cacheRoot: correspondenceCache, authority: correspondenceAuthority,
     config: { providerUrl: "http://127.0.0.1:9", model: correspondenceWorkset.model,
       requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" }, extractor: { extract: async () => ({
-        rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
+        ...syntheticGeminiExtract(JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
           outcome: { status: "interpreted" }, semantic_correspondence: {
             contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, source_interpretation_handle: "source1",
-            assessments: assessmentForTestPairs(request.catalog, request.original_query, pairs) } }),
-        responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+            assessments: assessmentForTestPairs(request.catalog, request.original_query, pairs) } }))
       }) } });
   expect(correspondenceFill.newly_admitted).toBe(1);
   const replay = await replaySemanticChain(root);

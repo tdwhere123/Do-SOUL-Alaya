@@ -22,6 +22,7 @@ import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { proposalRecoveryCases } from "./proposal-recovery.test-support.js";
+import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js";
 
 const MODEL = "gemini-3.1-flash-lite";
 const PROFILE = "gemini-3.1-minimal-v1" as const;
@@ -62,9 +63,10 @@ function extractor(raws: string[], extra: { finish?: string | null; usage?: bool
     extract: async (input: { readonly userPrompt: string }) => {
       calls.push(input.userPrompt);
       const rawJson = queue.shift() ?? "{";
+      const usage = withUsage ? { inputTokens: 3, outputTokens: 5, totalTokens: 8 } : undefined;
       return {
         rawJson,
-        ...(withUsage ? { usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8 } } : {}),
+        ...(usage === undefined ? {} : { usage }), responseBody: syntheticGeminiBody(rawJson, finish, usage),
         responseMetadata: finish === null
           ? { finishReason: null as string | null }
           : { finishReason: finish, completionWitness: "finish_reason" as const, completionContractVersion: 1 as const }

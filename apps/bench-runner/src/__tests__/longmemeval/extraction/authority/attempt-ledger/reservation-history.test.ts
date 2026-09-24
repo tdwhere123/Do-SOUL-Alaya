@@ -21,7 +21,8 @@ it("retains exact settled ownership across reopen while leaving the other reserv
   f.ledger.recordTransportOutcome(first, { retryCount: 0, rateLimitRetries: 0, successfulRequestCount: 1 }, 1);
   const before = readFileSync(f.path, "utf8");
   const read = inspectExtractionAttemptLedger(f.identity)!;
-  expect(read.settledAttempts).toEqual([{ cacheKey: first, attemptOrdinal: 1 }]);
+  expect(read.settledAttempts).toMatchObject([{ cacheKey: first, attemptOrdinal: 1,
+    usageSha256: expect.stringMatching(/^[0-9a-f]{64}$/u) }]);
   expect(read.unresolvedAttempts).toEqual([{ cacheKey: second, attemptOrdinal: 2 }]);
   expect(() => assertExtractionAttemptReservation(read, first, 1)).not.toThrow();
   expect(() => assertExtractionAttemptReservation(read, first, 2)).toThrow(/exact reserved attempt/u);
@@ -30,7 +31,7 @@ it("retains exact settled ownership across reopen while leaving the other reserv
   expect(openExtractionAttemptLedger({ ...f.identity, startingMissing: 2 }).snapshot().settledAttempts).toEqual(read.settledAttempts);
 });
 
-it.each(["overlap", "duplicate", "beyond-ceiling", "foreign-failure"] as const)(
+it.each(["overlap", "duplicate", "beyond-ceiling", "foreign-failure", "null-entry"] as const)(
   "rejects %s in retained settled identities", damage => {
     const f = fixture(), key = "1".repeat(64);
     f.ledger.reserveAttemptOrdinal(key);
@@ -42,6 +43,7 @@ it.each(["overlap", "duplicate", "beyond-ceiling", "foreign-failure"] as const)(
     if (damage === "duplicate") record.settled_attempts.push(record.settled_attempts[0]);
     if (damage === "beyond-ceiling") record.settled_attempts[0].attempt_ordinal = 9;
     if (damage === "foreign-failure") record.settled_attempts[0].cache_key = "2".repeat(64);
+    if (damage === "null-entry") record.settled_attempts = [null];
     writeFileSync(f.path, JSON.stringify(record));
     expect(() => inspectExtractionAttemptLedger(f.identity)).toThrow(/invalid|recorded authority/u);
   }

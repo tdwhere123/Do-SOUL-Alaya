@@ -14,6 +14,7 @@ import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../r
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { isExtractionRequestProfile } from "../../../runs/extraction/request-profile.js";
 import type { SourceGoldUnit } from "../../../runs/measurement/source-gold-join.js";
+import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
 
 type ReadyQuery = Extract<SemanticChainPlan["queries"][number], { status: "ready" }>;
 type ArchivedRow = { query_key: string; status: string; response?: unknown; first_exposure?: unknown;
@@ -213,7 +214,9 @@ async function prepareAnotherCachedQuestion(fixture: Fixture, root: string): Pro
   const fill = await executeSemanticProposalFill({ workset, cacheRoot, authority,
     config: { providerUrl: "http://127.0.0.1:9", model: workset.model, requestProfile: workset.request_profile, apiKey: "fixture" },
     extractor: { extract: async () => ({ rawJson: fixture.queryRawJson, responseMetadata: { finishReason: "STOP" },
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      responseBody: syntheticGeminiBody(fixture.queryRawJson, "STOP",
+        { inputTokens: 1, outputTokens: 1, totalTokens: 2 }) }) } });
   expect(fill.newly_admitted).toBe(1);
   return prepareSemanticChain({ ...config, query_workset: workset, query_cache_root: cacheRoot }, root);
 }

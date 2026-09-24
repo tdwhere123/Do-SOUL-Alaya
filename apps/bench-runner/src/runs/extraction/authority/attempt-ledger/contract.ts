@@ -32,6 +32,11 @@ export interface ExtractionAttemptReservationRecord {
   readonly cache_key: string;
 }
 
+export interface ExtractionAttemptSettlementRecord extends ExtractionAttemptReservationRecord {
+  /** Present only when one explicit reservation owns the reported usage; absent in retained history. */
+  readonly usage_sha256?: string;
+}
+
 export interface ExtractionTransportFailureRecord {
   readonly attempt_ordinal: number;
   readonly cache_key: string;
@@ -63,7 +68,7 @@ export interface ExtractionAttemptLedgerRecord {
   readonly pending_keys: readonly string[];
   readonly unresolved_attempts: readonly ExtractionAttemptReservationRecord[];
   /** Additive v5 history; absence in old records does not prove settled ownership. */
-  readonly settled_attempts?: readonly ExtractionAttemptReservationRecord[];
+  readonly settled_attempts?: readonly ExtractionAttemptSettlementRecord[];
   readonly transport_failures: readonly ExtractionTransportFailureRecord[];
   readonly telemetry: ExtractionAttemptTelemetryRecord;
 }
@@ -171,6 +176,7 @@ export function assertStoredAttemptLedgerRecord(record: ExtractionAttemptLedgerR
       hasOrdinalOverlap(reservations, failures) ||
       !hasUniqueOrderedOrdinals(settled) || hasOrdinalBeyondAttempts(settled, record.attempts) ||
       hasOrdinalOverlap(reservations, settled) || settled.length + reservations.length > record.attempts ||
+      settled.some(attempt => attempt.usage_sha256 !== undefined && !isDigest(attempt.usage_sha256)) ||
       failures.some(failure => settled.some(attempt => attempt.attempt_ordinal === failure.attempt_ordinal &&
         attempt.cache_key !== failure.cache_key))) {
     throw new Error("extraction attempt ledger exceeds its recorded authority");
@@ -205,7 +211,7 @@ function isAttemptLedgerRecord(value: unknown): value is ExtractionAttemptLedger
       !isNonNegativeSafeInteger(record.attempts) || !isShards(record.successful_shards) ||
       !isKeys(record.pending_keys) || !isReservations(record.unresolved_attempts) ||
       !isFailures(record.transport_failures) || !isTelemetry(record.telemetry) ||
-      record.settled_attempts !== undefined && !isReservations(record.settled_attempts)) return false;
+      record.settled_attempts !== undefined && !isSettlements(record.settled_attempts)) return false;
   try {
     assertStoredAttemptLedgerRecord(record);
     return true;
@@ -307,6 +313,13 @@ function isReservations(value: unknown): value is readonly ExtractionAttemptRese
   return Array.isArray(value) && value.every((entry) => hasExactKeys(
     entry, ["attempt_ordinal", "cache_key"]
   ) && isPositiveSafeInteger(entry.attempt_ordinal) && isDigest(entry.cache_key));
+}
+
+function isSettlements(value: unknown): value is readonly ExtractionAttemptSettlementRecord[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "object" && entry !== null && hasExactKeys(entry,
+    ["attempt_ordinal", "cache_key", ...(Object.hasOwn(entry, "usage_sha256") ? ["usage_sha256"] : [])]
+  ) && isPositiveSafeInteger(entry.attempt_ordinal) && isDigest(entry.cache_key) &&
+    (entry.usage_sha256 === undefined || isDigest(entry.usage_sha256)));
 }
 
 function isFailures(value: unknown): value is readonly ExtractionTransportFailureRecord[] {

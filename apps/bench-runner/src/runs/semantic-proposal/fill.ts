@@ -20,7 +20,7 @@ import { acquireExtractionCacheWriteLease, type ExtractionCacheWriteLease } from
 import { assertStepReportedUsage, baseReportedUsage } from "../extraction/authority/step-quote.js";
 import {
   listProviderRawAttempts, readProviderRawAttempt,
-  writeProviderRawAttempt, retainedFailureOutcome, type ProviderRawAttempt
+  writeProviderRawAttempt, retainedFailureOutcome, providerRawSuccessEvidenceState, type ProviderRawAttempt
 } from "../extraction/fill/provider-raw-attempt.js";
 import { readLiveTransportFailure } from "../extraction/cache/cache-live-delegate.js";
 import {
@@ -211,7 +211,8 @@ export function readSemanticProposalResults(workset: SemanticProposalWorkset, ca
       // absent decoded text on a failed HTTP attempt is not valid-empty output.
       const status = outcome === "transport_failure" ? outcome : !hasVerifiedProposalCompletion(shard) ||
         typeof shard.outcome === "object" && shard.outcome !== null &&
-        "reason" in shard.outcome && shard.outcome.reason === "truncated_raw" ? "incomplete"
+        "reason" in shard.outcome && ["truncated_raw", "missing_response_body", "truncated_response_body",
+          "unsupported_response_body"].includes(String(shard.outcome.reason)) ? "incomplete"
         : outcome !== "interpreted" ? outcome
         : hasVerifiedProposalCompletion(shard) ? "core_rejected" : "incomplete";
       return { line, shard, status };
@@ -277,6 +278,7 @@ async function fillLine(
       decodedText: extracted.rawJson,
       finishReason: extracted.responseMetadata?.finishReason ?? null,
       ...(extracted.usage === undefined ? {} : { usage: extracted.usage }),
+      ...(extracted.responseBody === undefined ? {} : { responseBody: extracted.responseBody }),
       ...(extracted.httpResponse === undefined ? {} : { httpResponse: extracted.httpResponse })
     });
     const settled = replayPersistedProposalRaw(input, line, ledger, raw, lastAttempt);
@@ -390,6 +392,17 @@ function replayPersistedProposalRaw(
     ledger.abandonPendingShard(line.key, raw.attempt_ordinal);
     return { classified: "incomplete", admitted: false };
   }
+  const physicalEvidence = providerRawSuccessEvidenceState(raw);
+  if (physicalEvidence !== "bound") {
+    const usage = baseReportedUsage(raw.usage);
+    writeAttempt(input, line, raw.decoded_text, usage,
+      { status: "invalid", reason: physicalEvidence === "missing" ? "missing_response_body" :
+        physicalEvidence === "truncated" ? "truncated_response_body" : "unsupported_response_body" },
+      false, raw.attempt_ordinal, raw.finish_reason);
+    ledger.recordTransportOutcome(line.key, settledProposalRequestOutcome(usage), raw.attempt_ordinal);
+    ledger.abandonPendingShard(line.key, raw.attempt_ordinal);
+    return { classified: "incomplete", admitted: false };
+  }
   return settleDecoded(input, line, ledger, {
     rawJson: raw.decoded_text,
     finishReason: raw.finish_reason,
@@ -429,6 +442,9 @@ function settleDecoded(
 function replayCachedProposalShard(
   line: SemanticProposalLine, shard: SemanticProposalShard
 ): ProposalAttemptClass | "empty" {
+  if (typeof shard.outcome === "object" && shard.outcome !== null && "reason" in shard.outcome &&
+      ["missing_response_body", "truncated_response_body", "unsupported_response_body"]
+        .includes(String(shard.outcome.reason))) return "incomplete";
   if (shard.raw_json.length === 0) {
     if (shard.admitted || proposalOutcomeStatus(shard) === "interpreted") {
       throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${shard.cache_key}`);

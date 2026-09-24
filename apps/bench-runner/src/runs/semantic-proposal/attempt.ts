@@ -10,7 +10,7 @@ import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill
 import { materializeSemanticProposalLines, type SemanticProposalKind, type SemanticProposalLine,
   type SemanticProposalWorkset } from "./workset.js";
 import { readProviderRawAttempt, bindProviderRawAttempt, verifyProviderRawReservation, listProviderRawAttempts,
-  providerRawAttemptInputPaths,
+  providerRawAttemptInputPaths, providerRawSuccessEvidenceState,
   type ProviderRawAttempt } from "../extraction/fill/provider-raw-attempt.js";
 import { baseReportedUsage } from "../extraction/authority/step-quote.js";
 import { dirname } from "node:path";
@@ -96,7 +96,7 @@ function assertProposalShardRaw(shard: SemanticProposalShard, raw: ProviderRawAt
       raw.completion_witness !== shard.completion_witness ||
       canonicalJson(baseReportedUsage(raw.usage) ?? null) !== canonicalJson(shard.usage ?? null) ||
       hasAdmittedProposalOutcome(shard) && (!raw.full_replay_possible || raw.decoded_text_digest !== shard.raw_digest ||
-        raw.transport_failure !== undefined)) {
+        raw.transport_failure !== undefined || providerRawSuccessEvidenceState(raw) !== "bound")) {
     throw new SemanticProposalIdentityError("proposal success differs from its reserved raw attempt");
   }
 }

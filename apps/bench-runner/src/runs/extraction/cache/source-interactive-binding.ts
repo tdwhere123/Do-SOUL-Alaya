@@ -6,7 +6,8 @@ import { isCompleteSemanticFinish, STEP_SEMANTIC_REQUEST_PROFILE } from "../../c
 import { inspectExtractionAttemptLedger } from "../authority/attempt-ledger.js";
 import { baseReportedUsage } from "../authority/step-quote.js";
 import { computeExtractionRawJsonSha256 } from "../content-closure.js";
-import { readProviderRawAttempt, verifyProviderRawReservation } from "../fill/provider-raw-attempt.js";
+import { providerRawSuccessEvidenceState, readProviderRawAttempt,
+  verifyProviderRawReservation } from "../fill/provider-raw-attempt.js";
 import { readRetainedInteractiveAuthority } from "../fill/retained-interactive-authority.js";
 import { sourceSemanticRequestWireDigest } from "../fill/source-semantic-interactive-request.js";
 import { buildExtractionTransportProvenance, isExtractionTransportProvenance } from "../transport-route.js";
@@ -76,6 +77,7 @@ export function inspectInteractiveTransportEvidence(
       raw.request_digest !== sourceSemanticRequestWireDigest(requestConfig, line, receipt.limits.max_output_tokens) ||
       canonicalJson(entry.transport_provenance) !== canonicalJson(buildExtractionTransportProvenance(transport)) ||
       !raw.full_replay_possible || raw.transport_failure !== undefined ||
+      providerRawSuccessEvidenceState(raw) !== "bound" ||
       raw.decoded_text !== entry.raw_json || raw.decoded_text_digest !== provenance.responseSha256 ||
       raw.finish_reason !== provenance.finishReason ||
       canonicalJson(raw.usage === null ? undefined : baseReportedUsage(raw.usage)) !==

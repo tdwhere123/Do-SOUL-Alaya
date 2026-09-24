@@ -23,6 +23,7 @@ import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../r
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { materializeSemanticProposalLines, type SemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
+import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
 
 /** Authored engineering outputs enter the existing raw/authority/receive owners; no model fidelity claim. */
 export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot: string, cacheRoots: string[]) {
@@ -201,7 +202,10 @@ async function fillAuthored(workset: SemanticProposalWorkset, cacheRoot: string,
     inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   const result = await executeSemanticProposalFill({ workset, cacheRoot, authority,
     config: { providerUrl: "http://127.0.0.1:9", model: workset.model, requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" },
-    extractor: { extract: async ({ userPrompt }) => ({ rawJson: raw(userPrompt), responseMetadata: { finishReason: "STOP" },
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
+    extractor: { extract: async ({ userPrompt }) => {
+      const rawJson = raw(userPrompt), usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+      return { rawJson, responseMetadata: { finishReason: "STOP" }, usage,
+        responseBody: syntheticGeminiBody(rawJson, "STOP", usage) };
+    } } });
   expect(result.terminal_failures).toBe(0);
 }

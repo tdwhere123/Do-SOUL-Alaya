@@ -200,7 +200,7 @@ async function decodeGeminiResponse(response: Response, input: ExtractInput, att
     }, validation);
   }
   input.validateRawJson?.(decoded.rawJson);
-  return { ...decoded, responseMetadata: {
+  return { ...decoded, responseBody: raw, responseMetadata: {
     ...decoded.responseMetadata, maxOutputTokens: input.maxOutputTokens
   } };
 }

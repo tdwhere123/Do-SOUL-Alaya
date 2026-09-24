@@ -72,7 +72,7 @@ try {
           providerUrl: workset.provider_url, apiKey: mode === "recover" ? null : "loopback-only" } });
       const output = mode === "recover" ? { summary: result,
         statuses: fill.readSemanticProposalResults(workset, cacheRoot, authority.limits.max_output_tokens).map(row => row.status) } : result;
-      process.stdout.write(`${JSON.stringify(output)}\n`);
+      process.stdout.write(`${mode === "recover" ? "PROPOSAL_RECOVERY_RESULT:" : ""}${JSON.stringify(output)}\n`);
       process.exit(0);
     } catch (cause) {
       process.stderr.write(cause instanceof Error ? cause.message : String(cause));

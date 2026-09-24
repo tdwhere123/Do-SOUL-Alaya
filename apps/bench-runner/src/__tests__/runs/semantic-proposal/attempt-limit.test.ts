@@ -12,6 +12,7 @@ import { executeSemanticProposalFill, prepareSemanticProposal, readSemanticPropo
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
 import { providerRawAttemptPath, requestEnvelopeDigest, retainedFailureOutcome, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { readSemanticChainProposalResults } from "../../../runs/semantic-chain/inputs.js";
+import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js";
 
 const model = "gemini-3.1-flash-lite", requestProfile = "gemini-3.1-minimal-v1" as const;
 const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3", provider_url: "http://127.0.0.1:9",
@@ -66,10 +67,12 @@ it("settles persisted malformed raw at the single-attempt limit before dispatchi
   const ordinal = ledger.reserveAttemptOrdinal(first!.key);
   writeProviderRawAttempt({ root: cacheRoot, cacheKey: first!.key, attemptOrdinal: ordinal, kind: "query",
     model, requestProfile, requestDigest: first!.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest, decodedText: "{", finishReason: "STOP",
-    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } });
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+    responseBody: syntheticGeminiBody("{", "STOP", { inputTokens: 1, outputTokens: 1, totalTokens: 2 }) });
   const calls: string[] = [];
   const result = await executeSemanticProposalFill({ workset, cacheRoot, authority, config, extractor: {
-    extract: async input => { calls.push(input.userPrompt); return { rawJson: "{", responseMetadata: { finishReason: "STOP" } }; }
+    extract: async input => { calls.push(input.userPrompt); return { rawJson: "{", responseMetadata: { finishReason: "STOP" },
+      responseBody: syntheticGeminiBody("{") }; }
   } });
   expect(calls).toHaveLength(1);
   expect(calls[0]).toContain("Who inspected the pump?");
@@ -112,7 +115,8 @@ it.each(["malformed", "retryable_transport"] as const)(
         let originalCalls = 0;
         await expect(executeSemanticProposalFill({ workset: original, cacheRoot, authority: originalAuthority,
           config: { ...config, providerUrl }, extractor: { extract: async () => {
-            if (++originalCalls < 3) return { rawJson: "{", responseMetadata: { finishReason: "STOP" } };
+            if (++originalCalls < 3) return { rawJson: "{", responseMetadata: { finishReason: "STOP" },
+              responseBody: syntheticGeminiBody("{") };
             throw Object.assign(new Error("interrupted after durable reservation"), { code: "ENOSPC" });
           } } })).rejects.toMatchObject({ code: "ENOSPC" });
         expect(originalCalls).toBe(3);
@@ -129,6 +133,7 @@ it.each(["malformed", "retryable_transport"] as const)(
           const raw = writeProviderRawAttempt({ root: cacheRoot, cacheKey: line.key, attemptOrdinal: ordinal, kind: "query",
             model, requestProfile, requestDigest: line.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
             decodedText: outcome === "malformed" ? "{" : "", finishReason: outcome === "malformed" ? "STOP" : null,
+            ...(outcome === "malformed" ? { responseBody: syntheticGeminiBody("{") } : {}),
             ...(outcome === "malformed" ? {} : { failureRetryable: true, failureClassification: "failure_max_retries",
               transportFailure: { attempt: 1, kind: "http_error", phase: "request", httpStatus: 503, fingerprint: "e".repeat(64) } }) });
           if (mode === "settled") ledger.recordTransportOutcome(line.key, retainedFailureOutcome(raw) ?? {
@@ -171,7 +176,7 @@ it.each(["unresolved", "settled"] as const)(
       const ordinal = ledger.reserveAttemptOrdinal(line.key);
       writeProviderRawAttempt({ root: cacheRoot, cacheKey: line.key, attemptOrdinal: ordinal, kind: "query", model,
         requestProfile, requestDigest: line.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
-        decodedText: text, finishReason: "STOP" });
+        decodedText: text, finishReason: "STOP", responseBody: syntheticGeminiBody(text) });
       if (mode === "settled") ledger.recordTransportOutcome(line.key, {
         retryCount: 0, rateLimitRetries: 0, successfulRequestCount: 1
       }, ordinal);
@@ -193,12 +198,13 @@ it.each(["malformed", "retryable_transport"] as const)(
     const first = ledger.reserveAttemptOrdinal(line.key);
     writeProviderRawAttempt({ root: cacheRoot, cacheKey: line.key, attemptOrdinal: first, kind: "query", model,
       requestProfile, requestDigest: line.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
-      decodedText: "{", finishReason: "STOP" });
+      decodedText: "{", finishReason: "STOP", responseBody: syntheticGeminiBody("{") });
     ledger.recordTransportOutcome(line.key, { retryCount: 0, rateLimitRetries: 0, successfulRequestCount: 1 }, first);
     const last = ledger.reserveAttemptOrdinal(line.key);
     writeProviderRawAttempt({ root: cacheRoot, cacheKey: line.key, attemptOrdinal: last, kind: "query", model,
       requestProfile, requestDigest: line.requestDigest, attemptLineageDigest: authority.attempt_lineage_digest,
       decodedText: outcome === "malformed" ? "{" : "", finishReason: outcome === "malformed" ? "STOP" : null,
+      ...(outcome === "malformed" ? { responseBody: syntheticGeminiBody("{") } : {}),
       ...(outcome === "malformed" ? {} : { failureRetryable: true, failureClassification: "failure_max_retries",
         transportFailure: { attempt: 1, kind: "http_error", phase: "request", httpStatus: 503, fingerprint: "f".repeat(64) } }) });
     expect(ledger.snapshot()).toMatchObject({ attempts: 2, maximumAttempts: 4,
