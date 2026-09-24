@@ -14,6 +14,7 @@ import type { SourceSemanticQuery } from "./semantic-query.js";
 
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT = "source-semantic-correspondence-selection-v2" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT = "source-semantic-correspondence-endpoint-evidence-v1" as const;
+const CORRESPONDENCE_ENDPOINT_EVIDENCE_MAX_BYTES = 1_000_000;
 export const SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE = /^qe([1-9][0-9]{0,2})$/u;
 export const SOURCE_SEMANTIC_SOURCE_ENDPOINT_HANDLE = /^se([1-9][0-9]{0,2})$/u;
 
@@ -153,23 +154,43 @@ export function buildSourceSemanticCorrespondenceEndpointEvidence(
   descriptors: readonly SourceSemanticCorrespondenceDescriptor[],
   catalog: SourceSemanticCorrespondenceEndpointCatalog
 ) {
+  let evidenceBytes = boundedJsonBytes({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT,
+    query_endpoints: [], source_endpoints: [] }, CORRESPONDENCE_ENDPOINT_EVIDENCE_MAX_BYTES);
+  const charge = (value: unknown, separator = false) => {
+    const available = CORRESPONDENCE_ENDPOINT_EVIDENCE_MAX_BYTES - evidenceBytes - Number(separator);
+    evidenceBytes += boundedJsonBytes(value, available) + Number(separator);
+  };
+  return { contract: SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT,
+    query_endpoints: queryEndpointEvidence(query, catalog, charge),
+    source_endpoints: sourceEndpointEvidence(descriptors, catalog, charge) };
+}
+
+type EvidenceCharge = (value: unknown, separator?: boolean) => void;
+
+function queryEndpointEvidence(
+  query: SourceSemanticQuery, catalog: SourceSemanticCorrespondenceEndpointCatalog, charge: EvidenceCharge
+) {
   const variables = new Map(query.variables.map((row) => [row.id, row]));
-  const sources = new Map(descriptors.map((row) => [row.source_interpretation_handle, row.interpretation]));
-  const query_endpoints = catalog.query_endpoints.map((endpoint) => {
+  const query_endpoints = catalog.query_endpoints.map((endpoint, endpointIndex) => {
     if (endpoint.kind === "referent") {
       const variable = variables.get(endpoint.variable!);
       if (variable?.reference === undefined) throw new AlayaError("VALIDATION", "catalog referent has no declared query reference");
+      charge({ handle: endpoint.handle, kind: endpoint.kind, reference: variable.reference,
+        attribution_context: query.attribution_context, uses: [] }, endpointIndex > 0);
+      let useCount = 0;
       const uses = query.alternatives.flatMap((alternative, index) => alternative.frames.flatMap((frame) =>
-        frame.role_requirements.filter((role) => role.target_variable === variable.id).map((role) => ({
-          alternative: index, frame: frame.id, predicate_reading: frame.predicate_reading,
-          operator: frame.operator ?? null, source_act: frame.source_act ?? null,
-          role: role.id, role_reading: role.role_reading, role_support: role.support,
-          context_obligations: alternative.context_obligations.filter((obligation) => obligation.frame === frame.id),
-          alternative_context: { purpose: alternative.purpose ?? null,
-            context_obligations: alternative.context_obligations,
-            answer_frames: alternative.answer_frames ?? null,
-            evidence_inputs: alternative.evidence_inputs ?? null }
-        }))));
+        frame.role_requirements.filter((role) => role.target_variable === variable.id).map((role) => {
+          const use = { alternative: index, frame: frame.id, predicate_reading: frame.predicate_reading,
+            operator: frame.operator ?? null, source_act: frame.source_act ?? null,
+            role: role.id, role_reading: role.role_reading, role_support: role.support,
+            context_obligations: alternative.context_obligations.filter((obligation) => obligation.frame === frame.id),
+            alternative_context: { purpose: alternative.purpose ?? null,
+              context_obligations: alternative.context_obligations,
+              answer_frames: alternative.answer_frames ?? null,
+              evidence_inputs: alternative.evidence_inputs ?? null } };
+          charge(use, useCount++ > 0);
+          return use;
+        })));
       return { handle: endpoint.handle, kind: endpoint.kind, reference: variable.reference,
         attribution_context: query.attribution_context, uses };
     }
@@ -184,14 +205,26 @@ export function buildSourceSemanticCorrespondenceEndpointEvidence(
         answer_frames: alternative.answer_frames ?? null,
         evidence_inputs: alternative.evidence_inputs ?? null } };
     if (endpoint.kind === "predicate") {
-      return { handle: endpoint.handle, kind: endpoint.kind, frame_context,
+      const row = { handle: endpoint.handle, kind: endpoint.kind, frame_context,
         roles: frame.role_requirements };
+      charge(row, endpointIndex > 0);
+      return row;
     }
     const role = frame.role_requirements.find((row) => row.id === endpoint.slot);
     if (role === undefined) throw new AlayaError("VALIDATION", "catalog slot has no declared query role");
-    return { handle: endpoint.handle, kind: endpoint.kind, frame_context, role };
+    const row = { handle: endpoint.handle, kind: endpoint.kind, frame_context, role };
+    charge(row, endpointIndex > 0);
+    return row;
   });
-  const source_endpoints = catalog.source_endpoints.map((endpoint) => {
+  return query_endpoints;
+}
+
+function sourceEndpointEvidence(
+  descriptors: readonly SourceSemanticCorrespondenceDescriptor[],
+  catalog: SourceSemanticCorrespondenceEndpointCatalog, charge: EvidenceCharge
+) {
+  const sources = new Map(descriptors.map((row) => [row.source_interpretation_handle, row.interpretation]));
+  const source_endpoints = catalog.source_endpoints.map((endpoint, endpointIndex) => {
     const interpretation = sources.get(endpoint.source_interpretation_handle);
     if (interpretation === undefined) throw new AlayaError("VALIDATION", "catalog source endpoint has no declared interpretation");
     const source_context = { attribution_context: interpretation.source.attribution_context,
@@ -199,20 +232,27 @@ export function buildSourceSemanticCorrespondenceEndpointEvidence(
     if (endpoint.kind === "referent") {
       const referent = interpretation.referents.find((row) => row.id === endpoint.referent);
       if (referent === undefined) throw new AlayaError("VALIDATION", "catalog referent has no declared source referent");
+      charge({ handle: endpoint.handle, kind: endpoint.kind, source_context, mentions: [], uses: [] }, endpointIndex > 0);
+      let mentionCount = 0;
       const mentions = referent.mentions.map((id) => {
         const mention = interpretation.mentions.find((row) => row.id === id);
         if (mention === undefined) throw new AlayaError("VALIDATION", "source referent has no declared mention");
-        return { id: mention.id, text: mention.text, assertion_id: mention.assertion_id,
+        const row = { id: mention.id, text: mention.text, assertion_id: mention.assertion_id,
           source_ref: mention.source_ref, utf8_span: mention.utf8_span,
           span_space: mention.span_space ?? null };
+        charge(row, mentionCount++ > 0);
+        return row;
       });
+      let useCount = 0;
       const uses = interpretation.frames.flatMap((frame) => frame.bindings.filter((binding) =>
         binding.target.kind === "node" && binding.target.id === referent.id).map((binding) => {
           const slot = frame.slots.find((row) => row.id === binding.slot_id);
           if (slot === undefined) throw new AlayaError("VALIDATION", "source binding has no declared slot");
-          return { frame: frame.id, assertion_ids: frame.assertion_ids, context_owner: frame.context_owner,
+          const use = { frame: frame.id, assertion_ids: frame.assertion_ids, context_owner: frame.context_owner,
             slot: slot.id, role_reading: slot.role_reading, slot_support: slot.support,
             target: binding.target, binding_support: binding.support };
+          charge(use, useCount++ > 0);
+          return use;
         }));
       return { handle: endpoint.handle, kind: endpoint.kind, source_context, mentions, uses };
     }
@@ -222,17 +262,86 @@ export function buildSourceSemanticCorrespondenceEndpointEvidence(
       context_owner: frame.context_owner, predicate_support: frame.predicate_support,
       additional_support: frame.additional_support };
     if (endpoint.kind === "frame") {
-      return { handle: endpoint.handle, kind: endpoint.kind, source_context, frame_context,
-        slots: frame.slots.map((slot) => ({ ...slot,
-          bindings: frame.bindings.filter((binding) => binding.slot_id === slot.id) })) };
+      charge({ handle: endpoint.handle, kind: endpoint.kind, source_context, frame_context, slots: [] }, endpointIndex > 0);
+      const slots = frame.slots.map((slot, slotIndex) => {
+        const row = { ...slot, bindings: frame.bindings.filter((binding) => binding.slot_id === slot.id) };
+        charge(row, slotIndex > 0);
+        return row;
+      });
+      return { handle: endpoint.handle, kind: endpoint.kind, source_context, frame_context, slots };
     }
     const slot = frame.slots.find((row) => row.id === endpoint.slot);
     if (slot === undefined) throw new AlayaError("VALIDATION", "catalog slot has no declared source slot");
-    return { handle: endpoint.handle, kind: endpoint.kind, source_context, frame_context,
-      slot, bindings: frame.bindings.filter((binding) => binding.slot_id === slot.id) };
+    const bindings = frame.bindings.filter((binding) => binding.slot_id === slot.id);
+    charge({ handle: endpoint.handle, kind: endpoint.kind, source_context, frame_context,
+      slot, bindings: [] }, endpointIndex > 0);
+    bindings.forEach((binding, index) => charge(binding, index > 0));
+    return { handle: endpoint.handle, kind: endpoint.kind, source_context, frame_context, slot, bindings };
   });
-  return { contract: SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT,
-    query_endpoints, source_endpoints };
+  return source_endpoints;
+}
+
+/** Counts ordinary JSON values without materializing an oversized serialized projection. */
+function boundedJsonBytes(value: unknown, maximum: number): number {
+  let bytes = 0;
+  const active = new WeakSet<object>();
+  const add = (amount: number) => {
+    if (amount > maximum - bytes) {
+      throw new AlayaError("VALIDATION", "semantic_correspondence request exceeds input budget");
+    }
+    bytes += amount;
+  };
+  const write = (item: unknown): void => {
+    if (typeof item === "string") {
+      add(2);
+      for (let index = 0; index < item.length; index++) {
+        const code = item.charCodeAt(index);
+        if (code === 34 || code === 92 || code === 8 || code === 9 || code === 10 || code === 12 || code === 13) add(2);
+        else if (code < 32) add(6);
+        else if (code >= 0xD800 && code <= 0xDBFF) {
+          if (index + 1 < item.length && item.charCodeAt(index + 1) >= 0xDC00 && item.charCodeAt(index + 1) <= 0xDFFF) {
+            add(4);
+            index++;
+          } else add(6);
+        } else if (code >= 0xDC00 && code <= 0xDFFF) add(6);
+        else add(code < 0x80 ? 1 : code < 0x800 ? 2 : 3);
+      }
+      return;
+    }
+    if (item === null || item === undefined) { add(4); return; }
+    if (typeof item === "boolean") { add(item ? 4 : 5); return; }
+    if (typeof item === "number") { add(JSON.stringify(item).length); return; }
+    if (Array.isArray(item)) {
+      if (active.has(item) || "toJSON" in item) {
+        throw new AlayaError("VALIDATION", "semantic_correspondence endpoint evidence requires JSON values");
+      }
+      active.add(item);
+      add(2);
+      for (let index = 0; index < item.length; index++) {
+        if (index > 0) add(1);
+        write(item[index]);
+      }
+      active.delete(item);
+      return;
+    }
+    if (typeof item !== "object" || "toJSON" in item) {
+      throw new AlayaError("VALIDATION", "semantic_correspondence endpoint evidence requires JSON values");
+    }
+    if (active.has(item)) throw new AlayaError("VALIDATION", "semantic_correspondence endpoint evidence requires JSON values");
+    active.add(item);
+    add(2);
+    let fields = 0;
+    for (const [key, entry] of Object.entries(item)) {
+      if (entry === undefined) continue;
+      if (fields++ > 0) add(1);
+      write(key);
+      add(1);
+      write(entry);
+    }
+    active.delete(item);
+  };
+  write(value);
+  return bytes;
 }
 
 export type SourceSemanticCorrespondenceEndpointEvidence = ReturnType<typeof buildSourceSemanticCorrespondenceEndpointEvidence>;

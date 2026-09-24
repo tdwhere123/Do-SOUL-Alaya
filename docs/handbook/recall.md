@@ -746,7 +746,10 @@ assertion locations, frame context, support and bindings onto the existing catal
 handles. It selects no equivalence and gives no new proof authority. Mention span
 units remain tagged separately from source UTF-8 assertion and attribution spans;
 the source interpretation identity does not bind mention spans. Recorded v5 request
-bytes and cache identities remain historical and cannot enter current generation.
+bytes and cache identities remain historical and cannot enter current generation;
+there is no retained v5 C semantic replay entry. Protocol counts projected JSON
+bytes incrementally before expanding each endpoint and repeated use, rejecting an
+oversized projection at 1 MB; SOUL retains the full-request byte cap.
 The Protocol endpoint-evidence projection exports are additive minor API under
 invariant §25; the v6 C request is a new wire identity.
 Role-only inputs explicitly

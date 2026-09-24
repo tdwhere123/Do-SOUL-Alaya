@@ -10,12 +10,14 @@ import {
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
 } from "@do-soul/alaya-core";
 import {
-  SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION,
-  SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
+  AlayaError, SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION,
+  SourceSemanticInterpretationSchema, SourceSemanticQuerySchema,
+  buildSourceSemanticCorrespondenceEndpointCatalog, buildSourceSemanticCorrespondenceEndpointEvidence,
+  sourceSemanticInterpretationIdentity,
   UNKNOWN_UTTERANCE_ATTRIBUTION
 } from "@do-soul/alaya-protocol";
 import {
-  proposeCorrespondenceSemantics, type SourceSemanticCorrespondenceRequest
+  buildSourceSemanticCorrespondenceRequest, proposeCorrespondenceSemantics, type SourceSemanticCorrespondenceRequest
 } from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import {
@@ -235,6 +237,47 @@ it("rejects an semantic_correspondence workset whose original question differs f
   expect(() => materializeSemanticProposalLines({ ...workset, items: [{
     ...(workset.items[0] as Record<string, unknown>), original_query: "Another original question?"
   }] }, 128)).toThrow(/does not bind the original query/u);
+});
+
+it("bounds a Core-admitted 120-frame projection before traversing its full endpoint graph", () => {
+  const base = admittedQuery();
+  const frames = Array.from({ length: 120 }, (_, index) => ({
+    id: `frame${index}`, variable: "proposition", predicate_reading: "send",
+    role_requirements: [{ id: "role", role_reading: "object", target_variable: "entity",
+      support: { kind: "query_text" as const, excerpt: "parcel" } }]
+  }));
+  const query = SourceSemanticQuerySchema.parse({ ...base,
+    variables: [{ id: "entity", sort: "entity", reference: { kind: "query_text", excerpt: "parcel" } },
+      { id: "proposition", sort: "proposition" }],
+    return_variables: [], gaps: [],
+    alternatives: [{ frames,
+      context_obligations: Array.from({ length: 256 }, (_, index) => ({
+        frame: `frame${index % 120}`, kind: "asserted_at_source"
+      })),
+      answer_frames: frames.map(row => row.id),
+      evidence_inputs: Array.from({ length: 16 }, () => ({ frames: frames.map(row => row.id) })) }],
+    requested_operation: { reading: "send", support: { kind: "query_text", excerpt: "sent" } }
+  });
+  expect(admitSourceSemanticQuery(query, ORIGINAL).kind).toBe("admitted");
+  const source = interpretation();
+  const descriptor = { source_interpretation_handle: "source1", interpretation: source };
+  const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(query, [descriptor]);
+  expect(catalog.query_endpoints).toHaveLength(241);
+  const guarded = structuredClone(query);
+  Object.defineProperty(guarded.alternatives[0]!.frames[119]!, "role_requirements", {
+    get() { throw new Error("projection traversed the final frame after exceeding its budget"); }
+  });
+  let directFailure: unknown;
+  try { buildSourceSemanticCorrespondenceEndpointEvidence(guarded, [descriptor], catalog); }
+  catch (error) { directFailure = error; }
+  expect(directFailure).toBeInstanceOf(AlayaError);
+  expect(directFailure).toMatchObject({ code: "VALIDATION", message: "semantic_correspondence request exceeds input budget" });
+  const sourceDescriptor = { source_interpretation_id: sourceSemanticInterpretationIdentity(source, sha256),
+    interpretation: source };
+  expect(() => buildSourceSemanticCorrespondenceRequest({ original_query: ORIGINAL,
+    admitted_query_semantics: query, source_interpretation_descriptors: [sourceDescriptor],
+    producer_id: "authored-control", producer_version: "1" }))
+    .toThrow(/semantic_correspondence request exceeds input budget/u);
 });
 
 async function fillCorrespondence(excerpt: string) {
