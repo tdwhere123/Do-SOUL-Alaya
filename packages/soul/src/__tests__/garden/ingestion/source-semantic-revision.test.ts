@@ -3,7 +3,7 @@ import { SOURCE_SEMANTIC_SYSTEM_PROMPT, buildSourceSemanticRequest, parseSourceS
 import { prepareSourceSemanticRevision } from "../../../garden/ingestion/official-api/source-semantic-revision.js";
 import { receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 
-const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor might read it.", assertionIds: [1, 2],
+const input = { sourceCorpus: "The permit is valid on Tuesday only. The clerk does not know whether the permit is valid on Thursday.", assertionIds: [1, 2],
   source_id: "revision", source_version: "1", producer_id: "authored", producer_version: "1" };
 const raw = SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
 
@@ -43,11 +43,11 @@ describe("source-bound explicit proposal revisions", () => {
   it("retains rejected raw and precise diagnostics while applying unchanged admission to the replacement", () => {
     const parent = buildSourceSemanticRequest(input);
     const broken = JSON.parse(raw);
-    broken.content.roots[0].expression.arguments[1].target.arguments[0].target = { kind: "occurrence", key: "absent" };
+    broken.content.roots[1].expression.content.arguments[1].target.arguments[1].target = { kind: "occurrence", key: "absent" };
     const previous = JSON.stringify(broken);
     const original = receiveSourceSemantics(previous, parent, input);
     expect(original.outcome.status).toBe("invalid");
-    const revision = prepareSourceSemanticRevision(parent, previous, [{ assertion_ids: [1], comment: "Preserve the lender and promised loan scope." }]);
+    const revision = prepareSourceSemanticRevision(parent, previous, [{ assertion_ids: [2], comment: "Preserve the supplied proposition under uncertainty." }]);
     expect(revision.structural_diagnostics.length).toBeGreaterThan(0);
     expect(JSON.stringify(revision.structural_diagnostics)).toContain("absent");
     const request = buildSourceSemanticRequest({ ...input, revision });
@@ -55,8 +55,9 @@ describe("source-bound explicit proposal revisions", () => {
     expect(receiveSourceSemantics(previous, request, input).outcome.status).toBe("invalid");
     const replacement = receiveSourceSemantics(raw, request, input);
     expect(replacement.outcome.status).toBe("interpreted");
-    const loan = replacement.interpretation!.frames.find((row) => row.predicate_support.reading === "lend")!;
-    expect(replacement.interpretation!.asserted_at_scope).not.toContain(loan.id);
+    const embedded = replacement.interpretation!.frames.find((row) => row.predicate_support.reading === "valid"
+      && row.context_owner.kind === "embedding")!;
+    expect(replacement.interpretation!.asserted_at_scope).not.toContain(embedded.id);
     expect(original.rawJson).toBe(previous);
     expect(original.interpretation).toBeUndefined();
   });
@@ -64,7 +65,7 @@ describe("source-bound explicit proposal revisions", () => {
   it("rejects foreign sources, changed prior raw and out-of-catalog review before production", () => {
     const parent = buildSourceSemanticRequest(input);
     const revision = prepareSourceSemanticRevision(parent, raw);
-    expect(() => buildSourceSemanticRequest({ ...input, sourceCorpus: input.sourceCorpus.replace("Mira", "Nora"), revision })).toThrow(/different original source/u);
+    expect(() => buildSourceSemanticRequest({ ...input, sourceCorpus: input.sourceCorpus.replace("Tuesday", "Monday"), revision })).toThrow(/different original source/u);
     expect(() => buildSourceSemanticRequest({ ...input, revision: { ...revision, previous_response: "{}" } })).toThrow(/digest mismatch/u);
     expect(() => prepareSourceSemanticRevision(parent, raw, [{ assertion_ids: [9], comment: "Foreign assertion" }])).toThrow(/unselected assertion/u);
     expect(() => prepareSourceSemanticRevision(parent, "{")).toThrow(/complete retained JSON/u);

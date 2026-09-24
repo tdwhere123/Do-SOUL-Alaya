@@ -11,6 +11,8 @@ import { officialApiExtractionResponseSchema, officialApiExtractionResponseSchem
 
 const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor might read it.", assertionIds: [1, 2],
   source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
+const guidanceInput = { ...input,
+  sourceCorpus: "The permit is valid on Tuesday only. The clerk does not know whether the permit is valid on Thursday." };
 const raw = SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
 
 describe("source-bound nested semantic expressions", () => {
@@ -57,24 +59,23 @@ describe("source-bound nested semantic expressions", () => {
     expect(flattened.asserted_at_scope).toEqual([flattened.frames[0]!.id]);
   });
 
-  it("compiles source scope and co-reference with host-owned identities", () => {
-    const received = proposeSourceSemantics(input, { rawJson: raw });
+  it("compiles the guidance example with a local qualifier and known content under uncertainty", () => {
+    const received = proposeSourceSemantics(guidanceInput, { rawJson: raw });
     expect(received.outcome).toEqual({ status: "interpreted", gaps: [] });
     expect(received.rawJson).toBe(raw);
     const h = received.interpretation!;
-    const frame = (reading: string) => h.frames.find((row) => row.predicate_support.reading === reading)!;
-    const promise = frame("promise"), loan = frame("lend"), reading = frame("read");
-    const universal = h.operators.find((row) => row.operator === "forall")!;
-    const possibility = h.operators.find((row) => row.operator === "possible")!;
-    expect(h.asserted_at_scope).toEqual(expect.arrayContaining([promise.id, universal.id]));
-    expect(h.asserted_at_scope).not.toContain(loan.id);
-    expect(h.asserted_at_scope).not.toContain(reading.id);
-    expect(loan.context_owner).toEqual({ kind: "embedding", parent_frame: promise.id, content_argument: loan.id });
-    expect(reading.context_owner).toEqual({ kind: "operator", operator_handle: possibility.id });
-    expect(reading.bindings[0]?.target).toEqual({ kind: "bound_variable", quantifier: universal.id, binder: "member" });
+    const validity = h.frames.filter((row) => row.predicate_support.reading === "valid");
+    const knowledge = h.frames.find((row) => row.predicate_support.reading === "know whether")!;
+    const negation = h.operators.find((row) => row.operator === "not")!;
+    expect(validity).toHaveLength(2);
+    expect(validity[0]!.slots.map((row) => row.role_reading)).toContain("exclusive applicability day");
+    expect(validity[1]!.slots.map((row) => row.role_reading)).not.toContain("exclusive applicability day");
+    expect(h.asserted_at_scope).toEqual([validity[0]!.id, negation.id]);
+    expect(knowledge.context_owner).toEqual({ kind: "operator", operator_handle: negation.id });
+    expect(validity[1]!.context_owner).toEqual({ kind: "embedding", parent_frame: knowledge.id,
+      content_argument: validity[1]!.id });
     expect(h.referents.some((row) => row.mentions.map((id) => h.mentions.find((mention) => mention.id === id)?.text)
-      .join("|") === "atlas|it")).toBe(true);
-    expect(h.domains?.[0]?.closure).toEqual({ kind: "open" });
+      .join("|") === "permit|permit")).toBe(true);
   });
 
   it("selects schema and exact prompt from each recorded producer contract", () => {
