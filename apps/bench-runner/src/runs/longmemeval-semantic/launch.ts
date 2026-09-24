@@ -40,9 +40,12 @@ export async function runLongMemEvalSemanticLauncher(args: readonly string[]): P
       path: required("--config"), maxBytes: 1024 * 1024, label: "LongMemEval population metadata" })), root);
     else if (operation === "run-population-stage") result = await runLongMemEvalLazyPopulationStage(root,
       required("--member"), required("--stage") as Parameters<typeof runLongMemEvalLazyPopulationStage>[2]);
-    else if (operation === "observe-population") result = await observeLongMemEvalLazyPopulation(root,
-      JSON.parse(readBoundedCanonicalUtf8Artifact({ path: required("--config"), maxBytes: 1024 * 1024,
-        label: "LongMemEval population cutoff" })), required("--evaluator-root"));
+    else if (operation === "observe-population") {
+      const cutoffConfigPath = required("--config");
+      result = await observeLongMemEvalLazyPopulation(root,
+        JSON.parse(readBoundedCanonicalUtf8Artifact({ path: cutoffConfigPath, maxBytes: 1024 * 1024,
+          label: "LongMemEval population cutoff" })), required("--evaluator-root"), cutoffConfigPath);
+    }
     else throw new AlayaError("VALIDATION", "unknown LongMemEval semantic operation");
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`); return 0;
   } catch (error) {

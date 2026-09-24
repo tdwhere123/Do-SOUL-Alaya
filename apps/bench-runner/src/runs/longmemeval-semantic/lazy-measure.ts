@@ -22,12 +22,14 @@ export type LongMemEvalLazyMeasurementInput = LongMemEvalLazyConfigInput & Reado
   evaluatorRoot: string;
 }>;
 
-/** Trusted import may parse labels; answer-session gold joins only after durable first exposure is readmitted. */
-export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazyMeasurementInput) {
-  const first = await readLazyQualifiedExposureState(input.lazyRoot);
-  const bound = await admitLongMemEvalLazyConfig(input);
-  const frozen = readLongMemEvalSemanticFreeze(input.root);
-  if (frozen.contract !== "longmemeval-native-semantic-v3") throw new AlayaError("CONFLICT", "native question arm changed");
+type NativeFreeze = Extract<ReturnType<typeof readLongMemEvalSemanticFreeze>,
+  { contract: "longmemeval-native-semantic-v3" }>;
+type LazyExposure = Awaited<ReturnType<typeof readLazyQualifiedExposureState>>;
+type BoundLazyConfig = Awaited<ReturnType<typeof admitLongMemEvalLazyConfig>>;
+
+/** Inventory the retained producer paths before any evaluator output or gold join. */
+function lazyMeasurementInputPaths(input: LongMemEvalLazyMeasurementInput,
+  first: LazyExposure, bound: BoundLazyConfig, frozen: NativeFreeze): readonly string[] {
   const selected = frozen.selected[0]!;
   const questionPaths = longMemEvalQuestionInputPaths(input.root, selected.index);
   const datasetPaths = longMemEvalDatasetInputPaths("longmemeval_s", {
@@ -41,19 +43,57 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
   ];
   const sourceRoots = new Set([input.sourceCacheRoot, ...frozen.config.source_cache_roots,
     ...bound.config.cache_owners.map(owner => owner.cacheRoot)]);
-  const outputRoot = admitEvaluatorOutputRoot(input.evaluatorRoot, [input.root, longMemEvalFreezePath(input.root),
-    input.lazyRoot, ...lazyQualificationRetainedInputPaths(input.lazyRoot),
-    input.preparedPath, input.sourcePreflightPath,
+  return [input.root, longMemEvalFreezePath(input.root), input.lazyRoot,
+    ...lazyQualificationRetainedInputPaths(input.lazyRoot), input.preparedPath, input.sourcePreflightPath,
     bound.config.initial_chain_root, join(bound.config.initial_chain_root, "prepare.json"),
     ...semanticChainReplayInputPaths(first.final.final_chain_root, first.path, [selected.query_key]),
     first.final.final_chain_root, first.final.final_snapshot_path, first.final.publication_report_path,
-    ...questionPaths.admittedInputPaths,
-    frozen.config.data_dir, frozen.config.pinned_meta_root,
+    ...questionPaths.admittedInputPaths, frozen.config.data_dir, frozen.config.pinned_meta_root,
     datasetPaths.sourcePath, datasetPaths.checksumSource,
     ...semanticProposalCacheInputPaths(frozen.query_workset, frozen.config.query_cache_root, frozen.config.max_output_tokens),
     frozen.config.correspondence_cache_root,
     ...[...sourceRoots].flatMap(cacheRoot => sourceCacheInputPaths(cacheRoot, sourceKeys)),
-    bound.config.chain.snapshot_path, bound.config.chain.query_cache_root, bound.config.chain.correspondence_cache_root]);
+    bound.config.chain.snapshot_path, bound.config.chain.query_cache_root, bound.config.chain.correspondence_cache_root];
+}
+
+/** Persist an unknown result without joining gold when first exposure was not durable. */
+function writeUnavailableLazyMeasurement(outputRoot: string, first: LazyExposure,
+  bound: BoundLazyConfig, frozen: NativeFreeze) {
+  const selected = frozen.selected[0]!;
+  const absenceReason = first.status === "reserved_unknown"
+    ? "first_exposure_reserved_unknown" : "first_exposure_not_durable";
+  const eligible = selected.cohort === "answerable" ? 1 : 0;
+  const rows = frozen.inventory.map(entry => entry.question_id === selected.question_id
+    ? { ...entry, selected: true, outcome: selected.cohort === "abstention" ? "uncalibrated" : "unknown",
+      reason: absenceReason, measurement_path: null, mechanism: "not_exercised",
+      attribution: { layer: first.status === "reserved_unknown" ? "first_exposure_unknown" : "first_exposure_unattempted", native: null } }
+    : { ...entry, selected: false, outcome: "not_selected_development", reason: null,
+      measurement_path: null, mechanism: "not_exercised", attribution: { layer: "not_selected", native: null } });
+  const result = { contract: "longmemeval-lazy-semantic-measurement-v1", status: "development_only",
+    metric: "source-bearing-union-first-exposure-any-at-k-v1", provider_calls: 0,
+    freeze_identity: bound.freeze_identity, prepared_identity: bound.prepared_identity,
+    window_identity: chainIdentity(first.window), final_identity: chainIdentity(first.final),
+    first_exposure_identity: null, replay_identity: null,
+    final_publication_identity: first.final.publication_report_identity,
+    source_preflight_identity: bound.source_preflight_identity,
+    question_id: selected.question_id, question_index: selected.index,
+    inventory: { questions: rows.length, answerable: frozen.inventory.filter(row => row.cohort === "answerable").length,
+      abstention: frozen.inventory.filter(row => row.cohort === "abstention").length },
+    primary: { eligible, hits: 0, misses: 0, unknown: eligible,
+      lower_bound: eligible === 0 ? null : 0, upper_bound: eligible === 0 ? null : 1 }, rows };
+  const path = join(outputRoot, `lazy-measurement-${chainIdentity(result)}.json`);
+  writeChainArtifact(path, result);
+  return { path, result };
+}
+
+/** Trusted import may parse labels; answer-session gold joins only after durable first exposure is readmitted. */
+export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazyMeasurementInput) {
+  const first = await readLazyQualifiedExposureState(input.lazyRoot);
+  const bound = await admitLongMemEvalLazyConfig(input);
+  const frozen = readLongMemEvalSemanticFreeze(input.root);
+  if (frozen.contract !== "longmemeval-native-semantic-v3") throw new AlayaError("CONFLICT", "native question arm changed");
+  const selected = frozen.selected[0]!;
+  const outputRoot = admitEvaluatorOutputRoot(input.evaluatorRoot, lazyMeasurementInputPaths(input, first, bound, frozen));
   if (chainIdentity(first.window.config) !== chainIdentity(bound.config) ||
       first.window.starting_publication_identity !== bound.publication_identity) {
     throw new AlayaError("CONFLICT", "lazy first exposure belongs to another frozen LongMemEval question");
@@ -61,32 +101,7 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
   if (first.window.query_key !== selected.query_key) {
     throw new AlayaError("CONFLICT", "lazy stage query differs from the selected original question");
   }
-  if (first.status !== "durable") {
-    const absenceReason = first.status === "reserved_unknown"
-      ? "first_exposure_reserved_unknown" : "first_exposure_not_durable";
-    const eligible = selected.cohort === "answerable" ? 1 : 0;
-    const rows = frozen.inventory.map(entry => entry.question_id === selected.question_id
-      ? { ...entry, selected: true, outcome: selected.cohort === "abstention" ? "uncalibrated" : "unknown",
-        reason: absenceReason, measurement_path: null, mechanism: "not_exercised",
-        attribution: { layer: first.status === "reserved_unknown" ? "first_exposure_unknown" : "first_exposure_unattempted", native: null } }
-      : { ...entry, selected: false, outcome: "not_selected_development", reason: null,
-        measurement_path: null, mechanism: "not_exercised", attribution: { layer: "not_selected", native: null } });
-    const result = { contract: "longmemeval-lazy-semantic-measurement-v1", status: "development_only",
-      metric: "source-bearing-union-first-exposure-any-at-k-v1", provider_calls: 0,
-      freeze_identity: bound.freeze_identity, prepared_identity: bound.prepared_identity,
-      window_identity: chainIdentity(first.window), final_identity: chainIdentity(first.final),
-      first_exposure_identity: null, replay_identity: null,
-      final_publication_identity: first.final.publication_report_identity,
-      source_preflight_identity: bound.source_preflight_identity,
-      question_id: selected.question_id, question_index: selected.index,
-      inventory: { questions: rows.length, answerable: frozen.inventory.filter(row => row.cohort === "answerable").length,
-        abstention: frozen.inventory.filter(row => row.cohort === "abstention").length },
-      primary: { eligible, hits: 0, misses: 0, unknown: eligible,
-        lower_bound: eligible === 0 ? null : 0, upper_bound: eligible === 0 ? null : 1 }, rows };
-    const path = join(outputRoot, `lazy-measurement-${chainIdentity(result)}.json`);
-    writeChainArtifact(path, result);
-    return { path, result };
-  }
+  if (first.status !== "durable") return writeUnavailableLazyMeasurement(outputRoot, first, bound, frozen);
   if (first.window.query_key !== selected.query_key || first.result.rows.length !== 1 ||
       first.result.rows[0]?.query_key !== selected.query_key ||
       first.final.final_snapshot_path === bound.config.chain.snapshot_path) {

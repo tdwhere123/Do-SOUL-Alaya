@@ -198,11 +198,85 @@ async function admitObservation(result: z.infer<typeof ObservationSchema>, popul
   return result;
 }
 
+/** Score one captured member from retained native state; the caller preserves member order. */
+async function scoreCutoffMember(capture: z.infer<typeof CutoffSchema>["members"][number],
+  population: Population, producerEvidenceError: string | null) {
+  const { member, stages } = capture;
+  let outcome: "hit" | "miss" | "unknown" | "uncalibrated" = member.dataset_cohort === "abstention" ? "uncalibrated" : "unknown";
+  let boundary = capture.capture_error ?? "execution_state_unknown";
+  if (capture.attempt_scope_error !== null || producerEvidenceError !== null) {
+    boundary = `producer_evidence_unknown: ${capture.attempt_scope_error ?? producerEvidenceError}`;
+  }
+  let measurementPath: string | null = null, exposureIdentity: string | null = null;
+  const stageRefs = stages.map(row => ({ stage: row.stage,
+    requested: row.requested === null ? null : chainIdentity(row.requested),
+    completed: row.completed === null ? null : chainIdentity(row.completed),
+    failed: row.failed === null ? null : chainIdentity(row.failed),
+    native_path: row.completed?.result_path ?? null,
+    native_identity: row.completed?.result_identity ?? null }));
+  if (capture.capture_error === null && capture.attempt_scope_error === null && producerEvidenceError === null) {
+    const broken = stages.find(row => row.completed === null && (row.failed !== null || row.requested !== null));
+    if (broken !== undefined) boundary = broken.failed === null ? `${broken.stage}_effect_unknown` : `${broken.stage}_failed: ${broken.failed.reason}`;
+    else if (member.execution_policy === "held" && stages.every(row => row.requested === null)) boundary = "not_started_held";
+    else if (stages.find(row => row.stage === "final")?.completed === null) boundary = "final_not_sealed";
+    else {
+      try {
+        const prepare = stages.find(row => row.stage === "prepare")?.completed;
+        if (prepare?.result_path === null || prepare?.result_path === undefined) throw new AlayaError("CONFLICT", "prepared member path missing");
+        for (const stage of stages) {
+          if (stage.completed?.result_path === null || stage.completed?.result_path === undefined) continue;
+          const retainedStage = stage.stage === "bind"
+            ? JSON.parse(readBoundedCanonicalUtf8Artifact({ path: stage.completed.result_path,
+              maxBytes: 1024 * 1024, label: "bound lazy question config" }))
+            : readChainArtifact(stage.completed.result_path);
+          if (retainedStage === undefined || chainIdentity(retainedStage) !== stage.completed.result_identity) {
+            throw new AlayaError("CONFLICT", `${stage.stage} native stage changed after population completion`);
+          }
+        }
+        admitNativeFreeze(member, population);
+        const first = await readLazyQualifiedExposureState(member.lazy_root);
+        const bound = await admitLongMemEvalLazyConfig({ root: member.native_root,
+          preparedPath: prepare.result_path, sourcePreflightPath: member.source_preflight_path,
+          sourceCacheRoot: member.source_cache_root });
+        if (chainIdentity(first.window.config) !== chainIdentity(bound.config)) throw new AlayaError("CONFLICT", "foreign lazy question binding");
+        boundary = first.status === "durable" ? "durable_first_exposure" :
+          first.status === "reserved_unknown" ? "first_exposure_reserved_unknown" : "first_exposure_unattempted";
+        if (capture.exposure_identity === null && first.status === "durable") {
+          boundary = "first_exposure_not_durable_at_cutoff";
+        } else if (first.status === "durable") {
+          exposureIdentity = chainIdentity(first.exposure);
+          if (exposureIdentity !== capture.exposure_identity) throw new AlayaError("CONFLICT", "first exposure changed during population cutoff");
+          const measured = await measureLongMemEvalLazyFirstExposure({ root: member.native_root,
+            preparedPath: prepare.result_path, sourcePreflightPath: member.source_preflight_path,
+            sourceCacheRoot: member.source_cache_root, lazyRoot: member.lazy_root,
+            evaluatorRoot: member.evaluator_root });
+          const measuredRow = measured.result.rows.find(row => row.question_id === member.question_id && row.selected);
+          if (measured.result.question_index !== member.index || measuredRow === undefined ||
+              measured.result.first_exposure_identity !== exposureIdentity ||
+              measuredRow.outcome !== "hit" && measuredRow.outcome !== "miss" && measuredRow.outcome !== "unknown" &&
+              measuredRow.outcome !== "uncalibrated") throw new AlayaError("CONFLICT", "foreign lazy measurement result");
+          outcome = member.dataset_cohort === "abstention" ? "uncalibrated" : measuredRow.outcome;
+          measurementPath = measured.path;
+          boundary = measuredRow.reason ?? boundary;
+        }
+      } catch (error) { boundary = `member_admission_or_measurement_failed: ${error instanceof Error ? error.message : String(error)}`; }
+    }
+  }
+  return { question_id: member.question_id, index: member.index,
+    cohort: member.dataset_cohort, prior_development_exposure: member.prior_development_exposure,
+    outcome, boundary, measurement_path: measurementPath, first_exposure_identity: exposureIdentity,
+    native_root: member.native_root, lazy_root: member.lazy_root, evaluator_root: member.evaluator_root,
+    attempt_scopes: capture.attempt_scopes, attempt_scope_error: capture.attempt_scope_error,
+    stages: stageRefs };
+}
+
 /** Samples frozen native references first; absent or rejected stages remain in the fixed denominator. */
-export async function observeLongMemEvalLazyPopulation(root: string, value: unknown, evaluatorRoot: string) {
+export async function observeLongMemEvalLazyPopulation(root: string, value: unknown, evaluatorRoot: string,
+  cutoffConfigPath?: string) {
   const input = ObservationInputSchema.parse(value);
   const { population, admittedInputPaths } = await readLongMemEvalLazyPopulationForObservation(root);
   const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, ...admittedInputPaths,
+    ...(cutoffConfigPath === undefined ? [] : [cutoffConfigPath]),
     ...population.members.map(member => member.evaluator_root)]);
   const path = join(outputRoot, `population-observation-${input.cutoff_id}.json`);
   const populationIdentity = chainIdentity(population);
@@ -235,77 +309,8 @@ export async function observeLongMemEvalLazyPopulation(root: string, value: unkn
     throw new AlayaError("CONFLICT", "population observation predecessor does not bind a retained cutoff");
   }
   const cutoff = await readOrFreezeCutoff(root, input, population, populationIdentity, true);
-  const captured = cutoff.members;
   const rows = [];
-  for (const capture of captured) {
-    const { member, stages } = capture;
-    let outcome: "hit" | "miss" | "unknown" | "uncalibrated" = member.dataset_cohort === "abstention" ? "uncalibrated" : "unknown";
-    let boundary = capture.capture_error ?? "execution_state_unknown";
-    if (capture.attempt_scope_error !== null || cutoff.producer_evidence_error !== null) {
-      boundary = `producer_evidence_unknown: ${capture.attempt_scope_error ?? cutoff.producer_evidence_error}`;
-    }
-    let measurementPath: string | null = null, exposureIdentity: string | null = null;
-    const stageRefs = stages.map(row => ({ stage: row.stage,
-      requested: row.requested === null ? null : chainIdentity(row.requested),
-      completed: row.completed === null ? null : chainIdentity(row.completed),
-      failed: row.failed === null ? null : chainIdentity(row.failed),
-      native_path: row.completed?.result_path ?? null,
-      native_identity: row.completed?.result_identity ?? null }));
-    if (capture.capture_error === null && capture.attempt_scope_error === null && cutoff.producer_evidence_error === null) {
-      const broken = stages.find(row => row.completed === null && (row.failed !== null || row.requested !== null));
-      if (broken !== undefined) boundary = broken.failed === null ? `${broken.stage}_effect_unknown` : `${broken.stage}_failed: ${broken.failed.reason}`;
-      else if (member.execution_policy === "held" && stages.every(row => row.requested === null)) boundary = "not_started_held";
-      else if (stages.find(row => row.stage === "final")?.completed === null) boundary = "final_not_sealed";
-      else {
-        try {
-          const prepare = stages.find(row => row.stage === "prepare")?.completed;
-          if (prepare?.result_path === null || prepare?.result_path === undefined) throw new AlayaError("CONFLICT", "prepared member path missing");
-          for (const stage of stages) {
-            if (stage.completed?.result_path === null || stage.completed?.result_path === undefined) continue;
-            const retainedStage = stage.stage === "bind"
-              ? JSON.parse(readBoundedCanonicalUtf8Artifact({ path: stage.completed.result_path,
-                maxBytes: 1024 * 1024, label: "bound lazy question config" }))
-              : readChainArtifact(stage.completed.result_path);
-            if (retainedStage === undefined || chainIdentity(retainedStage) !== stage.completed.result_identity) {
-              throw new AlayaError("CONFLICT", `${stage.stage} native stage changed after population completion`);
-            }
-          }
-          admitNativeFreeze(member, population);
-          const first = await readLazyQualifiedExposureState(member.lazy_root);
-          const bound = await admitLongMemEvalLazyConfig({ root: member.native_root,
-            preparedPath: prepare.result_path, sourcePreflightPath: member.source_preflight_path,
-            sourceCacheRoot: member.source_cache_root });
-          if (chainIdentity(first.window.config) !== chainIdentity(bound.config)) throw new AlayaError("CONFLICT", "foreign lazy question binding");
-          boundary = first.status === "durable" ? "durable_first_exposure" :
-            first.status === "reserved_unknown" ? "first_exposure_reserved_unknown" : "first_exposure_unattempted";
-          if (capture.exposure_identity === null && first.status === "durable") {
-            boundary = "first_exposure_not_durable_at_cutoff";
-          } else if (first.status === "durable") {
-            exposureIdentity = chainIdentity(first.exposure);
-            if (exposureIdentity !== capture.exposure_identity) throw new AlayaError("CONFLICT", "first exposure changed during population cutoff");
-            const measured = await measureLongMemEvalLazyFirstExposure({ root: member.native_root,
-              preparedPath: prepare.result_path, sourcePreflightPath: member.source_preflight_path,
-              sourceCacheRoot: member.source_cache_root, lazyRoot: member.lazy_root,
-              evaluatorRoot: member.evaluator_root });
-            const measuredRow = measured.result.rows.find(row => row.question_id === member.question_id && row.selected);
-            if (measured.result.question_index !== member.index || measuredRow === undefined ||
-                measured.result.first_exposure_identity !== exposureIdentity ||
-                measuredRow.outcome !== "hit" && measuredRow.outcome !== "miss" && measuredRow.outcome !== "unknown" &&
-                measuredRow.outcome !== "uncalibrated") throw new AlayaError("CONFLICT", "foreign lazy measurement result");
-            outcome = member.dataset_cohort === "abstention" ? "uncalibrated" : measuredRow.outcome;
-            measurementPath = measured.path;
-            boundary = measuredRow.reason ?? boundary;
-          }
-        } catch (error) { boundary = `member_admission_or_measurement_failed: ${error instanceof Error ? error.message : String(error)}`; }
-      }
-    }
-    rows.push({ question_id: member.question_id, index: member.index,
-      cohort: member.dataset_cohort, prior_development_exposure: member.prior_development_exposure,
-      outcome, boundary, measurement_path: measurementPath, first_exposure_identity: exposureIdentity,
-      native_root: member.native_root, lazy_root: member.lazy_root, evaluator_root: member.evaluator_root,
-      attempt_scopes: capture.attempt_scopes, attempt_scope_error: capture.attempt_scope_error,
-      stages: stageRefs });
-  }
+  for (const capture of cutoff.members) rows.push(await scoreCutoffMember(capture, population, cutoff.producer_evidence_error));
   const primary = summarizeLongMemEvalOutcomes(rows);
   const result = ObservationSchema.parse({ contract: "longmemeval-lazy-population-observation-v1", population_identity: populationIdentity,
     cutoff_identity: chainIdentity(cutoff), captured_at: cutoff.captured_at,

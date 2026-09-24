@@ -86,6 +86,43 @@ it("freezes ordered 20 and 50 membership without reading corpus, gold, or provid
   expect(forbidden).not.toHaveBeenCalled();
 });
 
+it("keeps the CLI cutoff config physically separate from aggregate output", async () => {
+  const { root, input } = authoredPopulation("development20");
+  freezeLongMemEvalLazyPopulation(input, root);
+  const physical = join(dirname(root), "physical-cutoff-config");
+  mkdirSync(physical);
+  const cutoffPath = join(physical, "cutoff.json");
+  writeFileSync(cutoffPath, JSON.stringify({ cutoff_id: "cli", cutoff_at: "2026-09-23T00:01:00.000Z",
+    predecessor_identity: null }));
+  const invoke = async (configPath: string, evaluatorRoot: string) => {
+    let error = "";
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(chunk => { error += String(chunk); return true; });
+    try {
+      const code = await runLongMemEvalSemanticLauncher(["observe-population", "--root", root,
+        "--config", configPath, "--evaluator-root", evaluatorRoot]);
+      return { code, error };
+    } finally { stdout.mockRestore(); stderr.mockRestore(); }
+  };
+  const direct = await invoke(cutoffPath, physical);
+  expect(direct).toMatchObject({ code: 2 });
+  expect(direct.error).toMatch(/separate from producer and input roots/u);
+  expect(readdirSync(physical)).toEqual(["cutoff.json"]);
+
+  const alias = join(dirname(root), "cutoff-config-directory-alias");
+  symlinkSync(physical, alias, "dir");
+  const aliased = await invoke(join(alias, "cutoff.json"), physical);
+  expect(aliased).toMatchObject({ code: 2 });
+  expect(aliased.error).toMatch(/separate from producer and input roots/u);
+  expect(readdirSync(physical)).toEqual(["cutoff.json"]);
+
+  const separate = join(dirname(root), "separate-aggregate-evaluator");
+  expect((await invoke(cutoffPath, separate)).code).toBe(0);
+  expect(readChainArtifact(join(separate, "population-observation-cli.json"))).toMatchObject({
+    primary: { eligible: 20, hits: 0, misses: 0, unknown: 20 }
+  });
+});
+
 it("rejects altered order, overlap, cohort, dataset, and execution before any member effect", async () => {
   const { root, input } = authoredPopulation("reused_readiness50");
   expect(() => freezeLongMemEvalLazyPopulation({ ...input, members: [...input.members].reverse() }, root)).toThrow(/membership/u);
