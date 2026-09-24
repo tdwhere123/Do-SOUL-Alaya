@@ -28,7 +28,7 @@ export async function runLongMemEvalSemanticLauncher(args: readonly string[]): P
       path: required("--config"), maxBytes: 1024 * 1024, label: "LongMemEval semantic config" })), root);
     else if (operation === "prepare") result = await prepareLongMemEvalSemanticRun(root);
     else if (operation === "replay") result = await replayLongMemEvalSemanticRun(root, required("--prepared"));
-    else if (operation === "measure") result = await measureLongMemEvalSemanticRun(root, required("--replay"));
+    else if (operation === "measure") result = await measureLongMemEvalSemanticRun(root, required("--replay"), required("--evaluator-root"));
     else if (operation === "bind-lazy") result = await writeLongMemEvalLazyConfig({ root,
       preparedPath: required("--prepared"), sourcePreflightPath: required("--source-preflight"),
       sourceCacheRoot: required("--source-cache-root") }, required("--out"));

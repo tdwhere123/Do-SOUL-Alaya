@@ -28,7 +28,7 @@ function requireSeparateEvaluatorRoot(input: LongMemEvalLazyMeasurementInput,
   }
 }
 
-/** Reads gold only after the native first exposure is durable and readmitted. */
+/** Trusted import may parse labels; answer-session gold joins only after durable first exposure is readmitted. */
 export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazyMeasurementInput) {
   const first = await readLazyQualifiedExposureState(input.lazyRoot);
   const bound = await admitLongMemEvalLazyConfig(input);

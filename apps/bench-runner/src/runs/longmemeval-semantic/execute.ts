@@ -105,7 +105,7 @@ async function publishQuestion(frozen: LongMemEvalSemanticFreeze, selected: Long
   return report;
 }
 
-/** Both preparation and evaluator joins must bind the exact original question inventory. */
+/** Every consumer must bind and admit the complete original question inventory. */
 export function verifyLongMemEvalQuestionPublication(frozen: LongMemEvalSemanticFreeze,
   selected: LongMemEvalSemanticFreeze["selected"][number], directory: string, value: unknown) {
   const { config } = frozen;
@@ -119,6 +119,10 @@ export function verifyLongMemEvalQuestionPublication(frozen: LongMemEvalSemantic
     chainIdentity(rows.map(({ source_id, source_version, content_digest, session_id }) => ({ source_id, source_version, content_digest, session_id })));
   if (report.census_count !== selected.source_manifest.length || report.sources.some((row) => row.question_id !== selected.question_id)
     || identity(report.sources) !== identity(selected.source_manifest)) throw new AlayaError("CONFLICT", "publication changed the complete question haystack");
+  if (report.admitted_count !== selected.source_manifest.length ||
+      report.sources.some((row) => row.admission !== "admitted" || !row.record_id)) {
+    throw new AlayaError("CONFLICT", "question publication does not admit the full original source census");
+  }
   return report;
 }
 

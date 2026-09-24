@@ -37,10 +37,8 @@ async function readInitialQuestion(input: LongMemEvalLazyConfigInput) {
   }
   const publication = verifyLongMemEvalQuestionPublication(frozen, selected, directory,
     readChainArtifact(row.publication_path));
-  if (chainIdentity(publication) !== row.publication_identity ||
-      publication.admitted_count !== selected.source_manifest.length ||
-      publication.sources.some(source => source.admission !== "admitted" || source.record_id === undefined)) {
-    throw new AlayaError("CONFLICT", "initial publication does not admit the full original source census");
+  if (chainIdentity(publication) !== row.publication_identity) {
+    throw new AlayaError("CONFLICT", "initial publication identity changed");
   }
   verifyLongMemEvalQuestionChain(frozen, selected, directory, publication, row.chain_root);
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(row.chain_root, "prepare.json")));

@@ -119,7 +119,7 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     expect(response.provider_attempts).toBe(0);
     expect(response.discovery?.access?.policy).toBe("query-conditioned-v1");
   }
-  const measured = await measureLongMemEvalSemanticRun(root, replay.path);
+  const measured = await measureLongMemEvalSemanticRun(root, replay.path, join(cacheRoots[0]!, "..", "native-evaluator"));
   expect(measured.result).toMatchObject({ contract: "longmemeval-native-semantic-measurement-v3", provider_calls: 0,
     order_policy: "evidence_support",
     primary: { eligible: 4, hits: 4, misses: 0, unknown: 0 } });
