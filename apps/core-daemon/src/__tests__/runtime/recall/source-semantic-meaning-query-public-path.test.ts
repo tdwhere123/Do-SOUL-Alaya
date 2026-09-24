@@ -6,13 +6,14 @@ import { expect, it } from "vitest";
 import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
-  type SourceSemanticDraft,
+  type SourceSemanticDraft, type SourceSemanticPublishedInterpretation,
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
   UTTERANCE_ATTRIBUTION_CONTRACT, type UtteranceAttribution, sourceSemanticQueryIdentity
 } from "@do-soul/alaya-protocol";
 import {
   createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
-  fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID
+  fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
+  verifyPublishedSourceSemanticInterpretation, verifyRetainedPublishedSourceSemanticInterpretation
 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
 import { proposeCorrespondenceSemantics, proposeQuerySemantics, proposeSourceSemantics } from "@do-soul/alaya-soul";
@@ -108,6 +109,24 @@ async function admitSource(filename: string, content = SOURCE, sourceId = "artif
   }, { workspaceId: WS });
   database.close();
   closeCachedDatabase(filename);
+}
+
+async function expectRetainedPublicationAfterReopen(filename: string, bound: SourceSemanticPublishedInterpretation) {
+  const { database } = await createRecallRealStorage(() => undefined, filename);
+  try {
+    const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
+    const owner = { stores, sha256: fieldContractSha256 };
+    const retained = verifyRetainedPublishedSourceSemanticInterpretation(owner, bound, WS);
+    expect(retained.eligibility).toBe("retained_only");
+    expect(retained.verification.bound).toEqual(bound);
+    expect(retained.verification.stored).toMatchObject({ content_bytes: SOURCE,
+      record: { source_version: "1", attribution_context: SOURCE_ATTRIBUTION } });
+    expect(stores.getCurrentRecord(WS, "artifact-lathe")?.source_version).toBe("2");
+    expect(() => verifyPublishedSourceSemanticInterpretation(owner, bound, WS)).toThrow();
+  } finally {
+    database.close();
+    closeCachedDatabase(filename);
+  }
 }
 
 async function openSession(filename: string) {
@@ -211,6 +230,7 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
     let sourceInterpretationId: string;
     let sourceInterpretation: SourceSemanticInterpretation;
     let sourceDraft: SourceSemanticDraft;
+    let sourcePublication: SourceSemanticPublishedInterpretation;
     try {
       const prepared = await interpret(session.handler, {
         operation: "prepare_source", source_id: "artifact-lathe", budget: BUDGET, authorized_scopes: SCOPES
@@ -252,6 +272,7 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
       }
       sourceInterpretationId = published.published.interpretation_id;
       sourceInterpretation = published.published.interpretation;
+      sourcePublication = published.published;
     } finally {
       await closeSession(session, filename);
     }
@@ -329,6 +350,7 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
     } finally {
       await closeSession(reopened, filename);
     }
+    await expectRetainedPublicationAfterReopen(filename, sourcePublication);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
