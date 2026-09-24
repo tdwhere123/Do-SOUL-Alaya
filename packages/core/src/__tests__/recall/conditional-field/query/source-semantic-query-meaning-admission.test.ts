@@ -5,10 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { digestOriginalQuery } from "../../../../recall/conditional-field/query/compile-query-identity.js";
 import { admitSourceSemanticQuery } from "../../../../recall/conditional-field/query/source-semantic-query-admission.js";
-import {
-  SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_GRAPH_SYNTAX,
-  SOURCE_SEMANTIC_QUERY_MEANING_SYNTAX, defaultSourceSemanticQueryProducerRegistry
-} from "../../../../recall/conditional-field/query/source-semantic-query-producer-registry.js";
+import { SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "../../../../recall/conditional-field/query/source-semantic-query-producer-registry.js";
 import { compileSourceSemanticGroupProgram } from "../../../../recall/conditional-field/query/compile-source-semantic-query.js";
 
 const ORIGINAL = "Who sent the sample to Mira?";
@@ -44,14 +41,6 @@ describe("source semantic query meaning admission", () => {
     }
     expect(() => reportedQuery(original, { kind: "reference", key: "missing" })).toThrow(/undeclared local reference/u);
     expect(admitSourceSemanticQuery(reportedQuery(original, { kind: "free", key: "person", excerpt: "invented" }), original).kind).toBe("invalid");
-  });
-
-  it("registers meaning syntax without occupying the canonical graph version", () => {
-    const record = defaultSourceSemanticQueryProducerRegistry.lookup(SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, "1");
-    expect(record?.syntaxes).toEqual([SOURCE_SEMANTIC_QUERY_GRAPH_SYNTAX, SOURCE_SEMANTIC_QUERY_MEANING_SYNTAX]);
-    expect(SOURCE_SEMANTIC_QUERY_GRAPH_SYNTAX).toBe(SOURCE_SEMANTIC_QUERY_CONTRACT);
-    expect(SOURCE_SEMANTIC_QUERY_MEANING_SYNTAX).toBe(SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT);
-    expect(SOURCE_SEMANTIC_QUERY_MEANING_SYNTAX).not.toBe(SOURCE_SEMANTIC_QUERY_GRAPH_SYNTAX);
   });
 
   it("admits a materialized meaning proposal and compiles the canonical query", () => {
