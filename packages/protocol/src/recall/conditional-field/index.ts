@@ -319,7 +319,7 @@ export {
   type SourceSemanticCorrespondence
 } from "./semantic-correspondence.js";
 export {
-  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES,
   SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE,
@@ -327,19 +327,19 @@ export {
   SourceSemanticQueryCatalogEntrySchema,
   SourceSemanticSourceCatalogEntrySchema,
   SourceSemanticCorrespondenceEndpointCatalogSchema,
-  SourceSemanticCorrespondenceSelectionSchema,
+  SourceSemanticCorrespondenceAssessmentSchema,
   buildSourceSemanticCorrespondenceEndpointCatalog,
   buildSourceSemanticCorrespondenceEndpointEvidence,
   countSourceSemanticCorrespondenceJsonBytes,
-  materializeSourceSemanticCorrespondenceSelection,
+  materializeSourceSemanticCorrespondenceAssessment,
   type SourceSemanticQueryCatalogEntry,
   type SourceSemanticSourceCatalogEntry,
   type SourceSemanticCorrespondenceEndpointCatalog,
   type SourceSemanticCorrespondenceEndpointEvidence,
-  type SourceSemanticCorrespondenceSelection,
+  type SourceSemanticCorrespondenceAssessment,
   type SourceSemanticCorrespondenceDescriptor,
-  type SourceSemanticCorrespondenceSelectionEnvelope
-} from "./semantic-correspondence-selection.js";
+  type SourceSemanticCorrespondenceAssessmentEnvelope
+} from "./semantic-correspondence-assessment.js";
 export {
   SOURCE_SEMANTIC_CONTEXT_CONTRACT,
   SourceSemanticEvaluationContextSchema,

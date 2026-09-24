@@ -4,22 +4,22 @@ import {
   SourceSemanticCorrespondenceSchema,
   SourceSemanticGapSchema, SourceSemanticOutcomeSchema,
   SourceSemanticQueryGapSchema, SourceSemanticQueryOutcomeGapBindingSchema,
-  SourceSemanticQuerySchema, SourceSemanticCorrespondenceSelectionSchema, materializeSourceSemanticQueryMeaning,
+  SourceSemanticQuerySchema, SourceSemanticCorrespondenceAssessmentSchema, materializeSourceSemanticQueryMeaning,
   expandSourceSemanticQueryCarrier,
-  materializeSourceSemanticCorrespondenceSelection,
+  materializeSourceSemanticCorrespondenceAssessment,
   SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
   SourceSemanticInterpretationSchema,
   materializeSourceSemanticTableProposal,
   SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   normalizeSourceSemantics, sourceSemanticQueryIdentity,
   verifySourceSemanticDisposition, canonicalJson,
-  type SourceSemanticCorrespondence, type SourceSemanticCorrespondenceEndpointCatalog, type SourceSemanticDraft,
+  type SourceSemanticCorrespondence, type SourceSemanticCorrespondenceAssessment, type SourceSemanticDraft,
   type SourceSemanticInterpretation,
   type SourceSemanticOutcome, type SourceSemanticQuery,
   type SourceSemanticQueryOutcome
 } from "@do-soul/alaya-protocol";
 import {
-  SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   buildSourceSemanticCorrespondenceRequest, buildSourceSemanticQueryRequest, buildSourceSemanticRequest,
   parseSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, rejectForbiddenProposalInput,
@@ -57,6 +57,7 @@ export type SourceSemanticCorrespondenceProposalResult = Readonly<{
   provider_attempts: 0 | 1;
   request: SourceSemanticCorrespondenceRequest;
   semantic_correspondence?: SourceSemanticCorrespondence;
+  assessment?: SourceSemanticCorrespondenceAssessment;
   raw_response_id?: string;
   rawJson?: string;
 }>;
@@ -222,7 +223,7 @@ function receiveCorrespondenceSemantics(
   if (bounded !== undefined) return bounded;
   const parsed = parseResponseJson(rawJson, attempt);
   if (parsed.status !== "ok") return parsed.result;
-  const envelope = CorrespondenceSelectionResponseSchema.safeParse(parsed.value);
+  const envelope = CorrespondenceAssessmentResponseSchema.safeParse(parsed.value);
   if (!envelope.success) {
     return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
   }
@@ -233,16 +234,9 @@ function receiveCorrespondenceSemantics(
   if (envelope.data.semantic_correspondence === undefined) {
     return { ...attempt, outcome: { status: "invalid", reason: "interpreted_correspondence_required" } };
   }
-  // Predicate-only set-valued groups compile to zero answers while looking interpreted.
-  if (request.catalog !== undefined) {
-    const selected = SourceSemanticCorrespondenceSelectionSchema.safeParse(envelope.data.semantic_correspondence);
-    if (selected.success &&
-      selectionGroupCompleteness(request.admitted_query_semantics, request.catalog, selected.data.selections) === "incomplete") {
-      return { ...attempt, outcome: { status: "invalid", reason: "incomplete_selection_group" } };
-    }
-  }
   try {
     const semantic_correspondence = SourceSemanticCorrespondenceSchema.parse(materializeCorrespondence(envelope.data.semantic_correspondence, request));
+    const assessment = SourceSemanticCorrespondenceAssessmentSchema.parse(envelope.data.semantic_correspondence);
     SourceSemanticOutcomeGapBindingSchema.parse({
       outcome: { status: "interpreted", gaps: envelope.data.outcome.gaps ?? [] }, gaps: []
     });
@@ -252,7 +246,7 @@ function receiveCorrespondenceSemantics(
     if (!request.source_interpretation_descriptors.some((row) => row.source_interpretation_id === semantic_correspondence.source_interpretation_id)) {
       return { ...attempt, outcome: { status: "invalid", reason: "correspondence_source_interpretation_mismatch" } };
     }
-    return { ...attempt, outcome: { status: "interpreted", gaps: [] }, semantic_correspondence };
+    return { ...attempt, outcome: { status: "interpreted", gaps: [] }, semantic_correspondence, assessment };
   } catch (error) {
     return { ...attempt, outcome: invalidProposalOutcome(error) };
   }
@@ -351,55 +345,12 @@ function materializeQuery(
   );
 }
 
-function selectionGroupCompleteness(
-  query: SourceSemanticQuery,
-  catalog: SourceSemanticCorrespondenceEndpointCatalog,
-  selections: readonly Readonly<{ query: string; source: string }>[]
-): "empty" | "complete" | "incomplete" {
-  const requiredSlots = returnedRoleIds(query);
-  if (requiredSlots.length === 0) return selections.length === 0 ? "empty" : "complete";
-  const queryByHandle = new Map(catalog.query_endpoints.map((row) => [row.handle, row]));
-  const sourceByHandle = new Map(catalog.source_endpoints.map((row) => [row.handle, row]));
-  const groups = new Map<string, { predicate: boolean; slots: Set<string> }>();
-  for (const selection of selections) {
-    const queryEndpoint = queryByHandle.get(selection.query);
-    const sourceEndpoint = sourceByHandle.get(selection.source);
-    if (queryEndpoint === undefined || sourceEndpoint === undefined || sourceEndpoint.kind === "referent") {
-      continue;
-    }
-    const frame = sourceEndpoint.frame;
-    if (frame === undefined) continue;
-    const group = groups.get(frame) ?? { predicate: false, slots: new Set<string>() };
-    if (queryEndpoint.kind === "predicate") group.predicate = true;
-    if (queryEndpoint.kind === "slot" && queryEndpoint.slot !== undefined) group.slots.add(queryEndpoint.slot);
-    groups.set(frame, group);
-  }
-  if (groups.size === 0) return "empty";
-  for (const group of groups.values()) {
-    if (!group.predicate || requiredSlots.some((slot) => !group.slots.has(slot))) return "incomplete";
-  }
-  return "complete";
-}
-
-function returnedRoleIds(query: SourceSemanticQuery): readonly string[] {
-  if (query.return_variables.length <= 1) return [];
-  const returned = new Set(query.return_variables);
-  const roles: string[] = [];
-  for (const alternative of query.alternatives) {
-    for (const frame of alternative.frames) {
-      for (const role of frame.role_requirements) {
-        if (returned.has(role.target_variable)) roles.push(role.id);
-      }
-    }
-  }
-  return roles;
-}
-
 function materializeCorrespondence(body: unknown, request: SourceSemanticCorrespondenceRequest): unknown {
   const record = asRecord(body);
   rejectForbiddenProposalInput(record);
-  const parsed = z.object({ source_interpretation_handle: z.string().optional() }).passthrough().parse(record);
-  return materializeSourceSemanticCorrespondenceSelection(record, request.catalog, {
+  const parsed = z.object({ source_interpretation_handle: z.string() }).passthrough().parse(record);
+  return materializeSourceSemanticCorrespondenceAssessment(record, request.catalog, {
+    original_query: request.original_query,
     source_interpretation_id: bindCorrespondenceHandle(parsed.source_interpretation_handle, request.source_interpretation_descriptors),
     query_semantics_id: sourceSemanticQueryIdentity(request.admitted_query_semantics, semanticSha256),
     producer_id: request.producer_capability.producer_id,
@@ -407,13 +358,7 @@ function materializeCorrespondence(body: unknown, request: SourceSemanticCorresp
   });
 }
 
-function bindCorrespondenceHandle(handle: string | undefined, descriptors: readonly SourceInterpretationDescriptor[]): string {
-  if (handle === undefined) {
-    if (descriptors.length !== 1) {
-      throw new AlayaError("VALIDATION", "semantic_correspondence to multiple descriptors requires a request-local handle");
-    }
-    return descriptors[0]!.source_interpretation_id;
-  }
+function bindCorrespondenceHandle(handle: string, descriptors: readonly SourceInterpretationDescriptor[]): string {
   const match = /^source([1-9][0-9]{0,2})$/u.exec(handle);
   const descriptor = match === null ? undefined : descriptors[Number(match[1]) - 1];
   if (descriptor === undefined) {
@@ -460,8 +405,8 @@ const QueryMeaningResponseSchema = z.object({
   outcome: QueryResponseOutcomeSchema,
   query: z.unknown().optional()
 }).strict().readonly();
-const CorrespondenceSelectionResponseSchema = z.object({
-  contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT),
+const CorrespondenceAssessmentResponseSchema = z.object({
+  contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT),
   outcome: ProducerResponseOutcomeSchema,
   semantic_correspondence: z.unknown().optional()
 }).strict().readonly();

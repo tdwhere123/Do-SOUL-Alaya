@@ -85,7 +85,7 @@ function twoOfferInterpretation() {
   });
 }
 
-function predicateOnlySelections(
+function predicateOnlyPairs(
   catalog: NonNullable<ReturnType<typeof proposeCorrespondenceSemantics>["request"]["catalog"]>,
   frames: readonly string[]
 ) {
@@ -99,7 +99,7 @@ function predicateOnlySelections(
   });
 }
 
-function offerSelections(
+function offerPairs(
   catalog: NonNullable<ReturnType<typeof proposeCorrespondenceSemantics>["request"]["catalog"]>,
   frames: readonly string[]
 ) {
@@ -108,12 +108,12 @@ function offerSelections(
     agent: catalog.query_endpoints.find((row) => row.kind === "slot" && row.slot === "agent")!,
     theme: catalog.query_endpoints.find((row) => row.kind === "slot" && row.slot === "theme")!
   };
-  const selections = [];
+  const pairs = [];
   for (const frame of frames) {
     const sourceFrame = catalog.source_endpoints.find((row) => row.kind === "frame" && row.frame === frame)!;
     const agent = catalog.source_endpoints.find((row) => row.kind === "slot" && row.frame === frame && row.slot === "agent")!;
     const theme = catalog.source_endpoints.find((row) => row.kind === "slot" && row.frame === frame && row.slot === "theme")!;
-    selections.push(
+    pairs.push(
       { query: queryByKind.predicate.handle, source: sourceFrame.handle, query_excerpt: "offer",
         source_semantic_support: [{ kind: "lexical" as const, mentions: [frame === "fPhilips" ? "mOffer1" : "mOffer2"] }] },
       { query: queryByKind.agent.handle, source: agent.handle, query_excerpt: "Which brands",
@@ -122,55 +122,53 @@ function offerSelections(
         source_semantic_support: [{ kind: "lexical" as const, mentions: [frame === "fPhilips" ? "mStylish" : "mDimmer"] }] }
     );
   }
-  return selections;
+  return pairs;
 }
 
-function receiveSelections(
+function receivePairs(
   sourceInterpretation: ReturnType<typeof twoOfferInterpretation>,
-  selections: ReturnType<typeof offerSelections>
+  pairs: ReturnType<typeof offerPairs>
 ) {
   const sourceInterpretationId = sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256);
   const admitted = setValuedQuery();
+  const catalog = proposeCorrespondenceSemantics({ original_query: SET_VALUED, admitted_query_semantics: admitted,
+    source_interpretation_descriptors: [{ source_interpretation_id: sourceInterpretationId, interpretation: sourceInterpretation }],
+    producer_id: "correspondence-producer", producer_version: "1" }).request.catalog;
   return proposeCorrespondenceSemantics({
     original_query: SET_VALUED, admitted_query_semantics: admitted,
     source_interpretation_descriptors: [{ source_interpretation_id: sourceInterpretationId, interpretation: sourceInterpretation }],
     producer_id: "correspondence-producer", producer_version: "1"
   }, {
     rawJson: JSON.stringify({
-      contract: "source-semantic-correspondence-response-v3",
+      contract: "source-semantic-correspondence-response-v4",
       outcome: { status: "interpreted" },
-      semantic_correspondence: { contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1", selections }
+      semantic_correspondence: { contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
+        assessments: assessPairs(catalog, pairs) }
     })
   });
 }
 
-describe("set-valued semantic_correspondence selections stay producer-owned", () => {
-  it("requires each set-valued group to bind returned-variable slots, not a predicate row alone", () => {
-    expect(SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT).toContain(
-      "slot binding for every returned variable"
-    );
-    expect(SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT).toContain(
-      "A predicate-only group is incomplete and must not be handed in as a group"
-    );
-    expect(SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT).not.toMatch(
-      /predicate-only group is (?:complete|enough|finished)/iu
-    );
-    for (const match of SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT.matchAll(/"selections"\s*:\s*(\[[\s\S]*?\])/gu)) {
-      const rows = JSON.parse(match[1]!) as readonly { query?: string; source?: string }[];
-      const bySource = new Map<string, { query: string }[]>();
-      for (const row of rows) {
-        if (row.source === undefined || row.query === undefined) continue;
-        const group = bySource.get(row.source) ?? [];
-        group.push({ query: row.query });
-        bySource.set(row.source, group);
-      }
-      for (const group of bySource.values()) {
-        expect(group.length).toBeGreaterThan(1);
-      }
-    }
+function assessPairs(catalog: ReturnType<typeof proposeCorrespondenceSemantics>["request"]["catalog"],
+  pairs: ReturnType<typeof offerPairs>) {
+  return catalog.query_endpoints.map((endpoint) => {
+    const equivalents = pairs.filter((pair) => pair.query === endpoint.handle).map(({ query: _query, ...pair }) => ({
+      ...pair, grounding: "The cited source relation has this local role."
+    }));
+    return equivalents.length > 0
+      ? { query: endpoint.handle, status: "supported", equivalents }
+      : { query: endpoint.handle, status: "unresolved", query_excerpt: "offer",
+        explanation: "No source relation has been proposed for this endpoint." };
+  });
+}
+
+describe("set-valued semantic_correspondence endpoint assessment", () => {
+  it("asks for all endpoint assessments while retaining every supported source frame", () => {
+    expect(SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT).toContain("Assess every advertised qeN exactly once");
+    expect(SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT).toContain("Preserve each supported predicate and returned-variable slot relation");
+    expect(SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT).toContain("Partial supported assessments remain available");
   });
 
-  it("still admits a first-pass single-frame selection as interpreted", () => {
+  it("still admits a first-pass single-frame assessment as interpreted", () => {
     const sourceInterpretation = twoOfferInterpretation();
     const prepared = proposeCorrespondenceSemantics({
       original_query: SET_VALUED, admitted_query_semantics: setValuedQuery(),
@@ -179,7 +177,7 @@ describe("set-valued semantic_correspondence selections stay producer-owned", ()
     });
     const catalog = prepared.request.catalog!;
     expect(catalog.source_endpoints.filter((row) => row.kind === "frame" && row.reading === "offer")).toHaveLength(2);
-    const received = receiveSelections(sourceInterpretation, offerSelections(catalog, ["fPhilips"]));
+    const received = receivePairs(sourceInterpretation, offerPairs(catalog, ["fPhilips"]));
     expect(received.outcome.status).toBe("interpreted");
     expect(received.semantic_correspondence?.correspondences).toHaveLength(3);
     expect(received.semantic_correspondence?.correspondences.map((row) =>
@@ -187,7 +185,7 @@ describe("set-valued semantic_correspondence selections stay producer-owned", ()
     )).toEqual(["fPhilips", "fPhilips", "fPhilips"]);
   });
 
-  it("rejects A2-shaped predicate-only groups as incomplete instead of compiling them as finished", () => {
+  it("keeps a partial predicate proposal while returned slots remain explicitly unresolved", () => {
     const sourceInterpretation = twoOfferInterpretation();
     const prepared = proposeCorrespondenceSemantics({
       original_query: SET_VALUED, admitted_query_semantics: setValuedQuery(),
@@ -197,12 +195,12 @@ describe("set-valued semantic_correspondence selections stay producer-owned", ()
     const frames = prepared.request.catalog!.source_endpoints
       .filter((row) => row.kind === "frame" && row.reading === "offer")
       .map((row) => row.frame!);
-    const received = receiveSelections(sourceInterpretation, predicateOnlySelections(prepared.request.catalog!, frames));
-    expect(received.outcome).toEqual({ status: "invalid", reason: "incomplete_selection_group" });
-    expect(received.semantic_correspondence).toBeUndefined();
+    const received = receivePairs(sourceInterpretation, predicateOnlyPairs(prepared.request.catalog!, frames));
+    expect(received.outcome.status).toBe("interpreted");
+    expect(received.semantic_correspondence?.correspondences).toHaveLength(2);
   });
 
-  it("materializes one selection group per matching frame without adding omitted pairs", () => {
+  it("materializes one assessment group per matching frame without adding omitted pairs", () => {
     const sourceInterpretation = twoOfferInterpretation();
     const sourceInterpretationId = sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256);
     const admitted = setValuedQuery();
@@ -217,11 +215,11 @@ describe("set-valued semantic_correspondence selections stay producer-owned", ()
       producer_id: "correspondence-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-correspondence-response-v3",
+        contract: "source-semantic-correspondence-response-v4",
         outcome: { status: "interpreted" },
         semantic_correspondence: {
-          contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1",
-          selections: offerSelections(prepared.request.catalog!, ["fPhilips", "fLutron"])
+          contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
+          assessments: assessPairs(prepared.request.catalog, offerPairs(prepared.request.catalog, ["fPhilips", "fLutron"]))
         }
       })
     });

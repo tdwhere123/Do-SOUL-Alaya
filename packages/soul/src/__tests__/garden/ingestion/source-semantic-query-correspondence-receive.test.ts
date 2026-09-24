@@ -139,7 +139,7 @@ function canonicalQuery(original: string, body: object) {
   });
 }
 
-describe("query meaning receive and semantic_correspondence selection", () => {
+describe("query meaning receive and semantic_correspondence assessment", () => {
   it("keeps the retired recursive response outside current query admission", () => {
     const example = sourceSemanticQueryExamples[0]!;
     const old = { ...example.response, contract: "source-semantic-query-response-v7",
@@ -415,7 +415,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
 
   });
 
-  it("materializes catalog selections", () => {
+  it("materializes complete endpoint assessments", () => {
     const sourceInterpretation = interpretation();
     expect(sourceInterpretation.normalizer_version).toBe("source-semantic-normalizer-v5");
     const sourceInterpretationId = sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256);
@@ -437,14 +437,17 @@ describe("query meaning receive and semantic_correspondence selection", () => {
       producer_id: "correspondence-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-correspondence-response-v3",
+        contract: "source-semantic-correspondence-response-v4",
         outcome: { status: "interpreted", gaps: [] },
         semantic_correspondence: {
-          contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1",
-          selections: [{
-            query: predicate!.handle, source: frame!.handle, query_excerpt: "accessioned",
-            source_semantic_support: [{ kind: "lexical", mentions: [predicateMention] }]
-          }]
+          contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
+          assessments: selected.request.catalog.query_endpoints.map((endpoint) => endpoint.handle === predicate!.handle
+            ? { query: endpoint.handle, status: "supported", equivalents: [{
+              source: frame!.handle, query_excerpt: "accessioned", grounding: "The local accession relation.",
+              source_semantic_support: [{ kind: "lexical", mentions: [predicateMention] }]
+            }] }
+            : { query: endpoint.handle, status: "unresolved", query_excerpt: "folio",
+              explanation: "No equivalent source endpoint is proposed." })
         }
       })
     });
@@ -458,7 +461,41 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     expect(received.semantic_correspondence?.correspondences[0]?.source_semantic_support).toEqual([
       { kind: "lexical", mentions: [predicateMention] }
     ]);
+    expect(received.assessment?.assessments).toHaveLength(selected.request.catalog.query_endpoints.length);
+    expect(received.assessment?.assessments.filter((row) => row.status === "unresolved")).toHaveLength(
+      selected.request.catalog.query_endpoints.length - 1);
 
+  });
+
+  it("distinguishes all unresolved assessment, missing coverage, invalid excerpt, and retired wire", () => {
+    const sourceInterpretation = interpretation();
+    const input = { original_query: EXISTENTIAL, admitted_query_semantics: canonicalQuery(EXISTENTIAL, existentialBody()),
+      source_interpretation_descriptors: [{
+        source_interpretation_id: sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256),
+        interpretation: sourceInterpretation
+      }], producer_id: "correspondence-producer", producer_version: "1" };
+    const catalog = proposeCorrespondenceSemantics(input).request.catalog;
+    const assessments = catalog.query_endpoints.map((row) => ({ query: row.handle, status: "unresolved",
+      query_excerpt: "folio", explanation: "No source equivalence has been established." }));
+    const body = (rows: unknown, contract = "source-semantic-correspondence-assessment-v1") => ({
+      contract, source_interpretation_handle: "source1", assessments: rows
+    });
+    const receive = (semantic_correspondence: unknown, contract = "source-semantic-correspondence-response-v4") =>
+      proposeCorrespondenceSemantics(input, { rawJson: JSON.stringify({ contract,
+        outcome: { status: "interpreted" }, semantic_correspondence }) });
+    const open = receive(body(assessments));
+    expect(open.outcome.status).toBe("interpreted");
+    expect(open.assessment?.assessments.every((row) => row.status === "unresolved")).toBe(true);
+    expect(open.semantic_correspondence?.correspondences).toEqual([]);
+    expect(receive(body(assessments.slice(1))).outcome).toMatchObject({ status: "invalid", reason: "malformed_response" });
+    expect(receive(body([{ ...assessments[0], query_excerpt: "accessionedX" }, ...assessments.slice(1)])).outcome)
+      .toMatchObject({ status: "invalid", reason: "malformed_response" });
+    expect(receive(body(assessments, "source-semantic-correspondence-selection-v2")).outcome)
+      .toMatchObject({ status: "invalid", reason: "malformed_response" });
+    expect(receive({ ...body(assessments), source_interpretation_handle: "source2" }).outcome)
+      .toMatchObject({ status: "invalid" });
+    expect(receive(body(assessments), "source-semantic-correspondence-response-v3").outcome)
+      .toMatchObject({ status: "invalid", reason: "malformed_response" });
   });
 
   it("rejects a graph producer envelope on the default meaning request", () => {
@@ -485,7 +522,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
         semantic_correspondence: { correspondences: [] }
       })
     });
-    expect(semantic_correspondence.request.contract).toBe("source-semantic-correspondence-request-v6");
+    expect(semantic_correspondence.request.contract).toBe("source-semantic-correspondence-request-v7");
     expect(semantic_correspondence.outcome.status).toBe("invalid");
     expect(semantic_correspondence.semantic_correspondence).toBeUndefined();
   });

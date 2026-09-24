@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { registerExtractionFillHooks } from "./fixture.js";
@@ -19,9 +20,9 @@ import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
 import { admitNativeLazyConfig } from "../../../runs/semantic-chain/bind-lazy.js";
 import { inspectSemanticChainReplayTarget, replaySemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { measureSourceSemanticLibraryResponse } from "../../../runs/measurement/source-semantic-library-measurement.js";
-import { SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+import { SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SoulInterpretationResponseSchema, SourceSemanticAccessReceiptSchema } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+import { parseSourceSemanticRequest, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
   type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
 import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
@@ -326,13 +327,13 @@ it("binds a newly received duplicate-content result only to frozen occurrences w
   await executeSemanticProposalFill({ workset: selectedItem, cacheRoot: config.chain.correspondence_cache_root,
     authority: correspondenceAuthority, config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
       requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
         outcome: { status: "interpreted" }, semantic_correspondence: {
-          contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, source_interpretation_handle: "source1",
-          selections: [{ query: predicate.handle, source: frame.handle, query_excerpt: "completed",
+          contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, source_interpretation_handle: "source1",
+          assessments: assessmentForTestPairs(request.catalog, request.original_query, [{ query: predicate.handle, source: frame.handle, query_excerpt: "completed",
             source_semantic_support: support.kind === "explicit" ? [{ kind: "lexical", mentions: support.mentions }] : [] },
           { query: slot.handle, source: sourceSlot.handle, query_excerpt: "What",
-            source_semantic_support: sourceInterpretation.frames[0]!.slots[0]!.support }] } }),
+            source_semantic_support: sourceInterpretation.frames[0]!.slots[0]!.support }]) } }),
       responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
     }) } });
   const replay = await replayLazyQualifiedFirstExposure(root);
@@ -596,16 +597,16 @@ async function fillAuthoredCompletionCorrespondence(
   return executeSemanticProposalFill({ workset: selected, cacheRoot: correspondenceCacheRoot,
     authority, config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
       requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
         outcome: { status: "interpreted" }, semantic_correspondence: {
-          contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
-          source_interpretation_handle: "source1", selections: [
+          contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT,
+          source_interpretation_handle: "source1", assessments: assessmentForTestPairs(request.catalog, request.original_query, [
             { query: predicate.handle, source: frame.handle, query_excerpt: "completed",
               source_semantic_support: support.kind === "explicit" ?
                 [{ kind: "lexical", mentions: support.mentions }] : [] },
             { query: slot.handle, source: sourceSlot.handle, query_excerpt: "What",
               source_semantic_support: interpretation.frames[0]!.slots[0]!.support }
-          ] } }), responseMetadata: { finishReason: "STOP" },
+          ]) } }), responseMetadata: { finishReason: "STOP" },
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
     }) } });
 }

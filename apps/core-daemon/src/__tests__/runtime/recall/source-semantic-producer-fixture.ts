@@ -1,7 +1,7 @@
 import {
   SourceSemanticQuerySchema, SourceSemanticCorrespondenceSchema, sourceSemanticQueryIdentity,
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
-  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT,
   UNKNOWN_UTTERANCE_ATTRIBUTION,
   encodeSourceSemanticQueryCarrier, type SourceSemanticQueryMeaningBody,
   type SourceSemanticQuery
@@ -29,8 +29,8 @@ export function authoredQuerySemantics(input: SourceSemanticQueryProposalInput, 
   return { query, outcome: { status: "interpreted" as const } };
 }
 
-/** Specify intended endpoint pairs; encode the current advertised producer catalog. */
-export function correspondenceSelectionJson(input: SourceSemanticCorrespondenceProposalInput, body: unknown,
+/** Specify intended endpoint pairs; assess the full advertised producer catalog. */
+export function correspondenceAssessmentJson(input: SourceSemanticCorrespondenceProposalInput, body: unknown,
   outcome: object = { status: "interpreted", gaps: [] }) {
   const request = buildSourceSemanticCorrespondenceRequest(input);
   const { source_interpretation_handle = "source1", ...nativeBody } = body as Record<string, unknown>;
@@ -42,7 +42,7 @@ export function correspondenceSelectionJson(input: SourceSemanticCorrespondenceP
     contract_version: SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT, ...nativeBody });
   const matches = (endpoint: object, candidate: object) => Object.entries(endpoint)
     .every(([key, value]) => (candidate as Record<string, unknown>)[key] === value);
-  const selections = desired.correspondences.map((pair) => {
+  const pairs = desired.correspondences.map((pair) => {
     const query = request.catalog.query_endpoints.find((row) => matches(pair.query_endpoint, row));
     const source = request.catalog.source_endpoints.find((row) => row.source_interpretation_handle === selected
       && matches(pair.source_endpoint, row));
@@ -51,16 +51,25 @@ export function correspondenceSelectionJson(input: SourceSemanticCorrespondenceP
       source_semantic_support: pair.source_semantic_support,
       ...(pair.applicable_context === undefined ? {} : { applicable_context: pair.applicable_context }) };
   });
-  return JSON.stringify({ contract: "source-semantic-correspondence-response-v3", outcome,
-    semantic_correspondence: { contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
-      source_interpretation_handle: selected, selections,
+  const assessments = request.catalog.query_endpoints.map((endpoint) => {
+    const equivalents = pairs.filter((pair) => pair.query === endpoint.handle).map(({ query: _query, ...pair }) => ({
+      ...pair, grounding: "Authored local correspondence with the cited source support."
+    }));
+    return equivalents.length > 0
+      ? { query: endpoint.handle, status: "supported", equivalents }
+      : { query: endpoint.handle, status: "unresolved", query_excerpt: request.original_query.slice(0, 1),
+        explanation: "No equivalent source endpoint is proposed." };
+  });
+  return JSON.stringify({ contract: "source-semantic-correspondence-response-v4", outcome,
+    semantic_correspondence: { contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT,
+      source_interpretation_handle: selected, assessments,
       ...(desired.domains === undefined ? {} : { domains: desired.domains }),
       ...(desired.membership_assumptions === undefined ? {} : { membership_assumptions: desired.membership_assumptions }) } });
 }
 
 export function receiveAuthoredCorrespondence(input: SourceSemanticCorrespondenceProposalInput, body: unknown,
   outcome?: object) {
-  return proposeCorrespondenceSemantics(input, { rawJson: correspondenceSelectionJson(input, body, outcome) });
+  return proposeCorrespondenceSemantics(input, { rawJson: correspondenceAssessmentJson(input, body, outcome) });
 }
 
 export type AuthoredQuerySemantics = SourceSemanticQuery;

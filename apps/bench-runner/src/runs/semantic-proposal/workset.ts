@@ -8,7 +8,8 @@ import {
   sourceSemanticCorrespondenceResponseJsonSchema, sourceSemanticQueryResponseJsonSchema,
   type SourceSemanticCorrespondenceRequest, type SourceSemanticQueryRequest
 } from "@do-soul/alaya-soul";
-import { SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "@do-soul/alaya-core";
+import { SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID, SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION,
+  SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "@do-soul/alaya-core";
 import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
 import { prepareSemanticProviderRequest, STEP_SEMANTIC_REQUEST_PROFILE } from "../compile-seed/http/semantic-provider-http.js";
 import { normalizeGeminiEndpoint } from "../provider/gemini-endpoint.js";
@@ -99,7 +100,7 @@ export function materializeSemanticProposalLines(
     });
   }
   const producer_id = workset.producer_id ?? SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID;
-  const producer_version = workset.producer_version ?? "1";
+  const producer_version = workset.producer_version ?? SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION;
   const schema = sourceSemanticCorrespondenceResponseJsonSchema();
   return workset.items.map((item) => {
     const parsed = CorrespondenceItemSchema.parse(item);

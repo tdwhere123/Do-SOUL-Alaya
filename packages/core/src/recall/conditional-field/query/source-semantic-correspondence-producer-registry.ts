@@ -1,6 +1,7 @@
 const SOURCE_SEMANTIC_CORRESPONDENCE_PRODUCER_REGISTRY_POLICY_VERSION = "1";
 export const SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID = "alaya.source.semantic.correspondence.core.v1";
-export const SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID = "alaya.source.semantic.correspondence.soul.v1";
+export const SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID = "alaya.source.semantic.correspondence.soul.v2";
+export const SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION = "2";
 
 const SOURCE_SEMANTIC_CORRESPONDENCE_PRODUCER_CAPABILITIES = ["semantic_correspondence"] as const;
 
@@ -43,7 +44,9 @@ export class SourceSemanticCorrespondenceProducerRegistry {
 
 const PRODUCTION_RECORDS: readonly SourceSemanticCorrespondenceProducerRecord[] = [
   sourceSemanticCorrespondenceProducerRecord(SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID),
-  sourceSemanticCorrespondenceProducerRecord(SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID)
+  sourceSemanticCorrespondenceProducerRecord(SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID, {
+    version: SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION
+  })
 ];
 
 export const defaultSourceSemanticCorrespondenceProducerRegistry = new SourceSemanticCorrespondenceProducerRegistry();

@@ -12,7 +12,7 @@ import {
 } from "./semantic-correspondence.js";
 import type { SourceSemanticQuery } from "./semantic-query.js";
 
-export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT = "source-semantic-correspondence-selection-v2" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT = "source-semantic-correspondence-assessment-v1" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT = "source-semantic-correspondence-endpoint-evidence-v1" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES = 1_000_000;
 export const SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE = /^qe([1-9][0-9]{0,2})$/u;
@@ -49,16 +49,26 @@ export const SourceSemanticCorrespondenceEndpointCatalogSchema = z.object({
   source_endpoints: z.array(SourceSemanticSourceCatalogEntrySchema).max(256).readonly()
 }).strict().readonly();
 
-export const SourceSemanticCorrespondenceSelectionSchema = z.object({
-  contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT),
-  source_interpretation_handle: DescriptorHandle.optional(),
-  selections: z.array(z.object({
-    query: QueryHandle,
+const ProposedEquivalentSchema = z.object({
     source: SourceHandle,
     query_excerpt: z.string().min(1).max(1024),
     source_semantic_support: z.array(SourceSemanticSupportSchema).max(8).readonly(),
-    applicable_context: SourceSemanticHandleSchema.optional()
-  }).strict().readonly()).max(256).readonly(),
+    applicable_context: SourceSemanticHandleSchema.optional(),
+    grounding: z.string().min(1).max(1024)
+}).strict().readonly();
+
+const EndpointAssessmentSchema = z.discriminatedUnion("status", [
+  z.object({ query: QueryHandle, status: z.literal("supported"),
+    equivalents: z.array(ProposedEquivalentSchema).min(1).max(256).readonly() }).strict().readonly(),
+  z.object({ query: QueryHandle, status: z.literal("unresolved"),
+    query_excerpt: z.string().min(1).max(1024),
+    explanation: z.string().min(1).max(1024) }).strict().readonly()
+]);
+
+export const SourceSemanticCorrespondenceAssessmentSchema = z.object({
+  contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT),
+  source_interpretation_handle: DescriptorHandle,
+  assessments: z.array(EndpointAssessmentSchema).max(256).readonly(),
   domains: z.array(z.object({
     query_domain: SourceSemanticHandleSchema, source_domain: SourceSemanticHandleSchema,
     query_support: z.object({ kind: z.literal("query_text"), excerpt: z.string().min(1).max(1024) }).strict().readonly(),
@@ -76,14 +86,15 @@ export const SourceSemanticCorrespondenceSelectionSchema = z.object({
 export type SourceSemanticQueryCatalogEntry = z.infer<typeof SourceSemanticQueryCatalogEntrySchema>;
 export type SourceSemanticSourceCatalogEntry = z.infer<typeof SourceSemanticSourceCatalogEntrySchema>;
 export type SourceSemanticCorrespondenceEndpointCatalog = z.infer<typeof SourceSemanticCorrespondenceEndpointCatalogSchema>;
-export type SourceSemanticCorrespondenceSelection = z.infer<typeof SourceSemanticCorrespondenceSelectionSchema>;
+export type SourceSemanticCorrespondenceAssessment = z.infer<typeof SourceSemanticCorrespondenceAssessmentSchema>;
 
 export type SourceSemanticCorrespondenceDescriptor = Readonly<{
   readonly source_interpretation_handle: string;
   readonly interpretation: SourceSemanticInterpretation;
 }>;
 
-export type SourceSemanticCorrespondenceSelectionEnvelope = Readonly<{
+export type SourceSemanticCorrespondenceAssessmentEnvelope = Readonly<{
+  readonly original_query: string;
   readonly source_interpretation_id: string;
   readonly query_semantics_id: string;
   readonly producer_id: string;
@@ -355,39 +366,69 @@ export function countSourceSemanticCorrespondenceJsonBytes(
 
 export type SourceSemanticCorrespondenceEndpointEvidence = ReturnType<typeof buildSourceSemanticCorrespondenceEndpointEvidence>;
 
-export function materializeSourceSemanticCorrespondenceSelection(
+export function materializeSourceSemanticCorrespondenceAssessment(
   body: unknown,
   catalog: SourceSemanticCorrespondenceEndpointCatalog,
-  envelope: SourceSemanticCorrespondenceSelectionEnvelope
+  envelope: SourceSemanticCorrespondenceAssessmentEnvelope
 ): SourceSemanticCorrespondence {
-  if (new TextEncoder().encode(JSON.stringify(body)).length > SOURCE_SEMANTIC_MAX_BYTES) {
+  try {
+    countSourceSemanticCorrespondenceJsonBytes(body, SOURCE_SEMANTIC_MAX_BYTES);
+  } catch (error) {
     throw new z.ZodError([{ code: "custom", path: [], message: "source semantic semantic_correspondence exceeds its byte bound" }]);
   }
-  const parsed = SourceSemanticCorrespondenceSelectionSchema.parse(body);
+  const parsed = SourceSemanticCorrespondenceAssessmentSchema.parse(body);
   const queryByHandle = new Map(catalog.query_endpoints.map((row) => [row.handle, row]));
   const sourceByHandle = new Map(catalog.source_endpoints.map((row) => [row.handle, row]));
-  const correspondences: SourceSemanticEndpointCorrespondence[] = parsed.selections.map((selection, index) => {
-    const query = queryByHandle.get(selection.query);
-    const source = sourceByHandle.get(selection.source);
+  const seenQueries = new Set<string>();
+  const correspondences: SourceSemanticEndpointCorrespondence[] = [];
+  for (const [index, assessment] of parsed.assessments.entries()) {
+    const query = queryByHandle.get(assessment.query);
     if (query === undefined) {
-      throw new z.ZodError([{ code: "custom", path: ["selections", index, "query"], message: "undeclared local reference" }]);
+      throw new z.ZodError([{ code: "custom", path: ["assessments", index, "query"], message: "undeclared local reference" }]);
     }
-    if (source === undefined) {
-      throw new z.ZodError([{ code: "custom", path: ["selections", index, "source"], message: "undeclared local reference" }]);
+    if (seenQueries.has(assessment.query)) {
+      throw new z.ZodError([{ code: "custom", path: ["assessments", index, "query"], message: "duplicate query endpoint assessment" }]);
     }
-    if (source.source_interpretation_handle !== (parsed.source_interpretation_handle ?? "source1")) {
-      throw new z.ZodError([{ code: "custom", path: ["selections", index, "source"],
-        message: "source endpoint is not on the bound interpretation" }]);
+    seenQueries.add(assessment.query);
+    if (assessment.status === "unresolved") {
+      if (!envelope.original_query.includes(assessment.query_excerpt)) {
+        throw new z.ZodError([{ code: "custom", path: ["assessments", index, "query_excerpt"], message: "query excerpt is not in the original query" }]);
+      }
+      continue;
     }
-    return {
-      relation: SOURCE_SEMANTIC_CORRESPONDENCE_RELATION,
-      query_endpoint: queryEndpoint(query),
-      source_endpoint: sourceEndpoint(source),
-      query_support: { kind: "query_text", excerpt: selection.query_excerpt },
-      source_semantic_support: selection.source_semantic_support,
-      ...(selection.applicable_context === undefined ? {} : { applicable_context: selection.applicable_context })
-    };
-  });
+    const seenSources = new Set<string>();
+    for (const [pairIndex, equivalent] of assessment.equivalents.entries()) {
+      const pairPath = ["assessments", index, "equivalents", pairIndex];
+      const source = sourceByHandle.get(equivalent.source);
+      if (source === undefined) {
+        throw new z.ZodError([{ code: "custom", path: [...pairPath, "source"], message: "undeclared local reference" }]);
+      }
+      if (source.source_interpretation_handle !== parsed.source_interpretation_handle) {
+        throw new z.ZodError([{ code: "custom", path: [...pairPath, "source"], message: "source endpoint is not on the bound interpretation" }]);
+      }
+      if (seenSources.has(equivalent.source)) {
+        throw new z.ZodError([{ code: "custom", path: [...pairPath, "source"], message: "duplicate proposed equivalent" }]);
+      }
+      if (!envelope.original_query.includes(equivalent.query_excerpt)) {
+        throw new z.ZodError([{ code: "custom", path: [...pairPath, "query_excerpt"], message: "query excerpt is not in the original query" }]);
+      }
+      seenSources.add(equivalent.source);
+      if (correspondences.length === 256) {
+        throw new z.ZodError([{ code: "custom", path: pairPath, message: "semantic_correspondence exceeds its correspondence bound" }]);
+      }
+      correspondences.push({
+        relation: SOURCE_SEMANTIC_CORRESPONDENCE_RELATION,
+        query_endpoint: queryEndpoint(query),
+        source_endpoint: sourceEndpoint(source),
+        query_support: { kind: "query_text", excerpt: equivalent.query_excerpt },
+        source_semantic_support: equivalent.source_semantic_support,
+        ...(equivalent.applicable_context === undefined ? {} : { applicable_context: equivalent.applicable_context })
+      });
+    }
+  }
+  if (seenQueries.size !== catalog.query_endpoints.length) {
+    throw new z.ZodError([{ code: "custom", path: ["assessments"], message: "missing query endpoint assessment" }]);
+  }
   return SourceSemanticCorrespondenceSchema.parse({
     contract: SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
     source_interpretation_id: envelope.source_interpretation_id,

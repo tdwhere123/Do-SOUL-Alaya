@@ -16,6 +16,7 @@ import {
 } from "../../../../recall/conditional-field/query/source-semantic-correspondence-admission.js";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION,
   SourceSemanticCorrespondenceProducerRegistry, sourceSemanticCorrespondenceProducerRecord
 } from "../../../../recall/conditional-field/query/source-semantic-correspondence-producer-registry.js";
 
@@ -397,6 +398,10 @@ describe("source semantic correspondence admission", () => {
       { ...SEND_PRED, applicable_context: "fMissing" }
     ]).admission;
     expect(foreignContext.kind).toBe("invalid");
+    const declaredContext = admitPair([
+      { ...SEND_PRED, applicable_context: "fSend" }
+    ]).admission;
+    expect(declaredContext.kind).toBe("admitted");
   });
 
   it("rejects an unregistered or capability-less semantic-correspondence producer and does not treat missing semantic correspondence as query semantics", () => {
@@ -425,10 +430,17 @@ describe("source semantic correspondence admission", () => {
     }).kind).toBe("unsupported");
     expect(admitSourceSemanticCorrespondence({
       semantic_correspondence: correspondenceBody(interpretationId, queryAdmission.query_id, [SEND_PRED], {
-        producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID
+        producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID,
+        producer_version: SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION
       }),
       source_interpretation: interpretation, query_semantics: semantics, original_query: ORIGINAL
     }).kind).toBe("admitted");
+    expect(admitSourceSemanticCorrespondence({
+      semantic_correspondence: correspondenceBody(interpretationId, queryAdmission.query_id, [SEND_PRED], {
+        producer_id: "alaya.source.semantic.correspondence.soul.v1", producer_version: "1"
+      }),
+      source_interpretation: interpretation, query_semantics: semantics, original_query: ORIGINAL
+    }).kind).toBe("unsupported");
     expect(admitSourceSemanticCorrespondence({
       semantic_correspondence: undefined, source_interpretation: interpretation, query_semantics: semantics, original_query: ORIGINAL
     }).kind).toBe("absent");

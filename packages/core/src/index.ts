@@ -206,6 +206,7 @@ export {
 } from "./recall/conditional-field/query/source-semantic-correspondence-admission.js";
 export {
   SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION,
   SourceSemanticCorrespondenceProducerRegistry, defaultSourceSemanticCorrespondenceProducerRegistry
 } from "./recall/conditional-field/query/source-semantic-correspondence-producer-registry.js";
 export { reasonSourceInterpretation } from "./recall/runtime/source-interpretation-reasoning.js";

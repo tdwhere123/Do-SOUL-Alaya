@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
 import {
   admitSourceSemanticCorrespondence, admitSourceSemanticQuery,
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
@@ -41,7 +42,7 @@ const ORIGINAL = "which parcel was sent and inspected?";
 const roots: string[] = [];
 
 proposalRecoveryCases({ workset: correspondenceWorkset,
-  body: line => selectionBody(line.request as SourceSemanticCorrespondenceRequest, "sent"), config });
+  body: line => assessmentBody(line.request as SourceSemanticCorrespondenceRequest), config });
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -176,21 +177,21 @@ function correspondenceWorkset() {
   });
 }
 
-function selectionBody(request: SourceSemanticCorrespondenceRequest, excerpt: string): string {
+function assessmentBody(request: SourceSemanticCorrespondenceRequest, inventedSupport = false): string {
   const predicate = request.catalog?.query_endpoints.find((row) => row.kind === "predicate");
   const frame = request.catalog?.source_endpoints.find((row) => row.kind === "frame");
   if (predicate === undefined || frame === undefined) {
     throw new Error("semantic_correspondence catalog missing predicate or frame");
   }
   return JSON.stringify({
-    contract: "source-semantic-correspondence-response-v3",
+    contract: "source-semantic-correspondence-response-v4",
     outcome: { status: "interpreted", gaps: [] },
     semantic_correspondence: {
-      contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1",
-      selections: [{
-        query: predicate.handle, source: frame.handle, query_excerpt: excerpt,
-        source_semantic_support: [{ kind: "lexical", mentions: ["mSent"] }]
-      }]
+      contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
+      assessments: assessmentForTestPairs(request.catalog, request.original_query, [{
+        query: predicate.handle, source: frame.handle, query_excerpt: "sent",
+        source_semantic_support: [{ kind: "lexical", mentions: [inventedSupport ? "mInvented" : "mSent"] }]
+      }])
     }
   });
 }
@@ -210,7 +211,7 @@ it("sends Step correspondence through the pinned route and reopens its admitted 
   });
   const line = materializeSemanticProposalLines(prepared, 4096)[0]!;
   const wire = `data: ${JSON.stringify({ choices: [{
-    delta: { content: selectionBody(line.request as SourceSemanticCorrespondenceRequest, "sent") },
+    delta: { content: assessmentBody(line.request as SourceSemanticCorrespondenceRequest) },
     finish_reason: "stop"
   }], usage: { prompt_tokens: 21, completion_tokens: 8, total_tokens: 29 } })}\n\ndata: [DONE]\n\n`;
   const seen: { path: string | undefined; body: Record<string, unknown> }[] = [];
@@ -311,7 +312,7 @@ it("rejects a complete request before serializing it when its lawful projection 
   const originalStringify = JSON.stringify;
   JSON.stringify = function (value, ...args) {
     if (value !== null && typeof value === "object" && "contract" in value &&
-      value.contract === "source-semantic-correspondence-request-v6") {
+      value.contract === "source-semantic-correspondence-request-v7") {
       throw new Error("oversized request was serialized before budget rejection");
     }
     return Reflect.apply(originalStringify, JSON, [value, ...args]);
@@ -363,12 +364,12 @@ it("rejects a descriptor aggregate before serializing its oversized array", () =
   expect(failure).toMatchObject({ code: "VALIDATION", message: "semantic_correspondence descriptors exceed input budget" });
 });
 
-async function fillCorrespondence(excerpt: string) {
+async function fillCorrespondence(inventedSupport = false) {
   const cacheRoot = join(tempRoot(), "cache");
   const prepared = correspondenceWorkset();
   const line = materializeSemanticProposalLines(prepared, 128)[0]!;
   const request = line.request as SourceSemanticCorrespondenceRequest;
-  const body = selectionBody(request, excerpt);
+  const body = assessmentBody(request, inventedSupport);
   const received = proposeCorrespondenceSemantics({ original_query: request.original_query,
     admitted_query_semantics: request.admitted_query_semantics,
     source_interpretation_descriptors: request.source_interpretation_descriptors,
@@ -395,7 +396,7 @@ async function fillCorrespondence(excerpt: string) {
 it("admits an semantic_correspondence shard only after Core admission", async () => {
   expect(admitSourceSemanticQuery(admittedQuery(), ORIGINAL).kind).toBe("admitted");
   const { cacheRoot, prepared, authority, first, result, key, received, core } =
-    await fillCorrespondence("sent");
+    await fillCorrespondence();
   expect(received.outcome.status).toBe("interpreted");
   expect(core.kind).toBe("admitted");
   const shard = inspectSemanticProposalShard(cacheRoot, key, {
@@ -418,7 +419,7 @@ it("admits an semantic_correspondence shard only after Core admission", async ()
 
 it("retains a Core-invalid interpreted semantic_correspondence as non-executable cache", async () => {
   const { cacheRoot, prepared, authority, first, result, key, received, core } =
-    await fillCorrespondence("invented support");
+    await fillCorrespondence(true);
   expect(received.outcome.status).toBe("interpreted");
   expect(core.kind).toBe("invalid");
   const shard = inspectSemanticProposalShard(cacheRoot, key, {
@@ -427,7 +428,7 @@ it("retains a Core-invalid interpreted semantic_correspondence as non-executable
   expect(first.calls).toHaveLength(1);
   expect(result.newly_admitted).toBe(0);
   expect(result.interpreted).toBe(0);
-  expect(readProviderRawAttempt(cacheRoot, key, 1)?.decoded_text).toContain("invented support");
+  expect(readProviderRawAttempt(cacheRoot, key, 1)?.decoded_text).toContain("mInvented");
   expect(shard?.admitted).toBe(false);
   expect(shard?.outcome).toMatchObject({ status: "interpreted" });
   expect(shard?.finish_reason).toBe("STOP");

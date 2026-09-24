@@ -8,7 +8,7 @@ import {
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/official-api/source-packet-request.js";
 import {
-  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
   SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   buildSourceSemanticRequest, buildSourceSemanticQueryRequest, semanticSha256,
   sourceSemanticResponseJsonSchema, sourceSemanticRequestCatalog, parseSourceSemanticRequest,
@@ -229,8 +229,10 @@ describe("query and semantic_correspondence proposal entry points", () => {
           }
         })) : "{}" });
         const semanticCorrespondence = proposeCorrespondenceSemantics(correspondenceInput, { rawJson: valid ? JSON.stringify({
-          contract: "source-semantic-correspondence-response-v3", outcome: { status: "interpreted", gaps: [] },
-          semantic_correspondence: { contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1", selections: [] }
+          contract: "source-semantic-correspondence-response-v4", outcome: { status: "interpreted", gaps: [] },
+          semantic_correspondence: { contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
+            assessments: preparedCorrespondence.request.catalog.query_endpoints.map((row) => ({ query: row.handle,
+              status: "unresolved", query_excerpt: "folio", explanation: "No equivalent source endpoint is proposed." })) }
         }) : "{}" });
         expect(querySemantics.outcome.status).toBe(valid ? "interpreted" : "invalid");
         expect(semanticCorrespondence.outcome.status).toBe(valid ? "interpreted" : "invalid");
@@ -266,12 +268,16 @@ describe("query and semantic_correspondence proposal entry points", () => {
 
   it("rejects semantic_correspondence outcome gaps rather than returning successful empty gaps", () => {
     const sourceInterpretation = currentInterpretation();
-    const received = proposeCorrespondenceSemantics({ original_query: "which folio was accessioned into bay B?", admitted_query_semantics: admittedQuery(),
+    const input = { original_query: "which folio was accessioned into bay B?", admitted_query_semantics: admittedQuery(),
       source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256), interpretation: sourceInterpretation }],
-      producer_id: "correspondence-producer", producer_version: "1" }, { rawJson: JSON.stringify({
-      contract: "source-semantic-correspondence-response-v3",
+      producer_id: "correspondence-producer", producer_version: "1" };
+    const prepared = proposeCorrespondenceSemantics(input);
+    const received = proposeCorrespondenceSemantics(input, { rawJson: JSON.stringify({
+      contract: "source-semantic-correspondence-response-v4",
       outcome: { status: "interpreted", gaps: [{ kind: "unsupported_meaning", affected_ids: [], support: [] }] },
-      semantic_correspondence: { contract: "source-semantic-correspondence-selection-v2", selections: [] }
+      semantic_correspondence: { contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
+        assessments: prepared.request.catalog.query_endpoints.map((row) => ({ query: row.handle,
+          status: "unresolved", query_excerpt: "folio", explanation: "No equivalent source endpoint is proposed." })) }
     }) });
     expect(received.outcome).toMatchObject({ status: "invalid", diagnostics: [{ code: "outcome_gap_mismatch", path: ["outcome", "gaps"] }] });
     expect(received.semantic_correspondence).toBeUndefined();
@@ -328,18 +334,21 @@ describe("query and semantic_correspondence proposal entry points", () => {
     const frame = prepared.request.catalog?.source_endpoints.find((row) => row.kind === "frame");
     const received = proposeCorrespondenceSemantics(correspondenceInput, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-correspondence-response-v3",
+        contract: "source-semantic-correspondence-response-v4",
         outcome: { status: "interpreted", gaps: [] },
         semantic_correspondence: {
-          contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1",
-          selections: [{
-            query: predicate!.handle, source: frame!.handle, query_excerpt: "accessioned",
-            source_semantic_support: [{ kind: "lexical", mentions: ["mAccessioned"] }]
-          }]
+          contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
+          assessments: prepared.request.catalog.query_endpoints.map((endpoint) => endpoint.handle === predicate!.handle
+            ? { query: endpoint.handle, status: "supported", equivalents: [{
+              source: frame!.handle, query_excerpt: "accessioned", grounding: "The local accession relation.",
+              source_semantic_support: [{ kind: "lexical", mentions: ["mAccessioned"] }]
+            }] }
+            : { query: endpoint.handle, status: "unresolved", query_excerpt: "folio",
+              explanation: "No equivalent source endpoint is proposed." })
         }
       })
     });
-    expect(received.request.contract).toBe(SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT);
+    expect(received.request.contract).toBe(SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT);
     expect(received.semantic_correspondence?.correspondences).toHaveLength(1);
     expect(received.request.source_interpretation_descriptors[0]!.interpretation.mentions.length).toBe(6);
     expect(received.request.source_interpretation_descriptors[0]!.interpretation.frames[0]!.bindings.length).toBe(3);

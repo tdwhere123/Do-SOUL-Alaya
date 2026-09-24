@@ -1,10 +1,11 @@
 import { existsSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
 import { join } from "node:path";
 import { expect } from "vitest";
-import { SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+import { SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
   type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { hashSourceRecordId, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, SourceSemanticAccessPolicySchema } from "@do-soul/alaya-protocol";
+  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, SourceSemanticAccessPolicySchema } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { BENCH_DAEMON_DB_FILENAME } from "../../../runs/snapshot/materialize.js";
@@ -217,12 +218,12 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   const aligned = await executeSemanticProposalFill({ workset, cacheRoot: correspondenceCache, authority: correspondenceAuthority,
     config: { providerUrl: "http://127.0.0.1:9", model: workset.model,
       requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
-        semantic_correspondence: { contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, source_interpretation_handle: "source1", selections: [
+      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
+        semantic_correspondence: { contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, source_interpretation_handle: "source1", assessments: assessmentForTestPairs(request.catalog, request.original_query, [
           { query: predicate.handle, source: frame.handle, query_excerpt: "completed",
             source_semantic_support: support.kind === "explicit" ? [{ kind: "lexical", mentions: support.mentions }] : [] },
           { query: slot.handle, source: sourceSlot.handle, query_excerpt: "What", source_semantic_support: sourceInterpretation.frames[0]!.slots[0]!.support }
-        ] } }), responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+        ]) } }), responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
     }) } });
   expect(aligned.newly_admitted).toBe(1);
   const proofReplay = await replaySemanticChain(root);
@@ -316,7 +317,7 @@ async function assertEvidenceInputWithdrawal(cacheRoot: string, config: Semantic
   const frame = request.catalog!.source_endpoints.find((row) => row.kind === "frame")!;
   const slot = request.catalog!.source_endpoints.find((row) => row.kind === "slot")!;
   const support = interpretation.frames[0]!.predicate_support;
-  const selections = [
+  const pairs = [
     ...request.catalog!.query_endpoints.filter((endpoint) => endpoint.kind === "predicate").map((endpoint) => ({
       query: endpoint.handle, source: frame.handle, query_excerpt: "completed",
       source_semantic_support: support.kind === "explicit" ? [{ kind: "lexical" as const, mentions: support.mentions }] : []
@@ -333,9 +334,10 @@ async function assertEvidenceInputWithdrawal(cacheRoot: string, config: Semantic
     cacheRoot: correspondenceCache, authority: correspondenceAuthority,
     config: { providerUrl: "http://127.0.0.1:9", model: correspondenceWorkset.model,
       requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" }, extractor: { extract: async () => ({
-        rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+        rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
           outcome: { status: "interpreted" }, semantic_correspondence: {
-            contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, source_interpretation_handle: "source1", selections } }),
+            contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, source_interpretation_handle: "source1",
+            assessments: assessmentForTestPairs(request.catalog, request.original_query, pairs) } }),
         responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
       }) } });
   expect(correspondenceFill.newly_admitted).toBe(1);

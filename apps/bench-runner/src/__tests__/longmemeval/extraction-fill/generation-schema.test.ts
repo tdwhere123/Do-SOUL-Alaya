@@ -7,7 +7,7 @@ import { SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, bui
   buildSourceSemanticQueryRequest, officialApiExtractionResponseSchemaPreimage,
   receiveSourceSemantics, sourceSemanticQueryResponseJsonSchema,
   sourceSemanticCorrespondenceResponseJsonSchema, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
-  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
+  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
 import { projectGeminiGenerationSchema, geminiGenerationSchemaCacheMaterial,
   countGeminiEnvelopeExpandedNodes } from "../../../runs/extraction/fill/batch/generation-schema.js";
@@ -19,7 +19,7 @@ const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor mi
   source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
 
 describe("Gemini complete generation schema guidance", () => {
-  it.each([SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT])(
+  it.each([SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT])(
     "keeps compact but exponentially expanded %s envelopes in JSON mode", (contract) => {
     const definitions: Record<string, object> = { leaf: { type: "string" } };
     let reference = "#/$defs/leaf";

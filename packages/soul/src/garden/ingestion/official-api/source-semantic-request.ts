@@ -10,7 +10,7 @@ import {
   SourceSemanticQueryGapSchema,
 
 
-  SourceSemanticQueryCarrierBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceSelectionSchema,
+  SourceSemanticQueryCarrierBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceAssessmentSchema,
   buildSourceReferenceCatalog, buildSourceSemanticCorrespondenceEndpointCatalog,
   buildSourceSemanticCorrespondenceEndpointEvidence, countSourceSemanticCorrespondenceJsonBytes,
   SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES,
@@ -29,8 +29,8 @@ import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type Sour
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
-export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT = "source-semantic-correspondence-request-v6" as const;
-export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v3" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT = "source-semantic-correspondence-request-v7" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v4" as const;
 
 const FORBIDDEN_PROPOSAL_KEYS = [
   "answers", "answer", "ranking", "seeds", "seed", "programs", "program",
@@ -155,7 +155,7 @@ export type SourceSemanticQueryRequest = Readonly<{
 
 export type SourceSemanticCorrespondenceRequest = Readonly<{
   original_query: string;
-  contract: typeof SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT;
+  contract: typeof SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT;
   k_version: typeof SOURCE_SEMANTIC_K_VERSION;
   admitted_query_semantics: SourceSemanticQuery;
   source_interpretation_descriptors: readonly SourceInterpretationDescriptor[];
@@ -316,7 +316,7 @@ export function buildSourceSemanticCorrespondenceRequest(
   }));
   const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(admitted_query_semantics, descriptors);
   const requestBase = {
-    contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT,
+    contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     admitted_query_semantics,
     original_query: input.original_query,
@@ -375,12 +375,12 @@ export function sourceSemanticQueryResponseJsonSchema(): object {
   }).strict().readonly(), "ref");
 }
 
-/** Current catalog-selection generation envelope for semantic correspondence. */
+/** Current endpoint-assessment generation envelope for semantic correspondence. */
 export function sourceSemanticCorrespondenceResponseJsonSchema(): object {
   return producerResponseJsonSchema(z.object({
-    contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT),
+    contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT),
     outcome: CorrespondenceGenerationOutcomeSchema,
-    semantic_correspondence: SourceSemanticCorrespondenceSelectionSchema.optional()
+    semantic_correspondence: SourceSemanticCorrespondenceAssessmentSchema.optional()
   }).strict().readonly());
 }
 
@@ -409,14 +409,15 @@ export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
 
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT = [
   "The original_query is the evidence text. Every query_excerpt and query_support.excerpt must copy an exact substring from it, preserving its inflection and language; normalized query-semantics predicates are not evidence excerpts.",
-  "Propose semantic_correspondence as source-semantic-correspondence-selection-v2 over the advertised catalog.",
+  "Propose semantic_correspondence as source-semantic-correspondence-assessment-v1 over the advertised catalog.",
   "Use contextual equivalence only. Semantic correspondence cannot rank or answer. Do not emit answers, ranking, seeds, programs, verdicts, or chosen results.",
   "Do not invent source-interpretation structure or rewrite query semantics. Do not copy host hashes or assemble internal query-semantics or source-interpretation endpoint objects.",
-  "Select catalog handles qeN and seN. Bind one actual query semantics and the named source interpretation. Name the target interpretation with request-local handle source1, source2, ... in descriptor order.",
-  // Set-valued answers need the predicate plus each returned-variable slot on the same frame; a predicate row alone compiles to none.
-  "A set-valued query that returns more than one free variable, or that asks which X which Y, must emit a selection group for each matching asserted frame in the advertised catalog. Each group MUST contain the matching predicate AND a slot binding for every returned variable on that same source frame. A predicate-only group is incomplete and must not be handed in as a group. Do not collapse those frames onto the first hit. The host does not complete omitted selections.",
-  "An endpoint pair must express the same contextual meaning, not merely related topics or similar entity types. A named query target keeps its actual meaning: do not map an unrelated product or topic to it. A free answer variable is not the requester or a named source participant merely because both denote people. If no supported pair exists, use abstained or an empty selections array; partial overlap must not invent missing equivalences.",
+  "Name the target interpretation with request-local handle source1, source2, ... in descriptor order. Assess every advertised qeN exactly once for that interpretation, even when no equivalence is supported. Do not assess source endpoints as query endpoints.",
+  "For each query endpoint, use status supported with a nonempty equivalents array containing every proposed contextual equivalent seN, or status unresolved with an exact query_excerpt and explanation of the unestablished obligation. Never leave an endpoint out or put an unsupported pair in an unresolved record. Keep all supported many-to-many pairs; do not pick a preferred pair or enumerate every possible query/source pair.",
+  "Each supported equivalent retains exact query_excerpt and source_semantic_support and adds bounded grounding. For a reference, explain its full denotation using the admitted reference, source mention and use, and relevant scope or context evidence; matching a word or entity type alone is insufficient. For predicates and slots, explain the local relation. Grounding and unresolved explanations are inspectable proposals, not certificates and not answers.",
+  "A set-valued query may have multiple asserted source frames. Preserve each supported predicate and returned-variable slot relation on its actual frame; do not collapse frames onto the first hit. If a slot is unsupported, assess it unresolved rather than fabricate a binding. Partial supported assessments remain available for native composition.",
+  "An endpoint pair must express the same contextual meaning, not merely related topics or similar entity types. A named query target keeps its actual meaning. A free answer variable is not the requester or a named source participant merely because both denote people. If no supported pair exists, submit explicit unresolved assessments; abstain only if you cannot provide the assessment. Partial overlap must not invent missing equivalences.",
   'Optional domains map {query_domain,source_domain,query_support,source_semantic_support}. Explicit conditional membership assumptions are {query_variable,source_domain,restrictions:[],status:"member"|"excluded",query_support,description}; use only assumptions stated in the query/context, never infer identity from a matching surface name. Closed source domains cannot acquire novel assumed members.',
   "Domain identifiers are exact admitted_query_semantics.domains[].id and the selected source interpretation's domains[].id. A frame, entity, statement, endpoint handle or conceptual category is not a domain identifier. If the source interpretation has no declared domains, omit domains and membership_assumptions or return empty arrays. Ordinary free-answer questions do not require inventing finite-domain membership. The source must already supply any domain you reference.",
-  "An interpreted semantic_correspondence has no gap channel: omit outcome.gaps or send []. Use abstained if no supported semantic_correspondence can be proposed."
+  "An interpreted semantic_correspondence has no gap channel: omit outcome.gaps or send []. Explicit unresolved endpoint assessments are not world-negation or canonical C gaps."
 ].join(" ");

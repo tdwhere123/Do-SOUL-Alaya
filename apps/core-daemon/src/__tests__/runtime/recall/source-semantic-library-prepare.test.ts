@@ -1,4 +1,4 @@
-import { authoredQuerySemantics, correspondenceSelectionJson } from "./source-semantic-producer-fixture.js";
+import { authoredQuerySemantics, correspondenceAssessmentJson } from "./source-semantic-producer-fixture.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -139,7 +139,7 @@ function isGoldInterpretation(interpretation: SourceSemanticInterpretation): boo
 function goldCorrespondenceJson(interpretation: SourceSemanticInterpretation): string {
   const actor = mention(interpretation, "Alice"), tools = mention(interpretation, "tools"), uses = mention(interpretation, "uses");
   const frame = frameOf(interpretation, "use");
-  return correspondenceSelectionJson({ original_query: ORIGINAL, admitted_query_semantics: receiveQuerySemantics(ORIGINAL),
+  return correspondenceAssessmentJson({ original_query: ORIGINAL, admitted_query_semantics: receiveQuerySemantics(ORIGINAL),
     source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(interpretation, fieldContractSha256), interpretation: interpretation }],
     producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, {
       correspondences: [
@@ -282,7 +282,7 @@ it("prepares bounded semantic correspondences from discovered source interpretat
         expect(prepared.semantic_correspondences).toHaveLength(1);
         const failureKinds = ["abstained", "truncated", "resource_exhausted", "invalid"] as const;
         for (const status of failureKinds) {
-          const rawJson = JSON.stringify({ contract: "source-semantic-correspondence-response-v3",
+          const rawJson = JSON.stringify({ contract: "source-semantic-correspondence-response-v4",
             outcome: status === "invalid" ? { status, reason: "rejected" } : { status } });
           const result = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_query_semantics: semantics,
             source_interpretation_descriptors: descriptors, produce: () => ({ rawJson }),

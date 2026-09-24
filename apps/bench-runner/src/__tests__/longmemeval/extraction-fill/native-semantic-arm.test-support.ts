@@ -1,12 +1,13 @@
 import { sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
+import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
 import { join } from "node:path";
 import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposure-session.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { expect } from "vitest";
 import { SoulInterpretationResponseSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT } from "@do-soul/alaya-protocol";
-import { SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
   type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
@@ -184,15 +185,15 @@ function authoredCorrespondence(userPrompt: string) {
   const request = JSON.parse(userPrompt) as SourceSemanticCorrespondenceRequest;
   const interpretation = request.source_interpretation_descriptors[0]!.interpretation;
   const support = interpretation.frames[0]!.predicate_support;
-  return JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
-    semantic_correspondence: { contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, source_interpretation_handle: "source1", selections: [
+  return JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
+    semantic_correspondence: { contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, source_interpretation_handle: "source1", assessments: assessmentForTestPairs(request.catalog, request.original_query, [
       { query: request.catalog!.query_endpoints.find((entry) => entry.kind === "predicate")!.handle,
         source: request.catalog!.source_endpoints.find((entry) => entry.kind === "frame")!.handle, query_excerpt: "completed",
         source_semantic_support: support.kind === "explicit" ? [{ kind: "lexical", mentions: support.mentions }] : [] },
       { query: request.catalog!.query_endpoints.find((entry) => entry.kind === "slot")!.handle,
         source: request.catalog!.source_endpoints.find((entry) => entry.kind === "slot")!.handle, query_excerpt: "What",
         source_semantic_support: interpretation.frames[0]!.slots[0]!.support }
-    ] } });
+    ]) } });
 }
 
 async function fillAuthored(workset: SemanticProposalWorkset, cacheRoot: string, raw: (userPrompt: string) => string) {

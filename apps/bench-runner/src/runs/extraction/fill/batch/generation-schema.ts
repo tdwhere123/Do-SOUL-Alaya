@@ -1,6 +1,6 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
-  SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
+  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
 
 type Schema = Record<string, unknown>;
 const mapPositions = ["properties", "patternProperties", "dependentSchemas"];
@@ -25,7 +25,7 @@ export function projectGeminiGenerationSchema(schema: object): { schema?: object
   const contract = record(record(root.properties)?.contract);
   const values = Array.isArray(contract?.enum) ? contract.enum : [contract?.const];
   const envelope = values.some(value => value === SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT
-    || value === SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT);
+    || value === SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT);
   const instruction = envelope ? ENVELOPE_SCHEMA_INSTRUCTION : SOURCE_SCHEMA_INSTRUCTION;
   const cycle = (value: unknown, visiting = new Set<string>()): boolean => {
     const node = record(value); if (node === undefined) return false;

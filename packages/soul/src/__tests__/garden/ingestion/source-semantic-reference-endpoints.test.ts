@@ -124,7 +124,7 @@ it("presents declared reference uses and source frame context on the same endpoi
       source_interpretation_id: sourceSemanticInterpretationIdentity(interpretation, semanticSha256), interpretation
     }], producer_id: "authored-control", producer_version: "1" });
   const { catalog, endpoint_evidence: evidence } = request;
-  expect(request.contract).toBe("source-semantic-correspondence-request-v6");
+  expect(request.contract).toBe("source-semantic-correspondence-request-v7");
   expect(evidence.contract).toBe("source-semantic-correspondence-endpoint-evidence-v1");
   expect(evidence.query_endpoints.map(row => row.handle)).toEqual(catalog.query_endpoints.map(row => row.handle));
   expect(evidence.source_endpoints.map(row => row.handle)).toEqual(catalog.source_endpoints.map(row => row.handle));
