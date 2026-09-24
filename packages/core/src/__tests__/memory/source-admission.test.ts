@@ -98,6 +98,27 @@ describe("source admission", () => {
     }, fieldSha256));
   });
 
+  it("classifies a metadata correction without a later recorded time as a conflict", () => {
+    const stores = createInMemoryFieldStores();
+    const admission = createSourceAdmissionPort({ sha256: fieldSha256, stores });
+    const first = admission.admit(request());
+    expect(() => admission.admit(request({ source_version: "v2", attribution_context: {
+      contract: UTTERANCE_ATTRIBUTION_CONTRACT, status: "captured", issuer_scope: "authored-harness",
+      utterances: [{ occurrence_id: "turn-1", utf8_span: [0, BODY.length],
+        conversation_ref: "conversation-1", author_ref: "person-1" }]
+    } }))).toThrowError(expect.objectContaining({ name: "CoreError", code: "CONFLICT" }));
+    expect(stores.getCurrentRecord("workspace-1", "src-1")?.identity).toBe(first.record.identity);
+  });
+
+  it("classifies null attribution on a new source as invalid input without storing it", () => {
+    const stores = createInMemoryFieldStores();
+    const admission = createSourceAdmissionPort({ sha256: fieldSha256, stores });
+    expect(() => admission.admit(request({ attribution_context: null }))).toThrowError(
+      expect.objectContaining({ name: "CoreError", code: "VALIDATION" })
+    );
+    expect(stores.getCurrentRecord("workspace-1", "src-1")).toBeNull();
+  });
+
   it("admits unknown valid time without requiring event or valid time", () => {
     const admitted = createPort().admit(request({
       event_time: null,

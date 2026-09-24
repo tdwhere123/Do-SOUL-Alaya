@@ -310,10 +310,10 @@ export function readCurrentExtractionAuthorityRevision(): string {
   try {
     gitRoot = realpathSync(readGitText(["rev-parse", "--show-toplevel"], checkoutRoot));
   } catch (cause) {
-    throw new Error("cannot establish the loaded bench-runner Git checkout", { cause });
+    throw new AlayaError("CONFLICT", "cannot establish the loaded bench-runner Git checkout", { cause });
   }
   if (gitRoot !== checkoutRoot) {
-    throw new Error("loaded bench-runner module is outside its Git checkout root");
+    throw new AlayaError("CONFLICT", "loaded bench-runner module is outside its Git checkout root");
   }
   return computeExtractionAuthorityWorktreeRevision({
     head: readGitText(["rev-parse", "HEAD"], checkoutRoot),

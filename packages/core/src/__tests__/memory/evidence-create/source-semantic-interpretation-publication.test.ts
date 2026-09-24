@@ -12,7 +12,7 @@ import {
   SourceSemanticPublishedInterpretationSchema,
   SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
   UNKNOWN_UTTERANCE_ATTRIBUTION,
-  type SourceReferenceCatalog
+  type SourceReferenceCatalog, type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
 import {
   SqliteEventLogRepo,
@@ -83,13 +83,14 @@ async function admitSource(
   sourceVersion = "1",
   recordedAt = CLOCK,
   evidenceObjectId: string | null = null,
-  sourceId = "artifact-1"
+  sourceId = "artifact-1",
+  attribution: UtteranceAttribution = UNKNOWN_UTTERANCE_ATTRIBUTION
 ) {
   return await fixture.sourceAdmission.admit({
     workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
     source_id: sourceId,
     source_version: sourceVersion,
-    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+    attribution_context: attribution,
     content_bytes: content,
     evidence_object_id: evidenceObjectId,
     recorded_at: recordedAt,
@@ -538,6 +539,42 @@ it("verifies a retained interpretation without admitting it to current execution
   expect(() => verifyRetainedPublishedSourceSemanticInterpretation(
     changedBytesOutsideAssertion, retained, REAL_SQLITE_TEST_WORKSPACE_ID
   )).toThrow(/stored source body does not match its digest/u);
+});
+
+it("inspects the exact historical source revision without granting current execution", async () => {
+  const fixture = await openFixture();
+  const captured = (author_ref: string): UtteranceAttribution => ({
+    contract: "utterance-attribution-v1", status: "captured", issuer_scope: "test-issuer",
+    utterances: [{ occurrence_id: "source", utf8_span: [0, Buffer.byteLength(SOURCE)],
+      conversation_ref: "conversation", author_ref }]
+  });
+  const original = captured("author-a"), corrected = captured("author-b");
+  await admitSource(fixture, SOURCE, "1", CLOCK, null, "artifact-1", original);
+  const { bound } = await fixture.publication.publish(publicationInput(catalogFor(ASSERTION), {
+    attribution_context: original
+  }));
+  await admitSource(fixture, SOURCE, "2", "2026-09-15T00:00:00.000Z", null, "artifact-1", corrected);
+  const inspect = (owner = fixture.owner, value: unknown = bound) =>
+    verifyRetainedPublishedSourceSemanticInterpretation(owner, value, REAL_SQLITE_TEST_WORKSPACE_ID);
+  expect(inspect()).toMatchObject({ eligibility: "retained_only", verification: {
+    stored: { record: { source_version: "1", attribution_context: original }, content_bytes: SOURCE }, bound
+  } });
+  expect(() => verifyPublishedSourceSemanticInterpretation(fixture.owner, bound, REAL_SQLITE_TEST_WORKSPACE_ID))
+    .toThrow(/source binding/u);
+  const changedInterpretation = { ...bound.interpretation,
+    source: { ...bound.interpretation.source, attribution_context: corrected } };
+  expect(() => inspect(fixture.owner, { ...bound, interpretation: changedInterpretation,
+    interpretation_id: sourceSemanticInterpretationIdentity(changedInterpretation, fieldContractSha256) }))
+    .toThrow(/source binding/u);
+  expect(() => inspect({ ...fixture.owner, stores: { ...fixture.stores,
+    getStoredRecord: (workspaceId, recordId) => {
+      const stored = fixture.stores.getStoredRecord(workspaceId, recordId);
+      return stored === null ? null : { ...stored, content_bytes: `Guest:${ASSERTION}` };
+    }
+  } })).toThrow(/stored source body does not match its digest/u);
+  expect(() => inspect({ ...fixture.owner, stores: { ...fixture.stores,
+    getStoredRecord: () => null
+  } })).toThrow(/retained interpretation source is unavailable/u);
 });
 
 it("publishes only an explicitly unbound normalized interpretation with matching captured attribution", async () => {

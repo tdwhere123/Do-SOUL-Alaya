@@ -15,8 +15,12 @@ it("keeps unknown explicit and validates exact UTF-8 occurrence boundaries", () 
   expect(bindUtteranceAttribution(captured(), "é").status).toBe("captured");
   expect(() => bindUtteranceAttribution({ ...captured(), utterances: [
     { ...captured().utterances[0]!, utf8_span: [0, 1] }
-  ] }, "é")).toThrow(/UTF-8/u);
-  expect(() => bindUtteranceAttribution(captured(), "a")).toThrow(/UTF-8/u);
+  ] }, "é")).toThrowError(expect.objectContaining({
+    name: "AlayaError", code: "VALIDATION", message: expect.stringMatching(/UTF-8/u)
+  }));
+  expect(() => bindUtteranceAttribution(captured(), "a")).toThrowError(expect.objectContaining({
+    name: "AlayaError", code: "VALIDATION", message: expect.stringMatching(/UTF-8/u)
+  }));
   expect(UtteranceAttributionSchema.safeParse(null).success).toBe(false);
   expect(UtteranceAttributionSchema.safeParse({ ...captured(), utterances: [
     captured().utterances[0], captured().utterances[0]

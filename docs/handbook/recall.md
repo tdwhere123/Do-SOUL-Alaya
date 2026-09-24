@@ -824,8 +824,10 @@ binders and canonical outcome gaps. A plain occurrence reference does not embed
 its target. Unowned or conflicting scopes are rejected; the compiler never
 guesses assertion permission, pronoun antecedents or domain facts. Compilation
 and normalization share one resource ledger. Structural admission and located
-gaps cannot certify language completeness. The canonical source interpretation and response-envelope
-shapes remain unchanged. Current SOUL request, receive, prompt, schema and
+gaps cannot certify language completeness. The selection-producer change preserved
+the canonical interpretation and source response envelope. The attribution cutover
+adds required source-binding attribution and published envelope v5; the source
+response envelope remains v5. Current SOUL request, receive, prompt, schema and
 revision admission require the v7 selection request, source units, explicit
 host assertion locations and normalizer-v5. Recorded v1/v2/v3/v4 proposals
 and marker-absent normalizer-v3 requests retain their original prompt, schema,
