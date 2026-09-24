@@ -1,7 +1,7 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
+import { buildSourceSemanticRequest, parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
 import * as geminiHttp from "../../../runs/compile-seed/http/gemini-http.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
@@ -10,7 +10,8 @@ import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } fro
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { listProviderRawAttempts, providerRawAttemptPath, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { cacheFilePath, inspectCachedRawExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
-import { extractionAdmissionGenerationSha256, type ExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
+import { computeSystemPromptSha256, extractionAdmissionGenerationSha256,
+  type ExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { computeExtractionRawJsonSha256 } from "../../../runs/extraction/content-closure.js";
 import { createHash } from "node:crypto";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
@@ -158,7 +159,8 @@ it("inspects a retained source shard without reusing it or dispatching its cache
   const shardPath = cacheFilePath(cacheRoot, currentKey);
   const shard = JSON.parse(readFileSync(shardPath, "utf8"));
   const current = parseSourceSemanticRequest(JSON.parse(shard.source_semantic.result.line.userPrompt));
-  const retainedRequest = { ...current, source_request: {
+  const { source_digest: _currentDigest, ...catalogRequest } = current;
+  const retainedRequest = { ...catalogRequest, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
     ...current.source_request, proposal_contract: "source-semantic-proposal-v2"
   } };
   const userPrompt = JSON.stringify(retainedRequest);
@@ -167,7 +169,7 @@ it("inspects a retained source shard without reusing it or dispatching its cache
   const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v2", outcome: { status: "abstained" } });
   const manifestPath = join(cacheRoot, "manifest.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtractionCacheManifest;
-  const retiredManifest = { ...manifest, source_semantic_generation: {
+  const retiredManifest = { ...manifest, system_prompt_sha256: computeSystemPromptSha256(systemPrompt), source_semantic_generation: {
     ...manifest.source_semantic_generation!, normalizer_version: "source-semantic-normalizer-v3"
   } } as unknown as ExtractionCacheManifest;
   writeFileSync(manifestPath, `${JSON.stringify(retiredManifest, null, 2)}\n`);
@@ -186,13 +188,85 @@ it("inspects a retained source shard without reusing it or dispatching its cache
   writeFileSync(retiredPath, `${JSON.stringify(shard, null, 2)}\n`);
   unlinkSync(shardPath);
 
-  expect(inspectCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
+  const retiredInspection = inspectCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE);
+  expect(retiredInspection, JSON.stringify(retiredInspection))
     .toMatchObject({ status: "retired", eligibility: "retained_only" });
   expect(inspectCachedRawExtraction(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
     .toMatchObject({ status: "quarantined", rawJson });
+  assertRetiredByteBindings(retiredPath, retiredKey, current);
   expect(await runCli(args)).not.toBe(0);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(calls);
 }, 60000);
+
+function assertRetiredByteBindings(retiredPath: string, retiredKey: string,
+  current: ReturnType<typeof parseSourceSemanticRequest>): void {
+  const shard = JSON.parse(readFileSync(retiredPath, "utf8"));
+  const retainedRequest = JSON.parse(shard.source_semantic.result.line.userPrompt);
+  const inspectChanged = (changed: object, reason: string) => {
+    writeFileSync(retiredPath, `${JSON.stringify(changed, null, 2)}\n`);
+    expect(inspectCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
+      .toMatchObject({ status: "invalid", reason: expect.stringContaining(reason) });
+    expect(inspectCachedRawExtraction(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
+      .toMatchObject({ status: "invalid" });
+  };
+  const changedSource = structuredClone(shard);
+  changedSource.source_semantic.source_corpus += " CORRUPTED";
+  inspectChanged(changedSource, "source bytes differ");
+  const changedPrompt = structuredClone(shard);
+  changedPrompt.source_semantic.result.line.systemPrompt += " CORRUPTED";
+  inspectChanged(changedPrompt, "prompt bytes differ");
+  const missingDigest = structuredClone(shard);
+  const unboundRequest = structuredClone(retainedRequest) as Record<string, unknown>;
+  delete unboundRequest.source_catalog;
+  missingDigest.source_semantic.result.line.userPrompt = JSON.stringify(unboundRequest);
+  missingDigest.source_semantic.result.line.requestSha256 =
+    computeExtractionRawJsonSha256(missingDigest.source_semantic.result.line.userPrompt);
+  inspectChanged(missingDigest, "digest witness is absent");
+
+  const emptyCurrent = buildSourceSemanticRequest({ sourceCorpus: "", assertionIds: [], sourceScope: "complete-source",
+    source_id: "unbound", source_version: "unbound", producer_id: "official-api-source-semantic", producer_version: "1" });
+  const emptyRequest = { ...retainedRequest, source_catalog: sourceSemanticRequestCatalog(emptyCurrent),
+    source_request: { ...retainedRequest.source_request, source_assertions: [], assertion_locations: [] } };
+  const emptyUserPrompt = JSON.stringify(emptyRequest);
+  const empty = { ...shard, raw_json: "", response_metadata: undefined, transport_provenance: undefined,
+    admission_identity: { ...shard.admission_identity, raw_json_sha256: computeExtractionRawJsonSha256("") },
+    source_semantic: { ...shard.source_semantic, kind: "deterministic_empty", source_corpus: "",
+      completion: "no_eligible_source", result: undefined,
+      line: { ...shard.source_semantic.result.line, unitKeys: [], userPrompt: emptyUserPrompt,
+        requestSha256: computeExtractionRawJsonSha256(emptyUserPrompt) } } };
+  writeFileSync(retiredPath, `${JSON.stringify(empty, null, 2)}\n`);
+  expect(inspectCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
+    .toMatchObject({ status: "retired", eligibility: "retained_only" });
+  inspectChanged({ ...empty, source_semantic: { ...empty.source_semantic,
+    line: { ...empty.source_semantic.line, unitKeys: ["unexpected"] } } }, "retained empty source binding mismatch");
+  const assertedRequest = { ...emptyRequest, source_request: { ...emptyRequest.source_request,
+    source_assertions: retainedRequest.source_request.source_assertions } };
+  const assertedUserPrompt = JSON.stringify(assertedRequest);
+  inspectChanged({ ...empty, source_semantic: { ...empty.source_semantic,
+    line: { ...empty.source_semantic.line, userPrompt: assertedUserPrompt,
+      requestSha256: computeExtractionRawJsonSha256(assertedUserPrompt) } } }, "retained empty source binding mismatch");
+  const catalogRequest = { ...emptyRequest, source_catalog: { ...emptyRequest.source_catalog,
+    assertions: retainedRequest.source_catalog.assertions } };
+  const catalogUserPrompt = JSON.stringify(catalogRequest);
+  inspectChanged({ ...empty, source_semantic: { ...empty.source_semantic,
+    line: { ...empty.source_semantic.line, userPrompt: catalogUserPrompt,
+      requestSha256: computeExtractionRawJsonSha256(catalogUserPrompt) } } }, "retained empty source binding mismatch");
+  const selectionRequest = { ...current, source_request: { ...current.source_request,
+    proposal_contract: "source-semantic-proposal-v7" } };
+  const selectionUserPrompt = JSON.stringify(selectionRequest);
+  const selection = structuredClone(shard);
+  selection.source_semantic.result.line.userPrompt = selectionUserPrompt;
+  selection.source_semantic.result.line.requestSha256 = computeExtractionRawJsonSha256(selectionUserPrompt);
+  writeFileSync(retiredPath, `${JSON.stringify(selection, null, 2)}\n`);
+  expect(inspectCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
+    .toMatchObject({ status: "retired", eligibility: "retained_only" });
+  const changedSelectionPrompt = structuredClone(selection);
+  changedSelectionPrompt.source_semantic.result.line.systemPrompt += " CORRUPTED";
+  inspectChanged(changedSelectionPrompt, "prompt bytes differ");
+  selection.source_semantic.source_corpus += " CORRUPTED";
+  inspectChanged(selection, "source bytes differ");
+  writeFileSync(retiredPath, `${JSON.stringify(shard, null, 2)}\n`);
+}
 
 it("quarantines an interactive generateContent line through the same source-semantic receiver as Batch", async () => {
   const fixture = await setupInteractive("unknown_alias");

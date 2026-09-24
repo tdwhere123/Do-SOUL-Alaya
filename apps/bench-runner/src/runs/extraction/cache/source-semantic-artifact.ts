@@ -18,7 +18,7 @@ import type { ExtractionCacheWriteLease } from "../fill/manifest/fill-root-guard
 import { buildExtractionTransportProvenance, isExtractionTransportProvenance } from "../transport-route.js";
 import { assertExtractionCacheIdentity } from "./cache-identity.js";
 import { extractionAdmissionGenerationSha256, readExtractionCacheManifestIdentity,
-  readRetainedSourceSemanticManifestIdentity } from "./extraction-cache-manifest.js";
+  readRetainedSourceSemanticManifestIdentity, computeSystemPromptSha256 } from "./extraction-cache-manifest.js";
 import { normalizeGeminiEndpoint } from "../../provider/gemini-endpoint.js";
 import { isCompleteSemanticFinish, STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
@@ -250,6 +250,12 @@ export function inspectCachedSourceSemantic(cacheRoot: string, cacheKey: string,
   }
 }
 
+const RETIRED_SELECTION_CONTRACT = "source-semantic-proposal-v7";
+const RETIRED_PROPOSAL_CONTRACTS = new Set([
+  "source-semantic-proposal-v1", "source-semantic-proposal-v2",
+  "source-semantic-proposal-v3", "source-semantic-proposal-v4", RETIRED_SELECTION_CONTRACT
+]);
+
 function isRetiredSourceRequest(value: unknown): boolean {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const outer = value as Record<string, unknown>;
@@ -259,7 +265,25 @@ function isRetiredSourceRequest(value: unknown): boolean {
   return outer.interpretation_contract === SOURCE_SEMANTIC_PACKET_CONTRACT &&
     Number.isInteger(outer.schema_version) && Number(outer.schema_version) > 0 &&
     (contract === undefined && Number(outer.schema_version) < SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION ||
-      typeof contract === "string" && /^source-semantic-proposal-v[1-7]$/u.test(contract));
+      typeof contract === "string" && RETIRED_PROPOSAL_CONTRACTS.has(contract));
+}
+
+function recordedSourceDigest(request: Record<string, unknown>): string {
+  const direct = Object.hasOwn(request, "source_digest");
+  const catalogBound = Object.hasOwn(request, "source_catalog");
+  const selectionWire = (request.source_request as Record<string, unknown>).proposal_contract === RETIRED_SELECTION_CONTRACT;
+  if (direct !== selectionWire || catalogBound === selectionWire) {
+    throw new AlayaError("CONFLICT", "retained source semantic source digest witness is absent or ambiguous");
+  }
+  const catalog = request.source_catalog;
+  if (catalogBound && (catalog === null || typeof catalog !== "object" || Array.isArray(catalog))) {
+    throw new AlayaError("CONFLICT", "retained source semantic source catalog witness is malformed");
+  }
+  const digest = direct ? request.source_digest : (catalog as Record<string, unknown>).source_digest;
+  if (typeof digest !== "string" || !/^[a-f0-9]{64}$/u.test(digest)) {
+    throw new AlayaError("CONFLICT", "retained source semantic source digest witness is malformed");
+  }
+  return digest;
 }
 
 /** Bounded recorded-byte and transport classification, without historical proposal decoding. */
@@ -280,9 +304,24 @@ function inspectRetiredSourceSemanticEntry(entry: CachedExtractionEntry, cacheRo
   if (identity === undefined || identity.generationSha256 !== entry.admission_identity.generation_sha256) {
     throw new AlayaError("CONFLICT", "retained source semantic generation binding mismatch");
   }
+  if (recordedSourceDigest(request as Record<string, unknown>) !== computeExtractionRawJsonSha256(typed.source_corpus)) {
+    throw new AlayaError("CONFLICT", "retained source semantic source bytes differ from recorded request digest");
+  }
+  if (identity.systemPromptSha256 !== computeSystemPromptSha256(line.systemPrompt)) {
+    throw new AlayaError("CONFLICT", "retained source semantic prompt bytes differ from recorded manifest digest");
+  }
   if (typed.kind === "deterministic_empty") {
+    const recorded = request as Record<string, unknown>;
+    const body = recorded.source_request as Record<string, unknown>;
+    const locations = body.assertion_locations;
+    const catalog = recorded.source_catalog as Record<string, unknown> | undefined;
     if (entry.raw_json !== "" || entry.transport_provenance !== undefined || entry.response_metadata !== undefined ||
-        typed.completion !== "no_eligible_source") throw new AlayaError("CONFLICT", "retained empty source binding mismatch");
+        typed.completion !== "no_eligible_source" || line.unitKeys.length !== 0 ||
+        !Array.isArray(body.source_assertions) || body.source_assertions.length !== 0 ||
+        (locations !== undefined && (!Array.isArray(locations) || locations.length !== 0)) ||
+        (catalog !== undefined && (!Array.isArray(catalog.assertions) || catalog.assertions.length !== 0))) {
+      throw new AlayaError("CONFLICT", "retained empty source binding mismatch");
+    }
     return;
   }
   if (typed.kind === "gemini_generate_content" || typed.kind === "step_chat_completion") {

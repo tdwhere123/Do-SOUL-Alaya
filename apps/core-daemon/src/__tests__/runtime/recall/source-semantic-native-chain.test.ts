@@ -374,7 +374,7 @@ it("preserves positive finite-domain and measured-comparison proofs through publ
   } finally { await rm(directory, { recursive: true, force: true }); }
 }, 60000);
 
-it("preserves compact source interpretation and receiver query semantics and semantic correspondence through publish, reopen, MCP recall and first exposure", async () => {
+it("preserves table source interpretation and receiver query semantics and semantic correspondence through publish, reopen, MCP recall and first exposure", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-native-chain-"));
   const filename = join(directory, "alaya.db");
   const started = Date.now();
@@ -520,7 +520,7 @@ it("preserves compact source interpretation and receiver query semantics and sem
   }
 }, 60000);
 
-it("discovers a compact-published interpretation after the first descriptor page", async () => {
+it("discovers a table-published interpretation after the first descriptor page", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-native-page-"));
   const filename = join(directory, "alaya.db");
   try {
