@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { registerExtractionFillHooks } from "./fixture.js";
 import { preflightExtractionBatch } from "../../../runs/extraction/fill/batch-preflight.js";
@@ -26,7 +26,9 @@ import { interpretedQueryRaw } from "../query-producer-fixture.js";
 import { setExtractionCredentialFixture } from "./fixture.js";
 import { inspectExtractionAuthority } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
+import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
+import type { GeminiBatchLimits, GeminiBatchPlan } from "../../../runs/extraction/fill/batch/contract.js";
 import { writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { forkSettledExtractionAttemptLedger, openExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
 
@@ -506,3 +508,224 @@ it("retains unsupported dispositions inside and outside the shortlist without in
   expect(first.result.rows).toHaveLength(1);
   expect(first.delivery.selected_delivered + first.delivery.selected_undelivered).toBe(10);
 });
+
+async function fillAuthoredCompletionQuery(workset: Parameters<typeof prepareSemanticProposal>[0], queryCacheRoot: string) {
+  const queryAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(
+    workset, queryCacheRoot, 4096),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  await executeSemanticProposalFill({ workset,
+    cacheRoot: queryCacheRoot, authority: queryAuthority,
+    config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
+      requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => ({
+      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
+        outcome: { status: "interpreted" }, query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+          alternatives: [{ conditions: [{ kind: "statement", key: "complete", predicate: "complete",
+            arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true },
+              excerpt: "What" }] }] }], gaps: [] } }),
+      responseMetadata: { finishReason: "STOP" },
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+    }) } });
+}
+
+function shortSourceBatchResponse(line: { key: string; request: { contents: { parts: { text: string }[] }[] } }) {
+  const request = parseSourceSemanticRequest(JSON.parse(line.request.contents[0]!.parts[0]!.text));
+  const assertion = request.source_request.source_assertions[0]!;
+  const theme = /^User: I completed (beta|item \d+)\.$/u.exec(assertion.text)?.[1];
+  if (theme === undefined) throw new Error("sample requested a non-short or unsupported source");
+  const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v7",
+    outcome: { status: "interpreted" }, content: { roots: [{ act: "assertion",
+      expression: { kind: "statement", predicate: { kind: "explicit", reading: "complete",
+        support: { assertion_id: assertion.assertion_id, text: "completed" } },
+        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [
+          { assertion_id: assertion.assertion_id, text: theme }] } }] } }] } });
+  return JSON.stringify({ key: line.key, response: { candidates: [{ finishReason: "STOP",
+    content: { parts: [{ text: rawJson }] } }], usageMetadata: {
+      promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } } });
+}
+
+function installStrictShortSourceBatchMock() {
+  let upload = "", displayName = "", creates = 0;
+  const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/upload/v1beta/files") return new Response(null,
+      { headers: { "x-goog-upload-url": "https://fixture-provider.invalid/upload-session" } });
+    if (path === "/upload-session") {
+      upload = String(init?.body);
+      return Response.json({ file: { name: "files/input" } });
+    }
+    if (path.endsWith(":batchGenerateContent")) {
+      creates++;
+      displayName = JSON.parse(String(init?.body)).batch.displayName;
+      return Response.json({ name: "batches/job" });
+    }
+    if (path === "/v1beta/batches/job") return Response.json({ name: "batches/job", metadata: {
+      displayName, model: `models/${MODEL}`, state: "BATCH_STATE_SUCCEEDED",
+      inputConfig: { fileName: "files/input" }, output: { responsesFile: "files/output" } } });
+    if (path === "/download/v1beta/files/output:download") return new Response(upload.trim().split("\n")
+      .map(line => shortSourceBatchResponse(JSON.parse(line))).join("\n"));
+    throw new Error(`unexpected offline request ${path}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return { fetchMock, createCount: () => creates };
+}
+
+async function fillAuthoredCompletionCorrespondence(
+  workset: Parameters<typeof materializeSemanticProposalLines>[0], opportunity: number,
+  correspondenceCacheRoot: string
+) {
+  const selected = { ...workset, items: [workset.items[opportunity]!] };
+  const request = materializeSemanticProposalLines(selected, 4096)[0]!.request as SourceSemanticCorrespondenceRequest;
+  const interpretation = request.source_interpretation_descriptors[0]!.interpretation;
+  const predicate = request.catalog!.query_endpoints.find(row => row.kind === "predicate")!;
+  const slot = request.catalog!.query_endpoints.find(row => row.kind === "slot")!;
+  const frame = request.catalog!.source_endpoints.find(row => row.kind === "frame")!;
+  const sourceSlot = request.catalog!.source_endpoints.find(row => row.kind === "slot")!;
+  const support = interpretation.frames[0]!.predicate_support;
+  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(selected,
+    correspondenceCacheRoot, 4096), inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  await executeSemanticProposalFill({ workset: selected, cacheRoot: correspondenceCacheRoot,
+    authority, config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
+      requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => ({
+      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+        outcome: { status: "interpreted" }, semantic_correspondence: {
+          contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
+          source_interpretation_handle: "source1", selections: [
+            { query: predicate.handle, source: frame.handle, query_excerpt: "completed",
+              source_semantic_support: support.kind === "explicit" ?
+                [{ kind: "lexical", mentions: support.mentions }] : [] },
+            { query: slot.handle, source: sourceSlot.handle, query_excerpt: "What",
+              source_semantic_support: interpretation.frames[0]!.slots[0]!.support }
+          ] } }), responseMetadata: { finishReason: "STOP" },
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+    }) } });
+}
+
+async function fillFrozenShortSources(selectedKeys: readonly string[]) {
+  setExtractionCredentialFixture();
+  const fillOptions = { variant: "longmemeval_s" as const, cacheRoot, dataDir, pinnedMetaRoot,
+    offset: 0, limit: 1, sourcePacking: "complete-source" as const,
+    openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION };
+  const inspection = await inspectExtractionAuthority({ ...fillOptions,
+    revision: readCurrentExtractionAuthorityRevision(), action: "sample" });
+  const sampleScope = createExtractionSampleScope(selectedKeys, inspection);
+  const receipt = createExtractionAuthorityReceipt({ action: "sample", sampleScope,
+    observation: inspection.observation, inspection,
+    outputTokenCap: { field: "maxOutputTokens", value: 4096 }, diskFloorBytes: 0,
+    priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2,
+      maximumInputTokensPerAttempt: 100000 } });
+  const authorityReceiptPath = join(cacheRoot, "composition-sample-authority.json");
+  writeExtractionAuthorityReceipt(authorityReceiptPath, receipt);
+  const limits: GeminiBatchLimits = { maxJobs: 1, maxRequestsPerJob: 10, maxFileBytes: 1000000,
+    maxInputTokensPerJob: 1000000, maxEnqueuedTokens: 1000000, maxOutputTokens: 4096,
+    maxUsd: receipt.price.estimated_upper_usd, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
+    deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 };
+  const { fetchMock, createCount } = installStrictShortSourceBatchMock();
+  const fill = (operation: "prepare" | "submit" | "resume" | "import") =>
+    runExtractionFill({ ...fillOptions, authorityReceiptPath,
+      batch: { operation, limits, window: "sample" }, log: () => undefined });
+  await fill("prepare");
+  const plan = JSON.parse(readFileSync(join(cacheRoot, "gemini-batch-plan-sample.json"), "utf8")) as GeminiBatchPlan;
+  expect(plan.lines).toHaveLength(10);
+  expect([...plan.lines.map(line => line.key)].sort()).toEqual([...selectedKeys].sort());
+  await fill("submit");
+  const imported = await fill("resume");
+  await fill("import");
+  expect(createCount()).toBe(1);
+  expect(imported.authorityTelemetry).toMatchObject({ attempts: 10, successfulShards: 10 });
+  return { plan, imported, fetchMock, createCount };
+}
+
+it("records whether three cold authored composition windows share the same eligible first ten", async () => {
+  const contents = ["I completed alpha. ".repeat(5000), "I completed beta.",
+    ...Array.from({ length: 10 }, (_, index) => `I completed item ${index + 2}.`)];
+  const fixture = await preparedSourceFixture(contents);
+  await fillAuthoredCompletionQuery(fixture.config.chain.query_workset, fixture.config.chain.query_cache_root);
+  const normalChain = fixture.config.chain;
+  const smallChain = { ...normalChain, output_byte_limit: 21600, budget: { ...normalChain.budget,
+    work_units: 50000, memory_bytes: 2_000_000, page_budget: 20000, finalization_reserve: 1000 } };
+  const stages = [
+    await fixture.bind(normalChain, "composition-cold"),
+    await fixture.bind(normalChain, "composition-qualified-normal"),
+    await fixture.bind(smallChain, "composition-qualified-small")
+  ];
+  const roots = ["composition-cold", "composition-qualified-normal", "composition-qualified-small"]
+    .map(name => join(cacheRoot, name));
+  const windows = [];
+  for (let index = 0; index < roots.length; index++) {
+    windows.push(await prepareLazyQualificationWindow(stages[index]!, roots[index]!));
+  }
+  const tuples = windows.map(window => window.window.map(row =>
+    [row.source_id, row.source_version, row.record_id]));
+  const eligible = windows.map(window => window.window.filter(row => row.state === "cache_miss" && row.key !== null)
+    .map(row => ({ source_id: row.source_id, key: row.key })));
+  const matched = tuples.every(rows => rows.length === 10 && JSON.stringify(rows) === JSON.stringify(tuples[0]))
+    && eligible.every(rows => rows.length === 10 && JSON.stringify(rows) === JSON.stringify(eligible[0]));
+  const returnRoot = process.env.COMPOSITION_CONTROL_RETURN_ROOT;
+  if (returnRoot !== undefined) {
+    mkdirSync(returnRoot);
+    writeFileSync(join(returnRoot, "window-trace.json"), JSON.stringify({
+      candidate: "1d257e784e9741dfbdf0333651353fd1d1a9db72", matched, tuples, eligible,
+      windows: windows.map(window => ({ query_state_identity: window.query_state_identity,
+        starting_snapshot_sha256: window.starting_snapshot_sha256,
+        starting_publication_identity: window.starting_publication_identity,
+        source_inventory_identity: window.source_inventory_identity,
+        dataset_sha256: window.dataset_sha256, window_open: window.window_open,
+        starting_access: window.starting_access, starting_discovery_work: window.starting_discovery_work,
+        starting_host_elapsed_ms: window.starting_host_elapsed_ms,
+        selected_missing_keys: window.selected_missing_keys,
+        window: window.window.map(row => ({ rank: row.rank, source_id: row.source_id,
+          source_version: row.source_version, record_id: row.record_id, state: row.state,
+          key: row.key })) })) }, null, 2));
+    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true });
+  }
+  expect(windows.map(window => window.query_state_identity))
+    .toEqual(Array(3).fill(windows[0]!.query_state_identity));
+  expect(windows.map(window => window.starting_snapshot_sha256))
+    .toEqual(Array(3).fill(windows[0]!.starting_snapshot_sha256));
+  if (!matched) return; // No H/C is prepared when the native window lacks a common eligible first ten.
+  const coldFinal = await sealLazyQualificationFinal(roots[0]!);
+  const coldExposure = await replayLazyQualifiedFirstExposure(roots[0]!);
+  expect(coldExposure.result.rows[0]?.status).toBe("replayed");
+  if (returnRoot !== undefined) {
+    writeFileSync(join(returnRoot, "cold-final.json"), JSON.stringify({ coldFinal,
+      delivery: coldExposure.delivery, result: coldExposure.result }, null, 2));
+    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true, force: true });
+  }
+  const { plan, imported, fetchMock, createCount } = await fillFrozenShortSources(windows[1]!.selected_missing_keys);
+  const normalFinal = await sealLazyQualificationFinal(roots[1]!);
+  const smallFinal = await sealLazyQualificationFinal(roots[2]!);
+  if (returnRoot !== undefined) {
+    writeFileSync(join(returnRoot, "qualified-finals.json"), JSON.stringify({ plan, batchState: imported.batchState,
+      authorityTelemetry: imported.authorityTelemetry, normalFinal, smallFinal,
+      mock: { createCount: createCount(), fetchCount: fetchMock.mock.calls.length } }, null, 2));
+    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true, force: true });
+  }
+  const finalPlans = [normalFinal, smallFinal].map(final => SemanticChainPlanSchema.parse(
+    readChainArtifact(join(final.final_chain_root, "prepare.json"))));
+  const worksets = finalPlans.map(plan => plan.correspondence_workset);
+  const lines = worksets.map(workset => workset == null ? [] : materializeSemanticProposalLines(workset, 4096));
+  const normalOpportunity = lines[0]!.findIndex(line => {
+    const request = line.request as SourceSemanticCorrespondenceRequest;
+    return eligible[1]!.some(row => row.source_id ===
+      request.source_interpretation_descriptors[0]?.interpretation.source.source_id);
+  });
+  const targetSource = normalOpportunity < 0 ? undefined : (lines[0]![normalOpportunity]!
+    .request as SourceSemanticCorrespondenceRequest).source_interpretation_descriptors[0]!.interpretation.source.source_id;
+  const smallOpportunity = lines[1]!.findIndex(line => (line.request as SourceSemanticCorrespondenceRequest)
+    .source_interpretation_descriptors[0]?.interpretation.source.source_id === targetSource);
+  if (returnRoot !== undefined) writeFileSync(join(returnRoot, "correspondence-opportunities.json"), JSON.stringify({
+    finalPlanStatus: finalPlans.map(plan => plan.queries[0]?.status), targetSource,
+    normalOpportunity, smallOpportunity, advertisedCounts: lines.map(rows => rows.length) }, null, 2));
+  if (targetSource === undefined || smallOpportunity < 0 || worksets[0] == null || worksets[1] == null) return;
+  for (const [stage, opportunity] of [normalOpportunity, smallOpportunity].entries()) {
+    await fillAuthoredCompletionCorrespondence(worksets[stage]!, opportunity,
+      normalChain.correspondence_cache_root);
+  }
+  const qualifiedExposure = [];
+  for (const root of roots.slice(1)) qualifiedExposure.push(await replayLazyQualifiedFirstExposure(root));
+  expect(qualifiedExposure.every(exposure => exposure.result.rows[0]?.status === "replayed")).toBe(true);
+  if (returnRoot !== undefined) {
+    writeFileSync(join(returnRoot, "qualified-exposures.json"), JSON.stringify(qualifiedExposure, null, 2));
+    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true, force: true });
+  }
+}, 120000);
