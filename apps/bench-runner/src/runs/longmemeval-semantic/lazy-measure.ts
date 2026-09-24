@@ -10,37 +10,34 @@ import { loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze } from "./c
 import { admitLongMemEvalLazyConfig, type LongMemEvalLazyConfigInput } from "./lazy-config.js";
 import { joinLongMemEvalGold } from "./measure.js";
 import { longMemEvalMetricOutcome } from "./measure.js";
-import { isContainedPath, samePhysicalLocation } from "../fs/opened-contained-path.js";
+import { isContainedPath } from "../fs/opened-contained-path.js";
+import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
 
 export type LongMemEvalLazyMeasurementInput = LongMemEvalLazyConfigInput & Readonly<{
   lazyRoot: string;
   evaluatorRoot: string;
 }>;
 
-function requireSeparateEvaluatorRoot(input: LongMemEvalLazyMeasurementInput,
-  finalChainRoot: string, queryCacheRoot: string, correspondenceCacheRoot: string): void {
-  for (const producer of [input.root, input.lazyRoot, input.sourceCacheRoot, finalChainRoot,
-    queryCacheRoot, correspondenceCacheRoot]) {
-    if (samePhysicalLocation(input.evaluatorRoot, producer) ||
-        isContainedPath(producer, input.evaluatorRoot) || isContainedPath(input.evaluatorRoot, producer)) {
-      throw new AlayaError("VALIDATION", "gold measurement root must be separate from producer roots");
-    }
-  }
-}
-
 /** Trusted import may parse labels; answer-session gold joins only after durable first exposure is readmitted. */
 export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazyMeasurementInput) {
   const first = await readLazyQualifiedExposureState(input.lazyRoot);
   const bound = await admitLongMemEvalLazyConfig(input);
-  requireSeparateEvaluatorRoot(input, first.final.final_chain_root,
-    bound.config.chain.query_cache_root, bound.config.chain.correspondence_cache_root);
+  const frozen = readLongMemEvalSemanticFreeze(input.root);
+  if (frozen.contract !== "longmemeval-native-semantic-v3") throw new AlayaError("CONFLICT", "native question arm changed");
+  const selected = frozen.selected[0]!;
+  const questionDirectory = resolve(input.root, "questions", String(selected.index).padStart(5, "0"));
+  const outputRoot = admitEvaluatorOutputRoot(input.evaluatorRoot, [input.root, input.lazyRoot,
+    input.preparedPath, input.sourcePreflightPath, input.sourceCacheRoot,
+    ...(first.status === "durable" ? [first.path] : []),
+    first.final.final_chain_root, first.final.final_snapshot_path, first.final.publication_report_path,
+    questionDirectory, join(questionDirectory, "library.sqlite"), join(questionDirectory, "publication.json"),
+    frozen.config.data_dir, frozen.config.pinned_meta_root, frozen.config.query_cache_root,
+    frozen.config.correspondence_cache_root, ...frozen.config.source_cache_roots,
+    bound.config.chain.snapshot_path, bound.config.chain.query_cache_root, bound.config.chain.correspondence_cache_root]);
   if (chainIdentity(first.window.config) !== chainIdentity(bound.config) ||
       first.window.starting_publication_identity !== bound.publication_identity) {
     throw new AlayaError("CONFLICT", "lazy first exposure belongs to another frozen LongMemEval question");
   }
-  const frozen = readLongMemEvalSemanticFreeze(input.root);
-  if (frozen.contract !== "longmemeval-native-semantic-v3") throw new AlayaError("CONFLICT", "native question arm changed");
-  const selected = frozen.selected[0]!;
   if (first.window.query_key !== selected.query_key) {
     throw new AlayaError("CONFLICT", "lazy stage query differs from the selected original question");
   }
@@ -66,7 +63,7 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
         abstention: frozen.inventory.filter(row => row.cohort === "abstention").length },
       primary: { eligible, hits: 0, misses: 0, unknown: eligible,
         lower_bound: eligible === 0 ? null : 0, upper_bound: eligible === 0 ? null : 1 }, rows };
-    const path = join(input.evaluatorRoot, `lazy-measurement-${chainIdentity(result)}.json`);
+    const path = join(outputRoot, `lazy-measurement-${chainIdentity(result)}.json`);
     writeChainArtifact(path, result);
     return { path, result };
   }
@@ -91,7 +88,7 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
   }
   const gold = joinLongMemEvalGold(question, finalPublication, selected.source_manifest.length);
   const measured = measureSemanticChain(first.final.final_chain_root, first.path,
-    [{ query_key: selected.query_key, source_units: gold.sourceUnits }], input.evaluatorRoot);
+    [{ query_key: selected.query_key, source_units: gold.sourceUnits }], outputRoot);
   const native = measured.result.rows[0];
   if (measured.result.rows.length !== 1 || native?.query_key !== selected.query_key ||
       measured.result.replay_identity !== first.result.identity) {
@@ -123,7 +120,7 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
       lower_bound: eligible === 0 ? null : hits / eligible,
       upper_bound: eligible === 0 ? null : (eligible - misses) / eligible },
     rows };
-  const path = join(input.evaluatorRoot, `lazy-measurement-${chainIdentity(result)}.json`);
+  const path = join(outputRoot, `lazy-measurement-${chainIdentity(result)}.json`);
   writeChainArtifact(path, result);
   return { path, result };
 }

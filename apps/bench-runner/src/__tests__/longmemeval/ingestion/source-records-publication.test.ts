@@ -22,6 +22,8 @@ import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic
 import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/execute.js";
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
 import { runLongMemEvalSemanticLauncher } from "../../../runs/longmemeval-semantic/launch.js";
+import { runSemanticChainLauncher } from "../../../runs/semantic-chain/launch.js";
+import { measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { chainIdentity, SemanticChainPlanSchema, readChainArtifact } from "../../../runs/semantic-chain/contract.js";
@@ -154,6 +156,48 @@ describe("complete-source census and publication", () => {
     expect(formalMeasurement.result.rows.filter(row => row.prior_development_exposure).map(row => row.question_id)).toEqual(["mixed-roles"]);
     expect(formalMeasurement.result.rows.filter(row => row.cohort === "answerable")
       .every(row => row.attribution.layer === "query_unavailable")).toBe(true);
+  }, 60000);
+
+  it("admits every physical question path before any evaluator output and requires a separate chain CLI root", async () => {
+    const f = await fixture(false, false, [question("first", [[{ role: "user", content: "First source." }]]),
+      question("aliased", [[{ role: "user", content: "Aliased source." }]])]);
+    const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
+    const root = join(f.root, "development"), evaluatorRoot = join(f.root, "evaluator");
+    await freezeLongMemEvalSemanticRun({ data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot,
+      dataset_sha256: census.dataset_sha256, dataset_question_count: 2, question_ids: ["first", "aliased"],
+      model: "gemini-2.5-flash-lite", provider_url: "http://127.0.0.1:9", request_profile: "gemini-2.5-nonthinking-v1",
+      query_cache_root: join(f.root, "query-cache"), recorded_at: CLOCK, producer_commit: "a".repeat(40),
+      max_output_tokens: 4096, output_byte_limit: 1000000,
+      budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000,
+        finalization_reserve: 10000, min_envelope: 10 } }, root);
+    const physicalQuestion = join(f.root, "physical-question");
+    await mkdir(join(root, "questions"), { recursive: true });
+    await mkdir(physicalQuestion);
+    await symlink(physicalQuestion, join(root, "questions", "00001"), "dir");
+    const prepared = await prepareLongMemEvalSemanticRun(root);
+    expect(prepared.result.rows.every(row => row.status === "prepared")).toBe(true);
+    const replay = await replayLongMemEvalSemanticRun(root, prepared.path);
+    expect(replay.result.rows.every(row => row.status === "replayed")).toBe(true);
+    await expect(measureLongMemEvalSemanticRun(root, replay.path, physicalQuestion))
+      .rejects.toThrow(/separate from producer and input roots/u);
+    const first = replay.result.rows[0]!;
+    if (first.status !== "replayed") throw new Error("first source must replay");
+    expect(readdirSync(first.chain_root).some(name => name.startsWith("measurement-"))).toBe(false);
+    expect(readdirSync(physicalQuestion).some(name => name.startsWith("measurement-"))).toBe(false);
+    const measured = await measureLongMemEvalSemanticRun(root, replay.path, evaluatorRoot);
+    const detailPath = measured.result.rows.find(row => row.question_id === "first")?.measurement_path;
+    if (!detailPath) throw new Error("first source detail required");
+    expect(detailPath.startsWith(`${evaluatorRoot}/`)).toBe(true);
+    const goldPath = join(f.root, "gold.json");
+    const gold = (readChainArtifact(detailPath) as { gold: unknown }).gold;
+    writeFileSync(goldPath, JSON.stringify(gold));
+    expect(() => measureSemanticChain(first.chain_root, first.replay_path, gold, first.chain_root))
+      .toThrow(/separate from producer and input roots/u);
+    const base = ["measure", "--root", first.chain_root, "--replay", first.replay_path, "--gold", goldPath];
+    expect(await runSemanticChainLauncher(base)).toBe(2);
+    expect(await runSemanticChainLauncher([...base, "--evaluator-root", f.root])).toBe(2);
+    expect(await runSemanticChainLauncher([...base, "--evaluator-root", join(f.root, "chain-evaluator")])).toBe(0);
+    expect(readdirSync(first.chain_root).some(name => name.startsWith("measurement-"))).toBe(false);
   }, 60000);
 
   it("withholds native preparation and first exposure when a source admission fails in the real publisher", async () => {

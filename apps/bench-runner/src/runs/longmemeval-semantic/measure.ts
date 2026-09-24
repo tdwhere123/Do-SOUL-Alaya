@@ -1,6 +1,6 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { join, resolve } from "node:path";
-import { canonicalPath, canonicalPathsOverlap } from "../fs/opened-contained-path.js";
+import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
 import { measureSemanticChain } from "../semantic-chain/replay.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
@@ -60,20 +60,22 @@ export function summarizeLongMemEvalOutcomes(rows: readonly {
 /** Trusted import may parse labels; answer-session gold joins only replayed, publication-admitted rows. */
 export async function measureLongMemEvalSemanticRun(root: string, replayPath: string, evaluatorRoot: string) {
   const frozen = readLongMemEvalSemanticFreeze(root);
-  if (!evaluatorRoot) throw new AlayaError("VALIDATION", "gold measurement requires an evaluator root");
   const config = frozen.config;
-  const evaluatorPath = canonicalPath(evaluatorRoot);
-  const protectedPaths = [root, replayPath, config.data_dir, config.pinned_meta_root, config.query_cache_root,
-    ...("arm" in config ? [config.correspondence_cache_root, ...config.source_cache_roots] : [])];
-  if (protectedPaths.some((path) => canonicalPathsOverlap(evaluatorPath, canonicalPath(path)))) {
-    throw new AlayaError("VALIDATION", "gold measurement root must be separate from producer and input roots");
-  }
   const replay = LongMemEvalExperimentReplaySchema.parse(readChainArtifact(replayPath));
   if ((replay.contract === "longmemeval-native-semantic-replay-v1") !== (frozen.contract === "longmemeval-native-semantic-v3")) {
     throw new AlayaError("CONFLICT", "replayed experiment arm differs from freeze");
   }
   if (replay.freeze_identity !== chainIdentity(frozen)) throw new AlayaError("CONFLICT", "development replay binds another freeze");
   assertLongMemEvalSemanticRows(frozen, replay.rows);
+  const questionPaths = frozen.selected.flatMap((selected) => {
+    const directory = resolve(root, "questions", String(selected.index).padStart(5, "0"));
+    return [directory, join(directory, "library.sqlite"), join(directory, "publication.json")];
+  });
+  const replayPaths = replay.rows.flatMap((row) => row.status === "replayed"
+    ? [row.chain_root, row.replay_path, row.publication_path] : []);
+  const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, replayPath, ...questionPaths, ...replayPaths,
+    config.data_dir, config.pinned_meta_root, config.query_cache_root,
+    ...("arm" in config ? [config.correspondence_cache_root, ...config.source_cache_roots] : [])]);
   const dataset = await loadFrozenLongMemEvalDataset(frozen.config);
   const selectedRows: LongMemEvalOutcome[] = [];
   for (const selected of frozen.selected) {
@@ -97,7 +99,7 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
         const gold = joinLongMemEvalGold(question, publication, selected.source_manifest.length);
         if (frozen.contract === "longmemeval-semantic-development-v3") LongMemEvalSourceOnlyReplaySchema.parse(readChainArtifact(replayed.replay_path));
         const measured = measureSemanticChain(replayed.chain_root, replayed.replay_path,
-          [{ query_key: selected.query_key, source_units: gold.sourceUnits }], evaluatorRoot);
+          [{ query_key: selected.query_key, source_units: gold.sourceUnits }], outputRoot);
         measurementPath = measured.path;
         const measuredRow = measured.result.rows[0];
         if (frozen.contract === "longmemeval-native-semantic-v3" && measuredRow?.status === "replayed"
@@ -152,6 +154,6 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
       strict_over_90_required_hits: primary.eligible === 0 ? null : Math.floor(0.9 * primary.eligible) + 1, target_decision: decision },
     formal_target: { eligible: totalEligible, strict_over_90_required_hits: totalEligible === 0 ? null : requiredHits,
       status: formal ? decision : "not_run", additional_confirmed_hits_needed: formal ? Math.max(0, requiredHits - hits) : null }, rows };
-  const path = join(evaluatorRoot, `measurement-${chainIdentity(result)}.json`);
+  const path = join(outputRoot, `measurement-${chainIdentity(result)}.json`);
   writeChainArtifact(path, result); return { path, result };
 }

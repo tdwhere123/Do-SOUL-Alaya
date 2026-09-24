@@ -15,6 +15,7 @@ import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js"
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../measurement/source-semantic-library-recall.js";
 import { measureSourceSemanticLibraryResponse } from "../measurement/source-semantic-library-measurement.js";
+import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
 import { sourceLookupStores } from "../snapshot/source-records/publish.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import { FirstExposurePageSchema } from "../measurement/first-exposure-session.js";
@@ -124,8 +125,10 @@ function sameSealedSnapshotObservation(expected: Awaited<ReturnType<typeof disco
   return canonicalJson(comparable(expected)) === canonicalJson(comparable(actual));
 }
 
-export function measureSemanticChain(root: string, replayPath: string, goldValue: unknown, outputRoot = root) {
+export function measureSemanticChain(root: string, replayPath: string, goldValue: unknown, evaluatorRoot: string) {
   const { plan, replay } = admitSemanticChainReplay(root, replayPath);
+  const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, replayPath, join(root, "prepare.json"),
+    plan.config.snapshot_path, plan.config.query_cache_root, plan.config.correspondence_cache_root]);
   const gold = z.array(z.object({ query_key: z.string(), source_units: SourceGoldUnitSchema.array() }).strict()).parse(goldValue);
   const expected = plan.queries.map((row) => row.query_key).sort();
   if (canonicalJson(expected) !== canonicalJson(gold.map((row) => row.query_key).sort())) {

@@ -26,6 +26,7 @@ type Fixture = { root: string; plan: SemanticChainPlan; replayPath: string;
 
 /** Keep the native fixture immutable; every counterfactual gets its own archive root. */
 export async function assertSemanticChainArchiveAdmission(fixture: Fixture): Promise<void> {
+  const evaluatorRoot = join(fixture.root, "..", "..", "semantic-chain-archive-evaluator");
   const original = readChainArtifact(fixture.replayPath) as Archive;
   const native = original.rows.find((row) => row.status === "replayed")!;
   const response = SoulInterpretationResponseSchema.parse(native.response);
@@ -33,7 +34,7 @@ export async function assertSemanticChainArchiveAdmission(fixture: Fixture): Pro
   const archiveRoot = join(fixture.root, "archive-admission");
   const sourceUnits = fixture.gold.find((row) => row.query_key === native.query_key)!.source_units;
   const measure = (root: string, path: string, plan: SemanticChainPlan) => measureSemanticChain(root, path,
-    plan.queries.map((query) => ({ query_key: query.query_key, source_units: sourceUnits })));
+    plan.queries.map((query) => ({ query_key: query.query_key, source_units: sourceUnits })), evaluatorRoot);
   const assertUnknown = (root: string, path: string, plan: SemanticChainPlan, key: string, reason: RegExp) => {
     const measured = measure(root, path, plan).result.rows;
     expect(measured.map((row) => row.query_key)).toEqual(plan.queries.map((row) => row.query_key));
@@ -170,7 +171,7 @@ export async function assertSemanticChainArchiveAdmission(fixture: Fixture): Pro
   assertGlobalArchiveMismatches(fixture, archiveRoot, original, measure);
 
   // The original current-cache native hit remains admitted after every counterfactual.
-  const positive = measureSemanticChain(fixture.root, fixture.replayPath, fixture.gold).result.rows
+  const positive = measureSemanticChain(fixture.root, fixture.replayPath, fixture.gold, evaluatorRoot).result.rows
     .find((row) => row.query_key === native.query_key);
   expect(positive?.measurement).toMatchObject({ status: "validated",
     metrics: { proof_conditioned_first_exposure: { any_at_5: { status: "hit" } } } });

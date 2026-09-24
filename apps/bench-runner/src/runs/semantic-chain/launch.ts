@@ -7,6 +7,7 @@ import { interveneSemanticChain } from "./intervene.js";
 import { prepareSourcePublicationAssociations } from "../snapshot/source-records/prepare-associations.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
+import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
 import { SourceRecordsDatasetSchema } from "../snapshot/source-records/contract.js";
 import { parseExtractionOpenSemanticsGeneration } from "../extraction/request-artifact.js";
 import { prepareLazyQualificationWindow, sealLazyQualificationFinal,
@@ -17,7 +18,7 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
   try {
     const [operation, ...rest] = args;
     const flags = new Map<string, string>();
-    const allowed = new Set(["--root", "--config", "--replay", "--gold", "--arm", "--out", "--leaf-trials",
+    const allowed = new Set(["--root", "--config", "--replay", "--gold", "--evaluator-root", "--arm", "--out", "--leaf-trials",
       "--population", "--source-preflight", "--source-cache-root", "--recorded-at", "--producer-commit"]);
     for (let index = 0; index < rest.length; index += 2) {
       const key = rest[index]!, value = rest[index + 1];
@@ -38,7 +39,11 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
     else if (operation === "qualify-replay") result = await replayLazyQualifiedFirstExposure(required("--root"));
     else if (operation === "replay") result = await replaySemanticChain(required("--root"),
       z.enum(["retained", "without_semantic_correspondences"]).parse(flags.get("--arm") ?? "retained"));
-    else if (operation === "measure") result = measureSemanticChain(required("--root"), required("--replay"), json(required("--gold")));
+    else if (operation === "measure") {
+      const root = required("--root"), replayPath = required("--replay"), goldPath = required("--gold");
+      const outputRoot = admitEvaluatorOutputRoot(required("--evaluator-root"), [root, replayPath, goldPath]);
+      result = measureSemanticChain(root, replayPath, json(goldPath), outputRoot);
+    }
     else if (operation === "intervene") result = interveneSemanticChain(required("--root"), required("--replay"),
       Number(flags.get("--leaf-trials") ?? "32"));
     else if (operation === "associate") {

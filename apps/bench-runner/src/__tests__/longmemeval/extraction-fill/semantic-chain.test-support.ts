@@ -26,6 +26,7 @@ import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposur
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
 
 export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySnapshot: { snapshot_path: string; db_sha256: string }): Promise<void> {
+  const evaluatorRoot = join(cacheRoot, "..", "semantic-chain-evaluator");
   const queryWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3", provider_url: "http://127.0.0.1:9",
     kind: "query", model: "gemini-2.5-flash-lite", request_profile: "gemini-2.5-nonthinking-v1",
     items: [{ original_query: "What was completed?" }, { original_query: "What else was completed?" }] });
@@ -53,7 +54,7 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
     reason: "discovery_unavailable: native discovery resource exhausted" }, { status: "raw_ready", reason: "unattempted" }]);
   const boundedReplay = await replaySemanticChain(boundedRoot);
   const boundedMeasured = measureSemanticChain(boundedRoot, boundedReplay.path,
-    bounded.queries.map(row => ({ query_key: row.query_key, source_units: [] })));
+    bounded.queries.map(row => ({ query_key: row.query_key, source_units: [] })), evaluatorRoot);
   expect(boundedMeasured.result.rows.map(row => row.status)).toEqual(["blocked", "replayed"]);
   const blockedRoot = join(cacheRoot, "blocked-chain");
   const blocked = await prepareSemanticChain(config, blockedRoot);
@@ -69,9 +70,9 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   expect((readChainArtifact(blockedWithdrawal.path) as { rows: { status: string }[] }).rows
     .every((row) => row.status === "not_exercised")).toBe(true);
   expect(blockedReplay.result).toMatchObject({ provider_calls: 0, rows: [{ status: "replayed" }, { status: "replayed" }] });
-  expect(() => measureSemanticChain(blockedRoot, blockedReplay.path, [])).toThrow(/per-query gold/u);
+  expect(() => measureSemanticChain(blockedRoot, blockedReplay.path, [], evaluatorRoot)).toThrow(/per-query gold/u);
   const measured = measureSemanticChain(blockedRoot, blockedReplay.path,
-    blocked.queries.map((row) => ({ query_key: row.query_key, source_units: [] })));
+    blocked.queries.map((row) => ({ query_key: row.query_key, source_units: [] })), evaluatorRoot);
   expect(measured.result.rows.every((row) => row.diagnostics?.query_semantics_status?.status === "unavailable"
     && row.measurement?.status === "validated")).toBe(true);
 
@@ -105,7 +106,7 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
     expect(withoutDeclaration.request_identity).not.toBe(unknownNative.request_identity);
   });
   const unknownMeasurement = measureSemanticChain(unknownRoot, unknownReplay.path,
-    unknownPlan.queries.map(row => ({ query_key: row.query_key, source_units: [] })));
+    unknownPlan.queries.map(row => ({ query_key: row.query_key, source_units: [] })), evaluatorRoot);
   expect(unknownMeasurement.result.rows[0]).toMatchObject({ status: "replayed", query_failure_reason: "unknown",
     diagnostics: { query_semantics_status: { status: "unavailable", reason: "producer_outcome_unknown" } },
     mechanism: { status: "unexercised" } });
@@ -127,7 +128,7 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   expect(failedDiscoveryRows.rows).toMatchObject([{ status: "blocked",
     reason: "discovery_unavailable: native discovery resource exhausted" }, { status: "replayed" }]);
   const failedDiscoveryMeasurement = measureSemanticChain(failedDiscoveryRoot, failedDiscoveryReplay.path,
-    unknownPlan.queries.map(row => ({ query_key: row.query_key, source_units: [] })));
+    unknownPlan.queries.map(row => ({ query_key: row.query_key, source_units: [] })), evaluatorRoot);
   expect(failedDiscoveryMeasurement.result.rows.map(row => row.status)).toEqual(["blocked", "replayed"]);
   const unreadableCache = join(cacheRoot, "unreadable-query-cache");
   writeFileSync(unreadableCache, "a file cannot be a proposal cache directory");
@@ -153,7 +154,7 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   expect(fill.newly_admitted).toBe(1);
   await expect(replaySemanticChain(blockedRoot)).rejects.toThrow(/query-semantics state changed/u);
   expect(() => measureSemanticChain(blockedRoot, blockedReplay.path,
-    blocked.queries.map((row) => ({ query_key: row.query_key, source_units: [] })))).toThrow(/query-semantics state changed/u);
+    blocked.queries.map((row) => ({ query_key: row.query_key, source_units: [] })), evaluatorRoot)).toThrow(/query-semantics state changed/u);
   const limitedRoot = join(cacheRoot, "limited-observation-chain");
   const limited = await prepareSemanticChain({ ...config,
     budget: { ...config.budget, work_units: 210000, memory_bytes: 20000000 }
@@ -241,8 +242,8 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
       source_version: selectedSource.source_version, content_digest: selectedSource.content_digest
     }]
   }));
-  expect(() => measureSemanticChain(root, replay.path, gold)).toThrow(/semantic-correspondence state changed/u);
-  const measuredRow = measureSemanticChain(root, proofReplay.path, gold).result.rows.find((row) => row.query_key === ready.query_key);
+  expect(() => measureSemanticChain(root, replay.path, gold, evaluatorRoot)).toThrow(/semantic-correspondence state changed/u);
+  const measuredRow = measureSemanticChain(root, proofReplay.path, gold, evaluatorRoot).result.rows.find((row) => row.query_key === ready.query_key);
   const proofMeasurement = measuredRow?.measurement;
   expect(measuredRow?.reason).toBeNull();
   expect(proofMeasurement?.status).toBe("validated");
@@ -371,6 +372,7 @@ async function assertEvidenceInputWithdrawal(cacheRoot: string, config: Semantic
 }
 
 async function assertReplayPreparationPool(plan: SemanticChainPlan, root: string): Promise<void> {
+  const evaluatorRoot = join(root, "..", "..", "semantic-chain-evaluator");
   const query = plan.queries[0];
   if (query?.status !== "ready") throw new Error("bounded preparation required");
   await withSemanticChainDaemon(plan.config, root, async (daemon) => {
@@ -415,7 +417,7 @@ async function assertReplayPreparationPool(plan: SemanticChainPlan, root: string
   expect(mismatch.result).toMatchObject({ rows: [{ status: "native_unavailable", reason: "prepared_access_pool_mismatch", first_exposure: null },
     { status: "replayed" }] });
   const mismatchMeasured = measureSemanticChain(mismatchRoot, mismatch.path,
-    plan.queries.map((entry) => ({ query_key: entry.query_key, source_units: [] })));
+    plan.queries.map((entry) => ({ query_key: entry.query_key, source_units: [] })), evaluatorRoot);
   expect(mismatchMeasured.result.rows[0]).toMatchObject({ measurement: null,
     preparation_trace: expect.arrayContaining([expect.objectContaining({
       work: expect.objectContaining({ native_work: expect.any(Number) }) })]), preparation_elapsed_ms: expect.any(Number) });

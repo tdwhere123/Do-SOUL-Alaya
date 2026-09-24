@@ -1,5 +1,5 @@
 import { dirname, join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
@@ -250,6 +250,15 @@ it("binds one original question through full-source preflight, native window, fi
   await expect(measureLongMemEvalLazyFirstExposure({ ...alpha.input, lazyRoot,
     evaluatorRoot: join(symlinked, "not-yet-created") })).rejects.toThrow(/separate from producer/u);
   expect(existsSync(join(lazyRoot, "not-yet-created"))).toBe(false);
+  const metadataAlias = join(dirname(cacheRoot), "linked-metadata");
+  symlinkSync(pinnedMetaRoot, metadataAlias, "dir");
+  for (const unsafe of [dataDir, pinnedMetaRoot, join(metadataAlias, "nested-output")]) {
+    await expect(measureLongMemEvalLazyFirstExposure({ ...alpha.input, lazyRoot, evaluatorRoot: unsafe }))
+      .rejects.toThrow(/separate from producer and input roots/u);
+  }
+  expect(readdirSync(dataDir).some(name => name.startsWith("measurement-") || name.startsWith("lazy-measurement-"))).toBe(false);
+  expect(readdirSync(pinnedMetaRoot).some(name => name.startsWith("measurement-") || name.startsWith("lazy-measurement-"))).toBe(false);
+  expect(existsSync(join(pinnedMetaRoot, "nested-output"))).toBe(false);
   expect(guardedFetch).not.toHaveBeenCalled();
 
   const beta = await preparedQuestion("beta", 1, 2);
