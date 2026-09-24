@@ -1,9 +1,12 @@
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES, type ProviderHttpResponseEvidence } from "@do-soul/alaya-engine-gateway";
+import { inspectProviderChatCompletionResponse, MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES,
+  type ProviderHttpResponseEvidence } from "@do-soul/alaya-engine-gateway";
+import { decodeGeminiGenerateContent, isGeminiGenerateContentProfile,
+  parseGeminiGenerateContentBody } from "./batch/native-codec.js";
 import {
   boundedArtifactEntryExists,
   readBoundedCanonicalUtf8Artifact
@@ -231,6 +234,38 @@ function assertProviderRawIntegrity(raw: ProviderRawAttempt): void {
       raw.request_profile !== "step-3.5-2603-low-json-schema-v1" && http !== undefined) {
     throw new ProviderRawAttemptIdentityError(`provider raw attempt integrity mismatch: ${raw.cache_key}`);
   }
+  assertCompletePhysicalResponse(raw, httpBytes);
+}
+
+function assertCompletePhysicalResponse(raw: ProviderRawAttempt, httpBytes: Buffer | undefined): void {
+  // A failed HTTP or parse attempt retains its original failure state; only a completed
+  // provider result may claim that normalized text, finish and usage came from these bytes.
+  if (raw.transport_failure !== undefined) return;
+  let decoded: { text: string; finishReason: string | null; usage?: unknown } | undefined;
+  try {
+    if (raw.request_profile === "step-3.5-2603-low-json-schema-v1") {
+      const http = raw.http_response;
+      if (http?.bodyComplete && !http.bodyTruncated && httpBytes !== undefined) {
+        decoded = inspectProviderChatCompletionResponse(httpBytes.toString("utf8"), http.contentType, 200,
+          { sseCompletionPolicy: "require_witness" });
+      }
+    } else if (isGeminiGenerateContentProfile(raw.request_profile) &&
+        raw.response_body !== undefined && !raw.response_body.truncated) {
+      const result = decodeGeminiGenerateContent(parseGeminiGenerateContentBody(raw.response_body.text));
+      decoded = { text: result.rawJson, finishReason: result.responseMetadata.finishReason, usage: result.usage };
+    }
+  } catch {
+    throw new ProviderRawAttemptIdentityError(`provider physical response cannot be decoded: ${raw.cache_key}`);
+  }
+  if (decoded === undefined) return;
+  const bytes = Buffer.from(decoded.text, "utf8");
+  if (bytes.length !== raw.original_byte_length ||
+      createHash("sha256").update(bytes).digest("hex") !== raw.decoded_text_digest ||
+      raw.full_replay_possible && decoded.text !== raw.decoded_text ||
+      decoded.finishReason !== raw.finish_reason ||
+      canonicalJson(decoded.usage ?? null) !== canonicalJson(raw.usage)) {
+    throw new ProviderRawAttemptIdentityError(`provider physical response differs from decoded attempt: ${raw.cache_key}`);
+  }
 }
 
 export function writeProviderRawAttempt(input: Readonly<{
@@ -290,6 +325,7 @@ export function writeProviderRawAttempt(input: Readonly<{
     ...(input.httpResponse === undefined ? {} : { http_response: input.httpResponse }),
     extracted_at: new Date().toISOString()
   });
+  assertProviderRawIntegrity(record);
   const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`, "utf8");
   if (bytes.byteLength > MAX_RECORD_BYTES) {
     throw new ProviderRawAttemptIdentityError("provider raw attempt exceeds its size limit");

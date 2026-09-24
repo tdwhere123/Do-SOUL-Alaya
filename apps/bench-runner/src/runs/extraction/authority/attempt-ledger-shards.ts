@@ -44,12 +44,14 @@ export function assertExtractionAttemptLedgerCacheIdentity(
 export function readValidLedgerShard(
   cacheRoot: string,
   cacheKey: string,
-  identity: ExtractionAttemptLedgerCacheIdentity
+  identity: ExtractionAttemptLedgerCacheIdentity,
+  allowPending = false
 ): ExtractionSuccessfulShard | undefined {
   const shard = inspectCachedRawExtraction(
     cacheRoot, cacheKey, identity.model, identity.requestProfile
   );
-  if (shard.status !== "hit" || shard.transportProvenance === undefined) return undefined;
+  if (shard.status !== "hit" && (!allowPending || shard.status !== "pending") ||
+      shard.transportProvenance === undefined || shard.rawJsonSha256 === undefined) return undefined;
   return {
     cacheKey, rawJsonSha256: shard.rawJsonSha256,
     successKind: "provider", transportProvenance: shard.transportProvenance,

@@ -162,8 +162,12 @@ export function assertCatalogRefillScopeMatchesInspection(input: {
   assertCatalogRefillRootBinding(scope.root_binding, input.cacheRoot);
   const progress = normalizeLedgerProgress(input.ledgerProgress);
   const remainingKeys = scope.keys.filter((key) => !progress.successfulKeys.includes(key));
+  const pendingKeys = inspection.pendingShards.map((shard) => shard.cacheKey);
   if (progress.successfulKeys.some((key) => !scope.keys.includes(key))) {
     throw new Error("catalog refill attempt ledger contains an out-of-scope success");
+  }
+  if (pendingKeys.some((key) => !progress.pendingKeys.includes(key))) {
+    throw new Error("catalog refill pending shard lacks its original ledger reservation");
   }
   if (remainingKeys.length === 0) {
     assertSettledCatalogRefillInspection(input, progress);
@@ -178,7 +182,8 @@ export function assertCatalogRefillScopeMatchesInspection(input: {
     throw new Error("catalog refill authority cache manifest drifted after inspection");
   }
   assertInspectionInventory(scope, inspection, progress.successfulKeys);
-  if (!sameOrderedKeys(remainingKeys, normalizeProgressKeys(inspection.missingKeys))) {
+  if (!sameOrderedKeys(remainingKeys,
+    normalizeProgressKeys([...inspection.missingKeys, ...pendingKeys]))) {
     throw new Error("catalog refill authority missing-key set drifted after inspection");
   }
   assertPreservedValidClosureUnchanged(
@@ -232,8 +237,8 @@ function assertInspectionInventory(
   successfulKeys: readonly string[]
 ): void {
   const { inventory } = inspection.observation;
-  if (inventory.invalidTurns !== 0 || inventory.orphanTurns !== 0 ||
-      inventory.missingTurns !== scope.shard_count - successfulKeys.length ||
+  if (inventory.invalidTurns !== inspection.pendingShards.length || inventory.orphanTurns !== 0 ||
+      inventory.missingTurns + inspection.pendingShards.length !== scope.shard_count - successfulKeys.length ||
       inventory.validTurns !== scope.preserved_valid_closure.shard_count + successfulKeys.length ||
       inspection.observation.dataset.expectedKeySetSha256 !== scope.expected_key_set_sha256 ||
       inspection.observation.extraction.rawContentClosureSha256 !==

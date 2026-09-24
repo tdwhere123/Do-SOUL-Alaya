@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -14,7 +15,7 @@ import { createExtractionExecutionAuthority } from "../../../runs/extraction/fil
 import { assertStepSourcePreflightReceipt } from "../../../runs/extraction/authority/source-preflight-binding.js";
 import { STEP_PLAN_QUOTE_BASIS, assertStepReportedUsage } from "../../../runs/extraction/authority/step-quote.js";
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
-import { listProviderRawAttempts, readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { listProviderRawAttempts, providerRawAttemptPath, readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { parseSourceSemanticInteractivePreflight, preflightSourceSemanticInteractive } from
   "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
@@ -99,6 +100,34 @@ it("reopens a configured logical model alias through its recorded Step transport
   expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, logicalModel, PROFILE))
     .toMatchObject({ status: "hit", transportProvenance: { model: MODEL } });
   await runExtractionFill(fixture.options);
+  expect(http.calls).toHaveLength(1);
+});
+
+it("rejects complete Step HTTP bytes that contradict normalized finish and usage", async () => {
+  const fixture = await scenario(1);
+  const http = await listen(body => ({
+    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop"
+  }));
+  await runExtractionFill(fixture.options);
+  const key = fixture.selected[0]!;
+  const rawPath = providerRawAttemptPath(roots.cacheRoot, key, 1);
+  const raw = JSON.parse(readFileSync(rawPath, "utf8"));
+  expect(readProviderRawAttempt(roots.cacheRoot, key, 1)?.finish_reason).toBe("stop");
+  const original = Buffer.from(raw.http_response.bodyBase64, "base64").toString("utf8");
+  const changed = original.replace('"finish_reason":"stop"', '"finish_reason":"length"')
+    .replace('"prompt_tokens":11', '"prompt_tokens":110')
+    .replace('"total_tokens":18', '"total_tokens":117');
+  expect(changed).not.toBe(original);
+  const bytes = Buffer.from(changed);
+  raw.http_response.bodyBase64 = bytes.toString("base64");
+  raw.http_response.bodyByteLength = bytes.length;
+  raw.http_response.bodySha256 = createHash("sha256").update(bytes).digest("hex");
+  writeFileSync(rawPath, `${JSON.stringify(raw)}\n`);
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE))
+    .toMatchObject({ status: "invalid", reason: expect.stringContaining("physical response differs") });
+  expect(() => readProviderRawAttempt(roots.cacheRoot, key, 1)).toThrow(/physical response differs/u);
+  expect(() => createExtractionExecutionAuthority(fixture.receipt, roots.cacheRoot))
+    .toThrow(/successful shard closure drifted/u);
   expect(http.calls).toHaveLength(1);
 });
 

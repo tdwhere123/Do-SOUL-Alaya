@@ -67,6 +67,7 @@ function input(values: {
       validTurns: values.validTurns,
       missingTurns: values.missingTurns,
       invalidTurns: 0,
+      pendingTurns: 0,
       orphanTurns: 0,
       coverage: values.validTurns / 23_807,
       expectedKeySetSha256: "a".repeat(64),

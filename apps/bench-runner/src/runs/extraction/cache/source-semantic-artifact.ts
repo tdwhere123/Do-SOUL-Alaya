@@ -196,12 +196,15 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
       entry.admission_identity.raw_json_sha256 !== rawJsonSha256) {
     throw new AlayaError("CONFLICT", "typed open-semantics admission identity mismatch");
   }
-  return { status: "hit" as const, artifactKind: "source_semantic" as const, sourceBinding: "unbound" as const, admitted,
+  const inspected = { artifactKind: "source_semantic" as const, sourceBinding: "unbound" as const, admitted,
     requestDigest: computeExtractionRawJsonSha256(line.userPrompt),
     cacheAdmission: entry.admission_identity, deterministicEmpty: typed.kind === "deterministic_empty",
     rawJson: entry.raw_json, rawJsonSha256, rawSignalCount: 0, parsedDraftCount: admitted.draft === undefined ? 0 : 1,
     transportProvenance: entry.transport_provenance, ...response,
     ...(interactiveBinding === undefined ? {} : interactiveBinding) };
+  return interactiveBinding?.admissionState === "pending"
+    ? { status: "pending" as const, reason: "source semantic transport attempt is pending successful ledger admission", ...inspected }
+    : { status: "hit" as const, ...inspected };
 }
 
 export function inspectCachedSourceSemantic(cacheRoot: string, cacheKey: string, model: string,
@@ -475,7 +478,8 @@ function persistSemanticEntry(input: Readonly<{ cacheRoot: string; config: Compi
   const { cacheRoot, config, writeLease } = input;
   const existing = readCachedEntry(cacheRoot, entry.cache_key, config.model, config.requestProfile);
   if (existing.status === "hit") {
-    if (inspectCachedSourceSemantic(cacheRoot, entry.cache_key, config.model, config.requestProfile).status !== "hit") {
+    const inspected = inspectCachedSourceSemantic(cacheRoot, entry.cache_key, config.model, config.requestProfile);
+    if (inspected.status !== "hit" && inspected.status !== "pending") {
       throw new AlayaError("CONFLICT", "existing open-semantics generation is invalid");
     }
     if (canonicalJson(existing.entry.source_semantic) !== canonicalJson(entry.source_semantic)) {

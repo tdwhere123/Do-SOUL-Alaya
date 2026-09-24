@@ -89,9 +89,12 @@ export function assertSampleInspection(
   assertExtractionSampleScope(scope);
   const eligible = new Set(inspection.nonemptyKeys ?? []);
   const missing = new Set(inspection.missingKeys);
+  const pending = new Set(inspection.pendingShards.map((shard) => shard.cacheKey));
   const successful = new Set(successfulKeys);
-  if (inspection.observation.inventory.invalidTurns !== 0 ||
-      scope.keys.some((key) => !eligible.has(key) || (!missing.has(key) && !successful.has(key)))) {
+  if (inspection.observation.inventory.invalidTurns !== pending.size ||
+      [...pending].some((key) => !scope.keys.includes(key)) ||
+      scope.keys.some((key) => !eligible.has(key) ||
+        (!missing.has(key) && !pending.has(key) && !successful.has(key)))) {
     throw new Error("sample keys must be native nonempty missing requests in the inspected window inventory");
   }
 }

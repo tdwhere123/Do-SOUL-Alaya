@@ -413,7 +413,7 @@ function packedRequestMatchesCatalog(
 }
 
 function invalidBind(
-  inspected: Extract<CachedExtractionInspection, { readonly status: "invalid" | "quarantined" }>
+  inspected: Extract<CachedExtractionInspection, { readonly status: "invalid" | "quarantined" | "pending" }>
 ): BoundPublicReceive {
   return { status: "invalid", reason: inspected.reason };
 }

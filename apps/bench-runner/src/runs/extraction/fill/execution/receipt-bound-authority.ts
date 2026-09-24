@@ -220,7 +220,12 @@ function assertAuthorityInspection(
   resumeManifestSha256: string | undefined = undefined,
   settledManifestSha256: string | undefined = undefined
 ): void {
-  assertExtractionAuthorityReceipt(receipt, inspection.observation);
+  const pending = inspection.pendingShards;
+  if (pending.length > 0 && (pending.length !== inspection.observation.inventory.invalidTurns ||
+      pending.some((shard) => shard.authorityLineageDigest !== receipt.lineage_digest))) {
+    throw new ExtractionCacheInvariantError("extraction pending shard does not match the original authority");
+  }
+  assertExtractionAuthorityReceipt(receipt, inspection.observation, pending.length);
   assertCatalogInspection({ receipt, inspection, cacheRoot, successorLedger,
     postPinManifestSha256, resumeManifestSha256, settledManifestSha256 });
   assertRepairInspection(receipt, inspection);
@@ -246,7 +251,8 @@ function assertAuthorityInspection(
     modelReadiness: inspection.modelReadiness
   }, { allowOwnedWriterLock: writeLease !== undefined });
   if (receipt.action === "probe" &&
-      (receipt.probe_key === undefined || !inspection.missingKeys.includes(receipt.probe_key))) {
+      (receipt.probe_key === undefined || !inspection.missingKeys.includes(receipt.probe_key) &&
+        !pending.some((shard) => shard.cacheKey === receipt.probe_key))) {
     throw new Error("extraction probe authority target is no longer a missing cache key");
   }
 }

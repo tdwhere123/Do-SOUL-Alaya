@@ -67,6 +67,10 @@ export type CachedExtractionInspection =
     readonly usage?: BenchProviderUsage;
   }
   | { readonly status: "missing"; readonly reason?: undefined }
+  | { readonly status: "pending"; readonly reason: string; readonly rawJson?: string;
+      readonly rawJsonSha256?: string; readonly rawSignalCount?: number;
+      readonly transportProvenance?: ExtractionTransportProvenance;
+      readonly attemptOrdinal?: number; readonly authorityLineageDigest?: string }
   | { readonly status: "retired"; readonly eligibility: "retained_only"; readonly reason: string; readonly rawJsonSha256?: undefined }
   | {
     readonly status: "invalid";
@@ -92,6 +96,10 @@ export type CachedRawExtractionInspection =
       readonly authorityLineageDigest?: string;
     }
   | { readonly status: "missing"; readonly reason?: undefined }
+  | { readonly status: "pending"; readonly reason: string; readonly rawJson?: string;
+      readonly rawJsonSha256?: string; readonly rawSignalCount?: number;
+      readonly transportProvenance?: ExtractionTransportProvenance;
+      readonly attemptOrdinal?: number; readonly authorityLineageDigest?: string }
   | { readonly status: "invalid"; readonly reason: string; readonly rawJsonSha256?: string }
   | {
       readonly status: "quarantined";

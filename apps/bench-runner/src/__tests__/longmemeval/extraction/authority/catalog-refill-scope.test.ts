@@ -69,6 +69,25 @@ describe("catalog refill authority scope creation", () => {
 });
 
 describe("catalog refill authority scope progress", () => {
+  it("retains an exact pending shard in the original refill key set", () => {
+    const cacheRoot = temporaryRoot();
+    const scope = createExtractionCatalogRefillScope({ cacheRoot,
+      inspection: inspected([firstKey, secondKey]), allowlist: allowlist([firstKey, secondKey]) });
+    const missing = inspected([secondKey]);
+    const pending = { ...missing,
+      pendingShards: [{ cacheKey: firstKey, attemptOrdinal: 1, authorityLineageDigest: "a".repeat(64) }],
+      observation: { ...missing.observation, inventory: { ...missing.observation.inventory,
+        validTurns: 2, invalidTurns: 1 } },
+      preservedValidClosure: { ...missing.preservedValidClosure, shard_count: 2 }
+    } as ExtractionAuthorityInspection;
+    expect(() => assertCatalogRefillScopeMatchesInspection({ scope, cacheRoot, inspection: pending,
+      ledgerProgress: { attempts: 1, successfulKeys: [] } }))
+      .toThrow(/pending shard lacks its original ledger reservation/u);
+    expect(() => assertCatalogRefillScopeMatchesInspection({ scope, cacheRoot, inspection: pending,
+      ledgerProgress: { attempts: 1, successfulKeys: [], pendingKeys: [firstKey] } }))
+      .not.toThrow();
+  });
+
   it("accepts only receipt-ledger progress over the original missing set", () => {
     const cacheRoot = temporaryRoot();
     const scope = createExtractionCatalogRefillScope({
@@ -203,6 +222,7 @@ function inspected(missingKeys: readonly string[]): ExtractionAuthorityInspectio
     sourceOccurrences: 4,
     unsupportedSourceOccurrences: 0,
     missingKeys,
+    pendingShards: [],
     invalidShards: [],
     preservedValidClosure: {
       shard_count: validTurns,

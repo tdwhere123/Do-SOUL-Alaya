@@ -10,21 +10,23 @@ export interface ExtractionAuthorityInventory {
 
 export function assertExtractionAuthorityInventoryProgress(
   authorized: ExtractionAuthorityInventory,
-  current: ExtractionAuthorityInventory
+  current: ExtractionAuthorityInventory,
+  pendingTurns = 0
 ): void {
-  if (authorized.invalidTurns > 0 &&
+  if (pendingTurns === 0 && authorized.invalidTurns > 0 &&
       authorized.expectedTurns === authorized.validTurns + authorized.missingTurns +
         authorized.invalidTurns) {
     assertRepairInventoryProgress(authorized, current);
     return;
   }
-  if (authorized.invalidTurns !== 0 || authorized.orphanTurns !== 0 ||
-      current.invalidTurns !== 0 || current.orphanTurns !== 0) {
+  if (!Number.isSafeInteger(pendingTurns) || pendingTurns < 0 ||
+      authorized.invalidTurns !== 0 || authorized.orphanTurns !== 0 ||
+      current.invalidTurns !== pendingTurns || current.orphanTurns !== 0) {
     throw new Error("extraction authority receipt cannot authorize invalid or orphan shards");
   }
   if (authorized.expectedTurns !== current.expectedTurns ||
       current.validTurns < authorized.validTurns ||
-      current.missingTurns > authorized.missingTurns) {
+      current.missingTurns + pendingTurns > authorized.missingTurns) {
     throw new Error("extraction authority receipt inventory regressed after inspection");
   }
 }

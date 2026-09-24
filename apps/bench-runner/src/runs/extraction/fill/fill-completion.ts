@@ -26,6 +26,7 @@ export interface ExtractionFillCompletion {
   readonly validTurns: number;
   readonly missingTurns: number;
   readonly invalidTurns: number;
+  readonly pendingTurns: number;
   readonly orphanTurns: number;
   readonly coverage: number;
   readonly expectedKeySetSha256: string;
@@ -73,7 +74,7 @@ export function inspectExtractionFillCompletion(input: {
   const closure = completeContentClosure(counts, expectedKeys.size);
   const excluded = new Set(input.excludeContentClosureKeys);
   const eligibleEntries = counts.entries.filter((entry) => !excluded.has(entry.cacheKey));
-  const partialClosure = counts.invalid === 0 && eligibleEntries.length > 0
+  const partialClosure = counts.invalid === counts.pending && eligibleEntries.length > 0
     ? computeExtractionContentClosureSha256(eligibleEntries)
     : null;
   return {
@@ -81,6 +82,7 @@ export function inspectExtractionFillCompletion(input: {
     validTurns: counts.valid,
     missingTurns: counts.missing,
     invalidTurns: counts.invalid,
+    pendingTurns: counts.pending,
     orphanTurns,
     coverage: expectedKeys.size === 0 ? 1 : counts.valid / expectedKeys.size,
     expectedKeySetSha256: computeExtractionKeySetSha256(expectedKeys),
@@ -196,11 +198,13 @@ function inspectExpectedShards(
   readonly valid: number;
   readonly missing: number;
   readonly invalid: number;
+  readonly pending: number;
   readonly entries: readonly ExtractionContentClosureEntry[];
 } {
   let valid = 0;
   let missing = 0;
   let invalid = 0;
+  let pending = 0;
   const entries: ExtractionContentClosureEntry[] = [];
   for (const cacheKey of expectedKeys) {
     const result = inspectCachedExtractionArtifact(
@@ -218,9 +222,12 @@ function inspectExpectedShards(
       });
     }
     else if (result.status === "missing") missing += 1;
-    else invalid += 1;
+    else {
+      invalid += 1;
+      if (result.status === "pending") pending += 1;
+    }
   }
-  return { valid, missing, invalid, entries };
+  return { valid, missing, invalid, pending, entries };
 }
 
 function inspectExpectedRawShards(

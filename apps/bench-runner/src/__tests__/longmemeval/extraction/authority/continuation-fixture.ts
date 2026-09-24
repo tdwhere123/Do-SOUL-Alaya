@@ -394,6 +394,7 @@ function continuationInspection(
     sourceOccurrences: 2,
     unsupportedSourceOccurrences: 0,
     missingKeys: [secondKey],
+    pendingShards: [],
     invalidShards: [],
     preservedValidClosure,
     writerLock: "absent" as const,

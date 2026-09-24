@@ -64,6 +64,39 @@ it.each([null, "MAX_TOKENS"])("preserves actual incomplete finish %s through esc
     completion_witness: finishReason === null ? null : "finish_reason", full_replay_possible: true, usage_known: false });
 });
 
+it("binds a complete Gemini body to decoded text, finish and usage on write and reopen", () => {
+  const input = { ...fixture(), requestProfile: "gemini-2.5-nonthinking-v1" };
+  const body = JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: "{}" }] } }],
+    usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 3, totalTokenCount: 5 } });
+  const usage = { inputTokens: 2, outputTokens: 3, totalTokens: 5 };
+  writeProviderRawAttempt({ ...input, decodedText: "{}", finishReason: "STOP", usage, responseBody: body });
+  expect(readProviderRawAttempt(input.root, input.cacheKey, 1)).toMatchObject({
+    decoded_text: "{}", finish_reason: "STOP", usage
+  });
+  const path = providerRawAttemptPath(input.root, input.cacheKey, 1);
+  const stored = JSON.parse(readFileSync(path, "utf8"));
+  const changedBody = body.replace('"finishReason":"STOP"', '"finishReason":"MAX_TOKENS"');
+  stored.response_body = { text: changedBody, truncated: false,
+    original_byte_length: Buffer.byteLength(changedBody), digest: digest(changedBody) };
+  writeFileSync(path, `${JSON.stringify(stored)}\n`);
+  expect(() => readProviderRawAttempt(input.root, input.cacheKey, 1))
+    .toThrow(/physical response differs/u);
+});
+
+it("retains missing and truncated Gemini body witnesses without inventing decoded evidence", () => {
+  const missing = { ...fixture(), requestProfile: "gemini-2.5-nonthinking-v1" };
+  writeProviderRawAttempt({ ...missing, decodedText: "{}", finishReason: null });
+  const missingRaw = readProviderRawAttempt(missing.root, missing.cacheKey, 1);
+  expect(missingRaw?.response_body).toBeUndefined();
+  expect(missingRaw).toMatchObject({ finish_reason: null, usage: null, usage_known: false });
+  const truncated = { ...fixture(), requestProfile: "gemini-2.5-nonthinking-v1" };
+  writeProviderRawAttempt({ ...truncated, decodedText: "{}", finishReason: "MAX_TOKENS",
+    responseBody: "x".repeat(BODY_CAP + 1) });
+  expect(readProviderRawAttempt(truncated.root, truncated.cacheKey, 1)).toMatchObject({
+    response_body: { truncated: true }, finish_reason: "MAX_TOKENS", usage: null
+  });
+});
+
 it("rejects a digest-consistent complete response body above its retention limit", () => {
   const input = fixture();
   const raw = writeProviderRawAttempt({ ...input, decodedText: "{}", responseBody: "body" });

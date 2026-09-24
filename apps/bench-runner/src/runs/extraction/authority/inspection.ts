@@ -47,6 +47,8 @@ export interface ExtractionAuthorityInspection {
   readonly sourceOccurrences: number;
   readonly unsupportedSourceOccurrences: number;
   readonly missingKeys: readonly string[];
+  readonly pendingShards: readonly Readonly<{ cacheKey: string; attemptOrdinal: number;
+    authorityLineageDigest: string }>[];
   readonly nonemptyKeys?: readonly string[];
   readonly invalidShards: readonly ExtractionRepairShard[];
   readonly preservedValidClosure: ExtractionPreservedValidClosure;
@@ -219,6 +221,7 @@ function buildExtractionAuthorityInspection(
     sourceOccurrences: window.windowTurnOccurrences,
     unsupportedSourceOccurrences: window.unsupportedSourceOccurrences,
     missingKeys: Object.freeze(shardStatus.missingKeys),
+    pendingShards: Object.freeze(shardStatus.pendingShards),
     nonemptyKeys: Object.freeze(shardStatus.nonemptyKeys ?? []),
     invalidShards: Object.freeze(shardStatus.invalidShards),
     preservedValidClosure: createExtractionPreservedValidClosure(shardStatus.validEntries),
@@ -236,11 +239,14 @@ function collectShardStatus(
   preservedValidExclusionKeys: ReadonlySet<string>
 ): {
   readonly missingKeys: readonly string[];
+  readonly pendingShards: readonly Readonly<{ cacheKey: string; attemptOrdinal: number;
+    authorityLineageDigest: string }>[];
   readonly nonemptyKeys?: readonly string[];
   readonly invalidShards: readonly ExtractionRepairShard[];
   readonly validEntries: readonly ExtractionContentClosureEntry[];
 } {
   const missingKeys: string[] = [];
+  const pendingShards: { cacheKey: string; attemptOrdinal: number; authorityLineageDigest: string }[] = [];
   const nonemptyKeys: string[] = [];
   const invalidShards: ExtractionRepairShard[] = [];
   const validEntries: ExtractionContentClosureEntry[] = [];
@@ -260,6 +266,11 @@ function collectShardStatus(
         cacheRoot, key, config.model, config.requestProfile, extractionTypedArtifactMode(config)
       );
       if (shard.status === "missing") missingKeys.push(key);
+      if (shard.status === "pending" && shard.attemptOrdinal !== undefined &&
+          shard.authorityLineageDigest !== undefined) {
+        pendingShards.push({ cacheKey: key, attemptOrdinal: shard.attemptOrdinal,
+          authorityLineageDigest: shard.authorityLineageDigest });
+      }
       if (shard.status === "hit" && !preservedValidExclusionKeys.has(key)) {
         validEntries.push({
           cacheKey: key,
@@ -280,6 +291,7 @@ function collectShardStatus(
   }
   return {
     missingKeys: missingKeys.sort(),
+    pendingShards: pendingShards.sort((left, right) => left.cacheKey.localeCompare(right.cacheKey)),
     nonemptyKeys: [...new Set(nonemptyKeys)].sort(),
     validEntries,
     invalidShards: invalidShards.sort((left, right) =>

@@ -276,6 +276,8 @@ export function openExtractionAttemptLedger(input: {
   let current = existed ? readAttemptLedgerRecord(path) : expected;
   assertBoundRecord(current, expected);
   const inspectShard = input.inspectProviderShard ?? readValidLedgerShard;
+  const inspectCommitShard = input.inspectProviderShard ?? ((cacheRoot: string, cacheKey: string,
+    identity: ExtractionAttemptLedgerCacheIdentity) => readValidLedgerShard(cacheRoot, cacheKey, identity, true));
   current = reconcilePending(
     input.cacheRoot, current, path, true, input.publicationTemporaryDirectory, inspectShard
   );
@@ -298,7 +300,7 @@ export function openExtractionAttemptLedger(input: {
     reserveAttemptOrdinal,
     abandonPendingShard: (cacheKey, attemptOrdinal) => update(abandonPendingShard(current, cacheKey, attemptOrdinal)),
     commitSuccessfulShard: (cacheKey) => {
-      const shard = requireValidShard(input.cacheRoot, cacheKey, current.cache_identity, inspectShard);
+      const shard = requireValidShard(input.cacheRoot, cacheKey, current.cache_identity, inspectCommitShard);
       if (!shardAttemptBelongsToLedger(shard, current)) {
         throw new ExtractionAttemptLimitError("extraction success differs from its settled provider attempt");
       }

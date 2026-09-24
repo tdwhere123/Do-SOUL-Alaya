@@ -344,7 +344,7 @@ function importInteractiveLine(
     input.cacheRoot, line.key, input.prepared.config.model, input.prepared.config.requestProfile,
     extractionTypedArtifactMode(input.prepared.config)
   );
-  if (inspected.status !== "hit") {
+  if (inspected.status !== "hit" && inspected.status !== "pending") {
     // Admission completed; retain the shard reservation so intact raw can rebuild it without another request.
     recordInteractiveOutcome(authority, line.key, attemptOrdinal, extracted, "admitted");
     return "quarantined";

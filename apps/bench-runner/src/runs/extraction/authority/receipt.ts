@@ -279,7 +279,8 @@ function buildUnsignedReceipt(
 
 export function assertExtractionAuthorityReceipt(
   receipt: ExtractionAuthorityReceipt,
-  observation: ExtractionAuthorityObservation
+  observation: ExtractionAuthorityObservation,
+  pendingTurns = 0
 ): void {
   assertReceiptShape(receipt);
   assertObservation(observation);
@@ -296,7 +297,7 @@ export function assertExtractionAuthorityReceipt(
   )) {
     throw new Error("extraction authority receipt does not match the current identity drift");
   }
-  assertExtractionAuthorityInventoryProgress(receipt.observation.inventory, observation.inventory);
+  assertExtractionAuthorityInventoryProgress(receipt.observation.inventory, observation.inventory, pendingTurns);
   if (receipt.repair_scope === undefined &&
       receipt.observation.extraction.rawContentClosureSha256 !==
       observation.extraction.rawContentClosureSha256) {

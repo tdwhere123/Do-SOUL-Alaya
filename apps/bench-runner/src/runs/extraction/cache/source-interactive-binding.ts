@@ -32,7 +32,8 @@ export function inspectInteractiveTransportEvidence(
   typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" | "step_chat_completion" }>,
   entry: CachedExtractionEntry,
   cacheRoot: string
-): { readonly attemptOrdinal: number; readonly authorityLineageDigest: string } {
+): { readonly attemptOrdinal: number; readonly authorityLineageDigest: string;
+  readonly admissionState: "pending" | "admitted" } {
   if ((typed.kind === "step_chat_completion") !==
       (entry.request_profile === STEP_SEMANTIC_REQUEST_PROFILE)) {
     throw new AlayaError("CONFLICT", "typed source semantic cache kind/profile mismatch");
@@ -90,12 +91,23 @@ export function inspectInteractiveTransportEvidence(
     throw new AlayaError("CONFLICT", "typed source semantic raw attempt has no admissible reservation");
   }
   const successful = ledger.successfulEntries.find((shard) => shard.cacheKey === entry.cache_key);
-  if (successful === undefined ? !ledger.pendingKeys.includes(entry.cache_key) :
-      successful.successKind !== "provider" || successful.attemptOrdinal !== provenance.attemptOrdinal ||
+  const settled = ledger.settledAttempts.some((attempt) => attempt.cacheKey === entry.cache_key &&
+    attempt.attemptOrdinal === provenance.attemptOrdinal);
+  const unresolved = ledger.unresolvedAttempts.some((attempt) => attempt.cacheKey === entry.cache_key &&
+    attempt.attemptOrdinal === provenance.attemptOrdinal);
+  if (successful === undefined) {
+    if (!ledger.pendingKeys.includes(entry.cache_key) || !settled && !unresolved) {
+      throw new AlayaError("CONFLICT", "typed source semantic cache has no pending exact attempt");
+    }
+    return { attemptOrdinal: provenance.attemptOrdinal, authorityLineageDigest: raw.authority_lineage_digest,
+      admissionState: "pending" };
+  }
+  if (!settled || successful.successKind !== "provider" || successful.attemptOrdinal !== provenance.attemptOrdinal ||
       successful.authorityLineageDigest !== raw.authority_lineage_digest ||
       successful.rawJsonSha256 !== raw.decoded_text_digest ||
       canonicalJson(successful.transportProvenance) !== canonicalJson(entry.transport_provenance)) {
     throw new AlayaError("CONFLICT", "typed source semantic cache differs from its ledger shard");
   }
-  return { attemptOrdinal: provenance.attemptOrdinal, authorityLineageDigest: raw.authority_lineage_digest };
+  return { attemptOrdinal: provenance.attemptOrdinal, authorityLineageDigest: raw.authority_lineage_digest,
+    admissionState: "admitted" };
 }

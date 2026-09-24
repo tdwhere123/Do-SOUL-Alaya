@@ -7,6 +7,7 @@ import * as geminiHttp from "../../../runs/compile-seed/http/gemini-http.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
+import { openExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
 import { importSourceSemanticArtifact, inspectCachedSourceSemantic,
   writeDeterministicSourceSemanticArtifact } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { readValidDeterministicLedgerShard, readValidLedgerShard } from "../../../runs/extraction/authority/attempt-ledger-shards.js";
@@ -150,6 +151,71 @@ it("fills complete-source open semantics through interactive generateContent wit
   await assertNativeLongMemEvalArm(dataDir, pinnedMetaRoot, [cacheRoot, secondCache]);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
 }, 120000);
+
+it("withholds a staged baseline source until its original attempts recover without new calls", async () => {
+  const fixture = await setupInteractive();
+  const options = { variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
+    sourcePacking: "complete-source" as const, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    authorityReceiptPath: fixture.receiptPath };
+  await runExtractionFill(options);
+  const initialCalls = fixture.fetchMock.mock.calls.length;
+  expect(initialCalls).toBe(fixture.keys.length);
+  const receipt = JSON.parse(readFileSync(fixture.receiptPath, "utf8"));
+  const rawAttempts = fixture.keys.map(key => ({ key, raw: listProviderRawAttempts(cacheRoot, key)[0]! }))
+    .sort((left, right) => left.raw.attempt_ordinal - right.raw.attempt_ordinal);
+  const rawBytes = new Map(rawAttempts.map(({ key, raw }) => [key,
+    readFileSync(providerRawAttemptPath(cacheRoot, key, raw.attempt_ordinal))]));
+  const census = await censusCompleteSourceRecords({ population: "fixture", dataDir, pinnedMetaRoot });
+  const publicationAssociations = census.records.map(source => {
+    const match = fixture.keys.map(key => ({ key,
+      result: inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE) }))
+      .find(item => item.result.status === "hit" &&
+        sourceSemanticRequestCatalog(item.result.admitted.request).source_digest === source.corpus_digest)!;
+    if (match.result.status !== "hit") throw new Error("fixture source interpretation missing");
+    return { source_id: source.source_id, source_version: source.source_version,
+      generation_key: match.key, request_digest: match.result.requestDigest };
+  });
+  const publish = async (name: string) => publishSourceSemanticSnapshot({
+    snapshotPath: join(cacheRoot, `${name}.sqlite`), dataDirRoot: join(cacheRoot, name),
+    recordedAt: "2026-09-25T00:00:00.000Z", producerCommit: "a".repeat(40),
+    populations: [{ name: "fixture", dataDir, pinnedMetaRoot, cacheRoots: [cacheRoot],
+      model: MODEL, requestProfile: REQUEST_PROFILE, publicationAssociations }]
+  });
+
+  // The raw and typed files survived, but the ledger stopped after the exact reservations.
+  const ledgerPath = join(cacheRoot, readdirSync(cacheRoot)
+    .find(name => name.startsWith("extraction-attempt-ledger."))!);
+  unlinkSync(ledgerPath);
+  const ledgerOptions = { cacheRoot, lineageDigest: receipt.lineage_digest,
+    cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+    startingMissing: receipt.limits.starting_missing, maximumAttempts: receipt.limits.maximum_attempts,
+    successfulShardCeiling: receipt.limits.successful_shard_ceiling };
+  const ledger = openExtractionAttemptLedger(ledgerOptions);
+  for (const { key, raw } of rawAttempts) {
+    expect(ledger.reserveAttemptOrdinal(key)).toBe(raw.attempt_ordinal);
+    expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status).toBe("pending");
+    expect(inspectCachedRawExtraction(cacheRoot, key, MODEL, REQUEST_PROFILE).status).toBe("pending");
+  }
+  const withheld = await publish("pending-publication");
+  expect(withheld.published_count).toBe(0);
+  expect(withheld.source_interpretation_binding_complete).toBe(false);
+
+  const resumed = await runExtractionFill(options);
+  expect(resumed.coverage).toBe(1);
+  expect(resumed.authorityTelemetry?.successfulShards).toBe(fixture.keys.length);
+  expect(fixture.fetchMock).toHaveBeenCalledTimes(initialCalls);
+  expect(openExtractionAttemptLedger(ledgerOptions).snapshot()).toMatchObject({
+    attempts: initialCalls, successfulShards: fixture.keys.length, unresolvedAttempts: []
+  });
+  for (const { key, raw } of rawAttempts) {
+    expect(readFileSync(providerRawAttemptPath(cacheRoot, key, raw.attempt_ordinal))
+      .equals(rawBytes.get(key)!)).toBe(true);
+    expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status).toBe("hit");
+  }
+  const admitted = await publish("admitted-publication");
+  expect(admitted.published_count).toBe(census.records.length);
+  expect(admitted.source_interpretation_binding_complete).toBe(true);
+}, 60000);
 
 it("rejects invalid interactive evidence before current reuse and retained quarantine", async () => {
   const fixture = await setupInteractive();
