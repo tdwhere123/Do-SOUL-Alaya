@@ -5,6 +5,7 @@ import { buildSourceReferenceCatalog, sourceReferenceResolver, type SourceSemant
 import { createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
   fieldContractSha256, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
+import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import { createRecallReadWorkerClient, type RecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
@@ -19,7 +20,9 @@ export const CLOCK = "2026-09-18T00:00:00.000Z";
 export const ACCESS_BUDGET = { schema_version: 1 as const, work_units: 10_000_000, memory_bytes: 200_000_000,
   page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 };
 export type AccessFixtureSource = Readonly<{ id: string; text: string; reading?: string; person?: string;
-  count?: number; scope?: "project" | "global_core" }>;
+  count?: number; scope?: "project" | "global_core"; verbatim?: boolean;
+  recordedAt?: string; eventTime?: string;
+  authoredDraft?: (catalog: ReturnType<typeof buildSourceReferenceCatalog>) => unknown }>;
 type Execute = NonNullable<RecallReadWorkerClient["sourceSemanticsPort"]>["execute"];
 
 export function accessQuery(original: string, reading = original): SourceSemanticQuery {
@@ -49,29 +52,42 @@ export async function withAccessLibrary(sources: readonly AccessFixtureSource[],
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo, runtimeNotifier, sha256: fieldContractSha256 });
   const ids = new Map<string, string[]>();
   for (const fixture of sources) {
-    const source = `User: ${fixture.text}`;
+    if (fixture.authoredDraft !== undefined && fixture.verbatim !== true) {
+      throw new Error("authored native source fixtures require verbatim original text");
+    }
+    const source = fixture.verbatim === true ? fixture.text : `User: ${fixture.text}`;
     await admission.admit({ workspace_id: WS, source_id: fixture.id, source_version: "1", content_bytes: source,
-      evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
+      evidence_object_id: null, recorded_at: fixture.recordedAt ?? CLOCK, event_time: fixture.eventTime ?? null,
+      valid_from: null, valid_to: null,
       speaker: "user", scope_class: fixture.scope ?? "project", spans: deriveAddressableSpanViews(source) }, { workspaceId: WS });
-    if (fixture.reading === undefined) { ids.set(fixture.id, []); continue; }
-    const catalog = buildSourceReferenceCatalog(fieldContractSha256(fixture.text), [{ assertion_id: 1, text: fixture.text }], fieldContractSha256);
+    if (fixture.reading === undefined && fixture.authoredDraft === undefined) { ids.set(fixture.id, []); continue; }
+    const units = fixture.authoredDraft === undefined ? [] : indexSourceSemanticUnits(source);
+    const catalog = fixture.authoredDraft === undefined
+      ? buildSourceReferenceCatalog(fieldContractSha256(fixture.text), [{ assertion_id: 1, text: fixture.text }], fieldContractSha256)
+      : buildSourceReferenceCatalog(fieldContractSha256(source), units.map(({ assertion_id, text }) => ({ assertion_id, text })), fieldContractSha256);
     const resolver = sourceReferenceResolver(catalog, fieldContractSha256);
-    const sourceRef = resolver.referenceForSpan(1, [0, fixture.text.length]);
+    const sourceRef = fixture.authoredDraft === undefined ? resolver.referenceForSpan(1, [0, fixture.text.length]) : undefined;
     const personStart = fixture.person === undefined ? -1 : fixture.text.indexOf(fixture.person);
     if (fixture.person !== undefined && personStart < 0) throw new Error("fixture person is absent from source text");
-    const personRef = fixture.person === undefined ? undefined
+    const personRef = fixture.person === undefined || fixture.authoredDraft !== undefined ? undefined
       : resolver.referenceForSpan(1, [personStart, personStart + fixture.person.length]);
     const publishedIds: string[] = [];
     for (let index = 0; index < (fixture.count ?? 1); index += 1) {
+      const authored = fixture.authoredDraft?.(catalog);
+      if (fixture.authoredDraft !== undefined && authored === undefined) throw new Error("authored source fixture returned no draft");
       const published = await createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 }).publish({
         workspaceId: WS, runId: RUN, artifactKey: fixture.id, source, catalog, provenance: { producer_id: "access-test-author" },
-        assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(source)] }],
-        producer_version: `p${index}`, contract_version: "source-interpretation-v4", draft: {
-          contract: "source-interpretation-v4", mentions: [{ id: "mStatement", assertion_id: 1, source_ref: sourceRef },
+        assertion_locations: fixture.authoredDraft === undefined
+          ? [{ assertion_id: 1, source_utf8_span: [fixture.verbatim === true ? 0 : 6, Buffer.byteLength(source)] }]
+          : units.map(unit => ({
+          assertion_id: unit.assertion_id, source_utf8_span: [Buffer.byteLength(source.slice(0, unit.start)),
+            Buffer.byteLength(source.slice(0, unit.end))] as const })),
+        producer_version: `p${index}`, contract_version: "source-interpretation-v4", draft: authored ?? {
+          contract: "source-interpretation-v4", mentions: [{ id: "mStatement", assertion_id: 1, source_ref: sourceRef! },
             ...(personRef === undefined ? [] : [{ id: "mPerson", assertion_id: 1, source_ref: personRef }])],
           referents: personRef === undefined ? [] : [{ id: "rPerson", referent_kind: "grouped", mentions: ["mPerson"] }],
           frames: [{ id: "fStatement", assertion_ids: [1], context_owner: { kind: "source_act", source_act: "assertion" },
-            additional_support: [], predicate_support: { kind: "explicit", reading: fixture.reading, mentions: ["mStatement"] },
+            additional_support: [], predicate_support: { kind: "explicit", reading: fixture.reading!, mentions: ["mStatement"] },
             slots: personRef === undefined ? [] : [{ id: "person", role_reading: "person", support: [{ kind: "lexical", mentions: ["mPerson"] }] }],
             bindings: personRef === undefined ? [] : [{ slot_id: "person", target: { kind: "node", id: "rPerson" }, support: [] }] }],
           operators: [], gaps: []
