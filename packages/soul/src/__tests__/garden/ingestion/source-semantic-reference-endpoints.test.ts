@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { sourceSemanticInterpretationIdentity, encodeSourceSemanticQueryCarrier,
+import { sourceSemanticInterpretationIdentity, UNKNOWN_UTTERANCE_ATTRIBUTION, encodeSourceSemanticQueryCarrier,
   type SourceSemanticQueryMeaningBody } from "@do-soul/alaya-protocol";
 import { buildSourceSemanticCorrespondenceRequest, semanticSha256 }
   from "../../../garden/ingestion/official-api/source-semantic-request.js";
@@ -105,4 +105,53 @@ it("retains shared charger identity and advertises positive versus cross-role C 
     expect(crossLend.source).not.toBe(lendLender.source);
     expect(catalog.source_endpoints.filter(row => row.kind === "frame")).toHaveLength(2);
   }
+});
+
+it("presents declared reference uses and source frame context on the same endpoint handles", () => {
+  const interpretation = chargerSource();
+  const query = chargerQuery(RECIPIENT, "recipient");
+  const request = buildSourceSemanticCorrespondenceRequest({ original_query: RECIPIENT,
+    admitted_query_semantics: query,
+    source_interpretation_descriptors: [{
+      source_interpretation_id: sourceSemanticInterpretationIdentity(interpretation, semanticSha256), interpretation
+    }], producer_id: "authored-control", producer_version: "1" });
+  const { catalog, endpoint_evidence: evidence } = request;
+  expect(request.contract).toBe("source-semantic-correspondence-request-v6");
+  expect(evidence.contract).toBe("source-semantic-correspondence-endpoint-evidence-v1");
+  expect(evidence.query_endpoints.map(row => row.handle)).toEqual(catalog.query_endpoints.map(row => row.handle));
+  expect(evidence.source_endpoints.map(row => row.handle)).toEqual(catalog.source_endpoints.map(row => row.handle));
+
+  const querySpeakerHandle = catalog.query_endpoints.find(row => row.variable === "speaker")!.handle;
+  expect(evidence.query_endpoints.find(row => row.handle === querySpeakerHandle)).toMatchObject({
+    kind: "referent", reference: { kind: "query_text", excerpt: "I" },
+    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+    uses: [
+      { frame: "taking", role_reading: "agent", role_support: { excerpt: "I" },
+        context_obligations: [{ kind: "asserted_at_source" }] },
+      { frame: "lending", role_reading: "recipient", role_support: { excerpt: "me" },
+        context_obligations: [{ kind: "asserted_at_source" }] }
+    ]
+  });
+  const sourceSpeaker = interpretation.referents.find(row => row.mentions.some(id =>
+    interpretation.mentions.find(mention => mention.id === id)?.text === "me"))!;
+  const sourceSpeakerHandle = catalog.source_endpoints.find(row => row.referent === sourceSpeaker.id)!.handle;
+  expect(evidence.source_endpoints.find(row => row.handle === sourceSpeakerHandle)).toMatchObject({
+    kind: "referent", source_context: {
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+      assertion_locations: interpretation.source.assertion_locations ?? null
+    },
+    mentions: [{ text: "me", span_space: "assertion_code_units" },
+      { text: "I", span_space: "assertion_code_units" }],
+    uses: [
+      { role_reading: "recipient", context_owner: { kind: "source_act", source_act: "assertion" },
+        target: { kind: "node", id: sourceSpeaker.id } },
+      { role_reading: "agent", context_owner: { kind: "source_act", source_act: "assertion" },
+        target: { kind: "node", id: sourceSpeaker.id } }
+    ]
+  });
+  const sourceSlotHandle = catalog.source_endpoints.find(row => row.kind === "slot" && row.reading === "recipient")!.handle;
+  expect(evidence.source_endpoints.find(row => row.handle === sourceSlotHandle)).toMatchObject({
+    kind: "slot", frame_context: { context_owner: { kind: "source_act", source_act: "assertion" } },
+    bindings: [{ target: { kind: "node", id: sourceSpeaker.id } }]
+  });
 });

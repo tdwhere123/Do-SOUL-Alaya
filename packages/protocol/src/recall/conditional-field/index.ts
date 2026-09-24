@@ -320,6 +320,7 @@ export {
 } from "./semantic-correspondence.js";
 export {
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT,
   SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE,
   SOURCE_SEMANTIC_SOURCE_ENDPOINT_HANDLE,
   SourceSemanticQueryCatalogEntrySchema,
@@ -327,10 +328,12 @@ export {
   SourceSemanticCorrespondenceEndpointCatalogSchema,
   SourceSemanticCorrespondenceSelectionSchema,
   buildSourceSemanticCorrespondenceEndpointCatalog,
+  buildSourceSemanticCorrespondenceEndpointEvidence,
   materializeSourceSemanticCorrespondenceSelection,
   type SourceSemanticQueryCatalogEntry,
   type SourceSemanticSourceCatalogEntry,
   type SourceSemanticCorrespondenceEndpointCatalog,
+  type SourceSemanticCorrespondenceEndpointEvidence,
   type SourceSemanticCorrespondenceSelection,
   type SourceSemanticCorrespondenceDescriptor,
   type SourceSemanticCorrespondenceSelectionEnvelope

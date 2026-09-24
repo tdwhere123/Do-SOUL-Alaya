@@ -18,11 +18,12 @@ import {
 
 
   SourceSemanticQueryCarrierBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceSelectionSchema,
-  buildSourceReferenceCatalog, buildSourceSemanticCorrespondenceEndpointCatalog, canonicalJson,
+  buildSourceReferenceCatalog, buildSourceSemanticCorrespondenceEndpointCatalog,
+  buildSourceSemanticCorrespondenceEndpointEvidence, canonicalJson,
   sourceReferenceCapacityReason, SourceReferenceCapacityExceeded, SourceReferenceCapacityReasonSchema,
   SOURCE_REFERENCE_MAX_ASSERTIONS,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery,
-  type SourceSemanticCorrespondenceEndpointCatalog,
+  type SourceSemanticCorrespondenceEndpointCatalog, type SourceSemanticCorrespondenceEndpointEvidence,
   ApprovedSemanticContextSchema, UtteranceAttributionSchema, UNKNOWN_UTTERANCE_ATTRIBUTION,
   bindUtteranceAttribution, type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
@@ -38,7 +39,8 @@ import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type Sour
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-selection-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
-export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT = "source-semantic-correspondence-request-v5" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT = "source-semantic-correspondence-request-v6" as const;
+const SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES = 1_000_000;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v3" as const;
 
 const FORBIDDEN_PROPOSAL_KEYS = [
@@ -217,6 +219,7 @@ export type SourceSemanticCorrespondenceRequest = Readonly<{
   producer_capability: z.infer<typeof ProducerCapability>;
   resource_limits: SourceSemanticResourceLimits;
   catalog: SourceSemanticCorrespondenceEndpointCatalog;
+  endpoint_evidence: SourceSemanticCorrespondenceEndpointEvidence;
 }>;
 
 export function semanticSha256(text: string): string {
@@ -392,8 +395,14 @@ export function buildSourceSemanticCorrespondenceRequest(
     throw new AlayaError("VALIDATION", "semantic_correspondence request does not bind the original query");
   }
   const source_interpretation_descriptors = z.array(SourceInterpretationDescriptorSchema).min(1).max(64).parse(input.source_interpretation_descriptors);
-  if (Buffer.byteLength(JSON.stringify(source_interpretation_descriptors)) > 1_000_000) throw new AlayaError("VALIDATION", "semantic_correspondence descriptors exceed input budget");
-  return {
+  if (Buffer.byteLength(JSON.stringify(source_interpretation_descriptors)) > SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES) {
+    throw new AlayaError("VALIDATION", "semantic_correspondence descriptors exceed input budget");
+  }
+  const descriptors = source_interpretation_descriptors.map((row, index) => ({
+    source_interpretation_handle: `source${index + 1}`, interpretation: row.interpretation
+  }));
+  const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(admitted_query_semantics, descriptors);
+  const request: SourceSemanticCorrespondenceRequest = {
     contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     admitted_query_semantics,
@@ -401,10 +410,13 @@ export function buildSourceSemanticCorrespondenceRequest(
     source_interpretation_descriptors,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
-    catalog: buildSourceSemanticCorrespondenceEndpointCatalog(admitted_query_semantics, source_interpretation_descriptors.map((row, index) => ({
-        source_interpretation_handle: `source${index + 1}`, interpretation: row.interpretation
-      })))
+    catalog,
+    endpoint_evidence: buildSourceSemanticCorrespondenceEndpointEvidence(admitted_query_semantics, descriptors, catalog)
   };
+  if (Buffer.byteLength(JSON.stringify(request)) > SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES) {
+    throw new AlayaError("VALIDATION", "semantic_correspondence request exceeds input budget");
+  }
+  return request;
 }
 
 /** Producer JSON Schema selected by the recorded request contract, without profile enums. */

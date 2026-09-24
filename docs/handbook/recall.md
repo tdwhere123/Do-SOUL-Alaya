@@ -740,7 +740,16 @@ The canonical query also binds the complete host-approved fixed context
 identity changes when those consumed fields change, even if the query text and
 meaning body do not. Source records hold the same attribution schema; the current
 source request and published interpretation carry the exact source value, and
-the current correspondence selection request is v5. Role-only inputs explicitly
+the current correspondence selection request is v6. Its versioned endpoint-evidence
+projection copies declared named-reference uses, source mentions, attribution,
+assertion locations, frame context, support and bindings onto the existing catalog
+handles. It selects no equivalence and gives no new proof authority. Mention span
+units remain tagged separately from source UTF-8 assertion and attribution spans;
+the source interpretation identity does not bind mention spans. Recorded v5 request
+bytes and cache identities remain historical and cannot enter current generation.
+The Protocol endpoint-evidence projection exports are additive minor API under
+invariant §25; the v6 C request is a new wire identity.
+Role-only inputs explicitly
 carry `unknown`; they do not manufacture a speaker or conversation identity.
 Captured attribution is scoped to its issuer and conversation, and exact UTF-8
 occurrence ranges bind it to the admitted bytes. It supplies bounded outer-author

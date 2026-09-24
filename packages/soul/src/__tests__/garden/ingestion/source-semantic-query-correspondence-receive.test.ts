@@ -479,7 +479,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
         semantic_correspondence: { correspondences: [] }
       })
     });
-    expect(semantic_correspondence.request.contract).toBe("source-semantic-correspondence-request-v5");
+    expect(semantic_correspondence.request.contract).toBe("source-semantic-correspondence-request-v6");
     expect(semantic_correspondence.outcome.status).toBe("invalid");
     expect(semantic_correspondence.semantic_correspondence).toBeUndefined();
   });

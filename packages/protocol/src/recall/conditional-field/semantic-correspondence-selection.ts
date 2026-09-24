@@ -12,6 +12,7 @@ import {
 import type { SourceSemanticQuery } from "./semantic-query.js";
 
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT = "source-semantic-correspondence-selection-v2" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT = "source-semantic-correspondence-endpoint-evidence-v1" as const;
 export const SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE = /^qe([1-9][0-9]{0,2})$/u;
 export const SOURCE_SEMANTIC_SOURCE_ENDPOINT_HANDLE = /^se([1-9][0-9]{0,2})$/u;
 
@@ -144,6 +145,96 @@ export function buildSourceSemanticCorrespondenceEndpointCatalog(
   }
   return SourceSemanticCorrespondenceEndpointCatalogSchema.parse({ query_endpoints, source_endpoints });
 }
+
+/** Copies admitted premises onto the existing endpoints; the catalog alone decides eligibility and handles. */
+export function buildSourceSemanticCorrespondenceEndpointEvidence(
+  query: SourceSemanticQuery,
+  descriptors: readonly SourceSemanticCorrespondenceDescriptor[],
+  catalog: SourceSemanticCorrespondenceEndpointCatalog
+) {
+  const variables = new Map(query.variables.map((row) => [row.id, row]));
+  const sources = new Map(descriptors.map((row) => [row.source_interpretation_handle, row.interpretation]));
+  const query_endpoints = catalog.query_endpoints.map((endpoint) => {
+    if (endpoint.kind === "referent") {
+      const variable = variables.get(endpoint.variable!);
+      if (variable?.reference === undefined) throw new Error("catalog referent has no declared query reference");
+      const uses = query.alternatives.flatMap((alternative, index) => alternative.frames.flatMap((frame) =>
+        frame.role_requirements.filter((role) => role.target_variable === variable.id).map((role) => ({
+          alternative: index, frame: frame.id, predicate_reading: frame.predicate_reading,
+          operator: frame.operator ?? null, source_act: frame.source_act ?? null,
+          role: role.id, role_reading: role.role_reading, role_support: role.support,
+          context_obligations: alternative.context_obligations.filter((obligation) => obligation.frame === frame.id),
+          alternative_context: { purpose: alternative.purpose ?? null,
+            context_obligations: alternative.context_obligations,
+            answer_frames: alternative.answer_frames ?? null,
+            evidence_inputs: alternative.evidence_inputs ?? null }
+        }))));
+      return { handle: endpoint.handle, kind: endpoint.kind, reference: variable.reference,
+        attribution_context: query.attribution_context, uses };
+    }
+    const alternative = query.alternatives[endpoint.alternative!];
+    const frame = alternative?.frames.find((row) => row.id === endpoint.frame);
+    if (alternative === undefined || frame === undefined) throw new Error("catalog frame has no declared query frame");
+    const frame_context = { frame: frame.id, predicate_reading: frame.predicate_reading,
+      operator: frame.operator ?? null, source_act: frame.source_act ?? null,
+      context_obligations: alternative.context_obligations.filter((row) => row.frame === frame.id),
+      alternative_context: { purpose: alternative.purpose ?? null,
+        context_obligations: alternative.context_obligations,
+        answer_frames: alternative.answer_frames ?? null,
+        evidence_inputs: alternative.evidence_inputs ?? null } };
+    if (endpoint.kind === "predicate") {
+      return { handle: endpoint.handle, kind: endpoint.kind, frame_context,
+        roles: frame.role_requirements };
+    }
+    const role = frame.role_requirements.find((row) => row.id === endpoint.slot);
+    if (role === undefined) throw new Error("catalog slot has no declared query role");
+    return { handle: endpoint.handle, kind: endpoint.kind, frame_context, role };
+  });
+  const source_endpoints = catalog.source_endpoints.map((endpoint) => {
+    const interpretation = sources.get(endpoint.source_interpretation_handle);
+    if (interpretation === undefined) throw new Error("catalog source endpoint has no declared interpretation");
+    const source_context = { attribution_context: interpretation.source.attribution_context,
+      assertion_locations: interpretation.source.assertion_locations ?? null };
+    if (endpoint.kind === "referent") {
+      const referent = interpretation.referents.find((row) => row.id === endpoint.referent);
+      if (referent === undefined) throw new Error("catalog referent has no declared source referent");
+      const mentions = referent.mentions.map((id) => {
+        const mention = interpretation.mentions.find((row) => row.id === id);
+        if (mention === undefined) throw new Error("source referent has no declared mention");
+        return { id: mention.id, text: mention.text, assertion_id: mention.assertion_id,
+          source_ref: mention.source_ref, utf8_span: mention.utf8_span,
+          span_space: mention.span_space ?? null };
+      });
+      const uses = interpretation.frames.flatMap((frame) => frame.bindings.filter((binding) =>
+        binding.target.kind === "node" && binding.target.id === referent.id).map((binding) => {
+          const slot = frame.slots.find((row) => row.id === binding.slot_id);
+          if (slot === undefined) throw new Error("source binding has no declared slot");
+          return { frame: frame.id, assertion_ids: frame.assertion_ids, context_owner: frame.context_owner,
+            slot: slot.id, role_reading: slot.role_reading, slot_support: slot.support,
+            target: binding.target, binding_support: binding.support };
+        }));
+      return { handle: endpoint.handle, kind: endpoint.kind, source_context, mentions, uses };
+    }
+    const frame = interpretation.frames.find((row) => row.id === endpoint.frame);
+    if (frame === undefined) throw new Error("catalog frame has no declared source frame");
+    const frame_context = { frame: frame.id, assertion_ids: frame.assertion_ids,
+      context_owner: frame.context_owner, predicate_support: frame.predicate_support,
+      additional_support: frame.additional_support };
+    if (endpoint.kind === "frame") {
+      return { handle: endpoint.handle, kind: endpoint.kind, source_context, frame_context,
+        slots: frame.slots.map((slot) => ({ ...slot,
+          bindings: frame.bindings.filter((binding) => binding.slot_id === slot.id) })) };
+    }
+    const slot = frame.slots.find((row) => row.id === endpoint.slot);
+    if (slot === undefined) throw new Error("catalog slot has no declared source slot");
+    return { handle: endpoint.handle, kind: endpoint.kind, source_context, frame_context,
+      slot, bindings: frame.bindings.filter((binding) => binding.slot_id === slot.id) };
+  });
+  return { contract: SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT,
+    query_endpoints, source_endpoints };
+}
+
+export type SourceSemanticCorrespondenceEndpointEvidence = ReturnType<typeof buildSourceSemanticCorrespondenceEndpointEvidence>;
 
 export function materializeSourceSemanticCorrespondenceSelection(
   body: unknown,
