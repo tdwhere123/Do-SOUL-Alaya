@@ -7,14 +7,18 @@ import * as geminiHttp from "../../../runs/compile-seed/http/gemini-http.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
-import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
+import { importSourceSemanticArtifact, inspectCachedSourceSemantic,
+  writeDeterministicSourceSemanticArtifact } from "../../../runs/extraction/cache/source-semantic-artifact.js";
+import { readValidDeterministicLedgerShard, readValidLedgerShard } from "../../../runs/extraction/authority/attempt-ledger-shards.js";
+import { acquireExtractionCacheWriteLease } from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 import { listProviderRawAttempts, providerRawAttemptPath, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { cacheFilePath, inspectCachedRawExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { computeSystemPromptSha256, extractionAdmissionGenerationSha256,
   type ExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { computeExtractionRawJsonSha256 } from "../../../runs/extraction/content-closure.js";
 import { createHash } from "node:crypto";
-import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
+import { EXTRACTION_OPEN_SEMANTICS_GENERATION, prepareSourceSemanticRequestLine,
+  SOURCE_SEMANTIC_BATCH_PRODUCER_ID } from "../../../runs/extraction/request-artifact.js";
 import type { LongMemEvalExpansionCapability } from "../../../datasets/longmemeval/promotion/expansion/expansion-capability.js";
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
@@ -147,7 +151,7 @@ it("fills complete-source open semantics through interactive generateContent wit
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
 }, 120000);
 
-it("inspects a retained source shard without reusing it or dispatching its cache root", async () => {
+it("rejects invalid interactive evidence before current reuse and retained quarantine", async () => {
   const fixture = await setupInteractive();
   const args = ["extraction-fill", "--variant", "s", "--data-dir", dataDir,
     "--pinned-meta-root", pinnedMetaRoot, "--extraction-cache-root", cacheRoot,
@@ -158,6 +162,63 @@ it("inspects a retained source shard without reusing it or dispatching its cache
   const currentKey = fixture.keys[0]!;
   const shardPath = cacheFilePath(cacheRoot, currentKey);
   const shard = JSON.parse(readFileSync(shardPath, "utf8"));
+  const identity = { model: MODEL, requestProfile: REQUEST_PROFILE };
+  const config = { model: MODEL, requestProfile: REQUEST_PROFILE,
+    providerUrl: "https://fixture-provider.invalid", apiKey: "", sourcePacking: "complete-source" as const,
+    openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION };
+  expect(readValidLedgerShard(cacheRoot, currentKey, identity)).toMatchObject({ successKind: "provider" });
+  const inspectChangedCurrent = (changed: object, reason: string) => {
+    writeFileSync(shardPath, `${JSON.stringify(changed, null, 2)}\n`);
+    expect(inspectCachedSourceSemantic(cacheRoot, currentKey, MODEL, REQUEST_PROFILE))
+      .toMatchObject({ status: "invalid", reason: expect.stringContaining(reason) });
+    expect(inspectCachedRawExtraction(cacheRoot, currentKey, MODEL, REQUEST_PROFILE))
+      .toMatchObject({ status: "invalid" });
+    expect(readValidLedgerShard(cacheRoot, currentKey, identity)).toBeUndefined();
+  };
+  const wrongKind = structuredClone(shard);
+  wrongKind.source_semantic.kind = "step_chat_completion";
+  inspectChangedCurrent(wrongKind, "kind/profile mismatch");
+  const missingOrdinal = structuredClone(shard);
+  delete missingOrdinal.source_semantic.result.provenance.attemptOrdinal;
+  inspectChangedCurrent(missingOrdinal, "interactive transport binding mismatch");
+  const invalidOrdinal = structuredClone(shard);
+  invalidOrdinal.source_semantic.result.provenance.attemptOrdinal = 0;
+  inspectChangedCurrent(invalidOrdinal, "interactive transport binding mismatch");
+  writeFileSync(shardPath, `${JSON.stringify(shard, null, 2)}\n`);
+  expect(inspectCachedSourceSemantic(cacheRoot, currentKey, MODEL, REQUEST_PROFILE))
+    .toMatchObject({ status: "hit" });
+  expect(readValidLedgerShard(cacheRoot, currentKey, identity)).toMatchObject({ successKind: "provider" });
+  const importLease = acquireExtractionCacheWriteLease(cacheRoot);
+  try {
+    const sourceCorpus = shard.source_semantic.source_corpus as string;
+    const result = shard.source_semantic.result;
+    expect(() => importSourceSemanticArtifact({ config, cacheRoot, writeLease: importLease, sourceCorpus,
+      result: { ...result, provenance: { ...result.provenance, attemptOrdinal: 0 } } }))
+      .toThrow("interactive transport binding mismatch");
+    expect(() => importSourceSemanticArtifact({ config, cacheRoot, writeLease: importLease, sourceCorpus,
+      result: { ...result, provenance: { ...result.provenance,
+        usage: { inputTokens: -10, outputTokens: 20, totalTokens: 10 } } } }))
+      .toThrow("response_metadata usage is invalid");
+  } finally { importLease.release(); }
+  expect(readValidLedgerShard(cacheRoot, currentKey, identity)).toMatchObject({ successKind: "provider" });
+
+  const emptyInput = { sourceCorpus: "", assertionIds: [], sourceScope: "complete-source" as const,
+    source_id: "unbound" as const, source_version: "unbound" as const,
+    producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID, producer_version: "1" as const };
+  const emptyRequest = buildSourceSemanticRequest(emptyInput);
+  const emptyLine = prepareSourceSemanticRequestLine(emptyRequest, [], config);
+  const emptyLease = acquireExtractionCacheWriteLease(cacheRoot);
+  try {
+    writeDeterministicSourceSemanticArtifact({ config, cacheRoot, writeLease: emptyLease,
+      line: emptyLine, sourceCorpus: "" });
+  } finally { emptyLease.release(); }
+  expect(inspectCachedSourceSemantic(cacheRoot, emptyLine.key, MODEL, REQUEST_PROFILE))
+    .toMatchObject({ status: "hit", deterministicEmpty: true });
+  expect(inspectCachedRawExtraction(cacheRoot, emptyLine.key, MODEL, REQUEST_PROFILE))
+    .toMatchObject({ status: "hit", deterministicEmpty: true });
+  expect(readValidDeterministicLedgerShard(cacheRoot, emptyLine.key, identity))
+    .toMatchObject({ successKind: "deterministic" });
+
   const current = parseSourceSemanticRequest(JSON.parse(shard.source_semantic.result.line.userPrompt));
   const { source_digest: _currentDigest, ...catalogRequest } = current;
   const retainedRequest = { ...catalogRequest, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
@@ -193,6 +254,8 @@ it("inspects a retained source shard without reusing it or dispatching its cache
     .toMatchObject({ status: "retired", eligibility: "retained_only" });
   expect(inspectCachedRawExtraction(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
     .toMatchObject({ status: "quarantined", rawJson });
+  expect(readValidLedgerShard(cacheRoot, retiredKey, identity)).toBeUndefined();
+  expect(readValidDeterministicLedgerShard(cacheRoot, retiredKey, identity)).toBeUndefined();
   assertRetiredByteBindings(retiredPath, retiredKey, current);
   expect(await runCli(args)).not.toBe(0);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(calls);
@@ -208,6 +271,8 @@ function assertRetiredByteBindings(retiredPath: string, retiredKey: string,
       .toMatchObject({ status: "invalid", reason: expect.stringContaining(reason) });
     expect(inspectCachedRawExtraction(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
       .toMatchObject({ status: "invalid" });
+    expect(readValidLedgerShard(cacheRoot, retiredKey, { model: MODEL, requestProfile: REQUEST_PROFILE }))
+      .toBeUndefined();
   };
   const changedSource = structuredClone(shard);
   changedSource.source_semantic.source_corpus += " CORRUPTED";
@@ -222,6 +287,21 @@ function assertRetiredByteBindings(retiredPath: string, retiredKey: string,
   missingDigest.source_semantic.result.line.requestSha256 =
     computeExtractionRawJsonSha256(missingDigest.source_semantic.result.line.userPrompt);
   inspectChanged(missingDigest, "digest witness is absent");
+  const wrongKind = structuredClone(shard);
+  wrongKind.source_semantic.kind = "step_chat_completion";
+  inspectChanged(wrongKind, "kind/profile mismatch");
+  const invalidUsage = structuredClone(shard);
+  invalidUsage.source_semantic.result.provenance.usage =
+    { inputTokens: -10, outputTokens: 20, totalTokens: 10 };
+  invalidUsage.response_metadata.usage =
+    { input_tokens: -10, output_tokens: 20, total_tokens: 10 };
+  inspectChanged(invalidUsage, "response_metadata usage is invalid");
+  const missingOrdinal = structuredClone(shard);
+  delete missingOrdinal.source_semantic.result.provenance.attemptOrdinal;
+  inspectChanged(missingOrdinal, "interactive transport binding mismatch");
+  const invalidOrdinal = structuredClone(shard);
+  invalidOrdinal.source_semantic.result.provenance.attemptOrdinal = 0;
+  inspectChanged(invalidOrdinal, "interactive transport binding mismatch");
 
   const emptyCurrent = buildSourceSemanticRequest({ sourceCorpus: "", assertionIds: [], sourceScope: "complete-source",
     source_id: "unbound", source_version: "unbound", producer_id: "official-api-source-semantic", producer_version: "1" });
@@ -237,6 +317,8 @@ function assertRetiredByteBindings(retiredPath: string, retiredKey: string,
   writeFileSync(retiredPath, `${JSON.stringify(empty, null, 2)}\n`);
   expect(inspectCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
     .toMatchObject({ status: "retired", eligibility: "retained_only" });
+  expect(readValidDeterministicLedgerShard(cacheRoot, retiredKey,
+    { model: MODEL, requestProfile: REQUEST_PROFILE })).toBeUndefined();
   inspectChanged({ ...empty, source_semantic: { ...empty.source_semantic,
     line: { ...empty.source_semantic.line, unitKeys: ["unexpected"] } } }, "retained empty source binding mismatch");
   const assertedRequest = { ...emptyRequest, source_request: { ...emptyRequest.source_request,

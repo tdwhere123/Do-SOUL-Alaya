@@ -104,8 +104,36 @@ function retainableOutcome(result: SourceSemanticProposalResult): "interpreted" 
 function assertInteractiveProvenance(provenance: InteractiveSemanticProvenance, requestProfile: string): void {
   const transport = requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
     ? "step-chat-completion" : "gemini-generate-content";
-  if (provenance.transport !== transport || "job" in provenance || "inputFile" in provenance) {
+  if (provenance.transport !== transport || "job" in provenance || "inputFile" in provenance ||
+      !Number.isSafeInteger(provenance.attemptOrdinal) || provenance.attemptOrdinal <= 0) {
     throw new AlayaError("CONFLICT", "typed open-semantics interactive transport binding mismatch");
+  }
+}
+
+function interactiveResponseMetadata(provenance: InteractiveSemanticProvenance) {
+  return persistedResponseMetadata({ finishReason: provenance.finishReason, completionContractVersion: 1,
+    completionWitness: "finish_reason" }, provenance.usage, true);
+}
+
+function inspectInteractiveTransportEvidence(
+  typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" | "step_chat_completion" }>,
+  entry: CachedExtractionEntry
+): void {
+  if ((typed.kind === "step_chat_completion") !==
+      (entry.request_profile === STEP_SEMANTIC_REQUEST_PROFILE)) {
+    throw new AlayaError("CONFLICT", "typed source semantic cache kind/profile mismatch");
+  }
+  assertInteractiveProvenance(typed.result.provenance, entry.request_profile);
+  if (!isCompleteSemanticFinish(entry.request_profile, typed.result.provenance.finishReason) ||
+      typed.result.rawJson !== entry.raw_json ||
+      typed.result.provenance.responseSha256 !== computeExtractionRawJsonSha256(entry.raw_json) ||
+      !isExtractionTransportProvenance(entry.transport_provenance)) {
+    throw new AlayaError("CONFLICT", "typed open-semantics interactive transport binding mismatch");
+  }
+  inspectCachedResponseMetadata(entry.response_metadata, true);
+  if (canonicalJson(entry.response_metadata) !==
+      canonicalJson(interactiveResponseMetadata(typed.result.provenance).response_metadata)) {
+    throw new AlayaError("CONFLICT", "typed open-semantics retained response metadata mismatch");
   }
 }
 
@@ -120,20 +148,7 @@ function inspectInteractiveGenerateContent(
   entry: CachedExtractionEntry,
   request: ReturnType<typeof parseSourceSemanticRequest>
 ): SourceSemanticProposalResult {
-  assertInteractiveProvenance(typed.result.provenance, entry.request_profile);
-  if (!isCompleteSemanticFinish(entry.request_profile, typed.result.provenance.finishReason)) {
-    throw new AlayaError("CONFLICT", "typed open-semantics interactive completion is not a complete provider finish");
-  }
-  if (typed.result.rawJson !== entry.raw_json ||
-      typed.result.provenance.responseSha256 !== computeExtractionRawJsonSha256(entry.raw_json) ||
-      !isExtractionTransportProvenance(entry.transport_provenance)) {
-    throw new AlayaError("CONFLICT", "typed open-semantics interactive transport binding mismatch");
-  }
-  const metadata = persistedResponseMetadata({ finishReason: typed.result.provenance.finishReason, completionContractVersion: 1,
-    completionWitness: "finish_reason" }, typed.result.provenance.usage, true);
-  if (canonicalJson(entry.response_metadata) !== canonicalJson(metadata.response_metadata)) {
-    throw new AlayaError("CONFLICT", "typed open-semantics retained response metadata mismatch");
-  }
+  inspectInteractiveTransportEvidence(typed, entry);
   const input = {
     config: { model: entry.model, requestProfile: entry.request_profile },
     line: typed.result.line, rawJson: entry.raw_json, sourceCorpus: typed.source_corpus,
@@ -177,10 +192,6 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
       throw new AlayaError("CONFLICT", "deterministic open semantics is not a zero-attempt empty catalog");
     }
   } else if (typed.kind === "gemini_generate_content" || typed.kind === "step_chat_completion") {
-    if ((typed.kind === "step_chat_completion") !==
-        (entry.request_profile === STEP_SEMANTIC_REQUEST_PROFILE)) {
-      throw new AlayaError("CONFLICT", "typed source semantic cache kind/profile mismatch");
-    }
     admitted = inspectInteractiveGenerateContent(typed, entry, request);
   } else {
     const retained = readRetainedBatchLine(cacheRoot, typed.plan_identity, entry.cache_key);
@@ -325,18 +336,7 @@ function inspectRetiredSourceSemanticEntry(entry: CachedExtractionEntry, cacheRo
     return;
   }
   if (typed.kind === "gemini_generate_content" || typed.kind === "step_chat_completion") {
-    assertInteractiveProvenance(typed.result.provenance, entry.request_profile);
-    if (!isCompleteSemanticFinish(entry.request_profile, typed.result.provenance.finishReason) ||
-        typed.result.rawJson !== entry.raw_json ||
-        typed.result.provenance.responseSha256 !== computeExtractionRawJsonSha256(entry.raw_json) ||
-        !isExtractionTransportProvenance(entry.transport_provenance)) {
-      throw new AlayaError("CONFLICT", "retained interactive source transport binding mismatch");
-    }
-    const metadata = persistedResponseMetadata({ finishReason: typed.result.provenance.finishReason,
-      completionContractVersion: 1, completionWitness: "finish_reason" }, typed.result.provenance.usage, true);
-    if (canonicalJson(entry.response_metadata) !== canonicalJson(metadata.response_metadata)) {
-      throw new AlayaError("CONFLICT", "retained interactive response metadata mismatch");
-    }
+    inspectInteractiveTransportEvidence(typed, entry);
     return;
   }
   if (typed.kind !== "gemini_batch") throw new AlayaError("CONFLICT", "retained source transport kind is unknown");
@@ -450,6 +450,8 @@ function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase
   const { result, config } = input;
   assertInteractiveProvenance(result.provenance, config.requestProfile);
   assertCompleteProviderFinish(result.provenance.finishReason, config.requestProfile);
+  const response = interactiveResponseMetadata(result.provenance);
+  inspectCachedResponseMetadata(response.response_metadata, true);
   const identity = bindOpenSemanticsImport(input, result.line);
   const { admitted, completion } = admitSourceSemanticLine({
     ...input, line: result.line, rawJson: result.rawJson
@@ -458,7 +460,7 @@ function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase
     model: config.model, request_profile: config.requestProfile,
     cache_key: result.line.key, raw_json: result.rawJson, extracted_at: new Date().toISOString(),
     transport_provenance: buildExtractionTransportProvenance(config),
-    ...persistedResponseMetadata({ finishReason: result.provenance.finishReason, completionContractVersion: 1, completionWitness: "finish_reason" }, result.provenance.usage, true),
+    ...response,
     admission_identity: { generation_sha256: extractionAdmissionGenerationSha256(identity.manifest),
       request_key: result.line.key, raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson) },
     source_semantic: { contract: SOURCE_SEMANTIC_CACHE_CONTRACT, source_binding: "unbound",
