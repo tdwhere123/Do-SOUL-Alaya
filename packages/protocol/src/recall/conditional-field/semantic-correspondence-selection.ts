@@ -14,7 +14,7 @@ import type { SourceSemanticQuery } from "./semantic-query.js";
 
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT = "source-semantic-correspondence-selection-v2" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT = "source-semantic-correspondence-endpoint-evidence-v1" as const;
-const CORRESPONDENCE_ENDPOINT_EVIDENCE_MAX_BYTES = 1_000_000;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES = 1_000_000;
 export const SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE = /^qe([1-9][0-9]{0,2})$/u;
 export const SOURCE_SEMANTIC_SOURCE_ENDPOINT_HANDLE = /^se([1-9][0-9]{0,2})$/u;
 
@@ -152,13 +152,18 @@ export function buildSourceSemanticCorrespondenceEndpointCatalog(
 export function buildSourceSemanticCorrespondenceEndpointEvidence(
   query: SourceSemanticQuery,
   descriptors: readonly SourceSemanticCorrespondenceDescriptor[],
-  catalog: SourceSemanticCorrespondenceEndpointCatalog
+  catalog: SourceSemanticCorrespondenceEndpointCatalog,
+  availableBytes = SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES
 ) {
-  let evidenceBytes = boundedJsonBytes({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT,
-    query_endpoints: [], source_endpoints: [] }, CORRESPONDENCE_ENDPOINT_EVIDENCE_MAX_BYTES);
+  if (!Number.isSafeInteger(availableBytes) || availableBytes < 0) {
+    throw new AlayaError("VALIDATION", "semantic_correspondence endpoint evidence budget is invalid");
+  }
+  const maximumBytes = Math.min(availableBytes, SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES);
+  let evidenceBytes = countSourceSemanticCorrespondenceJsonBytes({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT,
+    query_endpoints: [], source_endpoints: [] }, maximumBytes);
   const charge = (value: unknown, separator = false) => {
-    const available = CORRESPONDENCE_ENDPOINT_EVIDENCE_MAX_BYTES - evidenceBytes - Number(separator);
-    evidenceBytes += boundedJsonBytes(value, available) + Number(separator);
+    const available = maximumBytes - evidenceBytes - Number(separator);
+    evidenceBytes += countSourceSemanticCorrespondenceJsonBytes(value, available) + Number(separator);
   };
   return { contract: SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT,
     query_endpoints: queryEndpointEvidence(query, catalog, charge),
@@ -281,13 +286,17 @@ function sourceEndpointEvidence(
   return source_endpoints;
 }
 
-/** Counts ordinary JSON values without materializing an oversized serialized projection. */
-function boundedJsonBytes(value: unknown, maximum: number): number {
+/** Counts correspondence JSON without materializing an oversized serialized value. */
+export function countSourceSemanticCorrespondenceJsonBytes(
+  value: unknown, maximum: number,
+  errorMessage = "semantic_correspondence request exceeds input budget"
+): number {
+  if (!Number.isSafeInteger(maximum) || maximum < 0) throw new AlayaError("VALIDATION", errorMessage);
   let bytes = 0;
   const active = new WeakSet<object>();
   const add = (amount: number) => {
     if (amount > maximum - bytes) {
-      throw new AlayaError("VALIDATION", "semantic_correspondence request exceeds input budget");
+      throw new AlayaError("VALIDATION", errorMessage);
     }
     bytes += amount;
   };

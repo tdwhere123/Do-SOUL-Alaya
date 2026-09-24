@@ -321,6 +321,7 @@ export {
 export {
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_ENDPOINT_EVIDENCE_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES,
   SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE,
   SOURCE_SEMANTIC_SOURCE_ENDPOINT_HANDLE,
   SourceSemanticQueryCatalogEntrySchema,
@@ -329,6 +330,7 @@ export {
   SourceSemanticCorrespondenceSelectionSchema,
   buildSourceSemanticCorrespondenceEndpointCatalog,
   buildSourceSemanticCorrespondenceEndpointEvidence,
+  countSourceSemanticCorrespondenceJsonBytes,
   materializeSourceSemanticCorrespondenceSelection,
   type SourceSemanticQueryCatalogEntry,
   type SourceSemanticSourceCatalogEntry,

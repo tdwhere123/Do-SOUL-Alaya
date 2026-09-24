@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
   SourceSemanticCorrespondenceSelectionSchema, buildSourceSemanticCorrespondenceEndpointCatalog,
-  materializeSourceSemanticCorrespondenceSelection
+  countSourceSemanticCorrespondenceJsonBytes, materializeSourceSemanticCorrespondenceSelection
 } from "../../../recall/conditional-field/index.js";
 import type { SourceSemanticQuery } from "../../../recall/conditional-field/semantic-query.js";
 import type { SourceSemanticInterpretation } from "../../../garden/source-semantic-interpretation.js";
@@ -42,6 +42,17 @@ const interpretation = {
     { id: "rUnknown", referent_kind: "unresolved", mentions: ["mItem"] }
   ]
 } as unknown as SourceSemanticInterpretation;
+
+it("counts escaped and multibyte correspondence JSON by the serialized UTF-8 size", () => {
+  const values = ["quote\" slash\\ control\n 猫😀", [null, true, -0, { note: "\ud800" }],
+    { a: undefined, b: 1, c: ["x", undefined] }];
+  for (const value of values) {
+    const bytes = Buffer.byteLength(JSON.stringify(value));
+    expect(countSourceSemanticCorrespondenceJsonBytes(value, bytes)).toBe(bytes);
+    expect(() => countSourceSemanticCorrespondenceJsonBytes(value, bytes - 1))
+      .toThrow(/exceeds input budget/u);
+  }
+});
 
 it("advertises named query referents, predicates, and slots without pairing or unresolved source referents", () => {
   const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(query, [

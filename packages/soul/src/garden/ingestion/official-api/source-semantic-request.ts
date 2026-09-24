@@ -21,7 +21,8 @@ import {
 
   SourceSemanticQueryCarrierBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceSelectionSchema,
   buildSourceReferenceCatalog, buildSourceSemanticCorrespondenceEndpointCatalog,
-  buildSourceSemanticCorrespondenceEndpointEvidence, canonicalJson,
+  buildSourceSemanticCorrespondenceEndpointEvidence, countSourceSemanticCorrespondenceJsonBytes,
+  SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES, canonicalJson,
   sourceReferenceCapacityReason, SourceReferenceCapacityExceeded, SourceReferenceCapacityReasonSchema,
   SOURCE_REFERENCE_MAX_ASSERTIONS,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery,
@@ -43,7 +44,6 @@ export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT = "source-semantic-correspondence-request-v6" as const;
-const SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES = 1_000_000;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v3" as const;
 
 const FORBIDDEN_PROPOSAL_KEYS = [
@@ -404,14 +404,13 @@ export function buildSourceSemanticCorrespondenceRequest(
     throw new AlayaError("VALIDATION", "semantic_correspondence request does not bind the original query");
   }
   const source_interpretation_descriptors = z.array(SourceInterpretationDescriptorSchema).min(1).max(64).parse(input.source_interpretation_descriptors);
-  if (Buffer.byteLength(JSON.stringify(source_interpretation_descriptors)) > SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES) {
-    throw new AlayaError("VALIDATION", "semantic_correspondence descriptors exceed input budget");
-  }
+  countSourceSemanticCorrespondenceJsonBytes(source_interpretation_descriptors,
+    SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES, "semantic_correspondence descriptors exceed input budget");
   const descriptors = source_interpretation_descriptors.map((row, index) => ({
     source_interpretation_handle: `source${index + 1}`, interpretation: row.interpretation
   }));
   const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(admitted_query_semantics, descriptors);
-  const request: SourceSemanticCorrespondenceRequest = {
+  const requestBase = {
     contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     admitted_query_semantics,
@@ -419,8 +418,13 @@ export function buildSourceSemanticCorrespondenceRequest(
     source_interpretation_descriptors,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
-    catalog,
-    endpoint_evidence: buildSourceSemanticCorrespondenceEndpointEvidence(admitted_query_semantics, descriptors, catalog)
+    catalog
+  };
+  const baseBytes = countSourceSemanticCorrespondenceJsonBytes({ ...requestBase, endpoint_evidence: null },
+    SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES) - 4;
+  const request: SourceSemanticCorrespondenceRequest = { ...requestBase,
+    endpoint_evidence: buildSourceSemanticCorrespondenceEndpointEvidence(admitted_query_semantics, descriptors, catalog,
+      SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES - baseBytes)
   };
   if (Buffer.byteLength(JSON.stringify(request)) > SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES) {
     throw new AlayaError("VALIDATION", "semantic_correspondence request exceeds input budget");

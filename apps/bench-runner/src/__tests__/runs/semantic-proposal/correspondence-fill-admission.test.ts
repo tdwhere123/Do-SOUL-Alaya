@@ -106,6 +106,24 @@ function admittedQuery() {
   };
 }
 
+function admittedCapacityQuery(contextCount: number) {
+  const base = admittedQuery();
+  const frames = Array.from({ length: 32 }, (_, index) => ({
+    id: `frame${index}`, variable: "fSend", predicate_reading: "send",
+    role_requirements: [{ id: "object", role_reading: "object", target_variable: "parcel",
+      support: { kind: "query_text" as const, excerpt: "parcel" } }]
+  }));
+  return SourceSemanticQuerySchema.parse({ ...base,
+    variables: [{ id: "parcel", sort: "entity", reference: { kind: "query_text", excerpt: "parcel" } },
+      { id: "fSend", sort: "proposition" }],
+    alternatives: [{ frames, context_obligations: Array.from({ length: contextCount }, (_, index) => ({
+      frame: `frame${index % frames.length}`, kind: "asserted_at_source"
+    })) }],
+    return_variables: [], gaps: [],
+    requested_operation: { reading: "send", support: { kind: "query_text", excerpt: "sent" } }
+  });
+}
+
 function interpretation() {
   return SourceSemanticInterpretationSchema.parse({
     contract: "source-interpretation-v4",
@@ -278,6 +296,71 @@ it("bounds a Core-admitted 120-frame projection before traversing its full endpo
     admitted_query_semantics: query, source_interpretation_descriptors: [sourceDescriptor],
     producer_id: "authored-control", producer_version: "1" }))
     .toThrow(/semantic_correspondence request exceeds input budget/u);
+});
+
+it("rejects a complete request before serializing it when its lawful projection fits alone", () => {
+  const query = admittedCapacityQuery(200);
+  expect(admitSourceSemanticQuery(query, ORIGINAL).kind).toBe("admitted");
+  const source = interpretation();
+  const descriptor = { source_interpretation_handle: "source1", interpretation: source };
+  const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(query, [descriptor]);
+  const projection = buildSourceSemanticCorrespondenceEndpointEvidence(query, [descriptor], catalog);
+  expect(Buffer.byteLength(JSON.stringify(projection))).toBeLessThan(1_000_000);
+  const sourceDescriptor = { source_interpretation_id: sourceSemanticInterpretationIdentity(source, sha256),
+    interpretation: source };
+  const originalStringify = JSON.stringify;
+  JSON.stringify = function (value, ...args) {
+    if (value !== null && typeof value === "object" && "contract" in value &&
+      value.contract === "source-semantic-correspondence-request-v6") {
+      throw new Error("oversized request was serialized before budget rejection");
+    }
+    return Reflect.apply(originalStringify, JSON, [value, ...args]);
+  };
+  let failure: unknown;
+  try {
+    buildSourceSemanticCorrespondenceRequest({ original_query: ORIGINAL, admitted_query_semantics: query,
+      source_interpretation_descriptors: [sourceDescriptor], producer_id: "authored-control", producer_version: "1" });
+  } catch (error) { failure = error; }
+  finally { JSON.stringify = originalStringify; }
+  expect(failure).toBeInstanceOf(AlayaError);
+  expect(failure).toMatchObject({ code: "VALIDATION", message: "semantic_correspondence request exceeds input budget" });
+});
+
+it("accepts a nearby Core-admitted request within the complete byte budget", () => {
+  const query = admittedCapacityQuery(192);
+  expect(admitSourceSemanticQuery(query, ORIGINAL).kind).toBe("admitted");
+  const source = interpretation();
+  const request = buildSourceSemanticCorrespondenceRequest({ original_query: ORIGINAL,
+    admitted_query_semantics: query,
+    source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(source, sha256),
+      interpretation: source }], producer_id: "authored-control", producer_version: "1" });
+  expect(Buffer.byteLength(JSON.stringify(request))).toBeLessThanOrEqual(1_000_000);
+});
+
+it("rejects a descriptor aggregate before serializing its oversized array", () => {
+  const source = interpretation();
+  const enlarged = SourceSemanticInterpretationSchema.parse({ ...source,
+    mentions: source.mentions.map((mention, index) => index === 0
+      ? { ...mention, text: "a".repeat(20_000) } : mention)
+  });
+  const descriptor = { source_interpretation_id: sourceSemanticInterpretationIdentity(enlarged, sha256),
+    interpretation: enlarged };
+  const originalStringify = JSON.stringify;
+  JSON.stringify = function (value, ...args) {
+    if (Array.isArray(value) && value.length === 64 && value[0]?.interpretation !== undefined) {
+      throw new Error("oversized descriptor aggregate was serialized before budget rejection");
+    }
+    return Reflect.apply(originalStringify, JSON, [value, ...args]);
+  };
+  let failure: unknown;
+  try {
+    buildSourceSemanticCorrespondenceRequest({ original_query: ORIGINAL, admitted_query_semantics: admittedQuery(),
+      source_interpretation_descriptors: Array.from({ length: 64 }, () => descriptor),
+      producer_id: "authored-control", producer_version: "1" });
+  } catch (error) { failure = error; }
+  finally { JSON.stringify = originalStringify; }
+  expect(failure).toBeInstanceOf(AlayaError);
+  expect(failure).toMatchObject({ code: "VALIDATION", message: "semantic_correspondence descriptors exceed input budget" });
 });
 
 async function fillCorrespondence(excerpt: string) {
